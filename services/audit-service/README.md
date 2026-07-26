@@ -20,6 +20,10 @@ Hash-Chain an.
 - **Kein `deliver_new`** beim Abonnieren: Der durable Consumer `audit-service` holt nach einem Neustart lückenlos auf, statt Ereignisse zu verpassen (im Gegensatz zu kurzlebigen Test-Abonnements, siehe `dms-eventbus-client`).
 - Konsument ohne eigenen Stream (`ensure_stream=False`, siehe [ADR 0001](../../docs/adr/0001-eventbus-consumer-without-stream-ownership.md)) — kennt nur die Subject-Konvention der Producer, nicht deren Stream-Namen.
 
+## Registry-Registrierung (seit P4-S1)
+
+Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+
 ## Lokale Ausführung
 
 ```bash

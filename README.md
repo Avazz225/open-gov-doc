@@ -18,7 +18,7 @@ Dieses Repository enthält die Umsetzung des folgenden Systems: ein revisionssic
 
 ```
 services/   # Ein Ordner je Microservice (src/, tests/, Dockerfile, README.md, pyproject.toml)
-libs/       # Geteilte Python-Pakete (dms-common, dms-db-base, dms-eventbus-client, dms-auth-client)
+libs/       # Geteilte Python-Pakete (siehe libs/README.md für die vollständige Liste)
 infra/      # docker-compose.yml (lokale Dev-Umgebung) + k8s/ (später)
 tools/cli/  # DMS-CLI-Tool
 docs/       # ADRs + Service-Dokumentation

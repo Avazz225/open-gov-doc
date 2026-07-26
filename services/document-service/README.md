@@ -48,6 +48,10 @@ dedupliziert identische Inhalte automatisch.
 - Beide Prüfungen entfallen vollständig, wenn das jeweilige Feld nicht gesetzt
   wird (kein erzwungener Ordner/Objekttyp).
 
+## Registry-Registrierung (seit P4-S1)
+
+Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+
 ## Lokale Ausführung
 
 ```bash

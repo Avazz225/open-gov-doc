@@ -37,7 +37,7 @@
 - `blocks_read=false` (Default) blockiert nur Schreibzugriffe, `blocks_read=true` zusätzlich Lesezugriffe. `GET /check` erwartet dafür einen expliziten `access_type`-Parameter (`read`|`write`, Default `write`) — der aufrufende Dienst muss angeben, welche Art von Zugriff geprüft wird.
 - **Überlagert RBAC statt es zu verändern**: Eine aktive, blockierende Sperre führt zu `allowed=false` unabhängig von den eigentlich zugewiesenen Rechten. Ausnahme: Principals mit der Capability `scope_lock.bypass` (per normaler Rollenzuweisung vergeben) umgehen die Sperre — nach Aufhebung gelten sofort wieder die ursprünglichen Rechte, ohne dass irgendetwas manuell entzogen/neu vergeben werden musste.
 - **Klare Rückmeldung statt generischem Fehler**: `CheckResult` liefert bei einer blockierenden Sperre zusätzlich `blocked_by_scope_lock`, `scope_lock_reason` und `scope_lock_expires_at`, damit aufrufende Dienste (künftig API-Gateway/UI) Grund und voraussichtliche Dauer anzeigen können statt eines unspezifischen "keine Berechtigung".
-- **Wer Sperren setzen/aufheben darf, ist in dieser Session nicht durchgesetzt**: Die Endpunkte selbst sind ungated (analog zum Force-Unlock-Präzedenzfall im Document Service, P3-S2) — reale Autorisierung ("nur Admin-Rollen dürfen sperren") folgt auf API-Gateway-Ebene (P4-S1), ebenso ein optionales Vier-Augen-Prinzip (4.3) für das Setzen/Aufheben.
+- **Wer Sperren setzen/aufheben darf, ist weiterhin nicht durchgesetzt**: Die Endpunkte selbst sind ungated (analog zum Force-Unlock-Präzedenzfall im Document Service, P3-S2). Das seit P4-S1 existierende API-Gateway (3.5) prüft nur, dass überhaupt ein gültiger Bearer-Token vorliegt, nicht, ob der Principal zum Sperren berechtigt ist — reale Autorisierung ("nur Admin-Rollen dürfen sperren") bräuchte eine Auswertung der vom Gateway weitergereichten Identitäts-Header in diesem Service selbst, ebenso ein optionales Vier-Augen-Prinzip (4.3) für das Setzen/Aufheben.
 - **Auditierung**: `POST /scope-locks` und `DELETE /scope-locks/{id}` publizieren `permission.scope_lock.created`/`.released` über einen eigenen Producer-Client (getrennt vom reinen Struktur-Konsumenten, siehe unten) — der Audit Service konsumiert seit dieser Session zusätzlich `permission.>`.
 
 ## Vererbungsalgorithmus
@@ -68,6 +68,10 @@ Live end-to-end verifiziert (P3-S3): ein über die echte Folder-Service-API ange
 | `permission.scope_lock.created` | `{scope_lock_id, resource_id, locked_by, reason, blocks_read}` |
 | `permission.scope_lock.released` | `{scope_lock_id, resource_id, released_by}` |
 
+## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
+
+Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — folgt in Phase 11.
@@ -77,5 +81,5 @@ Noch keine — folgt in Phase 11.
 - Gruppenmitgliedschaft wird nicht aufgelöst: `principal_id` einer Zuweisung muss exakt dem abgefragten Principal entsprechen. Eine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" ist nicht Teil dieser Session (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
 - Granularere Cache-Invalidierung (nur betroffener Teilbaum statt gesamter Cache) als spätere Optimierung möglich, ohne die API zu ändern.
 - Konfigurierbares Vier-Augen-Prinzip (4.3) für Rechteänderungen ist nicht Teil dieser Session.
-- Keine Durchsetzung, wer Bereichssperren setzen/aufheben darf (folgt auf API-Gateway-Ebene, P4-S1) — analog zum bereits bestehenden offenen Punkt beim Document-Service-Force-Unlock.
+- Keine Durchsetzung, wer Bereichssperren setzen/aufheben darf: Das Gateway (3.5, P4-S1) prüft seit dieser Session zentral, dass ein Aufrufer *irgendeinen* gültigen Bearer-Token hat, aber keine Autorisierung für die konkrete Aktion (`POST`/`DELETE /scope-locks`) — jeder authentifizierte Principal kann aktuell Sperren setzen/aufheben. Eine echte Capability-Prüfung bräuchte, dass der Permission Service die vom Gateway weitergereichten Identitäts-Header auswertet (siehe `docs/services/gateway-service.md`) — analog zum bereits bestehenden offenen Punkt beim Document-Service-Force-Unlock.
 - `GET /check` verlässt sich auf den Aufrufer, den korrekten `access_type` (`read`/`write`) mitzugeben — der Service selbst kennt keine feste Zuordnung Permission-Name → Zugriffsart.

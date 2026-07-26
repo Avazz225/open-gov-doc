@@ -29,6 +29,15 @@ Publiziert (Stream `registry`, `dms-eventbus-client`, nach Commit):
 
 Kein Event pro Heartbeat. Konsumiert wird dieser Strom aktuell vom Audit Service (`docs/services/audit-service.md`).
 
+## Nutzung (seit P4-S1)
+
+Bis P4-S1 existierte nur diese API, ohne einen einzigen Aufrufer. Seitdem
+registrieren sich sieben Backend-Services selbst hier (über die neue geteilte
+Lib `libs/dms-registry-client`: Register-beim-Start, periodischer Heartbeat,
+Deregister-beim-Shutdown) — siehe `docs/services/gateway-service.md`, das
+`/instances/{service_type}` nutzt, um Requests dynamisch weiterzuleiten,
+statt Backend-Adressen statisch zu konfigurieren.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — Monitoring/Sensor-Konzept folgt in Phase 11.
@@ -37,3 +46,4 @@ Noch keine — Monitoring/Sensor-Konzept folgt in Phase 11.
 
 - Aktives Anpingen des gemeldeten `health_endpoint` (statt reinem Heartbeat-Push) als mögliche spätere Ergänzung, nicht Teil dieser Session.
 - Lizenzvermittlung (3.2b) folgt mit dem License Service.
+- **Kein Aufräumen dauerhaft unerreichbarer Instanzen** (seit P4-S1 beobachtet: Container-Neustarts ohne sauberes `DELETE /instances/{id}`, z. B. bei `docker compose down` ohne vorheriges Deregistrieren, hinterlassen dauerhaft `healthy=false`-Zeilen). Unkritisch für das Routing (`GET /instances/{service_type}` filtert sie bereits heraus), sammelt sich aber unbegrenzt in der Tabelle an — eine periodische Bereinigung (z. B. Löschen nach X Tagen ohne Heartbeat) ist nicht Teil dieser Session.

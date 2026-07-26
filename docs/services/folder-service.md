@@ -36,6 +36,10 @@ Publiziert (Stream `folder`, `ensure_stream=True`) exakt den Vertrag, den der Pe
 | `folder.resource.moved` | `{resource_id, new_parent_id}` (nur wenn sich `parent_id` tatsächlich ändert) |
 | `folder.resource.deleted` | `{resource_id}` |
 
+## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
+
+Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — folgt in Phase 11.

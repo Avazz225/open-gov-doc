@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from dms_auth_client import TokenValidator, make_current_user_dependency
 from dms_common import configure_logging
+from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, HTTPException, status
 
 from auth_service import keycloak_client
@@ -18,7 +19,18 @@ configure_logging(settings)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_realm_and_client(settings)
+
+    registration = await maybe_start_registration(
+        registry_service_base_url=settings.registry_service_base_url,
+        self_address=settings.self_address,
+        service_type=settings.service_name,
+        version="0.1.0",
+    )
+
     yield
+
+    if registration:
+        await registration.stop()
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)

@@ -1,0 +1,15 @@
+[project]
+name = "dms-registry-client"
+version = "0.1.0"
+description = "Selbst-Registrierung eines Service bei der Registry inkl. Heartbeat (Konzept 3.2a)"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dms_registry_client"]

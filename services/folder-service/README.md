@@ -31,6 +31,10 @@ Trägt ein Ordner einen `object_type_id`, validiert dieser Service die
 Attribute vor dem Anlegen gegen den Object-Type Service (`POST
 /object-types/{id}/validate`) - ohne `object_type_id` entfällt die Prüfung.
 
+## Registry-Registrierung (seit P4-S1)
+
+Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+
 ## Lokale Ausführung
 
 ```bash

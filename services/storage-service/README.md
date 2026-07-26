@@ -48,6 +48,10 @@ einer generischen Ziel-Menge — Begründung siehe `../../docs/adr/0004-storage-
   über `POST /replication/process-pending` nachgezogen (Retry-Queue, kein
   In-Prozess-Hintergrundtask).
 
+## Registry-Registrierung (seit P4-S1)
+
+Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+
 ## Lokale Ausführung
 
 ```bash

@@ -29,6 +29,10 @@ Konsument ohne eigenen Stream (`NatsEventBusClient(ensure_stream=False)`) — si
 
 **Zwischenfall & Fix (P3-S2)**: Mit einem zweiten konsumierten Subject (`document.>` neben `registry.>`) können NATS-Callbacks für unterschiedliche Subjects nebenläufig ausgeführt werden. `append_event` liest den aktuellen Kettenkopf (`prev_hash`) vor dem Insert — ohne Serialisierung konnten zwei nebenläufige Aufrufe denselben `prev_hash` lesen und die Kette korrumpieren (aufgedeckt durch `test_consumer_integration.py`, das nach Hinzufügen von `document.>` plötzlich fehlschlug, weil beim Testlauf bereits aufgelaufene `document.*`-Nachrichten parallel zum injizierten `registry.*`-Testereignis verarbeitet wurden). Fix: `consumer.py` serialisiert alle Aufrufe von `append_event` über einen In-Prozess-`asyncio.Lock` je Handler-Instanz — ausreichend, da der Audit Service als Single-Writer für seine eigene Kette konzipiert ist (keine horizontale Skalierung mehrerer Instanzen auf derselben Kette vorgesehen).
 
+## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
+
+Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — folgt in Phase 11.

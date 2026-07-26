@@ -45,6 +45,10 @@ Beide sind unabhängig getestet: `LocalFilesystemBackend` gegen echtes Dateisyst
 
 Keine — Storage Service publiziert/konsumiert weiterhin keine Events.
 
+## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
+
+Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — folgt in Phase 11.

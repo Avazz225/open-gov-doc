@@ -30,6 +30,10 @@ lokale und LDAP/AD-föderierte Nutzer gleichzeitig verwalten) — keine eigene
 Nutzertabelle in diesem Service nötig. AD-Gruppe→interne-Rolle-Mapping ist noch
 nicht implementiert (siehe `docs/services/auth-service.md`, "Offene Punkte").
 
+## Registry-Registrierung (seit P4-S1)
+
+Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+
 ## Lokale Ausführung
 
 ```bash

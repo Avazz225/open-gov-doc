@@ -9,12 +9,14 @@ dependencies = [
     "dms-common",
     "dms-db-base",
     "dms-constraint-engine",
+    "dms-registry-client",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-db-base = { workspace = true }
 dms-constraint-engine = { workspace = true }
+dms-registry-client = { workspace = true }
 
 [dependency-groups]
 dev = ["httpx>=0.27"]

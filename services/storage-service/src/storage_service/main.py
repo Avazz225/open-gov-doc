@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
+from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,8 +52,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if isinstance(backend, S3Backend):
             await backend.ensure_bucket()
 
+    registration = await maybe_start_registration(
+        registry_service_base_url=settings.registry_service_base_url,
+        self_address=settings.self_address,
+        service_type=settings.service_name,
+        version="0.1.0",
+    )
+
     yield
 
+    if registration:
+        await registration.stop()
     await engine.dispose()
 
 

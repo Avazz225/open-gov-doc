@@ -134,6 +134,11 @@ services:
     environment:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
+      # Selbst-Registrierung bei der Registry (3.2a, seit P4-S1) - Grundlage
+      # für das Gateway-Routing (3.5). Adresse ist die interne Compose-DNS,
+      # unter der andere Container diesen Service erreichen.
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://audit-service:8000
     ports:
       - "${AUDIT_SERVICE_PORT:-8002}:8000"
     depends_on:
@@ -154,6 +159,8 @@ services:
       DMS_KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       DMS_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
       DMS_KEYCLOAK_CLIENT_SECRET: ${AUTH_SERVICE_CLIENT_SECRET:-dms-api-dev-secret}
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://auth-service:8000
     ports:
       - "${AUTH_SERVICE_PORT:-8003}:8000"
     depends_on:
@@ -170,6 +177,8 @@ services:
     environment:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://permission-service:8000
     ports:
       - "${PERMISSION_SERVICE_PORT:-8004}:8000"
     depends_on:
@@ -202,6 +211,8 @@ services:
       DMS_SECONDARY_BACKEND: ${STORAGE_SERVICE_SECONDARY_BACKEND:-none}
       DMS_WRITE_STRATEGY: ${STORAGE_SERVICE_WRITE_STRATEGY:-primary_async}
       DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-2}
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://storage-service:8000
     volumes:
       - storage-local-data:/data/storage
     ports:
@@ -225,6 +236,8 @@ services:
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://document-service:8000
     ports:
       - "${DOCUMENT_SERVICE_PORT:-8006}:8000"
     depends_on:
@@ -248,6 +261,8 @@ services:
     restart: unless-stopped
     environment:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://object-type-service:8000
     ports:
       - "${OBJECT_TYPE_SERVICE_PORT:-8007}:8000"
     depends_on:
@@ -265,6 +280,8 @@ services:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://folder-service:8000
     ports:
       - "${FOLDER_SERVICE_PORT:-8008}:8000"
     depends_on:
@@ -274,5 +291,26 @@ services:
         condition: service_healthy
       object-type-service:
         condition: service_started
+    networks:
+      - dms-net
+
+  gateway-service:
+    build:
+      context: ..
+      dockerfile: services/gateway-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
+      DMS_KEYCLOAK_CLIENT_ID: dms-api
+      DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-120}
+      DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
+    ports:
+      - "${GATEWAY_SERVICE_PORT:-8009}:8000"
+    depends_on:
+      registry-service:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
     networks:
       - dms-net

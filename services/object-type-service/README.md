@@ -25,6 +25,10 @@ Funktion). Dieser Service ist der einzige, der sie importiert - andere
 Services rufen ausschließlich `/object-types/{id}/validate` über HTTP auf.
 Begründung: `../../docs/adr/0003-constraint-engine-as-library.md`.
 
+## Registry-Registrierung (seit P4-S1)
+
+Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+
 ## Lokale Ausführung
 
 ```bash

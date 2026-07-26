@@ -9,11 +9,13 @@ dependencies = [
     "aioboto3>=13.0",
     "dms-common",
     "dms-db-base",
+    "dms-registry-client",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-db-base = { workspace = true }
+dms-registry-client = { workspace = true }
 
 [dependency-groups]
 dev = ["httpx>=0.27"]

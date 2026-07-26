@@ -27,6 +27,10 @@ Bei jedem Start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
 
 Noch keine — Login/Logout-Audit-Events (Konzept 5.3, 5.5 Session-Fingerprinting) sind nicht Teil dieser Session.
 
+## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
+
+Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — folgt in Phase 11.
