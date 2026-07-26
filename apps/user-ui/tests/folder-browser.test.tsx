@@ -2,6 +2,15 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderBrowser } from "@/components/FolderBrowser";
+import { I18nProvider } from "@/i18n";
+
+function renderFolderBrowser() {
+  return render(
+    <I18nProvider>
+      <FolderBrowser />
+    </I18nProvider>
+  );
+}
 
 const listChildFoldersMock = vi.fn();
 const listDocumentsInFolderMock = vi.fn();
@@ -63,7 +72,7 @@ describe("FolderBrowser", () => {
       },
     ]);
 
-    render(<FolderBrowser />);
+    renderFolderBrowser();
 
     expect(await screen.findByText(/Verträge/)).toBeInTheDocument();
     expect(screen.getByText(/Rechnung.pdf/)).toBeInTheDocument();
@@ -82,7 +91,7 @@ describe("FolderBrowser", () => {
     listDocumentsInFolderMock.mockResolvedValue([]);
 
     const user = userEvent.setup();
-    render(<FolderBrowser />);
+    renderFolderBrowser();
 
     const folderButton = await screen.findByText(/Verträge/);
     await user.click(folderButton);
@@ -113,7 +122,7 @@ describe("FolderBrowser", () => {
     ]);
 
     const user = userEvent.setup();
-    render(<FolderBrowser />);
+    renderFolderBrowser();
 
     await user.click(await screen.findByText("Vorschau"));
 
@@ -128,7 +137,7 @@ describe("FolderBrowser", () => {
     uploadDocumentMock.mockResolvedValue({});
 
     const user = userEvent.setup();
-    render(<FolderBrowser />);
+    renderFolderBrowser();
 
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
 

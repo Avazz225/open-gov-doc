@@ -36,6 +36,10 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 
 `components/PreviewStub.tsx` zeigt nur einen Hinweis-Dialog ("Vorschau ist noch nicht verfügbar") statt einer echten Vorschau — der Rendering/Preview Service (3.7) existiert erst ab P5-S2. Die Komponente ist bewusst isoliert, damit sie später durch eine echte Vorschau ersetzt werden kann, ohne den Ordner-Browser selbst anzufassen.
 
+## Internationalisierung (Konzept 8, seit P4-S3)
+
+Alle sichtbaren Texte liegen in `src/i18n/de.json`, aufgelöst über `useI18n()`/`t("bereich.schlüssel")` (siehe [ADR 0007](../adr/0007-frontend-i18n-preparation.md)). Aktiv ist ausschließlich Deutsch, aber ohne weitere Komponenten-Änderungen erweiterbar — eine zweite Sprache ist nur eine zusätzliche JSON-Datei plus Registrierung in `src/i18n/index.tsx`. Noch keine Sprachumschaltung in der UI.
+
 ## Build & Auslieferung
 
 Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (`next build` mit `output: "export"`), Laufzeit-Image ist `nginx:alpine` ohne Node-Prozess. Die Gateway-Adresse (`NEXT_PUBLIC_GATEWAY_BASE_URL`) wird als Build-Arg fest eingebrannt (kein Server, der sie zur Laufzeit nachladen könnte) — überschreibbar über `USER_UI_GATEWAY_BASE_URL` in `infra/.env`.
@@ -54,3 +58,4 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 - Keine Workflow-Interaktion (Freigaben/Aufgaben) — Workflow Engine existiert erst ab Phase 6.
 - Kein automatisiertes Browser-E2E in dieser Umgebung möglich (kein Chrome/Chromium installiert) — nachzuholen, sobald eine Umgebung mit Browser verfügbar ist (z. B. CI).
 - Rollenabhängige Ansichten/Branding (Konzept 8, "Anpassbarkeit") nicht Teil dieses Grundgerüsts.
+- i18n nur strukturell vorbereitet (ADR 0007), keine zweite Sprache und keine UI-Sprachumschaltung.

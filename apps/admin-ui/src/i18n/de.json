@@ -1,0 +1,100 @@
+{
+  "meta": {
+    "title": "DMS Admin",
+    "description": "Nutzer-/Rollenverwaltung, Objekttyp-Editor, Registry-Übersicht (Admin-UI, Konzept 8)"
+  },
+  "common": {
+    "logout": "Abmelden",
+    "loading": "Lade...",
+    "delete": "Löschen",
+    "create": "Anlegen",
+    "refresh": "Aktualisieren",
+    "loadError": "Laden fehlgeschlagen",
+    "deleteError": "Löschen fehlgeschlagen"
+  },
+  "login": {
+    "heading": "DMS Admin",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "submitting": "Melde an...",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "nav": {
+    "ariaLabel": "Admin-Bereiche",
+    "users": "Nutzer & Rollen",
+    "objectTypes": "Objekttypen",
+    "registry": "Registry"
+  },
+  "home": {
+    "title": "DMS Admin",
+    "hint": "Wähle einen Bereich aus der Navigation."
+  },
+  "users": {
+    "pageTitle": "Nutzer & Rollen",
+    "sectionTitle": "Nutzer",
+    "formLabel": "Nutzer anlegen",
+    "username": "Benutzername",
+    "email": "E-Mail",
+    "password": "Passwort",
+    "firstName": "Vorname",
+    "lastName": "Nachname",
+    "enabledColumn": "Aktiv",
+    "enabledYes": "ja",
+    "enabledNo": "nein",
+    "empty": "Keine Nutzer.",
+    "createError": "Nutzer anlegen fehlgeschlagen"
+  },
+  "roles": {
+    "sectionTitle": "Rollen",
+    "formLabel": "Rolle anlegen",
+    "name": "Name",
+    "description": "Beschreibung",
+    "permissions": "Rechte (kommagetrennt)",
+    "permissionsPlaceholder": "read, write",
+    "empty": "Keine Rollen.",
+    "createError": "Rolle anlegen fehlgeschlagen"
+  },
+  "roleAssignments": {
+    "sectionTitle": "Rollenzuweisungen",
+    "formLabel": "Rolle zuweisen",
+    "username": "Nutzername",
+    "role": "Rolle",
+    "rolePlaceholder": "Rolle wählen",
+    "resource": "Ressource",
+    "submit": "Zuweisen",
+    "userColumn": "Nutzer",
+    "roleColumn": "Rolle",
+    "resourceColumn": "Ressource",
+    "remove": "Entfernen",
+    "empty": "Keine Zuweisungen.",
+    "createError": "Zuweisung fehlgeschlagen"
+  },
+  "objectTypes": {
+    "pageTitle": "Objekttypen",
+    "newHeading": "Neuer Objekttyp",
+    "formLabel": "Objekttyp anlegen",
+    "name": "Name",
+    "appliesTo": "Gilt für",
+    "appliesToDocument": "Dokument",
+    "appliesToFolder": "Ordner",
+    "attributesLabel": "Attribute (JSON-Liste, siehe Constraint Engine)",
+    "invalidJson": "Attribute müssen gültiges JSON sein (Liste von Objekten).",
+    "nameColumn": "Name",
+    "appliesToColumn": "Gilt für",
+    "attributesColumn": "Attribute",
+    "empty": "Keine Objekttypen.",
+    "createError": "Anlegen fehlgeschlagen"
+  },
+  "registry": {
+    "pageTitle": "Registry-Übersicht",
+    "serviceType": "Servicetyp",
+    "instance": "Instanz",
+    "version": "Version",
+    "address": "Adresse",
+    "status": "Status",
+    "healthy": "healthy",
+    "down": "down",
+    "empty": "Keine Instanzen registriert."
+  }
+}

@@ -68,6 +68,20 @@ async def create_role_assignment(
     return assignment
 
 
+async def list_role_assignments(
+    session: AsyncSession, *, principal_id: str | None = None, resource_id: str | None = None
+) -> list[RoleAssignment]:
+    """Grundlage der Admin-UI-Nutzer-/Rollenverwaltung (P4-S3) - bisher gab es
+    nur Erstellen/Löschen einzelner Zuweisungen, kein Auflisten."""
+    query = select(RoleAssignment)
+    if principal_id is not None:
+        query = query.where(RoleAssignment.principal_id == principal_id)
+    if resource_id is not None:
+        query = query.where(RoleAssignment.resource_id == resource_id)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
 async def delete_role_assignment(session: AsyncSession, assignment_id: int) -> None:
     assignment = await session.get(RoleAssignment, assignment_id)
     if assignment is None:

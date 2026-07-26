@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useI18n } from "@/i18n";
 import { uploadDocument } from "@/lib/api";
 import { ApiError } from "@/lib/auth-context";
 
@@ -15,6 +16,7 @@ export function UploadForm({
   createdBy: string;
   onUploaded: () => void;
 }) {
+  const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -36,28 +38,28 @@ export function UploadForm({
       setTitle("");
       onUploaded();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Upload fehlgeschlagen");
+      setError(err instanceof ApiError ? err.message : t("upload.error"));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} aria-label="Dokument hochladen">
+    <form onSubmit={handleSubmit} aria-label={t("upload.formLabel")}>
       <input
         type="file"
-        aria-label="Datei"
+        aria-label={t("upload.fileLabel")}
         onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         required
       />
       <input
         type="text"
-        placeholder="Titel (optional)"
+        placeholder={t("upload.titlePlaceholder")}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
       <button type="submit" disabled={!file || submitting}>
-        {submitting ? "Lade hoch..." : "Hochladen"}
+        {submitting ? t("upload.submitting") : t("upload.submit")}
       </button>
       {error && (
         <p className="error-text" role="alert">

@@ -10,6 +10,9 @@ Aufrufer sehen nur Benutzername/Passwort bzw. fertige Tokens.
 | `POST` | `/login` | Password-Grant gegen Keycloak, liefert Tokens |
 | `POST` | `/refresh` | Refresh-Token gegen neue Tokens tauschen |
 | `GET` | `/me` | Validiert Bearer-Token, liefert normalisierte Identität |
+| `GET` | `/users` | Nutzer auflisten (seit P4-S3, Admin-UI) |
+| `POST` | `/users` | Nutzer anlegen |
+| `DELETE` | `/users/{id}` | Nutzer löschen |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Realm-/Client-Bootstrap

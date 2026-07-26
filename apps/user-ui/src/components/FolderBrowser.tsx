@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/i18n";
 import {
   ApiError,
   type DocumentSummary,
@@ -12,8 +13,6 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { PreviewStub } from "./PreviewStub";
 import { UploadForm } from "./UploadForm";
-
-const ROOT_FOLDER: Pick<Folder, "id" | "name"> = { id: "root", name: "Start" };
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -28,7 +27,10 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
 
 export function FolderBrowser() {
   const { user, accessToken, logout } = useAuth();
-  const [trail, setTrail] = useState<Array<Pick<Folder, "id" | "name">>>([ROOT_FOLDER]);
+  const { t } = useI18n();
+  const [trail, setTrail] = useState<Array<Pick<Folder, "id" | "name">>>(() => [
+    { id: "root", name: t("folderBrowser.rootLabel") },
+  ]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -50,12 +52,12 @@ export function FolderBrowser() {
         setFolders(childFolders);
         setDocuments(docs);
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Laden fehlgeschlagen");
+        setError(err instanceof ApiError ? err.message : t("folderBrowser.loadError"));
       } finally {
         setIsLoading(false);
       }
     },
-    [accessToken]
+    [accessToken, t]
   );
 
   useEffect(() => {
@@ -76,23 +78,23 @@ export function FolderBrowser() {
       const blob = await downloadDocument(accessToken, doc.id);
       triggerBrowserDownload(blob, doc.title);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Download fehlgeschlagen");
+      setError(err instanceof ApiError ? err.message : t("folderBrowser.downloadError"));
     }
   }
 
   return (
     <main className="page">
       <div className="top-bar">
-        <h1>Dokumente</h1>
+        <h1>{t("folderBrowser.title")}</h1>
         <div>
           {user && <span>{user.username} </span>}
           <button type="button" onClick={logout}>
-            Abmelden
+            {t("common.logout")}
           </button>
         </div>
       </div>
 
-      <nav className="breadcrumbs" aria-label="Ordnerpfad">
+      <nav className="breadcrumbs" aria-label={t("folderBrowser.breadcrumbLabel")}>
         {trail.map((entry, index) => (
           <span key={entry.id}>
             {index > 0 && <span className="separator"> / </span>}
@@ -119,11 +121,11 @@ export function FolderBrowser() {
       )}
 
       {isLoading ? (
-        <p>Lade...</p>
+        <p>{t("common.loading")}</p>
       ) : (
         <>
           {folders.length === 0 && documents.length === 0 && (
-            <p className="empty-state">Dieser Ordner ist leer.</p>
+            <p className="empty-state">{t("folderBrowser.emptyFolder")}</p>
           )}
           <ul className="entry-list">
             {folders.map((folder) => (
@@ -142,10 +144,10 @@ export function FolderBrowser() {
                 <span>📄 {doc.title}</span>
                 <span className="actions">
                   <button type="button" onClick={() => handleDownload(doc)}>
-                    Herunterladen
+                    {t("folderBrowser.download")}
                   </button>
                   <button type="button" onClick={() => setPreviewTarget(doc)}>
-                    Vorschau
+                    {t("folderBrowser.preview")}
                   </button>
                 </span>
               </li>

@@ -81,6 +81,53 @@ def test_full_flow_via_api(client):
     delete_response = client.delete(f"/role-assignments/{assignment['id']}")
     assert delete_response.status_code == 204
 
+
+def test_list_role_assignments_returns_all(client):
+    role = client.post("/roles", json={"name": "Listener", "permissions": ["read"]}).json()
+    created = client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "dave",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    ).json()
+
+    response = client.get("/role-assignments")
+
+    assert response.status_code == 200
+    ids = [a["id"] for a in response.json()]
+    assert created["id"] in ids
+
+
+def test_list_role_assignments_filters_by_principal_id(client):
+    role = client.post("/roles", json={"name": "Filterable", "permissions": ["read"]}).json()
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "erin",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "frank",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    response = client.get("/role-assignments", params={"principal_id": "erin"})
+
+    assert response.status_code == 200
+    principal_ids = {a["principal_id"] for a in response.json()}
+    assert principal_ids == {"erin"}
+
     after = client.get(f"/effective-permissions/carol/{ROOT_RESOURCE_ID}").json()
     assert after["permissions"] == []
 

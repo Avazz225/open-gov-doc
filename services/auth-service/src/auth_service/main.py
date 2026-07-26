@@ -6,10 +6,11 @@ from dms_common import configure_logging
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, HTTPException, status
 
-from auth_service import keycloak_client
+from auth_service import admin_users, keycloak_client
+from auth_service.admin_users import UserAlreadyExistsError, UserNotFoundError, build_admin_client
 from auth_service.bootstrap import ensure_realm_and_client
 from auth_service.keycloak_client import InvalidCredentialsError
-from auth_service.schemas import LoginRequest, RefreshRequest, TokenResponse
+from auth_service.schemas import LoginRequest, RefreshRequest, TokenResponse, UserCreate, UserOut
 from auth_service.settings import Settings
 
 settings = Settings()
@@ -19,6 +20,7 @@ configure_logging(settings)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_realm_and_client(settings)
+    app.state.keycloak_admin = build_admin_client(settings)
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
@@ -79,3 +81,34 @@ async def me(user: dict = Depends(get_current_user)) -> dict:
         "email": user.get("email"),
         "realm_roles": user.get("realm_access", {}).get("roles", []),
     }
+
+
+@app.get("/users", response_model=list[UserOut])
+def list_users() -> list[dict]:
+    """Nutzerverwaltung für die Admin-UI (8, seit P4-S3) - liest direkt aus
+    Keycloak, keine eigene Nutzertabelle (siehe README: Konten sind bereits
+    vollständig durch Keycloak abgedeckt)."""
+    return admin_users.list_users(app.state.keycloak_admin)
+
+
+@app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserCreate) -> dict:
+    try:
+        return admin_users.create_user(
+            app.state.keycloak_admin,
+            username=payload.username,
+            email=payload.email,
+            password=payload.password,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+        )
+    except UserAlreadyExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: str) -> None:
+    try:
+        admin_users.delete_user(app.state.keycloak_admin, user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

@@ -116,6 +116,10 @@ services:
     environment:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
+      # Registriert sich seit P4-S3 bei sich selbst, damit das Gateway auch
+      # "registry-service" als service_type auflösen kann (z. B. Admin-UI).
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://registry-service:8000
     ports:
       - "${REGISTRY_SERVICE_PORT:-8001}:8000"
     depends_on:
@@ -326,6 +330,21 @@ services:
     restart: unless-stopped
     ports:
       - "${USER_UI_PORT:-3000}:80"
+    depends_on:
+      gateway-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  admin-ui:
+    build:
+      context: ..
+      dockerfile: apps/admin-ui/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_BASE_URL: ${ADMIN_UI_GATEWAY_BASE_URL:-http://localhost:8009}
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_UI_PORT:-3001}:80"
     depends_on:
       gateway-service:
         condition: service_started

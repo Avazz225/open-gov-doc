@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "title": "DMS",
+    "description": "Dokumenten-Navigation, Upload/Download (User-UI, Konzept 8)"
+  },
+  "common": {
+    "logout": "Abmelden",
+    "loading": "Lade..."
+  },
+  "login": {
+    "heading": "Anmelden",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "submitting": "Melde an...",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "folderBrowser": {
+    "title": "Dokumente",
+    "breadcrumbLabel": "Ordnerpfad",
+    "rootLabel": "Start",
+    "emptyFolder": "Dieser Ordner ist leer.",
+    "download": "Herunterladen",
+    "preview": "Vorschau",
+    "loadError": "Laden fehlgeschlagen",
+    "downloadError": "Download fehlgeschlagen"
+  },
+  "upload": {
+    "formLabel": "Dokument hochladen",
+    "fileLabel": "Datei",
+    "titlePlaceholder": "Titel (optional)",
+    "submit": "Hochladen",
+    "submitting": "Lade hoch...",
+    "error": "Upload fehlgeschlagen"
+  },
+  "previewStub": {
+    "heading": "Vorschau: {title}",
+    "message": "Vorschau ist noch nicht verfügbar - folgt mit dem Rendering/Preview Service (P5-S2).",
+    "close": "Schließen"
+  }
+}

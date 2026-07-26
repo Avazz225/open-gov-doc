@@ -10,6 +10,7 @@ Dieses Repository enthält die Umsetzung des folgenden Systems: ein revisionssic
 | [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) | Session-Roadmap: welche Phase/Session baut was, in welcher Reihenfolge |
 | [`PROGRESS.md`](PROGRESS.md) | **Lebender Tracker** — jede neue Arbeitssession startet hier: Status, nächster Schritt, offene Entscheidungen |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Konventionen: Definition of Done, Service-Aufbau, Commit-Stil |
+| [`docs/architecture.md`](docs/architecture.md) | Architekturdiagramm des aktuellen Stands (aktualisiert an Phasengrenzen) |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records |
 | [`docs/services/`](docs/services/) | Eine Kurzdoku je Service (Verantwortung, API, Schema, Events) |
 | [`docs/service-template.md`](docs/service-template.md) | Verbindliches Muster für einen neuen Service (Layout, pyproject.toml, Dockerfile) |

@@ -123,6 +123,17 @@ async def create_role_assignment(
     return assignment
 
 
+@app.get("/role-assignments", response_model=list[RoleAssignmentOut])
+async def list_role_assignments(
+    principal_id: str | None = None,
+    resource_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[RoleAssignmentOut]:
+    return await repository.list_role_assignments(
+        session, principal_id=principal_id, resource_id=resource_id
+    )
+
+
 @app.delete("/role-assignments/{assignment_id}", status_code=204)
 async def delete_role_assignment(
     assignment_id: int, session: AsyncSession = Depends(get_session)

@@ -12,6 +12,7 @@
 | `POST` | `/roles` | Rolle anlegen |
 | `GET` | `/roles` | Alle Rollen |
 | `POST` | `/role-assignments` | Zuweisung anlegen (404 bei unbekannter Rolle/Ressource) |
+| `GET` | `/role-assignments?principal_id=...&resource_id=...` | Zuweisungen auflisten, optional gefiltert (seit P4-S3, Grundlage der Admin-UI) |
 | `DELETE` | `/role-assignments/{id}` | Zuweisung entfernen |
 | `GET` | `/resources/{id}` | Ressourcenknoten lesen |
 | `PATCH` | `/resources/{id}` | `inherit` umschalten |

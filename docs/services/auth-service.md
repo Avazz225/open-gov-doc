@@ -12,6 +12,9 @@
 | `POST` | `/login` | `{username, password}` → Password-Grant gegen Keycloak, liefert Access-/Refresh-Token |
 | `POST` | `/refresh` | `{refresh_token}` → neue Tokens |
 | `GET` | `/me` | Bearer-Token validieren (JWKS, zustandslos, keine Rückfrage bei Keycloak), normalisierte Identität zurückgeben |
+| `GET` | `/users` | Nutzer auflisten (seit P4-S3, Grundlage der Admin-UI-Nutzerverwaltung) — liest direkt aus Keycloak |
+| `POST` | `/users` | Nutzer anlegen (`username`, `email`, `password`, `first_name`, `last_name`) — 409 bei bereits vergebenem Benutzernamen |
+| `DELETE` | `/users/{id}` | Nutzer löschen — 404 bei unbekannter `id` |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Realm-/Client-Bootstrap
@@ -40,3 +43,4 @@ Noch keine — folgt in Phase 11.
 - **AD-Gruppe → interne Rolle Mapping** (Konzept 4.4): Keycloak deckt lokale + LDAP/AD-föderierte Nutzer bereits nativ ab, aber die konfigurierbare Mapping-Regelengine (AD-Gruppe → DMS-Rolle) ist nicht implementiert. Rollenzuweisung/-auswertung ist Aufgabe des Permission Service (4.1, P2-S2); `/me` liefert aktuell nur Keycloaks rohe `realm_access.roles`.
 - **Issuer-Hostname-Konsistenz**: Der Auth Service spricht Keycloak intern über `DMS_KEYCLOAK_BASE_URL` (im Compose-Netz `http://keycloak:8080`) an; ausgestellte Tokens tragen entsprechend `iss=http://keycloak:8080/realms/dms`. Sobald ein browserbasierter Redirect-Flow (`standardFlowEnabled`) hinzukommt, muss die vom Browser sichtbare Keycloak-URL (`http://localhost:8080`) und die interne Service-zu-Service-URL konsistent gehalten werden (Keycloak-Hostname-Konfiguration) — für die aktuelle reine Password-Grant-Nutzung nicht relevant, da immer derselbe interne Pfad verwendet wird.
 - **SAML 2.0** (Konzept 4.4, für ADFS-Alt-Föderationen) nicht Teil dieser Session.
+- **`/users`-Endpunkte ohne eigene Autorisierungsprüfung** (seit P4-S3): Wie die bereits bekannten ungated Admin-Endpunkte anderer Services (Force-Unlock, Bereichssperren) verlässt sich auch die Nutzerverwaltung auf das API-Gateway (nur Token-Gültigkeit, keine Rollenprüfung) — jeder authentifizierte Principal kann aktuell Nutzer anlegen/löschen. Reale Autorisierung ("nur Admin-Rolle") ist derselbe offene Punkt wie bei den Bereichssperren des Permission Service.

@@ -38,6 +38,8 @@ Deregister-beim-Shutdown) — siehe `docs/services/gateway-service.md`, das
 `/instances/{service_type}` nutzt, um Requests dynamisch weiterzuleiten,
 statt Backend-Adressen statisch zu konfigurieren.
 
+**Registriert sich seit P4-S3 auch bei sich selbst** (`DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS` zeigen beide auf die eigene Adresse): Ohne das gäbe es für `service_type=registry-service` keine auflösbare Instanz, und das Gateway könnte `/api/registry-service/...` (z. B. für die Admin-UI-Registry-Übersicht) nie auflösen. Die allererste Registrierung schlägt dabei unvermeidlich fehl (der eigene Uvicorn-Server nimmt erst nach Abschluss des Lifespan-Startups Verbindungen an) — der Selbstheilungs-Fix aus `dms-registry-client` (Re-Registrierung bei `404` im nächsten Heartbeat, siehe P4-S1) greift hier für den denkbar häufigsten Anwendungsfall dieses Mechanismus.
+
 ## Sensoren (Konzept 10.1)
 
 Noch keine — Monitoring/Sensor-Konzept folgt in Phase 11.
