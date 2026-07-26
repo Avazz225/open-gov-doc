@@ -19,7 +19,15 @@ class EventBusClient(ABC):
     async def publish(self, subject: str, payload: bytes) -> None: ...
 
     @abstractmethod
-    async def subscribe(self, subject: str, handler: MessageHandler, *, durable: str) -> None: ...
+    async def subscribe(
+        self, subject: str, handler: MessageHandler, *, durable: str, deliver_new: bool = False
+    ) -> None:
+        """``deliver_new=True`` liefert nur Nachrichten ab jetzt, statt den kompletten
+        Verlauf des Streams (Default) - für Konsumenten wie den Audit Service, die
+        auch nach einem Neustart lückenlos aufholen sollen, bleibt ``False`` richtig;
+        kurzlebige/testweise Abonnements setzen ``deliver_new=True``.
+        """
+        ...
 
     @abstractmethod
     async def close(self) -> None: ...

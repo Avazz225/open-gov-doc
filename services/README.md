@@ -3,5 +3,6 @@
 Ein Verzeichnis je Microservice, gefüllt gemäß der Roadmap (`../IMPLEMENTATION_PLAN.md`).
 
 - `registry-service/` — Service Discovery (P1-S1, Konzept 3.2a)
+- `audit-service/` — hash-verkettetes Ereignisprotokoll (P1-S2, Konzept 3.4/5.3)
 
 Aufbau je Service: siehe `../docs/service-template.md`.

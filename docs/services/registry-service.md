@@ -22,7 +22,12 @@
 
 ## Events
 
-Noch keine — Event-Bus-Anbindung (Audit-Ereignisse bei Registrierung/Ausfall) folgt in P1-S2, wenn der Event-Bus produktiv verdrahtet wird.
+Publiziert (Stream `registry`, `dms-eventbus-client`, nach Commit):
+
+- `registry.instance.registered` — `subject`=`instance_id`, `payload`={`service_type`, `version`}
+- `registry.instance.deregistered` — `subject`=`instance_id`, `payload`={`service_type`}
+
+Kein Event pro Heartbeat. Konsumiert wird dieser Strom aktuell vom Audit Service (`docs/services/audit-service.md`).
 
 ## Sensoren (Konzept 10.1)
 

@@ -1,4 +1,5 @@
+from dms_eventbus_client.envelope import Event
 from dms_eventbus_client.interface import EventBusClient, MessageHandler
 from dms_eventbus_client.nats_backend import NatsEventBusClient
 
-__all__ = ["EventBusClient", "MessageHandler", "NatsEventBusClient"]
+__all__ = ["Event", "EventBusClient", "MessageHandler", "NatsEventBusClient"]

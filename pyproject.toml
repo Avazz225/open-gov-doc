@@ -24,3 +24,7 @@ ignore = ["B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Ohne dies kollidieren gleichnamige Testmodule (z. B. test_repository.py) über
+# verschiedene Services hinweg, da keines der tests/-Verzeichnisse ein
+# __init__.py hat (siehe pytest-Doku zu "import mode").
+addopts = "--import-mode=importlib"

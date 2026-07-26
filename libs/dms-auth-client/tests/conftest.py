@@ -11,6 +11,16 @@ KID = "test-key-1"
 
 
 @pytest.fixture(scope="session")
+def issuer() -> str:
+    return ISSUER
+
+
+@pytest.fixture(scope="session")
+def audience() -> str:
+    return AUDIENCE
+
+
+@pytest.fixture(scope="session")
 def rsa_keypair():
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_pem = private_key.private_bytes(
@@ -35,13 +45,22 @@ def jwks(rsa_keypair):
     return {"keys": [public_jwk]}
 
 
-def make_token(rsa_keypair, *, issuer=ISSUER, audience=AUDIENCE, expires_in=300, extra_claims=None):
-    private_pem, _ = rsa_keypair
-    claims = {
-        "iss": issuer,
-        "aud": audience,
-        "sub": "user-123",
-        "exp": int(time.time()) + expires_in,
-        **(extra_claims or {}),
-    }
-    return jwt.encode(claims, private_pem, algorithm="RS256", headers={"kid": KID})
+@pytest.fixture
+def make_token(rsa_keypair):
+    """Fabrik statt Modul-Import, damit Testdateien mit `--import-mode=importlib`
+    (nötig, weil mehrere Services gleichnamige Testmodule wie test_repository.py
+    haben) das nicht per `from conftest import ...` einbinden müssen.
+    """
+
+    def _make_token(*, issuer=ISSUER, audience=AUDIENCE, expires_in=300, extra_claims=None):
+        private_pem, _ = rsa_keypair
+        claims = {
+            "iss": issuer,
+            "aud": audience,
+            "sub": "user-123",
+            "exp": int(time.time()) + expires_in,
+            **(extra_claims or {}),
+        }
+        return jwt.encode(claims, private_pem, algorithm="RS256", headers={"kid": KID})
+
+    return _make_token

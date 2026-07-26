@@ -59,8 +59,9 @@ async def test_deregister_removes_instance(session):
     req = make_request()
     await repository.register(session, req)
 
-    await repository.deregister(session, req.instance_id)
+    result = await repository.deregister(session, req.instance_id)
 
+    assert result.service_type == req.service_type
     assert await session.get(ServiceInstance, req.instance_id) is None
 
 

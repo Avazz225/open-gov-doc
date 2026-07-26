@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
+from dms_eventbus_client import Event, NatsEventBusClient
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +28,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.run_sync(Base.metadata.create_all)
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
+
+    event_bus = NatsEventBusClient(settings.nats_url, stream="registry")
+    await event_bus.connect()
+    app.state.event_bus = event_bus
+
     yield
+
+    await event_bus.close()
     await engine.dispose()
 
 
@@ -37,6 +45,16 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with app.state.session_factory() as session:
         yield session
+
+
+async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+    event = Event(
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+    )
+    await app.state.event_bus.publish(event_type, event.to_bytes())
 
 
 @app.get("/healthz")
@@ -50,6 +68,11 @@ async def register_instance(
 ) -> InstanceOut:
     result = await repository.register(session, payload)
     await session.commit()
+    await publish_event(
+        "registry.instance.registered",
+        subject=payload.instance_id,
+        payload={"service_type": payload.service_type, "version": payload.version},
+    )
     return result
 
 
@@ -70,10 +93,15 @@ async def deregister_instance(
     instance_id: str, session: AsyncSession = Depends(get_session)
 ) -> None:
     try:
-        await repository.deregister(session, instance_id)
+        deregistered = await repository.deregister(session, instance_id)
     except repository.InstanceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Instance not registered") from exc
     await session.commit()
+    await publish_event(
+        "registry.instance.deregistered",
+        subject=instance_id,
+        payload={"service_type": deregistered.service_type},
+    )
 
 
 @app.get("/instances", response_model=list[InstanceOut])

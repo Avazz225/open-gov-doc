@@ -9,7 +9,9 @@ Dieses Projekt wird über viele einzelne Arbeitssessions hinweg gebaut (siehe [`
 3. Nicht-triviale Architekturentscheidungen sind als kurzes ADR in `docs/adr/` festgehalten (Template siehe [`docs/adr/README.md`](docs/adr/README.md)).
 4. `PROGRESS.md` ist aktualisiert: erledigte Session abgehakt, nächste Session benannt, offene Fragen notiert.
 5. Bei substantiellem Code-Zuwachs: `graphify dms/ --update` (spätestens am Ende jeder Phase verpflichtend).
-6. Tests laufen grün (`pytest` je Service, `docker compose up` startet fehlerfrei).
+6. Tests laufen grün (`pytest` je Service, `docker compose up --build` startet fehlerfrei).
+
+**Falle beim Docker-Smoke-Test**: `docker compose up -d` baut ein bereits existierendes Image **nicht** automatisch neu, auch wenn sich der Code geändert hat. Nach Code-Änderungen an einem Service vor dem Smoke-Test immer explizit `docker compose build <service>` (oder `up -d --build`) ausführen, sonst testet man versehentlich den alten Stand.
 
 ## Service-Aufbau
 

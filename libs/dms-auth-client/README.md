@@ -18,9 +18,9 @@ validator = TokenValidator(
 )
 get_current_user = make_current_user_dependency(validator)
 
+
 @app.get("/documents")
-def list_documents(user: dict = Depends(get_current_user)):
-    ...
+def list_documents(user: dict = Depends(get_current_user)): ...
 ```
 
 ## Tests

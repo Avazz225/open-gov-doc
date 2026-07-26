@@ -58,6 +58,7 @@ spricht zwingend die DB direkt an, z. B. reine Gateway-Services).
 ```python
 from dms_common import BaseServiceSettings
 
+
 class Settings(BaseServiceSettings):
     service_name: str = "<name>"
 ```

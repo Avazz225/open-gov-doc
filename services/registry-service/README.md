@@ -22,16 +22,25 @@ mutierenden Sweep-Prozess - vermeidet Race Conditions und ist einfacher zu
 testen, bei identischem Ergebnis ("ausgefallene Instanzen erscheinen nicht in
 der aktiven Routingtabelle").
 
+## Events (Konzept 3.4)
+
+Publiziert nach erfolgreichem Commit (`dms-eventbus-client`, Stream `registry`):
+
+- `registry.instance.registered` — `subject` = `instance_id`, `payload` = `{service_type, version}`
+- `registry.instance.deregistered` — `subject` = `instance_id`, `payload` = `{service_type}`
+
+Kein Event pro Heartbeat (zu hochfrequent, kein Audit-relevanter Vorgang).
+
 ## Lokale Ausführung
 
 ```bash
-cd infra && docker compose up -d postgres registry-service
+cd infra && docker compose up -d postgres nats registry-service
 curl localhost:8001/healthz
 ```
 
 ## Tests
 
 ```bash
-cd infra && docker compose up -d postgres && cd ..
+cd infra && docker compose up -d postgres nats && cd ..
 uv run pytest services/registry-service/tests
 ```

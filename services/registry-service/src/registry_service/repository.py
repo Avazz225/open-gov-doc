@@ -62,12 +62,14 @@ async def heartbeat(session: AsyncSession, instance_id: str) -> InstanceOut:
     return _to_out(instance, timeout_seconds=0, now=now)
 
 
-async def deregister(session: AsyncSession, instance_id: str) -> None:
+async def deregister(session: AsyncSession, instance_id: str) -> InstanceOut:
     instance = await session.get(ServiceInstance, instance_id)
     if instance is None:
         raise InstanceNotFoundError(instance_id)
+    result = _to_out(instance, timeout_seconds=0, now=datetime.now(UTC))
     await session.delete(instance)
     await session.flush()
+    return result
 
 
 async def list_active_by_type(

@@ -1,4 +1,3 @@
-from conftest import AUDIENCE, ISSUER, make_token
 from dms_auth_client import TokenValidator, make_current_user_dependency
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -15,10 +14,10 @@ def build_app(validator: TokenValidator) -> FastAPI:
     return app
 
 
-def test_valid_bearer_token_allows_access(rsa_keypair, jwks):
-    validator = TokenValidator(issuer=ISSUER, audience=AUDIENCE, jwks=jwks)
+def test_valid_bearer_token_allows_access(jwks, make_token, issuer, audience):
+    validator = TokenValidator(issuer=issuer, audience=audience, jwks=jwks)
     client = TestClient(build_app(validator))
-    token = make_token(rsa_keypair)
+    token = make_token()
 
     response = client.get("/me", headers={"Authorization": f"Bearer {token}"})
 
@@ -26,8 +25,8 @@ def test_valid_bearer_token_allows_access(rsa_keypair, jwks):
     assert response.json() == {"sub": "user-123"}
 
 
-def test_missing_token_is_rejected(jwks):
-    validator = TokenValidator(issuer=ISSUER, audience=AUDIENCE, jwks=jwks)
+def test_missing_token_is_rejected(jwks, issuer, audience):
+    validator = TokenValidator(issuer=issuer, audience=audience, jwks=jwks)
     client = TestClient(build_app(validator))
 
     response = client.get("/me")
@@ -35,8 +34,8 @@ def test_missing_token_is_rejected(jwks):
     assert response.status_code == 401
 
 
-def test_invalid_token_returns_401(jwks):
-    validator = TokenValidator(issuer=ISSUER, audience=AUDIENCE, jwks=jwks)
+def test_invalid_token_returns_401(jwks, issuer, audience):
+    validator = TokenValidator(issuer=issuer, audience=audience, jwks=jwks)
     client = TestClient(build_app(validator))
 
     response = client.get("/me", headers={"Authorization": "Bearer not-a-real-token"})
