@@ -18,6 +18,7 @@ Dieses Repository enthält die Umsetzung des folgenden Systems: ein revisionssic
 
 ```
 services/   # Ein Ordner je Microservice (src/, tests/, Dockerfile, README.md, pyproject.toml)
+apps/       # Frontend-Anwendungen (Next.js, statischer Export - Konzept 8, siehe ADR 0006)
 libs/       # Geteilte Python-Pakete (siehe libs/README.md für die vollständige Liste)
 infra/      # docker-compose.yml (lokale Dev-Umgebung) + k8s/ (später)
 tools/cli/  # DMS-CLI-Tool

@@ -1,0 +1,25 @@
+"use client";
+
+// Platzhalter für den eigentlichen Rendering/Preview Service (3.7/2.4,
+// P5-S2) - der existiert noch nicht. Zeigt bewusst deutlich an, dass hier
+// noch keine echte Vorschau steckt, statt eine leere/kaputte Ansicht zu
+// zeigen.
+export function PreviewStub({
+  title,
+  onClose,
+}: {
+  title: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h2>Vorschau: {title}</h2>
+        <p>Vorschau ist noch nicht verfügbar - folgt mit dem Rendering/Preview Service (P5-S2).</p>
+        <button type="button" onClick={onClose}>
+          Schließen
+        </button>
+      </div>
+    </div>
+  );
+}

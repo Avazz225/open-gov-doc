@@ -47,3 +47,32 @@ jobs:
           TEST_POSTGRES_DSN: postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms
           TEST_NATS_URL: nats://localhost:4222
         run: uv run pytest
+
+  user-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/user-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/user-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build (statischer Export)
+        run: npm run build

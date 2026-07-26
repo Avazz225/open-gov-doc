@@ -314,3 +314,20 @@ services:
         condition: service_healthy
     networks:
       - dms-net
+
+  user-ui:
+    build:
+      context: ..
+      dockerfile: apps/user-ui/Dockerfile
+      args:
+        # Vom Browser aus erreichbare Adresse des Gateways (nicht die interne
+        # Compose-DNS) - der Build brennt sie fest ein, siehe apps/user-ui/README.md.
+        NEXT_PUBLIC_GATEWAY_BASE_URL: ${USER_UI_GATEWAY_BASE_URL:-http://localhost:8009}
+    restart: unless-stopped
+    ports:
+      - "${USER_UI_PORT:-3000}:80"
+    depends_on:
+      gateway-service:
+        condition: service_started
+    networks:
+      - dms-net

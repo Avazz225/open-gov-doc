@@ -19,6 +19,12 @@ Verbindliches Muster (Layout, `pyproject.toml`, `main.py`, Dockerfile) siehe
 [`docs/service-template.md`](docs/service-template.md) — neue Services entstehen
 durch Kopieren dieses Musters.
 
+Frontend-Anwendungen (Konzept 8) folgen diesem Python-Muster nicht — sie liegen
+unter `apps/<name>/` statt `services/<name>/` (Next.js/statischer Export statt
+`pyproject.toml`/`uv`), siehe [ADR 0006](docs/adr/0006-user-ui-static-export-spa.md).
+Dieselbe Definition of Done gilt trotzdem, nur mit Node-typischem Tooling
+(`npm run lint`/`test`/`build` statt `ruff`/`pytest`).
+
 Ein Service liest/schreibt ausschließlich sein eigenes Postgres-Schema (Konzept 3.1) und kommuniziert mit anderen Services nur über deren API bzw. den Event-Bus — kein Import fremder Service-Interna. Docker-Images sind self-contained: `libs/` wird beim Image-Build aus dem Monorepo kopiert und lokal installiert (kein interner Package-Index), damit ein Rebuild zu jedem späteren Zeitpunkt denselben Stand reproduziert.
 
 ## Commits

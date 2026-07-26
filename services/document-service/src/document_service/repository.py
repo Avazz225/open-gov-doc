@@ -25,6 +25,19 @@ async def get_document(session: AsyncSession, document_id: str) -> Document:
     return document
 
 
+async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> list[Document]:
+    """Grundlage für die Ordner-Navigation der User-UI (P4-S2). `folder_id` wird
+    hier wie überall in diesem Service als opake Fremdreferenz behandelt (keine
+    Existenzprüfung gegen den Folder Service) - ein unbekannter Ordner liefert
+    einfach eine leere Liste statt eines Fehlers."""
+    result = await session.execute(
+        select(Document)
+        .where(Document.folder_id == folder_id, Document.deleted_at.is_(None))
+        .order_by(Document.title)
+    )
+    return list(result.scalars().all())
+
+
 async def create_document(
     session: AsyncSession,
     *,

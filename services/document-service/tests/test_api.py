@@ -46,6 +46,33 @@ def test_get_unknown_document_returns_404(client):
     assert response.status_code == 404
 
 
+def test_list_documents_by_folder(client):
+    in_folder = upload(client, title="Im Ordner", folder_id="root").json()
+    upload(client, title="Ohne Ordner")
+
+    response = client.get("/documents", params={"folder_id": "root"})
+
+    assert response.status_code == 200
+    ids = [d["id"] for d in response.json()]
+    assert in_folder["id"] in ids
+    assert all(d["folder_id"] == "root" for d in response.json())
+
+
+def test_list_documents_excludes_deleted(client):
+    body = upload(client, folder_id="root").json()
+    client.delete(f"/documents/{body['id']}", params={"deleted_by": "alice"})
+
+    response = client.get("/documents", params={"folder_id": "root"})
+
+    assert body["id"] not in [d["id"] for d in response.json()]
+
+
+def test_list_documents_unknown_folder_returns_empty(client):
+    response = client.get("/documents", params={"folder_id": "does-not-exist"})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_checkin_normal_version_and_download(client):
     body = upload(client, content=b"v1").json()
     document_id = body["id"]

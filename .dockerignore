@@ -1,0 +1,9 @@
+# Build-Kontext ist die Repo-Wurzel (siehe docs/service-template.md) - ohne
+# dies würde jeder `docker compose build` (auch für Python-Services) den
+# kompletten node_modules-Baum der Frontend-Apps mit an den Docker-Daemon
+# schicken.
+**/node_modules
+**/.next
+apps/*/out
+**/__pycache__
+.venv

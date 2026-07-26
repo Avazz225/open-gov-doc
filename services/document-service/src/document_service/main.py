@@ -156,6 +156,13 @@ async def create_document(
     return document
 
 
+@app.get("/documents", response_model=list[DocumentOut])
+async def list_documents(
+    folder_id: str, session: AsyncSession = Depends(get_session)
+) -> list[DocumentOut]:
+    return await repository.list_documents_by_folder(session, folder_id)
+
+
 @app.get("/documents/{document_id}", response_model=DocumentOut)
 async def get_document(
     document_id: str, session: AsyncSession = Depends(get_session)
