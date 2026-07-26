@@ -4,6 +4,12 @@ from collections.abc import Awaitable, Callable
 MessageHandler = Callable[[bytes], Awaitable[None]]
 
 
+class SubjectNotFoundError(Exception):
+    """Kein Stream deckt das abonnierte Subject ab (noch kein Producer
+    gestartet, siehe ADR 0001) - Backend-unabhängig, damit Aufrufer nicht
+    gegen NATS-spezifische Exceptions programmieren müssen."""
+
+
 class EventBusClient(ABC):
     """Publish/Consume-Interface, unabhängig vom konkreten Bus (Konzept 3.4).
 

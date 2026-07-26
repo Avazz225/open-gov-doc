@@ -3,7 +3,7 @@ from nats.js import api
 from nats.js.client import JetStreamContext
 from nats.js.errors import NotFoundError
 
-from dms_eventbus_client.interface import EventBusClient, MessageHandler
+from dms_eventbus_client.interface import EventBusClient, MessageHandler, SubjectNotFoundError
 
 
 class NatsEventBusClient(EventBusClient):
@@ -50,9 +50,14 @@ class NatsEventBusClient(EventBusClient):
             await msg.ack()
 
         deliver_policy = api.DeliverPolicy.NEW if deliver_new else None
-        await self._js.subscribe(
-            subject, durable=durable, cb=_callback, deliver_policy=deliver_policy
-        )
+        try:
+            await self._js.subscribe(
+                subject, durable=durable, cb=_callback, deliver_policy=deliver_policy
+            )
+        except NotFoundError as exc:
+            raise SubjectNotFoundError(
+                f"Kein Stream deckt Subject {subject!r} ab - noch kein Producer gestartet?"
+            ) from exc
 
     async def close(self) -> None:
         if self._nc is not None:

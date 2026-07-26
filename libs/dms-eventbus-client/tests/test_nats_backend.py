@@ -3,7 +3,7 @@ import os
 import uuid
 
 import pytest
-from dms_eventbus_client import NatsEventBusClient
+from dms_eventbus_client import NatsEventBusClient, SubjectNotFoundError
 
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 
@@ -67,3 +67,21 @@ async def test_pure_consumer_without_stream_ownership():
 def test_ensure_stream_true_requires_stream_name():
     with pytest.raises(ValueError, match="stream ist erforderlich"):
         NatsEventBusClient(NATS_URL, stream=None, ensure_stream=True)
+
+
+async def test_subscribe_without_existing_stream_raises_subject_not_found():
+    """Konsument startet, bevor irgendein Producer den Stream angelegt hat -
+    passiert z. B., wenn der Permission Service vor dem Folder Service startet."""
+    consumer = NatsEventBusClient(NATS_URL, ensure_stream=False)
+    await consumer.connect()
+
+    async def handler(payload: bytes) -> None:
+        pass
+
+    try:
+        with pytest.raises(SubjectNotFoundError):
+            await consumer.subscribe(
+                f"nonexistent_{uuid.uuid4().hex[:8]}.>", handler, durable="consumer-test"
+            )
+    finally:
+        await consumer.close()
