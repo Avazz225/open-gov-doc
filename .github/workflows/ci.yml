@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dms
+          POSTGRES_PASSWORD: dms_dev_only
+          POSTGRES_DB: dms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # NATS braucht den `-js`-Flag (JetStream) - das lässt sich über den
+      # `services:`-Block nicht mitgeben, daher als eigener Docker-Run-Schritt.
+      - name: Start NATS (JetStream)
+        run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync workspace
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Run tests
+        env:
+          TEST_POSTGRES_DSN: postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms
+          TEST_NATS_URL: nats://localhost:4222
+        run: uv run pytest

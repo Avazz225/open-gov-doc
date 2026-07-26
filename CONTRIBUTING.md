@@ -13,18 +13,11 @@ Dieses Projekt wird über viele einzelne Arbeitssessions hinweg gebaut (siehe [`
 
 ## Service-Aufbau
 
-Jeder Service unter `services/<name>/`:
+Verbindliches Muster (Layout, `pyproject.toml`, `main.py`, Dockerfile) siehe
+[`docs/service-template.md`](docs/service-template.md) — neue Services entstehen
+durch Kopieren dieses Musters.
 
-```
-services/<name>/
-  src/<name>/          # Quellcode
-  tests/                # pytest
-  Dockerfile
-  pyproject.toml         # uv-verwaltet
-  README.md              # Kurzüberblick, lokale Ausführung
-```
-
-Ein Service liest/schreibt ausschließlich sein eigenes Postgres-Schema (Konzept 3.1) und kommuniziert mit anderen Services nur über deren API bzw. den Event-Bus — kein Import fremder Service-Interna.
+Ein Service liest/schreibt ausschließlich sein eigenes Postgres-Schema (Konzept 3.1) und kommuniziert mit anderen Services nur über deren API bzw. den Event-Bus — kein Import fremder Service-Interna. Docker-Images sind self-contained: `libs/` wird beim Image-Build aus dem Monorepo kopiert und lokal installiert (kein interner Package-Index), damit ein Rebuild zu jedem späteren Zeitpunkt denselben Stand reproduziert.
 
 ## Commits
 

@@ -12,6 +12,7 @@ Dieses Repository enthält die Umsetzung des folgenden Systems: ein revisionssic
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Konventionen: Definition of Done, Service-Aufbau, Commit-Stil |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records |
 | [`docs/services/`](docs/services/) | Eine Kurzdoku je Service (Verantwortung, API, Schema, Events) |
+| [`docs/service-template.md`](docs/service-template.md) | Verbindliches Muster für einen neuen Service (Layout, pyproject.toml, Dockerfile) |
 
 ## Monorepo-Layout
 

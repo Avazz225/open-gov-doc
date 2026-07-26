@@ -11,6 +11,7 @@ venv/
 htmlcov/
 dist/
 build/
+.python-version
 
 # --- Node / Frontend ---
 node_modules/
@@ -39,3 +40,5 @@ infra/**/data/
 .DS_Store
 .vscode/
 .idea/
+
+uv.lock
