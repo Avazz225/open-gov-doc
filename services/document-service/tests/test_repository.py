@@ -15,6 +15,7 @@ async def _make_document(session, **overrides):
         "storage_object_key": "documents/x/aaaa",
         "folder_id": None,
         "object_type_id": None,
+        "attributes": {},
         "created_by": "alice",
     }
     payload.update(overrides)

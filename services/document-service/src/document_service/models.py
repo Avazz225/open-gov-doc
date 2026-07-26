@@ -1,24 +1,28 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("document")
 
 
 class Document(Base):
-    """Kernentität (2.1). ``folder_id``/``object_type_id`` sind bewusst opake
-    Referenzen ohne FK-Erzwingung: Folder Service und Object-Type Service
-    existieren erst ab P3-S3 - analog zum provisorischen Vorgehen des
-    Permission Service (siehe docs/services/permission-service.md)."""
+    """Kernentität (2.1). ``folder_id`` ist eine opake Referenz auf den
+    Folder Service (P3-S3), ``object_type_id`` referenziert den Object-Type
+    Service (2.2) - beide ohne FK-Erzwingung über Service-Grenzen hinweg,
+    aber seit P3-S3 aktiv gegen die jeweilige Service-API geprüft (siehe
+    main.py: Existenz des Ordners, Constraint-Validierung der Attribute)."""
 
     __tablename__ = "document"
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     title: Mapped[str] = mapped_column(String(512))
     folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    object_type_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    object_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Custom-Attribute gemäß Objekttyp-Schema (2.2) - nur bei Erstellung
+    # gesetzt/validiert, noch kein Update-Endpunkt für spätere Änderungen.
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict)
     # Zeigt auf die aktuelle Hauptversion (nicht die zuletzt angelegte Zeile -
     # Konfliktkopien erhöhen diesen Zeiger nicht, siehe repository.checkin_version).
     current_version_number: Mapped[int] = mapped_column(Integer, default=0)

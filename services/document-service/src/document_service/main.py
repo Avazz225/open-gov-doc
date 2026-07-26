@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,7 +11,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service import repository
+from document_service.folder_client import FolderClient
 from document_service.models import Base
+from document_service.object_type_client import ObjectTypeClient
 from document_service.schemas import (
     CheckinResult,
     DocumentOut,
@@ -41,10 +44,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS document"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
+        # CONTRIBUTING.md): `create_all` legt fehlende TABELLEN an, ändert aber
+        # keine bestehenden - `attributes` kam erst in P3-S3 dazu. Idempotent
+        # dank IF NOT EXISTS, betrifft nur additive, defaultbehaftete Spalten.
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS attributes JSON DEFAULT '{}'::json NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
     app.state.storage = StorageClient(settings.storage_service_base_url)
+    app.state.folder_client = FolderClient(settings.folder_service_base_url)
+    app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="document")
     await event_bus.connect()
@@ -54,6 +69,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await event_bus.close()
     await app.state.storage.close()
+    await app.state.folder_client.close()
+    await app.state.object_type_client.close()
     await engine.dispose()
 
 
@@ -83,9 +100,25 @@ async def create_document(
     title: str = Form(...),
     created_by: str = Form(...),
     folder_id: str | None = Form(None),
-    object_type_id: str | None = Form(None),
+    object_type_id: int | None = Form(None),
+    attributes: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
+    try:
+        parsed_attributes = json.loads(attributes) if attributes else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="attributes ist kein gültiges JSON") from exc
+
+    if folder_id is not None and not await app.state.folder_client.exists(folder_id):
+        raise HTTPException(status_code=400, detail=f"folder_id {folder_id!r} unbekannt")
+
+    if object_type_id is not None:
+        errors = await app.state.object_type_client.validate(
+            object_type_id, name=title, attributes=parsed_attributes
+        )
+        if errors:
+            raise HTTPException(status_code=400, detail={"errors": errors})
+
     data = await file.read()
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
@@ -103,6 +136,7 @@ async def create_document(
         storage_object_key=key,
         folder_id=folder_id,
         object_type_id=object_type_id,
+        attributes=parsed_attributes,
         created_by=created_by,
     )
     await session.commit()

@@ -25,15 +25,16 @@ Ressourcenknoten mit `inherit=false` bricht die Vererbung an dieser Stelle ab
 - eigene Zuweisungen an genau diesem Knoten gelten weiterhin, nur der weitere
 Aufstieg zu Vorfahren entfällt.
 
-## Ressourcen-Hierarchie: noch kein Folder Service
+## Ressourcen-Hierarchie: Folder Service (seit P3-S3)
 
-Der Folder Service (P3-S3) existiert noch nicht. Bis dahin hält dieser Service
-seine `resource_node`-Tabelle über Struktur-Events synchron, die der künftige
-Folder Service publizieren wird (`folder.resource.created/.moved/.deleted`,
-siehe `docs/services/permission-service.md` für den vorläufigen Vertrag).
-Startet dieser Service, bevor je ein Producer den `folder`-Stream angelegt
-hat, wird das Abonnement übersprungen (siehe `structure_consumer.py`) statt
-den Start zu blockieren.
+Dieser Service hält seine `resource_node`-Tabelle über Struktur-Events synchron,
+die der Folder Service publiziert (`folder.resource.created/.moved/.deleted`,
+siehe `docs/services/permission-service.md` — Vertrag in P3-S3 live gegen die
+echte Folder-Service-API verifiziert, keine Anpassung nötig). Startet dieser
+Service, bevor je ein Producer den `folder`-Stream angelegt hat (z. B. beim
+allerersten Hochfahren des gesamten Stacks), wird das Abonnement übersprungen
+(siehe `structure_consumer.py`) statt den Start zu blockieren — ein Neustart
+nach dem ersten Start des Folder Service holt das nach.
 
 ## Cache-Invalidierung
 

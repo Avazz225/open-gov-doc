@@ -1,0 +1,13 @@
+[project]
+name = "dms-constraint-engine"
+version = "0.1.0"
+description = "Regel-Engine: Objekttyp-Schema-Validierung (Pflichtfelder, Muster, Wertebereiche, bedingte Pflichtfelder) - Konzept 2.2/4.5"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dms_constraint_engine"]

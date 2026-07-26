@@ -38,19 +38,29 @@ abgelegt - vermeidet die Reihenfolge-Abhängigkeit "Schlüssel braucht
 Versionsnummer, Versionsnummer braucht abgeschlossenen DB-Schreibzugriff" und
 dedupliziert identische Inhalte automatisch.
 
+## Ordner- und Objekttyp-Anbindung (seit P3-S3)
+
+- `folder_id` (optional): wird beim Anlegen gegen den Folder Service geprüft
+  (`GET /folders/{id}`) - unbekannte Ordner-ID → 400.
+- `object_type_id` + `attributes` (optional, `attributes` als JSON-String im
+  Multipart-Feld): wird gegen `POST /object-types/{id}/validate` des
+  Object-Type Service geprüft - ungültige Attribute → 400 mit Fehlerliste.
+- Beide Prüfungen entfallen vollständig, wenn das jeweilige Feld nicht gesetzt
+  wird (kein erzwungener Ordner/Objekttyp).
+
 ## Lokale Ausführung
 
 ```bash
-cd infra && docker compose up -d postgres nats minio storage-service document-service
+cd infra && docker compose up -d postgres nats minio storage-service object-type-service folder-service document-service
 curl localhost:8006/healthz
 ```
 
 ## Tests
 
 ```bash
-cd infra && docker compose up -d postgres nats minio storage-service && cd ..
+cd infra && docker compose up -d postgres nats minio storage-service object-type-service folder-service && cd ..
 uv run pytest services/document-service/tests
 ```
 
-Alle Tests laufen gegen echte Infrastruktur (Postgres, NATS, Storage Service
-über HTTP) - keine Mocks.
+Alle Tests laufen gegen echte Infrastruktur (Postgres, NATS, Storage/Folder/
+Object-Type Service über HTTP) - keine Mocks.

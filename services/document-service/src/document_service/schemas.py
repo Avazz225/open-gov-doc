@@ -7,7 +7,8 @@ class DocumentOut(BaseModel):
     id: str
     title: str
     folder_id: str | None
-    object_type_id: str | None
+    object_type_id: int | None
+    attributes: dict
     current_version_number: int
     deleted_at: datetime | None
     created_by: str

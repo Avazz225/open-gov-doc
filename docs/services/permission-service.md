@@ -30,9 +30,9 @@
 
 Von der angefragten Ressource aus wird die Vorfahrenkette (`parent_id`) nach oben durchlaufen, an jedem Knoten werden die Zuweisungen des Principals gesammelt. Ein Knoten mit `inherit=false` beendet den Aufstieg **nach** Auswertung seiner eigenen Zuweisungen — Standard-DMS-Verhalten (SharePoint/Alfresco), wie in Konzept 4.1 gefordert.
 
-## Struktur-Synchronisation (provisorischer Vertrag)
+## Struktur-Synchronisation (Vertrag bestätigt seit P3-S3)
 
-Der Folder Service (P3-S3) existiert noch nicht. `structure_consumer.py` abonniert bereits `settings.structure_subjects` (Default `["folder.>"]`) über `NatsEventBusClient(ensure_stream=False)` und erwartet folgendes Event-Schema:
+Der Folder Service (P3-S3) implementiert genau den in P2-S2 provisorisch angenommenen Vertrag — keine Anpassung nötig. `structure_consumer.py` abonniert `settings.structure_subjects` (Default `["folder.>"]`) über `NatsEventBusClient(ensure_stream=False)`:
 
 | event_type (Suffix) | payload |
 |---|---|
@@ -40,13 +40,13 @@ Der Folder Service (P3-S3) existiert noch nicht. `structure_consumer.py` abonnie
 | `*.resource.moved` | `{resource_id, new_parent_id}` |
 | `*.resource.deleted` | `{resource_id}` |
 
-**Dieser Vertrag ist provisorisch** — Subject-Präfix (`folder`) und Payload-Form können sich ändern, sobald der Folder Service tatsächlich gebaut wird; dann wird dieser Abschnitt aktualisiert.
+Live end-to-end verifiziert (P3-S3): ein über die echte Folder-Service-API angelegter Ordner erscheint unmittelbar als `ResourceNode` in diesem Service, inklusive korrektem `parent_id`.
 
-**Bekannte Grenze**: Existiert beim Start noch kein Stream für ein konfiguriertes Subject (kein Producer je gelaufen), wird das Subject übersprungen (`SubjectNotFoundError` abgefangen, siehe `dms-eventbus-client`/ADR 0001) statt den Service-Start zu blockieren — es gibt aber keinen Retry-Loop, der den Stream später automatisch nachzieht; ein Neustart ist dann nötig.
+**Bekannte Grenze**: Existiert beim Start noch kein Stream für ein konfiguriertes Subject (kein Producer je gelaufen), wird das Subject übersprungen (`SubjectNotFoundError` abgefangen, siehe `dms-eventbus-client`/ADR 0001) statt den Service-Start zu blockieren — es gibt aber keinen Retry-Loop, der den Stream später automatisch nachzieht; ein Neustart ist dann nötig. In der Praxis unkritisch, da der Folder Service inzwischen existiert und seinen Stream beim eigenen Start anlegt.
 
 ## Events
 
-**Konsumiert:** `folder.>` (provisorisch, s. o.).
+**Konsumiert:** `folder.>` (Vertrag bestätigt, s. o.).
 **Publiziert:** keine — reiner RBAC-Dienst, keine eigenen Domain-Events.
 
 ## Sensoren (Konzept 10.1)

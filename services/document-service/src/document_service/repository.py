@@ -36,7 +36,8 @@ async def create_document(
     checksum_sha256: str,
     storage_object_key: str,
     folder_id: str | None,
-    object_type_id: str | None,
+    object_type_id: int | None,
+    attributes: dict,
     created_by: str,
 ) -> Document:
     now = datetime.now(UTC)
@@ -45,6 +46,7 @@ async def create_document(
         title=title,
         folder_id=folder_id,
         object_type_id=object_type_id,
+        attributes=attributes,
         current_version_number=1,
         created_by=created_by,
         created_at=now,
