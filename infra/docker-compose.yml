@@ -1,5 +1,5 @@
-# Lokale Dev-Basisinfrastruktur (Konzept 3.1/3.4/3.6/4.4).
-# Fachliche Services werden ab Phase 1 der Roadmap (../IMPLEMENTATION_PLAN.md) ergänzt.
+# Lokale Dev-Basisinfrastruktur (Konzept 3.1/3.4/3.6/4.4) + fachliche Services,
+# die gemäß Roadmap (../IMPLEMENTATION_PLAN.md) schrittweise ergänzt werden.
 #
 # Nutzung:
 #   cp .env.example .env
@@ -94,5 +94,20 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - dms-net
+
+  registry-service:
+    build:
+      context: ..
+      dockerfile: services/registry-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+    ports:
+      - "${REGISTRY_SERVICE_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - dms-net

@@ -1,5 +1,7 @@
 # services/
 
-Ein Verzeichnis je Microservice. Wird ab Phase 1 der Roadmap (`../IMPLEMENTATION_PLAN.md`) gefüllt, beginnend mit dem Registry Service (P1-S1).
+Ein Verzeichnis je Microservice, gefüllt gemäß der Roadmap (`../IMPLEMENTATION_PLAN.md`).
 
-Aufbau je Service: siehe `../CONTRIBUTING.md` ("Service-Aufbau").
+- `registry-service/` — Service Discovery (P1-S1, Konzept 3.2a)
+
+Aufbau je Service: siehe `../docs/service-template.md`.

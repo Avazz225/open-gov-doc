@@ -1,7 +1,7 @@
 # Fortschritt
 
-**Zuletzt abgeschlossen:** P0-S2 — Shared Libs, Service-Template, CI-Skeleton
-**Nächste Session:** P1-S1 — Registry Service (Discovery, Heartbeat/Health, Routingtabelle)
+**Zuletzt abgeschlossen:** P1-S1 — Registry Service (Discovery, Heartbeat/Health, Routingtabelle)
+**Nächste Session:** P1-S2 — Event-Bus produktiv (NATS JetStream) + Audit Service Grundgerüst mit Hash-Chain
 
 Details je Session: siehe [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
@@ -11,7 +11,7 @@ Details je Session: siehe [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 |---|---|---|
 | P0-S1 | ✅ fertig | Repo-Skeleton, Git-Init, Docker-Compose-Grundgerüst, graphify-Setup |
 | P0-S2 | ✅ fertig | Shared Libs, Service-Template, CI-Skeleton |
-| P1-S1 | offen | Registry Service |
+| P1-S1 | ✅ fertig | Registry Service |
 | P1-S2 | offen | Event-Bus produktiv + Audit Service Grundgerüst |
 | P2-S1 | offen | Keycloak + Auth Service |
 | P2-S2 | offen | Permission Service (RBAC) |
@@ -40,3 +40,4 @@ Details je Session: siehe [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
   - `dms-auth-client`: `TokenValidator` (JWKS/RS256) + FastAPI-Dependency — Unit-Tests mit selbst signiertem Testschlüssel (kein echter Keycloak nötig).
   - Docker-Testinfrastruktur nach jedem Lib-Test wieder heruntergefahren.
   `docs/service-template.md` geschrieben (Layout, `pyproject.toml`, `main.py`, Dockerfile) — **Konvention festgelegt**: Docker-Images kopieren `libs/` aus dem Monorepo und installieren lokal via `uv sync --frozen --package <name>` (kein interner Package-Index, volle Reproduzierbarkeit über `uv.lock`), Build-Kontext ist die Repo-Wurzel. `.github/workflows/ci.yml` (Postgres als Service-Container, NATS separat gestartet wegen JetStream-Flag, `ruff check .` + `pytest` über den ganzen Workspace) — lokal durchgespielt, nicht auf echtem GitHub Actions verifiziert. `graphify dms/ --update`: 167 Knoten/209 Kanten/31 Communities (Konzeptdokument-Knoten wie geplant gepruned, da `Business__DMS-Konzept.md`/`CLAUDE.md` jetzt gitignored sind). Ein Self-Loop-Edge im Graph als kleine Health-Warnung notiert, unkritisch. Nächster Schritt: P1-S1 (Registry Service).
+- **P1-S1**: `services/registry-service` gebaut (erster echter Service, nach `docs/service-template.md`-Muster): FastAPI-App, eigenes Postgres-Schema `registry` (Tabelle `service_instance`), Endpunkte `POST /instances` (Register/Upsert), `POST /instances/{id}/heartbeat`, `DELETE /instances/{id}`, `GET /instances/{service_type}` (aktive Routingtabelle), `GET /instances`, `/healthz`. **Design-Entscheidung**: Ausfallerkennung wird beim Lesen berechnet (`last_heartbeat_at` vs. `heartbeat_timeout_seconds`, Default 15s) statt über einen mutierenden Hintergrund-Sweep — vermeidet Race Conditions, einfacher zu testen, funktional äquivalent zu "fällt aus der Routingtabelle". Lizenzvermittlung (3.2b) bewusst noch nicht enthalten, folgt mit dem License Service (Phase 9). 14 Tests (Repository + API, gegen echtes Postgres) grün. Dockerfile nach Service-Template gebaut und **verifiziert**: Image gebaut, im Compose-Stack mit Postgres hochgefahren, End-to-End-Smoke-Test per `curl` (Register → Routingtabelle-Abfrage) erfolgreich, danach heruntergefahren. `docs/services/registry-service.md` angelegt. Gesamter Workspace (30 Tests über 4 Libs + Registry Service) läuft grün, Lint sauber. `graphify --update` bewusst noch nicht gelaufen (laut Plan erst am Ende der Phase, also nach P1-S2, verpflichtend). Nächster Schritt: P1-S2 (Event-Bus produktiv + Audit Service).
