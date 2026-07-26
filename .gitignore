@@ -1,0 +1,41 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- Node / Frontend ---
+node_modules/
+.next/
+out/
+
+# --- Env / Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Plan ---
+CLAUDE.md 
+Business__DMS-Konzept.md
+.claude/
+
+# --- graphify (regenerierbar via `graphify dms/ --update`) ---
+graphify-out/
+
+# --- Docker / lokale Daten ---
+infra/**/data/
+
+# --- OS / Editor ---
+.DS_Store
+.vscode/
+.idea/
