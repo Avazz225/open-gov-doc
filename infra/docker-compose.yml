@@ -16,6 +16,9 @@ volumes:
   nats-data:
   keycloak-data:
   minio-data:
+  # Steht für den PVC-Mountpunkt in einer echten Installation (Konzept 3.6) -
+  # ob dahinter NFS oder ein Block-Volume liegt, ist für storage-service unsichtbar.
+  storage-local-data:
 
 services:
   postgres:
@@ -173,6 +176,32 @@ services:
       postgres:
         condition: service_healthy
       nats:
+        condition: service_healthy
+    networks:
+      - dms-net
+
+  storage-service:
+    build:
+      context: ..
+      dockerfile: services/storage-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # Default: lokales Backend (steht für NFS/PVC-Mount, siehe 3.6). Für den
+      # S3/MinIO-Pfad testweise überschreiben: STORAGE_SERVICE_BACKEND=s3
+      DMS_BACKEND: ${STORAGE_SERVICE_BACKEND:-local}
+      DMS_LOCAL_STORAGE_BASE_PATH: /data/storage
+      DMS_S3_ENDPOINT_URL: http://minio:9000
+      DMS_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-dms_minio}
+      DMS_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dms_minio_dev_only}
+    volumes:
+      - storage-local-data:/data/storage
+    ports:
+      - "${STORAGE_SERVICE_PORT:-8005}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     networks:
       - dms-net
