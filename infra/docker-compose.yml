@@ -57,6 +57,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      # Kein curl/wget im Keycloak-Image - roher HTTP-Check über bash /dev/tcp
+      # gegen den öffentlichen Realm-Endpoint (kein Health-Extension nötig).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/master HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && head -1 <&3 | grep -q 200"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     networks:
       - dms-net
 
@@ -129,6 +137,24 @@ services:
       postgres:
         condition: service_healthy
       nats:
+        condition: service_healthy
+    networks:
+      - dms-net
+
+  auth-service:
+    build:
+      context: ..
+      dockerfile: services/auth-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
+      DMS_KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      DMS_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
+      DMS_KEYCLOAK_CLIENT_SECRET: ${AUTH_SERVICE_CLIENT_SECRET:-dms-api-dev-secret}
+    ports:
+      - "${AUTH_SERVICE_PORT:-8003}:8000"
+    depends_on:
+      keycloak:
         condition: service_healthy
     networks:
       - dms-net
