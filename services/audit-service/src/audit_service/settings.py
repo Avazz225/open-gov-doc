@@ -8,5 +8,7 @@ class Settings(BaseServiceSettings):
 
     # Welche Subjects der Audit Service konsumiert (Konzept 3.4: "konsumiert alle
     # Events"). Wildcard je Producer-Stream, damit neue Services sich nur hier
-    # eintragen müssen, ohne Code-Änderung.
-    subjects: list[str] = ["registry.>"]
+    # eintragen müssen, ohne Code-Änderung. "document.>" wurde in P3-S2 ergänzt,
+    # da 4.2 explizit vollständige Auditierung von Force-Unlock/Konfliktkopie
+    # verlangt - andere Services (Auth/Permission/Storage) folgen bei Bedarf.
+    subjects: list[str] = ["registry.>", "document.>"]

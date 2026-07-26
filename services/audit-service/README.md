@@ -1,8 +1,8 @@
 # audit-service
 
 Unveränderliches, hash-verkettetes Ereignisprotokoll (Konzept 3.4/5.3). Konsumiert
-alle konfigurierten Event-Bus-Subjects (Default `["registry.>"]`, siehe
-`Settings.subjects`) und hängt jedes Ereignis manipulationssicher an eine
+alle konfigurierten Event-Bus-Subjects (Default `["registry.>", "document.>"]`,
+siehe `Settings.subjects`) und hängt jedes Ereignis manipulationssicher an eine
 Hash-Chain an.
 
 ## Endpunkte

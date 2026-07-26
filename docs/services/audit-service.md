@@ -19,13 +19,15 @@
 
 ## Events
 
-**Konsumiert:** alle Subjects aus `Settings.subjects` (Default `["registry.>"]`) — aktuell `registry.instance.registered`, `registry.instance.deregistered` vom Registry Service. Neue Producer werden ergänzt, indem ihr Subject-Präfix zur Liste hinzugefügt wird, ohne Code-Änderung am Konsumenten selbst.
+**Konsumiert:** alle Subjects aus `Settings.subjects` (Default `["registry.>", "document.>"]`, `document.>` seit P3-S2 — 4.2 verlangt explizit vollständige Auditierung von Force-Unlock/Konfliktkopie). Neue Producer werden ergänzt, indem ihr Subject-Präfix zur Liste hinzugefügt wird, ohne Code-Änderung am Konsumenten selbst.
 
 **Publiziert:** keine eigenen Events — der Audit Service ist reiner Konsument/Senke.
 
 ## Architektur-Entscheidung
 
 Konsument ohne eigenen Stream (`NatsEventBusClient(ensure_stream=False)`) — siehe [ADR 0001](../adr/0001-eventbus-consumer-without-stream-ownership.md). Durable Consumer-Name `audit-service`, kein `deliver_new`, damit nach einem Neustart lückenlos aufgeholt wird (keine Lücke in der Kette).
+
+**Zwischenfall & Fix (P3-S2)**: Mit einem zweiten konsumierten Subject (`document.>` neben `registry.>`) können NATS-Callbacks für unterschiedliche Subjects nebenläufig ausgeführt werden. `append_event` liest den aktuellen Kettenkopf (`prev_hash`) vor dem Insert — ohne Serialisierung konnten zwei nebenläufige Aufrufe denselben `prev_hash` lesen und die Kette korrumpieren (aufgedeckt durch `test_consumer_integration.py`, das nach Hinzufügen von `document.>` plötzlich fehlschlug, weil beim Testlauf bereits aufgelaufene `document.*`-Nachrichten parallel zum injizierten `registry.*`-Testereignis verarbeitet wurden). Fix: `consumer.py` serialisiert alle Aufrufe von `append_event` über einen In-Prozess-`asyncio.Lock` je Handler-Instanz — ausreichend, da der Audit Service als Single-Writer für seine eigene Kette konzipiert ist (keine horizontale Skalierung mehrerer Instanzen auf derselben Kette vorgesehen).
 
 ## Sensoren (Konzept 10.1)
 
