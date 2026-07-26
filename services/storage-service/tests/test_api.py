@@ -93,3 +93,44 @@ def test_overwrite_updates_metadata(client):
     assert second.json()["size_bytes"] == len(b"second-longer")
     download = client.get(f"/objects/{key}")
     assert download.content == b"second-longer"
+
+
+def test_copies_endpoint_lists_single_primary_copy_without_redundancy(client):
+    key = _key()
+    client.put(f"/objects/{key}", content=b"data")
+
+    response = client.get(f"/objects/{key}/copies")
+
+    assert response.status_code == 200
+    copies = response.json()
+    assert len(copies) == 1
+    assert copies[0]["backend_id"] == "local"
+    assert copies[0]["status"] == "ok"
+
+
+def test_verify_all_matches_single_backend(client):
+    key = _key()
+    client.put(f"/objects/{key}", content=b"data")
+
+    response = client.get(f"/object-verify/{key}/all")
+
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["backend_id"] == "local"
+    assert entries[0]["ok"] is True
+
+
+def test_process_pending_is_noop_without_redundancy(client):
+    key = _key()
+    client.put(f"/objects/{key}", content=b"data")
+
+    response = client.post("/replication/process-pending")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "permanently_failed": 0,
+    }

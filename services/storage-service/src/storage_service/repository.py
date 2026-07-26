@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from storage_service.models import ObjectMetadata
+from storage_service.models import ObjectCopy, ObjectMetadata
 
 
 class NotFoundError(Exception):
@@ -49,4 +50,77 @@ async def delete_metadata(session: AsyncSession, object_key: str) -> None:
     # Ohne Flush bleibt das Objekt im Identity-Map-Fast-Path von `session.get()`
     # auffindbar, obwohl es zur Löschung vorgemerkt ist (die DELETE-Anweisung
     # selbst wird erst hier tatsächlich abgesetzt).
+    await session.flush()
+
+
+async def record_copy(
+    session: AsyncSession,
+    object_key: str,
+    backend_id: str,
+    *,
+    status: str,
+    checksum: str | None = None,
+    last_error: str | None = None,
+    increment_attempt: bool = False,
+) -> ObjectCopy:
+    """Legt eine Zeile in ``object_copy`` an oder aktualisiert sie (3.6) -
+    ein Aufruf pro (object_key, backend_id) je Schreib-/Replikations-/
+    Fixity-Versuch."""
+    now = datetime.now(UTC)
+    existing = await session.get(ObjectCopy, (object_key, backend_id))
+    if existing is None:
+        existing = ObjectCopy(
+            object_key=object_key, backend_id=backend_id, attempts=0, created_at=now
+        )
+        session.add(existing)
+
+    existing.status = status
+    existing.last_error = last_error
+    if checksum is not None:
+        existing.checksum_sha256 = checksum
+    if increment_attempt:
+        existing.attempts += 1
+    existing.updated_at = now
+
+    await session.flush()
+    return existing
+
+
+async def get_copy(session: AsyncSession, object_key: str, backend_id: str) -> ObjectCopy | None:
+    return await session.get(ObjectCopy, (object_key, backend_id))
+
+
+async def get_any_ok_copy(session: AsyncSession, object_key: str) -> ObjectCopy | None:
+    result = await session.execute(
+        select(ObjectCopy)
+        .where(ObjectCopy.object_key == object_key, ObjectCopy.status == "ok")
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
+async def list_copies(session: AsyncSession, object_key: str) -> list[ObjectCopy]:
+    result = await session.execute(select(ObjectCopy).where(ObjectCopy.object_key == object_key))
+    return list(result.scalars().all())
+
+
+async def list_pending_copies(session: AsyncSession, *, limit: int) -> list[ObjectCopy]:
+    """Retry-Queue (3.6): alle Kopien, die noch nicht erfolgreich repliziert
+    sind und noch nicht als dauerhaft fehlgeschlagen gelten."""
+    result = await session.execute(
+        select(ObjectCopy).where(ObjectCopy.status.in_(["pending", "failed"])).limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def delete_copy(session: AsyncSession, object_key: str, backend_id: str) -> None:
+    existing = await session.get(ObjectCopy, (object_key, backend_id))
+    if existing is not None:
+        await session.delete(existing)
+        await session.flush()
+
+
+async def delete_copies_for_key(session: AsyncSession, object_key: str) -> None:
+    for copy in await list_copies(session, object_key):
+        await session.delete(copy)
     await session.flush()

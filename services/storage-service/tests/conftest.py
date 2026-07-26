@@ -24,6 +24,7 @@ async def engine():
         await conn.run_sync(Base.metadata.create_all)
     yield eng
     async with eng.begin() as conn:
+        await conn.execute(text("DELETE FROM storage.object_copy"))
         await conn.execute(text("DELETE FROM storage.object_metadata"))
     await eng.dispose()
 

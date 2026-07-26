@@ -37,7 +37,7 @@ async def _clean_tables():
         await conn.execute(
             text(
                 "TRUNCATE permission.role_assignment, permission.effective_permission_cache, "
-                "permission.role, permission.resource_node CASCADE"
+                "permission.role, permission.scope_lock, permission.resource_node CASCADE"
             )
         )
     await eng.dispose()

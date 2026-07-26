@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -53,5 +55,34 @@ class EffectivePermissionsOut(BaseModel):
     permissions: list[str]
 
 
+class ScopeLockCreate(BaseModel):
+    resource_id: str
+    locked_by: str
+    reason: str | None = None
+    blocks_read: bool = False
+    expires_at: datetime | None = None
+
+
+class ScopeLockRelease(BaseModel):
+    released_by: str
+
+
+class ScopeLockOut(BaseModel):
+    id: int
+    resource_id: str
+    locked_by: str
+    reason: str | None
+    blocks_read: bool
+    expires_at: datetime | None
+    created_at: datetime
+    released_at: datetime | None
+    released_by: str | None
+
+    model_config = {"from_attributes": True}
+
+
 class CheckResult(BaseModel):
     allowed: bool
+    blocked_by_scope_lock: bool = False
+    scope_lock_reason: str | None = None
+    scope_lock_expires_at: datetime | None = None

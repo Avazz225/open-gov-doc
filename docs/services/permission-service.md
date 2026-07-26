@@ -1,9 +1,9 @@
 # permission-service
 
-**Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1).
+**Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume.
 
-**Konzept-Referenz:** 4.1
-**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`)
+**Konzept-Referenz:** 4.1, 4.7
+**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`)
 
 ## API
 
@@ -16,7 +16,11 @@
 | `GET` | `/resources/{id}` | Ressourcenknoten lesen |
 | `PATCH` | `/resources/{id}` | `inherit` umschalten |
 | `GET` | `/effective-permissions/{principal_id}/{resource_id}` | Gecachte effektive Rollen/Rechte |
-| `GET` | `/check` | `{allowed: bool}` für eine konkrete Permission |
+| `GET` | `/check?...&access_type=read\|write` | Autorisierungs-Check inkl. Bereichssperren-Überlagerung |
+| `POST` | `/scope-locks` | Bereichssperre setzen (404 bei unbekannter Ressource) |
+| `DELETE` | `/scope-locks/{id}` | Bereichssperre aufheben (`released_by`) |
+| `GET` | `/scope-locks?resource_id=` | Sperren auflisten (optional gefiltert) |
+| `GET` | `/scope-locks/effective/{resource_id}` | Aktive Sperren, die diese Ressource betreffen (inkl. geerbte) |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -25,6 +29,16 @@
 - `role`: `id`, `name` (unique), `description`, `permissions` (JSON-Liste von Capability-Strings, z. B. `["read","write"]`).
 - `role_assignment`: `principal_type` (`user`|`group`), `principal_id`, `role_id`, `resource_id` — unique auf der Kombination.
 - `effective_permission_cache`: `(principal_id, resource_id)` → `roles`, `permissions`, `computed_at`. Wird bei jeder Rechte-/Strukturänderung **vollständig geleert** (bewusste Vereinfachung, siehe README) statt granular je Teilbaum invalidiert.
+- `scope_lock`: `id` (PK), `resource_id` (FK), `locked_by`, `reason`, `blocks_read` (bool, Default `false`), `expires_at` (nullable), `created_at`, `released_at`/`released_by` (nullable) — nie hart gelöscht, die Aufhebung wird dokumentiert statt die Zeile zu entfernen (Audit-Trail bleibt vollständig).
+
+## Bereichssperren (4.7, seit P3-S4)
+
+- Eine Bereichssperre gilt **immer für den gesamten Unterbaum** ab `resource_id` — unabhängig vom `inherit`-Flag des jeweiligen Knotens, das ausschließlich die RBAC-Vererbung steuert (siehe `repository.get_active_scope_locks_for_resource`, läuft dieselbe Vorfahrenkette ab wie die Rechte-Auswertung, aber ohne am `inherit=false`-Knoten abzubrechen).
+- `blocks_read=false` (Default) blockiert nur Schreibzugriffe, `blocks_read=true` zusätzlich Lesezugriffe. `GET /check` erwartet dafür einen expliziten `access_type`-Parameter (`read`|`write`, Default `write`) — der aufrufende Dienst muss angeben, welche Art von Zugriff geprüft wird.
+- **Überlagert RBAC statt es zu verändern**: Eine aktive, blockierende Sperre führt zu `allowed=false` unabhängig von den eigentlich zugewiesenen Rechten. Ausnahme: Principals mit der Capability `scope_lock.bypass` (per normaler Rollenzuweisung vergeben) umgehen die Sperre — nach Aufhebung gelten sofort wieder die ursprünglichen Rechte, ohne dass irgendetwas manuell entzogen/neu vergeben werden musste.
+- **Klare Rückmeldung statt generischem Fehler**: `CheckResult` liefert bei einer blockierenden Sperre zusätzlich `blocked_by_scope_lock`, `scope_lock_reason` und `scope_lock_expires_at`, damit aufrufende Dienste (künftig API-Gateway/UI) Grund und voraussichtliche Dauer anzeigen können statt eines unspezifischen "keine Berechtigung".
+- **Wer Sperren setzen/aufheben darf, ist in dieser Session nicht durchgesetzt**: Die Endpunkte selbst sind ungated (analog zum Force-Unlock-Präzedenzfall im Document Service, P3-S2) — reale Autorisierung ("nur Admin-Rollen dürfen sperren") folgt auf API-Gateway-Ebene (P4-S1), ebenso ein optionales Vier-Augen-Prinzip (4.3) für das Setzen/Aufheben.
+- **Auditierung**: `POST /scope-locks` und `DELETE /scope-locks/{id}` publizieren `permission.scope_lock.created`/`.released` über einen eigenen Producer-Client (getrennt vom reinen Struktur-Konsumenten, siehe unten) — der Audit Service konsumiert seit dieser Session zusätzlich `permission.>`.
 
 ## Vererbungsalgorithmus
 
@@ -47,7 +61,12 @@ Live end-to-end verifiziert (P3-S3): ein über die echte Folder-Service-API ange
 ## Events
 
 **Konsumiert:** `folder.>` (Vertrag bestätigt, s. o.).
-**Publiziert:** keine — reiner RBAC-Dienst, keine eigenen Domain-Events.
+**Publiziert** (Stream `permission`, `ensure_stream=True`, seit P3-S4):
+
+| event_type | payload |
+|---|---|
+| `permission.scope_lock.created` | `{scope_lock_id, resource_id, locked_by, reason, blocks_read}` |
+| `permission.scope_lock.released` | `{scope_lock_id, resource_id, released_by}` |
 
 ## Sensoren (Konzept 10.1)
 
@@ -58,3 +77,5 @@ Noch keine — folgt in Phase 11.
 - Gruppenmitgliedschaft wird nicht aufgelöst: `principal_id` einer Zuweisung muss exakt dem abgefragten Principal entsprechen. Eine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" ist nicht Teil dieser Session (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
 - Granularere Cache-Invalidierung (nur betroffener Teilbaum statt gesamter Cache) als spätere Optimierung möglich, ohne die API zu ändern.
 - Konfigurierbares Vier-Augen-Prinzip (4.3) für Rechteänderungen ist nicht Teil dieser Session.
+- Keine Durchsetzung, wer Bereichssperren setzen/aufheben darf (folgt auf API-Gateway-Ebene, P4-S1) — analog zum bereits bestehenden offenen Punkt beim Document-Service-Force-Unlock.
+- `GET /check` verlässt sich auf den Aufrufer, den korrekten `access_type` (`read`/`write`) mitzugeben — der Service selbst kennt keine feste Zuordnung Permission-Name → Zugriffsart.

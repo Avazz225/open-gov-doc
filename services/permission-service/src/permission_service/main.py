@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
-from dms_eventbus_client import NatsEventBusClient
+from dms_eventbus_client import Event, NatsEventBusClient
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,9 @@ from permission_service.schemas import (
     RoleAssignmentOut,
     RoleCreate,
     RoleOut,
+    ScopeLockCreate,
+    ScopeLockOut,
+    ScopeLockRelease,
 )
 from permission_service.settings import Settings
 from permission_service.structure_consumer import start_consuming
@@ -45,8 +49,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus = event_bus
     await start_consuming(event_bus, settings.structure_subjects, app.state.session_factory)
 
+    # Eigener Producer-Client für publizierte Ereignisse (Bereichssperren, 4.7/5.3) -
+    # getrennt vom obigen reinen Konsumenten-Client (ensure_stream=False), da ein
+    # Producer den eigenen Stream anlegen muss (siehe ADR 0001).
+    publisher = NatsEventBusClient(settings.nats_url, stream="permission", ensure_stream=True)
+    await publisher.connect()
+    app.state.publisher = publisher
+
     yield
 
+    await publisher.close()
     await event_bus.close()
     await engine.dispose()
 
@@ -57,6 +69,11 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with app.state.session_factory() as session:
         yield session
+
+
+async def publish_event(event_type: str, payload: dict) -> None:
+    event = Event(event_type=event_type, service_name=settings.service_name, payload=payload)
+    await app.state.publisher.publish(event_type, event.to_bytes())
 
 
 @app.get("/healthz")
@@ -150,8 +167,85 @@ async def check(
     principal_id: str,
     resource_id: str,
     permission: str,
+    access_type: Literal["read", "write"] = "write",
     session: AsyncSession = Depends(get_session),
 ) -> CheckResult:
     entry = await repository.get_effective_permissions(session, principal_id, resource_id)
+
+    active_locks = await repository.get_active_scope_locks_for_resource(session, resource_id)
+    blocking_locks = [lock for lock in active_locks if access_type == "write" or lock.blocks_read]
+    if blocking_locks and "scope_lock.bypass" not in entry.permissions:
+        blocking_lock = blocking_locks[0]
+        await session.commit()
+        return CheckResult(
+            allowed=False,
+            blocked_by_scope_lock=True,
+            scope_lock_reason=blocking_lock.reason,
+            scope_lock_expires_at=blocking_lock.expires_at,
+        )
+
     await session.commit()
     return CheckResult(allowed=permission in entry.permissions)
+
+
+@app.post("/scope-locks", response_model=ScopeLockOut, status_code=201)
+async def create_scope_lock(
+    payload: ScopeLockCreate, session: AsyncSession = Depends(get_session)
+) -> ScopeLockOut:
+    try:
+        lock = await repository.create_scope_lock(
+            session,
+            resource_id=payload.resource_id,
+            locked_by=payload.locked_by,
+            reason=payload.reason,
+            blocks_read=payload.blocks_read,
+            expires_at=payload.expires_at,
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "permission.scope_lock.created",
+        {
+            "scope_lock_id": lock.id,
+            "resource_id": lock.resource_id,
+            "locked_by": lock.locked_by,
+            "reason": lock.reason,
+            "blocks_read": lock.blocks_read,
+        },
+    )
+    return lock
+
+
+@app.delete("/scope-locks/{lock_id}", response_model=ScopeLockOut)
+async def release_scope_lock(
+    lock_id: int, payload: ScopeLockRelease, session: AsyncSession = Depends(get_session)
+) -> ScopeLockOut:
+    try:
+        lock = await repository.release_scope_lock(session, lock_id, payload.released_by)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "permission.scope_lock.released",
+        {
+            "scope_lock_id": lock.id,
+            "resource_id": lock.resource_id,
+            "released_by": lock.released_by,
+        },
+    )
+    return lock
+
+
+@app.get("/scope-locks", response_model=list[ScopeLockOut])
+async def list_scope_locks(
+    resource_id: str | None = None, session: AsyncSession = Depends(get_session)
+) -> list[ScopeLockOut]:
+    return await repository.list_scope_locks(session, resource_id)
+
+
+@app.get("/scope-locks/effective/{resource_id}", response_model=list[ScopeLockOut])
+async def effective_scope_locks(
+    resource_id: str, session: AsyncSession = Depends(get_session)
+) -> list[ScopeLockOut]:
+    return await repository.get_active_scope_locks_for_resource(session, resource_id)

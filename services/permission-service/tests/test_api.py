@@ -83,3 +83,138 @@ def test_full_flow_via_api(client):
 
     after = client.get(f"/effective-permissions/carol/{ROOT_RESOURCE_ID}").json()
     assert after["permissions"] == []
+
+
+def test_scope_lock_with_unknown_resource_returns_404(client):
+    response = client.post(
+        "/scope-locks",
+        json={"resource_id": "does-not-exist", "locked_by": "admin"},
+    )
+    assert response.status_code == 404
+
+
+def test_scope_lock_blocks_write_check_with_reason(client):
+    lock = client.post(
+        "/scope-locks",
+        json={
+            "resource_id": ROOT_RESOURCE_ID,
+            "locked_by": "admin",
+            "reason": "Revision läuft",
+        },
+    ).json()
+
+    result = client.get(
+        "/check",
+        params={
+            "principal_id": "dave",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "write",
+            "access_type": "write",
+        },
+    ).json()
+
+    assert result["allowed"] is False
+    assert result["blocked_by_scope_lock"] is True
+    assert result["scope_lock_reason"] == "Revision läuft"
+
+    release = client.request("DELETE", f"/scope-locks/{lock['id']}", json={"released_by": "admin"})
+    assert release.status_code == 200
+    assert release.json()["released_by"] == "admin"
+
+    after_release = client.get(
+        "/check",
+        params={
+            "principal_id": "dave",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "write",
+            "access_type": "write",
+        },
+    ).json()
+    assert after_release["blocked_by_scope_lock"] is False
+
+
+def test_scope_lock_without_blocks_read_allows_read_access(client):
+    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+
+    result = client.get(
+        "/check",
+        params={
+            "principal_id": "erin",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "read",
+            "access_type": "read",
+        },
+    ).json()
+
+    assert result["blocked_by_scope_lock"] is False
+
+
+def test_scope_lock_with_blocks_read_also_blocks_read_access(client):
+    client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "blocks_read": True},
+    )
+
+    result = client.get(
+        "/check",
+        params={
+            "principal_id": "erin",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "read",
+            "access_type": "read",
+        },
+    ).json()
+
+    assert result["blocked_by_scope_lock"] is True
+
+
+def test_scope_lock_bypass_capability_overrides_block(client):
+    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+    role = client.post(
+        "/roles", json={"name": "ScopeLockBypasser", "permissions": ["scope_lock.bypass", "write"]}
+    ).json()
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "frank",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    result = client.get(
+        "/check",
+        params={
+            "principal_id": "frank",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "write",
+            "access_type": "write",
+        },
+    ).json()
+
+    assert result["blocked_by_scope_lock"] is False
+    assert result["allowed"] is True
+
+
+def test_list_scope_locks_endpoint(client):
+    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+
+    response = client.get("/scope-locks", params={"resource_id": ROOT_RESOURCE_ID})
+
+    assert response.status_code == 200
+    assert len(response.json()) >= 1
+
+
+def test_effective_scope_locks_endpoint(client):
+    client.post("/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"})
+
+    response = client.get(f"/scope-locks/effective/{ROOT_RESOURCE_ID}")
+
+    assert response.status_code == 200
+    assert len(response.json()) >= 1
+
+
+def test_release_unknown_scope_lock_returns_404(client):
+    response = client.request("DELETE", "/scope-locks/999999", json={"released_by": "admin"})
+    assert response.status_code == 404

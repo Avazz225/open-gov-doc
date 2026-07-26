@@ -9,11 +9,14 @@ Prüfsumme und Größe.
 | Methode | Pfad | Zweck |
 |---|---|---|
 | `PUT` | `/objects/{key}` | Hochladen (Body = Rohinhalt, `Content-Type`-Header optional) |
-| `GET` | `/objects/{key}` | Herunterladen |
-| `DELETE` | `/objects/{key}` | Löschen (Backend + Metadaten) |
+| `GET` | `/objects/{key}` | Herunterladen (Lese-Fallback über konfigurierte Ziele) |
+| `DELETE` | `/objects/{key}` | Löschen (alle Ziele + Metadaten) |
 | `GET` | `/object-metadata/{key}` | Metadaten (Checksum, Größe, Backend, Zeitstempel) |
-| `GET` | `/object-verify/{key}` | Fixity-Check: Prüfsumme neu berechnen und mit Referenzwert vergleichen |
-| `GET` | `/healthz` | Health-Check, zeigt aktives Backend |
+| `GET` | `/objects/{key}/copies` | Kopien-Status je Ziel |
+| `GET` | `/object-verify/{key}` | Fixity-Check des Primärziels |
+| `GET` | `/object-verify/{key}/all` | Fixity-Check über alle Ziele |
+| `POST` | `/replication/process-pending` | Retry-Queue für ausstehende Sekundärkopien verarbeiten |
+| `GET` | `/healthz` | Health-Check, zeigt aktive Ziele + Schreibstrategie |
 
 `{key}` erlaubt Schrägstriche (`docs/2026/vertrag.pdf`).
 
@@ -32,18 +35,29 @@ löschen, Existenzprüfung, Prüfsumme), Auswahl über `DMS_BACKEND=local|s3`:
 - **`s3`** — S3-kompatibel (`aioboto3`), Werkseinstellung MinIO für lokale Entwicklung,
   funktioniert identisch gegen AWS S3/Ceph RGW.
 
-Storage-Redundanz (mehrere Ziele gleichzeitig, Quorum-Schreiben, Fixity-Checks über
-alle Kopien) ist **nicht Teil dieser Session** — folgt in P3-S4.
+## Redundanz (seit P3-S4)
+
+Zwei gleichzeitige Ziele (Primär- + optionales Sekundärziel, je `local`/`s3`) statt
+einer generischen Ziel-Menge — Begründung siehe `../../docs/adr/0004-storage-redundancy-scope.md`.
+
+- `DMS_REDUNDANCY_ENABLED=true` + `DMS_SECONDARY_BACKEND=local|s3` (muss sich vom
+  Primärziel `DMS_BACKEND` unterscheiden) aktiviert ein zweites Ziel.
+- `DMS_WRITE_STRATEGY=quorum|primary_async` (Default `primary_async`) + bei
+  `quorum` `DMS_QUORUM_COUNT` (muss ≤ Anzahl konfigurierter Ziele sein).
+- Bei `primary_async` bleibt die Sekundärkopie zunächst `pending` und wird erst
+  über `POST /replication/process-pending` nachgezogen (Retry-Queue, kein
+  In-Prozess-Hintergrundtask).
 
 ## Lokale Ausführung
 
 ```bash
-# Lokales Backend (Default)
+# Lokales Backend (Default, keine Redundanz)
 cd infra && docker compose up -d postgres minio storage-service
 curl localhost:8005/healthz
 
-# S3/MinIO-Backend testweise
-STORAGE_SERVICE_BACKEND=s3 docker compose up -d --force-recreate storage-service
+# Mit Redundanz (Quorum über local+s3)
+DMS_REDUNDANCY_ENABLED=true DMS_SECONDARY_BACKEND=s3 DMS_WRITE_STRATEGY=quorum DMS_QUORUM_COUNT=2 \
+  docker compose up -d --force-recreate storage-service
 ```
 
 ## Tests

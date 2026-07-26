@@ -10,5 +10,7 @@ class Settings(BaseServiceSettings):
     # Events"). Wildcard je Producer-Stream, damit neue Services sich nur hier
     # eintragen müssen, ohne Code-Änderung. "document.>" wurde in P3-S2 ergänzt,
     # da 4.2 explizit vollständige Auditierung von Force-Unlock/Konfliktkopie
-    # verlangt - andere Services (Auth/Permission/Storage) folgen bei Bedarf.
-    subjects: list[str] = ["registry.>", "document.>"]
+    # verlangt. "permission.>" kam in P3-S4 dazu, da 4.7 explizit vollständige
+    # Auditierung von Bereichssperren (setzen/aufheben) verlangt - andere
+    # Services (Auth/Storage) folgen bei Bedarf.
+    subjects: list[str] = ["registry.>", "document.>", "permission.>"]

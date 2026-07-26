@@ -3,7 +3,13 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from permission_service.models import EffectivePermissionCache, ResourceNode, Role, RoleAssignment
+from permission_service.models import (
+    EffectivePermissionCache,
+    ResourceNode,
+    Role,
+    RoleAssignment,
+    ScopeLock,
+)
 from permission_service.settings import ROOT_RESOURCE_ID
 
 
@@ -136,3 +142,79 @@ async def get_effective_permissions(
     await session.merge(entry)
     await session.flush()
     return entry
+
+
+async def create_scope_lock(
+    session: AsyncSession,
+    *,
+    resource_id: str,
+    locked_by: str,
+    reason: str | None,
+    blocks_read: bool,
+    expires_at: datetime | None,
+) -> ScopeLock:
+    resource = await session.get(ResourceNode, resource_id)
+    if resource is None:
+        raise NotFoundError(f"resource_id {resource_id!r} unbekannt")
+
+    lock = ScopeLock(
+        resource_id=resource_id,
+        locked_by=locked_by,
+        reason=reason,
+        blocks_read=blocks_read,
+        expires_at=expires_at,
+        created_at=datetime.now(UTC),
+    )
+    session.add(lock)
+    await session.flush()
+    return lock
+
+
+async def release_scope_lock(session: AsyncSession, lock_id: int, released_by: str) -> ScopeLock:
+    lock = await session.get(ScopeLock, lock_id)
+    if lock is None or lock.released_at is not None:
+        raise NotFoundError(f"aktive scope_lock {lock_id!r} unbekannt")
+    lock.released_at = datetime.now(UTC)
+    lock.released_by = released_by
+    await session.flush()
+    return lock
+
+
+def _scope_lock_is_active(lock: ScopeLock, now: datetime) -> bool:
+    if lock.released_at is not None:
+        return False
+    return lock.expires_at is None or lock.expires_at > now
+
+
+async def list_scope_locks(session: AsyncSession, resource_id: str | None) -> list[ScopeLock]:
+    stmt = select(ScopeLock)
+    if resource_id is not None:
+        stmt = stmt.where(ScopeLock.resource_id == resource_id)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_active_scope_locks_for_resource(
+    session: AsyncSession, resource_id: str
+) -> list[ScopeLock]:
+    """Läuft die Vorfahrenkette von ``resource_id`` nach oben (wie
+    ``_collect_effective_roles``) und sammelt alle aktiven Bereichssperren
+    (4.7) - unabhängig vom ``inherit``-Flag, das nur die RBAC-Vererbung
+    betrifft: eine Bereichssperre gilt immer für den gesamten Unterbaum."""
+    now = datetime.now(UTC)
+    active: list[ScopeLock] = []
+    current_id: str | None = resource_id
+
+    while current_id is not None:
+        node = await session.get(ResourceNode, current_id)
+        if node is None:
+            break
+
+        result = await session.execute(select(ScopeLock).where(ScopeLock.resource_id == current_id))
+        for lock in result.scalars().all():
+            if _scope_lock_is_active(lock, now):
+                active.append(lock)
+
+        current_id = node.parent_id
+
+    return active

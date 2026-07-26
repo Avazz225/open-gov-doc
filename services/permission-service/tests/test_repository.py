@@ -1,3 +1,6 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
 from permission_service import repository
 from permission_service.models import ResourceNode
 from permission_service.settings import ROOT_RESOURCE_ID
@@ -183,3 +186,128 @@ async def test_set_resource_inherit_invalidates_cache(session):
 
     after = await repository.get_effective_permissions(session, "alice", "folder-a")
     assert after.permissions == []
+
+
+async def test_create_scope_lock_with_unknown_resource_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.create_scope_lock(
+            session,
+            resource_id="does-not-exist",
+            locked_by="admin",
+            reason=None,
+            blocks_read=False,
+            expires_at=None,
+        )
+
+
+async def test_scope_lock_blocks_subtree_regardless_of_inherit_flag(session):
+    await _add_child(session, "folder-a", inherit=False)
+    await _add_child(session, "folder-a-sub", parent_id="folder-a")
+    await repository.create_scope_lock(
+        session,
+        resource_id="folder-a",
+        locked_by="admin",
+        reason="Migration",
+        blocks_read=False,
+        expires_at=None,
+    )
+
+    active = await repository.get_active_scope_locks_for_resource(session, "folder-a-sub")
+
+    assert len(active) == 1
+    assert active[0].reason == "Migration"
+
+
+async def test_scope_lock_at_root_blocks_entire_tree(session):
+    await _add_child(session, "folder-a")
+    await repository.create_scope_lock(
+        session,
+        resource_id=ROOT_RESOURCE_ID,
+        locked_by="admin",
+        reason=None,
+        blocks_read=False,
+        expires_at=None,
+    )
+
+    active = await repository.get_active_scope_locks_for_resource(session, "folder-a")
+
+    assert len(active) == 1
+
+
+async def test_expired_scope_lock_is_not_active(session):
+    await repository.create_scope_lock(
+        session,
+        resource_id=ROOT_RESOURCE_ID,
+        locked_by="admin",
+        reason=None,
+        blocks_read=False,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+
+    active = await repository.get_active_scope_locks_for_resource(session, ROOT_RESOURCE_ID)
+
+    assert active == []
+
+
+async def test_release_scope_lock_makes_it_inactive(session):
+    lock = await repository.create_scope_lock(
+        session,
+        resource_id=ROOT_RESOURCE_ID,
+        locked_by="admin",
+        reason=None,
+        blocks_read=False,
+        expires_at=None,
+    )
+
+    released = await repository.release_scope_lock(session, lock.id, "admin2")
+
+    assert released.released_by == "admin2"
+    active = await repository.get_active_scope_locks_for_resource(session, ROOT_RESOURCE_ID)
+    assert active == []
+
+
+async def test_release_unknown_scope_lock_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.release_scope_lock(session, 999999, "admin")
+
+
+async def test_release_already_released_scope_lock_raises(session):
+    lock = await repository.create_scope_lock(
+        session,
+        resource_id=ROOT_RESOURCE_ID,
+        locked_by="admin",
+        reason=None,
+        blocks_read=False,
+        expires_at=None,
+    )
+    await repository.release_scope_lock(session, lock.id, "admin")
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.release_scope_lock(session, lock.id, "admin")
+
+
+async def test_list_scope_locks_filters_by_resource(session):
+    await _add_child(session, "folder-a")
+    await repository.create_scope_lock(
+        session,
+        resource_id=ROOT_RESOURCE_ID,
+        locked_by="admin",
+        reason=None,
+        blocks_read=False,
+        expires_at=None,
+    )
+    await repository.create_scope_lock(
+        session,
+        resource_id="folder-a",
+        locked_by="admin",
+        reason=None,
+        blocks_read=False,
+        expires_at=None,
+    )
+
+    all_locks = await repository.list_scope_locks(session, None)
+    scoped = await repository.list_scope_locks(session, "folder-a")
+
+    assert len(all_locks) == 2
+    assert len(scoped) == 1
+    assert scoped[0].resource_id == "folder-a"

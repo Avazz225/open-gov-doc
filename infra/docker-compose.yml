@@ -194,6 +194,14 @@ services:
       DMS_S3_ENDPOINT_URL: http://minio:9000
       DMS_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-dms_minio}
       DMS_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dms_minio_dev_only}
+      # Storage-Redundanz (3.6, P3-S4) - standardmäßig aus (ein einzelnes Ziel,
+      # wie vor P3-S4). Zum Testen z. B.:
+      #   STORAGE_SERVICE_REDUNDANCY_ENABLED=true STORAGE_SERVICE_SECONDARY_BACKEND=s3 \
+      #   STORAGE_SERVICE_WRITE_STRATEGY=quorum STORAGE_SERVICE_QUORUM_COUNT=2
+      DMS_REDUNDANCY_ENABLED: ${STORAGE_SERVICE_REDUNDANCY_ENABLED:-false}
+      DMS_SECONDARY_BACKEND: ${STORAGE_SERVICE_SECONDARY_BACKEND:-none}
+      DMS_WRITE_STRATEGY: ${STORAGE_SERVICE_WRITE_STRATEGY:-primary_async}
+      DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-2}
     volumes:
       - storage-local-data:/data/storage
     ports:

@@ -53,6 +53,29 @@ class RoleAssignment(Base):
     )
 
 
+class ScopeLock(Base):
+    """Bereichssperre (4.7): sperrt einen Ressourcen-Teilbaum vorübergehend für
+    reguläre Nutzer, unabhängig von den sonst geltenden RBAC-Rechten - ein
+    eigenständiges, RBAC überlagerndes statt veränderndes Konstrukt. Wird nie
+    hart gelöscht (``released_at``/``released_by`` dokumentieren die
+    Aufhebung), damit der Verlauf auditierbar bleibt (5.3)."""
+
+    __tablename__ = "scope_lock"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    resource_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("permission.resource_node.resource_id"), index=True
+    )
+    locked_by: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # False (Default) blockiert nur Schreibzugriffe, True zusätzlich Lesezugriffe.
+    blocks_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
 class EffectivePermissionCache(Base):
     """Materialisierter Cache (4.1) - wird bei jeder Rechte-/Strukturänderung
     vollständig geleert (siehe repository.invalidate_cache) statt granular je

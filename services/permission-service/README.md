@@ -1,7 +1,7 @@
 # permission-service
 
 RBAC mit Ordner-Vererbung und materialisiertem, ereignisgetriebenem Rechte-Cache
-(Konzept 4.1).
+(Konzept 4.1) sowie Bereichssperren (4.7, seit P3-S4).
 
 ## Endpunkte
 
@@ -14,8 +14,19 @@ RBAC mit Ordner-Vererbung und materialisiertem, ereignisgetriebenem Rechte-Cache
 | `GET` | `/resources/{id}` | Ressourcenknoten (Debug/Test) |
 | `PATCH` | `/resources/{id}` | Vererbung ein-/ausschalten (`inherit: bool`) |
 | `GET` | `/effective-permissions/{principal_id}/{resource_id}` | Effektive Rollen/Rechte (gecacht) |
-| `GET` | `/check?principal_id=&resource_id=&permission=` | Autorisierungs-Check |
+| `GET` | `/check?principal_id=&resource_id=&permission=&access_type=read\|write` | Autorisierungs-Check inkl. Bereichssperren |
+| `POST` | `/scope-locks` | Bereichssperre setzen (`resource_id`, `locked_by`, optional `reason`/`blocks_read`/`expires_at`) |
+| `DELETE` | `/scope-locks/{id}` | Sperre aufheben (`released_by`) |
+| `GET` | `/scope-locks?resource_id=` | Sperren auflisten |
+| `GET` | `/scope-locks/effective/{resource_id}` | Aktive Sperren, die diese Ressource betreffen (inkl. geerbte) |
 | `GET` | `/healthz` | Eigener Health-Check |
+
+## Bereichssperren (4.7)
+
+Sperrt einen ganzen Ressourcen-Teilbaum für reguläre Nutzer, unabhängig von
+RBAC — überlagert die Rechteprüfung statt sie zu verändern. Details, inkl. der
+`scope_lock.bypass`-Capability und der Auditierung über `permission.scope_lock.*`-
+Events: siehe `../../docs/services/permission-service.md`.
 
 ## Vererbungsmodell
 
