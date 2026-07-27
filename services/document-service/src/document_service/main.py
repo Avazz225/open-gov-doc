@@ -27,6 +27,11 @@ from document_service.schemas import (
 )
 from document_service.settings import Settings
 from document_service.storage_client import StorageClient, compute_checksum
+from document_service.virus_scan_client import (
+    ScanRejectedError,
+    ScanUnavailableError,
+    VirusScanClient,
+)
 
 settings = Settings()
 configure_logging(settings)
@@ -62,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage = StorageClient(settings.storage_service_base_url)
     app.state.folder_client = FolderClient(settings.folder_service_base_url)
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
+    app.state.virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="document")
     await event_bus.connect()
@@ -82,6 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.storage.close()
     await app.state.folder_client.close()
     await app.state.object_type_client.close()
+    await app.state.virus_scan_client.close()
     await engine.dispose()
 
 
@@ -131,6 +138,24 @@ async def create_document(
             raise HTTPException(status_code=400, detail={"errors": errors})
 
     data = await file.read()
+
+    try:
+        await app.state.virus_scan_client.scan(
+            data=data,
+            filename=file.filename or title,
+            content_type=file.content_type,
+            document_id=None,
+            created_by=created_by,
+        )
+    except ScanRejectedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"error": "virus_detected", "threat_name": exc.threat_name}
+        ) from exc
+    except ScanUnavailableError as exc:
+        raise HTTPException(
+            status_code=503, detail="Virenscan-Dienst nicht erreichbar - Upload abgelehnt"
+        ) from exc
+
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
     key = _object_key(document_id, checksum)
@@ -269,6 +294,24 @@ async def checkin_version(
     session: AsyncSession = Depends(get_session),
 ) -> CheckinResult:
     data = await file.read()
+
+    try:
+        await app.state.virus_scan_client.scan(
+            data=data,
+            filename=file.filename or f"version-{expected_base_version_number + 1}",
+            content_type=file.content_type,
+            document_id=document_id,
+            created_by=created_by,
+        )
+    except ScanRejectedError as exc:
+        raise HTTPException(
+            status_code=422, detail={"error": "virus_detected", "threat_name": exc.threat_name}
+        ) from exc
+    except ScanUnavailableError as exc:
+        raise HTTPException(
+            status_code=503, detail="Virenscan-Dienst nicht erreichbar - Upload abgelehnt"
+        ) from exc
+
     checksum = compute_checksum(data)
     key = _object_key(document_id, checksum)
     await app.state.storage.upload(key, data, file.content_type)

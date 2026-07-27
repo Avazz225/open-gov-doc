@@ -19,7 +19,7 @@
 
 ## Events
 
-**Konsumiert:** alle Subjects aus `Settings.subjects` (Default `["registry.>", "document.>", "permission.>"]` — `document.>` seit P3-S2, da 4.2 explizit vollständige Auditierung von Force-Unlock/Konfliktkopie verlangt; `permission.>` seit P3-S4, da 4.7 explizit vollständige Auditierung von Bereichssperren verlangt). Neue Producer werden ergänzt, indem ihr Subject-Präfix zur Liste hinzugefügt wird, ohne Code-Änderung am Konsumenten selbst.
+**Konsumiert:** alle Subjects aus `Settings.subjects` (Default `["registry.>", "document.>", "permission.>", "virus_scan.>"]` — `document.>` seit P3-S2, da 4.2 explizit vollständige Auditierung von Force-Unlock/Konfliktkopie verlangt; `permission.>` seit P3-S4, da 4.7 explizit vollständige Auditierung von Bereichssperren verlangt; `virus_scan.>` seit P5-S1, da 10.3/5.3 explizit die Auditierung von Scan-Ergebnissen verlangen). Neue Producer werden ergänzt, indem ihr Subject-Präfix zur Liste hinzugefügt wird, ohne Code-Änderung am Konsumenten selbst.
 
 **Publiziert:** keine eigenen Events — der Audit Service ist reiner Konsument/Senke.
 

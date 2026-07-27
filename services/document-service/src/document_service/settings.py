@@ -17,6 +17,10 @@ class Settings(BaseServiceSettings):
     folder_service_base_url: str = "http://localhost:8008"
     object_type_service_base_url: str = "http://localhost:8007"
 
+    # Verpflichtender Virenscan vor Freigabe eines Uploads (10.3, ADR 0010) -
+    # synchron aufgerufen, bevor Inhalt/Metadaten persistiert werden.
+    virus_scan_service_base_url: str = "http://localhost:8010"
+
     # Timeout ohne Aktivität, nach dem eine Bearbeitungssperre automatisch als
     # abgelaufen gilt (4.2) - kein Hintergrund-Sweep nötig, siehe repository.py.
     default_lock_timeout_seconds: float = 1800.0

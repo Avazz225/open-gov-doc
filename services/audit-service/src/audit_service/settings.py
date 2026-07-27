@@ -12,5 +12,6 @@ class Settings(BaseServiceSettings):
     # da 4.2 explizit vollständige Auditierung von Force-Unlock/Konfliktkopie
     # verlangt. "permission.>" kam in P3-S4 dazu, da 4.7 explizit vollständige
     # Auditierung von Bereichssperren (setzen/aufheben) verlangt - andere
-    # Services (Auth/Storage) folgen bei Bedarf.
-    subjects: list[str] = ["registry.>", "document.>", "permission.>"]
+    # Services (Auth/Storage) folgen bei Bedarf. "virus_scan.>" kam in P5-S1
+    # dazu - 10.3/5.3 verlangen explizit die Auditierung von Scan-Ergebnissen.
+    subjects: list[str] = ["registry.>", "document.>", "permission.>", "virus_scan.>"]

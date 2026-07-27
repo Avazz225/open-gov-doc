@@ -9,7 +9,7 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String) — erzeugt Dokument + Version 1 |
+| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String) — erzeugt Dokument + Version 1. Seit P5-S1: `422` bei einem Virenfund, `503` wenn der Virus-Scan Service nicht erreichbar ist (siehe unten) |
 | `GET` | `/documents?folder_id=...` | Nicht gelöschte Dokumente eines Ordners (seit P4-S2, Grundlage der User-UI-Navigation) — unbekannter `folder_id` liefert `[]`, kein 404 |
 | `GET` | `/documents/{id}` | Metadaten |
 | `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400 |
@@ -18,7 +18,7 @@
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
 | `GET` | `/documents/{id}/versions/{n}` | Metadaten einer konkreten Version |
 | `GET` | `/documents/{id}/versions/{n}/content` | Inhalt einer konkreten Version |
-| `POST` | `/documents/{id}/versions` | Check-in (multipart: `file`, `expected_base_version_number`, `created_by`, optional `comment`) — siehe Konflikterkennung unten |
+| `POST` | `/documents/{id}/versions` | Check-in (multipart: `file`, `expected_base_version_number`, `created_by`, optional `comment`) — siehe Konflikterkennung unten. Gleiches Virenscan-Gating wie beim Anlegen |
 | `GET` | `/documents/{id}/lock` | Aktuelle Sperre oder `null` |
 | `POST` | `/documents/{id}/lock` | Sperre setzen (`locked_by`, `session_id`, optional `timeout_seconds`) — 409 bei Fremdsperre |
 | `DELETE` | `/documents/{id}/lock` | Regulärer Unlock (`released_by`) — 403, wenn nicht der Halter |
@@ -38,6 +38,10 @@
 ## Speicherung der Inhalte (3.6-Anbindung)
 
 Objektschlüssel sind **inhaltsadressiert**: `documents/{document_id}/{sha256}`. Das vermeidet die Henne-Ei-Reihenfolge "Upload braucht die noch nicht vergebene Versionsnummer" und dedupliziert identische Inhalte innerhalb desselben Dokuments automatisch (z. B. wiederholtes Hochladen derselben Datei). Document Service spricht dafür ausschließlich `PUT`/`GET /objects/{key}` des Storage Service über HTTP an — kein Zugriff auf dessen Interna oder direkte Backend-Nutzung.
+
+## Virenscan vor Freigabe (10.3, seit P5-S1)
+
+Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** gegen den Virus-Scan Service geprüft (`VirusScanClient.scan(...)`) — nicht asynchron über ein Event, siehe [ADR 0010](../adr/0010-virus-scan-synchronous-gating.md) für die Begründung. Fällt der Scan negativ aus, wird die Anfrage mit `422` (`{"error": "virus_detected", "threat_name": ...}`) abgelehnt, bevor Inhalt im Storage Service oder Metadaten in der eigenen DB landen. Ist der Virus-Scan Service nicht erreichbar, wird der Upload ebenfalls abgelehnt (`503`, fail-closed statt stillschweigend durchzulassen). Details zur Engine (austauschbar, Standard erkennt nur die EICAR-Testsignatur) siehe `docs/services/virus-scan-service.md`.
 
 ## Bearbeitungssperre & Konfliktbehandlung (4.2)
 
@@ -78,3 +82,4 @@ Noch keine — folgt in Phase 11.
 - Kein Vier-Augen-Prinzip für Force-Unlock (4.3, folgt P6-S4).
 - Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
 - Umlaufmappen-Referenzen (2.3) und Ersatzdarstellungen (2.4) sind eigene, spätere Sessions (P6-S3 bzw. P5-S2) und greifen auf Dokumente/Versionen dieses Service zu, ohne dass hier bereits etwas vorbereitet wurde.
+- Virenscan-Gating erhöht die Upload-Latenz um die Scan-Zeit und scannt auch dann, wenn ein Check-in wegen veralteter `expected_base_version_number`/Lock-Konflikt ohnehin abgelehnt würde (unnötige, aber nicht falsche Arbeit) — siehe ADR 0010 "Konsequenzen".

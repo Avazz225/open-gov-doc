@@ -2,6 +2,13 @@ import pytest
 from document_service.main import app
 from fastapi.testclient import TestClient
 
+# Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
+# echten Antivirus-Produkten zu Integrationstestzwecken erkannt, hier zum
+# Verifizieren der Virenscan-Gate-Integration (10.3, ADR 0010) verwendet.
+EICAR_SIGNATURE = (
+    r"X5O!P%@AP[4\PZX54(P^)7CC)7}$" "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+).encode("ascii")
+
 
 @pytest.fixture
 def client():
@@ -71,6 +78,34 @@ def test_list_documents_unknown_folder_returns_empty(client):
     response = client.get("/documents", params={"folder_id": "does-not-exist"})
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_create_document_rejects_infected_upload(client):
+    response = upload(client, content=EICAR_SIGNATURE)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"] == "virus_detected"
+    assert response.json()["detail"]["threat_name"] == "Eicar-Test-Signature"
+
+
+def test_checkin_rejects_infected_version_without_creating_it(client):
+    body = upload(client, content=b"v1").json()
+    document_id = body["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/versions",
+        data={"expected_base_version_number": 1, "created_by": "alice"},
+        files={"file": ("infiziert.pdf", EICAR_SIGNATURE, "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"] == "virus_detected"
+
+    versions = client.get(f"/documents/{document_id}/versions").json()
+    assert len(versions) == 1
+
+    download = client.get(f"/documents/{document_id}/content")
+    assert download.content == b"v1"
 
 
 def test_checkin_normal_version_and_download(client):
