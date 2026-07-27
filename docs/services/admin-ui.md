@@ -26,7 +26,7 @@ Alle Seiten außer `/login/` sind über `RequireAuth` geschützt (clientseitiger
 Ersetzt die frühere flache Top-Nav-Leiste durch ein klassisches Management-Dashboard-Layout (Konzept 8):
 
 - **`AdminSidebar`** (links): gruppierte, einzeln ausklapp-/einklappbare Navigation (`sidebar-group`-Blöcke, Auf-/Zuklapp-Zustand pro Browser in `localStorage` gemerkt). Aktuell zwei Gruppen — "Verwaltung" (Nutzer & Rollen, Objekttypen, Registry) und "Installationen" — generisch gebaut für weitere Gruppen in künftigen Sessions.
-- **`AdminShell`**: Kopfzeile (Titel, `InstallationSwitcher`, Nutzername, Abmelden) + Hauptbereich rechts, der die jeweils gewählte Seite zeigt.
+- **`AdminShell`**: Kopfzeile (Titel, `InstallationSwitcher`, `ThemeSwitcher` seit P4-S6, Nutzername, Abmelden) + Hauptbereich rechts, der die jeweils gewählte Seite zeigt.
 
 ## Mehrfachinstallationen (Konzept 3a/8, seit P4-S5)
 
@@ -37,6 +37,10 @@ Die Admin-UI kann mehrere vollständig unabhängige DMS-Installationen verwalten
 - **Eigene Sitzung je Installation**: `auth-context.tsx` speichert Tokens unter `dms.tokens.<installationId>` statt eines einzigen globalen Schlüssels. Ein Wechsel zu einer bereits einmal angemeldeten Installation erfordert keine erneute Anmeldung, solange deren Sitzung noch gültig ist; eine neue, noch nie angemeldete Installation zeigt beim Wechsel den Login.
 - **Kein Single-Sign-on über Installationsgrenzen hinweg** — bewusst, entspricht der vollständigen Isolation aus Konzept 3a.
 - `lib/api.ts`s Gateway-Adresse ist seit dieser Session eine mutable Modulvariable (`setGatewayBaseUrl()`) statt einer festen Konstante, vom `InstallationProvider` bei jedem Wechsel synchron gesetzt.
+
+## Theming (Konzept 8, seit P4-S6)
+
+`src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`) — identisches Muster wie in der User-UI (bewusst dupliziert statt geteilt, ADR 0006), umschaltbar über den `ThemeSwitcher` in der Kopfzeile. Geräteübergreifend am Nutzerkonto der **aktiven Installation** gespeichert (`GET/PUT /api/auth-service/me/preferences`, `accessToken` kommt aus dem installationsbezogenen `AuthProvider`, ADR 0008), siehe [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md). Der `localStorage`-Cache-Schlüssel (`dms.theme`) ist bewusst **nicht** installationsspezifisch — ein Installationswechsel zeigt kurzzeitig noch die zuletzt gecachte Theme-Wahl, bis die neue Installation ihre eigene Präferenz nachgeladen hat (siehe ADR 0009 "Konsequenzen").
 
 ## Anbindung an das Backend
 
@@ -50,6 +54,7 @@ Ausschließlich über das API-Gateway der jeweils **aktiven Installation** (3.5,
 | Rollenzuweisungen | `GET/POST /api/permission-service/role-assignments`, `DELETE .../{id}` |
 | Objekttypen | `GET/POST/DELETE /api/object-type-service/object-types` |
 | Registry | `GET /api/registry-service/instances` |
+| Theme-Präferenz | `GET/PUT /api/auth-service/me/preferences` (seit P4-S6) |
 
 ## Auth-Zustand
 
@@ -70,8 +75,8 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **33 Tests**): API-Client (inkl. Routing über die aktiv gesetzte Gateway-Adresse), `AuthProvider` (Login/Logout/Session-Wiederherstellung, seit P4-S5 zusätzlich: Sitzungsisolation zwischen zwei Installationen, kein erneutes Login beim Zurückwechseln), `InstallationProvider` (Bootstrap, Hinzufügen/Wechseln/Entfernen, Schutz vor Entfernen der letzten Installation, Persistenz), `AdminSidebar` (Gruppen auf-/zuklappen inkl. Persistenz), `InstallationManager`/`InstallationSwitcher`, `UserManagement`, `ObjectTypeEditor`, `RegistryOverview` — Netzwerkschicht gemockt, gleiche Begründung wie bei der User-UI.
-- **Kein Browser in dieser Entwicklungsumgebung verfügbar** (siehe `docs/services/user-ui.md`) — jeder Gateway-Aufruf der Admin-UI wurde einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen. Das neue Multi-Installation-Verhalten selbst (Umschalten per Dropdown, Sidebar-Auf-/Zuklappen) ist rein clientseitig (`localStorage`) und wurde **nur über die Vitest-Komponententests verifiziert, nicht visuell im Browser** — an den Nutzer explizit als Einschränkung kommuniziert.
+- `npm test` (Vitest + Testing Library, **36 Tests**): API-Client (inkl. Routing über die aktiv gesetzte Gateway-Adresse), `AuthProvider` (Login/Logout/Session-Wiederherstellung, seit P4-S5 zusätzlich: Sitzungsisolation zwischen zwei Installationen, kein erneutes Login beim Zurückwechseln), `InstallationProvider` (Bootstrap, Hinzufügen/Wechseln/Entfernen, Schutz vor Entfernen der letzten Installation, Persistenz), `ThemeProvider` (seit P4-S6: Default `auto`, `data-theme`-Attribut, `localStorage`-Cache-Wiederherstellung, `setTheme`-Persistenz), `AdminSidebar` (Gruppen auf-/zuklappen inkl. Persistenz), `InstallationManager`/`InstallationSwitcher`, `UserManagement`, `ObjectTypeEditor`, `RegistryOverview` — Netzwerkschicht gemockt, gleiche Begründung wie bei der User-UI. `matchMedia` wird in `tests/setup.ts` gepolyfillt, da jsdom es nicht implementiert.
+- **Kein Browser in dieser Entwicklungsumgebung verfügbar** (siehe `docs/services/user-ui.md`) — jeder Gateway-Aufruf der Admin-UI wurde einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (seit P4-S6 zusätzlich: `GET/PUT /me/preferences` inkl. 422 bei ungültigem Theme-Wert). Das Multi-Installation-Verhalten und das Theme-Umschalten selbst (Umschalten per Dropdown, Sidebar-Auf-/Zuklappen, Flash-freier Themewechsel) sind rein clientseitig und wurden **nur über die Vitest-Komponententests verifiziert, nicht visuell im Browser** — an den Nutzer explizit als Einschränkung kommuniziert.
 
 ## Offene Punkte
 
@@ -82,4 +87,4 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 - Workflow-Designer, Lizenzübersicht, Audit-Trail-Ansicht, Konfigurationsim-/export (Konzept 8 nennt sie für die Admin-UI) sind nicht Teil dieses Grundgerüsts — die zugrundeliegenden Services existieren noch nicht.
 - i18n nur strukturell vorbereitet (ADR 0007), keine zweite Sprache und keine UI-Sprachumschaltung.
 - Installationsliste ist rein lokal im Browser gespeichert, kein geräteübergreifendes Provisioning (siehe ADR 0008 "Konsequenzen") — das wäre Aufgabe des optionalen, noch nicht gebauten Fleet-/Lizenz-Management-Service (Konzept 3a, Phase 13).
-- Kein Theming (Hell/Dunkel/Hoher-Kontrast/Auto) — folgt in P4-S6.
+- Theme-Präferenz hat keinen Konfliktauflösungsmechanismus zwischen Geräten/Installationen (letzter Fetch gewinnt) und kein Retry bei fehlgeschlagenem `PUT /me/preferences` (siehe ADR 0009 "Konsequenzen").

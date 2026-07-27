@@ -81,3 +81,27 @@ def delete_user(admin: KeycloakAdmin, user_id: str) -> None:
         if exc.response_code == 404:
             raise UserNotFoundError(f"user_id {user_id!r} unbekannt") from exc
         raise
+
+
+_THEME_ATTRIBUTE = "dms_theme"
+
+
+def get_theme_preference(admin: KeycloakAdmin, user_id: str) -> str:
+    """Theme-Präferenz aus einem Keycloak-Nutzerattribut (P4-S6, Konzept 8) -
+    kein neuer Persistenz-Baustein nötig, da Nutzerkonten ohnehin vollständig
+    in Keycloak leben (s. `list_users`). Keycloak liefert Attribute als
+    Listen zurück, unabhängig davon, ob sie single- oder multi-valued sind.
+    """
+    raw = admin.get_user(user_id)
+    values = raw.get("attributes", {}).get(_THEME_ATTRIBUTE)
+    return values[0] if values else "auto"
+
+
+def set_theme_preference(admin: KeycloakAdmin, user_id: str, theme: str) -> None:
+    """Attribute einzeln zusammenführen statt zu überschreiben - ein Update
+    ohne bestehende Attribute im Payload würde sie bei Keycloak sonst
+    löschen."""
+    raw = admin.get_user(user_id)
+    attributes = dict(raw.get("attributes", {}))
+    attributes[_THEME_ATTRIBUTE] = [theme]
+    admin.update_user(user_id, {"attributes": attributes})

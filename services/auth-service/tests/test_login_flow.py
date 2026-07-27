@@ -62,3 +62,46 @@ def test_healthz():
 
     assert response.status_code == 200
     assert response.json()["service"] == "auth-service"
+
+
+def test_get_preferences_defaults_to_auto(test_user):
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        response = client.get(
+            "/me/preferences", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"theme": "auto"}
+
+
+def test_update_preferences_persists_theme(test_user):
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        update_response = client.put("/me/preferences", json={"theme": "dark"}, headers=headers)
+        assert update_response.status_code == 200
+        assert update_response.json() == {"theme": "dark"}
+
+        get_response = client.get("/me/preferences", headers=headers)
+        assert get_response.json() == {"theme": "dark"}
+
+
+def test_update_preferences_rejects_unknown_theme(test_user):
+    with TestClient(app) as client:
+        tokens = client.post("/login", json=test_user).json()
+        response = client.put(
+            "/me/preferences",
+            json={"theme": "rainbow"},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+
+    assert response.status_code == 422
+
+
+def test_preferences_reject_missing_token():
+    with TestClient(app) as client:
+        response = client.get("/me/preferences")
+
+    assert response.status_code == 401

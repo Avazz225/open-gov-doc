@@ -41,7 +41,14 @@
     "label": "Cross-Cutting-Navigation",
     "documents": "Dokumente",
     "searchComingSoon": "Suche (folgt in P5-S4)",
-    "settingsComingSoon": "Einstellungen (folgt in P4-S6)"
+    "settings": "Einstellungen"
+  },
+  "theme": {
+    "label": "Design",
+    "auto": "Automatisch",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "highContrast": "Hoher Kontrast"
   },
   "explorer": {
     "paneLabel": "Explorer",

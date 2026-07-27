@@ -3,6 +3,27 @@ from keycloak import KeycloakAdmin
 from auth_service.settings import Settings
 
 
+def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
+    """Deklariertes User-Profile-Attribut für die Theme-Präferenz (8, P4-S6).
+    Keycloaks Declarative User Profile (seit Keycloak 25 Default) verwirft
+    jedes nicht deklarierte Attribut bei `update_user` still - kein Fehler,
+    einfach kein Effekt. Ohne diese Deklaration würde `admin_users.set_theme_preference`
+    also klaglos ins Leere laufen.
+    """
+    profile = admin.get_realm_users_profile()
+    if any(attribute["name"] == "dms_theme" for attribute in profile["attributes"]):
+        return
+    profile["attributes"].append(
+        {
+            "name": "dms_theme",
+            "displayName": "DMS Theme-Präferenz",
+            "multivalued": False,
+            "permissions": {"view": ["admin", "user"], "edit": ["admin", "user"]},
+        }
+    )
+    admin.update_realm_users_profile(profile)
+
+
 def ensure_realm_and_client(settings: Settings) -> None:
     """Idempotente Ersteinrichtung (analog zum `CREATE SCHEMA IF NOT EXISTS`-Muster
     der übrigen Services): legt Realm und OIDC-Client an, falls sie noch nicht
@@ -53,3 +74,4 @@ def ensure_realm_and_client(settings: Settings) -> None:
         },
         skip_exists=True,
     )
+    _ensure_theme_attribute(admin)

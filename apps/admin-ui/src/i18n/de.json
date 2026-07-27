@@ -12,6 +12,13 @@
     "loadError": "Laden fehlgeschlagen",
     "deleteError": "Löschen fehlgeschlagen"
   },
+  "theme": {
+    "label": "Design",
+    "auto": "Automatisch",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "highContrast": "Hoher Kontrast"
+  },
   "login": {
     "heading": "DMS Admin",
     "username": "Benutzername",

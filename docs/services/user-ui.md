@@ -19,7 +19,7 @@
 
 Ersetzt die frühere flache `FolderBrowser`-Ansicht (P4-S2) durch ein dreigeteiltes, resizable Arbeitsbereichs-Layout gemäß Konzept 8:
 
-- **`IconRail`** (ganz links, außerhalb des Main-Contents): iconbasierte Cross-Cutting-Navigation. Aktuell nur "Dokumente" funktional, "Suche" (P5-S4) und "Einstellungen" (P4-S6) sind bewusst sichtbare, deaktivierte Platzhalter.
+- **`IconRail`** (ganz links, außerhalb des Main-Contents): iconbasierte Cross-Cutting-Navigation. "Dokumente" ist funktional, "Suche" (P5-S4) bleibt ein bewusst sichtbarer, deaktivierter Platzhalter. "Einstellungen" öffnet seit P4-S6 ein Popover mit dem `ThemeSwitcher` statt weiter deaktiviert zu sein.
 - **`ExplorerPane`** (oben links): Windows-Explorer-artige Ordnernavigation mit Breadcrumb, Ordner-CRUD (Anlegen/Umbenennen/Löschen — die Backend-Endpunkte existierten bereits seit P3-S3, nur die UI dafür fehlte) und einer Tableiste für geöffnete Dokumente. Klick auf ein Dokument öffnet es als Tab, statt einen modalen Dialog zu zeigen.
 - **`MetadataPanel`** (unten links): Metadaten des über die Tabs ausgewählten Dokuments. Attribut-Formfelder werden dynamisch aus dem Objekttyp-Schema generiert (`GET /api/object-type-service/object-types/{id}`, 2.2) — ohne zugewiesenen Objekttyp ist nur der Titel editierbar. Speichert über den seit P4-S4 neuen `PATCH /api/document-service/documents/{id}`.
 - **`PreviewPane`** (rechts): vom aktiven Tab synchronisiert, zeigt weiterhin nur einen Stub (echtes Rendering folgt mit dem Preview Service, P5-S2) — jetzt aber als permanenter Bereich statt als Overlay.
@@ -41,6 +41,7 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 | Herunterladen | `GET /api/document-service/documents/{id}/content` |
 | Dokumentmetadaten ändern | `PATCH /api/document-service/documents/{id}` (seit P4-S4, neuer Endpunkt) |
 | Objekttyp-Schema für das Metadaten-Panel | `GET /api/object-type-service/object-types/{id}` |
+| Theme-Präferenz lesen/schreiben | `GET/PUT /api/auth-service/me/preferences` (seit P4-S6) |
 
 ## Auth-Zustand
 
@@ -49,6 +50,10 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 ## Vorschau (2.4)
 
 `components/PreviewPane.tsx` zeigt nur einen Hinweis ("Vorschau ist noch nicht verfügbar") statt einer echten Vorschau — der Rendering/Preview Service (3.7) existiert erst ab P5-S2. Seit P4-S4 ist das ein fest im Layout verankerter Bereich (vorher ein modaler Dialog, `PreviewStub`) — bewusst weiterhin isoliert, damit er später durch eine echte Vorschau ersetzt werden kann, ohne den Rest des Layouts anzufassen.
+
+## Theming (Konzept 8, seit P4-S6)
+
+`src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`): Hell/Dunkel/Hoher-Kontrast/Automatisch, umschaltbar über den `ThemeSwitcher` im Einstellungen-Popover der `IconRail`. Geräteübergreifend am Nutzerkonto gespeichert (`GET/PUT /api/auth-service/me/preferences`), siehe [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md) für die Begründung (Keycloak-Attribut statt neuer Persistenz-Baustein) und den dabei gefundenen Stolperstein (Declarative User Profile verwirft nicht deklarierte Attribute stillschweigend). `localStorage` (`dms.theme`) dient als sofort verfügbarer Cache, u. a. damit die Login-Seite ohne Sitzung ebenfalls ein Theme hat. `data-theme` auf `<html>` steuert per CSS-Variablen (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) das gesamte Stylesheet (`globals.css`).
 
 ## Internationalisierung (Konzept 8, seit P4-S3)
 
@@ -61,8 +66,8 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — Typprüfung, ESLint, produktionsfähiger statischer Export.
-- `npm test` (Vitest + Testing Library): `AuthProvider` (Login/Logout/Session-Wiederherstellung/Ablauf), API-Client (Gateway-URL-Aufbau, Bearer-Header, Fehlerbehandlung, seit P4-S4 auch Ordner-CRUD/Metadaten-PATCH), `DocumentWorkspace` (Navigation, Ordner-CRUD, Tab-Öffnen inkl. Vorschau-Synchronisation, Metadaten-Speichern inkl. Tab-Titel-Update, Upload-Reload) — Netzwerkschicht (`fetch`) gemockt, da sie die Grenze zur externen Infrastruktur ist.
-- **Kein Browser für visuelle/E2E-Tests in dieser Entwicklungsumgebung verfügbar** (kein installiertes Chrome/Chromium, Playwright daher nicht einsetzbar) — stattdessen wurde jeder von der UI verwendete Gateway-Aufruf einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (Login → Ordner anlegen/umbenennen → Upload in den neuen Ordner → Metadaten-PATCH ändert Titel/Attribute → Liste zeigt die Änderung → Ordner löschen → Objekttyp-Schema über das Gateway abrufbar). Die neue Resizable-/Tab-/Layout-Interaktion selbst (Ziehgriffe, Tab-Wechsel-Optik) konnte dadurch **nicht visuell** verifiziert werden — nur über die Vitest-Komponententests. Ein Mensch sollte die Oberfläche vor einer Produktivnutzung im echten Browser durchklicken.
+- `npm test` (Vitest + Testing Library, **20 Tests**): `AuthProvider` (Login/Logout/Session-Wiederherstellung/Ablauf), API-Client (Gateway-URL-Aufbau, Bearer-Header, Fehlerbehandlung, seit P4-S4 auch Ordner-CRUD/Metadaten-PATCH), `DocumentWorkspace` (Navigation, Ordner-CRUD, Tab-Öffnen inkl. Vorschau-Synchronisation, Metadaten-Speichern inkl. Tab-Titel-Update, Upload-Reload), `ThemeProvider` (seit P4-S6: Default `auto`, `data-theme`-Attribut, `localStorage`-Cache-Wiederherstellung, `setTheme`-Persistenz) — Netzwerkschicht (`fetch`) gemockt, da sie die Grenze zur externen Infrastruktur ist. `matchMedia` wird in `tests/setup.ts` gepolyfillt, da jsdom es nicht implementiert.
+- **Kein Browser für visuelle/E2E-Tests in dieser Entwicklungsumgebung verfügbar** (kein installiertes Chrome/Chromium, Playwright daher nicht einsetzbar) — stattdessen wurde jeder von der UI verwendete Gateway-Aufruf einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (Login → Ordner anlegen/umbenennen → Upload in den neuen Ordner → Metadaten-PATCH ändert Titel/Attribute → Liste zeigt die Änderung → Ordner löschen → Objekttyp-Schema über das Gateway abrufbar; seit P4-S6 zusätzlich: `GET/PUT /me/preferences` inkl. 422 bei ungültigem Theme-Wert). Die neue Resizable-/Tab-/Layout-Interaktion sowie das Theme-Umschalten selbst (Ziehgriffe, Tab-Wechsel-Optik, Popover, Flash-freier Themewechsel) konnten dadurch **nicht visuell** verifiziert werden — nur über die Vitest-Komponententests. Ein Mensch sollte die Oberfläche vor einer Produktivnutzung im echten Browser durchklicken.
 
 ## Offene Punkte
 
@@ -73,6 +78,6 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 - Kein automatisiertes Browser-E2E in dieser Umgebung möglich (kein Chrome/Chromium installiert) — nachzuholen, sobald eine Umgebung mit Browser verfügbar ist (z. B. CI).
 - Rollenabhängige Ansichten/Branding (Konzept 8, "Anpassbarkeit") nicht Teil dieses Grundgerüsts.
 - i18n nur strukturell vorbereitet (ADR 0007), keine zweite Sprache und keine UI-Sprachumschaltung.
-- Kein Theming (Hell/Dunkel/Hoher-Kontrast/Auto) — folgt in P4-S6.
+- Theme-Präferenz hat keinen Konfliktauflösungsmechanismus zwischen Geräten (letzter Fetch gewinnt) und kein Retry bei fehlgeschlagenem `PUT /me/preferences` (siehe ADR 0009 "Konsequenzen").
 - Ordner-Verschieben (neuer Elternordner) ist im Backend (`PATCH /folders/{id}`) bereits möglich, in der UI aber bewusst nicht verdrahtet — Umbenennen deckt den in dieser Session geforderten CRUD-Umfang ab, ein Drag&Drop-Verschieben ist eine spätere UX-Verfeinerung.
 - Bekannte Backend-Lücke, bei dieser Session sichtbar geworden: `DELETE /folders/{id}` prüft nur auf Unterordner, nicht auf enthaltene Dokumente — ein Ordner mit nur Dokumenten (keinen Unterordnern) lässt sich aktuell löschen, ohne dass die Dokumente mitgelöscht oder die Löschung blockiert wird (deren `folder_id` bliebe auf eine nicht mehr existierende Ressource verweisen). Nicht in dieser Session behoben, siehe `PROGRESS.md`.

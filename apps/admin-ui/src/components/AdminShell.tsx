@@ -5,6 +5,7 @@ import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { AdminSidebar } from "./AdminSidebar";
 import { InstallationSwitcher } from "./InstallationSwitcher";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // Management-Dashboard-Layout (P4-S5, Nutzer-Feedback nach P4-S3, Konzept 8):
 // ersetzt die vorherige flache Top-Nav-Leiste durch eine linke
@@ -22,6 +23,7 @@ export function AdminShell({ title, children }: { title: string; children: React
         <h1>{title}</h1>
         <div className="top-bar-actions">
           <InstallationSwitcher />
+          <ThemeSwitcher />
           {user && <span>{user.username} </span>}
           <button type="button" onClick={logout}>
             {t("common.logout")}

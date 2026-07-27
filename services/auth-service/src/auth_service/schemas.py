@@ -1,4 +1,8 @@
+from typing import Literal
+
 from pydantic import BaseModel
+
+ThemeName = Literal["light", "dark", "high-contrast", "auto"]
 
 
 class LoginRequest(BaseModel):
@@ -32,3 +36,7 @@ class UserOut(BaseModel):
     enabled: bool
     first_name: str | None
     last_name: str | None
+
+
+class ThemePreference(BaseModel):
+    theme: ThemeName = "auto"

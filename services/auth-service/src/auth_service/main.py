@@ -10,7 +10,14 @@ from auth_service import admin_users, keycloak_client
 from auth_service.admin_users import UserAlreadyExistsError, UserNotFoundError, build_admin_client
 from auth_service.bootstrap import ensure_realm_and_client
 from auth_service.keycloak_client import InvalidCredentialsError
-from auth_service.schemas import LoginRequest, RefreshRequest, TokenResponse, UserCreate, UserOut
+from auth_service.schemas import (
+    LoginRequest,
+    RefreshRequest,
+    ThemePreference,
+    TokenResponse,
+    UserCreate,
+    UserOut,
+)
 from auth_service.settings import Settings
 
 settings = Settings()
@@ -81,6 +88,23 @@ async def me(user: dict = Depends(get_current_user)) -> dict:
         "email": user.get("email"),
         "realm_roles": user.get("realm_access", {}).get("roles", []),
     }
+
+
+@app.get("/me/preferences", response_model=ThemePreference)
+def get_my_preferences(user: dict = Depends(get_current_user)) -> ThemePreference:
+    """Cross-UI-Theming (8, P4-S6) - Präferenz hängt am Nutzerkonto (Keycloak-
+    Attribut), nicht an einer einzelnen Installation/einem einzelnen Browser,
+    damit sie geräteübergreifend wirkt (Nutzer-Feedback nach P4-S5)."""
+    theme = admin_users.get_theme_preference(app.state.keycloak_admin, user["sub"])
+    return ThemePreference(theme=theme)
+
+
+@app.put("/me/preferences", response_model=ThemePreference)
+def update_my_preferences(
+    payload: ThemePreference, user: dict = Depends(get_current_user)
+) -> ThemePreference:
+    admin_users.set_theme_preference(app.state.keycloak_admin, user["sub"], payload.theme)
+    return payload
 
 
 @app.get("/users", response_model=list[UserOut])

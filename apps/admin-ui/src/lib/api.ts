@@ -86,6 +86,27 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
+export type ThemeName = "light" | "dark" | "high-contrast" | "auto";
+
+export async function getThemePreference(token: string): Promise<ThemeName> {
+  const response = await request("auth-service", "me/preferences", {}, token);
+  const body = (await response.json()) as { theme: ThemeName };
+  return body.theme;
+}
+
+export async function updateThemePreference(token: string, theme: ThemeName): Promise<void> {
+  await request(
+    "auth-service",
+    "me/preferences",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme }),
+    },
+    token
+  );
+}
+
 export interface KeycloakUser {
   id: string;
   username: string;
