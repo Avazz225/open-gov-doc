@@ -17,6 +17,17 @@ if (typeof window !== "undefined" && !window.matchMedia) {
   }) as unknown as MediaQueryList;
 }
 
+// jsdom implementiert `ResizeObserver` nicht - `PreviewPane` (P5-S3) nutzt es,
+// um die gerenderte Bildhöhe für die OCR-Overlay-Schriftgröße zu messen.
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
 afterEach(() => {
   cleanup();
 });

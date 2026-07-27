@@ -1,6 +1,11 @@
+import os
+
+import httpx
 import pytest
 from document_service.main import app
 from fastapi.testclient import TestClient
+
+STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 
 # Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
 # echten Antivirus-Produkten zu Integrationstestzwecken erkannt, hier zum
@@ -46,6 +51,27 @@ def test_download_current_content_roundtrips_bytes(client):
     response = client.get(f"/documents/{body['id']}/content")
     assert response.status_code == 200
     assert response.content == b"Original-Inhalt"
+
+
+def test_download_content_returns_404_instead_of_crashing_if_object_missing(client):
+    """Regressionstest: eine Inkonsistenz zwischen Document Service (kennt die
+    Version) und Storage Service (Objekt fehlt, z. B. weil dessen Metadaten-
+    Zeile verloren ging) darf nicht zu einem unbehandelten 500 führen (siehe
+    storage_client.ObjectNotFoundError)."""
+    body = upload(client, content=b"wird gleich verwaist").json()
+    document_id = body["id"]
+    checksum = client.get(f"/documents/{document_id}/versions/1").json()["checksum_sha256"]
+
+    delete_response = httpx.delete(
+        f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}"
+    )
+    assert delete_response.status_code == 204
+
+    response = client.get(f"/documents/{document_id}/content")
+    assert response.status_code == 404
+
+    response_by_version = client.get(f"/documents/{document_id}/versions/1/content")
+    assert response_by_version.status_code == 404
 
 
 def test_get_unknown_document_returns_404(client):

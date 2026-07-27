@@ -69,6 +69,8 @@ Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** 
 
 **Audit-Anbindung**: Audit Service konsumiert seit dieser Session zusätzlich `document.>` (vorher nur `registry.>`) — 4.2 verlangt explizit vollständige Auditierung von Force-Unlock/Konfliktkopie. Force-Unlock und die daraus ggf. entstehende Konfliktkopie erzeugen zwei separate, aber im Audit-Trail über `subject=document_id` verknüpfbare Ereignisse.
 
+**Rendering-Anbindung (seit P5-S2)**: Rendering Service konsumiert `document.created`/`document.version.created`, um automatisch Ersatzdarstellungen/Vorschauen zu erzeugen (siehe `docs/services/rendering-service.md`) — reine Konsumentenbeziehung, dieser Service selbst weiß nichts vom Rendering Service.
+
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
 Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
@@ -81,5 +83,5 @@ Noch keine — folgt in Phase 11.
 
 - Kein Vier-Augen-Prinzip für Force-Unlock (4.3, folgt P6-S4).
 - Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
-- Umlaufmappen-Referenzen (2.3) und Ersatzdarstellungen (2.4) sind eigene, spätere Sessions (P6-S3 bzw. P5-S2) und greifen auf Dokumente/Versionen dieses Service zu, ohne dass hier bereits etwas vorbereitet wurde.
+- Umlaufmappen-Referenzen (2.3) sind eine eigene, spätere Session (P6-S3) und greifen auf Dokumente/Versionen dieses Service zu, ohne dass hier bereits etwas vorbereitet wurde. Ersatzdarstellungen (2.4) sind seit P5-S2 umgesetzt (siehe `docs/services/rendering-service.md`), ohne dass dieser Service dafür geändert werden musste — der Rendering Service konsumiert die bereits vorhandenen `document.>`-Events und ruft die bereits vorhandenen Versions-/Content-Endpunkte auf.
 - Virenscan-Gating erhöht die Upload-Latenz um die Scan-Zeit und scannt auch dann, wenn ein Check-in wegen veralteter `expected_base_version_number`/Lock-Konflikt ohnehin abgelehnt würde (unnötige, aber nicht falsche Arbeit) — siehe ADR 0010 "Konsequenzen".

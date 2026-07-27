@@ -14,4 +14,15 @@ class Settings(BaseServiceSettings):
     # Auditierung von Bereichssperren (setzen/aufheben) verlangt - andere
     # Services (Auth/Storage) folgen bei Bedarf. "virus_scan.>" kam in P5-S1
     # dazu - 10.3/5.3 verlangen explizit die Auditierung von Scan-Ergebnissen.
-    subjects: list[str] = ["registry.>", "document.>", "permission.>", "virus_scan.>"]
+    # "rendering.>" kam in P5-S2 dazu - erzeugte/gescheiterte Ersatzdarstellungen
+    # sind ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung. "ocr.>"
+    # kam in P5-S3 dazu - 3.9/5.3 verlangen explizit die Auditierung von
+    # OCR-Ergebnissen (inkl. needs_review-Fällen).
+    subjects: list[str] = [
+        "registry.>",
+        "document.>",
+        "permission.>",
+        "virus_scan.>",
+        "rendering.>",
+        "ocr.>",
+    ]

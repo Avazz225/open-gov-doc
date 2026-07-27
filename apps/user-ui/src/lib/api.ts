@@ -260,3 +260,139 @@ export async function downloadDocument(token: string, documentId: string): Promi
   );
   return response.blob();
 }
+
+export interface DocumentVersion {
+  version_number: number;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  checksum_sha256: string;
+  is_conflict: boolean;
+  based_on_version_number: number | null;
+  comment: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+// Versionshistorie (P5-S3, Nutzerwunsch) - Backend existiert bereits seit
+// document-service's Check-in-Funktion, war im User-UI bisher nicht sichtbar.
+export async function listDocumentVersions(
+  token: string,
+  documentId: string
+): Promise<DocumentVersion[]> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/versions`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function downloadDocumentVersion(
+  token: string,
+  documentId: string,
+  versionNumber: number
+): Promise<Blob> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/versions/${versionNumber}/content`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
+export interface RenditionSummary {
+  id: string;
+  document_id: string;
+  version_number: number;
+  rendition_type: string;
+  source_filename: string;
+  source_content_type: string | null;
+  target_filename: string;
+  target_content_type: string;
+  size_bytes: number;
+  status: "ready" | "failed";
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Rendering Service (3.7/2.4, P5-S2) - erzeugt Ersatzdarstellungen/Vorschauen
+// asynchron nach dem Upload, daher kann die Liste für ein frisch hochgeladenes
+// Dokument zunächst leer sein. `versionNumber` seit P5-S3 (Versionsauswahl in
+// der Vorschau) optional filterbar.
+export async function listRenditions(
+  token: string,
+  documentId: string,
+  versionNumber?: number
+): Promise<RenditionSummary[]> {
+  const query = new URLSearchParams({ document_id: documentId });
+  if (versionNumber !== undefined) query.set("version_number", String(versionNumber));
+  const response = await request("rendering-service", `renditions?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function downloadRenditionContent(token: string, renditionId: string): Promise<Blob> {
+  const response = await request(
+    "rendering-service",
+    `renditions/${encodeURIComponent(renditionId)}/content`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
+export interface OcrWord {
+  text: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  confidence: number;
+}
+
+export interface OcrPage {
+  page_number: number;
+  width: number;
+  height: number;
+  words: OcrWord[];
+}
+
+export interface OcrResultSummary {
+  id: string;
+  document_id: string;
+  version_number: number;
+  status: "ready" | "needs_review" | "failed";
+  engine: string;
+  average_confidence: number;
+  full_text: string;
+  pages: OcrPage[];
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// OCR Service (3.9, P5-S3) - liefert Wort-Bounding-Boxen für die
+// positionsgenaue Text-Overlay-Markierung in der Vorschau (Nutzerwunsch).
+export async function listOcrResults(
+  token: string,
+  documentId: string,
+  versionNumber?: number
+): Promise<OcrResultSummary[]> {
+  const query = new URLSearchParams({ document_id: documentId });
+  if (versionNumber !== undefined) query.set("version_number", String(versionNumber));
+  const response = await request("ocr-service", `ocr-results?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function downloadOcrPageImage(token: string, ocrResultId: string): Promise<Blob> {
+  const response = await request(
+    "ocr-service",
+    `ocr-results/${encodeURIComponent(ocrResultId)}/page-image`,
+    {},
+    token
+  );
+  return response.blob();
+}

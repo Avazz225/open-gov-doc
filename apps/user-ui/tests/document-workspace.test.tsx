@@ -21,6 +21,12 @@ const renameFolderMock = vi.fn();
 const deleteFolderMock = vi.fn();
 const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
+const listRenditionsMock = vi.fn();
+const downloadRenditionContentMock = vi.fn();
+const listOcrResultsMock = vi.fn();
+const downloadOcrPageImageMock = vi.fn();
+const listDocumentVersionsMock = vi.fn();
+const downloadDocumentVersionMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -32,6 +38,12 @@ vi.mock("@/lib/api", () => ({
   deleteFolder: (...args: unknown[]) => deleteFolderMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   updateDocumentMetadata: (...args: unknown[]) => updateDocumentMetadataMock(...args),
+  listRenditions: (...args: unknown[]) => listRenditionsMock(...args),
+  downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
+  listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
+  downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
+  listDocumentVersions: (...args: unknown[]) => listDocumentVersionsMock(...args),
+  downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -79,6 +91,28 @@ describe("DocumentWorkspace", () => {
     deleteFolderMock.mockReset();
     getObjectTypeMock.mockReset();
     updateDocumentMetadataMock.mockReset();
+    listRenditionsMock.mockReset();
+    listRenditionsMock.mockResolvedValue([]);
+    downloadRenditionContentMock.mockReset();
+    listOcrResultsMock.mockReset();
+    listOcrResultsMock.mockResolvedValue([]);
+    downloadOcrPageImageMock.mockReset();
+    listDocumentVersionsMock.mockReset();
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        version_number: 1,
+        filename: "Rechnung.pdf",
+        content_type: "application/pdf",
+        size_bytes: 1,
+        checksum_sha256: "x",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadDocumentVersionMock.mockReset();
     window.localStorage.clear();
   });
 
@@ -121,6 +155,7 @@ describe("DocumentWorkspace", () => {
   it("opens a document as a tab and syncs the preview pane", async () => {
     listChildFoldersMock.mockResolvedValue([]);
     listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listRenditionsMock.mockResolvedValue([]);
 
     const user = userEvent.setup();
     renderWorkspace();
@@ -131,7 +166,228 @@ describe("DocumentWorkspace", () => {
     expect(within(tabBar).getByText("Rechnung.pdf")).toBeInTheDocument();
     const previewPane = screen.getByLabelText("Vorschau");
     expect(within(previewPane).getByText("Rechnung.pdf")).toBeInTheDocument();
-    expect(screen.getByText(/Vorschau ist noch nicht verfügbar/)).toBeInTheDocument();
+    expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 1);
+    expect(
+      await screen.findByText(/Für dieses Dokument liegt noch keine Vorschau vor/)
+    ).toBeInTheDocument();
+  });
+
+  it("shows the rendered thumbnail when a ready rendition exists", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listRenditionsMock.mockResolvedValue([
+      {
+        id: "d1:1:thumbnail",
+        document_id: "d1",
+        version_number: 1,
+        rendition_type: "thumbnail",
+        source_filename: "Rechnung.pdf",
+        source_content_type: "application/pdf",
+        target_filename: "Rechnung_thumbnail.png",
+        target_content_type: "image/png",
+        size_bytes: 123,
+        status: "ready",
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadRenditionContentMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    await waitFor(() =>
+      expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "d1:1:thumbnail")
+    );
+    const previewPane = screen.getByLabelText("Vorschau");
+    const image = await within(previewPane).findByRole("img");
+    expect(image).toHaveAttribute("src", "blob:mock-url");
+  });
+
+  it("renders OCR word spans with percentage-based positioning when a ready OCR result exists", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listRenditionsMock.mockResolvedValue([
+      {
+        id: "d1:1:thumbnail",
+        document_id: "d1",
+        version_number: 1,
+        rendition_type: "thumbnail",
+        source_filename: "Rechnung.pdf",
+        source_content_type: "application/pdf",
+        target_filename: "Rechnung_thumbnail.png",
+        target_content_type: "image/png",
+        size_bytes: 123,
+        status: "ready",
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadRenditionContentMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+    listOcrResultsMock.mockResolvedValue([
+      {
+        id: "d1:1",
+        document_id: "d1",
+        version_number: 1,
+        status: "ready",
+        engine: "native_text_layer",
+        average_confidence: 100.0,
+        full_text: "Hallo",
+        pages: [
+          {
+            page_number: 1,
+            width: 200,
+            height: 100,
+            words: [{ text: "Hallo", left: 20, top: 10, width: 40, height: 20, confidence: 95 }],
+          },
+        ],
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadOcrPageImageMock.mockRejectedValue(new Error("409"));
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const previewPane = screen.getByLabelText("Vorschau");
+    const word = await within(previewPane).findByText("Hallo");
+    expect(word).toHaveClass("ocr-word");
+    expect(word).toHaveStyle({ left: "10%", top: "10%", width: "20%", height: "20%" });
+  });
+
+  it("does not render an OCR overlay when no ready OCR result exists", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listRenditionsMock.mockResolvedValue([
+      {
+        id: "d1:1:thumbnail",
+        document_id: "d1",
+        version_number: 1,
+        rendition_type: "thumbnail",
+        source_filename: "Rechnung.pdf",
+        source_content_type: "application/pdf",
+        target_filename: "Rechnung_thumbnail.png",
+        target_content_type: "image/png",
+        size_bytes: 123,
+        status: "ready",
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadRenditionContentMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const previewPane = screen.getByLabelText("Vorschau");
+    await within(previewPane).findByRole("img");
+    expect(previewPane.querySelectorAll(".ocr-word")).toHaveLength(0);
+  });
+
+  it("lets the user pick an older version and reloads renditions/OCR for it", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        version_number: 1,
+        filename: "Rechnung.pdf",
+        content_type: "application/pdf",
+        size_bytes: 1,
+        checksum_sha256: "x",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        version_number: 2,
+        filename: "Rechnung-v2.pdf",
+        content_type: "application/pdf",
+        size_bytes: 2,
+        checksum_sha256: "y",
+        is_conflict: false,
+        based_on_version_number: 1,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-02T00:00:00Z",
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+    await waitFor(() => expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 1));
+
+    await user.selectOptions(screen.getByLabelText("Version auswählen"), "2");
+
+    await waitFor(() => expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 2));
+    expect(listOcrResultsMock).toHaveBeenCalledWith("token-123", "d1", 2);
+  });
+
+  it("downloads the selected version's content, not just the current version", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        version_number: 1,
+        filename: "Rechnung.pdf",
+        content_type: "application/pdf",
+        size_bytes: 1,
+        checksum_sha256: "x",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        version_number: 2,
+        filename: "Rechnung-v2.pdf",
+        content_type: "application/pdf",
+        size_bytes: 2,
+        checksum_sha256: "y",
+        is_conflict: false,
+        based_on_version_number: 1,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-02T00:00:00Z",
+      },
+    ]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["content"]));
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+    await waitFor(() => expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 1));
+    await user.selectOptions(screen.getByLabelText("Version auswählen"), "2");
+    await waitFor(() => expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 2));
+
+    const previewPane = screen.getByLabelText("Vorschau");
+    await user.click(within(previewPane).getByText("Herunterladen"));
+
+    await waitFor(() =>
+      expect(downloadDocumentVersionMock).toHaveBeenCalledWith("token-123", "d1", 2)
+    );
   });
 
   it("creates a new folder and reloads the listing", async () => {

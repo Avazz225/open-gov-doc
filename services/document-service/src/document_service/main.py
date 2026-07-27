@@ -26,7 +26,7 @@ from document_service.schemas import (
     LockReleaseRequest,
 )
 from document_service.settings import Settings
-from document_service.storage_client import StorageClient, compute_checksum
+from document_service.storage_client import ObjectNotFoundError, StorageClient, compute_checksum
 from document_service.virus_scan_client import (
     ScanRejectedError,
     ScanUnavailableError,
@@ -268,7 +268,12 @@ async def download_current_content(
         version = await repository.get_current_version(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    data = await app.state.storage.download(version.storage_object_key)
+    try:
+        data = await app.state.storage.download(version.storage_object_key)
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
+        ) from exc
     return Response(content=data, media_type=version.content_type or "application/octet-stream")
 
 
@@ -280,7 +285,12 @@ async def download_version_content(
         version = await repository.get_version(session, document_id, version_number)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    data = await app.state.storage.download(version.storage_object_key)
+    try:
+        data = await app.state.storage.download(version.storage_object_key)
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
+        ) from exc
     return Response(content=data, media_type=version.content_type or "application/octet-stream")
 
 

@@ -194,6 +194,51 @@ body {
   margin: 0 0 0.75rem;
 }
 
+.preview-thumbnail {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--dms-border);
+}
+
+/* Text-Overlay für die Vorschau (P5-S3, Nutzerwunsch): Wort-Spans liegen
+   unsichtbar exakt über dem Bild (gleiches Prinzip wie pdf.js' textLayer) -
+   `.preview-image-wrapper` schrumpft per `inline-block` auf die tatsächliche
+   Bildgröße, `.ocr-text-layer` deckt sie per `inset: 0` exakt ab. */
+.preview-image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin-bottom: 0.75rem;
+}
+
+.ocr-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+}
+
+.ocr-word {
+  position: absolute;
+  color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: text;
+  user-select: text;
+}
+
+.version-select {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.ocr-review-hint {
+  opacity: 0.8;
+  font-size: 0.85rem;
+}
+
 .splitter {
   background: var(--dms-border);
 }

@@ -7,6 +7,13 @@ def compute_checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+class ObjectNotFoundError(Exception):
+    """Der Storage Service kennt den angefragten Object-Key nicht (mehr) -
+    z. B. weil die zugehörige Metadaten-Zeile verloren ging, während die
+    Bytes selbst evtl. noch auf der Platte liegen (Inkonsistenz außerhalb
+    der Kontrolle des Document Service)."""
+
+
 class StorageClient:
     """Dünner HTTP-Client gegen die Storage-Service-API (3.6). Document
     Service hält nie selbst Dateiinhalte - reine Service-zu-Service-Kommunikation
@@ -22,6 +29,8 @@ class StorageClient:
 
     async def download(self, key: str) -> bytes:
         response = await self._client.get(f"/objects/{key}")
+        if response.status_code == 404:
+            raise ObjectNotFoundError(key)
         response.raise_for_status()
         return response.content
 

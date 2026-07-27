@@ -1,6 +1,6 @@
 # user-ui
 
-**Verantwortung:** Authentifizierte Web-Oberfläche für Endnutzer — Anmelden, Ordner-Navigation inkl. CRUD, Dokument-Upload/-Download, Dokumentmetadaten-Bearbeitung, Vorschau-Platzhalter (Konzept 8).
+**Verantwortung:** Authentifizierte Web-Oberfläche für Endnutzer — Anmelden, Ordner-Navigation inkl. CRUD, Dokument-Upload/-Download (versionsbewusst seit P5-S3), Dokumentmetadaten-Bearbeitung, Vorschau mit Thumbnail und OCR-Text-Overlay (Konzept 8).
 **Konzept-Referenz:** 8
 **Kein eigenes Postgres-Schema** — reine clientseitig gerenderte SPA (statischer Export, siehe [ADR 0006](../adr/0006-user-ui-static-export-spa.md)), kein eigener Backend-Prozess.
 
@@ -22,7 +22,7 @@ Ersetzt die frühere flache `FolderBrowser`-Ansicht (P4-S2) durch ein dreigeteil
 - **`IconRail`** (ganz links, außerhalb des Main-Contents): iconbasierte Cross-Cutting-Navigation. "Dokumente" ist funktional, "Suche" (P5-S4) bleibt ein bewusst sichtbarer, deaktivierter Platzhalter. "Einstellungen" öffnet seit P4-S6 ein Popover mit dem `ThemeSwitcher` statt weiter deaktiviert zu sein.
 - **`ExplorerPane`** (oben links): Windows-Explorer-artige Ordnernavigation mit Breadcrumb, Ordner-CRUD (Anlegen/Umbenennen/Löschen — die Backend-Endpunkte existierten bereits seit P3-S3, nur die UI dafür fehlte) und einer Tableiste für geöffnete Dokumente. Klick auf ein Dokument öffnet es als Tab, statt einen modalen Dialog zu zeigen.
 - **`MetadataPanel`** (unten links): Metadaten des über die Tabs ausgewählten Dokuments. Attribut-Formfelder werden dynamisch aus dem Objekttyp-Schema generiert (`GET /api/object-type-service/object-types/{id}`, 2.2) — ohne zugewiesenen Objekttyp ist nur der Titel editierbar. Speichert über den seit P4-S4 neuen `PATCH /api/document-service/documents/{id}`.
-- **`PreviewPane`** (rechts): vom aktiven Tab synchronisiert, zeigt weiterhin nur einen Stub (echtes Rendering folgt mit dem Preview Service, P5-S2) — jetzt aber als permanenter Bereich statt als Overlay.
+- **`PreviewPane`** (rechts): vom aktiven Tab synchronisiert, permanenter Bereich statt Overlay. Lädt seit P5-S2 die vom Rendering Service erzeugte Thumbnail-Ersatzdarstellung nach und zeigt sie als Bild an, sofern eine mit Status `ready` existiert. Seit P5-S3 zusätzlich: Versionsauswahl (`<select>`, nur sichtbar bei mehr als einer Version) sowie ein positionsgenaues Text-Overlay aus den Wort-Bounding-Boxen des OCR Service, mit dem sich erkannter Text direkt über dem Bild markieren/kopieren lässt (Nutzer-Feedback nach P5-S2).
 
 Alle drei Content-Spalten sind über `Splitter`-Ziehgriffe größenveränderbar; die Aufteilung wird pro Browser in `localStorage` gemerkt (`dms.explorer.leftWidth`/`dms.explorer.topHeight`). `Splitter` ist eine generische, abhängigkeitsfreie Komponente (Pointer-Events, Neuberechnung relativ zur Container-Bounding-Box bei jedem Move statt kumulierter Deltas) — keine externe Layout-Bibliothek eingeführt, um die Abhängigkeitsfläche klein zu halten.
 
@@ -42,14 +42,27 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 | Dokumentmetadaten ändern | `PATCH /api/document-service/documents/{id}` (seit P4-S4, neuer Endpunkt) |
 | Objekttyp-Schema für das Metadaten-Panel | `GET /api/object-type-service/object-types/{id}` |
 | Theme-Präferenz lesen/schreiben | `GET/PUT /api/auth-service/me/preferences` (seit P4-S6) |
+| Ersatzdarstellungen zur ausgewählten Version | `GET /api/rendering-service/renditions?document_id={id}&version_number={n}` (seit P5-S2, `version_number` seit P5-S3) |
+| Vorschaubild laden | `GET /api/rendering-service/renditions/{id}/content` (seit P5-S2) |
+| Versionshistorie eines Dokuments | `GET /api/document-service/documents/{id}/versions` (seit P5-S3) |
+| Bestimmte Version herunterladen | `GET /api/document-service/documents/{id}/versions/{n}/content` (seit P5-S3) |
+| OCR-Ergebnis zur ausgewählten Version (Wort-Bounding-Boxen) | `GET /api/ocr-service/ocr-results?document_id={id}&version_number={n}` (seit P5-S3) |
+| OCR-eigenes PDF-Seitenbild | `GET /api/ocr-service/ocr-results/{id}/page-image` (seit P5-S3) |
 
 ## Auth-Zustand
 
 `src/lib/auth-context.tsx`: Access-/Refresh-Token im `localStorage` (`dms.tokens`), proaktiver Refresh kurz vor Ablauf (`setTimeout` basierend auf `expires_in`). Bekannte, bewusste Vereinfachung dieses Grundgerüsts: kein httpOnly-Cookie, siehe ADR 0006 "Offene Punkte"/Konsequenzen.
 
-## Vorschau (2.4)
+## Vorschau (2.4/3.9, seit P5-S2 an den Rendering Service, seit P5-S3 zusätzlich an den OCR Service angebunden)
 
-`components/PreviewPane.tsx` zeigt nur einen Hinweis ("Vorschau ist noch nicht verfügbar") statt einer echten Vorschau — der Rendering/Preview Service (3.7) existiert erst ab P5-S2. Seit P4-S4 ist das ein fest im Layout verankerter Bereich (vorher ein modaler Dialog, `PreviewStub`) — bewusst weiterhin isoliert, damit er später durch eine echte Vorschau ersetzt werden kann, ohne den Rest des Layouts anzufassen.
+`components/PreviewPane.tsx` lädt beim Öffnen eines Dokuments (`useEffect`, Abhängigkeit `activeDocument?.id`) zunächst die Versionsliste (`listDocumentVersions()`) und setzt die Auswahl auf `current_version_number`; ein zweiter Effekt (Abhängigkeit `[activeDocument?.id, selectedVersion]`) lädt für die ausgewählte Version sowohl das OCR-Ergebnis (`listOcrResults()`) als auch das Anzeigebild:
+
+- Existiert ein OCR-Ergebnis, wird zuerst dessen eigenständiges Seitenbild versucht (`downloadOcrPageImage()`, nur für PDFs — der OCR Service rastert diese selbst, da rendering-service keine PDF-Thumbnails erzeugt).
+- Schlägt das fehl oder existiert kein OCR-Ergebnis, greift die bestehende `thumbnail`-Rendition aus rendering-service (`listRenditions()`/`downloadRenditionContent()`, Rasterbild-Fall).
+
+Beide Pfade zeigen das Ergebnis als `<img>` über eine per `URL.createObjectURL` erzeugte Blob-URL an — beim Wechsel/Unmount wird die vorherige Blob-URL wieder freigegeben (`URL.revokeObjectURL`). Existiert ein `ready`/`needs_review`-OCR-Ergebnis, wird zusätzlich ein **Text-Overlay** aus dessen Wort-Bounding-Boxen gerendert: ein `<div>` je Wort, unsichtbar (`color: transparent`) und prozentual exakt über dem Bild positioniert (`left/top/width/height` als `%` von `page.width`/`page.height`, gleiches Prinzip wie pdf.js' Textlayer) — Nutzer können den erkannten Text direkt über dem Dokumentbild markieren und kopieren. Die Schriftgröße jedes Worts wird über einen `ResizeObserver` auf das `<img>` an die tatsächlich gerenderte Bildhöhe angepasst, damit Markieren/Doppelklick-Wortauswahl bei jeder Splitter-Breite/jedem Zoom treffsicher bleiben. Ein `needs_review`-Ergebnis zeigt zusätzlich einen kleinen Warnhinweis, blendet das Overlay aber nicht aus (der Text bleibt nutzbar).
+
+Renditions/OCR-Ergebnisse sind bewusst ein Zusatznutzen, kein Blocker (2.4/3.9): existiert nichts Passendes (falsches Format, Verarbeitung noch nicht abgeschlossen, Ladefehler), fällt die Spalte auf einen Hinweistext zurück — der Download-Button (jetzt versionsbewusst, `downloadDocumentVersion()`) bleibt in jedem Fall nutzbar. Absichtlich einfach gehalten: kein Polling auf eine noch nicht fertige Verarbeitung (erneutes Öffnen/Versionswechsel holt den aktuellen Stand nach), nur Seite 1 bei mehrseitigen PDFs (konsistent mit dem OCR-Service-Scope).
 
 ## Theming (Konzept 8, seit P4-S6)
 
@@ -66,13 +79,16 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — Typprüfung, ESLint, produktionsfähiger statischer Export.
-- `npm test` (Vitest + Testing Library, **20 Tests**): `AuthProvider` (Login/Logout/Session-Wiederherstellung/Ablauf), API-Client (Gateway-URL-Aufbau, Bearer-Header, Fehlerbehandlung, seit P4-S4 auch Ordner-CRUD/Metadaten-PATCH), `DocumentWorkspace` (Navigation, Ordner-CRUD, Tab-Öffnen inkl. Vorschau-Synchronisation, Metadaten-Speichern inkl. Tab-Titel-Update, Upload-Reload), `ThemeProvider` (seit P4-S6: Default `auto`, `data-theme`-Attribut, `localStorage`-Cache-Wiederherstellung, `setTheme`-Persistenz) — Netzwerkschicht (`fetch`) gemockt, da sie die Grenze zur externen Infrastruktur ist. `matchMedia` wird in `tests/setup.ts` gepolyfillt, da jsdom es nicht implementiert.
-- **Kein Browser für visuelle/E2E-Tests in dieser Entwicklungsumgebung verfügbar** (kein installiertes Chrome/Chromium, Playwright daher nicht einsetzbar) — stattdessen wurde jeder von der UI verwendete Gateway-Aufruf einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (Login → Ordner anlegen/umbenennen → Upload in den neuen Ordner → Metadaten-PATCH ändert Titel/Attribute → Liste zeigt die Änderung → Ordner löschen → Objekttyp-Schema über das Gateway abrufbar; seit P4-S6 zusätzlich: `GET/PUT /me/preferences` inkl. 422 bei ungültigem Theme-Wert). Die neue Resizable-/Tab-/Layout-Interaktion sowie das Theme-Umschalten selbst (Ziehgriffe, Tab-Wechsel-Optik, Popover, Flash-freier Themewechsel) konnten dadurch **nicht visuell** verifiziert werden — nur über die Vitest-Komponententests. Ein Mensch sollte die Oberfläche vor einer Produktivnutzung im echten Browser durchklicken.
+- `npm test` (Vitest + Testing Library, **25 Tests**): `AuthProvider` (Login/Logout/Session-Wiederherstellung/Ablauf), API-Client (Gateway-URL-Aufbau, Bearer-Header, Fehlerbehandlung, seit P4-S4 auch Ordner-CRUD/Metadaten-PATCH), `DocumentWorkspace` (Navigation, Ordner-CRUD, Tab-Öffnen inkl. Vorschau-Synchronisation, Metadaten-Speichern inkl. Tab-Titel-Update, Upload-Reload, seit P5-S2 auch: keine Rendition vorhanden → Hinweistext, `ready`-Thumbnail → `<img>` mit Blob-URL; seit P5-S3 zusätzlich: OCR-Wort-Spans mit korrekten Prozent-Positionen, kein Overlay ohne bereites OCR-Ergebnis, Versionswechsel löst Neuladen von Renditions/OCR mit der gewählten Versionsnummer aus, Download nutzt die ausgewählte statt der aktuellen Version), `ThemeProvider` (seit P4-S6: Default `auto`, `data-theme`-Attribut, `localStorage`-Cache-Wiederherstellung, `setTheme`-Persistenz) — Netzwerkschicht (`fetch`) gemockt, da sie die Grenze zur externen Infrastruktur ist. `matchMedia` und (seit P5-S3) `ResizeObserver` werden in `tests/setup.ts` gepolyfillt, da jsdom sie nicht implementiert.
+- **Kein Browser für visuelle/E2E-Tests in dieser Entwicklungsumgebung verfügbar** (kein installiertes Chrome/Chromium, Playwright daher nicht einsetzbar) — stattdessen wurde jeder von der UI verwendete Gateway-Aufruf einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (Login → Ordner anlegen/umbenennen → Upload in den neuen Ordner → Metadaten-PATCH ändert Titel/Attribute → Liste zeigt die Änderung → Ordner löschen → Objekttyp-Schema über das Gateway abrufbar; seit P4-S6 zusätzlich: `GET/PUT /me/preferences` inkl. 422 bei ungültigem Theme-Wert; seit P5-S2 zusätzlich: `GET /renditions`/`GET /renditions/{id}/content` liefern ein echtes, vom Rendering Service erzeugtes Thumbnail; seit P5-S3 zusätzlich: ein echtes PDF mit Textlayer hochgeladen → `GET /ocr-results` liefert korrekte Wort-Bounding-Boxen, `GET /ocr-results/{id}/page-image` liefert ein passendes PNG, `GET /documents/{id}/versions` liefert die Versionshistorie). Die neue Resizable-/Tab-/Layout-Interaktion sowie das Theme-Umschalten, die Thumbnail-Anzeige und das OCR-Text-Overlay selbst konnten dadurch **nicht visuell** verifiziert werden — nur über die Vitest-Komponententests plus die curl-bestätigte Korrektheit der zugrunde liegenden API-Antworten. Ein Mensch sollte die Oberfläche vor einer Produktivnutzung im echten Browser durchklicken.
 
 ## Offene Punkte
 
 - Tokens im `localStorage` statt httpOnly-Cookie (XSS-Risiko bewusst in Kauf genommen, siehe ADR 0006).
-- Keine echte Vorschau (folgt P5-S2).
+- Vorschau zeigt weiterhin nur Bild + OCR-Text-Overlay an, keine eigene Ansicht für `substitute_text`/`pdf_archive`-Renditionen — wären ohnehin eher Download- als Vorschau-Kandidaten.
+- Kein Polling, falls eine Ersatzdarstellung/ein OCR-Ergebnis zum Zeitpunkt des Öffnens noch nicht fertig verarbeitet ist — erneutes Öffnen des Tabs/Versionswechsel holt den aktuellen Stand nach, kein automatisches Nachladen.
+- Versionshistorie zeigt nur die Versionsnummer (kein Diff, kein Kommentar-/Konfliktanzeige-UI trotz vorhandener Backend-Felder wie `is_conflict`/`comment`) — bewusst minimal, da nicht Teil des Nutzerwunsches dieser Session.
+- OCR-Overlay nur für Seite 1 mehrseitiger PDFs (konsistent mit dem OCR-Service-Scope, siehe `docs/services/ocr-service.md`).
 - Keine Suche (Konzept 8 nennt sie, Search Service existiert erst P5-S4).
 - Keine Workflow-Interaktion (Freigaben/Aufgaben) — Workflow Engine existiert erst ab Phase 6.
 - Kein automatisiertes Browser-E2E in dieser Umgebung möglich (kein Chrome/Chromium installiert) — nachzuholen, sobald eine Umgebung mit Browser verfügbar ist (z. B. CI).

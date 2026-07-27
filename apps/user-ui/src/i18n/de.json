@@ -82,6 +82,10 @@
   "preview": {
     "paneLabel": "Vorschau",
     "noSelection": "Kein Dokument ausgewählt.",
-    "stubMessage": "Vorschau ist noch nicht verfügbar - folgt mit dem Rendering/Preview Service (P5-S2)."
+    "loading": "Vorschau wird geladen...",
+    "noRendition": "Für dieses Dokument liegt noch keine Vorschau vor.",
+    "versionSelectLabel": "Version auswählen",
+    "versionOption": "Version {number}",
+    "ocrNeedsReview": "OCR-Text hat geringe Erkennungssicherheit – bitte prüfen"
   }
 }

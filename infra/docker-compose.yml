@@ -285,6 +285,61 @@ services:
     networks:
       - dms-net
 
+  rendering-service:
+    build:
+      context: ..
+      dockerfile: services/rendering-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_OCR_SERVICE_BASE_URL: http://ocr-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://rendering-service:8000
+    ports:
+      - "${RENDERING_SERVICE_PORT:-8011}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      storage-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      ocr-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  ocr-service:
+    build:
+      context: ..
+      dockerfile: services/ocr-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://ocr-service:8000
+    ports:
+      - "${OCR_SERVICE_PORT:-8012}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      storage-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   object-type-service:
     build:
       context: ..
