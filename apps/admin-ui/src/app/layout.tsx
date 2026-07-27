@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { I18nProvider } from "@/i18n";
 import de from "@/i18n/de.json";
 import { AuthProvider } from "@/lib/auth-context";
+import { InstallationProvider } from "@/lib/installation-context";
 import "./globals.css";
 
 // Direkter JSON-Import statt über `@/i18n` (dort mit "use client" markiert) -
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="de">
       <body>
         <I18nProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <InstallationProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </InstallationProvider>
         </I18nProvider>
       </body>
     </html>

@@ -22,9 +22,12 @@
   },
   "nav": {
     "ariaLabel": "Admin-Bereiche",
+    "groupManagement": "Verwaltung",
+    "groupInstallations": "Installationen",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
-    "registry": "Registry"
+    "registry": "Registry",
+    "installations": "Installationsverwaltung"
   },
   "home": {
     "title": "DMS Admin",
@@ -96,5 +99,20 @@
     "healthy": "healthy",
     "down": "down",
     "empty": "Keine Instanzen registriert."
+  },
+  "installations": {
+    "pageTitle": "Installationsverwaltung",
+    "hint": "Jede Installation ist vollständig isoliert (Konzept 3a) und braucht eine eigene Anmeldung - danach kann ohne erneutes Anmelden zwischen bereits angemeldeten Installationen gewechselt werden, solange die jeweilige Sitzung gültig ist.",
+    "switcherLabel": "Installation",
+    "newHeading": "Neue Installation",
+    "formLabel": "Installation hinzufügen",
+    "name": "Name",
+    "gatewayUrl": "Gateway-Adresse",
+    "invalidUrl": "Bitte eine gültige URL angeben.",
+    "nameColumn": "Name",
+    "gatewayUrlColumn": "Gateway-Adresse",
+    "statusColumn": "Status",
+    "active": "aktiv",
+    "switchTo": "Wechseln"
   }
 }

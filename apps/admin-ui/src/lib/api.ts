@@ -1,4 +1,15 @@
-import { GATEWAY_BASE_URL } from "./config";
+import { GATEWAY_BASE_URL as DEFAULT_GATEWAY_BASE_URL } from "./config";
+
+// Mutable statt eines festen Imports (P4-S5, Multi-Installation, Konzept 8):
+// Die Admin-UI kann mehrere Installationen mit je eigenem Gateway-Endpunkt
+// verwalten - `InstallationProvider` ruft `setGatewayBaseUrl()` bei jedem
+// Installationswechsel auf. Alle bestehenden Aufrufer dieses Moduls bleiben
+// unverändert (sie kennen die URL nicht, nur den `service_type`/Pfad).
+let gatewayBaseUrl = DEFAULT_GATEWAY_BASE_URL;
+
+export function setGatewayBaseUrl(url: string): void {
+  gatewayBaseUrl = url;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -31,7 +42,7 @@ async function request(
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${GATEWAY_BASE_URL}/api/${serviceType}/${path}`, {
+  const response = await fetch(`${gatewayBaseUrl}/api/${serviceType}/${path}`, {
     ...init,
     headers,
   });

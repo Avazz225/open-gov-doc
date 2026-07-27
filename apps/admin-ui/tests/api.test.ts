@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createRole, listUsers, login } from "@/lib/api";
+import { ApiError, createRole, listUsers, login, setGatewayBaseUrl } from "@/lib/api";
 
 function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = {}) {
   const { ok = true, status = 200 } = init;
@@ -14,6 +14,18 @@ function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = 
 describe("api client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    setGatewayBaseUrl("http://localhost:8009");
+  });
+
+  it("routes requests through the actively configured gateway base URL", async () => {
+    setGatewayBaseUrl("http://second-installation:8009");
+    const fetchMock = mockFetchOnce([]);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listUsers("token-123");
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://second-installation:8009/api/auth-service/users");
   });
 
   it("login posts credentials to the gateway's auth-service route", async () => {
