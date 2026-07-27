@@ -4,13 +4,20 @@ import { useState } from "react";
 import { useI18n } from "@/i18n";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
+export type WorkspaceView = "documents" | "search";
+
 // Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
 // Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
-// ist funktional, "Suche" bleibt ein sichtbarer, deaktivierter Platzhalter
-// (folgt erst mit P5-S4) statt wegzulassen und die Navigationsstruktur
-// später erneut umzubauen. "Einstellungen" öffnet seit P4-S6 ein Popover mit
+// und seit P5-S4 auch "Suche" schalten zwischen den beiden Ansichten in
+// DocumentWorkspace um. "Einstellungen" öffnet seit P4-S6 ein Popover mit
 // dem Theme-Umschalter statt weiter deaktiviert zu sein.
-export function IconRail() {
+export function IconRail({
+  activeView,
+  onSelectView,
+}: {
+  activeView: WorkspaceView;
+  onSelectView: (view: WorkspaceView) => void;
+}) {
   const { t } = useI18n();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -18,17 +25,19 @@ export function IconRail() {
     <nav className="icon-rail" aria-label={t("iconRail.label")}>
       <button
         type="button"
-        className="icon-rail-button icon-rail-active"
+        className={`icon-rail-button${activeView === "documents" ? " icon-rail-active" : ""}`}
         title={t("iconRail.documents")}
-        aria-current="page"
+        aria-current={activeView === "documents" ? "page" : undefined}
+        onClick={() => onSelectView("documents")}
       >
         <span aria-hidden="true">📄</span>
       </button>
       <button
         type="button"
-        className="icon-rail-button"
-        disabled
-        title={t("iconRail.searchComingSoon")}
+        className={`icon-rail-button${activeView === "search" ? " icon-rail-active" : ""}`}
+        title={t("iconRail.search")}
+        aria-current={activeView === "search" ? "page" : undefined}
+        onClick={() => onSelectView("search")}
       >
         <span aria-hidden="true">🔍</span>
       </button>

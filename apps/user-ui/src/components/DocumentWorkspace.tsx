@@ -14,9 +14,10 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ExplorerPane } from "./ExplorerPane";
-import { IconRail } from "./IconRail";
+import { IconRail, type WorkspaceView } from "./IconRail";
 import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
+import { SearchPane } from "./SearchPane";
 import { Splitter } from "./Splitter";
 
 const MIN_LEFT_WIDTH = 260;
@@ -61,6 +62,7 @@ export function DocumentWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<DocumentSummary[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [view, setView] = useState<WorkspaceView>("documents");
 
   const outerRef = useRef<HTMLDivElement>(null);
   const leftColRef = useRef<HTMLDivElement>(null);
@@ -194,41 +196,47 @@ export function DocumentWorkspace() {
       </div>
 
       <div className="workspace-body">
-        <IconRail />
+        <IconRail activeView={view} onSelectView={setView} />
         <div className="main-area" ref={outerRef} style={{ gridTemplateColumns: `${leftWidth}px 6px 1fr` }}>
           <div
             className="left-col"
             ref={leftColRef}
             style={{ gridTemplateRows: `${topHeight}px 6px 1fr` }}
           >
-            <ExplorerPane
-              trail={trail}
-              folders={folders}
-              documents={documents}
-              isLoading={isLoading}
-              error={error}
-              tabs={tabs}
-              activeTabId={activeTabId}
-              onOpenFolder={openFolder}
-              onBreadcrumbClick={goToBreadcrumb}
-              onOpenDocument={openDocumentTab}
-              onSelectTab={selectTab}
-              onCloseTab={closeTab}
-              onCreateFolder={handleCreateFolder}
-              onRenameFolder={handleRenameFolder}
-              onDeleteFolder={handleDeleteFolder}
-              token={accessToken ?? ""}
-              createdBy={user?.username ?? ""}
-              currentFolderId={currentFolder.id}
-              onUploaded={() => load(currentFolder.id)}
-            />
-            <Splitter
-              orientation="horizontal"
-              containerRef={leftColRef}
-              onResize={handleHorizontalResize}
-              label={t("explorer.resizeVertical")}
-            />
-            <MetadataPanel document={activeDocument} onSaved={handleMetadataSaved} />
+            {view === "documents" ? (
+              <>
+                <ExplorerPane
+                  trail={trail}
+                  folders={folders}
+                  documents={documents}
+                  isLoading={isLoading}
+                  error={error}
+                  tabs={tabs}
+                  activeTabId={activeTabId}
+                  onOpenFolder={openFolder}
+                  onBreadcrumbClick={goToBreadcrumb}
+                  onOpenDocument={openDocumentTab}
+                  onSelectTab={selectTab}
+                  onCloseTab={closeTab}
+                  onCreateFolder={handleCreateFolder}
+                  onRenameFolder={handleRenameFolder}
+                  onDeleteFolder={handleDeleteFolder}
+                  token={accessToken ?? ""}
+                  createdBy={user?.username ?? ""}
+                  currentFolderId={currentFolder.id}
+                  onUploaded={() => load(currentFolder.id)}
+                />
+                <Splitter
+                  orientation="horizontal"
+                  containerRef={leftColRef}
+                  onResize={handleHorizontalResize}
+                  label={t("explorer.resizeVertical")}
+                />
+                <MetadataPanel document={activeDocument} onSaved={handleMetadataSaved} />
+              </>
+            ) : (
+              <SearchPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
+            )}
           </div>
           <Splitter
             orientation="vertical"

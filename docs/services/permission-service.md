@@ -18,6 +18,7 @@
 | `PATCH` | `/resources/{id}` | `inherit` umschalten |
 | `GET` | `/effective-permissions/{principal_id}/{resource_id}` | Gecachte effektive Rollen/Rechte |
 | `GET` | `/check?...&access_type=read\|write` | Autorisierungs-Check inkl. Bereichssperren-Überlagerung |
+| `POST` | `/check/batch` | Batch-Form von `/check` (seit P5-S4, Search Service) — mehrere `resource_ids` in einem Aufruf |
 | `POST` | `/scope-locks` | Bereichssperre setzen (404 bei unbekannter Ressource) |
 | `DELETE` | `/scope-locks/{id}` | Bereichssperre aufheben (`released_by`) |
 | `GET` | `/scope-locks?resource_id=` | Sperren auflisten (optional gefiltert) |
@@ -40,6 +41,10 @@
 - **Klare Rückmeldung statt generischem Fehler**: `CheckResult` liefert bei einer blockierenden Sperre zusätzlich `blocked_by_scope_lock`, `scope_lock_reason` und `scope_lock_expires_at`, damit aufrufende Dienste (künftig API-Gateway/UI) Grund und voraussichtliche Dauer anzeigen können statt eines unspezifischen "keine Berechtigung".
 - **Wer Sperren setzen/aufheben darf, ist weiterhin nicht durchgesetzt**: Die Endpunkte selbst sind ungated (analog zum Force-Unlock-Präzedenzfall im Document Service, P3-S2). Das seit P4-S1 existierende API-Gateway (3.5) prüft nur, dass überhaupt ein gültiger Bearer-Token vorliegt, nicht, ob der Principal zum Sperren berechtigt ist — reale Autorisierung ("nur Admin-Rollen dürfen sperren") bräuchte eine Auswertung der vom Gateway weitergereichten Identitäts-Header in diesem Service selbst, ebenso ein optionales Vier-Augen-Prinzip (4.3) für das Setzen/Aufheben.
 - **Auditierung**: `POST /scope-locks` und `DELETE /scope-locks/{id}` publizieren `permission.scope_lock.created`/`.released` über einen eigenen Producer-Client (getrennt vom reinen Struktur-Konsumenten, siehe unten) — der Audit Service konsumiert seit dieser Session zusätzlich `permission.>`.
+
+## Batch-Check (seit P5-S4, Search Service)
+
+`POST /check/batch` (Body: `{principal_id, permission, access_type, resource_ids: [...]}`, Antwort: `{results: {resource_id: bool}}`) wurde für den neuen Search Service ergänzt: eine Suchergebnisliste kann viele verschiedene Ordner betreffen, und der bestehende `GET /check` prüft nur ein Principal/Resource/Permission-Tripel je Aufruf — viele Einzel-Roundtrips wären für eine Ergebnisseite unpraktikabel. Die Implementierung wiederholt exakt dieselbe Logik wie `/check` (inkl. Bereichssperren-Überlagerung) in einer Schleife über die (deduplizierten) `resource_ids` — jeder Durchlauf trifft den bereits vorhandenen `effective_permission_cache`, daher keine teure Mehrfachberechnung trotz der Schleife; eine SQL-seitige Mega-Query wäre für den hier relevanten Umfang (Suchergebnisseiten, keine Massenoperationen) Overengineering. Search Service nutzt Ordner-`resource_id`s (nicht Dokument-IDs) als Prüfobjekt — Dokumente sind selbst keine Permission-Resources, siehe `docs/services/search-service.md`.
 
 ## Vererbungsalgorithmus
 

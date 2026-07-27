@@ -396,3 +396,68 @@ export async function downloadOcrPageImage(token: string, ocrResultId: string): 
   );
   return response.blob();
 }
+
+// Search Service (3.7, P5-S4, ADR 0012: Postgres Volltextsuche statt
+// dediziertem Suchindex) - Facetten orientieren sich am Objekttyp-Schema.
+export interface SearchResult extends DocumentSummary {
+  folder_name: string | null;
+  rank: number;
+  snippet: string;
+}
+
+export interface FacetObjectType {
+  id: number;
+  name: string;
+  attributes: ObjectTypeAttribute[];
+}
+
+export interface SearchFacets {
+  object_types: FacetObjectType[];
+}
+
+export interface SearchFacetCounts {
+  folder: Array<{ folder_id: string | null; folder_name: string | null; count: number }>;
+  object_type: Array<{ object_type_id: number | null; count: number }>;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+  total_returned: number;
+  facet_counts: SearchFacetCounts;
+}
+
+export async function getSearchFacets(token: string): Promise<SearchFacets> {
+  const response = await request("search-service", "search/facets", {}, token);
+  return response.json();
+}
+
+export interface SearchParams {
+  q?: string;
+  folderId?: string;
+  objectTypeId?: number;
+  createdBy?: string;
+  createdAfter?: string;
+  createdBefore?: string;
+  // Schlüssel bereits in der Backend-Konvention, z. B. "attr.kunde" oder
+  // "attr.betrag.gte" - siehe docs/services/search-service.md.
+  attrFilters?: Record<string, string>;
+  limit?: number;
+  offset?: number;
+}
+
+export async function searchDocuments(token: string, params: SearchParams): Promise<SearchResponse> {
+  const query = new URLSearchParams();
+  if (params.q) query.set("q", params.q);
+  if (params.folderId) query.set("folder_id", params.folderId);
+  if (params.objectTypeId !== undefined) query.set("object_type_id", String(params.objectTypeId));
+  if (params.createdBy) query.set("created_by", params.createdBy);
+  if (params.createdAfter) query.set("created_after", params.createdAfter);
+  if (params.createdBefore) query.set("created_before", params.createdBefore);
+  for (const [key, value] of Object.entries(params.attrFilters ?? {})) {
+    query.set(key, value);
+  }
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  const response = await request("search-service", `search?${query.toString()}`, {}, token);
+  return response.json();
+}

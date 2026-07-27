@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from permission_service import repository
 from permission_service.models import Base, ResourceNode
 from permission_service.schemas import (
+    BatchCheckRequest,
+    BatchCheckResult,
     CheckResult,
     EffectivePermissionsOut,
     ResourceNodeOut,
@@ -207,6 +209,32 @@ async def check(
 
     await session.commit()
     return CheckResult(allowed=permission in entry.permissions)
+
+
+@app.post("/check/batch", response_model=BatchCheckResult)
+async def check_batch(
+    payload: BatchCheckRequest, session: AsyncSession = Depends(get_session)
+) -> BatchCheckResult:
+    """Batch-Form von `/check` (P5-S4, Search Service): prüft mehrere
+    Resource-IDs in einem Aufruf statt vieler Einzel-Roundtrips. Wiederholt
+    dieselbe Logik wie `/check` je Resource-ID - jeder Aufruf trifft den
+    bereits vorhandenen `EffectivePermissionCache`, daher keine teure
+    Mehrfachberechnung trotz der Schleife."""
+    results: dict[str, bool] = {}
+    for resource_id in set(payload.resource_ids):
+        entry = await repository.get_effective_permissions(
+            session, payload.principal_id, resource_id
+        )
+        active_locks = await repository.get_active_scope_locks_for_resource(session, resource_id)
+        blocking_locks = [
+            lock for lock in active_locks if payload.access_type == "write" or lock.blocks_read
+        ]
+        if blocking_locks and "scope_lock.bypass" not in entry.permissions:
+            results[resource_id] = False
+            continue
+        results[resource_id] = payload.permission in entry.permissions
+    await session.commit()
+    return BatchCheckResult(results=results)
 
 
 @app.post("/scope-locks", response_model=ScopeLockOut, status_code=201)

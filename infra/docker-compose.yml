@@ -340,6 +340,44 @@ services:
     networks:
       - dms-net
 
+  search-service:
+    build:
+      context: ..
+      dockerfile: services/search-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_OCR_SERVICE_BASE_URL: http://ocr-service:8000
+      DMS_RENDERING_SERVICE_BASE_URL: http://rendering-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://search-service:8000
+    ports:
+      - "${SEARCH_SERVICE_PORT:-8013}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      document-service:
+        condition: service_started
+      folder-service:
+        condition: service_started
+      object-type-service:
+        condition: service_started
+      permission-service:
+        condition: service_started
+      ocr-service:
+        condition: service_started
+      rendering-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   object-type-service:
     build:
       context: ..

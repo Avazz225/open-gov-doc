@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -86,3 +87,14 @@ class CheckResult(BaseModel):
     blocked_by_scope_lock: bool = False
     scope_lock_reason: str | None = None
     scope_lock_expires_at: datetime | None = None
+
+
+class BatchCheckRequest(BaseModel):
+    principal_id: str
+    permission: str
+    access_type: Literal["read", "write"] = "read"
+    resource_ids: list[str]
+
+
+class BatchCheckResult(BaseModel):
+    results: dict[str, bool]

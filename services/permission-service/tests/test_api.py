@@ -82,6 +82,99 @@ def test_full_flow_via_api(client):
     assert delete_response.status_code == 204
 
 
+def test_check_batch_returns_per_resource_result(client):
+    """Batch-Form von /check (P5-S4, Search Service) - eine Resource mit
+    Grant, eine unbekannte."""
+    role = client.post(
+        "/roles", json={"name": "BatchCheckRole", "permissions": ["document.read"]}
+    ).json()
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "grace",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    response = client.post(
+        "/check/batch",
+        json={
+            "principal_id": "grace",
+            "permission": "document.read",
+            "access_type": "read",
+            "resource_ids": [ROOT_RESOURCE_ID, "unbekannte-ressource"],
+        },
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[ROOT_RESOURCE_ID] is True
+    assert results["unbekannte-ressource"] is False
+
+
+def test_check_batch_denies_principal_without_assignment(client):
+    response = client.post(
+        "/check/batch",
+        json={
+            "principal_id": "no-such-principal",
+            "permission": "document.read",
+            "access_type": "read",
+            "resource_ids": [ROOT_RESOURCE_ID],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][ROOT_RESOURCE_ID] is False
+
+
+def test_check_batch_respects_blocking_scope_lock(client):
+    role = client.post(
+        "/roles", json={"name": "BatchLockRole", "permissions": ["document.read"]}
+    ).json()
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "heidi",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+    client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "blocks_read": True},
+    )
+
+    response = client.post(
+        "/check/batch",
+        json={
+            "principal_id": "heidi",
+            "permission": "document.read",
+            "access_type": "read",
+            "resource_ids": [ROOT_RESOURCE_ID],
+        },
+    )
+
+    assert response.json()["results"][ROOT_RESOURCE_ID] is False
+
+
+def test_check_batch_with_empty_resource_ids_returns_empty_results(client):
+    response = client.post(
+        "/check/batch",
+        json={
+            "principal_id": "ivan",
+            "permission": "document.read",
+            "access_type": "read",
+            "resource_ids": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"] == {}
+
+
 def test_list_role_assignments_returns_all(client):
     role = client.post("/roles", json={"name": "Listener", "permissions": ["read"]}).json()
     created = client.post(

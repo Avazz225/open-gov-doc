@@ -27,6 +27,8 @@ const listOcrResultsMock = vi.fn();
 const downloadOcrPageImageMock = vi.fn();
 const listDocumentVersionsMock = vi.fn();
 const downloadDocumentVersionMock = vi.fn();
+const getSearchFacetsMock = vi.fn();
+const searchDocumentsMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -44,6 +46,8 @@ vi.mock("@/lib/api", () => ({
   downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
   listDocumentVersions: (...args: unknown[]) => listDocumentVersionsMock(...args),
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
+  getSearchFacets: (...args: unknown[]) => getSearchFacetsMock(...args),
+  searchDocuments: (...args: unknown[]) => searchDocumentsMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -113,6 +117,14 @@ describe("DocumentWorkspace", () => {
       },
     ]);
     downloadDocumentVersionMock.mockReset();
+    getSearchFacetsMock.mockReset();
+    getSearchFacetsMock.mockResolvedValue({ object_types: [] });
+    searchDocumentsMock.mockReset();
+    searchDocumentsMock.mockResolvedValue({
+      results: [],
+      total_returned: 0,
+      facet_counts: { folder: [], object_type: [] },
+    });
     window.localStorage.clear();
   });
 
@@ -474,5 +486,110 @@ describe("DocumentWorkspace", () => {
 
     await waitFor(() => expect(uploadDocumentMock).toHaveBeenCalled());
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("switches to the search view via the icon rail and back to documents", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await screen.findByText(/Rechnung.pdf/);
+    expect(screen.queryByLabelText("Suche")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTitle("Suche"));
+    expect(screen.getByLabelText("Suche")).toBeInTheDocument();
+    expect(screen.queryByText("Neuer Ordner")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTitle("Dokumente"));
+    expect(screen.queryByLabelText("Suche")).not.toBeInTheDocument();
+    expect(await screen.findByText(/Rechnung.pdf/)).toBeInTheDocument();
+  });
+
+  it("runs a search and opens a result as a document tab", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    searchDocumentsMock.mockResolvedValue({
+      results: [
+        {
+          id: "d2",
+          title: "Suchtreffer.pdf",
+          folder_id: "root",
+          object_type_id: null,
+          attributes: {},
+          current_version_number: 1,
+          deleted_at: null,
+          created_by: "alice",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          folder_name: "Start",
+          rank: 0.5,
+          snippet: "...gefundener Text...",
+        },
+      ],
+      total_returned: 1,
+      facet_counts: { folder: [], object_type: [] },
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(screen.getByTitle("Suche"));
+    await user.type(screen.getByLabelText("Suchbegriff"), "Vertrag");
+    await user.click(screen.getByText("Suchen"));
+
+    await waitFor(() => expect(searchDocumentsMock).toHaveBeenCalled());
+    expect(searchDocumentsMock.mock.calls[0][1].q).toBe("Vertrag");
+
+    await user.click(await screen.findByText("Suchtreffer.pdf"));
+
+    // Öffnen bleibt bewusst in der Suchansicht (kein automatischer
+    // View-Wechsel, siehe SearchPane-Kommentar) - die Vorschau rechts
+    // reagiert trotzdem sofort, da sie unabhängig vom aktiven View immer
+    // vom activeTabId gesteuert wird.
+    const previewPane = screen.getByLabelText("Vorschau");
+    expect(within(previewPane).getByText("Suchtreffer.pdf")).toBeInTheDocument();
+  });
+
+  it("shows attribute filter controls for the selected object type", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    getSearchFacetsMock.mockResolvedValue({
+      object_types: [
+        {
+          id: 1,
+          name: "Rechnung",
+          attributes: [
+            { name: "kunde", type: "string" },
+            { name: "faelligkeit", type: "date" },
+          ],
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(screen.getByTitle("Suche"));
+    await user.selectOptions(await screen.findByLabelText("Objekttyp"), "1");
+
+    expect(screen.getByText("kunde")).toBeInTheDocument();
+    expect(screen.getByText("faelligkeit")).toBeInTheDocument();
+    expect(screen.getByLabelText("faelligkeit von")).toBeInTheDocument();
+    expect(screen.getByLabelText("faelligkeit bis")).toBeInTheDocument();
+  });
+
+  it("shows a no-results message when the search returns nothing", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(screen.getByTitle("Suche"));
+    await user.click(screen.getByText("Suchen"));
+
+    expect(await screen.findByText("Keine Treffer.")).toBeInTheDocument();
   });
 });
