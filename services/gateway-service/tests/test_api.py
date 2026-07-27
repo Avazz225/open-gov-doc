@@ -56,6 +56,35 @@ def test_healthz(client):
     assert response.json() == {"status": "ok", "service": "gateway-service"}
 
 
+def test_cors_preflight_from_allowed_frontend_origin_succeeds(client):
+    # Browser-Frontends senden vor dem eigentlichen Request einen
+    # OPTIONS-Preflight (curl tut das nicht, deshalb blieb dieser Fall bei
+    # den sonstigen curl-basierten Tests unentdeckt). Ohne CORSMiddleware
+    # antwortet FastAPI hier mit 405, da OPTIONS auf der Proxy-Route nicht
+    # registriert ist.
+    response = client.options(
+        "/api/auth-service/login",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_cors_preflight_from_unknown_origin_is_rejected(client):
+    response = client.options(
+        "/api/auth-service/login",
+        headers={
+            "Origin": "http://evil.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_protected_route_without_token_is_rejected(client):
     response = client.get("/api/permission-service/healthz")
     assert response.status_code == 401

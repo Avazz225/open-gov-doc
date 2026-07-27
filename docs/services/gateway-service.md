@@ -31,6 +31,10 @@ erst einen Token braucht). Bei Erfolg werden die Identitäts-Claims als
 weitergereicht (aktuell von keinem Backend-Service konsumiert, siehe
 [ADR 0005](../adr/0005-gateway-registry-routing-and-inprocess-rate-limiting.md)).
 
+## CORS
+
+Die Browser-Frontends (`user-ui`, `admin-ui`) laufen auf einer anderen Origin als das Gateway — `CORSMiddleware` erlaubt `settings.cors_allowed_origins` (Default: `http://localhost:3000`/`:3001`, die Standard-Ports beider Frontends), `allow_credentials=False` (Auth läuft über den `Authorization`-Header, nicht über Cookies). **Zwischenfall & Fix**: Fehlte zunächst komplett — curl-basierte Verifikation deckte das nicht auf, da curl keinen Preflight-`OPTIONS`-Request auslöst. Im echten Browser scheiterte dadurch bereits der Login mit `405` auf den Preflight, bevor der eigentliche `POST /login` überhaupt gesendet wurde. Bei geänderten `USER_UI_PORT`/`ADMIN_UI_PORT` muss `DMS_CORS_ALLOWED_ORIGINS` (JSON-Array) entsprechend mit angepasst werden.
+
 ## Rate Limiting
 
 In-Prozess-Sliding-Window je Client (`sub`-Claim bei authentifizierten,

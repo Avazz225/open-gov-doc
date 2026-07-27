@@ -12,6 +12,7 @@
 | `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String) — erzeugt Dokument + Version 1 |
 | `GET` | `/documents?folder_id=...` | Nicht gelöschte Dokumente eines Ordners (seit P4-S2, Grundlage der User-UI-Navigation) — unbekannter `folder_id` liefert `[]`, kein 404 |
 | `GET` | `/documents/{id}` | Metadaten |
+| `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400 |
 | `DELETE` | `/documents/{id}?deleted_by=...` | Weiche Löschung (`deleted_at` gesetzt, Metadaten bleiben) |
 | `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
@@ -30,7 +31,7 @@
 - `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a).
 - `document_lock`: genau eine aktive Zeile je gesperrtem Dokument (`document_id` als PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 
-`folder_id`/`object_type_id` sind opake Referenzen ohne FK-Erzwingung über Service-Grenzen hinweg, werden aber seit P3-S3 aktiv geprüft: `folder_id` (falls gesetzt) muss beim Folder Service existieren (sonst 400), `object_type_id` (falls gesetzt) validiert `attributes`+`title` gegen den Object-Type Service (sonst 400 mit Fehlerliste). `attributes` wird nur bei der Erstellung gesetzt/validiert — es gibt noch keinen Endpunkt, um sie nachträglich zu ändern (offener Punkt).
+`folder_id`/`object_type_id` sind opake Referenzen ohne FK-Erzwingung über Service-Grenzen hinweg, werden aber seit P3-S3 aktiv geprüft: `folder_id` (falls gesetzt) muss beim Folder Service existieren (sonst 400), `object_type_id` (falls gesetzt) validiert `attributes`+`title` gegen den Object-Type Service (sonst 400 mit Fehlerliste). Seit P4-S4 gilt dieselbe Validierung auch für `PATCH /documents/{id}` — `folder_id`/`object_type_id` selbst bleiben dabei bewusst unveränderlich (Verschieben/Retypisieren sind eigene Operationen mit anderen Konsistenzfragen, kein reines Metadaten-Update).
 
 **Ad-hoc-Schema-Migration**: `attributes` kam erst in P3-S3 zur bestehenden `document`-Tabelle dazu. Ohne Alembic (siehe `CONTRIBUTING.md`) übernimmt ein `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in der Lifespan-Startup-Routine diese additive, defaultbehaftete Änderung idempotent — funktioniert nur für genau diese Art von Änderung (neue, nullable/defaultbehaftete Spalte), nicht für Umbenennungen/Typänderungen/Entfernen von Spalten. Sobald Schemaänderungen komplexer werden, wird echtes Alembic-Tooling nötig (siehe „Offene Entscheidungen" in `PROGRESS.md`).
 
@@ -57,6 +58,7 @@ Objektschlüssel sind **inhaltsadressiert**: `documents/{document_id}/{sha256}`.
 | `document.created` | `{title, created_by}` |
 | `document.version.created` | `{version_number, is_conflict, created_by}` |
 | `document.lock.force_released` | `{original_locked_by, released_by, reason}` |
+| `document.metadata.updated` | `{title}` (seit P4-S4) |
 | `document.deleted` | `{deleted_by}` |
 
 **Konsumiert:** keine.
@@ -75,5 +77,4 @@ Noch keine — folgt in Phase 11.
 
 - Kein Vier-Augen-Prinzip für Force-Unlock (4.3, folgt P6-S4).
 - Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
-- Kein Endpunkt, um `attributes`/`title` eines bestehenden Dokuments nachträglich zu ändern (und damit erneut zu validieren) — nur bei Erstellung.
 - Umlaufmappen-Referenzen (2.3) und Ersatzdarstellungen (2.4) sind eigene, spätere Sessions (P6-S3 bzw. P5-S2) und greifen auf Dokumente/Versionen dieses Service zu, ohne dass hier bereits etwas vorbereitet wurde.

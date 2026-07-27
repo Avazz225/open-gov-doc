@@ -78,7 +78,7 @@ Damit ist "sauber strukturiert und dokumentiert" kein Abschlussschritt, sondern 
 | BPMN-Engine | `SpiffWorkflow` + `bpmn-js-spiffworkflow` — **Lizenz-Check LGPLv3 vor P6-S1 einplanen** (13, offener Punkt) |
 | OCR | PaddleOCR (Standard) + Tesseract (`pytesseract`, Alternative) (3.9) |
 | Signatur | `pyHanko` (PAdES) (3.10) |
-| Frontend | React/Next.js, primär Client-Side-Rendering (8) |
+| Frontend | React/Next.js, primär Client-Side-Rendering (8); `bpmn-js` für den Process Designer (P6-S6) |
 | Monitoring | Prometheus-Exposition + Grafana-Templates + CheckMK-Anbindung (10.1) |
 | Containerisierung | Docker + `docker-compose` lokal; Kubernetes-Readiness erst ab P10 relevant |
 
@@ -118,6 +118,9 @@ Jede Zeile = eine Session (Konzept-Referenz in Klammern). `P4-S3` markiert den e
 | P4-S1 | API-Gateway/BFF: Routing über Registry, Auth-Validierung, Rate Limiting (3.5) |
 | P4-S2 | User-UI Grundgerüst: Login, Navigation, Upload/Download, Vorschau-Stub (8) |
 | P4-S3 | Admin-UI Grundgerüst (Nutzer/Rollen, Objekttyp-Editor, Registry-Übersicht) + **Doku-/ADR-Pass**: Architekturdiagramm des bisherigen Stands, offene Entscheidungen konsolidiert → **Meilenstein: lauffähiges Kern-DMS** |
+| P4-S4 | **User-UI v2** (Nutzer-Feedback nach erstem echten Browser-Test von P4-S2/S3, 8): dreigeteilter Hauptbereich (Explorer mit Dokumenttabs oben links, Metadaten-Panel unten links, Vorschau rechts, alle drei über Tab-Auswahl synchronisiert und resizable), Ordner-CRUD (bisher nur Navigation), Dokumentmetadaten anzeigen/bearbeiten (Attribute gemäß Objekttyp, 2.2 — braucht vermutlich einen neuen `PATCH`-Endpunkt am Document Service, siehe dessen "Offene Punkte"), linke iconbasierte Navigationsleiste für Cross-Cutting-Funktionen außerhalb des Hauptbereichs |
+| P4-S5 | **Admin-UI v2** (dasselbe Nutzer-Feedback, 8): Dashboard-Layout mit linker, ausklapp-/gruppierbarer Navigationsseitenleiste statt Top-Nav-Links; Unterstützung mehrerer Installationen aus einer Admin-UI heraus (Installationsliste mit je eigenem Gateway-Endpunkt/eigener Sitzung, Wechsel ohne erneute Anmeldung solange die Sitzung gilt, siehe 3a/8) |
+| P4-S6 | **Cross-UI Theming**: Hell/Dunkel/Hoher-Kontrast/Automatisch für beide bestehenden Frontend-Apps (8), Präferenz im Nutzerprofil statt nur lokal gespeichert und geräteübergreifend wirksam — Speicherort vermutlich ein Keycloak-User-Attribut über die bereits vorhandene Admin-API-Anbindung des Auth Service (P4-S3), damit kein neuer Persistenz-Baustein nötig wird; endgültige Technik-Entscheidung ist Teil dieser Session |
 
 ### Phase 5 — Verarbeitung: Scan, Rendering, OCR, Suche
 | Session | Deliverable |
@@ -135,6 +138,7 @@ Jede Zeile = eine Session (Konzept-Referenz in Klammern). `P4-S3` markiert den e
 | P6-S3 | Case Service: Umlaufmappen, dynamische Referenz + Abschluss-Snapshot, prozessspez. Bearbeitungskopien (2.3) |
 | P6-S4 | Generischer Vier-Augen-Approval-Mechanismus + Superuser Break-Glass + Not-Shutdown (4.3/4.6/4.8) |
 | P6-S5 | Signature Service: pyHanko/PAdES, SES/AES/QES, Signature-Task-Typ (3.10) |
+| P6-S6 | **Process-Designer-UI** (eigenständige Frontend-Anwendung, **nicht** Teil der Admin-UI, siehe 7.1/8): grafische BPMN-2.0-Modellierung über `bpmn-js` gegen die Workflow Engine aus P6-S1, Import/Export von BPMN-XML, Validierung referenzierter Objekttypen/Ordnerziele/Instanz-Ziele beim Import |
 
 ### Phase 7 — Compliance & Aussonderung
 | Session | Deliverable |
@@ -193,7 +197,7 @@ Jede Zeile = eine Session (Konzept-Referenz in Klammern). `P4-S3` markiert den e
 | P14-S2 | Reviewer/Approval-UI + Migrations-Konsole (8) |
 | P14-S3 | Backlog-Kandidaten aus 12.2 (ERP-Konnektoren, Mobile, KI) sauber als Plugin-Erweiterungspunkte vorbereiten (nicht implementieren) + finaler Repo-weiter Doku-/Struktur-Audit |
 
-**43 Sessions insgesamt**, davon 12 bis zum MVP-Meilenstein (P4-S3).
+**47 Sessions insgesamt** (ursprünglich 43, seit P4-S3 um P4-S4/S5/S6 und P6-S6 ergänzt — direktes Nutzer-Feedback nach dem ersten echten Browser-Test des MVP, siehe `PROGRESS.md`), davon 12 bis zum MVP-Meilenstein (P4-S3).
 
 ## PROGRESS.md — Resume-Mechanismus
 
@@ -207,5 +211,5 @@ Jede Zeile = eine Session (Konzept-Referenz in Klammern). `P4-S3` markiert den e
 
 - `docker-compose up` im betroffenen Bereich muss fehlerfrei starten.
 - `pytest` je Service läuft grün (Unit + einfache Integrationstests gegen die Compose-Umgebung).
-- Bei UI-Sessions (P4-S2, P4-S3, P14-S2): Dev-Server starten, Kernpfad (Login → Navigation → Upload/Freigabe je nach Session) manuell im Browser durchklicken, nicht nur Typecheck/Build.
+- Bei UI-Sessions (P4-S2, P4-S3, P4-S4, P4-S5, P4-S6, P6-S6, P14-S2): Dev-Server starten, Kernpfad (Login → Navigation → Upload/Freigabe je nach Session) manuell im Browser durchklicken, nicht nur Typecheck/Build. **Erfahrungswert aus P4-S2/S3**: Reine curl-basierte Verifikation reicht nicht aus — ein CORS-Bug (fehlende Preflight-Behandlung im Gateway) und Layout-/UX-Mängel wurden erst durch echtes Browser-Testen der Nutzerin/des Nutzers sichtbar. Steht in der jeweiligen Session-Umgebung kein Browser zur Verfügung, ist das explizit als Einschränkung zu kommunizieren statt stillschweigend nur curl-Checks als ausreichend zu behandeln.
 - Ab P8 zusätzlich: CLI-Smoke-Test der jeweils neuen Funktionalität.

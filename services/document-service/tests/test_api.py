@@ -172,6 +172,39 @@ def test_force_release_then_conflicting_checkin(client):
     assert alice_response.json()["is_conflict"] is True
 
 
+def test_update_document_metadata(client):
+    body = upload(client, title="Alt").json()
+    document_id = body["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"title": "Neu", "attributes": {"foo": "bar"}},
+    )
+
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["title"] == "Neu"
+    assert updated["attributes"] == {"foo": "bar"}
+
+    get_response = client.get(f"/documents/{document_id}")
+    assert get_response.json()["title"] == "Neu"
+
+
+def test_update_document_metadata_partial_update_keeps_title(client):
+    body = upload(client, title="Bleibt").json()
+    document_id = body["id"]
+
+    response = client.patch(f"/documents/{document_id}", json={"attributes": {"foo": "bar"}})
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Bleibt"
+
+
+def test_update_document_metadata_unknown_document_returns_404(client):
+    response = client.patch("/documents/does-not-exist", json={"title": "x"})
+    assert response.status_code == 404
+
+
 def test_delete_document(client):
     body = upload(client).json()
     document_id = body["id"]

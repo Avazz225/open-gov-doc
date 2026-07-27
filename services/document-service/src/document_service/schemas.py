@@ -3,6 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class DocumentUpdate(BaseModel):
+    title: str | None = None
+    attributes: dict | None = None
+
+
 class DocumentOut(BaseModel):
     id: str
     title: str

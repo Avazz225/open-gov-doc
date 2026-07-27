@@ -97,6 +97,76 @@ export async function listChildFolders(token: string, folderId: string): Promise
   return response.json();
 }
 
+export async function createFolder(
+  token: string,
+  params: { name: string; parentId: string; createdBy: string }
+): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    "folders",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: params.name,
+        parent_id: params.parentId,
+        created_by: params.createdBy,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function renameFolder(token: string, folderId: string, name: string): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteFolder(token: string, folderId: string): Promise<void> {
+  await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export interface ObjectTypeAttribute {
+  name: string;
+  type?: string;
+  required?: boolean;
+  min?: number;
+  max?: number;
+  pattern?: string;
+}
+
+export interface ObjectType {
+  id: number;
+  name: string;
+  applies_to: string;
+  attributes: ObjectTypeAttribute[];
+}
+
+export async function getObjectType(token: string, objectTypeId: number): Promise<ObjectType> {
+  const response = await request(
+    "object-type-service",
+    `object-types/${objectTypeId}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 export interface DocumentSummary {
   id: string;
   title: string;
@@ -137,6 +207,24 @@ export async function uploadDocument(
     "document-service",
     "documents",
     { method: "POST", body: formData },
+    token
+  );
+  return response.json();
+}
+
+export async function updateDocumentMetadata(
+  token: string,
+  documentId: string,
+  params: { title?: string; attributes?: Record<string, unknown> }
+): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
     token
   );
   return response.json();

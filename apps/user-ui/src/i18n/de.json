@@ -5,7 +5,12 @@
   },
   "common": {
     "logout": "Abmelden",
-    "loading": "Lade..."
+    "loading": "Lade...",
+    "create": "Anlegen",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "loadError": "Laden fehlgeschlagen",
+    "deleteError": "Löschen fehlgeschlagen"
   },
   "login": {
     "heading": "Anmelden",
@@ -21,7 +26,6 @@
     "rootLabel": "Start",
     "emptyFolder": "Dieser Ordner ist leer.",
     "download": "Herunterladen",
-    "preview": "Vorschau",
     "loadError": "Laden fehlgeschlagen",
     "downloadError": "Download fehlgeschlagen"
   },
@@ -33,9 +37,44 @@
     "submitting": "Lade hoch...",
     "error": "Upload fehlgeschlagen"
   },
-  "previewStub": {
-    "heading": "Vorschau: {title}",
-    "message": "Vorschau ist noch nicht verfügbar - folgt mit dem Rendering/Preview Service (P5-S2).",
-    "close": "Schließen"
+  "iconRail": {
+    "label": "Cross-Cutting-Navigation",
+    "documents": "Dokumente",
+    "searchComingSoon": "Suche (folgt in P5-S4)",
+    "settingsComingSoon": "Einstellungen (folgt in P4-S6)"
+  },
+  "explorer": {
+    "paneLabel": "Explorer",
+    "openDocuments": "Geöffnete Dokumente",
+    "closeTab": "{title} schließen",
+    "newFolder": "Neuer Ordner",
+    "newFolderFormLabel": "Neuen Ordner anlegen",
+    "newFolderPlaceholder": "Ordnername",
+    "renameFolderFormLabel": "Ordner umbenennen",
+    "renameFolder": "{name} umbenennen",
+    "deleteFolder": "{name} löschen",
+    "confirmDeleteFolder": "Ordner \"{name}\" wirklich löschen?",
+    "toggleUpload": "Hochladen",
+    "createFolderError": "Ordner konnte nicht angelegt werden",
+    "renameFolderError": "Ordner konnte nicht umbenannt werden",
+    "deleteFolderError": "Ordner konnte nicht gelöscht werden (ggf. nicht leer)",
+    "resizeHorizontal": "Spaltenbreite ändern",
+    "resizeVertical": "Zeilenhöhe ändern"
+  },
+  "metadata": {
+    "paneLabel": "Metadaten",
+    "heading": "Metadaten",
+    "formLabel": "Dokumentmetadaten bearbeiten",
+    "titleLabel": "Titel",
+    "noSelection": "Kein Dokument ausgewählt.",
+    "noObjectType": "Kein Objekttyp zugewiesen - keine weiteren Attribute.",
+    "loadObjectTypeError": "Objekttyp konnte nicht geladen werden",
+    "saveError": "Speichern fehlgeschlagen",
+    "saving": "Speichere..."
+  },
+  "preview": {
+    "paneLabel": "Vorschau",
+    "noSelection": "Kein Dokument ausgewählt.",
+    "stubMessage": "Vorschau ist noch nicht verfügbar - folgt mit dem Rendering/Preview Service (P5-S2)."
   }
 }

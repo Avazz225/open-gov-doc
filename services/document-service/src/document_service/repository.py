@@ -85,6 +85,27 @@ async def create_document(
     return document
 
 
+async def update_document_metadata(
+    session: AsyncSession,
+    document_id: str,
+    *,
+    title: str | None,
+    attributes: dict | None,
+) -> Document:
+    """Metadaten-Update (P4-S4, Nutzer-Feedback: Attribute waren bisher nur bei
+    der Erstellung setzbar). Ändert bewusst nicht `folder_id`/`object_type_id` -
+    das wären Verschiebe- bzw. Retypisierungs-Operationen mit eigenen
+    Konsistenzfragen, kein reines Metadaten-Update."""
+    document = await get_document(session, document_id)
+    if title is not None:
+        document.title = title
+    if attributes is not None:
+        document.attributes = attributes
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
 async def delete_document(session: AsyncSession, document_id: str, *, deleted_by: str) -> Document:
     """Weiche Löschung (Sichtbarkeit aus, Metadaten bleiben). Aufbewahrung/
     Zwangslöschung/Löschregister (5.2/5.2a) sind bewusst nicht Teil dieser

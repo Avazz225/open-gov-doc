@@ -11,6 +11,13 @@ class Settings(BaseServiceSettings):
     keycloak_realm: str = "dms"
     keycloak_client_id: str = "dms-api"
 
+    # Browser-Frontends (user-ui/admin-ui, Konzept 8) laufen auf einer anderen
+    # Origin als das Gateway - ohne CORS-Freigabe scheitert bereits der
+    # Preflight-OPTIONS-Request mit 405, bevor der eigentliche Request
+    # überhaupt gesendet wird (curl-basierte Tests decken das nicht ab, da
+    # curl keinen Origin-Header setzt und damit keinen Preflight auslöst).
+    cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+
     # "{service_type}:{path}" (Pfad ohne führenden Slash, exakter Match) - Routen,
     # die ohne Bearer-Token erreichbar sein müssen, allen voran Login/Refresh
     # selbst (man braucht ja erst einen Token, um einen Token zu bekommen).

@@ -5,6 +5,7 @@ import httpx
 from dms_auth_client import InvalidTokenError, TokenValidator
 from dms_common import configure_logging
 from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from gateway_service.rate_limiter import RateLimiter
 from gateway_service.settings import Settings
@@ -49,6 +50,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+# Muss vor den Routen registriert werden, damit Starlette Preflight-
+# OPTIONS-Requests abfängt, bevor sie auf die generische Proxy-Route treffen
+# würden (dort ist OPTIONS gar nicht als Methode registriert).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 
 
 @app.get("/healthz")

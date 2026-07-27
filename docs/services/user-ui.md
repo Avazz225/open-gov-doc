@@ -1,6 +1,6 @@
 # user-ui
 
-**Verantwortung:** Authentifizierte Web-Oberfläche für Endnutzer — Anmelden, Ordner-Navigation, Dokument-Upload/-Download, Vorschau-Platzhalter (Konzept 8).
+**Verantwortung:** Authentifizierte Web-Oberfläche für Endnutzer — Anmelden, Ordner-Navigation inkl. CRUD, Dokument-Upload/-Download, Dokumentmetadaten-Bearbeitung, Vorschau-Platzhalter (Konzept 8).
 **Konzept-Referenz:** 8
 **Kein eigenes Postgres-Schema** — reine clientseitig gerenderte SPA (statischer Export, siehe [ADR 0006](../adr/0006-user-ui-static-export-spa.md)), kein eigener Backend-Prozess.
 
@@ -13,7 +13,18 @@
 | Route | Zweck |
 |---|---|
 | `/login/` | Anmeldung (Benutzername/Passwort gegen den Auth Service über das Gateway) |
-| `/` | Ordner-Browser: Navigation, Upload, Download, Vorschau-Platzhalter — nur erreichbar mit gültiger Session (clientseitiger Redirect nach `/login/`, wenn nicht angemeldet) |
+| `/` | `DocumentWorkspace` (seit P4-S4) — nur erreichbar mit gültiger Session (clientseitiger Redirect nach `/login/`, wenn nicht angemeldet) |
+
+## Layout (P4-S4, Nutzer-Feedback nach dem ersten echten Browser-Test des MVP)
+
+Ersetzt die frühere flache `FolderBrowser`-Ansicht (P4-S2) durch ein dreigeteiltes, resizable Arbeitsbereichs-Layout gemäß Konzept 8:
+
+- **`IconRail`** (ganz links, außerhalb des Main-Contents): iconbasierte Cross-Cutting-Navigation. Aktuell nur "Dokumente" funktional, "Suche" (P5-S4) und "Einstellungen" (P4-S6) sind bewusst sichtbare, deaktivierte Platzhalter.
+- **`ExplorerPane`** (oben links): Windows-Explorer-artige Ordnernavigation mit Breadcrumb, Ordner-CRUD (Anlegen/Umbenennen/Löschen — die Backend-Endpunkte existierten bereits seit P3-S3, nur die UI dafür fehlte) und einer Tableiste für geöffnete Dokumente. Klick auf ein Dokument öffnet es als Tab, statt einen modalen Dialog zu zeigen.
+- **`MetadataPanel`** (unten links): Metadaten des über die Tabs ausgewählten Dokuments. Attribut-Formfelder werden dynamisch aus dem Objekttyp-Schema generiert (`GET /api/object-type-service/object-types/{id}`, 2.2) — ohne zugewiesenen Objekttyp ist nur der Titel editierbar. Speichert über den seit P4-S4 neuen `PATCH /api/document-service/documents/{id}`.
+- **`PreviewPane`** (rechts): vom aktiven Tab synchronisiert, zeigt weiterhin nur einen Stub (echtes Rendering folgt mit dem Preview Service, P5-S2) — jetzt aber als permanenter Bereich statt als Overlay.
+
+Alle drei Content-Spalten sind über `Splitter`-Ziehgriffe größenveränderbar; die Aufteilung wird pro Browser in `localStorage` gemerkt (`dms.explorer.leftWidth`/`dms.explorer.topHeight`). `Splitter` ist eine generische, abhängigkeitsfreie Komponente (Pointer-Events, Neuberechnung relativ zur Container-Bounding-Box bei jedem Move statt kumulierter Deltas) — keine externe Layout-Bibliothek eingeführt, um die Abhängigkeitsfläche klein zu halten.
 
 ## Anbindung an das Backend
 
@@ -24,9 +35,12 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 | Anmelden | `POST /api/auth-service/login` (öffentliche Route, kein Token nötig) |
 | Identität nach Login | `GET /api/auth-service/me` |
 | Ordner-Navigation | `GET /api/folder-service/folders/{id}/children` (Start: `root`) |
-| Dokumente eines Ordners | `GET /api/document-service/documents?folder_id={id}` (neuer Endpunkt, seit dieser Session — siehe `docs/services/document-service.md`) |
+| Ordner anlegen/umbenennen/löschen | `POST /api/folder-service/folders`, `PATCH /api/folder-service/folders/{id}`, `DELETE /api/folder-service/folders/{id}` (seit P4-S4 in der UI verdrahtet) |
+| Dokumente eines Ordners | `GET /api/document-service/documents?folder_id={id}` |
 | Hochladen | `POST /api/document-service/documents` (multipart) |
 | Herunterladen | `GET /api/document-service/documents/{id}/content` |
+| Dokumentmetadaten ändern | `PATCH /api/document-service/documents/{id}` (seit P4-S4, neuer Endpunkt) |
+| Objekttyp-Schema für das Metadaten-Panel | `GET /api/object-type-service/object-types/{id}` |
 
 ## Auth-Zustand
 
@@ -34,7 +48,7 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 
 ## Vorschau (2.4)
 
-`components/PreviewStub.tsx` zeigt nur einen Hinweis-Dialog ("Vorschau ist noch nicht verfügbar") statt einer echten Vorschau — der Rendering/Preview Service (3.7) existiert erst ab P5-S2. Die Komponente ist bewusst isoliert, damit sie später durch eine echte Vorschau ersetzt werden kann, ohne den Ordner-Browser selbst anzufassen.
+`components/PreviewPane.tsx` zeigt nur einen Hinweis ("Vorschau ist noch nicht verfügbar") statt einer echten Vorschau — der Rendering/Preview Service (3.7) existiert erst ab P5-S2. Seit P4-S4 ist das ein fest im Layout verankerter Bereich (vorher ein modaler Dialog, `PreviewStub`) — bewusst weiterhin isoliert, damit er später durch eine echte Vorschau ersetzt werden kann, ohne den Rest des Layouts anzufassen.
 
 ## Internationalisierung (Konzept 8, seit P4-S3)
 
@@ -47,8 +61,8 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — Typprüfung, ESLint, produktionsfähiger statischer Export.
-- `npm test` (Vitest + Testing Library): `AuthProvider` (Login/Logout/Session-Wiederherstellung/Ablauf), API-Client (Gateway-URL-Aufbau, Bearer-Header, Fehlerbehandlung), `FolderBrowser` (Navigation, Upload-Reload, Vorschau-Stub) — Netzwerkschicht (`fetch`) gemockt, da sie die Grenze zur externen Infrastruktur ist (analog zu `dms-auth-client`s lokalen Test-Schlüsseln statt echtem Keycloak).
-- **Kein Browser für visuelle/E2E-Tests in dieser Entwicklungsumgebung verfügbar** (kein installiertes Chrome/Chromium, Playwright daher nicht einsetzbar) — stattdessen wurde jeder von der UI verwendete Gateway-Aufruf einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (Login → `/me` → Ordner-Navigation inkl. neu angelegtem Unterordner → Upload → Liste zeigt neues Dokument → Download liefert exakt die hochgeladenen Bytes zurück). Ein Mensch sollte die Oberfläche vor einer Produktivnutzung dennoch einmal im echten Browser durchklicken.
+- `npm test` (Vitest + Testing Library): `AuthProvider` (Login/Logout/Session-Wiederherstellung/Ablauf), API-Client (Gateway-URL-Aufbau, Bearer-Header, Fehlerbehandlung, seit P4-S4 auch Ordner-CRUD/Metadaten-PATCH), `DocumentWorkspace` (Navigation, Ordner-CRUD, Tab-Öffnen inkl. Vorschau-Synchronisation, Metadaten-Speichern inkl. Tab-Titel-Update, Upload-Reload) — Netzwerkschicht (`fetch`) gemockt, da sie die Grenze zur externen Infrastruktur ist.
+- **Kein Browser für visuelle/E2E-Tests in dieser Entwicklungsumgebung verfügbar** (kein installiertes Chrome/Chromium, Playwright daher nicht einsetzbar) — stattdessen wurde jeder von der UI verwendete Gateway-Aufruf einzeln per `curl` gegen den echten laufenden Compose-Stack nachvollzogen (Login → Ordner anlegen/umbenennen → Upload in den neuen Ordner → Metadaten-PATCH ändert Titel/Attribute → Liste zeigt die Änderung → Ordner löschen → Objekttyp-Schema über das Gateway abrufbar). Die neue Resizable-/Tab-/Layout-Interaktion selbst (Ziehgriffe, Tab-Wechsel-Optik) konnte dadurch **nicht visuell** verifiziert werden — nur über die Vitest-Komponententests. Ein Mensch sollte die Oberfläche vor einer Produktivnutzung im echten Browser durchklicken.
 
 ## Offene Punkte
 
@@ -59,3 +73,6 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 - Kein automatisiertes Browser-E2E in dieser Umgebung möglich (kein Chrome/Chromium installiert) — nachzuholen, sobald eine Umgebung mit Browser verfügbar ist (z. B. CI).
 - Rollenabhängige Ansichten/Branding (Konzept 8, "Anpassbarkeit") nicht Teil dieses Grundgerüsts.
 - i18n nur strukturell vorbereitet (ADR 0007), keine zweite Sprache und keine UI-Sprachumschaltung.
+- Kein Theming (Hell/Dunkel/Hoher-Kontrast/Auto) — folgt in P4-S6.
+- Ordner-Verschieben (neuer Elternordner) ist im Backend (`PATCH /folders/{id}`) bereits möglich, in der UI aber bewusst nicht verdrahtet — Umbenennen deckt den in dieser Session geforderten CRUD-Umfang ab, ein Drag&Drop-Verschieben ist eine spätere UX-Verfeinerung.
+- Bekannte Backend-Lücke, bei dieser Session sichtbar geworden: `DELETE /folders/{id}` prüft nur auf Unterordner, nicht auf enthaltene Dokumente — ein Ordner mit nur Dokumenten (keinen Unterordnern) lässt sich aktuell löschen, ohne dass die Dokumente mitgelöscht oder die Löschung blockiert wird (deren `folder_id` bliebe auf eine nicht mehr existierende Ressource verweisen). Nicht in dieser Session behoben, siehe `PROGRESS.md`.

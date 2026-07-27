@@ -18,6 +18,7 @@ from document_service.object_type_client import ObjectTypeClient
 from document_service.schemas import (
     CheckinResult,
     DocumentOut,
+    DocumentUpdate,
     DocumentVersionOut,
     LockAcquireRequest,
     LockForceReleaseRequest,
@@ -171,6 +172,34 @@ async def get_document(
         return await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.patch("/documents/{document_id}", response_model=DocumentOut)
+async def update_document(
+    document_id: str, payload: DocumentUpdate, session: AsyncSession = Depends(get_session)
+) -> DocumentOut:
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if document.object_type_id is not None:
+        errors = await app.state.object_type_client.validate(
+            document.object_type_id,
+            name=payload.title if payload.title is not None else document.title,
+            attributes=payload.attributes if payload.attributes is not None else document.attributes,
+        )
+        if errors:
+            raise HTTPException(status_code=400, detail={"errors": errors})
+
+    updated = await repository.update_document_metadata(
+        session, document_id, title=payload.title, attributes=payload.attributes
+    )
+    await session.commit()
+    await publish_event(
+        "document.metadata.updated", subject=document_id, payload={"title": updated.title}
+    )
+    return updated
 
 
 @app.delete("/documents/{document_id}", response_model=DocumentOut)

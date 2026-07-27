@@ -43,6 +43,35 @@ async def test_delete_document_sets_deleted_at(session):
     assert deleted.deleted_at is not None
 
 
+async def test_update_document_metadata_changes_title_and_attributes(session):
+    document = await _make_document(session, attributes={"a": 1})
+
+    updated = await repository.update_document_metadata(
+        session, document.id, title="Neuer Titel", attributes={"a": 2}
+    )
+
+    assert updated.title == "Neuer Titel"
+    assert updated.attributes == {"a": 2}
+
+
+async def test_update_document_metadata_partial_update_keeps_other_field(session):
+    document = await _make_document(session, title="Original", attributes={"a": 1})
+
+    updated = await repository.update_document_metadata(
+        session, document.id, title=None, attributes={"a": 2}
+    )
+
+    assert updated.title == "Original"
+    assert updated.attributes == {"a": 2}
+
+
+async def test_update_document_metadata_unknown_document_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.update_document_metadata(
+            session, "does-not-exist", title="x", attributes=None
+        )
+
+
 async def test_checkin_normal_advances_current_version(session):
     document = await _make_document(session)
 

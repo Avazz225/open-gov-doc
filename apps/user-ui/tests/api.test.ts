@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, listChildFolders, login } from "@/lib/api";
+import { ApiError, createFolder, listChildFolders, login, updateDocumentMetadata } from "@/lib/api";
 
 function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = {}) {
   const { ok = true, status = 200 } = init;
@@ -44,6 +44,33 @@ describe("api client", () => {
     const [, init] = fetchMock.mock.calls[0];
     const headers = init.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token-123");
+  });
+
+  it("creates a folder via the folder-service route", async () => {
+    const fetchMock = mockFetchOnce({ id: "f1", name: "Neu" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFolder("token-123", { name: "Neu", parentId: "root", createdBy: "alice" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://localhost:8009/api/folder-service/folders");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "Neu",
+      parent_id: "root",
+      created_by: "alice",
+    });
+  });
+
+  it("PATCHes document metadata via the document-service route", async () => {
+    const fetchMock = mockFetchOnce({ id: "d1", title: "Neu" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateDocumentMetadata("token-123", "d1", { title: "Neu", attributes: { a: 1 } });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://localhost:8009/api/document-service/documents/d1");
+    expect(init.method).toBe("PATCH");
   });
 
   it("raises ApiError with the backend's detail message on failure", async () => {
