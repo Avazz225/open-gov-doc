@@ -204,13 +204,32 @@ export async function deleteRoleAssignment(token: string, assignmentId: number):
   );
 }
 
+// Verfügbare Attribut-Typen der Constraint Engine (4.5) - siehe
+// libs/dms-constraint-engine.
+export type AttributeType = "string" | "decimal" | "integer" | "boolean" | "date" | "reference";
+
+export interface ObjectTypeAttribute {
+  name: string;
+  type: AttributeType;
+  required?: boolean;
+  pattern?: string;
+  min?: number;
+  max?: number;
+}
+
+// Sentinel für "direkt unter der Wurzel platzierbar" (2.2a, ADR 0013) - muss
+// exakt zum Backend-Konstanten `ROOT_PARENT_TYPE` passen.
+export const ROOT_PARENT_TYPE = "$ROOT";
+
 export interface ObjectType {
   id: number;
   name: string;
   applies_to: string;
-  attributes: Array<Record<string, unknown>>;
+  attributes: ObjectTypeAttribute[];
   naming_constraints: Record<string, unknown> | null;
   conditions: Array<Record<string, unknown>>;
+  allowed_parent_types: string[] | null;
+  icon: string | null;
 }
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -220,12 +239,60 @@ export async function listObjectTypes(token: string): Promise<ObjectType[]> {
 
 export async function createObjectType(
   token: string,
-  params: { name: string; appliesTo: "document" | "folder"; attributes: Array<Record<string, unknown>> }
+  params: {
+    name: string;
+    appliesTo: "document" | "folder";
+    attributes: ObjectTypeAttribute[];
+    allowedParentTypes: string[] | null;
+    icon: string | null;
+  }
 ): Promise<ObjectType> {
   const response = await request(
     "object-type-service",
     "object-types",
-    jsonInit({ name: params.name, applies_to: params.appliesTo, attributes: params.attributes }),
+    jsonInit({
+      name: params.name,
+      applies_to: params.appliesTo,
+      attributes: params.attributes,
+      allowed_parent_types: params.allowedParentTypes,
+      icon: params.icon,
+    }),
+    token
+  );
+  return response.json();
+}
+
+// Bewusst kein `name`/`appliesTo` im Payload - beide sind serverseitig nach
+// Anlage unveränderlich (siehe object-type-service). `namingConstraints`/
+// `conditions` werden unverändert durchgereicht statt in der geführten
+// Oberfläche editierbar zu sein (außerhalb des Umfangs von P5b-S3) - ohne das
+// würde ein Speichern über diesen Editor sie stillschweigend auf ihren
+// Default zurücksetzen.
+export async function updateObjectType(
+  token: string,
+  objectTypeId: number,
+  params: {
+    attributes: ObjectTypeAttribute[];
+    namingConstraints: Record<string, unknown> | null;
+    conditions: Array<Record<string, unknown>>;
+    allowedParentTypes: string[] | null;
+    icon: string | null;
+  }
+): Promise<ObjectType> {
+  const response = await request(
+    "object-type-service",
+    `object-types/${objectTypeId}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        attributes: params.attributes,
+        naming_constraints: params.namingConstraints,
+        conditions: params.conditions,
+        allowed_parent_types: params.allowedParentTypes,
+        icon: params.icon,
+      }),
+    },
     token
   );
   return response.json();
@@ -235,6 +302,76 @@ export async function deleteObjectType(token: string, objectTypeId: number): Pro
   await request(
     "object-type-service",
     `object-types/${objectTypeId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+// Formular-Layouts (2.2b, seit P5b-S2, ADR 0014) - `is_custom: false` heißt
+// "generiertes Smart Layout, nicht gespeichert", `true` heißt "explizites,
+// über PUT gespeichertes Override".
+export type LayoutPurpose = "display" | "search" | "upload";
+
+export interface LayoutField {
+  attribute: string;
+  label: string;
+  required: boolean;
+}
+
+export interface LayoutRow {
+  columns: LayoutField[];
+}
+
+export interface LayoutData {
+  rows: LayoutRow[];
+  responsive_breakpoint_px: number;
+  is_custom: boolean;
+}
+
+export async function getObjectTypeLayout(
+  token: string,
+  objectTypeId: number,
+  purpose: LayoutPurpose
+): Promise<LayoutData> {
+  const response = await request(
+    "object-type-service",
+    `object-types/${objectTypeId}/layouts/${purpose}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function putObjectTypeLayout(
+  token: string,
+  objectTypeId: number,
+  purpose: LayoutPurpose,
+  payload: { rows: LayoutRow[]; responsiveBreakpointPx: number }
+): Promise<LayoutData> {
+  const response = await request(
+    "object-type-service",
+    `object-types/${objectTypeId}/layouts/${purpose}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rows: payload.rows,
+        responsive_breakpoint_px: payload.responsiveBreakpointPx,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function resetObjectTypeLayout(
+  token: string,
+  objectTypeId: number,
+  purpose: LayoutPurpose
+): Promise<void> {
+  await request(
+    "object-type-service",
+    `object-types/${objectTypeId}/layouts/${purpose}`,
     { method: "DELETE" },
     token
   );

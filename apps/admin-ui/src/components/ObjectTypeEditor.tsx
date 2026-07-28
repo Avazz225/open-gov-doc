@@ -1,26 +1,109 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
-  type ObjectType,
+  ROOT_PARENT_TYPE,
   createObjectType,
   deleteObjectType,
   listObjectTypes,
+  putObjectTypeLayout,
+  updateObjectType,
+  type AttributeType,
+  type LayoutRow,
+  type ObjectType,
+  type ObjectTypeAttribute,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-const EXAMPLE_ATTRIBUTES = `[{"name": "Rechnungsnummer", "required": true}]`;
+const ATTRIBUTE_TYPES: AttributeType[] = [
+  "string",
+  "decimal",
+  "integer",
+  "boolean",
+  "date",
+  "reference",
+];
+const ICON_OPTIONS = [
+  "folder",
+  "folder-open",
+  "folder-star",
+  "archive",
+  "briefcase",
+  "invoice",
+  "contract",
+];
+// Muss zur Smart-Layout-Generierung des Backends passen (2.2b,
+// object_type_service.layout.COLUMNS_PER_ROW), da hier nur beim Anlegen
+// einmalig dieselbe Paketierung mit den hier vergebenen Anzeigenamen
+// nachgebildet wird (siehe Begründung bei handleSubmit).
+const LAYOUT_COLUMNS_PER_ROW = 2;
+const LAYOUT_PURPOSES = ["display", "search", "upload"] as const;
+
+interface AttributeDraft {
+  name: string;
+  label: string;
+  type: AttributeType;
+  required: boolean;
+  pattern: string;
+  min: string;
+  max: string;
+}
+
+function emptyAttribute(): AttributeDraft {
+  return { name: "", label: "", type: "string", required: false, pattern: "", min: "", max: "" };
+}
+
+function toBackendAttribute(draft: AttributeDraft): ObjectTypeAttribute {
+  const attribute: ObjectTypeAttribute = {
+    name: draft.name.trim(),
+    type: draft.type,
+    required: draft.required,
+  };
+  if (draft.type === "string" && draft.pattern.trim()) {
+    attribute.pattern = draft.pattern.trim();
+  }
+  if ((draft.type === "decimal" || draft.type === "integer") && draft.min.trim() !== "") {
+    attribute.min = Number(draft.min);
+  }
+  if ((draft.type === "decimal" || draft.type === "integer") && draft.max.trim() !== "") {
+    attribute.max = Number(draft.max);
+  }
+  return attribute;
+}
+
+function buildGeneratedLayoutRows(drafts: AttributeDraft[]): LayoutRow[] {
+  const rows: LayoutRow[] = [];
+  for (let i = 0; i < drafts.length; i += LAYOUT_COLUMNS_PER_ROW) {
+    const chunk = drafts.slice(i, i + LAYOUT_COLUMNS_PER_ROW);
+    rows.push({
+      columns: chunk.map((draft) => ({
+        attribute: draft.name.trim(),
+        label: draft.label.trim() || draft.name.trim(),
+        required: draft.required,
+      })),
+    });
+  }
+  return rows;
+}
+
+function iconLabel(t: (path: string) => string, value: string): string {
+  const translated = t(`objectTypes.icons.${value}`);
+  return translated === `objectTypes.icons.${value}` ? value : translated;
+}
 
 export function ObjectTypeEditor() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [appliesTo, setAppliesTo] = useState<"document" | "folder">("document");
-  const [attributesJson, setAttributesJson] = useState("[]");
+  const [attributes, setAttributes] = useState<AttributeDraft[]>([]);
+  const [icon, setIcon] = useState("");
+  const [allowedParentTypes, setAllowedParentTypes] = useState<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -35,24 +118,128 @@ export function ObjectTypeEditor() {
     reload();
   }, [reload]);
 
-  async function handleCreate(event: FormEvent) {
+  // Nur bestehende Ordnerklassen dürfen referenziert werden (2.2a, nur Ordner
+  // können Elternobjekte sein) - die eigene Klasse wird beim Bearbeiten
+  // ausgeblendet (Selbstreferenz wäre strukturell sinnlos, auch wenn das
+  // Backend mangels Zyklenerkennung, ADR 0013, keinen Fehler werfen würde).
+  const folderTypeNames = useMemo(
+    () =>
+      objectTypes
+        .filter((ot) => ot.applies_to === "folder" && ot.id !== editingId)
+        .map((ot) => ot.name),
+    [objectTypes, editingId]
+  );
+
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setAppliesTo("document");
+    setAttributes([]);
+    setIcon("");
+    setAllowedParentTypes(new Set());
+  }
+
+  function startEdit(ot: ObjectType) {
+    setEditingId(ot.id);
+    setName(ot.name);
+    setAppliesTo(ot.applies_to as "document" | "folder");
+    setAttributes(
+      ot.attributes.map((a) => ({
+        name: a.name,
+        label: "",
+        type: a.type,
+        required: Boolean(a.required),
+        pattern: a.pattern ?? "",
+        min: a.min !== undefined ? String(a.min) : "",
+        max: a.max !== undefined ? String(a.max) : "",
+      }))
+    );
+    setIcon(ot.icon ?? "");
+    setAllowedParentTypes(new Set(ot.allowed_parent_types ?? []));
+    setError(null);
+  }
+
+  function addAttribute() {
+    setAttributes((prev) => [...prev, emptyAttribute()]);
+  }
+
+  function updateAttribute(index: number, patch: Partial<AttributeDraft>) {
+    setAttributes((prev) => prev.map((a, i) => (i === index ? { ...a, ...patch } : a)));
+  }
+
+  function removeAttribute(index: number) {
+    setAttributes((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function toggleAllowedParentType(value: string) {
+    setAllowedParentTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  }
+
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
     setError(null);
-    let attributes;
-    try {
-      attributes = JSON.parse(attributesJson || "[]");
-    } catch {
-      setError(t("objectTypes.invalidJson"));
+
+    if (attributes.some((a) => !a.name.trim())) {
+      setError(t("objectTypes.invalidAttributeName"));
       return;
     }
+
+    const backendAttributes = attributes.map(toBackendAttribute);
+    const allowedParentTypesArray = allowedParentTypes.size > 0 ? Array.from(allowedParentTypes) : null;
+    const iconValue = appliesTo === "folder" && icon ? icon : null;
+
     try {
-      await createObjectType(accessToken, { name, appliesTo, attributes });
-      setName("");
-      setAttributesJson("[]");
+      if (editingId === null) {
+        const created = await createObjectType(accessToken, {
+          name,
+          appliesTo,
+          attributes: backendAttributes,
+          allowedParentTypes: allowedParentTypesArray,
+          icon: iconValue,
+        });
+
+        // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
+        // nur beim Anlegen wird aus ihnen ein initiales Smart Layout mit den
+        // hier vergebenen Labels für alle drei Verwendungszwecke persistiert;
+        // ohne abweichende Labels bleibt es beim serverseitig generierten
+        // Default (kein unnötiges Override). Spätere Anpassungen laufen
+        // ausschließlich über den separaten Layout-Designer.
+        const labelsAssigned = attributes.some(
+          (a) => a.label.trim() && a.label.trim() !== a.name.trim()
+        );
+        if (labelsAssigned) {
+          const rows = buildGeneratedLayoutRows(attributes);
+          for (const purpose of LAYOUT_PURPOSES) {
+            await putObjectTypeLayout(accessToken, created.id, purpose, {
+              rows,
+              responsiveBreakpointPx: 600,
+            });
+          }
+        }
+      } else {
+        const current = objectTypes.find((ot) => ot.id === editingId);
+        await updateObjectType(accessToken, editingId, {
+          attributes: backendAttributes,
+          namingConstraints: current?.naming_constraints ?? null,
+          conditions: current?.conditions ?? [],
+          allowedParentTypes: allowedParentTypesArray,
+          icon: iconValue,
+        });
+      }
+      resetForm();
       await reload();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("objectTypes.createError"));
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : t(editingId === null ? "objectTypes.createError" : "objectTypes.updateError")
+      );
     }
   }
 
@@ -60,6 +247,7 @@ export function ObjectTypeEditor() {
     if (!accessToken) return;
     try {
       await deleteObjectType(accessToken, id);
+      if (editingId === id) resetForm();
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.deleteError"));
@@ -75,35 +263,163 @@ export function ObjectTypeEditor() {
       )}
 
       <section className="card">
-        <h2>{t("objectTypes.newHeading")}</h2>
-        <form aria-label={t("objectTypes.formLabel")} onSubmit={handleCreate}>
+        <h2>{editingId === null ? t("objectTypes.newHeading") : t("objectTypes.editHeading")}</h2>
+        <form
+          aria-label={editingId === null ? t("objectTypes.formLabel") : t("objectTypes.editFormLabel")}
+          onSubmit={handleSubmit}
+        >
           <div className="form-grid">
             <label>
               {t("objectTypes.name")}
-              <input value={name} onChange={(e) => setName(e.target.value)} required />
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={editingId !== null}
+                required
+              />
             </label>
             <label>
               {t("objectTypes.appliesTo")}
               <select
                 value={appliesTo}
                 onChange={(e) => setAppliesTo(e.target.value as "document" | "folder")}
+                disabled={editingId !== null}
               >
                 <option value="document">{t("objectTypes.appliesToDocument")}</option>
                 <option value="folder">{t("objectTypes.appliesToFolder")}</option>
               </select>
             </label>
+            {appliesTo === "folder" && (
+              <label>
+                {t("objectTypes.iconLabel")}
+                <select value={icon} onChange={(e) => setIcon(e.target.value)}>
+                  <option value="">{t("objectTypes.iconNone")}</option>
+                  {ICON_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {iconLabel(t, value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
-          <label>
-            {t("objectTypes.attributesLabel")}
-            <textarea
-              rows={4}
-              style={{ width: "100%", fontFamily: "monospace" }}
-              value={attributesJson}
-              onChange={(e) => setAttributesJson(e.target.value)}
-              placeholder={EXAMPLE_ATTRIBUTES}
-            />
-          </label>
-          <button type="submit">{t("common.create")}</button>
+
+          <h3>{t("objectTypes.attributesHeading")}</h3>
+          {attributes.length === 0 && <p className="empty-state">{t("objectTypes.noAttributes")}</p>}
+          {attributes.map((attribute, index) => (
+            <div className="attribute-row" key={index}>
+              <div className="form-grid">
+                <label>
+                  {t("objectTypes.attributeName")}
+                  <input
+                    value={attribute.name}
+                    onChange={(e) => updateAttribute(index, { name: e.target.value })}
+                    required
+                  />
+                </label>
+                {editingId === null && (
+                  <label>
+                    {t("objectTypes.attributeLabel")}
+                    <input
+                      value={attribute.label}
+                      onChange={(e) => updateAttribute(index, { label: e.target.value })}
+                      placeholder={attribute.name}
+                    />
+                  </label>
+                )}
+                <label>
+                  {t("objectTypes.attributeType")}
+                  <select
+                    value={attribute.type}
+                    onChange={(e) => updateAttribute(index, { type: e.target.value as AttributeType })}
+                  >
+                    {ATTRIBUTE_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {t(`objectTypes.attributeTypes.${type}`)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={attribute.required}
+                    onChange={(e) => updateAttribute(index, { required: e.target.checked })}
+                  />
+                  {t("objectTypes.attributeRequired")}
+                </label>
+                {attribute.type === "string" && (
+                  <label>
+                    {t("objectTypes.attributePattern")}
+                    <input
+                      value={attribute.pattern}
+                      onChange={(e) => updateAttribute(index, { pattern: e.target.value })}
+                    />
+                  </label>
+                )}
+                {(attribute.type === "decimal" || attribute.type === "integer") && (
+                  <>
+                    <label>
+                      {t("objectTypes.attributeMin")}
+                      <input
+                        type="number"
+                        value={attribute.min}
+                        onChange={(e) => updateAttribute(index, { min: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      {t("objectTypes.attributeMax")}
+                      <input
+                        type="number"
+                        value={attribute.max}
+                        onChange={(e) => updateAttribute(index, { max: e.target.value })}
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+              <button type="button" onClick={() => removeAttribute(index)}>
+                {t("objectTypes.removeAttribute")}
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addAttribute}>
+            {t("objectTypes.addAttribute")}
+          </button>
+
+          <h3>{t("objectTypes.allowedParentTypesLabel")}</h3>
+          <p className="hint">{t("objectTypes.allowedParentTypesHint")}</p>
+          <div className="checkbox-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={allowedParentTypes.has(ROOT_PARENT_TYPE)}
+                onChange={() => toggleAllowedParentType(ROOT_PARENT_TYPE)}
+              />
+              {t("objectTypes.allowedParentTypesRootOption")}
+            </label>
+            {folderTypeNames.map((typeName) => (
+              <label key={typeName}>
+                <input
+                  type="checkbox"
+                  checked={allowedParentTypes.has(typeName)}
+                  onChange={() => toggleAllowedParentType(typeName)}
+                />
+                {typeName}
+              </label>
+            ))}
+          </div>
+
+          <div className="actions">
+            <button type="submit">
+              {editingId === null ? t("common.create") : t("objectTypes.save")}
+            </button>
+            {editingId !== null && (
+              <button type="button" onClick={resetForm}>
+                {t("objectTypes.cancelEdit")}
+              </button>
+            )}
+          </div>
         </form>
       </section>
 
@@ -113,6 +429,7 @@ export function ObjectTypeEditor() {
             <th>{t("objectTypes.nameColumn")}</th>
             <th>{t("objectTypes.appliesToColumn")}</th>
             <th>{t("objectTypes.attributesColumn")}</th>
+            <th>{t("objectTypes.iconColumn")}</th>
             <th />
           </tr>
         </thead>
@@ -122,7 +439,11 @@ export function ObjectTypeEditor() {
               <td>{ot.name}</td>
               <td>{ot.applies_to}</td>
               <td>{ot.attributes.length}</td>
-              <td>
+              <td>{ot.icon ? iconLabel(t, ot.icon) : "—"}</td>
+              <td className="actions">
+                <button type="button" onClick={() => startEdit(ot)}>
+                  {t("objectTypes.edit")}
+                </button>
                 <button type="button" onClick={() => handleDelete(ot.id)}>
                   {t("common.delete")}
                 </button>

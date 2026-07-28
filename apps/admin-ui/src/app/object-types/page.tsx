@@ -1,6 +1,7 @@
 "use client";
 
 import { AdminShell } from "@/components/AdminShell";
+import { LayoutDesigner } from "@/components/LayoutDesigner";
 import { ObjectTypeEditor } from "@/components/ObjectTypeEditor";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useI18n } from "@/i18n";
@@ -11,6 +12,7 @@ export default function ObjectTypesPage() {
     <RequireAuth>
       <AdminShell title={t("objectTypes.pageTitle")}>
         <ObjectTypeEditor />
+        <LayoutDesigner />
       </AdminShell>
     </RequireAuth>
   );
