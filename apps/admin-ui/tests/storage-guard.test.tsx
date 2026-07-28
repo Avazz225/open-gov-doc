@@ -14,11 +14,13 @@ function renderStorageGuard() {
 const getGuardConfigMock = vi.fn();
 const updateGuardConfigMock = vi.fn();
 const getGuardStatusMock = vi.fn();
+const reidentifyTargetMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getGuardConfig: (...args: unknown[]) => getGuardConfigMock(...args),
   updateGuardConfig: (...args: unknown[]) => updateGuardConfigMock(...args),
   getGuardStatus: (...args: unknown[]) => getGuardStatusMock(...args),
+  reidentifyTarget: (...args: unknown[]) => reidentifyTargetMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -47,6 +49,7 @@ describe("StorageGuard", () => {
     getGuardConfigMock.mockReset();
     updateGuardConfigMock.mockReset();
     getGuardStatusMock.mockReset();
+    reidentifyTargetMock.mockReset();
   });
 
   it("shows target status including a resyncing badge for pending copies", async () => {
@@ -110,5 +113,52 @@ describe("StorageGuard", () => {
 
     expect(await screen.findByText("Gespeichert.")).toBeInTheDocument();
     expect(updateGuardConfigMock).toHaveBeenCalledWith("token-123", true);
+  });
+
+  it("accepts a device change after confirmation and reloads the status", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock
+      .mockResolvedValueOnce([
+        { target_id: "local", device_id: "old-device", verified_at: "2026-01-01T00:00:00Z", pending_copies: 0 },
+      ])
+      .mockResolvedValueOnce([
+        { target_id: "local", device_id: "new-device", verified_at: "2026-01-02T00:00:00Z", pending_copies: 3 },
+      ]);
+    reidentifyTargetMock.mockResolvedValue({
+      target_id: "local",
+      device_id: "new-device",
+      verified_at: "2026-01-02T00:00:00Z",
+      pending_copies: 3,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderStorageGuard();
+    await screen.findByText("old-device");
+
+    fireEvent.click(screen.getByRole("button", { name: "Datenträger-Wechsel akzeptieren" }));
+
+    expect(await screen.findByText("new-device")).toBeInTheDocument();
+    expect(reidentifyTargetMock).toHaveBeenCalledWith("token-123", "local");
+  });
+
+  it("does not call reidentify when the confirmation is dismissed", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock.mockResolvedValue([
+      { target_id: "local", device_id: "abc123", verified_at: "2026-01-01T00:00:00Z", pending_copies: 0 },
+    ]);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    renderStorageGuard();
+    await screen.findByText("local");
+
+    fireEvent.click(screen.getByRole("button", { name: "Datenträger-Wechsel akzeptieren" }));
+
+    expect(reidentifyTargetMock).not.toHaveBeenCalled();
   });
 });

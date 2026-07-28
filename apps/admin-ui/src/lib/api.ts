@@ -449,6 +449,16 @@ export async function getGuardStatus(token: string): Promise<GuardStatusEntry[]>
   return response.json();
 }
 
+export async function reidentifyTarget(token: string, targetId: string): Promise<GuardStatusEntry> {
+  const response = await request(
+    "storage-service",
+    `guard-status/${encodeURIComponent(targetId)}/reidentify`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
 export interface ServiceInstance {
   instance_id: string;
   service_type: string;

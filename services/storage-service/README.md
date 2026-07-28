@@ -19,6 +19,7 @@ Prüfsumme und Größe.
 | `GET` | `/guard-config` | Wächter-Konfiguration lesen (`allow_degraded_start`) |
 | `PUT` | `/guard-config` | Wächter-Konfiguration ändern (wirkt erst beim nächsten Start) |
 | `GET` | `/guard-status` | Geräte-ID/Status je Ziel (Admin-UI-Statusblock) |
+| `POST` | `/guard-status/{target_id}/reidentify` | Beabsichtigten Datenträger-Wechsel akzeptieren, ohne Neustart |
 | `GET` | `/healthz` | Health-Check, zeigt aktive Ziele + Schreibstrategie |
 
 `{key}` erlaubt Schrägstriche (`docs/2026/vertrag.pdf`).
@@ -69,6 +70,16 @@ danach automatische Vormerkung zur Nachreplikation (`POST
 /replication/process-pending`). Details siehe
 `../../docs/adr/0017-storage-device-identity-guard.md`.
 
+**Rebalancing + Korrekturmechanismus (seit P5c-S2)**: ein neu zum Ziel-Set
+hinzugefügtes Ziel bekommt beim Erststart-Bootstrap automatisch `pending`-
+Kopien für alle bereits existierenden Objekte (kein separater Trigger nötig -
+eine Ziel-Set-Änderung erfordert ohnehin einen Neustart). Ein beabsichtigter
+Datenträger-Wechsel lässt sich zur Laufzeit über `POST
+/guard-status/{target_id}/reidentify` akzeptieren (übernimmt eine vorhandene
+Marker-Datei des neuen Geräts oder prägt eine neue, setzt bestehende Kopien
+auf `pending` zurück) - ersetzt die zuvor nötige direkte Korrektur in
+`backend_identity`.
+
 ## Registry-Registrierung (seit P4-S1)
 
 Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
@@ -97,4 +108,5 @@ uv run pytest services/storage-service/tests
 
 `test_local_backend.py`/`test_backend_factory.py` laufen ohne Infrastruktur
 (nutzen `tmp_path`). `test_s3_backend.py` braucht echtes MinIO.
-`test_api.py`/`test_repository.py`/`test_identity_guard.py` brauchen Postgres.
+`test_api.py`/`test_repository.py`/`test_identity_guard.py` brauchen Postgres
+(**86 Tests** insgesamt).

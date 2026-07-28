@@ -203,6 +203,27 @@ async def test_reset_copies_for_backend_returns_zero_when_none_exist(session):
     assert await repository.reset_copies_for_backend(session, "nonexistent-target") == 0
 
 
+async def test_seed_pending_copies_for_new_target_covers_all_uncovered_objects(session):
+    key_a = _key()
+    key_b = _key()
+    await _make_metadata(session, key_a)
+    await _make_metadata(session, key_b)
+    # key_a hat bereits eine Kopie auf dem neuen Ziel (z. B. aus einem
+    # früheren, teilweise gelaufenen Rebalancing-Versuch) - darf nicht
+    # doppelt angelegt/überschrieben werden.
+    await repository.record_copy(session, key_a, "new-target", status="ok", checksum="x")
+
+    count = await repository.seed_pending_copies_for_new_target(session, "new-target")
+
+    assert count == 1
+    assert (await repository.get_copy(session, key_a, "new-target")).status == "ok"
+    assert (await repository.get_copy(session, key_b, "new-target")).status == "pending"
+
+
+async def test_seed_pending_copies_for_new_target_returns_zero_when_no_objects_exist(session):
+    assert await repository.seed_pending_copies_for_new_target(session, "new-target") == 0
+
+
 async def test_count_pending_copies_by_backend(session):
     key = _key()
     await _make_metadata(session, key)

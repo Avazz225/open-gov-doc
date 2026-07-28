@@ -6,6 +6,7 @@ import {
   ApiError,
   getGuardConfig,
   getGuardStatus,
+  reidentifyTarget,
   updateGuardConfig,
   type GuardStatusEntry,
 } from "@/lib/api";
@@ -25,6 +26,7 @@ export function StorageGuard() {
   const [isSaving, setIsSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [allowDegradedStart, setAllowDegradedStart] = useState(false);
+  const [reidentifyingTarget, setReidentifyingTarget] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -52,6 +54,21 @@ export function StorageGuard() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  async function handleReidentify(targetId: string) {
+    if (!accessToken) return;
+    if (!window.confirm(t("storageGuard.confirmReidentify", { targetId }))) return;
+    setError(null);
+    setReidentifyingTarget(targetId);
+    try {
+      await reidentifyTarget(accessToken, targetId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.loadError"));
+    } finally {
+      setReidentifyingTarget(null);
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -86,6 +103,7 @@ export function StorageGuard() {
                 <th>{t("storageGuard.deviceId")}</th>
                 <th>{t("storageGuard.verifiedAt")}</th>
                 <th>{t("storageGuard.pendingCopies")}</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -100,6 +118,17 @@ export function StorageGuard() {
                         ? t("storageGuard.resyncing", { count: entry.pending_copies })
                         : t("storageGuard.inSync")}
                     </span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleReidentify(entry.target_id)}
+                      disabled={reidentifyingTarget !== null}
+                    >
+                      {reidentifyingTarget === entry.target_id
+                        ? t("common.loading")
+                        : t("storageGuard.reidentify")}
+                    </button>
                   </td>
                 </tr>
               ))}

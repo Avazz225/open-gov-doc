@@ -193,7 +193,9 @@
     "resyncing": "wird nachrepliziert ({count})",
     "empty": "Keine Ziele konfiguriert.",
     "allowDegradedStart": "Degradierten Start erlauben, wenn mindestens ein Ziel nachweislich unverändert ist",
-    "saved": "Gespeichert."
+    "saved": "Gespeichert.",
+    "reidentify": "Datenträger-Wechsel akzeptieren",
+    "confirmReidentify": "Datenträger-Wechsel für Ziel \"{targetId}\" akzeptieren? Alle bisherigen Kopien auf diesem Ziel werden zur Nachreplikation vorgemerkt."
   },
   "registry": {
     "pageTitle": "Registry-Übersicht",

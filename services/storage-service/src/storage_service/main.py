@@ -311,6 +311,39 @@ async def put_guard_config(
     return config
 
 
+@app.post("/guard-status/{target_id}/reidentify", response_model=GuardStatusEntry)
+async def reidentify_target(
+    target_id: str, session: AsyncSession = Depends(get_session)
+) -> GuardStatusEntry:
+    """Korrekturmechanismus für einen beabsichtigten Datenträger-Wechsel
+    (3.6, P5c-S2, ADR 0017-Folgepunkt) - ersetzt die bisher nötige direkte
+    Korrektur in `backend_identity` durch einen API-Aufruf, ohne Neustart.
+    Markiert alle bisherigen Kopien des Ziels zur Nachreplikation, wie beim
+    automatischen degradierten Start (`POST /replication/process-pending`
+    zieht sie nach)."""
+    if target_id not in app.state.targets:
+        raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
+
+    try:
+        identity = await identity_guard.reidentify_target(
+            session, target_id, app.state.backends[target_id]
+        )
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=502, detail=f"Ziel {target_id!r} nicht erreichbar: {exc}"
+        ) from exc
+
+    await session.commit()
+    pending_counts = await repository.count_pending_copies_by_backend(session)
+    return GuardStatusEntry(
+        target_id=target_id,
+        device_id=identity.device_id,
+        verified_at=identity.verified_at,
+        pending_copies=pending_counts.get(target_id, 0),
+    )
+
+
 @app.get("/guard-status", response_model=list[GuardStatusEntry])
 async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list[GuardStatusEntry]:
     """Admin-UI-Statusblock (3.6 "im Admin-UI als Status sichtbar", P5b-S6):

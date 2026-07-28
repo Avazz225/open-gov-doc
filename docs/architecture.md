@@ -1,6 +1,6 @@
-# Architektur-Überblick (Stand: P5b-S6 — Phase 5b abgeschlossen)
+# Architektur-Überblick (Stand: P5c-S2 — Phase 5c abgeschlossen)
 
-Momentaufnahme des Systems zum MVP-Meilenstein (Ende Phase 4, vertikaler MVP-Slice) plus allen vier Bausteinen aus Phase 5 (Verarbeitung: Scan, Rendering, OCR, Suche — Konzept-Referenzen in Klammern) sowie den sechs Retrofit-Sessions aus Phase 5b (Objekt-Hierarchie/Klassen-Icons, Formular-Layouts, Admin-/User-UI-Konsum, OCR-Konfigurierbarkeit, Storage-Datenträger-Identität). Kein neuer Service ist durch Phase 5b entstanden — alle Änderungen erweitern bereits bestehende Services/Frontends. Für die Entstehungsgeschichte einzelner Entscheidungen siehe `docs/adr/`, für Details je Baustein `docs/services/<name>.md`.
+Momentaufnahme des Systems zum MVP-Meilenstein (Ende Phase 4, vertikaler MVP-Slice) plus allen vier Bausteinen aus Phase 5 (Verarbeitung: Scan, Rendering, OCR, Suche — Konzept-Referenzen in Klammern), den sechs Retrofit-Sessions aus Phase 5b (Objekt-Hierarchie/Klassen-Icons, Formular-Layouts, Admin-/User-UI-Konsum, OCR-Konfigurierbarkeit, Storage-Datenträger-Identität) sowie den zwei Konsolidierungs-Sessions aus Phase 5c (Test-DB-Isolation, Storage-Rebalancing + Gerätewechsel-Korrektur). Kein neuer Service ist durch Phase 5b/5c entstanden — alle Änderungen erweitern bereits bestehende Services/Frontends. Für die Entstehungsgeschichte einzelner Entscheidungen siehe `docs/adr/`, für Details je Baustein `docs/services/<name>.md`.
 
 ## Gesamtbild
 
@@ -43,7 +43,7 @@ flowchart TB
         Registry["registry-service\nDiscovery (3.2a)"]
         Auth["auth-service\nOIDC-Broker + Nutzerverwaltung (4.4)"]
         Permission["permission-service\nRBAC + Bereichssperren (4.1/4.7)"]
-        Storage["storage-service\nBackend-Plugins, Redundanz, Datenträger-Identität (3.6)"]
+        Storage["storage-service\nBackend-Plugins, Redundanz, Datenträger-Identität, Rebalancing (3.6)"]
         Document["document-service\nCRUD, Versionierung, Locking (2.1/4.2)"]
         ObjectType["object-type-service\nObjekttypen + Constraint Engine (2.2/4.5)"]
         Folder["folder-service\nOrdner-Hierarchie (2.1)"]
@@ -136,6 +136,7 @@ flowchart TB
 - **OCR Service speist sowohl rendering-service als auch search-service per Nachzieheffekt** (P5-S3/P5-S4): rendering-service konsumiert `ocr.completed` und erzeugt daraus eine `substitute_text`-Rendition für Dokumente, die es selbst mangels OCR nicht bedienen konnte; search-service konsumiert `ocr.completed`/`rendering.completed`, um seinen Volltextindex nachzuindexieren, sobald OCR/Rendering abgeschlossen sind (zeitlich nach dem initialen Upload-Event). Beides sind Fälle, in denen ein Verarbeitungs-Service einen anderen Verarbeitungs-Service sowohl per Event als auch per HTTP (Volltext-Nachschlag) konsumiert.
 - **Search Service ist der erste Konsument des vom Gateway injizierten `X-DMS-Principal`-Headers** (P5-S4): bislang liest kein Backend-Service diesen Header aus, obwohl er auf jedem authentifizierten proxied Request mitgeschickt wird. `GET /search` liest ihn für die Berechtigungsfilterung — ein Suchergebnis wird über die `folder_id` seines Dokuments geprüft (`POST /check/batch` am Permission Service, neu in dieser Session), **nicht** über die `document_id` selbst: Dokumente sind keine eigenen Permission-Resources, nur Ordner werden als `ResourceNode` geführt (`structure_subjects = ["folder.>"]`).
 - **Phase 5b (P5b-S1–S6) war reine Vertiefung, kein neuer Knoten**: Objekt-Hierarchie/Klassen-Icons (ADR 0013), Formular-Layouts (ADR 0014) und ihr Admin-/User-UI-Konsum betreffen object-type-service + beide Frontends; OCR-Konfigurierbarkeit (ADR 0016) betrifft ocr-service + Admin-UI; Storage-Datenträger-Identität + Mehrfach-Devices (ADR 0017) betrifft storage-service + Admin-UI. Alle sechs Sessions erweitern bereits im Diagramm vorhandene Knoten, keine neuen Kanten im Event-Bus-Sinn (keiner der Retrofits publiziert ein neues, cross-service relevantes Event außer `ocr.skipped`, das denselben Konsumentenkreis wie `ocr.completed`/`ocr.failed` hat).
+- **Phase 5c (P5c-S1/S2) war eine Konsolidierungsrunde offener Punkte, ebenfalls kein neuer Knoten**: P5c-S1 (Test-DB-Isolation) betrifft nur Test-Infrastruktur, keinen Produktionscode; P5c-S2 (Rebalancing bei neuem Ziel, Gerätewechsel-Korrektur ohne Neustart) erweitert storage-service + Admin-UI um dieselben ADR-0017-Bausteine (Retry-Queue, `reset_copies_for_backend`), keine neue Kante.
 - **Nicht abgebildet**: die 26 weiteren, noch nicht gebauten Services aus `IMPLEMENTATION_PLAN.md` (Workflow Engine, Signature Service, Federation Hub, ...) — Phase 5 (Verarbeitung: Scan, Rendering, OCR, Suche) und Phase 5b (Vertiefung/Retrofit bereits bestehender Services) sind mit dieser Session vollständig abgebildet. Dieses Diagramm zeigt den aktuellen Stand, nicht die Zielarchitektur. Es wird an künftigen Phasengrenzen aktualisiert.
 
 ## Offene Entscheidungen

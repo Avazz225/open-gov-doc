@@ -145,6 +145,37 @@ async def reset_copies_for_backend(session: AsyncSession, backend_id: str) -> in
     return result.rowcount or 0
 
 
+async def seed_pending_copies_for_new_target(session: AsyncSession, backend_id: str) -> int:
+    """Rebalancing bei neu hinzugefügtem Ziel (3.6/7.2, P5c-S2): legt für
+    jedes bereits existierende Objekt, das noch keine Kopie-Zeile für
+    `backend_id` hat, eine neue `pending`-Zeile an - `POST /replication/
+    process-pending` zieht sie über die bereits bestehende Retry-Queue nach,
+    kein neuer Mechanismus. Wird ausschließlich beim Erststart-Bootstrap
+    eines Ziels aufgerufen (siehe `identity_guard.check_target_identity`),
+    daher hier keine eigene Gate-Logik. Gibt die Anzahl neu angelegter
+    Zeilen zurück (fürs Logging)."""
+    already_covered = select(ObjectCopy.object_key).where(ObjectCopy.backend_id == backend_id)
+    result = await session.execute(
+        select(ObjectMetadata.object_key).where(ObjectMetadata.object_key.notin_(already_covered))
+    )
+    now = datetime.now(UTC)
+    count = 0
+    for (object_key,) in result.all():
+        session.add(
+            ObjectCopy(
+                object_key=object_key,
+                backend_id=backend_id,
+                status="pending",
+                attempts=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        count += 1
+    await session.flush()
+    return count
+
+
 async def count_pending_copies_by_backend(session: AsyncSession) -> dict[str, int]:
     """Anzahl noch nicht erfolgreich replizierter Kopien je Ziel (`pending`/
     `failed`) - Grundlage für den Admin-UI-Statusblock (3.6 "im Admin-UI als
