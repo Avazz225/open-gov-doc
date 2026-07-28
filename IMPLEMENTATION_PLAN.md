@@ -75,7 +75,7 @@ Damit ist "sauber strukturiert und dokumentiert" kein Abschlussschritt, sondern 
 | Auth | OIDC via Keycloak, `Authlib`/`python-jose`, `python-keycloak` (4.4) |
 | Storage-Backends | `aioboto3`/`boto3` (S3/MinIO), `azure-storage-blob`, lokales FS mit `fcntl` (3.6) |
 | Query-Konsole | `pglast`/`libpg_query` (6.1) |
-| BPMN-Engine | `SpiffWorkflow` + `bpmn-js-spiffworkflow` — **Lizenz-Check LGPLv3 vor P6-S1 einplanen** (13, offener Punkt) |
+| BPMN-Engine | `SpiffWorkflow` + `bpmn-js-spiffworkflow` — LGPLv3 als unveränderte Dependency akzeptiert, siehe [ADR 0018](docs/adr/0018-spiffworkflow-lgpl-license.md) (13) |
 | OCR | PaddleOCR (Standard) + Tesseract (`pytesseract`, Alternative) (3.9) |
 | Signatur | `pyHanko` (PAdES) (3.10) |
 | Frontend | React/Next.js, primär Client-Side-Rendering (8); `bpmn-js` für den Process Designer (P6-S6) |
@@ -146,10 +146,19 @@ Nachträglich eingeschoben (Nutzerwunsch nach Abschluss von P5-S4, analog zum Pr
 | P5b-S5 | **OCR-Konfigurierbarkeit** (3.9): `ocr-service`/Admin-UI erhalten `ocrEnabled` (bei `false` muss der Service nicht deployt werden — Docker-Compose-Profil-Opt-out), eine konfigurierbare maximale Wortobergrenze (Dokumente darüber überspringen OCR) und eine konfigurierbare Verarbeitungs-Batch-Size — Retrofit von P5-S3. |
 | P5b-S6 | **Storage Service: Datenträger-Identität & Redundanz-Wächter** (3.6): Index-/Identitätsdatei mit Geräte-ID je Backend-Instanz, Startverweigerung bei fehlender/abweichender Identität, Admin-Override ("Start erlaubt, wenn mindestens ein Backend nachweislich unverändert ist") inkl. zwingender Hintergrund-Replikation zur Wiederherstellung der Redundanz danach; außerdem explizite Unterstützung beliebig vieler gleichartiger Backend-Instanzen im selben Ziel-Set (z. B. 2× S3 + 1× NFS) — Retrofit von P3-S1/P3-S4. |
 
+### Phase 5c — Konsolidierung offener Punkte (Betriebs-Härtung II)
+
+Nachträglich eingeschoben nach Abschluss von Phase 5b, gleiches Präzedenzmuster wie die Einschiebung von Phase 5b selbst (siehe oben) — diesmal kein Nutzer-Feedback aus echter UI-Nutzung, sondern eine bewusste Konsolidierungsrunde über die in `PROGRESS.md` "Offene Entscheidungen" angesammelten Punkte, bevor Phase 6 beginnt. Nur die beiden Punkte, für die tatsächlich eine baldige Umsetzung entschieden wurde; die übrigen offenen Punkte bleiben bewusst Backlog (siehe `PROGRESS.md`).
+
+| Session | Deliverable |
+|---|---|
+| P5c-S1 | **Test-DB-Isolationslücke schließen** (Tooling, kein Konzept-Bezug): Jede Service-`conftest.py` erzwingt jetzt `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN` beim Laden, statt beide Variablen unabhängig dem Environment zu überlassen — schließt die Lücke, die zweimal echten Schaden verursacht hat (P5-S2 Datenverlust, P5b-S6 Live-DB-Leck), weil `TestClient(app)`-basierte Tests bislang unbemerkt `DMS_POSTGRES_DSN` (Live-Default) statt `TEST_POSTGRES_DSN` lasen. Verifiziert per echtem Testlauf gegen eine isolierte Wegwerf-Datenbank bei nur gesetztem `TEST_POSTGRES_DSN` (bewusst `DMS_POSTGRES_DSN` aus der Shell entfernt, um den ursprünglichen Fehlerfall zu reproduzieren) — 76/76 Tests grün, Live-`dms`-Datenbank nachweislich unverändert. |
+| P5c-S2 | **Storage: Rebalancing bei Ziel-Set-Änderung + Gerätewechsel-Korrekturmechanismus** (3.6, ADR 0017-Folgepunkte): Ein neu zum Ziel-Set hinzugefügtes Backend bekommt bislang keine automatische Kopie bestehender Objekte (Rebalancing); ein beabsichtigter, legitimer Gerätewechsel erfordert aktuell eine manuelle Korrektur direkt in der `backend_identity`-Tabelle statt eines API-Endpunkts. Beides war seit ADR 0004 bzw. ADR 0017 als Backlog-Punkt vertagt (ursprünglich frühestens Phase 10/Plugin Orchestration Service), auf Nutzerentscheidung vorgezogen. |
+
 ### Phase 6 — Workflow & Vorgänge
 | Session | Deliverable |
 |---|---|
-| P6-S1 | Workflow Engine Grundgerüst: SpiffWorkflow, BPMN-Import/-Ausführung, Manual/Automatic Tasks (7.1) — Lizenz-Check LGPLv3 zuerst |
+| P6-S1 | Workflow Engine Grundgerüst: SpiffWorkflow, BPMN-Import/-Ausführung, Manual/Automatic Tasks (7.1) — Lizenzfrage bereits geklärt, siehe [ADR 0018](docs/adr/0018-spiffworkflow-lgpl-license.md) |
 | P6-S2 | SLA-Zeitüberwachung je Schritt (Timer/Boundary Events) + Notification Service |
 | P6-S3 | Case Service: Umlaufmappen, dynamische Referenz + Abschluss-Snapshot, prozessspez. Bearbeitungskopien (2.3) |
 | P6-S4 | Generischer Vier-Augen-Approval-Mechanismus + Superuser Break-Glass + Not-Shutdown (4.3/4.6/4.8) |
@@ -213,7 +222,7 @@ Nachträglich eingeschoben (Nutzerwunsch nach Abschluss von P5-S4, analog zum Pr
 | P14-S2 | Reviewer/Approval-UI + Migrations-Konsole (8) |
 | P14-S3 | Backlog-Kandidaten aus 12.2 (ERP-Konnektoren, Mobile, KI) sauber als Plugin-Erweiterungspunkte vorbereiten (nicht implementieren) + finaler Repo-weiter Doku-/Struktur-Audit |
 
-**53 Sessions insgesamt** (ursprünglich 43, seit P4-S3 um P4-S4/S5/S6 und P6-S6 ergänzt — direktes Nutzer-Feedback nach dem ersten echten Browser-Test des MVP; seit P5-S4 um Phase 5b (P5b-S1–S6) ergänzt — nachträglicher Ausbauwunsch nach Abschluss der Verarbeitungs-Phase, siehe `PROGRESS.md`), davon 12 bis zum MVP-Meilenstein (P4-S3).
+**55 Sessions insgesamt** (ursprünglich 43, seit P4-S3 um P4-S4/S5/S6 und P6-S6 ergänzt — direktes Nutzer-Feedback nach dem ersten echten Browser-Test des MVP; seit P5-S4 um Phase 5b (P5b-S1–S6) ergänzt — nachträglicher Ausbauwunsch nach Abschluss der Verarbeitungs-Phase; seit P5b-S6 um Phase 5c (P5c-S1/S2) ergänzt — Konsolidierungsrunde offener Punkte, siehe `PROGRESS.md`), davon 12 bis zum MVP-Meilenstein (P4-S3).
 
 ## PROGRESS.md — Resume-Mechanismus
 

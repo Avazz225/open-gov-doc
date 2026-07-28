@@ -36,6 +36,11 @@ const GROUPS: NavGroup[] = [
     labelKey: "nav.groupProcessing",
     items: [{ href: "/ocr-settings/", labelKey: "nav.ocrSettings" }],
   },
+  {
+    id: "storage",
+    labelKey: "nav.groupStorage",
+    items: [{ href: "/storage-guard/", labelKey: "nav.storageGuard" }],
+  },
 ];
 
 const COLLAPSED_GROUPS_KEY = "dms.admin.collapsedGroups";

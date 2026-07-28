@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from storage_service.models import ObjectCopy, ObjectMetadata
+from storage_service.models import BackendIdentity, GuardConfig, ObjectCopy, ObjectMetadata
+
+_GUARD_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -124,3 +126,83 @@ async def delete_copies_for_key(session: AsyncSession, object_key: str) -> None:
     for copy in await list_copies(session, object_key):
         await session.delete(copy)
     await session.flush()
+
+
+async def reset_copies_for_backend(session: AsyncSession, backend_id: str) -> int:
+    """Setzt jede vorhandene Kopie-Zeile eines Ziels auf `pending` zurück
+    (3.6 "Hintergrund-Replikation zwingend", P5b-S6) - nach einem
+    Datenträger-Wechsel gilt jede zuvor dort abgelegte Kopie als verloren,
+    unabhängig vom zuletzt bekannten Status. `POST /replication/
+    process-pending` zieht sie danach über die bereits bestehende Retry-Queue
+    nach (kein neuer Hintergrundtask, siehe ADR 0004/0017). Gibt die Anzahl
+    zurückgesetzter Zeilen zurück (fürs Logging/Audit)."""
+    result = await session.execute(
+        update(ObjectCopy)
+        .where(ObjectCopy.backend_id == backend_id)
+        .values(status="pending", attempts=0, last_error=None, updated_at=datetime.now(UTC))
+    )
+    await session.flush()
+    return result.rowcount or 0
+
+
+async def count_pending_copies_by_backend(session: AsyncSession) -> dict[str, int]:
+    """Anzahl noch nicht erfolgreich replizierter Kopien je Ziel (`pending`/
+    `failed`) - Grundlage für den Admin-UI-Statusblock (3.6 "im Admin-UI als
+    Status sichtbar"), z. B. um einen laufenden Wiederherstellungs-Fortschritt
+    nach einem degradierten Start sichtbar zu machen."""
+    result = await session.execute(
+        select(ObjectCopy.backend_id, func.count())
+        .where(ObjectCopy.status.in_(["pending", "failed"]))
+        .group_by(ObjectCopy.backend_id)
+    )
+    return dict(result.all())
+
+
+async def get_backend_identity(session: AsyncSession, target_id: str) -> BackendIdentity | None:
+    return await session.get(BackendIdentity, target_id)
+
+
+async def list_backend_identities(session: AsyncSession) -> list[BackendIdentity]:
+    result = await session.execute(select(BackendIdentity))
+    return list(result.scalars().all())
+
+
+async def record_backend_identity(
+    session: AsyncSession, target_id: str, device_id: str
+) -> BackendIdentity:
+    """Legt die bekannte Geräte-ID für ein Ziel an oder bestätigt sie erneut
+    (`verified_at` wird immer aktualisiert) - ein Aufruf deckt sowohl den
+    Erststart (Anlage) als auch jede spätere erfolgreiche Übereinstimmungs-
+    prüfung ab (3.6, P5b-S6)."""
+    now = datetime.now(UTC)
+    identity = await session.get(BackendIdentity, target_id)
+    if identity is None:
+        identity = BackendIdentity(target_id=target_id, device_id=device_id, verified_at=now)
+        session.add(identity)
+    else:
+        identity.device_id = device_id
+        identity.verified_at = now
+    await session.flush()
+    return identity
+
+
+async def get_guard_config(session: AsyncSession) -> GuardConfig:
+    """Get-or-create mit Default `allow_degraded_start=False` (gleiches
+    Muster wie `ocr_service.repository.get_config`, P5b-S5/ADR 0016) - kein
+    separates Migrations-/Seed-Skript nötig."""
+    config = await session.get(GuardConfig, _GUARD_CONFIG_ID)
+    if config is None:
+        config = GuardConfig(
+            id=_GUARD_CONFIG_ID, allow_degraded_start=False, updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_guard_config(session: AsyncSession, *, allow_degraded_start: bool) -> GuardConfig:
+    config = await get_guard_config(session)
+    config.allow_degraded_start = allow_degraded_start
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config

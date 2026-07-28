@@ -1,51 +1,44 @@
 from storage_service.backends.interface import ObjectNotFoundError, StorageBackend
 from storage_service.backends.local_backend import LocalFilesystemBackend
 from storage_service.backends.s3_backend import S3Backend
-from storage_service.settings import Settings
+from storage_service.settings import BackendTargetConfig, Settings
 
 
-def build_backend_by_type(settings: Settings, backend_type: str) -> StorageBackend:
-    """Baut ein Backend-Plugin (3.6) für einen bestimmten Typ - neue Backends
-    (z. B. Azure Blob) werden hier ergänzt, ohne den Rest des Service
-    anzufassen. Getrennt von ``settings.backend``, damit Primär- und
-    Sekundärziel unabhängig instanziiert werden können (Redundanz, P3-S4)."""
-    if backend_type == "local":
-        return LocalFilesystemBackend(settings.local_storage_base_path)
-    if backend_type == "s3":
+def build_backend(target: BackendTargetConfig) -> StorageBackend:
+    """Baut ein Backend-Plugin (3.6) für eine einzelne, konfigurierte
+    Ziel-Instanz - neue Backend-Typen (z. B. Azure Blob) werden hier ergänzt,
+    ohne den Rest des Service anzufassen. Seit P5b-S6 nach `target.id`
+    (nicht `target.type`) instanziiert, damit beliebig viele gleichartige
+    Instanzen (z. B. zwei S3-Provider) unabhängig konfiguriert werden können
+    (ADR 0017)."""
+    if target.type == "local":
+        assert target.base_path is not None  # von BackendTargetConfig bereits erzwungen
+        return LocalFilesystemBackend(target.base_path)
+    if target.type == "s3":
+        assert target.endpoint_url and target.access_key and target.secret_key
+        assert target.bucket and target.region
         return S3Backend(
-            endpoint_url=settings.s3_endpoint_url,
-            access_key=settings.s3_access_key,
-            secret_key=settings.s3_secret_key,
-            bucket=settings.s3_bucket,
-            region=settings.s3_region,
+            endpoint_url=target.endpoint_url,
+            access_key=target.access_key,
+            secret_key=target.secret_key,
+            bucket=target.bucket,
+            region=target.region,
         )
-    raise ValueError(f"Unbekanntes Storage-Backend: {backend_type!r}")
-
-
-def build_backend(settings: Settings) -> StorageBackend:
-    """Baut nur das Primärbackend - Kompatibilitäts-Helfer für Aufrufer, die
-    keine Redundanz brauchen (z. B. Tests)."""
-    return build_backend_by_type(settings, settings.backend)
+    raise ValueError(f"Unbekannter Backend-Typ: {target.type!r}")
 
 
 def resolve_targets(settings: Settings) -> list[str]:
-    """Liste der konfigurierten Redundanz-Ziele, Primärziel zuerst (bestimmt
-    auch die Lesepriorität, siehe ``replication.read_with_fallback``)."""
-    targets = [settings.backend]
-    if settings.redundancy_enabled:
-        if settings.secondary_backend in ("none", settings.backend):
-            raise ValueError(
-                "secondary_backend muss gesetzt sein und sich von backend "
-                "unterscheiden, wenn redundancy_enabled=true"
-            )
-        targets.append(settings.secondary_backend)
-    return targets
+    """Liste der konfigurierten Ziel-`id`s, Primärziel zuerst (bestimmt auch
+    die Lesepriorität, siehe ``replication.read_with_fallback``)."""
+    return [target.id for target in settings.targets]
 
 
 def build_backends(settings: Settings) -> dict[str, StorageBackend]:
-    """Baut genau die Backends, die als Ziel konfiguriert sind (nicht mehr) -
-    ohne Redundanz bleibt es bei einem einzigen Backend, wie vor P3-S4."""
-    return {target: build_backend_by_type(settings, target) for target in resolve_targets(settings)}
+    """Baut genau die Backend-Instanzen, die im Ziel-Set konfiguriert sind -
+    beliebig viele, auch mehrere desselben Typs (3.6 "Mehrfach-Devices",
+    P5b-S6). Ohne Redundanz bleibt es bei einem einzigen Ziel, wie vor
+    P3-S4."""
+    return {target.id: build_backend(target) for target in settings.targets}
 
 
 __all__ = [
@@ -54,7 +47,6 @@ __all__ = [
     "LocalFilesystemBackend",
     "StorageBackend",
     "build_backend",
-    "build_backend_by_type",
     "build_backends",
     "resolve_targets",
 ]

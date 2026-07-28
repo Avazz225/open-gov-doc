@@ -1,6 +1,36 @@
 from typing import Literal
 
 from dms_common import BaseServiceSettings
+from pydantic import BaseModel, model_validator
+
+
+class BackendTargetConfig(BaseModel):
+    """Eine einzelne Backend-Instanz im Ziel-Set (3.6). Seit P5b-S6 (ADR 0017)
+    ist `id` - nicht `type` - der eindeutige Schlüssel, daher sind beliebig
+    viele gleichartige Instanzen möglich (z. B. zwei S3-Provider gleichzeitig
+    im selben Ziel-Set), jede mit eigenen Zugangsdaten/Mount-Parametern."""
+
+    id: str
+    type: Literal["local", "s3"]
+    base_path: str | None = None
+    endpoint_url: str | None = None
+    access_key: str | None = None
+    secret_key: str | None = None
+    bucket: str | None = None
+    region: str | None = None
+
+    @model_validator(mode="after")
+    def _check_required_fields_for_type(self) -> "BackendTargetConfig":
+        if self.type == "local" and not self.base_path:
+            raise ValueError(f"Ziel {self.id!r}: base_path ist für type=local erforderlich")
+        if self.type == "s3" and not all(
+            [self.endpoint_url, self.access_key, self.secret_key, self.bucket, self.region]
+        ):
+            raise ValueError(
+                f"Ziel {self.id!r}: endpoint_url/access_key/secret_key/bucket/region "
+                "sind für type=s3 erforderlich"
+            )
+        return self
 
 
 class Settings(BaseServiceSettings):
@@ -8,22 +38,21 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Primäres Backend (3.6) - immer aktiv, auch ohne Redundanz.
-    backend: Literal["local", "s3"] = "local"
-
-    # Storage-Redundanz (3.6): Ein zweites Ziel neben dem Primärbackend.
-    # Bewusst auf genau zwei Ziele (die beiden vorhandenen Backend-Typen)
-    # begrenzt statt einer generischen Ziel-Liste - siehe ADR 0004.
-    redundancy_enabled: bool = False
-    secondary_backend: Literal["local", "s3", "none"] = "none"
+    # Ziel-Set (3.6) - seit P5b-S6 eine echte Liste von Backend-Instanzen statt
+    # der vorherigen festen Zwei-Slot-Struktur (backend/secondary_backend,
+    # siehe ADR 0004/0017). Primärziel ist immer der erste Eintrag (bestimmt
+    # auch die Lesepriorität, siehe replication.read_with_fallback).
+    targets: list[BackendTargetConfig] = [
+        BackendTargetConfig(id="local", type="local", base_path="/tmp/dms-storage-dev")
+    ]
 
     # Schreibstrategie (3.6): "quorum" = synchron, Erfolg erst ab quorum_count
     # bestätigten Zielen (Werkseinstellung für hohen Schutzbedarf laut Konzept);
-    # "primary_async" = synchron nur aufs Primärziel, Sekundärziele werden als
+    # "primary_async" = synchron nur aufs Primärziel, weitere Ziele werden als
     # "pending" vermerkt und über POST /replication/process-pending nachgezogen
     # (Werkseinstellung für den allgemeinen Arbeitsbetrieb).
     write_strategy: Literal["quorum", "primary_async"] = "primary_async"
-    quorum_count: int = 2
+    quorum_count: int = 1
 
     # Nach so vielen erfolglosen Replikationsversuchen gilt eine Kopie als
     # dauerhaft fehlgeschlagen ("failed_permanent") statt weiter für
@@ -31,15 +60,3 @@ class Settings(BaseServiceSettings):
     # geforderte "Alarmierung", solange kein Notification Service existiert
     # (folgt Phase 6): wird stattdessen als Error-Log-Zeile ausgegeben.
     max_replication_attempts: int = 5
-
-    # Lokales Dateisystem-Backend: In einer Kubernetes-Umgebung ist das der
-    # Mountpunkt eines PVC - ob darunter NFS oder ein Block-Volume liegt, ist
-    # für dieses Backend irrelevant (siehe backends/local_backend.py).
-    local_storage_base_path: str = "/tmp/dms-storage-dev"
-
-    # S3-kompatibles Backend (Werkseinstellung MinIO für lokale Entwicklung).
-    s3_endpoint_url: str = "http://localhost:9000"
-    s3_access_key: str = "dms_minio"
-    s3_secret_key: str = "dms_minio_dev_only"
-    s3_bucket: str = "dms-storage"
-    s3_region: str = "us-east-1"

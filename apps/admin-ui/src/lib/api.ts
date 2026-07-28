@@ -410,6 +410,45 @@ export async function updateOcrConfig(
   return response.json();
 }
 
+export interface GuardConfig {
+  allow_degraded_start: boolean;
+  updated_at: string;
+}
+
+export async function getGuardConfig(token: string): Promise<GuardConfig> {
+  const response = await request("storage-service", "guard-config", {}, token);
+  return response.json();
+}
+
+export async function updateGuardConfig(
+  token: string,
+  allowDegradedStart: boolean
+): Promise<GuardConfig> {
+  const response = await request(
+    "storage-service",
+    "guard-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allow_degraded_start: allowDegradedStart }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface GuardStatusEntry {
+  target_id: string;
+  device_id: string | null;
+  verified_at: string | null;
+  pending_copies: number;
+}
+
+export async function getGuardStatus(token: string): Promise<GuardStatusEntry[]> {
+  const response = await request("storage-service", "guard-status", {}, token);
+  return response.json();
+}
+
 export interface ServiceInstance {
   instance_id: string;
   service_type: string;

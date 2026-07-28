@@ -174,3 +174,83 @@ async def test_delete_copies_for_key_removes_all(session):
     await repository.delete_copies_for_key(session, key)
 
     assert await repository.list_copies(session, key) == []
+
+
+async def test_reset_copies_for_backend_resets_status_and_attempts(session):
+    key_a = _key()
+    key_b = _key()
+    await _make_metadata(session, key_a)
+    await _make_metadata(session, key_b)
+    await repository.record_copy(session, key_a, "s3", status="ok", checksum="x")
+    await repository.record_copy(
+        session, key_b, "s3", status="failed_permanent", last_error="kaputt", increment_attempt=True
+    )
+    await repository.record_copy(session, key_a, "local", status="ok", checksum="x")
+
+    count = await repository.reset_copies_for_backend(session, "s3")
+
+    assert count == 2
+    for key in (key_a, key_b):
+        copy = await repository.get_copy(session, key, "s3")
+        assert copy.status == "pending"
+        assert copy.attempts == 0
+        assert copy.last_error is None
+    # Andere Ziele bleiben unberührt.
+    assert (await repository.get_copy(session, key_a, "local")).status == "ok"
+
+
+async def test_reset_copies_for_backend_returns_zero_when_none_exist(session):
+    assert await repository.reset_copies_for_backend(session, "nonexistent-target") == 0
+
+
+async def test_count_pending_copies_by_backend(session):
+    key = _key()
+    await _make_metadata(session, key)
+    await repository.record_copy(session, key, "s3", status="pending")
+    await repository.record_copy(session, key, "local", status="ok", checksum="x")
+    other_key = _key()
+    await _make_metadata(session, other_key)
+    await repository.record_copy(session, other_key, "s3", status="failed")
+
+    counts = await repository.count_pending_copies_by_backend(session)
+
+    assert counts["s3"] == 2
+    assert "local" not in counts
+
+
+async def test_get_backend_identity_unknown_returns_none(session):
+    assert await repository.get_backend_identity(session, "unknown-target") is None
+
+
+async def test_record_backend_identity_creates_then_updates(session):
+    identity = await repository.record_backend_identity(session, "local", "device-1")
+    assert identity.device_id == "device-1"
+    first_verified_at = identity.verified_at
+
+    updated = await repository.record_backend_identity(session, "local", "device-1")
+    assert updated.verified_at >= first_verified_at
+
+    fetched = await repository.get_backend_identity(session, "local")
+    assert fetched.device_id == "device-1"
+
+
+async def test_list_backend_identities_returns_all(session):
+    await repository.record_backend_identity(session, "local", "device-a")
+    await repository.record_backend_identity(session, "s3", "device-b")
+
+    identities = await repository.list_backend_identities(session)
+
+    assert {i.target_id for i in identities} == {"local", "s3"}
+
+
+async def test_get_guard_config_creates_default_row(session):
+    config = await repository.get_guard_config(session)
+
+    assert config.allow_degraded_start is False
+
+
+async def test_update_guard_config_persists(session):
+    await repository.update_guard_config(session, allow_degraded_start=True)
+
+    fetched = await repository.get_guard_config(session)
+    assert fetched.allow_degraded_start is True

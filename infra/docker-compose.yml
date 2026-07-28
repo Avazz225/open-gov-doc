@@ -200,21 +200,22 @@ services:
     restart: unless-stopped
     environment:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
-      # Default: lokales Backend (steht für NFS/PVC-Mount, siehe 3.6). Für den
-      # S3/MinIO-Pfad testweise überschreiben: STORAGE_SERVICE_BACKEND=s3
-      DMS_BACKEND: ${STORAGE_SERVICE_BACKEND:-local}
-      DMS_LOCAL_STORAGE_BASE_PATH: /data/storage
-      DMS_S3_ENDPOINT_URL: http://minio:9000
-      DMS_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-dms_minio}
-      DMS_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dms_minio_dev_only}
-      # Storage-Redundanz (3.6, P3-S4) - standardmäßig aus (ein einzelnes Ziel,
-      # wie vor P3-S4). Zum Testen z. B.:
-      #   STORAGE_SERVICE_REDUNDANCY_ENABLED=true STORAGE_SERVICE_SECONDARY_BACKEND=s3 \
+      # Ziel-Set (3.6, seit P5b-S6 eine echte Liste statt fester backend/
+      # secondary_backend-Slots - siehe ADR 0004/0017): Default ein einzelnes
+      # lokales Ziel (steht für NFS/PVC-Mount). Beliebig viele, auch
+      # gleichartige Ziele möglich, z. B. zum Testen von Redundanz/Quorum:
+      #   STORAGE_SERVICE_TARGETS='[{"id":"local","type":"local","base_path":"/data/storage"},
+      #     {"id":"s3-minio","type":"s3","endpoint_url":"http://minio:9000",
+      #      "access_key":"dms_minio","secret_key":"dms_minio_dev_only",
+      #      "bucket":"dms-storage","region":"us-east-1"}]'
       #   STORAGE_SERVICE_WRITE_STRATEGY=quorum STORAGE_SERVICE_QUORUM_COUNT=2
-      DMS_REDUNDANCY_ENABLED: ${STORAGE_SERVICE_REDUNDANCY_ENABLED:-false}
-      DMS_SECONDARY_BACKEND: ${STORAGE_SERVICE_SECONDARY_BACKEND:-none}
+      # Env-Var-Werte werden nicht weiter expandiert - MinIO-Zugangsdaten in
+      # einer eigenen STORAGE_SERVICE_TARGETS-Überschreibung müssen deshalb
+      # wörtlich eingetragen werden, nicht als ${MINIO_ROOT_USER}-Referenz.
+      DMS_TARGETS: >-
+        ${STORAGE_SERVICE_TARGETS:-[{"id":"local","type":"local","base_path":"/data/storage"}]}
       DMS_WRITE_STRATEGY: ${STORAGE_SERVICE_WRITE_STRATEGY:-primary_async}
-      DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-2}
+      DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-1}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://storage-service:8000
     volumes:

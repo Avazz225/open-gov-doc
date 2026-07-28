@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,11 +10,14 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from storage_service import replication, repository
+from storage_service import identity_guard, replication, repository
 from storage_service.backends import ObjectNotFoundError, S3Backend, build_backends, resolve_targets
 from storage_service.models import Base
 from storage_service.schemas import (
     FixityEntry,
+    GuardConfigIn,
+    GuardConfigOut,
+    GuardStatusEntry,
     ObjectCopyOut,
     ObjectMetadataOut,
     ReplicationRunResult,
@@ -23,16 +27,72 @@ from storage_service.settings import Settings
 
 settings = Settings()
 configure_logging(settings)
+logger = logging.getLogger(__name__)
 
 
 def _validate_settings(settings: Settings) -> None:
     targets = resolve_targets(settings)
+    if not targets:
+        raise RuntimeError("Mindestens ein Ziel muss konfiguriert sein")
+    if len(set(targets)) != len(targets):
+        raise RuntimeError(f"Ziel-`id`s müssen eindeutig sein, gefunden: {targets}")
     quorum_satisfiable = 1 <= settings.quorum_count <= len(targets)
     if settings.write_strategy == "quorum" and not quorum_satisfiable:
         raise RuntimeError(
             f"quorum_count={settings.quorum_count} ist mit {len(targets)} konfigurierten "
             f"Ziel(en) nicht erfüllbar"
         )
+
+
+async def _run_startup_guard(session_factory, backends: dict, targets: list[str]) -> None:
+    """Datenträger-Wechsel-Wächter (3.6, P5b-S6, ADR 0017): prüft für jedes
+    konfigurierte Ziel die Geräte-Identität, bevor der Service Anfragen
+    entgegennimmt. Werkseinstellung ist Startverweigerung bei jeder
+    Abweichung; ein Admin-Override (`GuardConfig.allow_degraded_start`)
+    erlaubt einen degradierten Start, sofern mindestens ein Ziel nachweislich
+    unverändert ist - in diesem Fall werden alle Kopien der betroffenen Ziele
+    automatisch zur Nachreplikation vorgemerkt (`POST
+    /replication/process-pending` zieht sie nach, kein In-Prozess-
+    Hintergrundtask, siehe ADR 0004)."""
+    verified: dict[str, bool] = {}
+    async with session_factory() as session:
+        for target_id in targets:
+            verified[target_id] = await identity_guard.check_target_identity(
+                session, target_id, backends[target_id]
+            )
+        await session.commit()
+
+    unverified = [target_id for target_id, ok in verified.items() if not ok]
+    if not unverified:
+        return
+
+    async with session_factory() as session:
+        guard_config = await repository.get_guard_config(session)
+        await session.commit()
+
+    verified_targets = [target_id for target_id, ok in verified.items() if ok]
+    if not guard_config.allow_degraded_start or not verified_targets:
+        override_state = (
+            "aktiv, aber kein Ziel ist nachweislich unverändert"
+            if guard_config.allow_degraded_start
+            else "nicht aktiv"
+        )
+        raise RuntimeError(
+            f"Datenträger-Identität für {unverified} nicht verifizierbar - Start verweigert. "
+            f"Admin-Override 'allow_degraded_start' ist {override_state} (siehe PUT /guard-config)."
+        )
+
+    logger.warning(
+        "Degradierter Start: Ziel(e) %s nicht verifiziert, %s verifiziert - "
+        "Kopien der nicht verifizierten Ziele werden zur Nachreplikation vorgemerkt",
+        unverified,
+        verified_targets,
+    )
+    async with session_factory() as session:
+        for target_id in unverified:
+            count = await repository.reset_copies_for_backend(session, target_id)
+            logger.warning("%s Kopie(n) für Ziel %r auf 'pending' zurückgesetzt", count, target_id)
+        await session.commit()
 
 
 @asynccontextmanager
@@ -51,6 +111,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     for backend in app.state.backends.values():
         if isinstance(backend, S3Backend):
             await backend.ensure_bucket()
+
+    await _run_startup_guard(app.state.session_factory, app.state.backends, app.state.targets)
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
@@ -76,11 +138,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 @app.get("/healthz")
 def healthz() -> dict:
+    targets = resolve_targets(settings)
     return {
         "status": "ok",
         "service": settings.service_name,
-        "backend": settings.backend,
-        "targets": resolve_targets(settings),
+        "primary_target": targets[0],
+        "targets": targets,
         "write_strategy": settings.write_strategy,
     }
 
@@ -98,7 +161,7 @@ async def upload_object(
     metadata = await repository.upsert_metadata(
         session,
         object_key=key,
-        backend=settings.backend,
+        backend=app.state.targets[0],
         checksum_sha256=checksum,
         size_bytes=len(data),
         content_type=request.headers.get("content-type"),
@@ -208,7 +271,7 @@ async def verify_object(key: str, session: AsyncSession = Depends(get_session)) 
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
 
-    actual = await app.state.backends[settings.backend].checksum(key)
+    actual = await app.state.backends[app.state.targets[0]].checksum(key)
     return VerifyResult(
         ok=actual == metadata.checksum_sha256, expected=metadata.checksum_sha256, actual=actual
     )
@@ -230,3 +293,38 @@ async def replication_process_pending(
     )
     await session.commit()
     return result
+
+
+@app.get("/guard-config", response_model=GuardConfigOut)
+async def get_guard_config(session: AsyncSession = Depends(get_session)) -> GuardConfigOut:
+    return await repository.get_guard_config(session)
+
+
+@app.put("/guard-config", response_model=GuardConfigOut)
+async def put_guard_config(
+    body: GuardConfigIn, session: AsyncSession = Depends(get_session)
+) -> GuardConfigOut:
+    config = await repository.update_guard_config(
+        session, allow_degraded_start=body.allow_degraded_start
+    )
+    await session.commit()
+    return config
+
+
+@app.get("/guard-status", response_model=list[GuardStatusEntry])
+async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list[GuardStatusEntry]:
+    """Admin-UI-Statusblock (3.6 "im Admin-UI als Status sichtbar", P5b-S6):
+    zuletzt bestätigte Geräte-ID je konfiguriertem Ziel plus Anzahl noch
+    nicht replizierter Kopien - ein Ziel mit `pending_copies > 0` nach einem
+    degradierten Start befindet sich noch in der Wiederherstellung."""
+    identities = {i.target_id: i for i in await repository.list_backend_identities(session)}
+    pending_counts = await repository.count_pending_copies_by_backend(session)
+    return [
+        GuardStatusEntry(
+            target_id=target_id,
+            device_id=identities[target_id].device_id if target_id in identities else None,
+            verified_at=identities[target_id].verified_at if target_id in identities else None,
+            pending_copies=pending_counts.get(target_id, 0),
+        )
+        for target_id in app.state.targets
+    ]

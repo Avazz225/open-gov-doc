@@ -33,11 +33,13 @@
     "groupManagement": "Verwaltung",
     "groupInstallations": "Installationen",
     "groupProcessing": "Verarbeitung",
+    "groupStorage": "Speicher",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
     "registry": "Registry",
     "installations": "Installationsverwaltung",
-    "ocrSettings": "OCR-Einstellungen"
+    "ocrSettings": "OCR-Einstellungen",
+    "storageGuard": "Speicher-Wächter"
   },
   "home": {
     "title": "DMS Admin",
@@ -177,6 +179,21 @@
     "batchSize": "Verarbeitungs-Batch-Size",
     "saved": "Gespeichert.",
     "updatedAt": "Zuletzt geändert"
+  },
+  "storageGuard": {
+    "pageTitle": "Speicher-Wächter",
+    "hint": "Ob der Storage Service bei einem Datenträger-Wechsel automatisch verweigert oder degradiert startet (3.6, ADR 0017) - das Ziel-Set selbst (welche Backends konfiguriert sind) ist Deployment-Konfiguration, hier nicht editierbar.",
+    "unreachable": "Storage Service nicht erreichbar - möglicherweise wegen verweigertem Start nach einem erkannten Datenträger-Wechsel (siehe Server-Log).",
+    "targetId": "Ziel",
+    "deviceId": "Geräte-ID",
+    "deviceIdUnknown": "unbekannt",
+    "verifiedAt": "Zuletzt bestätigt",
+    "pendingCopies": "Status",
+    "inSync": "synchron",
+    "resyncing": "wird nachrepliziert ({count})",
+    "empty": "Keine Ziele konfiguriert.",
+    "allowDegradedStart": "Degradierten Start erlauben, wenn mindestens ein Ziel nachweislich unverändert ist",
+    "saved": "Gespeichert."
   },
   "registry": {
     "pageTitle": "Registry-Übersicht",

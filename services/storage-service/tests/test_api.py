@@ -19,7 +19,9 @@ def _key() -> str:
 def test_healthz(client):
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json()["backend"] == "local"
+    body = response.json()
+    assert body["primary_target"] == "local"
+    assert body["targets"] == ["local"]
 
 
 def test_upload_download_roundtrip(client):
@@ -134,3 +136,34 @@ def test_process_pending_is_noop_without_redundancy(client):
         "failed": 0,
         "permanently_failed": 0,
     }
+
+
+def test_get_guard_config_returns_default(client):
+    response = client.get("/guard-config")
+    assert response.status_code == 200
+    assert response.json()["allow_degraded_start"] is False
+
+
+def test_put_guard_config_updates_and_persists(client):
+    put_response = client.put("/guard-config", json={"allow_degraded_start": True})
+    assert put_response.status_code == 200
+    assert put_response.json()["allow_degraded_start"] is True
+
+    get_response = client.get("/guard-config")
+    assert get_response.json()["allow_degraded_start"] is True
+
+
+def test_guard_status_shows_verified_identity_after_startup(client):
+    """Der Lifespan-Wächter (P5b-S6) läuft bei jedem `TestClient`-Start und
+    prägt/bestätigt die Geräte-ID des einzigen konfigurierten Ziels - direkt
+    nach dem Start muss `/guard-status` das bereits widerspiegeln, ganz ohne
+    dass zuvor ein Objekt hoch-/heruntergeladen wurde."""
+    response = client.get("/guard-status")
+
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["target_id"] == "local"
+    assert entries[0]["device_id"] is not None
+    assert entries[0]["verified_at"] is not None
+    assert entries[0]["pending_copies"] == 0

@@ -9,6 +9,10 @@ DSN = os.environ.get(
     "TEST_POSTGRES_DSN",
     "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms",
 )
+# Erzwingt dieselbe DB für die App-Settings (liest DMS_POSTGRES_DSN) wie für die
+# Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
+# siehe PROGRESS.md "Tooling & Testing" (P5-S2-Datenverlust, P5b-S6-Leck).
+os.environ["DMS_POSTGRES_DSN"] = DSN
 
 
 @pytest.fixture

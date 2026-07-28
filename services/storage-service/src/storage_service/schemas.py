@@ -47,3 +47,20 @@ class ReplicationRunResult(BaseModel):
     succeeded: int
     failed: int
     permanently_failed: int
+
+
+class GuardConfigIn(BaseModel):
+    allow_degraded_start: bool = False
+
+
+class GuardConfigOut(GuardConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class GuardStatusEntry(BaseModel):
+    target_id: str
+    device_id: str | None
+    verified_at: datetime | None
+    pending_copies: int
