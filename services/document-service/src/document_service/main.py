@@ -127,12 +127,19 @@ async def create_document(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="attributes ist kein gültiges JSON") from exc
 
-    if folder_id is not None and not await app.state.folder_client.exists(folder_id):
-        raise HTTPException(status_code=400, detail=f"folder_id {folder_id!r} unbekannt")
+    parent_folder = None
+    if folder_id is not None:
+        parent_folder = await app.state.folder_client.get(folder_id)
+        if parent_folder is None:
+            raise HTTPException(status_code=400, detail=f"folder_id {folder_id!r} unbekannt")
 
     if object_type_id is not None:
         errors = await app.state.object_type_client.validate(
-            object_type_id, name=title, attributes=parsed_attributes
+            object_type_id,
+            name=title,
+            attributes=parsed_attributes,
+            parent_object_type_id=parent_folder["object_type_id"] if parent_folder else None,
+            parent_is_root=folder_id is None or folder_id == "root",
         )
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
@@ -212,7 +219,9 @@ async def update_document(
         errors = await app.state.object_type_client.validate(
             document.object_type_id,
             name=payload.title if payload.title is not None else document.title,
-            attributes=payload.attributes if payload.attributes is not None else document.attributes,
+            attributes=payload.attributes
+            if payload.attributes is not None
+            else document.attributes,
         )
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})

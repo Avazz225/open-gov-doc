@@ -20,5 +20,12 @@ class ObjectType(Base):
     attributes: Mapped[list] = mapped_column(JSON, default=list)
     naming_constraints: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     conditions: Mapped[list] = mapped_column(JSON, default=list)
+    # Erzwungene Objekt-Hierarchie (2.2a): Namen zulässiger Eltern-Ordnerklassen,
+    # oder der Sentinel "$ROOT" für Platzierung direkt unter der Wurzel. None/leer
+    # = überall platzierbar (Rückwärtskompatibilität zu Typen ohne diese Angabe).
+    allowed_parent_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Nur für Ordnerklassen (applies_to == "folder") gesetzt (2.2a) - Anzeige im
+    # User-UI-Explorer vor dem Namen folgt erst mit P5b-S4.
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

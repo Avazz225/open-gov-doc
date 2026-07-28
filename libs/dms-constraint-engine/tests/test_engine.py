@@ -1,4 +1,4 @@
-from dms_constraint_engine import validate
+from dms_constraint_engine import ROOT_PARENT_TYPE, validate
 
 RECHNUNG_SCHEMA = {
     "objectType": "Rechnung",
@@ -128,3 +128,49 @@ def test_reference_type_rejects_empty_value():
 
 def test_empty_schema_always_valid():
     assert validate({}, name="x", attributes={"anything": "goes"}) == []
+
+
+def test_no_allowed_parent_types_means_unrestricted_placement():
+    schema = {"attributes": []}
+    assert validate(schema, name="x", attributes={}, parent_type_name=None) == []
+    assert validate(schema, name="x", attributes={}, parent_type_name="Irgendwas") == []
+    assert validate(schema, name="x", attributes={}, parent_type_name=ROOT_PARENT_TYPE) == []
+
+
+def test_allowed_parent_types_accepts_matching_parent():
+    schema = {"attributes": [], "allowedParentTypes": ["Projektordner"]}
+    errors = validate(schema, name="x", attributes={}, parent_type_name="Projektordner")
+    assert errors == []
+
+
+def test_allowed_parent_types_rejects_non_matching_parent():
+    schema = {"attributes": [], "allowedParentTypes": ["Projektordner"]}
+    errors = validate(schema, name="x", attributes={}, parent_type_name="Kundenordner")
+    assert any("Elternordner" in e for e in errors)
+
+
+def test_allowed_parent_types_root_sentinel_accepts_root_placement():
+    schema = {"attributes": [], "allowedParentTypes": [ROOT_PARENT_TYPE]}
+    errors = validate(schema, name="x", attributes={}, parent_type_name=ROOT_PARENT_TYPE)
+    assert errors == []
+
+
+def test_allowed_parent_types_root_sentinel_rejects_untyped_parent():
+    # Ein Elternordner ohne eigenen Objekttyp ist NICHT dasselbe wie die Wurzel
+    # (2.2a) - nur der explizite ROOT_PARENT_TYPE-Sentinel zählt als Wurzel.
+    schema = {"attributes": [], "allowedParentTypes": [ROOT_PARENT_TYPE]}
+    errors = validate(schema, name="x", attributes={}, parent_type_name=None)
+    assert any("ohne Objekttyp" in e for e in errors)
+
+
+def test_allowed_parent_types_rejects_untyped_parent_when_specific_type_required():
+    schema = {"attributes": [], "allowedParentTypes": ["Projektordner"]}
+    errors = validate(schema, name="x", attributes={}, parent_type_name=None)
+    assert any("ohne Objekttyp" in e for e in errors)
+
+
+def test_allowed_parent_types_supports_multiple_alternatives():
+    schema = {"attributes": [], "allowedParentTypes": ["Projektordner", ROOT_PARENT_TYPE]}
+    assert validate(schema, name="x", attributes={}, parent_type_name="Projektordner") == []
+    assert validate(schema, name="x", attributes={}, parent_type_name=ROOT_PARENT_TYPE) == []
+    assert validate(schema, name="x", attributes={}, parent_type_name="Anderer") != []

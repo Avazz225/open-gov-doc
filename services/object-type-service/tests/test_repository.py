@@ -61,3 +61,75 @@ async def test_delete_removes_entry(session):
     await repository.delete_object_type(session, created.id)
     with pytest.raises(repository.NotFoundError):
         await repository.get_object_type(session, created.id)
+
+
+async def test_create_with_root_sentinel_allowed_parent_type_succeeds(session):
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(name="TopLevelOrd", applies_to="folder", allowed_parent_types=["$ROOT"]),
+    )
+    assert created.allowed_parent_types == ["$ROOT"]
+
+
+async def test_create_with_allowed_parent_types_referencing_existing_folder_type_succeeds(session):
+    await repository.create_object_type(
+        session, ObjectTypeCreate(name="TopLevelOrd", applies_to="folder")
+    )
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="SecondLevelOrd", applies_to="folder", allowed_parent_types=["TopLevelOrd"]
+        ),
+    )
+    assert created.allowed_parent_types == ["TopLevelOrd"]
+
+
+async def test_create_with_allowed_parent_types_referencing_unknown_type_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="MeinDoc", applies_to="document", allowed_parent_types=["Unbekannt"]
+            ),
+        )
+
+
+async def test_create_with_allowed_parent_types_referencing_document_type_raises(session):
+    await repository.create_object_type(session, RECHNUNG)
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="AndereRechnung", applies_to="document", allowed_parent_types=["Rechnung"]
+            ),
+        )
+
+
+async def test_create_icon_on_document_type_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session, ObjectTypeCreate(name="MeinDoc2", applies_to="document", icon="file")
+        )
+
+
+async def test_create_icon_on_folder_type_succeeds(session):
+    created = await repository.create_object_type(
+        session, ObjectTypeCreate(name="Projektordner2", applies_to="folder", icon="folder-star")
+    )
+    assert created.icon == "folder-star"
+
+
+async def test_update_allowed_parent_types_and_icon(session):
+    parent = await repository.create_object_type(
+        session, ObjectTypeCreate(name="TopLevelOrd2", applies_to="folder")
+    )
+    created = await repository.create_object_type(
+        session, ObjectTypeCreate(name="SecondLevelOrd2", applies_to="folder")
+    )
+    updated = await repository.update_object_type(
+        session,
+        created.id,
+        ObjectTypeUpdate(allowed_parent_types=[parent.name], icon="folder-plain"),
+    )
+    assert updated.allowed_parent_types == [parent.name]
+    assert updated.icon == "folder-plain"

@@ -13,7 +13,7 @@ from folder_service import repository
 from folder_service.models import Base
 from folder_service.object_type_client import ObjectTypeClient
 from folder_service.schemas import FolderCreate, FolderOut, FolderUpdate
-from folder_service.settings import Settings
+from folder_service.settings import ROOT_FOLDER_ID, Settings
 
 settings = Settings()
 configure_logging(settings)
@@ -69,11 +69,22 @@ async def publish_event(event_type: str, subject: str, payload: dict) -> None:
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
 
-async def _validate_against_object_type(object_type_id: int | None, *, name: str, attributes: dict):
+async def _validate_against_object_type(
+    object_type_id: int | None,
+    *,
+    name: str,
+    attributes: dict,
+    parent_object_type_id: int | None,
+    parent_is_root: bool,
+):
     if object_type_id is None:
         return
     errors = await app.state.object_type_client.validate(
-        object_type_id, name=name, attributes=attributes
+        object_type_id,
+        name=name,
+        attributes=attributes,
+        parent_object_type_id=parent_object_type_id,
+        parent_is_root=parent_is_root,
     )
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
@@ -88,8 +99,17 @@ def healthz() -> dict:
 async def create_folder(
     payload: FolderCreate, session: AsyncSession = Depends(get_session)
 ) -> FolderOut:
+    try:
+        parent_folder = await repository.get_folder(session, payload.parent_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     await _validate_against_object_type(
-        payload.object_type_id, name=payload.name, attributes=payload.attributes
+        payload.object_type_id,
+        name=payload.name,
+        attributes=payload.attributes,
+        parent_object_type_id=parent_folder.object_type_id,
+        parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
     )
     try:
         folder = await repository.create_folder(
@@ -137,6 +157,25 @@ async def list_children(
 async def update_folder(
     folder_id: str, payload: FolderUpdate, session: AsyncSession = Depends(get_session)
 ) -> FolderOut:
+    try:
+        current = await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    is_move = payload.parent_id is not None and payload.parent_id != current.parent_id
+    if is_move and current.object_type_id is not None:
+        try:
+            new_parent = await repository.get_folder(session, payload.parent_id)
+        except repository.NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        await _validate_against_object_type(
+            current.object_type_id,
+            name=payload.name if payload.name is not None else current.name,
+            attributes=payload.attributes if payload.attributes is not None else current.attributes,
+            parent_object_type_id=new_parent.object_type_id,
+            parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
+        )
+
     try:
         folder, moved = await repository.update_folder(
             session,

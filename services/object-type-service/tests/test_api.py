@@ -97,6 +97,135 @@ def test_validate_unknown_object_type_returns_404(client):
     assert response.status_code == 404
 
 
+def test_create_with_allowed_parent_types_referencing_unknown_type_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={"name": "MeinDoc", "applies_to": "document", "allowed_parent_types": ["Unbekannt"]},
+    )
+    assert response.status_code == 422
+
+
+def test_create_with_allowed_parent_types_referencing_document_type_returns_422(client):
+    client.post("/object-types", json=RECHNUNG_PAYLOAD)
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "AndereRechnung",
+            "applies_to": "document",
+            "allowed_parent_types": ["Rechnung"],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_icon_on_document_type_returns_422(client):
+    response = client.post(
+        "/object-types", json={"name": "MeinDoc2", "applies_to": "document", "icon": "file"}
+    )
+    assert response.status_code == 422
+
+
+def test_create_folder_hierarchy_with_root_sentinel_succeeds(client):
+    top = client.post(
+        "/object-types",
+        json={
+            "name": "meinTopLevelOrd",
+            "applies_to": "folder",
+            "allowed_parent_types": ["$ROOT"],
+            "icon": "folder-top",
+        },
+    )
+    assert top.status_code == 201
+    assert top.json()["allowed_parent_types"] == ["$ROOT"]
+    assert top.json()["icon"] == "folder-top"
+
+    second = client.post(
+        "/object-types",
+        json={
+            "name": "meinSecondLevelOrd",
+            "applies_to": "folder",
+            "allowed_parent_types": ["meinTopLevelOrd"],
+        },
+    )
+    assert second.status_code == 201
+
+    doc = client.post(
+        "/object-types",
+        json={
+            "name": "meinDoc",
+            "applies_to": "document",
+            "allowed_parent_types": ["meinSecondLevelOrd"],
+        },
+    )
+    assert doc.status_code == 201
+
+
+def test_validate_endpoint_accepts_placement_under_root(client):
+    object_type_id = client.post(
+        "/object-types",
+        json={"name": "NurAmRoot", "applies_to": "folder", "allowed_parent_types": ["$ROOT"]},
+    ).json()["id"]
+
+    at_root = client.post(
+        f"/object-types/{object_type_id}/validate",
+        json={"name": "x", "attributes": {}, "parent_is_root": True},
+    )
+    assert at_root.json() == {"valid": True, "errors": []}
+
+    not_at_root = client.post(
+        f"/object-types/{object_type_id}/validate",
+        json={"name": "x", "attributes": {}, "parent_is_root": False},
+    )
+    assert not_at_root.json()["valid"] is False
+
+
+def test_validate_endpoint_resolves_parent_object_type_id_to_name(client):
+    parent_id = client.post(
+        "/object-types", json={"name": "meinTopLevelOrd2", "applies_to": "folder"}
+    ).json()["id"]
+    child_id = client.post(
+        "/object-types",
+        json={
+            "name": "meinSecondLevelOrd2",
+            "applies_to": "folder",
+            "allowed_parent_types": ["meinTopLevelOrd2"],
+        },
+    ).json()["id"]
+
+    matching = client.post(
+        f"/object-types/{child_id}/validate",
+        json={"name": "x", "attributes": {}, "parent_object_type_id": parent_id},
+    )
+    assert matching.json() == {"valid": True, "errors": []}
+
+    other_id = client.post(
+        "/object-types", json={"name": "AndereOrdnerklasse", "applies_to": "folder"}
+    ).json()["id"]
+    mismatching = client.post(
+        f"/object-types/{child_id}/validate",
+        json={"name": "x", "attributes": {}, "parent_object_type_id": other_id},
+    )
+    assert mismatching.json()["valid"] is False
+
+
+def test_validate_endpoint_untyped_parent_rejected_when_specific_parent_required(client):
+    client.post("/object-types", json={"name": "meinTopLevelOrd3", "applies_to": "folder"})
+    child_id = client.post(
+        "/object-types",
+        json={
+            "name": "meinSecondLevelOrd3",
+            "applies_to": "folder",
+            "allowed_parent_types": ["meinTopLevelOrd3"],
+        },
+    ).json()["id"]
+
+    response = client.post(
+        f"/object-types/{child_id}/validate",
+        json={"name": "x", "attributes": {}},
+    )
+    assert response.json()["valid"] is False
+
+
 def test_update_and_delete(client):
     object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
 

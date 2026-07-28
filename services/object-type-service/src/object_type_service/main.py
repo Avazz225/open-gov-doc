@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from dms_common import configure_logging
+from dms_constraint_engine import ROOT_PARENT_TYPE
 from dms_constraint_engine import validate as run_validation
 from dms_db_base import build_engine, make_session_factory
 from dms_registry_client import maybe_start_registration
@@ -30,6 +31,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS object_type"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
+        # CONTRIBUTING.md): `create_all` legt fehlende TABELLEN an, ändert aber
+        # keine bestehenden - beide Spalten kamen erst in P5b-S1 dazu (2.2a).
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS allowed_parent_types JSON"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE object_type.object_type ADD COLUMN IF NOT EXISTS icon VARCHAR(64)")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -68,6 +81,8 @@ async def create_object_type(
         object_type = await repository.create_object_type(session, payload)
     except repository.DuplicateNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.InvalidFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return object_type
 
@@ -97,6 +112,8 @@ async def update_object_type(
         object_type = await repository.update_object_type(session, object_type_id, payload)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InvalidFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return object_type
 
@@ -121,10 +138,25 @@ async def validate_against_object_type(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    # Auflösung der Platzierungs-Information (2.2a): der Aufrufer kennt nur die
+    # object_type_id des Elternordners (bzw. dass er die Wurzel ist) - der Name
+    # wird hier aufgelöst, damit Object-Type Service die einzige Quelle für
+    # Objekttyp-Namen bleibt (kein zusätzlicher Roundtrip beim Aufrufer nötig).
+    if payload.parent_is_root:
+        parent_type_name = ROOT_PARENT_TYPE
+    elif payload.parent_object_type_id is not None:
+        parent_object_type = await session.get(ObjectType, payload.parent_object_type_id)
+        parent_type_name = parent_object_type.name if parent_object_type is not None else None
+    else:
+        parent_type_name = None
+
     schema = {
         "attributes": object_type.attributes,
         "namingConstraints": object_type.naming_constraints,
         "conditions": object_type.conditions,
+        "allowedParentTypes": object_type.allowed_parent_types,
     }
-    errors = run_validation(schema, name=payload.name, attributes=payload.attributes)
+    errors = run_validation(
+        schema, name=payload.name, attributes=payload.attributes, parent_type_name=parent_type_name
+    )
     return ValidateResult(valid=not errors, errors=errors)

@@ -10,6 +10,10 @@ _NUMERIC_TYPES = {"decimal", "integer"}
 
 _CONDITION_RE = re.compile(r"^\s*([A-Za-z0-9_äöüÄÖÜß]+)\s*(>=|<=|==|!=|>|<)\s*(.+?)\s*$")
 
+# Sentinel für "direkt unter der Wurzel platziert" in ``allowedParentTypes``
+# (2.2a) - kein echter Objekttyp-Name, daher als Konstante statt Freitext.
+ROOT_PARENT_TYPE = "$ROOT"
+
 
 def _to_number(value: Any) -> float | None:
     try:
@@ -130,13 +134,39 @@ def _apply_then(action: str, attributes: dict[str, Any], errors: list[str]) -> N
             errors.append(f"Bedingte Pflichtangabe fehlt: '{required_attr}'")
 
 
-def validate(schema: dict, *, name: str, attributes: dict[str, Any]) -> list[str]:
+def _validate_parent(schema: dict, parent_type_name: str | None, errors: list[str]) -> None:
+    """Erzwungene Objekt-Hierarchie (2.2a): ``allowedParentTypes`` listet die
+    Namen zulässiger Eltern-Ordnerklassen, ``ROOT_PARENT_TYPE`` steht für die
+    Platzierung direkt unter der Wurzel. Fehlt ``allowedParentTypes`` oder ist
+    die Liste leer, ist der Typ überall platzierbar (Rückwärtskompatibilität).
+    ``parent_type_name=None`` bedeutet "Elternordner ohne eigenen Objekttyp"
+    (kein Alias für die Wurzel - dafür ist ``ROOT_PARENT_TYPE`` zuständig)."""
+    allowed = schema.get("allowedParentTypes")
+    if not allowed:
+        return
+    if parent_type_name not in allowed:
+        label = "ohne Objekttyp" if parent_type_name is None else repr(parent_type_name)
+        errors.append(
+            f"Objekttyp erlaubt keine Platzierung unter einem Elternordner {label} "
+            f"- erlaubte Elternklassen: {allowed}"
+        )
+
+
+def validate(
+    schema: dict,
+    *,
+    name: str,
+    attributes: dict[str, Any],
+    parent_type_name: str | None = None,
+) -> list[str]:
     """Validiert ``attributes`` (und ``name``) gegen ein Objekttyp-Schema (2.2).
 
     Unterstützt Pflichtfelder, bedingte Pflichtfelder, Musterprüfung für Namen
     und Werte, Wertebereiche (min/max) - die in 4.5 als Minimum geforderten
-    Regeltypen. Gibt eine Liste menschenlesbarer Fehlermeldungen zurück
-    (leer = gültig).
+    Regeltypen - sowie die erzwungene Platzierungs-Hierarchie aus 2.2a
+    (``allowedParentTypes`` im Schema, ``parent_type_name`` als aufgelöster
+    Name der Elternklasse bzw. ``ROOT_PARENT_TYPE`` für die Wurzel). Gibt eine
+    Liste menschenlesbarer Fehlermeldungen zurück (leer = gültig).
     """
     errors: list[str] = []
 
@@ -148,5 +178,7 @@ def validate(schema: dict, *, name: str, attributes: dict[str, Any]) -> list[str
     for condition in schema.get("conditions", []):
         if _evaluate_condition(condition["if"], attributes):
             _apply_then(condition["then"], attributes, errors)
+
+    _validate_parent(schema, parent_type_name, errors)
 
     return errors
