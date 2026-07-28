@@ -1,13 +1,23 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
-import type { DocumentSummary, Folder } from "@/lib/api";
+import { listObjectTypes, type DocumentSummary, type Folder } from "@/lib/api";
+import { folderIcon } from "@/lib/icons";
+import { FolderTree } from "./FolderTree";
 import { UploadForm } from "./UploadForm";
 
 interface BreadcrumbEntry {
   id: string;
   name: string;
+}
+
+const VIEW_MODE_KEY = "dms.explorer.viewMode";
+type ExplorerViewMode = "list" | "tree";
+
+function loadViewMode(): ExplorerViewMode {
+  if (typeof window === "undefined") return "list";
+  return window.localStorage.getItem(VIEW_MODE_KEY) === "tree" ? "tree" : "list";
 }
 
 // Obere linke Spalte des 3-Spalten-Layouts (Nutzer-Feedback nach P4-S3, 8):
@@ -25,6 +35,7 @@ export function ExplorerPane({
   tabs,
   activeTabId,
   onOpenFolder,
+  onNavigateToFolder,
   onBreadcrumbClick,
   onOpenDocument,
   onSelectTab,
@@ -45,6 +56,7 @@ export function ExplorerPane({
   tabs: DocumentSummary[];
   activeTabId: string | null;
   onOpenFolder: (folder: Folder) => void;
+  onNavigateToFolder: (path: Folder[]) => void;
   onBreadcrumbClick: (index: number) => void;
   onOpenDocument: (doc: DocumentSummary) => void;
   onSelectTab: (id: string) => void;
@@ -63,6 +75,25 @@ export function ExplorerPane({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+  const [viewMode, setViewMode] = useState<ExplorerViewMode>(loadViewMode);
+  const [folderIconById, setFolderIconById] = useState<Record<number, string | null>>({});
+
+  // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) - einmalig geladen, kein
+  // Blocker für die übrige Anzeige, wenn das fehlschlägt (bleibt dann beim
+  // generischen Ordner-Symbol, siehe `folderIcon()`-Fallback).
+  useEffect(() => {
+    if (!token) return;
+    listObjectTypes(token, "folder")
+      .then((types) =>
+        setFolderIconById(Object.fromEntries(types.map((ot) => [ot.id, ot.icon])))
+      )
+      .catch(() => {});
+  }, [token]);
+
+  function changeViewMode(mode: ExplorerViewMode) {
+    setViewMode(mode);
+    window.localStorage.setItem(VIEW_MODE_KEY, mode);
+  }
 
   async function handleCreateSubmit(event: FormEvent) {
     event.preventDefault();
@@ -118,16 +149,18 @@ export function ExplorerPane({
         </div>
       )}
 
-      <nav className="breadcrumbs" aria-label={t("folderBrowser.breadcrumbLabel")}>
-        {trail.map((entry, index) => (
-          <span key={entry.id}>
-            {index > 0 && <span className="separator"> / </span>}
-            <button type="button" onClick={() => onBreadcrumbClick(index)}>
-              {entry.name}
-            </button>
-          </span>
-        ))}
-      </nav>
+      {viewMode === "list" && (
+        <nav className="breadcrumbs" aria-label={t("folderBrowser.breadcrumbLabel")}>
+          {trail.map((entry, index) => (
+            <span key={entry.id}>
+              {index > 0 && <span className="separator"> / </span>}
+              <button type="button" onClick={() => onBreadcrumbClick(index)}>
+                {entry.name}
+              </button>
+            </span>
+          ))}
+        </nav>
+      )}
 
       <div className="explorer-toolbar">
         <button type="button" onClick={() => setIsCreatingFolder((v) => !v)}>
@@ -136,6 +169,24 @@ export function ExplorerPane({
         <button type="button" onClick={() => setShowUpload((v) => !v)}>
           {t("explorer.toggleUpload")}
         </button>
+        <span className="view-mode-toggle" role="group" aria-label={t("explorer.viewModeLabel")}>
+          <button
+            type="button"
+            className={viewMode === "list" ? "view-mode-active" : undefined}
+            aria-pressed={viewMode === "list"}
+            onClick={() => changeViewMode("list")}
+          >
+            {t("explorer.viewModeList")}
+          </button>
+          <button
+            type="button"
+            className={viewMode === "tree" ? "view-mode-active" : undefined}
+            aria-pressed={viewMode === "tree"}
+            onClick={() => changeViewMode("tree")}
+          >
+            {t("explorer.viewModeTree")}
+          </button>
+        </span>
       </div>
 
       {isCreatingFolder && (
@@ -172,7 +223,15 @@ export function ExplorerPane({
         </p>
       )}
 
-      {isLoading ? (
+      {viewMode === "tree" ? (
+        <FolderTree
+          token={token}
+          rootLabel={trail[0]?.name ?? t("folderBrowser.rootLabel")}
+          folderIcons={folderIconById}
+          onOpenDocument={onOpenDocument}
+          onNavigateToFolder={onNavigateToFolder}
+        />
+      ) : isLoading ? (
         <p>{t("common.loading")}</p>
       ) : (
         <>
@@ -205,7 +264,10 @@ export function ExplorerPane({
                       className="entry-name"
                       onClick={() => onOpenFolder(folder)}
                     >
-                      📁 {folder.name}
+                      {folderIcon(
+                        folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null
+                      )}{" "}
+                      {folder.name}
                     </button>
                     <span className="actions">
                       <button

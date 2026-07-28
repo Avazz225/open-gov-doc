@@ -33,6 +33,8 @@
     "formLabel": "Dokument hochladen",
     "fileLabel": "Datei",
     "titlePlaceholder": "Titel (optional)",
+    "objectTypeLabel": "Objekttyp",
+    "noObjectType": "Kein Objekttyp",
     "submit": "Hochladen",
     "submitting": "Lade hoch...",
     "error": "Upload fehlgeschlagen"
@@ -66,7 +68,14 @@
     "renameFolderError": "Ordner konnte nicht umbenannt werden",
     "deleteFolderError": "Ordner konnte nicht gelöscht werden (ggf. nicht leer)",
     "resizeHorizontal": "Spaltenbreite ändern",
-    "resizeVertical": "Zeilenhöhe ändern"
+    "resizeVertical": "Zeilenhöhe ändern",
+    "viewModeLabel": "Ansicht",
+    "viewModeList": "Liste",
+    "viewModeTree": "Baum",
+    "treeLabel": "Ordner-Baumansicht",
+    "treeLoadError": "Ordnerinhalt konnte nicht geladen werden",
+    "expandFolder": "{name} aufklappen",
+    "collapseFolder": "{name} zuklappen"
   },
   "metadata": {
     "paneLabel": "Metadaten",

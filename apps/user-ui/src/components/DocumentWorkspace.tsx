@@ -101,6 +101,20 @@ export function DocumentWorkspace() {
     setTrail((prev) => [...prev, { id: folder.id, name: folder.name }]);
   }
 
+  // Baumansicht-Navigation (2.2a/8, P5b-S4): `FolderTree` kennt bereits den
+  // vollständigen Vorfahren-Pfad des angeklickten Knotens (er musste
+  // aufgeklappt werden, um sichtbar zu sein) und übergibt ihn direkt - siehe
+  // ADR 0015, warum hier kein neuer Backend-Endpunkt für den vollständigen
+  // Pfad nötig war. Ersetzt den gesamten Breadcrumb-Trail statt ihn nur zu
+  // verlängern, da ein Baum-Klick anders als `openFolder` nicht zwingend eine
+  // Ebene tiefer als der aktuelle Trail führt.
+  function navigateToFolder(path: Folder[]) {
+    setTrail([
+      { id: "root", name: t("folderBrowser.rootLabel") },
+      ...path.map((folder) => ({ id: folder.id, name: folder.name })),
+    ]);
+  }
+
   function goToBreadcrumb(index: number) {
     setTrail((prev) => prev.slice(0, index + 1));
   }
@@ -214,6 +228,7 @@ export function DocumentWorkspace() {
                   tabs={tabs}
                   activeTabId={activeTabId}
                   onOpenFolder={openFolder}
+                  onNavigateToFolder={navigateToFolder}
                   onBreadcrumbClick={goToBreadcrumb}
                   onOpenDocument={openDocumentTab}
                   onSelectTab={selectTab}

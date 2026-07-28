@@ -176,12 +176,60 @@ export interface ObjectType {
   name: string;
   applies_to: string;
   attributes: ObjectTypeAttribute[];
+  icon: string | null;
 }
 
 export async function getObjectType(token: string, objectTypeId: number): Promise<ObjectType> {
   const response = await request(
     "object-type-service",
     `object-types/${objectTypeId}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function listObjectTypes(
+  token: string,
+  appliesTo?: "document" | "folder"
+): Promise<ObjectType[]> {
+  const query = appliesTo ? `?applies_to=${appliesTo}` : "";
+  const response = await request("object-type-service", `object-types${query}`, {}, token);
+  return response.json();
+}
+
+// Formular-Layouts (2.2b, seit P5b-S2/ADR 0014) - steuern seit P5b-S4 die
+// Anordnung der Attributfelder in Metadaten-Panel, Suchmaske und Upload-
+// Dialog. `is_custom: false` heißt "generiertes Smart Layout, nicht
+// gespeichert", `true` heißt "über den Admin-UI-Layout-Designer gespeichertes
+// Override" - für die reine Anzeige hier ohne Bedeutung, nur zur Vollständigkeit
+// mit übernommen.
+export type LayoutPurpose = "display" | "search" | "upload";
+
+export interface LayoutField {
+  attribute: string;
+  label: string;
+  required: boolean;
+}
+
+export interface LayoutRow {
+  columns: LayoutField[];
+}
+
+export interface LayoutData {
+  rows: LayoutRow[];
+  responsive_breakpoint_px: number;
+  is_custom: boolean;
+}
+
+export async function getObjectTypeLayout(
+  token: string,
+  objectTypeId: number,
+  purpose: LayoutPurpose
+): Promise<LayoutData> {
+  const response = await request(
+    "object-type-service",
+    `object-types/${objectTypeId}/layouts/${purpose}`,
     {},
     token
   );
@@ -216,13 +264,24 @@ export async function listDocumentsInFolder(
 
 export async function uploadDocument(
   token: string,
-  params: { file: File; title: string; createdBy: string; folderId: string }
+  params: {
+    file: File;
+    title: string;
+    createdBy: string;
+    folderId: string;
+    objectTypeId?: number;
+    attributes?: Record<string, string>;
+  }
 ): Promise<DocumentSummary> {
   const formData = new FormData();
   formData.append("file", params.file);
   formData.append("title", params.title);
   formData.append("created_by", params.createdBy);
   formData.append("folder_id", params.folderId);
+  if (params.objectTypeId !== undefined) {
+    formData.append("object_type_id", String(params.objectTypeId));
+    formData.append("attributes", JSON.stringify(params.attributes ?? {}));
+  }
 
   const response = await request(
     "document-service",

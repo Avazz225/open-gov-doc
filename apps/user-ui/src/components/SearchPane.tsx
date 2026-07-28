@@ -6,20 +6,39 @@ import {
   ApiError,
   type DocumentSummary,
   type FacetObjectType,
+  type LayoutData,
   type SearchFacets,
   type SearchResult,
+  getObjectTypeLayout,
   getSearchFacets,
   searchDocuments,
 } from "@/lib/api";
+import { LayoutFormFields } from "./LayoutFormFields";
 
 const RANGE_TYPES = new Set(["date", "decimal", "integer"]);
+
+// Fällt zurück auf ein Ein-Attribut-pro-Zeile-Layout (identisch zur
+// Anordnung vor P5b-S4), falls das "search"-Layout des gewählten Objekttyps
+// nicht geladen werden kann - die Suche soll nicht wegen eines Ausfalls des
+// Object-Type Service komplett unbenutzbar werden.
+function fallbackLayout(objectType: FacetObjectType | undefined): LayoutData {
+  return {
+    rows: (objectType?.attributes ?? []).map((attribute) => ({
+      columns: [{ attribute: attribute.name, label: attribute.name, required: false }],
+    })),
+    responsive_breakpoint_px: 600,
+    is_custom: false,
+  };
+}
 
 // Linke Spalte im "Suche"-Ansichtsmodus (Nutzerwunsch, P5-S4) - ersetzt
 // ExplorerPane/MetadataPanel, während PreviewPane unverändert vom aktiven Tab
 // gesteuert bleibt (siehe DocumentWorkspace). Objekttyp-Auswahl blendet
-// passende Attributfilter ein (Bereichsfilter bei date/decimal/integer,
-// Exakt-Match sonst), Klick auf ein Ergebnis öffnet es wie jedes andere
-// Dokument über die bestehende Tab-/Vorschau-Maschinerie.
+// passende Attributfilter ein, seit P5b-S4 angeordnet über das "search"-
+// Formular-Layout des Objekttyps (2.2b) statt einer festen Ein-Feld-pro-
+// Zeile-Reihenfolge - Bereichsfilter bei date/decimal/integer, Exakt-Match
+// sonst. Klick auf ein Ergebnis öffnet es wie jedes andere Dokument über die
+// bestehende Tab-/Vorschau-Maschinerie.
 export function SearchPane({
   token,
   onOpenDocument,
@@ -31,6 +50,7 @@ export function SearchPane({
   const [facets, setFacets] = useState<SearchFacets | null>(null);
   const [query, setQuery] = useState("");
   const [objectTypeId, setObjectTypeId] = useState<string>("");
+  const [layout, setLayout] = useState<LayoutData | null>(null);
   const [attrValues, setAttrValues] = useState<Record<string, string>>({});
   const [attrRangeValues, setAttrRangeValues] = useState<Record<string, { gte: string; lte: string }>>(
     {}
@@ -50,6 +70,16 @@ export function SearchPane({
   const selectedObjectType: FacetObjectType | undefined = facets?.object_types.find(
     (ot) => String(ot.id) === objectTypeId
   );
+
+  useEffect(() => {
+    if (!token || !selectedObjectType) {
+      setLayout(null);
+      return;
+    }
+    getObjectTypeLayout(token, selectedObjectType.id, "search")
+      .then(setLayout)
+      .catch(() => setLayout(fallbackLayout(selectedObjectType)));
+  }, [token, selectedObjectType]);
 
   function handleObjectTypeChange(value: string) {
     setObjectTypeId(value);
@@ -108,47 +138,62 @@ export function SearchPane({
           </select>
         </label>
 
-        {selectedObjectType?.attributes.map((attribute) =>
-          RANGE_TYPES.has(attribute.type ?? "string") ? (
-            <fieldset key={attribute.name} className="search-attr-range">
-              <legend>{attribute.name}</legend>
-              <input
-                type="text"
-                aria-label={`${attribute.name} ${t("search.rangeFrom")}`}
-                placeholder={t("search.rangeFrom")}
-                value={attrRangeValues[attribute.name]?.gte ?? ""}
-                onChange={(event) =>
-                  setAttrRangeValues((prev) => ({
-                    ...prev,
-                    [attribute.name]: { ...prev[attribute.name], gte: event.target.value, lte: prev[attribute.name]?.lte ?? "" },
-                  }))
-                }
-              />
-              <input
-                type="text"
-                aria-label={`${attribute.name} ${t("search.rangeTo")}`}
-                placeholder={t("search.rangeTo")}
-                value={attrRangeValues[attribute.name]?.lte ?? ""}
-                onChange={(event) =>
-                  setAttrRangeValues((prev) => ({
-                    ...prev,
-                    [attribute.name]: { ...prev[attribute.name], lte: event.target.value, gte: prev[attribute.name]?.gte ?? "" },
-                  }))
-                }
-              />
-            </fieldset>
-          ) : (
-            <label key={attribute.name} className="search-attr-exact">
-              {attribute.name}
-              <input
-                type="text"
-                value={attrValues[attribute.name] ?? ""}
-                onChange={(event) =>
-                  setAttrValues((prev) => ({ ...prev, [attribute.name]: event.target.value }))
-                }
-              />
-            </label>
-          )
+        {selectedObjectType && layout && (
+          <LayoutFormFields
+            layout={layout}
+            renderField={(field) => {
+              const attribute = selectedObjectType.attributes.find((a) => a.name === field.attribute);
+              const type = attribute?.type ?? "string";
+              return RANGE_TYPES.has(type) ? (
+                <fieldset className="search-attr-range">
+                  <legend>{field.label}</legend>
+                  <input
+                    type="text"
+                    aria-label={`${field.label} ${t("search.rangeFrom")}`}
+                    placeholder={t("search.rangeFrom")}
+                    value={attrRangeValues[field.attribute]?.gte ?? ""}
+                    onChange={(event) =>
+                      setAttrRangeValues((prev) => ({
+                        ...prev,
+                        [field.attribute]: {
+                          ...prev[field.attribute],
+                          gte: event.target.value,
+                          lte: prev[field.attribute]?.lte ?? "",
+                        },
+                      }))
+                    }
+                  />
+                  <input
+                    type="text"
+                    aria-label={`${field.label} ${t("search.rangeTo")}`}
+                    placeholder={t("search.rangeTo")}
+                    value={attrRangeValues[field.attribute]?.lte ?? ""}
+                    onChange={(event) =>
+                      setAttrRangeValues((prev) => ({
+                        ...prev,
+                        [field.attribute]: {
+                          ...prev[field.attribute],
+                          lte: event.target.value,
+                          gte: prev[field.attribute]?.gte ?? "",
+                        },
+                      }))
+                    }
+                  />
+                </fieldset>
+              ) : (
+                <label className="search-attr-exact">
+                  {field.label}
+                  <input
+                    type="text"
+                    value={attrValues[field.attribute] ?? ""}
+                    onChange={(event) =>
+                      setAttrValues((prev) => ({ ...prev, [field.attribute]: event.target.value }))
+                    }
+                  />
+                </label>
+              );
+            }}
+          />
         )}
 
         <button type="submit">{t("search.submit")}</button>

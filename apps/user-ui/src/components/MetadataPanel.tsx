@@ -5,11 +5,14 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   type DocumentSummary,
+  type LayoutData,
   type ObjectType,
   getObjectType,
+  getObjectTypeLayout,
   updateDocumentMetadata,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { LayoutFormFields } from "./LayoutFormFields";
 
 function attributeInputType(attrType: string | undefined): string {
   if (attrType === "integer" || attrType === "decimal") return "number";
@@ -18,10 +21,14 @@ function attributeInputType(attrType: string | undefined): string {
 }
 
 // Untere linke Spalte des 3-Spalten-Layouts (Nutzer-Feedback nach P4-S3, 8):
-// Metadaten des über die Tabs ausgewählten Dokuments. Attribut-Formfelder
-// werden aus dem Objekttyp-Schema (2.2, Object-Type Service) generiert -
-// ohne Objekttyp gibt es nur den Titel zu bearbeiten. Speichert über den
-// seit P4-S4 neuen `PATCH /documents/{id}` (Document Service).
+// Metadaten des über die Tabs ausgewählten Dokuments. Seit P5b-S4 werden die
+// Attribut-Formfelder nicht mehr fest verdrahtet (ein Feld pro Zeile in
+// Attributreihenfolge), sondern über das "display"-Formular-Layout des
+// Objekttyps angeordnet (2.2b) - `LayoutFormFields` rendert das Zeilen/
+// Spalten-Grid, `objectType.attributes` liefert weiterhin Typ (für den
+// Eingabefeld-Typ) und Wertebereich. Ohne Objekttyp gibt es weiterhin nur
+// den Titel zu bearbeiten. Speichert über den seit P4-S4 vorhandenen
+// `PATCH /documents/{id}` (Document Service).
 export function MetadataPanel({
   document: activeDocument,
   onSaved,
@@ -32,6 +39,7 @@ export function MetadataPanel({
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [objectType, setObjectType] = useState<ObjectType | null>(null);
+  const [layout, setLayout] = useState<LayoutData | null>(null);
   const [title, setTitle] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +48,7 @@ export function MetadataPanel({
   useEffect(() => {
     setError(null);
     setObjectType(null);
+    setLayout(null);
     if (!activeDocument) {
       setTitle("");
       setValues({});
@@ -52,8 +61,15 @@ export function MetadataPanel({
       )
     );
     if (activeDocument.object_type_id !== null && accessToken) {
-      getObjectType(accessToken, activeDocument.object_type_id)
-        .then(setObjectType)
+      const objectTypeId = activeDocument.object_type_id;
+      Promise.all([
+        getObjectType(accessToken, objectTypeId),
+        getObjectTypeLayout(accessToken, objectTypeId, "display"),
+      ])
+        .then(([fetchedObjectType, fetchedLayout]) => {
+          setObjectType(fetchedObjectType);
+          setLayout(fetchedLayout);
+        })
         .catch(() => setError(t("metadata.loadObjectTypeError")));
     }
   }, [activeDocument, accessToken, t]);
@@ -93,19 +109,27 @@ export function MetadataPanel({
           <input value={title} onChange={(e) => setTitle(e.target.value)} required />
         </label>
 
-        {objectType ? (
-          objectType.attributes.map((attr) => (
-            <label key={attr.name}>
-              {attr.name}
-              {attr.required ? " *" : ""}
-              <input
-                type={attributeInputType(attr.type)}
-                value={values[attr.name] ?? ""}
-                required={attr.required}
-                onChange={(e) => setValues((prev) => ({ ...prev, [attr.name]: e.target.value }))}
-              />
-            </label>
-          ))
+        {objectType && layout ? (
+          <LayoutFormFields
+            layout={layout}
+            renderField={(field) => {
+              const attribute = objectType.attributes.find((a) => a.name === field.attribute);
+              return (
+                <label>
+                  {field.label}
+                  {field.required ? " *" : ""}
+                  <input
+                    type={attributeInputType(attribute?.type)}
+                    value={values[field.attribute] ?? ""}
+                    required={field.required}
+                    onChange={(e) =>
+                      setValues((prev) => ({ ...prev, [field.attribute]: e.target.value }))
+                    }
+                  />
+                </label>
+              );
+            }}
+          />
         ) : activeDocument.object_type_id === null ? (
           <p className="empty-state">{t("metadata.noObjectType")}</p>
         ) : null}

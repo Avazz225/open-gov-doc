@@ -368,6 +368,86 @@ body {
   margin-bottom: 0.75rem;
 }
 
+/* Baumansicht (2.2a/8, P5b-S4): nutzerseitig umschaltbare Alternative zur
+   Listenansicht, siehe FolderTree.tsx. */
+.view-mode-toggle {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.view-mode-toggle button.view-mode-active {
+  background: var(--dms-accent-bg);
+  font-weight: 600;
+}
+
+.folder-tree {
+  font-size: 0.9rem;
+}
+
+.tree-children {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0;
+}
+
+.tree-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  width: 1.25rem;
+  flex-shrink: 0;
+}
+
+.tree-toggle-spacer {
+  display: inline-block;
+  width: 1.25rem;
+  flex-shrink: 0;
+}
+
+.tree-row button.entry-name {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+/* Formular-Layouts (2.2b, P5b-S4): gemeinsames Zeilen/Spalten-Grid für
+   Metadaten-Panel, Suchmaske und Upload-Dialog, siehe LayoutFormFields.tsx. */
+.layout-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.layout-grid-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.layout-grid-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.layout-grid-field label,
+.layout-grid-field .search-attr-exact,
+.layout-grid-field .search-attr-range {
+  width: 100%;
+}
+
 .inline-form {
   display: flex;
   gap: 0.5rem;
