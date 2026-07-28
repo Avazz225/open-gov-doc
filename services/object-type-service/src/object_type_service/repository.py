@@ -4,8 +4,8 @@ from dms_constraint_engine import ROOT_PARENT_TYPE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from object_type_service.models import ObjectType
-from object_type_service.schemas import ObjectTypeCreate, ObjectTypeUpdate
+from object_type_service.models import ObjectType, ObjectTypeLayout
+from object_type_service.schemas import LayoutIn, ObjectTypeCreate, ObjectTypeUpdate
 
 
 class NotFoundError(Exception):
@@ -120,3 +120,61 @@ async def delete_object_type(session: AsyncSession, object_type_id: int) -> None
     object_type = await get_object_type(session, object_type_id)
     await session.delete(object_type)
     await session.flush()
+
+
+def _validate_layout_attributes(object_type: ObjectType, payload: LayoutIn) -> None:
+    """Ein Layout darf nur Attribute referenzieren, die auch tatsächlich zum
+    Objekttyp gehören (2.2b) - analog zur Referenzprüfung von
+    ``allowedParentTypes`` (2.2a), verhindert verwaiste Feldverweise nach
+    Tippfehlern oder nachträglich entfernten Attributen."""
+    known = {attribute["name"] for attribute in object_type.attributes}
+    referenced = {field.attribute for row in payload.rows for field in row.columns}
+    unknown = referenced - known
+    if unknown:
+        raise InvalidFieldError(
+            f"Layout referenziert unbekannte Attribute von {object_type.name!r}: {sorted(unknown)}"
+        )
+
+
+async def get_layout(
+    session: AsyncSession, object_type_id: int, purpose: str
+) -> ObjectTypeLayout | None:
+    return await session.get(ObjectTypeLayout, (object_type_id, purpose))
+
+
+async def upsert_layout(
+    session: AsyncSession, object_type_id: int, purpose: str, payload: LayoutIn
+) -> ObjectTypeLayout:
+    object_type = await get_object_type(session, object_type_id)
+    _validate_layout_attributes(object_type, payload)
+    layout_dict = {
+        "rows": [row.model_dump() for row in payload.rows],
+        "responsive_breakpoint_px": payload.responsive_breakpoint_px,
+    }
+    now = datetime.now(UTC)
+    existing = await get_layout(session, object_type_id, purpose)
+    if existing is not None:
+        existing.layout = layout_dict
+        existing.updated_at = now
+        await session.flush()
+        return existing
+    layout_row = ObjectTypeLayout(
+        object_type_id=object_type_id,
+        purpose=purpose,
+        layout=layout_dict,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(layout_row)
+    await session.flush()
+    return layout_row
+
+
+async def delete_layout(session: AsyncSession, object_type_id: int, purpose: str) -> None:
+    """Setzt ein Layout auf das generierte Smart-Layout zurück (2.2b) -
+    idempotent, da das Fehlen einer Override-Zeile bereits dem Default
+    entspricht (kein Fehler, falls nie eine Abweichung gespeichert wurde)."""
+    existing = await get_layout(session, object_type_id, purpose)
+    if existing is not None:
+        await session.delete(existing)
+        await session.flush()

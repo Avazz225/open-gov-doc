@@ -239,3 +239,85 @@ def test_update_and_delete(client):
     delete_response = client.delete(f"/object-types/{object_type_id}")
     assert delete_response.status_code == 204
     assert client.get(f"/object-types/{object_type_id}").status_code == 404
+
+
+def test_get_layout_without_override_returns_generated_smart_layout(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+
+    response = client.get(f"/object-types/{object_type_id}/layouts/display")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_custom"] is False
+    assert body["responsive_breakpoint_px"] == 600
+    assert body["rows"][0]["columns"][0]["attribute"] == "Rechnungsnummer"
+    assert body["rows"][0]["columns"][0]["required"] is True
+
+
+def test_get_layout_unknown_object_type_returns_404(client):
+    response = client.get("/object-types/999999/layouts/display")
+    assert response.status_code == 404
+
+
+def test_get_layout_invalid_purpose_returns_422(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    response = client.get(f"/object-types/{object_type_id}/layouts/irgendwas")
+    assert response.status_code == 422
+
+
+def test_put_layout_persists_override_and_get_returns_it(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+
+    put_response = client.put(
+        f"/object-types/{object_type_id}/layouts/upload",
+        json={
+            "rows": [
+                {"columns": [{"attribute": "Betrag", "label": "Rechnungsbetrag", "required": True}]}
+            ],
+            "responsive_breakpoint_px": 480,
+        },
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["is_custom"] is True
+    assert put_response.json()["responsive_breakpoint_px"] == 480
+
+    get_response = client.get(f"/object-types/{object_type_id}/layouts/upload")
+    assert get_response.json()["is_custom"] is True
+    assert get_response.json()["rows"][0]["columns"][0]["label"] == "Rechnungsbetrag"
+
+    other_purpose = client.get(f"/object-types/{object_type_id}/layouts/display")
+    assert other_purpose.json()["is_custom"] is False
+
+
+def test_put_layout_referencing_unknown_attribute_returns_422(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+
+    response = client.put(
+        f"/object-types/{object_type_id}/layouts/search",
+        json={"rows": [{"columns": [{"attribute": "Unbekannt", "label": "Unbekannt"}]}]},
+    )
+    assert response.status_code == 422
+
+
+def test_put_layout_unknown_object_type_returns_404(client):
+    response = client.put("/object-types/999999/layouts/display", json={"rows": []})
+    assert response.status_code == 404
+
+
+def test_delete_layout_resets_to_generated_default(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    client.put(
+        f"/object-types/{object_type_id}/layouts/display",
+        json={"rows": [{"columns": [{"attribute": "Betrag", "label": "Betrag"}]}]},
+    )
+    assert client.get(f"/object-types/{object_type_id}/layouts/display").json()["is_custom"] is True
+
+    delete_response = client.delete(f"/object-types/{object_type_id}/layouts/display")
+    assert delete_response.status_code == 204
+
+    reset = client.get(f"/object-types/{object_type_id}/layouts/display")
+    assert reset.json()["is_custom"] is False
+
+
+def test_delete_layout_unknown_object_type_returns_404(client):
+    response = client.delete("/object-types/999999/layouts/display")
+    assert response.status_code == 404

@@ -11,8 +11,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from object_type_service import repository
+from object_type_service.layout import generate_smart_layout
 from object_type_service.models import Base, ObjectType
 from object_type_service.schemas import (
+    LayoutIn,
+    LayoutOut,
+    LayoutPurpose,
     ObjectTypeCreate,
     ObjectTypeOut,
     ObjectTypeUpdate,
@@ -160,3 +164,50 @@ async def validate_against_object_type(
         schema, name=payload.name, attributes=payload.attributes, parent_type_name=parent_type_name
     )
     return ValidateResult(valid=not errors, errors=errors)
+
+
+@app.get("/object-types/{object_type_id}/layouts/{purpose}", response_model=LayoutOut)
+async def get_layout(
+    object_type_id: int, purpose: LayoutPurpose, session: AsyncSession = Depends(get_session)
+) -> LayoutOut:
+    try:
+        object_type = await repository.get_object_type(session, object_type_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    stored = await repository.get_layout(session, object_type_id, purpose.value)
+    if stored is not None:
+        return LayoutOut(**stored.layout, is_custom=True)
+    generated = generate_smart_layout(object_type.attributes)
+    return LayoutOut(**generated, is_custom=False)
+
+
+@app.put("/object-types/{object_type_id}/layouts/{purpose}", response_model=LayoutOut)
+async def put_layout(
+    object_type_id: int,
+    purpose: LayoutPurpose,
+    payload: LayoutIn,
+    session: AsyncSession = Depends(get_session),
+) -> LayoutOut:
+    try:
+        layout_row = await repository.upsert_layout(session, object_type_id, purpose.value, payload)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InvalidFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return LayoutOut(**layout_row.layout, is_custom=True)
+
+
+@app.delete(
+    "/object-types/{object_type_id}/layouts/{purpose}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def reset_layout(
+    object_type_id: int, purpose: LayoutPurpose, session: AsyncSession = Depends(get_session)
+) -> None:
+    try:
+        await repository.get_object_type(session, object_type_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await repository.delete_layout(session, object_type_id, purpose.value)
+    await session.commit()

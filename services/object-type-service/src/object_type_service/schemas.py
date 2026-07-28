@@ -1,7 +1,17 @@
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel
+
+
+class LayoutPurpose(StrEnum):
+    """Verwendungszweck eines Formular-Layouts (2.2b) - dasselbe Layout-Format
+    steuert alle drei, aber als getrennt speicherbare/überschreibbare Zeilen."""
+
+    display = "display"
+    search = "search"
+    upload = "upload"
 
 
 class ObjectTypeCreate(BaseModel):
@@ -51,3 +61,24 @@ class ValidateRequest(BaseModel):
 class ValidateResult(BaseModel):
     valid: bool
     errors: list[str]
+
+
+class LayoutField(BaseModel):
+    attribute: str
+    label: str
+    required: bool = False
+
+
+class LayoutRow(BaseModel):
+    columns: list[LayoutField]
+
+
+class LayoutIn(BaseModel):
+    rows: list[LayoutRow] = []
+    responsive_breakpoint_px: int = 600
+
+
+class LayoutOut(LayoutIn):
+    # False = generiertes Smart Layout (nicht persistiert), True = explizit
+    # über PUT gespeicherte Abweichung (siehe ADR 0014).
+    is_custom: bool

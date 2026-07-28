@@ -15,11 +15,16 @@
 | `PUT` | `/object-types/{id}` | Definition ersetzen (Attribute/Naming/Conditions/`allowed_parent_types`/`icon`) — `name`/`applies_to` bleiben unveränderlich |
 | `DELETE` | `/object-types/{id}` | Löschen |
 | `POST` | `/object-types/{id}/validate` | `{name, attributes, parent_object_type_id?, parent_is_root?}` → `{valid, errors}` — Platzierungs-Parameter seit P5b-S1 (2.2a) |
+| `GET` | `/object-types/{id}/layouts/{purpose}` | Formular-Layout (`purpose`: `display`\|`search`\|`upload`, 2.2b, seit P5b-S2) — liefert ein gespeichertes Override (`is_custom: true`) oder ein aus den aktuellen Attributen generiertes Smart Layout (`is_custom: false`), 404 bei unbekannter `object_type_id` |
+| `PUT` | `/object-types/{id}/layouts/{purpose}` | Speichert ein explizites Layout-Override — 422 bei Referenz auf ein unbekanntes Attribut, 404 bei unbekannter `object_type_id` |
+| `DELETE` | `/object-types/{id}/layouts/{purpose}` | Entfernt ein Override (Reset auf das generierte Smart Layout) — idempotent, 404 nur bei unbekannter `object_type_id` |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
 
 `object_type`: `id`, `name` (unique), `applies_to` (`"document"`\|`"folder"`), `attributes` (JSON-Liste, siehe Schema unten), `naming_constraints` (JSON, nullable), `conditions` (JSON-Liste), `allowed_parent_types` (JSON-Liste von Objekttyp-Namen oder `"$ROOT"`, nullable — 2.2a, seit P5b-S1), `icon` (String, nullable, nur für `applies_to="folder"` — 2.2a, seit P5b-S1), `created_at`/`updated_at`.
+
+`object_type_layout` (2.2b, seit P5b-S2): `object_type_id` + `purpose` (`"display"`\|`"search"`\|`"upload"`) als zusammengesetzter Primärschlüssel (Fremdschlüssel auf `object_type.id`, `ON DELETE CASCADE`), `layout` (JSON: `{rows: [{columns: [{attribute, label, required}]}], responsive_breakpoint_px}`), `created_at`/`updated_at`. Nur explizite Abweichungen vom generierten Smart Layout werden hier gespeichert (siehe ADR 0014) — fehlt eine Zeile, gilt automatisch der aktuelle generierte Stand.
 
 ## Objekttyp-Schema (2.2)
 
@@ -51,6 +56,17 @@ Jeder Objekttyp kann über `allowed_parent_types` festlegen, unter welchen Ordne
 - **Kein Rückwirkungs-Check**: Verschärft man `allowed_parent_types` nachträglich, werden bereits bestehende Platzierungen nicht rückwirkend geprüft — nur künftige Anlagen/Verschiebungen (Konzept 13, offener Punkt).
 - **Keine Zyklen-Erkennung** über mehrere Klassen hinweg (siehe ADR 0013, Konsequenzen).
 
+## Formular-Layouts (2.2b, seit P5b-S2)
+
+Jeder Objekttyp trägt zusätzlich zu seinen Attributen ein Formular-Layout je Verwendungszweck (`display`/`search`/`upload`) — ein Zeilen/Spalten-Grid, das steuert, wie die Attribute in der User-UI (Metadaten-Anzeige, Suchmaske, Upload-Dialog, alle erst ab P5b-S4 tatsächlich angebunden) angeordnet werden.
+
+- **Smart-Layout-Generierung** (`object_type_service.layout.generate_smart_layout`): packt die Attribute eines Objekttyps in Anlage-Reihenfolge zu je zwei Feldern pro Zeile, übernimmt den technischen Attributnamen zunächst 1:1 als `label` und spiegelt das `required`-Flag des Attributs zum Generierungszeitpunkt. Dieselbe Heuristik gilt für alle drei Verwendungszwecke.
+- **Generiert, nicht persistiert**: Ohne gespeichertes Override liefert `GET .../layouts/{purpose}` bei jedem Aufruf ein frisch aus der aktuellen Attributliste berechnetes Layout (`is_custom: false`) — bleibt dadurch automatisch aktuell, auch wenn sich Attribute später ändern. Erst ein `PUT` friert einen Stand explizit ein (`is_custom: true`, Snapshot statt live Referenz). **Ausführliche Begründung: ADR 0014.**
+- **Referenzprüfung beim Speichern**: `PUT` lehnt ein Layout ab (`422`), das ein nicht zum Objekttyp gehörendes Attribut referenziert — analog zur `allowedParentTypes`-Referenzprüfung (2.2a).
+- **`DELETE` setzt gezielt einen einzelnen Verwendungszweck zurück** auf das generierte Smart Layout — idempotent, kein Fehler, falls nie ein Override existierte.
+- **Kein GUI-Editor in dieser Session** — die geführte Attributauswahl/Anzeigename-Vergabe/Layout-Nachjustierung im Admin-UI folgt mit **P5b-S3**; diese Session deckt ausschließlich das Backend-Datenmodell, die Generierung und die Lese-/Schreib-/Reset-API ab, verifiziert per pytest/curl.
+- **Kein Rückwirkungs-Check**: Ändert sich die Attributliste eines Objekttyps, nachdem bereits ein individuelles Layout gespeichert wurde, wird dieses nicht automatisch nachgeführt (kann danach ein entferntes Attribut referenzieren) — dieselbe bewusste Einschränkung wie bei `allowedParentTypes` (ADR 0013).
+
 ## Constraint Engine (4.5)
 
 Die eigentliche Validierungslogik liegt in `libs/dms-constraint-engine` (reine, zustandslose Bibliothek) — **siehe ADR 0003** für die Begründung, warum das keine eigene Service ist. Dieser Service ist der einzige Ort, der die Lib importiert; andere Services (Document Service, Folder Service) rufen ausschließlich `/object-types/{id}/validate` über HTTP auf.
@@ -75,11 +91,12 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/object-type-service/tests`: Repository (CRUD, `allowed_parent_types`/`icon`-Validierung inkl. Ablehnung unbekannter/Nicht-Ordner-Referenzen), API (`/validate` inkl. `parent_is_root`/`parent_object_type_id`-Auflösung, 422 bei ungültigen 2.2a-Feldern).
+- `uv run pytest services/object-type-service/tests`: Repository (CRUD, `allowed_parent_types`/`icon`-Validierung inkl. Ablehnung unbekannter/Nicht-Ordner-Referenzen, Layout-Upsert/-Reset/-Attributreferenzprüfung), Smart-Layout-Generierung (`test_layout.py`, reine Funktionslogik), API (`/validate` inkl. `parent_is_root`/`parent_object_type_id`-Auflösung, 422 bei ungültigen 2.2a-Feldern, `/layouts/{purpose}` inkl. generiertem vs. gespeichertem Layout, 422/404-Fälle).
 
 ## Offene Punkte
 
 - Referenz-Existenzprüfung (s. o.) nicht implementiert.
 - Statusübergänge (4.5 nennt "bei Erstellung, Änderung und Statusübergängen") werden noch nicht ausgewertet — es gibt noch keinen Workflow-/Status-Mechanismus (folgt Phase 6).
-- **Kein GUI-Editor für `allowed_parent_types`/`icon`** — folgt mit P5b-S3 (GUI-Objekttyp-/Layout-Designer); diese Session deckt nur das Backend-Schema/die Durchsetzung ab, verifiziert per curl/pytest.
-- Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowed_parent_types` (siehe ADR 0013).
+- **Kein GUI-Editor für `allowed_parent_types`/`icon`/Formular-Layouts** — folgt mit P5b-S3 (GUI-Objekttyp-/Layout-Designer); diese und die vorherige Session decken nur das Backend-Schema/die Durchsetzung/Generierung ab, verifiziert per curl/pytest.
+- Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowed_parent_types` (siehe ADR 0013); kein Rückwirkungs-Check für gespeicherte Layout-Overrides bei späteren Attributänderungen (siehe ADR 0014).
+- User-UI-Konsum der Layouts (Metadaten-Panel/Suchmaske/Upload-Dialog auf layoutgesteuertes Rendering umstellen) folgt erst mit P5b-S4.

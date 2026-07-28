@@ -1,6 +1,12 @@
 import pytest
 from object_type_service import repository
-from object_type_service.schemas import ObjectTypeCreate, ObjectTypeUpdate
+from object_type_service.schemas import (
+    LayoutField,
+    LayoutIn,
+    LayoutRow,
+    ObjectTypeCreate,
+    ObjectTypeUpdate,
+)
 
 RECHNUNG = ObjectTypeCreate(
     name="Rechnung",
@@ -133,3 +139,73 @@ async def test_update_allowed_parent_types_and_icon(session):
     )
     assert updated.allowed_parent_types == [parent.name]
     assert updated.icon == "folder-plain"
+
+
+async def test_get_layout_without_override_returns_none(session):
+    created = await repository.create_object_type(session, RECHNUNG)
+    assert await repository.get_layout(session, created.id, "display") is None
+
+
+async def test_upsert_layout_persists_override(session):
+    created = await repository.create_object_type(session, RECHNUNG)
+    payload = LayoutIn(
+        rows=[
+            LayoutRow(
+                columns=[
+                    LayoutField(attribute="Rechnungsnummer", label="Rechnungs-Nr.", required=True)
+                ]
+            )
+        ],
+        responsive_breakpoint_px=480,
+    )
+    saved = await repository.upsert_layout(session, created.id, "upload", payload)
+    assert saved.layout["responsive_breakpoint_px"] == 480
+    assert saved.layout["rows"][0]["columns"][0]["label"] == "Rechnungs-Nr."
+
+    fetched = await repository.get_layout(session, created.id, "upload")
+    assert fetched is not None
+    assert fetched.layout["rows"][0]["columns"][0]["attribute"] == "Rechnungsnummer"
+
+
+async def test_upsert_layout_overwrites_existing(session):
+    created = await repository.create_object_type(session, RECHNUNG)
+    first = LayoutIn(
+        rows=[LayoutRow(columns=[LayoutField(attribute="Betrag", label="Betrag")])],
+    )
+    await repository.upsert_layout(session, created.id, "display", first)
+    second = LayoutIn(
+        rows=[LayoutRow(columns=[LayoutField(attribute="Rechnungsnummer", label="Nr.")])],
+    )
+    updated = await repository.upsert_layout(session, created.id, "display", second)
+    assert updated.layout["rows"][0]["columns"][0]["attribute"] == "Rechnungsnummer"
+
+
+async def test_upsert_layout_with_unknown_attribute_raises(session):
+    created = await repository.create_object_type(session, RECHNUNG)
+    payload = LayoutIn(
+        rows=[LayoutRow(columns=[LayoutField(attribute="Unbekannt", label="Unbekannt")])],
+    )
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.upsert_layout(session, created.id, "search", payload)
+
+
+async def test_upsert_layout_unknown_object_type_raises(session):
+    payload = LayoutIn(rows=[])
+    with pytest.raises(repository.NotFoundError):
+        await repository.upsert_layout(session, 999999, "display", payload)
+
+
+async def test_delete_layout_removes_override(session):
+    created = await repository.create_object_type(session, RECHNUNG)
+    payload = LayoutIn(
+        rows=[LayoutRow(columns=[LayoutField(attribute="Betrag", label="Betrag")])],
+    )
+    await repository.upsert_layout(session, created.id, "display", payload)
+    await repository.delete_layout(session, created.id, "display")
+    assert await repository.get_layout(session, created.id, "display") is None
+
+
+async def test_delete_layout_without_override_is_idempotent(session):
+    created = await repository.create_object_type(session, RECHNUNG)
+    await repository.delete_layout(session, created.id, "display")
+    assert await repository.get_layout(session, created.id, "display") is None
