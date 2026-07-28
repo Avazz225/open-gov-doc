@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OcrWordOut(BaseModel):
@@ -26,11 +26,23 @@ class OcrResultOut(BaseModel):
     id: str
     document_id: str
     version_number: int
-    status: Literal["ready", "needs_review", "failed"]
+    status: Literal["ready", "needs_review", "failed", "skipped"]
     engine: str
     average_confidence: float
     full_text: str
     pages: list[OcrPageOut]
     error_message: str | None
     created_at: datetime
+    updated_at: datetime
+
+
+class OcrConfigIn(BaseModel):
+    # None = keine Obergrenze.
+    max_word_count: int | None = Field(default=None, ge=1)
+    batch_size: int = Field(default=4, ge=1, le=64)
+
+
+class OcrConfigOut(OcrConfigIn):
+    model_config = {"from_attributes": True}
+
     updated_at: datetime

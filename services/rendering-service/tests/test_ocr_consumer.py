@@ -24,6 +24,15 @@ class FakeOcrClient:
         return self.full_text
 
 
+class UnreachableOcrClient:
+    """Simuliert ocrEnabled=false (P5b-S5): ocr-service ist per Docker-Compose-
+    Profil gar nicht deployt - ein `ocr.completed`-Event aus der Zeit, als OCR
+    noch lief, darf beim Nachlade-Versuch nicht den Handler crashen."""
+
+    async def get_full_text(self, document_id: str, version_number: int) -> str | None:
+        raise ConnectionError("ocr-service nicht erreichbar")
+
+
 class EventRecorder:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict]] = []
@@ -82,6 +91,32 @@ async def test_ocr_handler_creates_rendition_when_missing():
     assert ocr_client.calls == [(document_id, 1)]
     assert len(recorder.events) == 1
     assert recorder.events[0][0] == "rendering.completed"
+    await engine.dispose()
+
+
+async def test_ocr_handler_does_not_crash_if_ocr_service_unreachable():
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    engine = build_engine(DSN)
+    handler = make_ocr_handler(
+        session_factory=make_session_factory(engine),
+        ocr_client=UnreachableOcrClient(),
+        storage=StorageClient(STORAGE_SERVICE_URL),
+        publish_event=EventRecorder(),
+    )
+
+    await handler(
+        _make_event(
+            "ocr.completed",
+            document_id,
+            {
+                "version_number": 1,
+                "status": "ready",
+                "engine": "tesseract",
+                "average_confidence": 90.0,
+            },
+        )
+    )  # darf keine Exception werfen
+
     await engine.dispose()
 
 

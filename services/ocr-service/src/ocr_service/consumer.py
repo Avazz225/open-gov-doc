@@ -2,6 +2,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
+from ocr_service import repository
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.pipeline import PublishEvent, process_version
 from ocr_service.storage_client import StorageClient
@@ -48,6 +49,17 @@ def make_handler(
     return handle
 
 
+async def _current_batch_size(session_factory: async_sessionmaker[AsyncSession]) -> int:
+    """Wird von `NatsEventBusClient.subscribe()` bei jeder Nachricht neu
+    aufgerufen (P5b-S5 "Verarbeitungs-Batch-Size") - liest die Admin-UI-
+    editierbare `OcrConfig`-Zeile live, ohne dass ein Neustart nötig wäre, um
+    eine geänderte Batch-Size wirksam werden zu lassen."""
+    async with session_factory() as session:
+        config = await repository.get_config(session)
+        await session.commit()
+        return config.batch_size
+
+
 async def start_consuming(
     bus: NatsEventBusClient,
     subjects: list[str],
@@ -65,7 +77,12 @@ async def start_consuming(
     )
     for subject in subjects:
         try:
-            await bus.subscribe(subject, handler, durable="ocr-service")
+            await bus.subscribe(
+                subject,
+                handler,
+                durable="ocr-service",
+                max_concurrency=lambda: _current_batch_size(session_factory),
+            )
         except SubjectNotFoundError:
             logger.warning(
                 "Kein Stream für Subject %r gefunden - noch kein Producer gestartet? "

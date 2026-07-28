@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 
 from ocr_service import repository
 from ocr_service.document_client import DocumentNotFoundError, DocumentServiceClient
-from ocr_service.engines import UnreadableDocumentError, select_engine
+from ocr_service.engines import UnreadableDocumentError, estimate_word_count, select_engine
 from ocr_service.models import OcrResult
 from ocr_service.settings import Settings
 from ocr_service.storage_client import StorageClient
@@ -57,6 +57,32 @@ async def process_version(
 
     if engine is None:
         return None  # Format ohne OCR-Bedarf (.docx/.pptx/Video/...) - keine Zeile, kein Event
+
+    async with session_factory() as session:
+        config = await repository.get_config(session)
+        await session.commit()
+
+    if config.max_word_count is not None:
+        estimated_words = estimate_word_count(
+            data, content_type=metadata.content_type, filename=metadata.filename
+        )
+        if estimated_words > config.max_word_count:
+            logger.info(
+                "Dokument %r Version %s übersteigt geschätzt %s Wörter (Obergrenze %s) - "
+                "OCR übersprungen (3.9 Kosten-/Performance-Schutzventil)",
+                document_id,
+                version_number,
+                estimated_words,
+                config.max_word_count,
+            )
+            return await _persist_skip(
+                document_id,
+                version_number,
+                estimated_words=estimated_words,
+                max_word_count=config.max_word_count,
+                session_factory=session_factory,
+                publish_event=publish_event,
+            )
 
     try:
         extraction = await engine.extract(
@@ -143,6 +169,45 @@ async def _persist_failure(
         await session.commit()
     await publish_event(
         "ocr.failed", document_id, {"version_number": version_number, "error": error}
+    )
+    return result
+
+
+async def _persist_skip(
+    document_id: str,
+    version_number: int,
+    *,
+    estimated_words: int,
+    max_word_count: int,
+    session_factory: async_sessionmaker[AsyncSession],
+    publish_event: PublishEvent,
+) -> OcrResult:
+    """Eigener Status statt `failed` - eine übersprungene Verarbeitung wegen
+    der konfigurierten Wortobergrenze (3.9) ist kein Fehler, sondern eine
+    bewusste, im Audit-Trail sichtbare Entscheidung (sonst nicht von einem
+    "noch nicht verarbeitet" unterscheidbar)."""
+    error = (
+        f"Übersprungen: geschätzt {estimated_words} Wörter über der konfigurierten "
+        f"Obergrenze von {max_word_count}"
+    )
+    async with session_factory() as session:
+        result = await repository.upsert_ocr_result(
+            session,
+            document_id=document_id,
+            version_number=version_number,
+            status="skipped",
+            engine="",
+            average_confidence=0.0,
+            full_text="",
+            pages=[],
+            page_image_storage_key=None,
+            error_message=error,
+        )
+        await session.commit()
+    await publish_event(
+        "ocr.skipped",
+        document_id,
+        {"version_number": version_number, "estimated_words": estimated_words},
     )
     return result
 

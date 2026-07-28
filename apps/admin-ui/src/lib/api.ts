@@ -377,6 +377,39 @@ export async function resetObjectTypeLayout(
   );
 }
 
+export interface OcrConfig {
+  max_word_count: number | null;
+  batch_size: number;
+  updated_at: string;
+}
+
+// ocrEnabled selbst ist bewusst kein Feld hier - das ist ein Docker-Compose-
+// Profil-Opt-out (ADR 0016, P5b-S5), keine Laufzeit-Einstellung des Service.
+// Ist ocr-service nicht deployt, schlägt dieser Aufruf mit einem
+// Verbindungsfehler fehl - `OcrSettings.tsx` zeigt das dann als "nicht
+// erreichbar" statt eines Werts an.
+export async function getOcrConfig(token: string): Promise<OcrConfig> {
+  const response = await request("ocr-service", "config", {}, token);
+  return response.json();
+}
+
+export async function updateOcrConfig(
+  token: string,
+  payload: { maxWordCount: number | null; batchSize: number }
+): Promise<OcrConfig> {
+  const response = await request(
+    "ocr-service",
+    "config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_word_count: payload.maxWordCount, batch_size: payload.batchSize }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export interface ServiceInstance {
   instance_id: string;
   service_type: string;

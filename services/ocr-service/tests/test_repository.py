@@ -69,6 +69,45 @@ async def test_upsert_overwrites_same_key(session):
     assert len(all_for_doc) == 1
 
 
+async def test_get_config_creates_default_row_on_first_access(session):
+    config = await repository.get_config(session)
+    await session.commit()
+
+    assert config.max_word_count is None
+    assert config.batch_size == repository.DEFAULT_BATCH_SIZE
+
+
+async def test_get_config_is_idempotent(session):
+    first = await repository.get_config(session)
+    await session.commit()
+    second = await repository.get_config(session)
+    await session.commit()
+
+    assert first.id == second.id == 1
+
+
+async def test_update_config_persists_values(session):
+    updated = await repository.update_config(session, max_word_count=5000, batch_size=8)
+    await session.commit()
+
+    assert updated.max_word_count == 5000
+    assert updated.batch_size == 8
+
+    fetched = await repository.get_config(session)
+    assert fetched.max_word_count == 5000
+    assert fetched.batch_size == 8
+
+
+async def test_update_config_can_clear_max_word_count(session):
+    await repository.update_config(session, max_word_count=100, batch_size=4)
+    await session.commit()
+
+    cleared = await repository.update_config(session, max_word_count=None, batch_size=4)
+    await session.commit()
+
+    assert cleared.max_word_count is None
+
+
 async def test_list_ocr_results_filters_by_version(session):
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
     for version in (1, 2):

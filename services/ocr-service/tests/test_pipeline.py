@@ -6,7 +6,7 @@ from io import BytesIO
 import httpx
 import pytest
 from dms_db_base import build_engine, make_session_factory
-from ocr_service import pipeline
+from ocr_service import pipeline, repository
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.storage_client import StorageClient
 from PIL import Image
@@ -171,6 +171,31 @@ async def test_process_version_returns_none_for_unknown_document():
 
     assert result is None
     assert recorder.events == []
+
+
+async def test_process_version_skips_when_over_configured_word_limit():
+    engine = build_engine(DSN)
+    session_factory = make_session_factory(engine)
+    async with session_factory() as session:
+        await repository.update_config(session, max_word_count=10, batch_size=4)
+        await session.commit()
+    await engine.dispose()
+
+    document_id = _upload_document(
+        filename=f"lang-{uuid.uuid4().hex[:8]}.pdf",
+        content=_text_pdf("Sehr geehrte Damen und Herren"),
+        content_type="application/pdf",
+    )
+    recorder = EventRecorder()
+
+    result = await _run_pipeline(document_id, 1, recorder)
+
+    assert result is not None
+    assert result.status == "skipped"
+    assert result.error_message is not None
+    assert recorder.events == [
+        ("ocr.skipped", document_id, {"version_number": 1, "estimated_words": 250})
+    ]
 
 
 @pytest.mark.skipif(

@@ -1,9 +1,15 @@
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+
 import nats
 from nats.js import api
 from nats.js.client import JetStreamContext
 from nats.js.errors import NotFoundError
 
 from dms_eventbus_client.interface import EventBusClient, MessageHandler, SubjectNotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 class NatsEventBusClient(EventBusClient):
@@ -41,13 +47,59 @@ class NatsEventBusClient(EventBusClient):
         await self._js.publish(subject, payload)
 
     async def subscribe(
-        self, subject: str, handler: MessageHandler, *, durable: str, deliver_new: bool = False
+        self,
+        subject: str,
+        handler: MessageHandler,
+        *,
+        durable: str,
+        deliver_new: bool = False,
+        max_concurrency: int | Callable[[], Awaitable[int]] = 1,
     ) -> None:
         assert self._js is not None, "connect() muss vor subscribe() aufgerufen werden"
 
+        in_flight = 0
+        slot_free = asyncio.Condition()
+
+        async def _resolve_limit() -> int:
+            if callable(max_concurrency):
+                return await max_concurrency()
+            return max_concurrency
+
+        async def _run(msg) -> None:
+            nonlocal in_flight
+            try:
+                await handler(msg.data)
+            except Exception:
+                # Wie im sequentiellen Pfad: bei einem Fehler wird nicht
+                # bestätigt (Neuzustellung durch JetStream) - hier zusätzlich
+                # geloggt, da die Exception sonst nur als "Task exception was
+                # never retrieved" verlorenginge (Task statt direktem await).
+                logger.exception(
+                    "Handler-Fehler bei nebenläufiger Verarbeitung (Subject %r) - "
+                    "keine Bestätigung, Neuzustellung erwartet",
+                    subject,
+                )
+            else:
+                await msg.ack()
+            finally:
+                async with slot_free:
+                    in_flight -= 1
+                    slot_free.notify_all()
+
         async def _callback(msg) -> None:
-            await handler(msg.data)
-            await msg.ack()
+            nonlocal in_flight
+            limit = await _resolve_limit()
+            if limit <= 1:
+                # Exakt das bisherige Verhalten (keine Nebenläufigkeit) -
+                # unverändert für jeden Aufrufer, der max_concurrency nicht setzt.
+                await handler(msg.data)
+                await msg.ack()
+                return
+            async with slot_free:
+                while in_flight >= limit:
+                    await slot_free.wait()
+                in_flight += 1
+            asyncio.create_task(_run(msg))
 
         deliver_policy = api.DeliverPolicy.NEW if deliver_new else None
         try:

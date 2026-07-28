@@ -17,7 +17,7 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS ocr"))
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("TRUNCATE ocr.ocr_result CASCADE"))
+        await conn.execute(text("TRUNCATE ocr.ocr_result, ocr.ocr_config CASCADE"))
     await eng.dispose()
     yield
 

@@ -9,6 +9,7 @@
     "delete": "Löschen",
     "create": "Anlegen",
     "refresh": "Aktualisieren",
+    "save": "Speichern",
     "loadError": "Laden fehlgeschlagen",
     "deleteError": "Löschen fehlgeschlagen"
   },
@@ -31,10 +32,12 @@
     "ariaLabel": "Admin-Bereiche",
     "groupManagement": "Verwaltung",
     "groupInstallations": "Installationen",
+    "groupProcessing": "Verarbeitung",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
     "registry": "Registry",
-    "installations": "Installationsverwaltung"
+    "installations": "Installationsverwaltung",
+    "ocrSettings": "OCR-Einstellungen"
   },
   "home": {
     "title": "DMS Admin",
@@ -164,6 +167,16 @@
     "loadError": "Layout konnte nicht geladen werden",
     "noObjectTypes": "Keine Objekttypen vorhanden.",
     "emptyLayout": "Dieses Layout enthält aktuell keine Felder."
+  },
+  "ocrSettings": {
+    "pageTitle": "OCR-Einstellungen",
+    "enabledHint": "Ob OCR grundsätzlich läuft, ist eine Deployment-Entscheidung (Docker-Compose-Profil \"ocr\", siehe ADR 0016) - hier nur die laufzeitveränderlichen Einstellungen des laufenden Service.",
+    "unreachable": "OCR Service nicht erreichbar - vermutlich per Compose-Profil deaktiviert (ocrEnabled=false).",
+    "maxWordCount": "Maximale Wortobergrenze",
+    "maxWordCountPlaceholder": "keine Obergrenze",
+    "batchSize": "Verarbeitungs-Batch-Size",
+    "saved": "Gespeichert.",
+    "updatedAt": "Zuletzt geändert"
   },
   "registry": {
     "pageTitle": "Registry-Übersicht",

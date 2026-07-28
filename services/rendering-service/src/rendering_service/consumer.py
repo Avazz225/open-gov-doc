@@ -112,7 +112,17 @@ def make_ocr_handler(
         if existing is not None:
             return
 
-        full_text = await ocr_client.get_full_text(document_id, version_number)
+        try:
+            full_text = await ocr_client.get_full_text(document_id, version_number)
+        except Exception:
+            # OCR Service nicht erreichbar (P5b-S5: ocrEnabled=false-Installationen
+            # haben ihn gar nicht deployt) oder anderer HTTP-Fehler - nicht fatal,
+            # sonst würde dieses `ocr.completed`-Event (aus der Zeit, als OCR noch
+            # aktiv war) endlos redeliver-t, ohne je verarbeitbar zu sein.
+            logger.exception(
+                "OCR-Abfrage fehlgeschlagen für %r Version %s", document_id, version_number
+            )
+            return
         if full_text is None:
             return
 

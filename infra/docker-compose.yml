@@ -309,16 +309,24 @@ services:
         condition: service_started
       document-service:
         condition: service_started
-      ocr-service:
-        condition: service_started
     networks:
       - dms-net
 
+  # Optional (3.9, P5b-S5, ADR 0016): ocrEnabled=false bedeutet, dieser
+  # Container wird gar nicht erst deployt (Compose-Profil-Opt-out) statt
+  # laufend "aus" zu sein - konsistent mit dem "Dazustellen"-Prinzip. Aktiv,
+  # sobald das Profil "ocr" eingeschaltet ist (siehe COMPOSE_PROFILES in
+  # .env.example, standardmäßig aktiv). rendering-service/search-service
+  # hängen deshalb bewusst NICHT per depends_on an diesem Service - beide
+  # tolerieren seine Abwesenheit bereits über ihre HTTP-Clients
+  # (search-service: schon vorhandenes try/except; rendering-service: neu in
+  # dieser Session ergänzt, siehe consumer.py).
   ocr-service:
     build:
       context: ..
       dockerfile: services/ocr-service/Dockerfile
     restart: unless-stopped
+    profiles: ["ocr"]
     environment:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
@@ -370,8 +378,6 @@ services:
       object-type-service:
         condition: service_started
       permission-service:
-        condition: service_started
-      ocr-service:
         condition: service_started
       rendering-service:
         condition: service_started

@@ -3,7 +3,7 @@
 **Verantwortung:** Texterkennung inkl. Wort-Bounding-Boxen für bild-/PDF-basierte Dokumente (Konzept 3.9) — erkennt automatisch, ob ein Dokument überhaupt OCR braucht (vorhandener nutzbarer Textlayer ja/nein), speist den künftigen Search Service (P5-S4) sowie einen Nachzieheffekt im Rendering Service, und liefert die Wort-Positionen für die positionsgenaue Text-Markierung in der Vorschau (Nutzer-Feedback nach P5-S2).
 
 **Konzept-Referenz:** 3.9
-**Eigenes Postgres-Schema:** `ocr` (`ocr_result`).
+**Eigenes Postgres-Schema:** `ocr` (`ocr_result`, `ocr_config`).
 
 ## API
 
@@ -12,6 +12,8 @@
 | `GET` | `/ocr-results?document_id=...&version_number=...` | OCR-Ergebnisse zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) |
 | `GET` | `/ocr-results/{id}` | Einzelnes OCR-Ergebnis (Volltext, Wort-Bounding-Boxen, Konfidenz) — 404 bei unbekannter `id` |
 | `GET` | `/ocr-results/{id}/page-image` | Vom OCR Service selbst gerastertes Seitenbild (nur PDFs, siehe unten) — 404 bei unbekannter `id`, 409 wenn kein eigenständiges Seitenbild existiert (Rasterbild-Fall) |
+| `GET` | `/config` | Aktuelle Konfiguration (`max_word_count`, `batch_size`, `updated_at`) — legt beim allerersten Aufruf die Default-Zeile an (P5b-S5) |
+| `PUT` | `/config` | Aktualisiert `max_word_count`/`batch_size`, wirkt ohne Neustart auf das nächste verarbeitete Dokument (Admin-UI "OCR-Einstellungen") |
 | `GET` | `/healthz` | Health-Check |
 
 `id` eines OCR-Ergebnisses ist ein natürlicher Schlüssel `{document_id}:{version_number}` (siehe Datenmodell) — anders als bei rendering-service gibt es hier bewusst nur ein autoritatives Ergebnis je Version, kein Diskriminator für mehrere Regeln.
@@ -27,6 +29,16 @@ Konsumiert `document.created`/`document.version.created` vom Document Service �
 5. Ergebnis wird dauerhaft unter dem natürlichen Schlüssel gespeichert (Upsert, idempotent bei Redelivery) und als `ocr.completed`/`ocr.failed` veröffentlicht.
 
 **Nur Seite 1**: konsistent mit rendering-service's eigenem Ein-Bild-Thumbnail-Scope — Mehrseiten-OCR ist nicht Teil dieser Session.
+
+## Konfigurierbarkeit (3.9, P5b-S5, [ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md))
+
+Drei in 3.9 geforderte Stellschrauben, bewusst über zwei unterschiedliche Mechanismen umgesetzt (Begründung siehe ADR):
+
+- **`ocrEnabled`** — Docker-Compose-Profil-Opt-out, **kein** Feld in `/config`: `ocr-service` trägt `profiles: ["ocr"]`; ist das Profil (`COMPOSE_PROFILES`, Default `ocr`) nicht aktiv, wird der Container gar nicht erst deployt. `rendering-service`/`search-service` hängen deshalb bewusst nicht per `depends_on` an `ocr-service` und tolerieren dessen Abwesenheit über ihre HTTP-Clients (`get_full_text()`).
+- **Maximale Wortobergrenze** (`max_word_count`, `null` = keine Grenze) — vor dem eigentlichen Engine-Aufruf wird die Wortzahl **geschätzt** (`engines.estimate_word_count()`: PDF-Seitenzahl × 250, Rasterbilder zählen immer als eine Seite) und mit der konfigurierten Grenze verglichen. Überschritten → `status="skipped"`, Event `ocr.skipped`, **keine** Engine läuft (das ist der eigentliche Zweck: teure Tesseract-Läufe auf sehr große Scans vermeiden).
+- **Verarbeitungs-Batch-Size** (`batch_size`, Default `4`) — Nebenläufigkeitsgrenze für gleichzeitig laufende `process_version()`-Aufrufe. `NatsEventBusClient.subscribe()` (`dms-eventbus-client`) bekam dafür einen neuen optionalen `max_concurrency`-Parameter (Default `1`, für alle anderen Konsumenten unverändert); `ocr-service` übergibt ein Callable, das `OcrConfig.batch_size` bei jeder Nachricht live aus der DB liest.
+
+Beide DB-gestützten Werte (`max_word_count`/`batch_size`) liegen in der neuen einzeiligen `OcrConfig`-Tabelle (feste `id=1`, per `GET`/`PUT /config` administrierbar) und wirken **ohne Neustart** — anders als jede bisherige `Settings`-Umgebungsvariable in diesem Repo.
 
 ## Engine-Plugins (3.3/3.8, gleiches Prinzip wie Storage-Backends/Renderer)
 
@@ -59,6 +71,7 @@ rendering-service abonniert zusätzlich `ocr.completed` (eigener Durable-Name `r
 |---|---|---|
 | `ocr.completed` | `{version_number, status: "ready"\|"needs_review", engine, average_confidence}` | Nach erfolgreicher Extraktion |
 | `ocr.failed` | `{version_number, error}` | Bei nicht lesbarem PDF oder einer Engine-Exception |
+| `ocr.skipped` | `{version_number, estimated_words}` | Geschätzte Wortzahl übersteigt die konfigurierte Obergrenze (P5b-S5) — keine Engine lief |
 
 Der Audit Service konsumiert `ocr.>` seit dieser Session (siehe `docs/services/audit-service.md`).
 
@@ -72,8 +85,8 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/ocr-service/tests`: Engines (`NativeTextLayerEngine`/`TesseractEngine` gegen echte, in-memory erzeugte PDFs/Bilder, `select_engine()`-Dispatch für alle Fälle inkl. korruptem PDF), Repository (Upsert/Überschreiben/Filter), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. `DocumentNotFoundError`-Pfad ohne NATS-Redelivery-Risiko), API, Consumer-Integration (echtes NATS-Event löst echte OCR aus). Die beiden `TesseractEngine`-Tests sind mit `pytest.mark.skipif(shutil.which("tesseract") is None, ...)` versehen, da diese Entwicklungsumgebung selbst keinen `tesseract`-Systembinary hat (nur der Docker-Container, siehe Dockerfile) — Verifikation erfolgt dort per Live-E2E.
-- **Live-E2E über den echten Gateway-Stack** (Session-Abschluss): echtes PDF mit Textlayer hochgeladen → `native_text_layer`-Ergebnis mit korrekten Wort-Bounding-Boxen und passendem Seitenbild (834×625 PNG), `average_confidence=100.0` → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Text → Audit-Trail zeigt sowohl `ocr.completed` als auch `rendering.completed`, Hash-Kette bleibt intakt. Gateway-Routing erzwingt Auth (401 ohne/mit ungültigem Token) wie bei allen anderen Services.
+- `uv run pytest services/ocr-service/tests`: Engines (`NativeTextLayerEngine`/`TesseractEngine` gegen echte, in-memory erzeugte PDFs/Bilder, `select_engine()`-Dispatch für alle Fälle inkl. korruptem PDF, `estimate_word_count()` für Mehrseiten-PDF/Rasterbild/kaputtes PDF), Repository (Upsert/Überschreiben/Filter, `OcrConfig` Default-Anlage/Update/Zurücksetzen), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. `DocumentNotFoundError`-Pfad ohne NATS-Redelivery-Risiko, sowie der neue `skipped`-Pfad bei niedrig konfigurierter Wortobergrenze), API (inkl. `GET`/`PUT /config`, Validierungsfehler bei `batch_size` außerhalb `1..64`), Consumer-Integration (echtes NATS-Event löst echte OCR aus). Die beiden `TesseractEngine`-Tests sind mit `pytest.mark.skipif(shutil.which("tesseract") is None, ...)` versehen, da diese Entwicklungsumgebung selbst keinen `tesseract`-Systembinary hat (nur der Docker-Container, siehe Dockerfile) — Verifikation erfolgt dort per Live-E2E. Der neue `max_concurrency`-Parameter von `NatsEventBusClient.subscribe()` wird eigenständig in `libs/dms-eventbus-client/tests/test_nats_backend.py` getestet (Default bleibt streng sequentiell, `max_concurrency>1` lässt Handler nachweislich parallel laufen, ein fehlschlagender Handler blockiert die freigewordene Kapazität nicht).
+- **Live-E2E über den echten Gateway-Stack** (Session-Abschluss): echtes PDF mit Textlayer hochgeladen → `native_text_layer`-Ergebnis mit korrekten Wort-Bounding-Boxen und passendem Seitenbild (834×625 PNG), `average_confidence=100.0` → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Text → Audit-Trail zeigt sowohl `ocr.completed` als auch `rendering.completed`, Hash-Kette bleibt intakt. Gateway-Routing erzwingt Auth (401 ohne/mit ungültigem Token) wie bei allen anderen Services. P5b-S5 ergänzt: `PUT /config` mit niedriger Wortobergrenze → Upload eines Dokuments → `status="skipped"` sichtbar über `GET /ocr-results`.
 
 ## Offene Punkte
 
@@ -82,3 +95,6 @@ Noch keine — folgt in Phase 11.
 - **`needs_review` ohne echte Workflow-Anbindung**: BPMN-gestützte manuelle Nachprüfung folgt frühestens mit P6-S1/P6-S4.
 - **Keine automatische Nachverarbeitung bei dauerhaftem `failed`**: kein Retry-Mechanismus, analog zu rendering-service.
 - **Keine Autorisierung** (wie bei allen bisherigen Services): Gateway prüft nur Token-Gültigkeit, keine Rollenprüfung.
+- **Wortobergrenze ist eine grobe Schätzung** (P5b-S5): `Seitenzahl × 250` statt exakter Zählung — kann bei textarmen mehrseitigen PDFs zu früh und bei textdichten Einzelbildern nie greifen (Details/Begründung siehe ADR 0016).
+- **Batch-Size begrenzt nur die Anzahl gleichzeitiger Aufrufe, nicht den Ressourcenverbrauch je Aufruf** — kein echter Worker-Pool mit Speicher-/CPU-Accounting.
+- **`ocrEnabled` ist nur als Compose-Profil sichtbar/steuerbar** — die Admin-UI zeigt lediglich "erreichbar"/"nicht erreichbar", kein Schalter (Begründung siehe ADR 0016).

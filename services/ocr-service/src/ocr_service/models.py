@@ -32,3 +32,23 @@ class OcrResult(Base):
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OcrConfig(Base):
+    """Admin-UI-editierbare Laufzeit-Konfiguration (3.9, P5b-S5) - bewusst eine
+    einzelne Zeile mit fester `id=1` statt echter Mehrzeiligkeit, da es genau
+    eine Installation je ocr-service-Deployment gibt (keine Mandantentrennung
+    innerhalb einer Installation, 3a). Anders als `Settings` (env-only, nur bei
+    Neustart wirksam) wird diese Zeile von `pipeline.py`/`consumer.py` bei
+    jedem verarbeiteten Dokument frisch gelesen, ist also ohne Neustart wirksam.
+    `ocrEnabled` selbst ist bewusst **nicht** Teil dieser Tabelle, sondern ein
+    Docker-Compose-Profil-Opt-out (siehe ADR 0016) - ein bereits laufender
+    Service kann sich nicht selbst "undeployen"."""
+
+    __tablename__ = "ocr_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # None = keine Obergrenze (Default: OCR läuft immer, wie vor P5b-S5).
+    max_word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    batch_size: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

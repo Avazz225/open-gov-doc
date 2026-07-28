@@ -11,7 +11,7 @@ from ocr_service import repository
 from ocr_service.consumer import start_consuming
 from ocr_service.document_client import DocumentServiceClient
 from ocr_service.models import Base
-from ocr_service.schemas import OcrResultOut
+from ocr_service.schemas import OcrConfigIn, OcrConfigOut, OcrResultOut
 from ocr_service.settings import Settings
 from ocr_service.storage_client import StorageClient
 from sqlalchemy import text
@@ -90,6 +90,24 @@ async def publish_event(event_type: str, subject: str, payload: dict) -> None:
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/config", response_model=OcrConfigOut)
+async def get_config(session: AsyncSession = Depends(get_session)) -> OcrConfigOut:
+    config = await repository.get_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/config", response_model=OcrConfigOut)
+async def put_config(
+    body: OcrConfigIn, session: AsyncSession = Depends(get_session)
+) -> OcrConfigOut:
+    config = await repository.update_config(
+        session, max_word_count=body.max_word_count, batch_size=body.batch_size
+    )
+    await session.commit()
+    return config
 
 
 @app.get("/ocr-results", response_model=list[OcrResultOut])

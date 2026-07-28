@@ -1,12 +1,35 @@
 import fitz  # PyMuPDF
 from ocr_service.engines.interface import TextLayerExtractor, UnreadableDocumentError
 from ocr_service.engines.native_text_layer import NativeTextLayerEngine
-from ocr_service.engines.tesseract_ocr import TesseractEngine
+from ocr_service.engines.tesseract_ocr import TesseractEngine, is_raster_image
 from ocr_service.settings import Settings
 
 _settings = Settings()
 
 _ENGINES: list[TextLayerExtractor] = [NativeTextLayerEngine(), TesseractEngine()]
+
+# Kosten-/Performance-Schutzventil (3.9, P5b-S5): "geschätzt anhand
+# Seiten-/Bildgröße" statt exakter Analyse - eine echte Wortzählung würde die
+# teure OCR-Arbeit, die die Obergrenze gerade vermeiden soll, selbst schon
+# vorwegnehmen. Grobe, aber dokumentierte Annahme für eine typische
+# Geschäftsdokument-Seite (konkrete Schätzmethode ist laut Konzept
+# ausdrücklich Implementierungsdetail, keine Konzeptentscheidung).
+ASSUMED_WORDS_PER_PAGE = 250
+
+
+def estimate_word_count(data: bytes, *, content_type: str | None, filename: str) -> int:
+    """Günstige Vorab-Schätzung ohne die Engine laufen zu lassen, um gegen
+    `OcrConfig.max_word_count` zu prüfen. Rasterbilder gelten immer als eine
+    Seite (kein Seitenzahl-Konzept); PDFs nutzen die ohnehin kostenlos
+    verfügbare `page_count` - kein Rendern/Rastern nötig, um sie zu ermitteln."""
+    if is_raster_image(content_type=content_type, filename=filename):
+        return ASSUMED_WORDS_PER_PAGE
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+    except Exception:
+        # Nicht lesbar - select_engine() wirft in diesem Fall ohnehin UnreadableDocumentError.
+        return 0
+    return doc.page_count * ASSUMED_WORDS_PER_PAGE
 
 
 def _is_pdf(*, content_type: str | None, filename: str) -> bool:
@@ -47,4 +70,10 @@ def select_engine(
     return None
 
 
-__all__ = ["NativeTextLayerEngine", "TesseractEngine", "UnreadableDocumentError", "select_engine"]
+__all__ = [
+    "NativeTextLayerEngine",
+    "TesseractEngine",
+    "UnreadableDocumentError",
+    "estimate_word_count",
+    "select_engine",
+]

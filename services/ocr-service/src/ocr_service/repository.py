@@ -1,8 +1,11 @@
 from datetime import UTC, datetime
 
-from ocr_service.models import OcrResult
+from ocr_service.models import OcrConfig, OcrResult
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+DEFAULT_BATCH_SIZE = 4
+_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -64,3 +67,31 @@ async def list_ocr_results(
         query = query.where(OcrResult.version_number == version_number)
     result = await session.execute(query.order_by(OcrResult.version_number))
     return list(result.scalars().all())
+
+
+async def get_config(session: AsyncSession) -> OcrConfig:
+    """Liest die (einzige) Konfigurationszeile, legt sie mit Defaults an, falls
+    sie noch nie gespeichert wurde (frischer Service, vor dem ersten `PUT
+    /config`) - macht ein separates Migrations-/Seed-Skript überflüssig."""
+    config = await session.get(OcrConfig, _CONFIG_ID)
+    if config is None:
+        config = OcrConfig(
+            id=_CONFIG_ID,
+            max_word_count=None,
+            batch_size=DEFAULT_BATCH_SIZE,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_config(
+    session: AsyncSession, *, max_word_count: int | None, batch_size: int
+) -> OcrConfig:
+    config = await get_config(session)
+    config.max_word_count = max_word_count
+    config.batch_size = batch_size
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config

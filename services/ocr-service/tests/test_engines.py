@@ -2,7 +2,12 @@ import shutil
 from io import BytesIO
 
 import pytest
-from ocr_service.engines import UnreadableDocumentError, select_engine
+from ocr_service.engines import (
+    ASSUMED_WORDS_PER_PAGE,
+    UnreadableDocumentError,
+    estimate_word_count,
+    select_engine,
+)
 from ocr_service.engines.native_text_layer import NativeTextLayerEngine
 from ocr_service.engines.tesseract_ocr import TesseractEngine
 from PIL import Image, ImageDraw, ImageFont
@@ -130,6 +135,35 @@ def test_select_engine_returns_none_for_unsupported_format():
         data=b"irrelevant",
     )
     assert engine is None
+
+
+def _multi_page_pdf(page_count: int) -> bytes:
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=(400, 300))
+    for _ in range(page_count):
+        c.drawString(20, 250, "Seite")
+        c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def test_estimate_word_count_scales_with_pdf_page_count():
+    estimate = estimate_word_count(
+        _multi_page_pdf(3), content_type="application/pdf", filename="brief.pdf"
+    )
+    assert estimate == 3 * ASSUMED_WORDS_PER_PAGE
+
+
+def test_estimate_word_count_treats_raster_image_as_one_page():
+    estimate = estimate_word_count(b"irrelevant", content_type="image/png", filename="scan.png")
+    assert estimate == ASSUMED_WORDS_PER_PAGE
+
+
+def test_estimate_word_count_zero_for_unreadable_pdf():
+    estimate = estimate_word_count(
+        b"kein echtes pdf", content_type="application/pdf", filename="kaputt.pdf"
+    )
+    assert estimate == 0
 
 
 def test_select_engine_raises_for_corrupt_pdf():
