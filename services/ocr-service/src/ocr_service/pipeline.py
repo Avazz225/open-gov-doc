@@ -62,6 +62,22 @@ async def process_version(
         config = await repository.get_config(session)
         await session.commit()
 
+    if config.allowed_content_types and metadata.content_type not in config.allowed_content_types:
+        logger.info(
+            "Dokument %r Version %s hat Content-Type %r, der nicht auf der admin-konfigurierten "
+            "OCR-Positivliste steht (P5d-S1) - OCR übersprungen",
+            document_id,
+            version_number,
+            metadata.content_type,
+        )
+        return await _persist_content_type_skip(
+            document_id,
+            version_number,
+            content_type=metadata.content_type,
+            session_factory=session_factory,
+            publish_event=publish_event,
+        )
+
     if config.max_word_count is not None:
         estimated_words = estimate_word_count(
             data, content_type=metadata.content_type, filename=metadata.filename
@@ -208,6 +224,44 @@ async def _persist_skip(
         "ocr.skipped",
         document_id,
         {"version_number": version_number, "estimated_words": estimated_words},
+    )
+    return result
+
+
+async def _persist_content_type_skip(
+    document_id: str,
+    version_number: int,
+    *,
+    content_type: str | None,
+    session_factory: async_sessionmaker[AsyncSession],
+    publish_event: PublishEvent,
+) -> OcrResult:
+    """Eigener Status statt `failed`/keine Zeile - ein per admin-konfigurierter
+    Positivliste nicht abgedeckter Content-Type (P5d-S1) ist wie die
+    Wortobergrenze (`_persist_skip`) eine bewusste, im Audit-Trail sichtbare
+    Entscheidung, kein technischer Fehler."""
+    error = (
+        f"Übersprungen: Content-Type {content_type!r} steht nicht auf der "
+        "admin-konfigurierten OCR-Positivliste"
+    )
+    async with session_factory() as session:
+        result = await repository.upsert_ocr_result(
+            session,
+            document_id=document_id,
+            version_number=version_number,
+            status="skipped",
+            engine="",
+            average_confidence=0.0,
+            full_text="",
+            pages=[],
+            page_image_storage_key=None,
+            error_message=error,
+        )
+        await session.commit()
+    await publish_event(
+        "ocr.skipped",
+        document_id,
+        {"version_number": version_number, "content_type": content_type},
     )
     return result
 

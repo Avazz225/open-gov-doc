@@ -51,4 +51,11 @@ class OcrConfig(Base):
     # None = keine Obergrenze (Default: OCR läuft immer, wie vor P5b-S5).
     max_word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     batch_size: Mapped[int] = mapped_column(Integer)
+    # Admin-editierbare Content-Type-Positivliste (P5d-S1) - greift zusätzlich
+    # zur bestehenden technischen `select_engine()`-Auswahl: ist die Liste
+    # nicht leer, läuft OCR nur noch für die dort genannten Content-Types,
+    # obwohl `select_engine()` weitere technisch unterstützen würde (z. B.
+    # "nur application/pdf, nicht image/tiff"). Leere Liste (Default) = keine
+    # Einschränkung, identisch zum Verhalten vor P5d-S1.
+    allowed_content_types: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

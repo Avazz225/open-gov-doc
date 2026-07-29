@@ -16,9 +16,18 @@ Dateiinhalte - jeder Zugriff läuft über die HTTP-API des Storage Service (3.6)
 | `POST` | `/documents/{id}/versions` | Check-in (multipart: `file`, `expected_base_version_number`, `created_by`) |
 | `GET`/`POST`/`DELETE` | `/documents/{id}/lock` | Sperre lesen/setzen/regulär freigeben |
 | `POST` | `/documents/{id}/lock/force-release` | Administrativer Force-Unlock |
+| `GET`/`PUT` | `/upload-config` | Format-Whitelist lesen/ändern (seit P5d-S1) |
 | `GET` | `/healthz` | Health-Check |
 
 Details/Schema/Events: siehe `../../docs/services/document-service.md`.
+
+## Content-Type-Erkennung & Format-Whitelist (seit P5d-S1)
+
+Der gespeicherte `content_type` wird per `python-magic`/`libmagic` aus den
+tatsächlichen Datei-Bytes ermittelt, nicht aus dem vom Client gesendeten
+Header übernommen. Eine admin-editierbare Whitelist (`GET`/`PUT
+/upload-config`, leer = keine Einschränkung) lehnt nicht gelistete Formate
+mit `400` ab, bevor Virenscan/Speicherung ausgeführt werden.
 
 ## Konfliktschutz statt "überwachter" Sperre
 

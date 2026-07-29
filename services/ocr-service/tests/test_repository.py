@@ -75,6 +75,7 @@ async def test_get_config_creates_default_row_on_first_access(session):
 
     assert config.max_word_count is None
     assert config.batch_size == repository.DEFAULT_BATCH_SIZE
+    assert config.allowed_content_types == []
 
 
 async def test_get_config_is_idempotent(session):
@@ -87,22 +88,30 @@ async def test_get_config_is_idempotent(session):
 
 
 async def test_update_config_persists_values(session):
-    updated = await repository.update_config(session, max_word_count=5000, batch_size=8)
+    updated = await repository.update_config(
+        session, max_word_count=5000, batch_size=8, allowed_content_types=["image/tiff"]
+    )
     await session.commit()
 
     assert updated.max_word_count == 5000
     assert updated.batch_size == 8
+    assert updated.allowed_content_types == ["image/tiff"]
 
     fetched = await repository.get_config(session)
     assert fetched.max_word_count == 5000
     assert fetched.batch_size == 8
+    assert fetched.allowed_content_types == ["image/tiff"]
 
 
 async def test_update_config_can_clear_max_word_count(session):
-    await repository.update_config(session, max_word_count=100, batch_size=4)
+    await repository.update_config(
+        session, max_word_count=100, batch_size=4, allowed_content_types=[]
+    )
     await session.commit()
 
-    cleared = await repository.update_config(session, max_word_count=None, batch_size=4)
+    cleared = await repository.update_config(
+        session, max_word_count=None, batch_size=4, allowed_content_types=[]
+    )
     await session.commit()
 
     assert cleared.max_word_count is None

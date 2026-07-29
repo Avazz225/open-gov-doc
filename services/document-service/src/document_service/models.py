@@ -56,6 +56,21 @@ class DocumentVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class UploadConfig(Base):
+    """Admin-UI-editierbare Format-Whitelist (3.1/3.6, P5d-S1) - gleiches
+    Einzelzeilen-Muster wie `ocr_service.OcrConfig`/`storage_service.GuardConfig`:
+    bewusst eine feste Zeile `id=1` statt echter Mehrzeiligkeit (genau eine
+    Installation je Deployment, 3a). Leere Liste (Default) = keine
+    Einschränkung - jeder per Sniffing erkannte Content-Type wird akzeptiert,
+    identisch zum Verhalten vor P5d-S1."""
+
+    __tablename__ = "upload_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    allowed_content_types: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class DocumentLock(Base):
     """Bearbeitungssperre (4.2), an Nutzer + Session gebunden. Genau eine
     aktive Sperre je Dokument - deshalb ``document_id`` als Primärschlüssel

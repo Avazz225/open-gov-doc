@@ -50,6 +50,7 @@ describe("OcrSettings", () => {
     getOcrConfigMock.mockResolvedValue({
       max_word_count: 5000,
       batch_size: 4,
+      allowed_content_types: ["application/pdf"],
       updated_at: "2026-01-01T00:00:00Z",
     });
 
@@ -57,6 +58,7 @@ describe("OcrSettings", () => {
 
     expect(await screen.findByDisplayValue("5000")).toBeInTheDocument();
     expect(screen.getByDisplayValue("4")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("application/pdf")).toBeInTheDocument();
   });
 
   it("shows an unreachable state when ocr-service is not deployed (ocrEnabled=false)", async () => {
@@ -73,11 +75,13 @@ describe("OcrSettings", () => {
     getOcrConfigMock.mockResolvedValue({
       max_word_count: null,
       batch_size: 4,
+      allowed_content_types: [],
       updated_at: "2026-01-01T00:00:00Z",
     });
     updateOcrConfigMock.mockResolvedValue({
       max_word_count: 3000,
       batch_size: 8,
+      allowed_content_types: ["application/pdf", "image/png"],
       updated_at: "2026-01-02T00:00:00Z",
     });
 
@@ -90,12 +94,16 @@ describe("OcrSettings", () => {
     fireEvent.change(screen.getByLabelText("Verarbeitungs-Batch-Size"), {
       target: { value: "8" },
     });
+    fireEvent.change(screen.getByLabelText("Für OCR erlaubte Content-Types"), {
+      target: { value: "application/pdf, image/png" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     expect(await screen.findByText("Gespeichert.")).toBeInTheDocument();
     expect(updateOcrConfigMock).toHaveBeenCalledWith("token-123", {
       maxWordCount: 3000,
       batchSize: 8,
+      allowedContentTypes: ["application/pdf", "image/png"],
     });
   });
 });

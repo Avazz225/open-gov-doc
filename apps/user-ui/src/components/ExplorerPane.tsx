@@ -214,6 +214,7 @@ export function ExplorerPane({
           folderId={currentFolderId}
           createdBy={createdBy}
           onUploaded={onUploaded}
+          onClose={() => setShowUpload(false)}
         />
       )}
 

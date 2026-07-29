@@ -79,6 +79,7 @@ async def get_config(session: AsyncSession) -> OcrConfig:
             id=_CONFIG_ID,
             max_word_count=None,
             batch_size=DEFAULT_BATCH_SIZE,
+            allowed_content_types=[],
             updated_at=datetime.now(UTC),
         )
         session.add(config)
@@ -87,11 +88,16 @@ async def get_config(session: AsyncSession) -> OcrConfig:
 
 
 async def update_config(
-    session: AsyncSession, *, max_word_count: int | None, batch_size: int
+    session: AsyncSession,
+    *,
+    max_word_count: int | None,
+    batch_size: int,
+    allowed_content_types: list[str],
 ) -> OcrConfig:
     config = await get_config(session)
     config.max_word_count = max_word_count
     config.batch_size = batch_size
+    config.allowed_content_types = allowed_content_types
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config

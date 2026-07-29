@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service import repository
+from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
 from document_service.models import Base
 from document_service.object_type_client import ObjectTypeClient
@@ -24,6 +25,8 @@ from document_service.schemas import (
     LockForceReleaseRequest,
     LockOut,
     LockReleaseRequest,
+    UploadConfigIn,
+    UploadConfigOut,
 )
 from document_service.settings import Settings
 from document_service.storage_client import ObjectNotFoundError, StorageClient, compute_checksum
@@ -107,9 +110,42 @@ async def publish_event(event_type: str, subject: str, payload: dict) -> None:
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
 
+async def _resolve_content_type(session: AsyncSession, data: bytes) -> str:
+    """Sniffing statt ungeprüftem Client-Header (P5d-S1) + Abgleich gegen die
+    admin-editierbare Format-Whitelist. Wird vor dem Virenscan aufgerufen -
+    ein von vornherein abgelehntes Format muss den Scan-Dienst nicht erst
+    bemühen."""
+    content_type = sniff_content_type(data)
+    config = await repository.get_upload_config(session)
+    if config.allowed_content_types and content_type not in config.allowed_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Content-Type {content_type!r} ist nicht in der erlaubten Formatliste",
+        )
+    return content_type
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/upload-config", response_model=UploadConfigOut)
+async def get_upload_config(session: AsyncSession = Depends(get_session)) -> UploadConfigOut:
+    config = await repository.get_upload_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/upload-config", response_model=UploadConfigOut)
+async def put_upload_config(
+    body: UploadConfigIn, session: AsyncSession = Depends(get_session)
+) -> UploadConfigOut:
+    config = await repository.update_upload_config(
+        session, allowed_content_types=body.allowed_content_types
+    )
+    await session.commit()
+    return config
 
 
 @app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
@@ -145,12 +181,13 @@ async def create_document(
             raise HTTPException(status_code=400, detail={"errors": errors})
 
     data = await file.read()
+    content_type = await _resolve_content_type(session, data)
 
     try:
         await app.state.virus_scan_client.scan(
             data=data,
             filename=file.filename or title,
-            content_type=file.content_type,
+            content_type=content_type,
             document_id=None,
             created_by=created_by,
         )
@@ -166,14 +203,14 @@ async def create_document(
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
     key = _object_key(document_id, checksum)
-    await app.state.storage.upload(key, data, file.content_type)
+    await app.state.storage.upload(key, data, content_type)
 
     document = await repository.create_document(
         session,
         document_id=document_id,
         title=title,
         filename=file.filename or title,
-        content_type=file.content_type,
+        content_type=content_type,
         size_bytes=len(data),
         checksum_sha256=checksum,
         storage_object_key=key,
@@ -313,12 +350,13 @@ async def checkin_version(
     session: AsyncSession = Depends(get_session),
 ) -> CheckinResult:
     data = await file.read()
+    content_type = await _resolve_content_type(session, data)
 
     try:
         await app.state.virus_scan_client.scan(
             data=data,
             filename=file.filename or f"version-{expected_base_version_number + 1}",
-            content_type=file.content_type,
+            content_type=content_type,
             document_id=document_id,
             created_by=created_by,
         )
@@ -333,7 +371,7 @@ async def checkin_version(
 
     checksum = compute_checksum(data)
     key = _object_key(document_id, checksum)
-    await app.state.storage.upload(key, data, file.content_type)
+    await app.state.storage.upload(key, data, content_type)
 
     try:
         version, is_conflict = await repository.checkin_version(
@@ -342,7 +380,7 @@ async def checkin_version(
             expected_base_version_number=expected_base_version_number,
             storage_object_key=key,
             filename=file.filename or f"version-{expected_base_version_number + 1}",
-            content_type=file.content_type,
+            content_type=content_type,
             size_bytes=len(data),
             checksum_sha256=checksum,
             created_by=created_by,

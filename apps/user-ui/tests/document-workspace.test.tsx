@@ -500,6 +500,76 @@ describe("DocumentWorkspace", () => {
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(2));
   });
 
+  it("accepts a dropped file via drag-and-drop in the upload modal", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    uploadDocumentMock.mockResolvedValue({});
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByText("Hochladen"));
+
+    const dialog = screen.getByRole("dialog", { name: "Dokument hochladen" });
+    const file = new File(["hello"], "gedroppt.txt", { type: "text/plain" });
+    fireEvent.drop(dialog, { dataTransfer: { files: [file] } });
+
+    expect(await screen.findByText("gedroppt.txt")).toBeInTheDocument();
+
+    fireEvent.submit(screen.getByRole("form", { name: "Dokument hochladen" }));
+
+    await waitFor(() => expect(uploadDocumentMock).toHaveBeenCalled());
+  });
+
+  it("closes the upload modal via the cancel button without uploading", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByText("Hochladen"));
+    expect(screen.getByRole("dialog", { name: "Dokument hochladen" })).toBeInTheDocument();
+
+    await user.click(screen.getByText("Abbrechen"));
+
+    expect(screen.queryByRole("dialog", { name: "Dokument hochladen" })).not.toBeInTheDocument();
+    expect(uploadDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a client-side text preview for text/plain documents instead of an image rendition", async () => {
+    const textDocument = { ...document1, id: "d3", title: "notiz.txt" };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([textDocument]);
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        version_number: 1,
+        filename: "notiz.txt",
+        content_type: "text/plain",
+        size_bytes: 11,
+        checksum_sha256: "z",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["Hallo Welt"], { type: "text/plain" }));
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/notiz.txt/));
+
+    const previewPane = screen.getByLabelText("Vorschau");
+    expect(await within(previewPane).findByText("Hallo Welt")).toBeInTheDocument();
+    expect(listRenditionsMock).not.toHaveBeenCalled();
+    expect(listOcrResultsMock).not.toHaveBeenCalled();
+  });
+
   it("switches to the search view via the icon rail and back to documents", async () => {
     listChildFoldersMock.mockResolvedValue([]);
     listDocumentsInFolderMock.mockResolvedValue([document1]);

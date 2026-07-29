@@ -177,7 +177,9 @@ async def test_process_version_skips_when_over_configured_word_limit():
     engine = build_engine(DSN)
     session_factory = make_session_factory(engine)
     async with session_factory() as session:
-        await repository.update_config(session, max_word_count=10, batch_size=4)
+        await repository.update_config(
+            session, max_word_count=10, batch_size=4, allowed_content_types=[]
+        )
         await session.commit()
     await engine.dispose()
 
@@ -196,6 +198,56 @@ async def test_process_version_skips_when_over_configured_word_limit():
     assert recorder.events == [
         ("ocr.skipped", document_id, {"version_number": 1, "estimated_words": 250})
     ]
+
+
+async def test_process_version_skips_content_type_not_on_allowlist():
+    engine = build_engine(DSN)
+    session_factory = make_session_factory(engine)
+    async with session_factory() as session:
+        await repository.update_config(
+            session, max_word_count=None, batch_size=4, allowed_content_types=["image/png"]
+        )
+        await session.commit()
+    await engine.dispose()
+
+    document_id = _upload_document(
+        filename=f"nicht-erlaubt-{uuid.uuid4().hex[:8]}.pdf",
+        content=_text_pdf("Sehr geehrte Damen und Herren"),
+        content_type="application/pdf",
+    )
+    recorder = EventRecorder()
+
+    result = await _run_pipeline(document_id, 1, recorder)
+
+    assert result is not None
+    assert result.status == "skipped"
+    assert "application/pdf" in result.error_message
+    assert recorder.events == [
+        ("ocr.skipped", document_id, {"version_number": 1, "content_type": "application/pdf"})
+    ]
+
+
+async def test_process_version_runs_when_content_type_on_allowlist():
+    engine = build_engine(DSN)
+    session_factory = make_session_factory(engine)
+    async with session_factory() as session:
+        await repository.update_config(
+            session, max_word_count=None, batch_size=4, allowed_content_types=["application/pdf"]
+        )
+        await session.commit()
+    await engine.dispose()
+
+    document_id = _upload_document(
+        filename=f"erlaubt-{uuid.uuid4().hex[:8]}.pdf",
+        content=_text_pdf("Sehr geehrte Damen und Herren"),
+        content_type="application/pdf",
+    )
+    recorder = EventRecorder()
+
+    result = await _run_pipeline(document_id, 1, recorder)
+
+    assert result is not None
+    assert result.status == "ready"
 
 
 @pytest.mark.skipif(

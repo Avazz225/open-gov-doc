@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentUpdate(BaseModel):
@@ -67,3 +67,14 @@ class LockReleaseRequest(BaseModel):
 class LockForceReleaseRequest(BaseModel):
     released_by: str
     reason: str | None = None
+
+
+class UploadConfigIn(BaseModel):
+    # Leer = keine Einschränkung (Default, siehe models.UploadConfig).
+    allowed_content_types: list[str] = Field(default_factory=list)
+
+
+class UploadConfigOut(UploadConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime

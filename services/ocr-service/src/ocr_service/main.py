@@ -27,6 +27,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS ocr"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
+        # CONTRIBUTING.md): `create_all` legt fehlende TABELLEN an, ändert aber
+        # keine bestehenden - `allowed_content_types` kam erst in P5d-S1 dazu
+        # (zunächst als Negativliste `excluded_content_types` gebaut, noch in
+        # derselben Session auf eine Positivliste korrigiert - `DROP` betrifft
+        # daher keine echten Admin-Einstellungen).
+        await conn.execute(
+            text("ALTER TABLE ocr.ocr_config DROP COLUMN IF EXISTS excluded_content_types")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE ocr.ocr_config "
+                "ADD COLUMN IF NOT EXISTS allowed_content_types JSON DEFAULT '[]'::json NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -104,7 +119,10 @@ async def put_config(
     body: OcrConfigIn, session: AsyncSession = Depends(get_session)
 ) -> OcrConfigOut:
     config = await repository.update_config(
-        session, max_word_count=body.max_word_count, batch_size=body.batch_size
+        session,
+        max_word_count=body.max_word_count,
+        batch_size=body.batch_size,
+        allowed_content_types=body.allowed_content_types,
     )
     await session.commit()
     return config

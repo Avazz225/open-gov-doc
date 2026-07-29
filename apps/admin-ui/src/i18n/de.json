@@ -39,6 +39,7 @@
     "registry": "Registry",
     "installations": "Installationsverwaltung",
     "ocrSettings": "OCR-Einstellungen",
+    "uploadSettings": "Format-Whitelist",
     "storageGuard": "Speicher-Wächter"
   },
   "home": {
@@ -177,6 +178,17 @@
     "maxWordCount": "Maximale Wortobergrenze",
     "maxWordCountPlaceholder": "keine Obergrenze",
     "batchSize": "Verarbeitungs-Batch-Size",
+    "allowedContentTypes": "Für OCR erlaubte Content-Types",
+    "allowedContentTypesHint": "Kommagetrennt, z. B. \"application/pdf, image/png\" - greift zusätzlich zur technischen Format-Prüfung, leer = keine Einschränkung (Positivliste: nur gelistete Content-Types lösen OCR aus).",
+    "saved": "Gespeichert.",
+    "updatedAt": "Zuletzt geändert"
+  },
+  "uploadSettings": {
+    "pageTitle": "Format-Whitelist",
+    "hint": "Der Content-Type wird serverseitig aus dem tatsächlichen Dateiinhalt ermittelt (nicht aus dem vom Browser gesendeten Header) und gegen diese Liste geprüft (3.1/3.6). Leer = jedes erkannte Format wird akzeptiert.",
+    "unreachable": "Document Service nicht erreichbar.",
+    "allowedContentTypes": "Erlaubte Content-Types",
+    "allowedContentTypesHint": "Kommagetrennt, z. B. \"application/pdf, text/plain, application/json\" - leer = keine Einschränkung.",
     "saved": "Gespeichert.",
     "updatedAt": "Zuletzt geändert"
   },

@@ -26,7 +26,7 @@ async def _clean_tables():
         await conn.execute(
             text(
                 "TRUNCATE document.document_lock, document.document_version, "
-                "document.document CASCADE"
+                "document.document, document.upload_config CASCADE"
             )
         )
     await eng.dispose()

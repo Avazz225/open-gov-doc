@@ -34,7 +34,10 @@ const GROUPS: NavGroup[] = [
   {
     id: "processing",
     labelKey: "nav.groupProcessing",
-    items: [{ href: "/ocr-settings/", labelKey: "nav.ocrSettings" }],
+    items: [
+      { href: "/ocr-settings/", labelKey: "nav.ocrSettings" },
+      { href: "/upload-settings/", labelKey: "nav.uploadSettings" },
+    ],
   },
   {
     id: "storage",

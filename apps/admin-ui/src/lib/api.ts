@@ -380,6 +380,7 @@ export async function resetObjectTypeLayout(
 export interface OcrConfig {
   max_word_count: number | null;
   batch_size: number;
+  allowed_content_types: string[];
   updated_at: string;
 }
 
@@ -395,7 +396,7 @@ export async function getOcrConfig(token: string): Promise<OcrConfig> {
 
 export async function updateOcrConfig(
   token: string,
-  payload: { maxWordCount: number | null; batchSize: number }
+  payload: { maxWordCount: number | null; batchSize: number; allowedContentTypes: string[] }
 ): Promise<OcrConfig> {
   const response = await request(
     "ocr-service",
@@ -403,7 +404,40 @@ export async function updateOcrConfig(
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ max_word_count: payload.maxWordCount, batch_size: payload.batchSize }),
+      body: JSON.stringify({
+        max_word_count: payload.maxWordCount,
+        batch_size: payload.batchSize,
+        allowed_content_types: payload.allowedContentTypes,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface UploadConfig {
+  allowed_content_types: string[];
+  updated_at: string;
+}
+
+// Analog zu getOcrConfig/updateOcrConfig - Document Service, nicht OCR Service
+// (P5d-S1, Format-Whitelist statt OCR-Filterliste).
+export async function getUploadConfig(token: string): Promise<UploadConfig> {
+  const response = await request("document-service", "upload-config", {}, token);
+  return response.json();
+}
+
+export async function updateUploadConfig(
+  token: string,
+  payload: { allowedContentTypes: string[] }
+): Promise<UploadConfig> {
+  const response = await request(
+    "document-service",
+    "upload-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed_content_types: payload.allowedContentTypes }),
     },
     token
   );

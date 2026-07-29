@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from document_service.models import Document, DocumentLock, DocumentVersion
+from document_service.models import Document, DocumentLock, DocumentVersion, UploadConfig
+
+_UPLOAD_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -289,3 +291,27 @@ async def checkin_version(
 
     await session.flush()
     return version, is_conflict
+
+
+async def get_upload_config(session: AsyncSession) -> UploadConfig:
+    """Liest die (einzige) Format-Whitelist-Zeile, legt sie mit Defaults an,
+    falls sie noch nie gespeichert wurde - macht ein separates Migrations-/
+    Seed-Skript überflüssig (gleiches Muster wie `ocr_service.get_config`)."""
+    config = await session.get(UploadConfig, _UPLOAD_CONFIG_ID)
+    if config is None:
+        config = UploadConfig(
+            id=_UPLOAD_CONFIG_ID, allowed_content_types=[], updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_upload_config(
+    session: AsyncSession, *, allowed_content_types: list[str]
+) -> UploadConfig:
+    config = await get_upload_config(session)
+    config.allowed_content_types = allowed_content_types
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config

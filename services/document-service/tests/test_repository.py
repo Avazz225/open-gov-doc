@@ -259,3 +259,21 @@ async def test_force_unlock_then_conflicting_checkin_becomes_conflict_copy(sessi
     assert "_conflict_alice_" in version.filename
     refreshed = await repository.get_document(session, document.id)
     assert refreshed.current_version_number == 2  # Bobs Version bleibt aktuell
+
+
+async def test_get_upload_config_defaults_to_no_restriction(session):
+    config = await repository.get_upload_config(session)
+
+    assert config.allowed_content_types == []
+
+
+async def test_update_upload_config_persists_values(session):
+    updated = await repository.update_upload_config(
+        session, allowed_content_types=["application/pdf", "text/plain"]
+    )
+    await session.commit()
+
+    assert updated.allowed_content_types == ["application/pdf", "text/plain"]
+
+    fetched = await repository.get_upload_config(session)
+    assert fetched.allowed_content_types == ["application/pdf", "text/plain"]

@@ -266,6 +266,68 @@ def test_update_document_metadata_unknown_document_returns_404(client):
     assert response.status_code == 404
 
 
+def test_upload_content_type_is_sniffed_not_trusted(client):
+    """P5d-S1: der vom Browser gesendete Header wird nicht mehr übernommen -
+    hier klar sichtbar, da `upload()` Klartext-Inhalt als "application/pdf"
+    deklariert, aber das tatsächliche Byte-Sniffing "text/plain" ermittelt."""
+    body = upload(client, content=b"Hallo Welt").json()
+    version = client.get(f"/documents/{body['id']}/versions/1").json()
+    assert version["content_type"] == "text/plain"
+
+
+def test_checkin_content_type_is_sniffed_not_trusted(client):
+    body = upload(client, content=b"v1").json()
+    document_id = body["id"]
+
+    client.post(
+        f"/documents/{document_id}/versions",
+        data={"expected_base_version_number": 1, "created_by": "alice"},
+        files={"file": ("daten.json", b'{"a": 1}', "application/pdf")},
+    )
+
+    version = client.get(f"/documents/{document_id}/versions/2").json()
+    assert version["content_type"] == "application/json"
+
+
+def test_upload_rejects_content_type_not_on_whitelist(client):
+    config_response = client.put(
+        "/upload-config", json={"allowed_content_types": ["application/pdf"]}
+    )
+    assert config_response.status_code == 200
+
+    response = upload(client, content=b"Hallo Welt")  # sniffed als text/plain
+
+    assert response.status_code == 400
+
+
+def test_upload_allows_content_type_on_whitelist(client):
+    client.put("/upload-config", json={"allowed_content_types": ["text/plain"]})
+
+    response = upload(client, content=b"Hallo Welt")
+
+    assert response.status_code == 201
+
+
+def test_upload_config_empty_whitelist_means_no_restriction(client):
+    response = client.get("/upload-config")
+    assert response.status_code == 200
+    assert response.json()["allowed_content_types"] == []
+
+    response = upload(client, content=b"Hallo Welt")
+    assert response.status_code == 201
+
+
+def test_put_upload_config_persists(client):
+    put_response = client.put(
+        "/upload-config", json={"allowed_content_types": ["application/pdf", "text/plain"]}
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["allowed_content_types"] == ["application/pdf", "text/plain"]
+
+    get_response = client.get("/upload-config")
+    assert get_response.json()["allowed_content_types"] == ["application/pdf", "text/plain"]
+
+
 def test_delete_document(client):
     body = upload(client).json()
     document_id = body["id"]

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   type LayoutData,
@@ -25,16 +25,24 @@ function attributeInputType(attrType: string | undefined): string {
 // (Anzeige) und SearchPane (Suche) - dieselbe Objekttyp-Hierarchie-Prüfung
 // (2.2a) wie bisher übernimmt weiterhin der Document Service serverseitig,
 // diese UI dupliziert sie nicht.
+//
+// Seit P5d-S2 ein echter Modal-Dialog (Nutzer-Feedback) statt eines inline in
+// `ExplorerPane` eingeblendeten Formulars - nimmt zusätzlich Drag-and-Drop
+// von Dateien auf die gesamte Dialogfläche entgegen, nicht nur auf das
+// `<input type="file">`. Wiederverwendet die bereits vorhandenen, aber
+// bislang ungenutzten `.modal-backdrop`/`.modal-content`-Klassen.
 export function UploadForm({
   token,
   folderId,
   createdBy,
   onUploaded,
+  onClose,
 }: {
   token: string;
   folderId: string;
   createdBy: string;
   onUploaded: () => void;
+  onClose: () => void;
 }) {
   const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
@@ -45,6 +53,7 @@ export function UploadForm({
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -89,6 +98,7 @@ export function UploadForm({
       setObjectTypeId("");
       setValues({});
       onUploaded();
+      onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("upload.error"));
     } finally {
@@ -96,63 +106,111 @@ export function UploadForm({
     }
   }
 
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragOver(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDragOver(false);
+    const dropped = event.dataTransfer.files?.[0];
+    if (dropped) setFile(dropped);
+  }
+
   return (
-    <form onSubmit={handleSubmit} aria-label={t("upload.formLabel")}>
-      <input
-        type="file"
-        aria-label={t("upload.fileLabel")}
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        required
-      />
-      <input
-        type="text"
-        placeholder={t("upload.titlePlaceholder")}
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-      />
-      <label>
-        {t("upload.objectTypeLabel")}
-        <select value={objectTypeId} onChange={(e) => handleObjectTypeChange(e.target.value)}>
-          <option value="">{t("upload.noObjectType")}</option>
-          {objectTypes.map((ot) => (
-            <option key={ot.id} value={ot.id}>
-              {ot.name}
-            </option>
-          ))}
-        </select>
-      </label>
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className={`modal-content modal-content-wide upload-dropzone ${
+          isDragOver ? "upload-dropzone-active" : ""
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("upload.formLabel")}
+        onClick={(e) => e.stopPropagation()}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <div className="modal-header">
+          <h2 className="pane-heading">{t("upload.formLabel")}</h2>
+          <button type="button" className="modal-close" aria-label={t("upload.close")} onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <p className="empty-state">{t("upload.dropHint")}</p>
 
-      {selectedObjectType && layout && (
-        <LayoutFormFields
-          layout={layout}
-          renderField={(field) => {
-            const attribute = selectedObjectType.attributes.find((a) => a.name === field.attribute);
-            return (
-              <label>
-                {field.label}
-                {field.required ? " *" : ""}
-                <input
-                  type={attributeInputType(attribute?.type)}
-                  value={values[field.attribute] ?? ""}
-                  required={field.required}
-                  onChange={(e) =>
-                    setValues((prev) => ({ ...prev, [field.attribute]: e.target.value }))
-                  }
-                />
-              </label>
-            );
-          }}
-        />
-      )}
+        <form onSubmit={handleSubmit} aria-label={t("upload.formLabel")}>
+          <input
+            type="file"
+            aria-label={t("upload.fileLabel")}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            required
+          />
+          {file && <p className="upload-selected-file">{file.name}</p>}
+          <input
+            type="text"
+            placeholder={t("upload.titlePlaceholder")}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <label>
+            {t("upload.objectTypeLabel")}
+            <select value={objectTypeId} onChange={(e) => handleObjectTypeChange(e.target.value)}>
+              <option value="">{t("upload.noObjectType")}</option>
+              {objectTypes.map((ot) => (
+                <option key={ot.id} value={ot.id}>
+                  {ot.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      <button type="submit" disabled={!file || submitting}>
-        {submitting ? t("upload.submitting") : t("upload.submit")}
-      </button>
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-    </form>
+          {selectedObjectType && layout && (
+            <LayoutFormFields
+              layout={layout}
+              renderField={(field) => {
+                const attribute = selectedObjectType.attributes.find(
+                  (a) => a.name === field.attribute
+                );
+                return (
+                  <label>
+                    {field.label}
+                    {field.required ? " *" : ""}
+                    <input
+                      type={attributeInputType(attribute?.type)}
+                      value={values[field.attribute] ?? ""}
+                      required={field.required}
+                      onChange={(e) =>
+                        setValues((prev) => ({ ...prev, [field.attribute]: e.target.value }))
+                      }
+                    />
+                  </label>
+                );
+              }}
+            />
+          )}
+
+          <div className="actions">
+            <button type="submit" disabled={!file || submitting}>
+              {submitting ? t("upload.submitting") : t("upload.submit")}
+            </button>
+            <button type="button" onClick={onClose}>
+              {t("common.cancel")}
+            </button>
+          </div>
+          {error && (
+            <p className="error-text" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+      </div>
+    </div>
   );
 }

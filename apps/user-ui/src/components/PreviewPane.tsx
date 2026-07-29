@@ -26,7 +26,19 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-type ThumbnailState = "loading" | "ready" | "none";
+type PreviewKind = "loading" | "image" | "text" | "none";
+
+// Clientseitige Direktanzeige (P5d-S2, Nutzer-Feedback: `.txt`/`.json` hatten
+// bislang keine funktionierende Vorschau) - kein neuer rendering-service-
+// Renderer, kein Ersatzdarstellungs-Overhead für bereits textbasierte Inhalte.
+// `content_type` kommt seit P5d-S1 aus dem serverseitigen Sniffing, ist also
+// zuverlässiger als ein vom Client geratener Wert.
+const MAX_PREVIEW_CHARS = 200_000;
+
+function isTextPreviewable(contentType: string | null): boolean {
+  if (!contentType) return false;
+  return contentType.startsWith("text/") || contentType === "application/json";
+}
 
 // Ermittelt das Anzeigebild für die ausgewählte Version: existiert ein
 // OCR-Ergebnis, hat der OCR Service für PDFs sein eigenes Seitenbild gerastert
@@ -68,8 +80,9 @@ async function loadDisplayImage(
 export function PreviewPane({ document: activeDocument }: { document: DocumentSummary | null }) {
   const { accessToken } = useAuth();
   const { t } = useI18n();
-  const [thumbnailState, setThumbnailState] = useState<ThumbnailState>("none");
+  const [previewKind, setPreviewKind] = useState<PreviewKind>("none");
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [textContent, setTextContent] = useState<string | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [ocrResult, setOcrResult] = useState<OcrResultSummary | null>(null);
@@ -101,23 +114,49 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, activeDocument?.id]);
 
-  // Vorschaubild + OCR-Ergebnis für die ausgewählte Version laden.
+  // Vorschau für die ausgewählte Version laden: entweder clientseitiger
+  // Text-Direktanzeige (P5d-S2) oder das bisherige Vorschaubild + OCR-Ergebnis.
+  // Wartet auf `versions` (Content-Type-Herkunft), bevor entschieden wird,
+  // welcher Zweig greift - der Versions-Effekt oben setzt `selectedVersion`
+  // sofort, lädt die Metadaten aber asynchron nach.
   useEffect(() => {
     if (!accessToken || !activeDocument || selectedVersion === null) {
-      setThumbnailState("none");
+      setPreviewKind("none");
       setThumbnailUrl(null);
+      setTextContent(null);
       setOcrResult(null);
       return;
     }
 
+    const versionMeta = versions.find((v) => v.version_number === selectedVersion);
+    if (!versionMeta) return; // Versions-Metadaten noch nicht geladen - kein Zwischenzustand zeigen
+    const contentType = versionMeta.content_type;
+
     let cancelled = false;
     let objectUrl: string | null = null;
-    setThumbnailState("loading");
+    setPreviewKind("loading");
     setThumbnailUrl(null);
+    setTextContent(null);
     setOcrResult(null);
 
     async function load() {
       if (!accessToken || !activeDocument || selectedVersion === null) return;
+
+      if (isTextPreviewable(contentType)) {
+        try {
+          const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
+          if (cancelled) return;
+          const text = await blob.text();
+          setTextContent(
+            text.length > MAX_PREVIEW_CHARS ? `${text.slice(0, MAX_PREVIEW_CHARS)}\n…` : text
+          );
+          setPreviewKind("text");
+        } catch {
+          if (!cancelled) setPreviewKind("none");
+        }
+        return;
+      }
+
       let ocr: OcrResultSummary | null = null;
       try {
         const results = await listOcrResults(accessToken, activeDocument.id, selectedVersion);
@@ -132,11 +171,11 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setThumbnailUrl(objectUrl);
-        setThumbnailState("ready");
+        setPreviewKind("image");
         setOcrResult(ocr);
       } catch {
         if (!cancelled) {
-          setThumbnailState("none");
+          setPreviewKind("none");
           setOcrResult(null);
         }
       }
@@ -149,7 +188,7 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, activeDocument?.id, selectedVersion]);
+  }, [accessToken, activeDocument?.id, selectedVersion, versions]);
 
   // Misst die tatsächlich gerenderte Bildhöhe, damit die Overlay-Wort-Spans
   // bei jeder Splitter-Breite/jedem Zoom die richtige Schriftgröße bekommen.
@@ -205,9 +244,13 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         </label>
       )}
 
-      {thumbnailState === "loading" && <p className="empty-state">{t("preview.loading")}</p>}
+      {previewKind === "loading" && <p className="empty-state">{t("preview.loading")}</p>}
 
-      {thumbnailState === "ready" && thumbnailUrl && (
+      {previewKind === "text" && textContent !== null && (
+        <pre className="preview-text">{textContent}</pre>
+      )}
+
+      {previewKind === "image" && thumbnailUrl && (
         <div className="preview-image-wrapper">
           <img
             ref={imgRef}
@@ -242,7 +285,7 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         </div>
       )}
 
-      {thumbnailState === "none" && <p className="empty-state">{t("preview.noRendition")}</p>}
+      {previewKind === "none" && <p className="empty-state">{t("preview.noRendition")}</p>}
 
       {ocrResult?.status === "needs_review" && (
         <p className="ocr-review-hint">⚠ {t("preview.ocrNeedsReview")}</p>

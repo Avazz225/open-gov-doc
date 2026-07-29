@@ -37,7 +37,9 @@
     "noObjectType": "Kein Objekttyp",
     "submit": "Hochladen",
     "submitting": "Lade hoch...",
-    "error": "Upload fehlgeschlagen"
+    "error": "Upload fehlgeschlagen",
+    "close": "Schließen",
+    "dropHint": "Datei hierher ziehen oder über das Feld unten auswählen"
   },
   "iconRail": {
     "label": "Cross-Cutting-Navigation",

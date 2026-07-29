@@ -28,6 +28,19 @@ if (typeof window !== "undefined" && !window.ResizeObserver) {
   window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
 
+// jsdoms `Blob` implementiert `.text()` nicht - `PreviewPane` (P5d-S2) liest
+// darüber den Inhalt für die clientseitige Text-Direktanzeige aus.
+if (typeof Blob !== "undefined" && !Blob.prototype.text) {
+  Blob.prototype.text = function (this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}
+
 afterEach(() => {
   cleanup();
 });

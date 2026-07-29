@@ -2,27 +2,19 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
-import { ApiError, getOcrConfig, updateOcrConfig, type OcrConfig } from "@/lib/api";
+import { ApiError, getUploadConfig, updateUploadConfig, type UploadConfig } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// ocrEnabled (3.9) ist bewusst NICHT hier editierbar - das ist ein Docker-
-// Compose-Profil-Opt-out (ADR 0016): der Container wird gar nicht deployt,
-// eine bereits laufende Instanz kann sich nicht selbst "undeployen". Ist der
-// Service nicht erreichbar, zeigt diese Seite genau das an (unreachable
-// statt eines Fehlers) - das ist zugleich der sichtbare Status von
-// "ocrEnabled=false" in dieser UI, ohne einen eigenen Schalter dafür.
-export function OcrSettings() {
+export function UploadSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
-  const [config, setConfig] = useState<OcrConfig | null>(null);
+  const [config, setConfig] = useState<UploadConfig | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  const [maxWordCountInput, setMaxWordCountInput] = useState("");
-  const [batchSizeInput, setBatchSizeInput] = useState("4");
   const [allowedContentTypesInput, setAllowedContentTypesInput] = useState("");
 
   const reload = useCallback(async () => {
@@ -31,10 +23,8 @@ export function OcrSettings() {
     setUnreachable(false);
     setError(null);
     try {
-      const loaded = await getOcrConfig(accessToken);
+      const loaded = await getUploadConfig(accessToken);
       setConfig(loaded);
-      setMaxWordCountInput(loaded.max_word_count === null ? "" : String(loaded.max_word_count));
-      setBatchSizeInput(String(loaded.batch_size));
       setAllowedContentTypesInput(loaded.allowed_content_types.join(", "));
     } catch (err) {
       if (err instanceof ApiError) {
@@ -58,16 +48,11 @@ export function OcrSettings() {
     setSavedAt(null);
     setIsSaving(true);
     try {
-      const maxWordCount = maxWordCountInput.trim() === "" ? null : Number(maxWordCountInput);
       const allowedContentTypes = allowedContentTypesInput
         .split(",")
         .map((value) => value.trim())
         .filter((value) => value.length > 0);
-      const updated = await updateOcrConfig(accessToken, {
-        maxWordCount,
-        batchSize: Number(batchSizeInput),
-        allowedContentTypes,
-      });
+      const updated = await updateUploadConfig(accessToken, { allowedContentTypes });
       setConfig(updated);
       setSavedAt(Date.now());
     } catch (err) {
@@ -79,45 +64,24 @@ export function OcrSettings() {
 
   return (
     <div className="card">
-      <p className="hint">{t("ocrSettings.enabledHint")}</p>
+      <p className="hint">{t("uploadSettings.hint")}</p>
 
       {isLoading ? (
         <p>{t("common.loading")}</p>
       ) : unreachable ? (
-        <p className="empty-state">{t("ocrSettings.unreachable")}</p>
+        <p className="empty-state">{t("uploadSettings.unreachable")}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
-            {t("ocrSettings.maxWordCount")}
-            <input
-              type="number"
-              min={1}
-              placeholder={t("ocrSettings.maxWordCountPlaceholder")}
-              value={maxWordCountInput}
-              onChange={(event) => setMaxWordCountInput(event.target.value)}
-            />
-          </label>
-          <label>
-            {t("ocrSettings.batchSize")}
-            <input
-              type="number"
-              min={1}
-              max={64}
-              required
-              value={batchSizeInput}
-              onChange={(event) => setBatchSizeInput(event.target.value)}
-            />
-          </label>
-          <label>
-            {t("ocrSettings.allowedContentTypes")}
+            {t("uploadSettings.allowedContentTypes")}
             <input
               type="text"
-              placeholder="application/pdf, image/png"
+              placeholder="application/pdf, text/plain, application/json"
               value={allowedContentTypesInput}
               onChange={(event) => setAllowedContentTypesInput(event.target.value)}
             />
           </label>
-          <p className="hint">{t("ocrSettings.allowedContentTypesHint")}</p>
+          <p className="hint">{t("uploadSettings.allowedContentTypesHint")}</p>
           <div className="actions">
             <button type="submit" disabled={isSaving}>
               {t("common.save")}
@@ -131,10 +95,10 @@ export function OcrSettings() {
           {error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("ocrSettings.saved")}</p>}
+      {savedAt !== null && !error && <p className="hint">{t("uploadSettings.saved")}</p>}
       {config && (
         <p className="hint">
-          {t("ocrSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
+          {t("uploadSettings.updatedAt")}: {new Date(config.updated_at).toLocaleString()}
         </p>
       )}
     </div>

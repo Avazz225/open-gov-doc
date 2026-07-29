@@ -2,8 +2,8 @@
 
 **Verantwortung:** Dokumente als Kernentität (Konzept 2.1) — CRUD, dauerhafte Versionierung (2.1a, kein Überschreiben/Verwerfen), Bearbeitungssperre bei externer Bearbeitung inkl. Force-Unlock und Konfliktkopie (4.2). Hält selbst nie Dateiinhalte — jeder Byte-Zugriff läuft über die HTTP-API des Storage Service (3.6).
 
-**Konzept-Referenz:** 2.1/2.1a/4.2
-**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`)
+**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6
+**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`)
 
 ## API
 
@@ -23,6 +23,8 @@
 | `POST` | `/documents/{id}/lock` | Sperre setzen (`locked_by`, `session_id`, optional `timeout_seconds`) — 409 bei Fremdsperre |
 | `DELETE` | `/documents/{id}/lock` | Regulärer Unlock (`released_by`) — 403, wenn nicht der Halter |
 | `POST` | `/documents/{id}/lock/force-release` | Administrativer Force-Unlock (`released_by`, optional `reason`) |
+| `GET` | `/upload-config` | Format-Whitelist lesen (`allowed_content_types`, seit P5d-S1) |
+| `PUT` | `/upload-config` | Format-Whitelist ändern - wirkt sofort auf den nächsten Upload |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -30,6 +32,7 @@
 - `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`.
 - `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a).
 - `document_lock`: genau eine aktive Zeile je gesperrtem Dokument (`document_id` als PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
+- `upload_config`: einzelne Zeile (`id=1`, seit P5d-S1) — `allowed_content_types` (JSON-Liste, leer = keine Einschränkung), `updated_at`.
 
 `folder_id`/`object_type_id` sind opake Referenzen ohne FK-Erzwingung über Service-Grenzen hinweg, werden aber seit P3-S3 aktiv geprüft: `folder_id` (falls gesetzt) muss beim Folder Service existieren (sonst 400), `object_type_id` (falls gesetzt) validiert `attributes`+`title` gegen den Object-Type Service (sonst 400 mit Fehlerliste). Seit P4-S4 gilt dieselbe Validierung auch für `PATCH /documents/{id}` — `folder_id`/`object_type_id` selbst bleiben dabei bewusst unveränderlich (Verschieben/Retypisieren sind eigene Operationen mit anderen Konsistenzfragen, kein reines Metadaten-Update).
 
@@ -40,6 +43,24 @@
 ## Speicherung der Inhalte (3.6-Anbindung)
 
 Objektschlüssel sind **inhaltsadressiert**: `documents/{document_id}/{sha256}`. Das vermeidet die Henne-Ei-Reihenfolge "Upload braucht die noch nicht vergebene Versionsnummer" und dedupliziert identische Inhalte innerhalb desselben Dokuments automatisch (z. B. wiederholtes Hochladen derselben Datei). Document Service spricht dafür ausschließlich `PUT`/`GET /objects/{key}` des Storage Service über HTTP an — kein Zugriff auf dessen Interna oder direkte Backend-Nutzung.
+
+## Content-Type-Erkennung & Format-Whitelist (3.1/3.6, seit P5d-S1)
+
+Der bei jedem Upload gespeicherte `content_type` wird **serverseitig aus den
+tatsächlichen Magic-Bytes** ermittelt (`content_type_sniffer.py`, `python-magic`/
+`libmagic`) - nicht mehr aus dem ungeprüft vom Browser gesendeten
+`file.content_type`-Header übernommen. Behebt, dass z. B. `.txt`/`.json` je
+nach Browser/Betriebssystem mit generischem oder schlicht falschem
+Content-Type ankommen (Nutzer-Feedback nach Phase 5c, siehe `PROGRESS.md`).
+Das Sniffing läuft vor dem Virenscan (kein unnötiger Scan-Aufruf bei
+ohnehin abgelehntem Format) und gilt für Anlegen *und* Check-in gleichermaßen.
+
+Eine admin-editierbare Whitelist (`UploadConfig`, gleiches
+Einzelzeilen-Muster wie `OcrConfig`/`GuardConfig` der anderen Services)
+erlaubt, den erkannten Content-Type gegen eine feste Liste zu prüfen - ein
+nicht gelistetes Format wird mit `400` abgelehnt, bevor Inhalt/Metadaten
+geschrieben werden. Leere Liste (Default) = keine Einschränkung, identisches
+Verhalten zu vor P5d-S1.
 
 ## Virenscan vor Freigabe (10.3, seit P5-S1)
 
