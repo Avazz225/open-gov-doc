@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -38,6 +40,7 @@ from document_service.virus_scan_client import (
 
 settings = Settings()
 configure_logging(settings)
+logger = logging.getLogger(__name__)
 
 
 def _object_key(document_id: str, checksum_sha256: str) -> str:
@@ -50,6 +53,7 @@ def _object_key(document_id: str, checksum_sha256: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_start = time.time()
     engine = build_engine(settings.postgres_dsn)
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS document"))
@@ -82,6 +86,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         service_type=settings.service_name,
         version="0.1.0",
     )
+
+    startup_end = time.time()
+    millis = round((startup_end - startup_start) * 1000, 3)
+    logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 

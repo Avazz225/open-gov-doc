@@ -1,3 +1,6 @@
+import logging
+import time
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -22,10 +25,12 @@ from auth_service.settings import Settings
 
 settings = Settings()
 configure_logging(settings)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_start = time.time()
     ensure_realm_and_client(settings)
     app.state.keycloak_admin = build_admin_client(settings)
 
@@ -35,6 +40,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         service_type=settings.service_name,
         version="0.1.0",
     )
+
+    startup_end = time.time()
+    millis = round((startup_end - startup_start) * 1000, 3)
+    logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 

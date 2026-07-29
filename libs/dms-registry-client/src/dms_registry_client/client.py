@@ -6,6 +6,9 @@ import uuid
 import httpx
 
 logger = logging.getLogger(__name__)
+# während der entwicklung auf WARN um logoutput zu reduzieren.
+# Später per xml oder json CM um logger detailgenau zu steuern.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class RegistryRegistration:

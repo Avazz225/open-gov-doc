@@ -1,3 +1,6 @@
+import logging
+import time
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,6 +16,7 @@ from gateway_service.upstream import InstanceResolver, filter_headers
 
 settings = Settings()
 configure_logging(settings)
+logger = logging.getLogger(__name__)
 
 _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
@@ -28,6 +32,7 @@ def _build_token_validator(settings: Settings) -> TokenValidator:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_start = time.time()
     http_client = httpx.AsyncClient(timeout=settings.upstream_timeout_seconds)
     app.state.http_client = http_client
     app.state.instance_resolver = InstanceResolver(
@@ -43,6 +48,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Test-Schlüssel validierende Instanz einsetzen können, ohne einen echten
     # Keycloak zu benötigen (analog zu libs/dms-auth-client/tests).
     app.state.token_validator = _build_token_validator(settings)
+
+    startup_end = time.time()
+    millis = round((startup_end - startup_start) * 1000, 3)
+    logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
