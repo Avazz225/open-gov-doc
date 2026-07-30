@@ -27,7 +27,7 @@ out/
 
 # --- Plan ---
 CLAUDE.md 
-Business__DMS-Konzept.md
+Konzept.md
 .claude/
 
 # --- graphify (regenerierbar via `graphify dms/ --update`) ---
