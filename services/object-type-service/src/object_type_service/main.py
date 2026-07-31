@@ -1,6 +1,5 @@
 import logging
 import time
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -17,6 +16,7 @@ from object_type_service import repository
 from object_type_service.layout import generate_smart_layout
 from object_type_service.models import Base, ObjectType
 from object_type_service.schemas import (
+    KennzeichenOut,
     LayoutIn,
     LayoutOut,
     LayoutPurpose,
@@ -51,6 +51,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         await conn.execute(
             text("ALTER TABLE object_type.object_type ADD COLUMN IF NOT EXISTS icon VARCHAR(64)")
+        )
+        # Kennzeichengenerator-Spalten (P5e-S1) - `object_type_sequence` ist
+        # eine neue Tabelle und wird bereits von `create_all` angelegt.
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS kennzeichen_format VARCHAR(256)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS kennzeichen_display_override BOOLEAN"
+            )
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
@@ -173,6 +187,20 @@ async def validate_against_object_type(
         schema, name=payload.name, attributes=payload.attributes, parent_type_name=parent_type_name
     )
     return ValidateResult(valid=not errors, errors=errors)
+
+
+@app.post("/object-types/{object_type_id}/next-kennzeichen", response_model=KennzeichenOut)
+async def next_kennzeichen(
+    object_type_id: int, session: AsyncSession = Depends(get_session)
+) -> KennzeichenOut:
+    try:
+        kennzeichen = await repository.generate_next_kennzeichen(session, object_type_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.NoKennzeichenFormatError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return KennzeichenOut(kennzeichen=kennzeichen)
 
 
 @app.get("/object-types/{object_type_id}/layouts/{purpose}", response_model=LayoutOut)

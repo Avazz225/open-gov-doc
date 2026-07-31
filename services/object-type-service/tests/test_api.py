@@ -321,3 +321,59 @@ def test_delete_layout_resets_to_generated_default(client):
 def test_delete_layout_unknown_object_type_returns_404(client):
     response = client.delete("/object-types/999999/layouts/display")
     assert response.status_code == 404
+
+
+def test_create_with_kennzeichen_format_on_folder_type_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "OrdnerMitKennzeichenAPI",
+            "applies_to": "folder",
+            "kennzeichen_format": "{Laufende_Nummer}",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_with_kennzeichen_format_missing_laufende_nummer_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "MeinDocOhneNummerAPI",
+            "applies_to": "document",
+            "kennzeichen_format": "{YYYY}",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_next_kennzeichen_returns_incrementing_formatted_values(client):
+    object_type_id = client.post(
+        "/object-types",
+        json={
+            "name": "RechnungMitKennzeichenAPI",
+            "applies_to": "document",
+            "kennzeichen_format": "{YYYY}-{Laufende_Nummer}",
+        },
+    ).json()["id"]
+
+    first = client.post(f"/object-types/{object_type_id}/next-kennzeichen")
+    second = client.post(f"/object-types/{object_type_id}/next-kennzeichen")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_kennzeichen = first.json()["kennzeichen"]
+    second_kennzeichen = second.json()["kennzeichen"]
+    assert first_kennzeichen != second_kennzeichen
+    assert first_kennzeichen.endswith("-001")
+    assert second_kennzeichen.endswith("-002")
+
+
+def test_next_kennzeichen_without_configured_format_returns_404(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    response = client.post(f"/object-types/{object_type_id}/next-kennzeichen")
+    assert response.status_code == 404
+
+
+def test_next_kennzeichen_unknown_object_type_returns_404(client):
+    response = client.post("/object-types/999999/next-kennzeichen")
+    assert response.status_code == 404

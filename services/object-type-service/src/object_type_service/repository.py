@@ -1,11 +1,17 @@
+import re
 from datetime import UTC, datetime
 
 from dms_constraint_engine import ROOT_PARENT_TYPE
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from object_type_service.models import ObjectType, ObjectTypeLayout
+from object_type_service.models import ObjectType, ObjectTypeLayout, ObjectTypeSequence
 from object_type_service.schemas import LayoutIn, ObjectTypeCreate, ObjectTypeUpdate
+
+# Kennzeichengenerator-Platzhalter (P5e-S1) - siehe PROGRESS.md "Kennzeichengenerator".
+KENNZEICHEN_PLACEHOLDERS = {"YYYY", "YY", "MM", "DD", "Laufende_Nummer"}
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_]+)\}")
 
 
 class NotFoundError(Exception):
@@ -14,6 +20,11 @@ class NotFoundError(Exception):
 
 class DuplicateNameError(Exception):
     pass
+
+
+class NoKennzeichenFormatError(Exception):
+    """Kein `kennzeichen_format` für diesen Objekttyp konfiguriert - vom
+    Aufrufer als 404 zu behandeln (P5e-S1)."""
 
 
 class InvalidFieldError(Exception):
@@ -59,12 +70,39 @@ def _validate_icon(applies_to: str, icon: str | None) -> None:
         raise InvalidFieldError("icon ist nur für Ordnerklassen (applies_to='folder') zulässig")
 
 
+def _validate_kennzeichen_format(applies_to: str, kennzeichen_format: str | None) -> None:
+    if kennzeichen_format is None:
+        return
+    if applies_to != "document":
+        raise InvalidFieldError(
+            "kennzeichen_format ist nur für Dokumentklassen (applies_to='document') zulässig"
+        )
+    used = set(_PLACEHOLDER_RE.findall(kennzeichen_format))
+    unknown = sorted(used - KENNZEICHEN_PLACEHOLDERS)
+    if unknown:
+        raise InvalidFieldError(f"kennzeichen_format enthält unbekannte Platzhalter: {unknown}")
+    if "Laufende_Nummer" not in used:
+        raise InvalidFieldError(
+            "kennzeichen_format muss den Platzhalter {Laufende_Nummer} enthalten"
+        )
+
+
+def _validate_kennzeichen_display_override(applies_to: str, value: bool | None) -> None:
+    if value is not None and applies_to != "document":
+        raise InvalidFieldError(
+            "kennzeichen_display_override ist nur für Dokumentklassen "
+            "(applies_to='document') zulässig"
+        )
+
+
 async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -> ObjectType:
     existing = await session.execute(select(ObjectType).where(ObjectType.name == payload.name))
     if existing.scalar_one_or_none() is not None:
         raise DuplicateNameError(f"Objekttyp {payload.name!r} existiert bereits")
     await _validate_allowed_parent_types(session, payload.allowed_parent_types)
     _validate_icon(payload.applies_to, payload.icon)
+    _validate_kennzeichen_format(payload.applies_to, payload.kennzeichen_format)
+    _validate_kennzeichen_display_override(payload.applies_to, payload.kennzeichen_display_override)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -75,6 +113,8 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         conditions=payload.conditions,
         allowed_parent_types=payload.allowed_parent_types,
         icon=payload.icon,
+        kennzeichen_format=payload.kennzeichen_format,
+        kennzeichen_display_override=payload.kennzeichen_display_override,
         created_at=now,
         updated_at=now,
     )
@@ -106,11 +146,17 @@ async def update_object_type(
     object_type = await get_object_type(session, object_type_id)
     await _validate_allowed_parent_types(session, payload.allowed_parent_types)
     _validate_icon(object_type.applies_to, payload.icon)
+    _validate_kennzeichen_format(object_type.applies_to, payload.kennzeichen_format)
+    _validate_kennzeichen_display_override(
+        object_type.applies_to, payload.kennzeichen_display_override
+    )
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
     object_type.allowed_parent_types = payload.allowed_parent_types
     object_type.icon = payload.icon
+    object_type.kennzeichen_format = payload.kennzeichen_format
+    object_type.kennzeichen_display_override = payload.kennzeichen_display_override
     object_type.updated_at = datetime.now(UTC)
     await session.flush()
     return object_type
@@ -178,3 +224,63 @@ async def delete_layout(session: AsyncSession, object_type_id: int, purpose: str
     if existing is not None:
         await session.delete(existing)
         await session.flush()
+
+
+def _render_kennzeichen(
+    format_str: str, *, jahr: int, monat: int, tag: int, laufende_nummer: int
+) -> str:
+    values = {
+        "YYYY": f"{jahr:04d}",
+        "YY": f"{jahr % 100:02d}",
+        "MM": f"{monat:02d}",
+        "DD": f"{tag:02d}",
+        "Laufende_Nummer": f"{laufende_nummer:03d}",
+    }
+    return format_str.format(**values)
+
+
+async def _next_sequence_number(session: AsyncSession, object_type_id: int, jahr: int) -> int:
+    """Atomarer, gegen Nebenläufigkeit abgesicherter Jahres-Zähler (P5e-S1).
+    ``INSERT ... ON CONFLICT DO NOTHING`` legt die Zähler-Zeile bei Bedarf an,
+    ohne dass zwei gleichzeitige Erstaufrufe an einem Unique-Constraint
+    scheitern; das anschließende ``SELECT ... FOR UPDATE`` sperrt die (jetzt
+    garantiert existierende) Zeile für die restliche Transaktion, sodass
+    parallele Aufrufe serialisiert statt gleichzeitig gelesen/geschrieben
+    werden."""
+    insert_stmt = (
+        pg_insert(ObjectTypeSequence)
+        .values(object_type_id=object_type_id, jahr=jahr, naechste_nummer=1)
+        .on_conflict_do_nothing(index_elements=["object_type_id", "jahr"])
+    )
+    await session.execute(insert_stmt)
+
+    result = await session.execute(
+        select(ObjectTypeSequence)
+        .where(
+            ObjectTypeSequence.object_type_id == object_type_id,
+            ObjectTypeSequence.jahr == jahr,
+        )
+        .with_for_update()
+    )
+    row = result.scalar_one()
+    assigned = row.naechste_nummer
+    row.naechste_nummer = assigned + 1
+    await session.flush()
+    return assigned
+
+
+async def generate_next_kennzeichen(session: AsyncSession, object_type_id: int) -> str:
+    object_type = await get_object_type(session, object_type_id)
+    if object_type.kennzeichen_format is None:
+        raise NoKennzeichenFormatError(
+            f"object_type_id {object_type_id!r} hat keinen Kennzeichengenerator konfiguriert"
+        )
+    now = datetime.now(UTC)
+    laufende_nummer = await _next_sequence_number(session, object_type_id, now.year)
+    return _render_kennzeichen(
+        object_type.kennzeichen_format,
+        jahr=now.year,
+        monat=now.month,
+        tag=now.day,
+        laufende_nummer=laufende_nummer,
+    )

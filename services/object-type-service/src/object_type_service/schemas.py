@@ -22,6 +22,8 @@ class ObjectTypeCreate(BaseModel):
     conditions: list[dict] = []
     allowed_parent_types: list[str] | None = None
     icon: str | None = None
+    kennzeichen_format: str | None = None
+    kennzeichen_display_override: bool | None = None
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -30,6 +32,8 @@ class ObjectTypeUpdate(BaseModel):
     conditions: list[dict] = []
     allowed_parent_types: list[str] | None = None
     icon: str | None = None
+    kennzeichen_format: str | None = None
+    kennzeichen_display_override: bool | None = None
 
 
 class ObjectTypeOut(BaseModel):
@@ -41,10 +45,16 @@ class ObjectTypeOut(BaseModel):
     conditions: list[dict]
     allowed_parent_types: list[str] | None
     icon: str | None
+    kennzeichen_format: str | None
+    kennzeichen_display_override: bool | None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class KennzeichenOut(BaseModel):
+    kennzeichen: str
 
 
 class ValidateRequest(BaseModel):

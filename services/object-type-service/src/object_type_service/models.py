@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("object_type")
@@ -27,8 +27,31 @@ class ObjectType(Base):
     # Nur für Ordnerklassen (applies_to == "folder") gesetzt (2.2a) - Anzeige im
     # User-UI-Explorer vor dem Namen folgt erst mit P5b-S4.
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Kennzeichengenerator (2.2, seit P5e-S1) - nur für applies_to == "document"
+    # gesetzt. None = kein Generator konfiguriert. Format-String mit
+    # Platzhaltern {YYYY}/{YY}/{MM}/{DD}/{Laufende_Nummer}, siehe
+    # repository._render_kennzeichen.
+    kennzeichen_format: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Tri-State-Override (None = kein Override, es gilt der globale Standard
+    # aus P5e-S2) des globalen "Kennzeichen vor Dateinamen anzeigen"-Schalters.
+    kennzeichen_display_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ObjectTypeSequence(Base):
+    """Atomarer, gegen Nebenläufigkeit abgesicherter Jahres-Zähler für den
+    Kennzeichengenerator (P5e-S1): eine Zeile je Objekttyp und Jahr, damit der
+    Zähler zum Jahreswechsel automatisch wieder bei 1 beginnt (Nutzerentscheidung
+    "Reset pro Jahr", siehe PROGRESS.md)."""
+
+    __tablename__ = "object_type_sequence"
+
+    object_type_id: Mapped[int] = mapped_column(
+        ForeignKey("object_type.object_type.id", ondelete="CASCADE"), primary_key=True
+    )
+    jahr: Mapped[int] = mapped_column(primary_key=True)
+    naechste_nummer: Mapped[int] = mapped_column(default=1)
 
 
 class ObjectTypeLayout(Base):
