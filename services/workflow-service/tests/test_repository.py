@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from workflow_service import repository
 
@@ -153,6 +155,46 @@ async def test_complete_task_already_completed_raises(session, manual_task_bpmn)
         await repository.complete_task(
             session, instance.id, tasks[0].id, completed_by="bob", data={}
         )
+
+
+async def test_advance_timers_fires_boundary_event_and_persists_state(session, boundary_timer_bpmn):
+    definition = await repository.create_process_definition(
+        session, name="Eskalation", bpmn_xml=boundary_timer_bpmn, process_id=None
+    )
+    instance = await repository.start_instance(
+        session,
+        definition.id,
+        created_by="alice",
+        business_key=None,
+        initial_data={"escalation_email": "supervisor@example.com"},
+    )
+    assert instance.status == "running"
+
+    await asyncio.sleep(0.1)
+    results = await repository.advance_timers(session)
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.instance.id == instance.id
+    assert len(result.fired) == 1
+    assert result.fired[0].data["escalation_email"] == "supervisor@example.com"
+    assert result.newly_completed is False
+    # der ursprüngliche Task bleibt bereit (non-interrupting Boundary-Timer)
+    tasks = await repository.get_ready_tasks(session, instance.id)
+    assert len(tasks) == 1
+
+
+async def test_advance_timers_ignores_instances_without_due_timers(session, manual_task_bpmn):
+    definition = await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    await repository.start_instance(
+        session, definition.id, created_by="alice", business_key=None, initial_data={}
+    )
+    results = await repository.advance_timers(session)
+    assert len(results) == 1
+    assert results[0].fired == []
+    assert results[0].newly_completed is False
 
 
 async def test_list_instances_filters_by_status(session, manual_task_bpmn, no_tasks_bpmn):

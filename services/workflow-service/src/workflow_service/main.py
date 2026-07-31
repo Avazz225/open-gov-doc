@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -9,7 +10,7 @@ from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from workflow_service import repository
 from workflow_service.models import Base
@@ -26,6 +27,42 @@ from workflow_service.settings import Settings
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+
+async def _sla_poll_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
+    """SLA-Zeitüberwachung (P6-S2, ADR 0020): pollt statt push-basiert zu reagieren,
+    da weder SpiffWorkflow noch dieses Projekt einen Hintergrund-Scheduler mitbringen.
+    Ein Fehler in einem Tick bricht die Schleife nicht ab, damit ein einzelner defekter
+    Blob nicht die SLA-Überwachung aller anderen laufenden Instanzen stoppt."""
+    while True:
+        try:
+            async with session_factory() as session:
+                results = await repository.advance_timers(session)
+                await session.commit()
+            for result in results:
+                for fired in result.fired:
+                    await publish_event(
+                        "workflow.task.escalated",
+                        subject=result.instance.id,
+                        payload={
+                            "process_definition_id": result.instance.process_definition_id,
+                            "business_key": result.instance.business_key,
+                            "task_name": fired.name,
+                            "lane": fired.lane,
+                            "escalation_email": fired.data.get("escalation_email"),
+                        },
+                    )
+                if result.newly_completed:
+                    await publish_event(
+                        "workflow.instance.completed",
+                        subject=result.instance.id,
+                        payload={"business_key": result.instance.business_key},
+                    )
+        except Exception:
+            logger.exception(
+                "SLA-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.sla_poll_interval_seconds)
 
 
 @asynccontextmanager
@@ -51,12 +88,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version="0.1.0",
     )
 
+    sla_poll_task = asyncio.create_task(_sla_poll_loop(app.state.session_factory))
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    sla_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await sla_poll_task
     if registration:
         await registration.stop()
     await event_bus.close()

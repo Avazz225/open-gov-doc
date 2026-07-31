@@ -1,6 +1,6 @@
 # workflow-service
 
-**Verantwortung:** Workflow Engine Grundgerüst (Konzept 7.1) — BPMN-2.0-Import und -Ausführung über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3, [ADR 0018](../adr/0018-spiffworkflow-lgpl-license.md)), Manual/Automatic Tasks. Reines Engine-Grundgerüst dieser Session — kein UI (Process Designer folgt mit P6-S6), keine Rollenprüfung (folgt mit P6-S4).
+**Verantwortung:** Workflow Engine Grundgerüst (Konzept 7.1) — BPMN-2.0-Import und -Ausführung über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3, [ADR 0018](../adr/0018-spiffworkflow-lgpl-license.md)), Manual/Automatic Tasks, seit P6-S2 auch Timer/Boundary Events (SLA-Zeitüberwachung, [ADR 0020](../adr/0020-sla-timer-polling.md)). Kein UI (Process Designer folgt mit P6-S6), keine Rollenprüfung (folgt mit P6-S4).
 
 **Konzept-Referenz:** 7.1
 **Eigenes Postgres-Schema:** `workflow` (Tabellen `process_definition`, `process_instance`)
@@ -31,10 +31,15 @@ Die gesamte SpiffWorkflow-API-Oberfläche ist in einem einzigen Modul isoliert (
 
 - **Manual/User Tasks** (`<bpmn:manualTask>`/`<bpmn:userTask>`, beide haben `task_spec.manual == True`): bleiben nach `do_engine_steps()` bereit stehen, bis `POST .../complete` aufgerufen wird. `task_spec.lane` (Bahn-/Rollenname aus dem BPMN-Modell, `None` falls das Modell keine Lanes definiert) wird informativ mitgeliefert — **keine Auswertung/Durchsetzung** in dieser Session, siehe "Offene Punkte".
 - **Automatic Tasks (Script Tasks)**: laufen über SpiffWorkflows eingebaute Standard-Python-Scripting-Umgebung automatisch, sobald sie bereit sind — keine eigene Connector-/Delegate-Registrierung in diesem Grundgerüst.
+- **Timer/Boundary Events (P6-S2, SLA-Zeitüberwachung, 7.1)**: `spiff_adapter.check_timers()` kapselt `wf.refresh_waiting_tasks()`+`do_engine_steps()` und meldet gefeuerte Boundary-Timer (erkannt über `isinstance(task_spec, BoundaryEvent)`) zurück. Beide BPMN-Semantiken real gegen die installierte Version getestet: non-interrupting (`cancelActivity="false"`) lässt den ursprünglichen Task weiterlaufen, interrupting (`cancelActivity="true"`, BPMN-Default) storniert ihn — beides vollständig SpiffWorkflow-eigene Semantik, siehe Modul-Docstring.
 
 ## State-Persistenz (ADR 0019)
 
 Jede Prozessinstanz speichert ausschließlich den vollständigen, von `BpmnWorkflowSerializer.serialize_json()` erzeugten JSON-Blob — **keine** separate, normalisierte Task-Tabelle. Begründung/Konsequenzen: siehe [ADR 0019](../adr/0019-workflow-full-state-serialization.md).
+
+## SLA-Poll-Loop (P6-S2, ADR 0020)
+
+Ein asyncio-Hintergrund-Task (`_sla_poll_loop` in `main.py`, gestartet in `lifespan`) prüft alle `sla_poll_interval_seconds` (Default 30s, `DMS_SLA_POLL_INTERVAL_SECONDS`) **jede** Instanz mit `status="running"`: deserialisieren, `spiff_adapter.check_timers()`, Blob neu persistieren, gefeuerte Boundary-Events als `workflow.task.escalated` publizieren. Kein Push-Mechanismus, keine verteilte Sperre bei mehreren `workflow-service`-Replikaten — siehe [ADR 0020](../adr/0020-sla-timer-polling.md) für die vollständige Begründung und die dokumentierten Grenzen.
 
 ## Events
 
@@ -45,8 +50,9 @@ Jede Prozessinstanz speichert ausschließlich den vollständigen, von `BpmnWorkf
 | `workflow.instance.started` | `{process_definition_id, created_by}` |
 | `workflow.instance.completed` | `{business_key}` |
 | `workflow.task.completed` | `{task_id, completed_by}` |
+| `workflow.task.escalated` | `{process_definition_id, business_key, task_name, lane, escalation_email}` (P6-S2, gefeuert vom SLA-Poll-Loop bei einem ausgelösten Boundary-Timer; `escalation_email` ist ein opakes Prozessdatum aus `initial_data`, siehe SLA-Poll-Loop-Abschnitt) |
 
-**Konsumiert:** keine — reiner Producer in dieser Session. Kein bestehender Service emittiert aktuell etwas, worauf workflow-service reagieren müsste (z. B. der `needs_review`-Flag aus `ocr.completed`, siehe `docs/services/ocr-service.md` "Offene Punkte") — diese Anbindung ist explizit auf eine spätere Phase-6-Session verschoben, vermutlich zusammen mit dem generischen Approval-Mechanismus (P6-S4).
+**Konsumiert:** keine — reiner Producer. `notification-service` (P6-S2) ist der erste Konsument von `workflow.task.escalated`, siehe `docs/services/notification-service.md`. Kein anderer bestehender Service emittiert aktuell etwas, worauf workflow-service reagieren müsste (z. B. der `needs_review`-Flag aus `ocr.completed`, siehe `docs/services/ocr-service.md` "Offene Punkte") — diese Anbindung bleibt auf eine spätere Phase-6-Session verschoben, vermutlich zusammen mit dem generischen Approval-Mechanismus (P6-S4).
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
@@ -58,18 +64,21 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-`uv run pytest services/workflow-service/tests` (44 Tests, alle grün):
-- `test_spiff_adapter.py` — isolierter Test des SpiffWorkflow-Wrappers gegen echte BPMN-Test-Fixtures (`tests/fixtures/`, aus dem offiziellen SpiffWorkflow-GitHub-Repo übernommen, nicht handgeschrieben, um Namespace-/Schema-Fehler zu vermeiden): Parsing/Auto-Erkennung der Prozess-ID, Ausführung eines Script Tasks parallel zu einem wartenden Manual Task, Serialisierungs-Rundreise (Task-ID bleibt stabil), Task-Abschluss bis zur vollständigen Prozessbeendigung, Lane-Extraktion mit und ohne BPMN-Lanes im Modell.
-- `test_repository.py`/`test_api.py` — Anlegen+Duplikat-/Ungültig-Fälle, Instanzstart (mit wartendem Manual Task vs. vollautomatisch sofort abgeschlossen), bereite Tasks auflisten, Task abschließen bis zum Abschluss der Instanz, doppeltes Abschließen desselben Tasks abgelehnt, Löschung einer referenzierten Prozessdefinition abgelehnt, Filterung der Instanzliste nach Status.
+`uv run pytest services/workflow-service/tests`:
+- `test_spiff_adapter.py` — isolierter Test des SpiffWorkflow-Wrappers gegen echte BPMN-Test-Fixtures (`tests/fixtures/`, aus dem offiziellen SpiffWorkflow-GitHub-Repo übernommen, nicht handgeschrieben, um Namespace-/Schema-Fehler zu vermeiden): Parsing/Auto-Erkennung der Prozess-ID, Ausführung eines Script Tasks parallel zu einem wartenden Manual Task, Serialisierungs-Rundreise (Task-ID bleibt stabil), Task-Abschluss bis zur vollständigen Prozessbeendigung, Lane-Extraktion mit und ohne BPMN-Lanes im Modell, seit P6-S2: `check_timers()` feuert einen non-interrupting Boundary-Timer, `escalation_email` aus `initial_data` ist im Datenschnappschuss sichtbar, der ursprüngliche Task bleibt danach normal abschließbar.
+- `test_repository.py`/`test_api.py` — Anlegen+Duplikat-/Ungültig-Fälle, Instanzstart (mit wartendem Manual Task vs. vollautomatisch sofort abgeschlossen), bereite Tasks auflisten, Task abschließen bis zum Abschluss der Instanz, doppeltes Abschließen desselben Tasks abgelehnt, Löschung einer referenzierten Prozessdefinition abgelehnt, Filterung der Instanzliste nach Status, seit P6-S2: `advance_timers()` feuert das Boundary-Event und persistiert den aktualisierten Blob.
 - Läuft wie jeder andere Service gegen echte Infrastruktur (Postgres, NATS) — kein Mocking. Wie immer: niemals gegen die laufende Entwicklungs-Datenbank, siehe `PROGRESS.md` "Tooling & Testing".
-- **Live-Smoke-Test**: `docker compose build workflow-service` + `up -d`, echte BPMN-Datei über curl hochgeladen, Instanz gestartet, bereite Tasks aufgelistet, Task abgeschlossen, Instanzstatus `"completed"` bestätigt — Testdaten anschließend gelöscht.
+- Der volle Poll-Loop selbst (`_sla_poll_loop`) wird nicht per Sleep-Wartezeit in der Testsuite geprüft (nicht deterministisch genug) — stattdessen per Live-Smoke-Test mit kurzem `DMS_SLA_POLL_INTERVAL_SECONDS` gegen den gebauten Container verifiziert.
+- **Live-Smoke-Test**: `docker compose build workflow-service` + `up -d`, echte BPMN-Datei über curl hochgeladen, Instanz gestartet, bereite Tasks aufgelistet, Task abgeschlossen, Instanzstatus `"completed"` bestätigt — Testdaten anschließend gelöscht. Seit P6-S2 zusätzlich: BPMN-Datei mit Boundary-Timer + `escalation_email` gestartet, nach kurzem Warten über `notification-service` bestätigt, dass eine Eskalations-Benachrichtigung zugestellt wurde.
 - Reine Backend-Session, kein Browser-Test nötig (nicht in der UI-Sessions-Liste von `IMPLEMENTATION_PLAN.md`).
 
 ## Offene Punkte
 
 - **Keine Rollenprüfung/RBAC** — weder ein `X-DMS-Roles`-Stringcheck (wie beim Kennzeichen-Feature, P5e-S2) noch ein echter `permission-service`-Aufruf. `completed_by`/`created_by` sind reine, ungeprüfte Strings. Explizit **P6-S4** zugewiesen (genereller Vier-Augen-Approval-Mechanismus + Superuser Break-Glass).
 - **Script Tasks führen serverseitig beliebigen, in der BPMN-XML eingebetteten Python-Code aus** (SpiffWorkflows Standard-Scripting-Umgebung) — ohne Rollenprüfung am Upload-Endpunkt ein reales Sicherheitsthema, sobald BPMN-Import nicht mehr nur von vertrauenswürdigen internen Nutzern erfolgt (7.1 sieht Import aus externen Werkzeugen als Kernfeature vor). Bewusste Entscheidung nach Rückfrage: für den aktuellen internen Test-/Entwicklungsbetrieb aktiviert, als offener Punkt an P6-S4 verwiesen statt vorab eingeschränkt oder als No-Op-Stub gebaut.
-- **Keine SLA-/Zeitüberwachung** (Timer/Boundary Events), keine Eskalation, kein Notification Service — **P6-S2**.
+- **SLA-Poll-Präzision an das Poll-Intervall gekoppelt** (Default 30s) — keine Echtzeit-Erkennung einer Eskalation, siehe ADR 0020.
+- **Keine verteilte Sperre bei mehreren `workflow-service`-Replikaten** — ein horizontal skaliertes Deployment würde denselben Boundary-Timer mehrfach feuern/publizieren, siehe ADR 0020 "Konsequenzen".
+- **Nur `DurationTimerEventDefinition`-basierte Boundary-Timer real getestet** (P6-S2) — `CycleTimerEventDefinition` (wiederkehrende Eskalation) und `TimeDateEventDefinition` (fester Zeitpunkt) werden von SpiffWorkflow nativ unterstützt, sind aber diese Session nicht mit einem eigenen Test abgedeckt.
 - **Keine Case-Service-Anbindung** (Umlaufmappen, prozessspezifische Bearbeitungskopien, 2.3) — **P6-S3**.
 - **Keine Signature Tasks** (3.10) — **P6-S5**.
 - **Kein Process Designer** — Prozesse können ausschließlich per BPMN-XML-Upload importiert werden, keine grafische Modellierung im System selbst — **P6-S6** (eigenständige Frontend-Anwendung mit `bpmn-js`).

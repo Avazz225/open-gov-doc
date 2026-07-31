@@ -21,6 +21,21 @@ nicht nur aus der Doku übernommen:
   `do_engine_steps()`, damit der Workflow über den abgeschlossenen Task hinaus läuft.
 - Serialisierung: `BpmnWorkflowSerializer(BpmnWorkflowSerializer.configure())`,
   `serializer.serialize_json(wf) -> str`, `serializer.deserialize_json(json_str) -> wf`.
+- Timer/Boundary Events (P6-S2, SLA-Zeitüberwachung, 7.1): `wf.refresh_waiting_tasks()`
+  überführt fällige `WAITING`-Timer-Tasks nach `READY`; ein anschließendes
+  `do_engine_steps()` führt sie aus. Ein gefeuerter Boundary-Timer ist über
+  `do_engine_steps(did_complete_task=...)` abfangbar, gefiltert auf
+  `isinstance(task.task_spec, BoundaryEvent)` (aus
+  `SpiffWorkflow.bpmn.specs.mixins.events.intermediate_event`). Beide BPMN-Semantiken
+  real gegen die installierte Version getestet (echte, aus dem offiziellen
+  `sartography/SpiffWorkflow`-Repo geladene Fixture `boundary_timer_on_task.bpmn`):
+  ein non-interrupting Boundary-Timer (`cancelActivity="false"`) feuert die
+  Eskalationsverzweigung, während der ursprüngliche Task bereit bleibt und normal
+  abschließbar ist; ein interrupting Boundary-Timer (`cancelActivity="true"`, BPMN-
+  Default falls das Attribut fehlt) storniert den ursprünglichen Task und lässt den
+  Workflow ausschließlich in die Eskalationsverzweigung laufen - beides vollständig
+  SpiffWorkflow-eigene Semantik, dieses Modul muss dafür keine eigene Cancel-/
+  Routing-Logik schreiben, nur `refresh_waiting_tasks()`+`do_engine_steps()` aufrufen.
 """
 
 from dataclasses import dataclass
@@ -28,6 +43,7 @@ from typing import Any
 
 from SpiffWorkflow.bpmn.parser import BpmnParser
 from SpiffWorkflow.bpmn.serializer import BpmnWorkflowSerializer
+from SpiffWorkflow.bpmn.specs.mixins.events.intermediate_event import BoundaryEvent
 from SpiffWorkflow.bpmn.workflow import BpmnWorkflow
 from SpiffWorkflow.task import Task, TaskState
 
@@ -44,6 +60,13 @@ class BpmnParseError(Exception):
 @dataclass
 class TaskInfo:
     id: str
+    name: str
+    lane: str | None
+    data: dict[str, Any]
+
+
+@dataclass
+class FiredBoundaryEvent:
     name: str
     lane: str | None
     data: dict[str, Any]
@@ -145,3 +168,27 @@ def complete_task(task: Task, data: dict[str, Any]) -> None:
 
 def is_completed(wf: BpmnWorkflow) -> bool:
     return wf.is_completed()
+
+
+def check_timers(wf: BpmnWorkflow) -> list[FiredBoundaryEvent]:
+    """Bringt fällige Timer/Boundary Events zum Feuern (SLA-Zeitüberwachung, P6-S2)
+    und meldet zurück, welche Boundary-Timer dabei tatsächlich ausgelöst haben - unabhängig
+    davon, ob sie den ursprünglichen Task stornieren (interrupting) oder nicht
+    (non-interrupting, siehe Modul-Docstring). Der Datenschnappschuss (`.data`) enthält
+    insbesondere `initial_data`-Prozessvariablen wie `escalation_email`, die normal per
+    BPMN-Datenfluss bis zum Boundary-Task durchgereicht wurden."""
+    fired: list[FiredBoundaryEvent] = []
+
+    def did_complete(task: Task) -> None:
+        if isinstance(task.task_spec, BoundaryEvent):
+            fired.append(
+                FiredBoundaryEvent(
+                    name=task.task_spec.bpmn_name or task.task_spec.name,
+                    lane=getattr(task.task_spec, "lane", None),
+                    data=dict(task.data),
+                )
+            )
+
+    wf.refresh_waiting_tasks()
+    wf.do_engine_steps(did_complete_task=did_complete)
+    return fired

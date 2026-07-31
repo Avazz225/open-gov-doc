@@ -108,6 +108,20 @@ services:
     networks:
       - dms-net
 
+  # Dev-SMTP-Testserver für notification-service (P6-S2, Konzept 7.1) - fängt jede
+  # Mail ab, kein echter Versand, Web-UI zum Prüfen unter MAILPIT_UI_PORT. Kein
+  # Healthcheck nötig, da kein anderer Service beim Start hart auf ihn wartet -
+  # ein einzelner fehlgeschlagener E-Mail-Zustellversuch bleibt als "failed" stehen
+  # (siehe docs/services/notification-service.md), kein Blocker für den Service-Start.
+  mailpit:
+    image: axllent/mailpit:v1.30.6
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    networks:
+      - dms-net
+
   registry-service:
     build:
       context: ..
@@ -395,6 +409,7 @@ services:
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://workflow-service:8000
+      DMS_SLA_POLL_INTERVAL_SECONDS: ${WORKFLOW_SLA_POLL_INTERVAL_SECONDS:-30}
     ports:
       - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
     depends_on:
@@ -402,6 +417,30 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+    networks:
+      - dms-net
+
+  notification-service:
+    build:
+      context: ..
+      dockerfile: services/notification-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://notification-service:8000
+      DMS_SMTP_HOST: mailpit
+      DMS_SMTP_PORT: "1025"
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-8015}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
     networks:
       - dms-net
 

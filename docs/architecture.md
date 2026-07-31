@@ -1,6 +1,6 @@
-# Architektur-Überblick (Stand: P6-S1 — Workflow Engine Grundgerüst)
+# Architektur-Überblick (Stand: P6-S2 — SLA-Zeitüberwachung + Notification Service)
 
-Momentaufnahme des Systems zum MVP-Meilenstein (Ende Phase 4, vertikaler MVP-Slice) plus allen vier Bausteinen aus Phase 5 (Verarbeitung: Scan, Rendering, OCR, Suche — Konzept-Referenzen in Klammern), den sechs Retrofit-Sessions aus Phase 5b (Objekt-Hierarchie/Klassen-Icons, Formular-Layouts, Admin-/User-UI-Konsum, OCR-Konfigurierbarkeit, Storage-Datenträger-Identität), den zwei Konsolidierungs-Sessions aus Phase 5c (Test-DB-Isolation, Storage-Rebalancing + Gerätewechsel-Korrektur), den zwei Sessions aus Phase 5d (Content-Type-Governance: serverseitiges Sniffing + Format-Whitelist + OCR-Positivliste; Upload-/Vorschau-UX: Modal-Dialog mit Drag & Drop + clientseitige Text-Direktanzeige), den drei Sessions aus Phase 5e (Kennzeichengenerator: Format-String/Zähler am Object-Type Service, Vergabe + erste echte Rollenprüfung am Document Service, Anzeige in beiden Frontends) sowie **P6-S1 (neuer `workflow-service`-Knoten, Konzept 7.1)**. Für die Entstehungsgeschichte einzelner Entscheidungen siehe `docs/adr/`, für Details je Baustein `docs/services/<name>.md`.
+Momentaufnahme des Systems zum MVP-Meilenstein (Ende Phase 4, vertikaler MVP-Slice) plus allen vier Bausteinen aus Phase 5 (Verarbeitung: Scan, Rendering, OCR, Suche — Konzept-Referenzen in Klammern), den sechs Retrofit-Sessions aus Phase 5b (Objekt-Hierarchie/Klassen-Icons, Formular-Layouts, Admin-/User-UI-Konsum, OCR-Konfigurierbarkeit, Storage-Datenträger-Identität), den zwei Konsolidierungs-Sessions aus Phase 5c (Test-DB-Isolation, Storage-Rebalancing + Gerätewechsel-Korrektur), den zwei Sessions aus Phase 5d (Content-Type-Governance: serverseitiges Sniffing + Format-Whitelist + OCR-Positivliste; Upload-/Vorschau-UX: Modal-Dialog mit Drag & Drop + clientseitige Text-Direktanzeige), den drei Sessions aus Phase 5e (Kennzeichengenerator: Format-String/Zähler am Object-Type Service, Vergabe + erste echte Rollenprüfung am Document Service, Anzeige in beiden Frontends), **P6-S1 (neuer `workflow-service`-Knoten, Konzept 7.1)** sowie **P6-S2 (neuer `notification-service`-Knoten + Timer/Boundary Events in workflow-service, Konzept 7.1, ADR 0020)**. Für die Entstehungsgeschichte einzelner Entscheidungen siehe `docs/adr/`, für Details je Baustein `docs/services/<name>.md`.
 
 ## Gesamtbild
 
@@ -39,6 +39,7 @@ flowchart TB
     Gateway -->|"proxied Request"| Ocr
     Gateway -->|"proxied Request"| Search
     Gateway -->|"proxied Request"| Workflow
+    Gateway -->|"proxied Request"| Notification
 
     subgraph Backend["Backend-Services (je eigenes Postgres-Schema, 3.1)"]
         Registry["registry-service\nDiscovery (3.2a)"]
@@ -53,7 +54,8 @@ flowchart TB
         Rendering["rendering-service\nVorschau + Ersatzdarstellungen (3.7/2.4)"]
         Ocr["ocr-service\nWorterkennung + Wort-Bounding-Boxen (3.9)"]
         Search["search-service\nVolltextindex + Facettensuche, Postgres FTS (3.7, ADR 0012)"]
-        Workflow["workflow-service\nBPMN-Import/-Ausführung, Manual/Automatic Tasks (7.1, ADR 0018/0019)"]
+        Workflow["workflow-service\nBPMN-Import/-Ausführung, Manual/Automatic Tasks,\nSLA-Zeitüberwachung (7.1, ADR 0018/0019/0020)"]
+        Notification["notification-service\nE-Mail/In-App/Webhook (7.1)"]
     end
 
     Document -->|HTTP| Storage
@@ -87,6 +89,7 @@ flowchart TB
     Ocr -.-> Registry
     Search -.-> Registry
     Workflow -.-> Registry
+    Notification -.-> Registry
 
     subgraph Bus["Event-Bus (NATS JetStream, 3.4, ADR 0001)"]
         NATS(("NATS"))
@@ -99,19 +102,22 @@ flowchart TB
     VirusScan -->|"virus_scan.completed"| NATS
     Rendering -->|"rendering.completed"| NATS
     Ocr -->|"ocr.completed / ocr.failed"| NATS
-    Workflow -->|"workflow.instance.*, workflow.task.completed"| NATS
+    Workflow -->|"workflow.instance.*, workflow.task.completed/.escalated"| NATS
+    Notification -->|"notification.sent / notification.failed"| NATS
     NATS -->|"folder.>"| Permission
     NATS -->|"document.>"| Rendering
     NATS -->|"document.>"| Ocr
     NATS -->|"ocr.completed"| Rendering
     NATS -->|"document.>"| Search
     NATS -->|"ocr.>, rendering.>"| Search
-    NATS -->|"registry.>, document.>, permission.>, virus_scan.>, rendering.>, ocr.>, workflow.>"| Audit
+    NATS -->|"workflow.task.escalated"| Notification
+    NATS -->|"registry.>, document.>, permission.>, virus_scan.>, rendering.>, ocr.>, workflow.>, notification.>"| Audit
 
     subgraph Infra["Infrastruktur"]
         Postgres[("Postgres\nSchema pro Service")]
         Keycloak["Keycloak\nIdentity Provider"]
         MinIO[("MinIO\nS3-Backend")]
+        Mailpit["Mailpit\nDev-SMTP-Testserver"]
     end
 
     Registry --- Postgres
@@ -128,6 +134,8 @@ flowchart TB
     Ocr --- Postgres
     Search --- Postgres
     Workflow --- Postgres
+    Notification --- Postgres
+    Notification -->|SMTP| Mailpit
 ```
 
 ## Lesehinweise
@@ -135,7 +143,7 @@ flowchart TB
 - **Gestrichelte Pfeile** zur Registry: Selbst-Registrierung (Heartbeat), nicht Teil des eigentlichen Request-Pfads. Seit P4-S3 registriert sich auch der Registry Service bei sich selbst (siehe `docs/services/registry-service.md`), sonst wäre er über das Gateway nicht als `service_type=registry-service` auflösbar.
 - **Gateway ist der einzige vorgesehene öffentliche Einstiegspunkt** für beide Frontends — Backend-Service-Ports sind in der Docker-Compose-Umgebung trotzdem noch direkt veröffentlicht (Entwickler-Komfort, dokumentierter offener Punkt, siehe ADR 0005).
 - **Auth-Validierung** passiert zentral im Gateway (JWT gegen Keycloaks JWKS); kein Backend-Service prüft Tokens selbst nach. **Autorisierung** (wer darf was) ist dagegen an mehreren Stellen noch nicht durchgesetzt (Force-Unlock, Bereichssperren, Admin-UI-Nutzerverwaltung) — siehe die jeweiligen "Offene Punkte" in `docs/services/*.md` und die konsolidierte Liste in `PROGRESS.md`.
-- **Event-Bus-Rollen**: Folder Service und Registry Service sind reine Producer ihrer eigenen Strukturereignisse; Permission Service konsumiert `folder.>` und produziert zusätzlich eigene `permission.scope_lock.*`-Events; Virus-Scan Service ist reiner Producer (`virus_scan.completed`), konsumiert selbst keine Events (Document Service ruft ihn stattdessen synchron auf, ADR 0010); Rendering Service konsumiert sowohl `document.>` (nur `document.created`/`document.version.created` lösen etwas aus) als auch seit P5-S3 `ocr.completed`, und produziert eigene `rendering.completed`-Events; OCR Service konsumiert `document.>` (dasselbe Muster wie Rendering Service) und produziert eigene `ocr.completed`/`ocr.failed`-Events; **Search Service konsumiert `document.>` sowie `ocr.>`/`rendering.>`, produziert aber keine eigenen Events** (reiner Konsument + Query-API, dieselbe Rolle wie Audit Service); **Workflow Service ist seit P6-S1 reiner Producer** (`workflow.instance.started`/`.completed`, `workflow.task.completed`) und konsumiert selbst keine Events — kein bestehender Service emittiert aktuell etwas, worauf reagiert werden müsste (gleiche Rolle wie Virus-Scan Service, nur ohne dessen synchrones Gegenstück); Audit Service ist reiner Konsument/Senke für `registry.>`, `document.>`, `permission.>`, `virus_scan.>`, `rendering.>`, `ocr.>`, `workflow.>` (siehe ADR 0001 für die Producer/Konsument-Unterscheidung im Event-Bus-Client).
+- **Event-Bus-Rollen**: Folder Service und Registry Service sind reine Producer ihrer eigenen Strukturereignisse; Permission Service konsumiert `folder.>` und produziert zusätzlich eigene `permission.scope_lock.*`-Events; Virus-Scan Service ist reiner Producer (`virus_scan.completed`), konsumiert selbst keine Events (Document Service ruft ihn stattdessen synchron auf, ADR 0010); Rendering Service konsumiert sowohl `document.>` (nur `document.created`/`document.version.created` lösen etwas aus) als auch seit P5-S3 `ocr.completed`, und produziert eigene `rendering.completed`-Events; OCR Service konsumiert `document.>` (dasselbe Muster wie Rendering Service) und produziert eigene `ocr.completed`/`ocr.failed`-Events; **Search Service konsumiert `document.>` sowie `ocr.>`/`rendering.>`, produziert aber keine eigenen Events** (reiner Konsument + Query-API, dieselbe Rolle wie Audit Service); **Workflow Service ist weiterhin reiner Producer** (seit P6-S1: `workflow.instance.started`/`.completed`, `workflow.task.completed`; seit P6-S2 zusätzlich `workflow.task.escalated`, ausgelöst vom SLA-Poll-Loop, ADR 0020) und konsumiert selbst keine Events; **Notification Service ist seit P6-S2 sowohl Konsument (`workflow.task.escalated`) als auch Producer (`notification.sent`/`.failed`)** — der erste Service in diesem Projekt, der beide Rollen gleichzeitig hat (zwei getrennte `NatsEventBusClient`-Instanzen, siehe `docs/services/notification-service.md`); Audit Service ist reiner Konsument/Senke für `registry.>`, `document.>`, `permission.>`, `virus_scan.>`, `rendering.>`, `ocr.>`, `workflow.>`, `notification.>` (siehe ADR 0001 für die Producer/Konsument-Unterscheidung im Event-Bus-Client).
 - **Virus-Scan Service dockt synchron an, nicht über Events** (seit P5-S1, ADR 0010): Document Service ruft `/scan` direkt auf, bevor er Inhalt/Metadaten eines Uploads persistiert — nötig, weil 10.3 einen Scan *vor* Freigabe verlangt, ein rein event-getriebener Scan aber erst reagieren würde, nachdem der Inhalt bereits abrufbar wäre.
 - **Rendering Service, OCR Service und Search Service docken asynchron über Events an** (seit P5-S2/P5-S3/P5-S4): anders als der Virenscan muss keiner von ihnen vor der Freigabe eines Uploads fertig sein — alle drei entstehen als Konsumenten von `document.created`/`document.version.created`, nachdem Document Service bereits geantwortet hat. Document Service selbst musste dafür nicht geändert werden (siehe `docs/services/document-service.md`).
 - **OCR Service speist sowohl rendering-service als auch search-service per Nachzieheffekt** (P5-S3/P5-S4): rendering-service konsumiert `ocr.completed` und erzeugt daraus eine `substitute_text`-Rendition für Dokumente, die es selbst mangels OCR nicht bedienen konnte; search-service konsumiert `ocr.completed`/`rendering.completed`, um seinen Volltextindex nachzuindexieren, sobald OCR/Rendering abgeschlossen sind (zeitlich nach dem initialen Upload-Event). Beides sind Fälle, in denen ein Verarbeitungs-Service einen anderen Verarbeitungs-Service sowohl per Event als auch per HTTP (Volltext-Nachschlag) konsumiert.
@@ -144,8 +152,9 @@ flowchart TB
 - **Phase 5c (P5c-S1/S2) war eine Konsolidierungsrunde offener Punkte, ebenfalls kein neuer Knoten**: P5c-S1 (Test-DB-Isolation) betrifft nur Test-Infrastruktur, keinen Produktionscode; P5c-S2 (Rebalancing bei neuem Ziel, Gerätewechsel-Korrektur ohne Neustart) erweitert storage-service + Admin-UI um dieselben ADR-0017-Bausteine (Retry-Queue, `reset_copies_for_backend`), keine neue Kante.
 - **Phase 5d (P5d-S1/S2) war erneutes Nutzer-Feedback aus tatsächlicher Nutzung, ebenfalls kein neuer Knoten**: P5d-S1 (Content-Type-Sniffing + Format-Whitelist am Document Service, Content-Type-Positivliste am OCR Service) erweitert beide Services + Admin-UI um dieselbe Einzelzeilen-Konfigurationsachse wie `OcrConfig`/`GuardConfig`; P5d-S2 (Upload-Modal mit Drag & Drop, clientseitige Text-Direktanzeige) betrifft ausschließlich die User-UI. Keine neue Kante im Event-Bus-Sinn — der Document Service publiziert weiterhin dieselben Events, nur der serverseitig ermittelte `content_type`-Wert darin ist jetzt zuverlässiger.
 - **Phase 5e (P5e-S1–S3) war ebenfalls kein neuer Knoten**: Kennzeichengenerator (Format-String/atomarer Jahres-Zähler) erweitert object-type-service, die tatsächliche Vergabe + erste echte `X-DMS-Roles`-Rollenprüfung im gesamten System erweitert document-service (neue Realm-Rolle `dms-admin`, angelegt von auth-service), die Anzeige erweitert beide Frontends. Keine neue Kante im Event-Bus-Sinn — keiner der drei Sessions führt ein neues Event ein.
-- **P6-S1 ist der erste neue Knoten seit search-service (P5-S4)**: `workflow-service` (Konzept 7.1) importiert/führt BPMN-2.0-Prozesse über SpiffWorkflow aus (ADR 0018: LGPLv3 als unveränderte Dependency akzeptiert; ADR 0019: voller serialisierter Ausführungszustand je Instanz statt eigener Task-Tabelle). Reiner Producer ohne Consumer (siehe "Event-Bus-Rollen" oben) und ohne Abhängigkeit zu einem anderen Backend-Service — bewusst eigenständig, da diese Session weder RBAC/Approval (P6-S4) noch eine Anbindung an konkrete Geschäftsobjekte wie Dokumente vorwegnehmen soll (`business_key` ist eine opake, unvalidierte Referenz). Kein UI-Anteil (Process-Designer folgt erst mit P6-S6).
-- **Nicht abgebildet**: die weiteren, noch nicht gebauten Services aus `IMPLEMENTATION_PLAN.md` (Signature Service, Federation Hub, Case Service, Notification Service, ...) sowie die verbleibenden fünf Sessions der laufenden Phase 6 (P6-S2–P6-S6). Dieses Diagramm zeigt den aktuellen Stand, nicht die Zielarchitektur. Es wird an künftigen Phasengrenzen aktualisiert.
+- **P6-S1 war der erste neue Knoten seit search-service (P5-S4)**: `workflow-service` (Konzept 7.1) importiert/führt BPMN-2.0-Prozesse über SpiffWorkflow aus (ADR 0018: LGPLv3 als unveränderte Dependency akzeptiert; ADR 0019: voller serialisierter Ausführungszustand je Instanz statt eigener Task-Tabelle). Ohne Abhängigkeit zu einem anderen Backend-Service — bewusst eigenständig, da diese Session weder RBAC/Approval (P6-S4) noch eine Anbindung an konkrete Geschäftsobjekte wie Dokumente vorwegnehmen soll (`business_key` ist eine opake, unvalidierte Referenz). Kein UI-Anteil (Process-Designer folgt erst mit P6-S6).
+- **P6-S2 fügt `notification-service` hinzu und erweitert `workflow-service` um Timer/Boundary Events** (Konzept 7.1, ADR 0020: Polling statt Push für die SLA-Zeitüberwachung, keine verteilte Sperre bei mehreren Replikaten). `notification-service` ist bewusst der erste Service mit beiden Event-Bus-Rollen gleichzeitig (siehe "Event-Bus-Rollen" oben) und der erste mit einer neuen Infra-Abhängigkeit (`mailpit`, Dev-SMTP-Testserver, kein echter Versand). Empfänger-Auflösung bewusst ohne RBAC (opakes `escalation_email`-Prozessdatum, gleiches Muster wie `business_key`) — echte Rollen-Auflösung folgt frühestens mit P6-S4.
+- **Nicht abgebildet**: die weiteren, noch nicht gebauten Services aus `IMPLEMENTATION_PLAN.md` (Signature Service, Federation Hub, Case Service, ...) sowie die verbleibenden vier Sessions der laufenden Phase 6 (P6-S3–P6-S6). Dieses Diagramm zeigt den aktuellen Stand, nicht die Zielarchitektur. Es wird an künftigen Phasengrenzen aktualisiert.
 
 ## Offene Entscheidungen
 

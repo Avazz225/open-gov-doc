@@ -66,3 +66,12 @@ def lanes_bpmn() -> str:
     path = os.path.join(os.path.dirname(__file__), "fixtures", "lanes.bpmn")
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+@pytest.fixture
+def boundary_timer_bpmn() -> str:
+    """Non-interrupting Boundary-Timer (`cancelActivity="false"`, `PT0.002S`), aus dem
+    offiziellen sartography/SpiffWorkflow-Repo (P6-S2, SLA-Zeitüberwachung)."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "boundary_timer_on_task.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()

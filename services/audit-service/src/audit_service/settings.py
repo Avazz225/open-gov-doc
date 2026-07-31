@@ -19,7 +19,9 @@ class Settings(BaseServiceSettings):
     # kam in P5-S3 dazu - 3.9/5.3 verlangen explizit die Auditierung von
     # OCR-Ergebnissen (inkl. needs_review-Fällen). "workflow.>" kam in P6-S1
     # dazu - Prozessinstanz-Start/-Abschluss und Task-Abschlüsse sind Teil
-    # der nachvollziehbaren Dokumentverarbeitung.
+    # der nachvollziehbaren Dokumentverarbeitung. "notification.>" kam in P6-S2
+    # dazu - Zustellversuche (erfolgreich/fehlgeschlagen) sind ebenfalls Teil der
+    # nachvollziehbaren Systemaktionen (5.3).
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -28,4 +30,5 @@ class Settings(BaseServiceSettings):
         "rendering.>",
         "ocr.>",
         "workflow.>",
+        "notification.>",
     ]

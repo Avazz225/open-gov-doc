@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -6,6 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from workflow_service import spiff_adapter
 from workflow_service.models import ProcessDefinition, ProcessInstance
+
+
+@dataclass
+class TimerAdvanceResult:
+    """Ergebnis eines Poll-Ticks der SLA-Zeitüberwachung (P6-S2) für eine einzelne
+    Instanz - `main.py` übersetzt daraus `workflow.task.escalated`-/
+    `workflow.instance.completed`-Events, ohne selbst SpiffWorkflow-Typen zu kennen."""
+
+    instance: ProcessInstance
+    fired: list[spiff_adapter.FiredBoundaryEvent]
+    newly_completed: bool
 
 
 class NotFoundError(Exception):
@@ -182,3 +194,28 @@ async def complete_task(
         instance.completed_at = now
     await session.flush()
     return instance
+
+
+async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
+    """Ein Poll-Tick der SLA-Zeitüberwachung (P6-S2, ADR 0020): deserialisiert **jede**
+    laufende Instanz, lässt fällige Boundary-Timer feuern und persistiert den Blob neu -
+    unabhängig davon, ob dabei etwas gefeuert hat, da sich der interne Timer-Zustand
+    (nächste Fälligkeit) auch sonst ändern kann. Die bereits in ADR 0019 dokumentierte
+    Konsequenz (keine effiziente Cross-Instanz-Abfrage möglich) gilt hier unverändert."""
+    running = await list_instances(session, status="running")
+    results: list[TimerAdvanceResult] = []
+    now = datetime.now(UTC)
+    for instance in running:
+        wf = spiff_adapter.deserialize(instance.workflow_state)
+        fired = spiff_adapter.check_timers(wf)
+        completed = spiff_adapter.is_completed(wf)
+        instance.workflow_state = spiff_adapter.serialize(wf)
+        instance.updated_at = now
+        if completed:
+            instance.status = "completed"
+            instance.completed_at = now
+        results.append(
+            TimerAdvanceResult(instance=instance, fired=fired, newly_completed=completed)
+        )
+    await session.flush()
+    return results

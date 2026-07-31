@@ -5,3 +5,8 @@ class Settings(BaseServiceSettings):
     service_name: str = "workflow-service"
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
+
+    # SLA-Zeitüberwachung (P6-S2, ADR 0020): Poll-Intervall der Boundary-Timer-Prüfung.
+    # Begrenzt die Erkennungspräzision einer SLA-Überschreitung auf dieses Intervall -
+    # kein Push-Mechanismus vorhanden, siehe ADR 0020.
+    sla_poll_interval_seconds: int = 30

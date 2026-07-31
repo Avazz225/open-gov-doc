@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from workflow_service import spiff_adapter as sa
 
@@ -113,3 +115,35 @@ def test_lane_is_none_when_bpmn_model_has_no_lanes(manual_task_bpmn):
 
     ready = sa.ready_manual_tasks(wf)
     assert ready[0].lane is None
+
+
+def test_check_timers_fires_non_interrupting_boundary_event(boundary_timer_bpmn):
+    """P6-S2 (SLA-Zeitüberwachung): non-interrupting Boundary-Timer feuert die
+    Eskalationsverzweigung, während der ursprüngliche Task bereit bleibt. `escalation_email`
+    aus `initial_data` muss im Datenschnappschuss des gefeuerten Events sichtbar sein -
+    normaler BPMN-Datenfluss vom Start-Task bis zum Boundary-Task."""
+    spec, _ = sa.parse_bpmn(boundary_timer_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.set_initial_data(wf, {"escalation_email": "supervisor@example.com"})
+    sa.run_ready_steps(wf)
+    assert sa.check_timers(wf) == []  # Timer noch nicht fällig
+
+    time.sleep(0.1)
+    fired = sa.check_timers(wf)
+
+    assert len(fired) == 1
+    assert fired[0].data["escalation_email"] == "supervisor@example.com"
+    # Non-interrupting: der ursprüngliche Task bleibt bereit und ist normal abschließbar.
+    ready = sa.ready_manual_tasks(wf)
+    assert len(ready) == 1
+    task = sa.find_ready_task(wf, ready[0].id)
+    sa.complete_task(task, {})
+    sa.run_ready_steps(wf)
+    assert sa.is_completed(wf) is True
+
+
+def test_check_timers_returns_empty_list_when_nothing_fired(manual_task_bpmn):
+    spec, _ = sa.parse_bpmn(manual_task_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.run_ready_steps(wf)
+    assert sa.check_timers(wf) == []

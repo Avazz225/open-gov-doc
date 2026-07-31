@@ -1,0 +1,101 @@
+import logging
+from collections.abc import Awaitable, Callable
+
+from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from notification_service import repository
+from notification_service.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+
+def make_handler(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+) -> Callable[[bytes], Awaitable[None]]:
+    """Übersetzt `workflow.task.escalated` in Benachrichtigungen (Konzept 7.1, P6-S2):
+    immer eine In-App-Notification (Empfänger = Lane-Name, sonst `"unassigned"` - keine
+    Rollen-Auflösung ohne RBAC, siehe ADR 0020), zusätzlich eine E-Mail, falls die
+    Prozessinstanz einen `escalation_email`-Wert mitgegeben hat (opakes Prozessdatum,
+    Konvention wie `business_key` in workflow-service)."""
+
+    async def handle(payload: bytes) -> None:
+        event = Event.from_bytes(payload)
+        data = event.payload
+        task_name = data.get("task_name", "?")
+        business_key = data.get("business_key")
+        subject = f"SLA überschritten: {task_name}"
+        body = (
+            f"Prozessinstanz {event.subject} (business_key={business_key!r}) hat den "
+            f"Task {task_name!r} nicht rechtzeitig abgeschlossen."
+        )
+
+        async with session_factory() as session:
+            recipient = data.get("lane") or "unassigned"
+            in_app = await repository.create_and_send(
+                session,
+                settings,
+                channel="in_app",
+                recipient=recipient,
+                subject=subject,
+                body=body,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, in_app)
+
+            escalation_email = data.get("escalation_email")
+            if escalation_email:
+                email_notification = await repository.create_and_send(
+                    session,
+                    settings,
+                    channel="email",
+                    recipient=escalation_email,
+                    subject=subject,
+                    body=body,
+                )
+                await session.commit()
+                await publish_notification_result(publish_event, email_notification)
+
+    return handle
+
+
+async def publish_notification_result(
+    publish_event: Callable[[str, str, dict], Awaitable[None]], notification
+) -> None:
+    if notification.status == "sent":
+        await publish_event(
+            "notification.sent",
+            str(notification.id),
+            {"channel": notification.channel, "recipient": notification.recipient},
+        )
+    else:
+        await publish_event(
+            "notification.failed",
+            str(notification.id),
+            {
+                "channel": notification.channel,
+                "recipient": notification.recipient,
+                "error": notification.error,
+            },
+        )
+
+
+async def start_consuming(
+    bus: NatsEventBusClient,
+    subjects: list[str],
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+) -> None:
+    handler = make_handler(session_factory, settings, publish_event)
+    for subject in subjects:
+        try:
+            await bus.subscribe(subject, handler, durable="notification-service")
+        except SubjectNotFoundError:
+            logger.warning(
+                "Kein Stream für Subject %r gefunden - noch kein Producer gestartet? "
+                "Wird bis zum nächsten Neustart nicht konsumiert.",
+                subject,
+            )
