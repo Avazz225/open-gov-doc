@@ -1,0 +1,243 @@
+import logging
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from dms_common import configure_logging
+from dms_db_base import build_engine, make_session_factory
+from dms_eventbus_client import Event, NatsEventBusClient
+from dms_registry_client import maybe_start_registration
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from workflow_service import repository
+from workflow_service.models import Base
+from workflow_service.schemas import (
+    ProcessDefinitionDetailOut,
+    ProcessDefinitionOut,
+    ProcessInstanceCreate,
+    ProcessInstanceOut,
+    ReadyTaskOut,
+    TaskCompleteRequest,
+)
+from workflow_service.settings import Settings
+
+settings = Settings()
+configure_logging(settings)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    startup_start = time.time()
+    engine = build_engine(settings.postgres_dsn)
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
+        await conn.run_sync(Base.metadata.create_all)
+    app.state.engine = engine
+    app.state.session_factory = make_session_factory(engine)
+
+    # Reiner Producer (kein Consumer, siehe docs/services/workflow-service.md
+    # "Events") - eigener Stream, ein Producer muss ihn selbst anlegen (ADR 0001).
+    event_bus = NatsEventBusClient(settings.nats_url, stream="workflow")
+    await event_bus.connect()
+    app.state.event_bus = event_bus
+
+    registration = await maybe_start_registration(
+        registry_service_base_url=settings.registry_service_base_url,
+        self_address=settings.self_address,
+        service_type=settings.service_name,
+        version="0.1.0",
+    )
+
+    startup_end = time.time()
+    millis = round((startup_end - startup_start) * 1000, 3)
+    logger.info("Startup completed in %s ms.", millis, exc_info=True)
+
+    yield
+
+    if registration:
+        await registration.stop()
+    await event_bus.close()
+    await engine.dispose()
+
+
+app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with app.state.session_factory() as session:
+        yield session
+
+
+async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+    event = Event(
+        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+    )
+    await app.state.event_bus.publish(event_type, event.to_bytes())
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok", "service": settings.service_name}
+
+
+@app.post(
+    "/process-definitions", response_model=ProcessDefinitionOut, status_code=status.HTTP_201_CREATED
+)
+async def create_process_definition(
+    bpmn_xml: UploadFile = File(...),
+    name: str = Form(...),
+    process_id: str | None = Form(None),
+    session: AsyncSession = Depends(get_session),
+) -> ProcessDefinitionOut:
+    xml_bytes = await bpmn_xml.read()
+    try:
+        xml_text = xml_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="bpmn_xml ist kein gültiges UTF-8") from exc
+
+    try:
+        definition = await repository.create_process_definition(
+            session, name=name, bpmn_xml=xml_text, process_id=process_id
+        )
+    except repository.DuplicateNameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.InvalidBpmnError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return definition
+
+
+@app.get("/process-definitions", response_model=list[ProcessDefinitionOut])
+async def list_process_definitions(
+    session: AsyncSession = Depends(get_session),
+) -> list[ProcessDefinitionOut]:
+    return await repository.list_process_definitions(session)
+
+
+@app.get("/process-definitions/{process_definition_id}", response_model=ProcessDefinitionDetailOut)
+async def get_process_definition(
+    process_definition_id: int, session: AsyncSession = Depends(get_session)
+) -> ProcessDefinitionDetailOut:
+    try:
+        return await repository.get_process_definition(session, process_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/process-definitions/{process_definition_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_process_definition(
+    process_definition_id: int, session: AsyncSession = Depends(get_session)
+) -> None:
+    try:
+        await repository.delete_process_definition(session, process_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.ProcessDefinitionInUseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+
+
+@app.post(
+    "/process-definitions/{process_definition_id}/instances",
+    response_model=ProcessInstanceOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_instance(
+    process_definition_id: int,
+    payload: ProcessInstanceCreate,
+    session: AsyncSession = Depends(get_session),
+) -> ProcessInstanceOut:
+    try:
+        instance = await repository.start_instance(
+            session,
+            process_definition_id,
+            created_by=payload.created_by,
+            business_key=payload.business_key,
+            initial_data=payload.initial_data,
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InvalidBpmnError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "workflow.instance.started",
+        subject=instance.id,
+        payload={"process_definition_id": process_definition_id, "created_by": payload.created_by},
+    )
+    if instance.status == "completed":
+        await publish_event(
+            "workflow.instance.completed",
+            subject=instance.id,
+            payload={"business_key": instance.business_key},
+        )
+    return instance
+
+
+@app.get("/instances/{instance_id}", response_model=ProcessInstanceOut)
+async def get_instance(
+    instance_id: str, session: AsyncSession = Depends(get_session)
+) -> ProcessInstanceOut:
+    try:
+        return await repository.get_instance(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/instances", response_model=list[ProcessInstanceOut])
+async def list_instances(
+    process_definition_id: int | None = None,
+    status: str | None = None,
+    business_key: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[ProcessInstanceOut]:
+    return await repository.list_instances(
+        session,
+        process_definition_id=process_definition_id,
+        status=status,
+        business_key=business_key,
+    )
+
+
+@app.get("/instances/{instance_id}/tasks", response_model=list[ReadyTaskOut])
+async def get_ready_tasks(
+    instance_id: str, session: AsyncSession = Depends(get_session)
+) -> list[ReadyTaskOut]:
+    try:
+        tasks = await repository.get_ready_tasks(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [ReadyTaskOut(id=t.id, name=t.name, lane=t.lane, data=t.data) for t in tasks]
+
+
+@app.post("/instances/{instance_id}/tasks/{task_id}/complete", response_model=ProcessInstanceOut)
+async def complete_task(
+    instance_id: str,
+    task_id: str,
+    payload: TaskCompleteRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ProcessInstanceOut:
+    try:
+        instance = await repository.complete_task(
+            session, instance_id, task_id, completed_by=payload.completed_by, data=payload.data
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.TaskNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "workflow.task.completed",
+        subject=instance_id,
+        payload={"task_id": task_id, "completed_by": payload.completed_by},
+    )
+    if instance.status == "completed":
+        await publish_event(
+            "workflow.instance.completed",
+            subject=instance_id,
+            payload={"business_key": instance.business_key},
+        )
+    return instance
