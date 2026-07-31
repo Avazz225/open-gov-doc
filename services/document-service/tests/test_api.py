@@ -399,3 +399,59 @@ def test_delete_document(client):
     response = client.request("DELETE", f"/documents/{document_id}?deleted_by=admin")
     assert response.status_code == 200
     assert response.json()["deleted_at"] is not None
+
+
+def test_create_document_with_derived_from_fields_creates_independent_document(client):
+    """Bearbeitungskopie (2.3, P6-S3, z. B. Schwaerzung fuer die Akteneinsicht):
+    kein neues Endpunkt noetig - die Herkunftsfelder laufen ueber die normale
+    Upload-Pipeline und das Ergebnis ist ein ganz eigenstaendiges Dokument."""
+    original = upload(client, title="Original").json()
+
+    copy_response = upload(
+        client,
+        title="Schwaerzung",
+        content=b"geschwaerzter Inhalt",
+        derived_from_document_id=original["id"],
+        derived_from_version_number=1,
+        originating_case_id="case-123",
+    )
+    assert copy_response.status_code == 201
+    copy = copy_response.json()
+    assert copy["id"] != original["id"]
+    assert copy["derived_from_document_id"] == original["id"]
+    assert copy["derived_from_version_number"] == 1
+    assert copy["originating_case_id"] == "case-123"
+
+    # Unabhaengige Versionierung/Auditierung - eigener current_version_number,
+    # das Original bleibt unveraendert.
+    assert copy["current_version_number"] == 1
+    original_still_unchanged = client.get(f"/documents/{original['id']}").json()
+    assert original_still_unchanged["derived_from_document_id"] is None
+
+
+def test_create_document_without_derived_fields_has_null_origin(client):
+    body = upload(client).json()
+    assert body["derived_from_document_id"] is None
+    assert body["derived_from_version_number"] is None
+    assert body["originating_case_id"] is None
+
+
+def test_create_document_derived_from_without_version_number_returns_400(client):
+    original = upload(client).json()
+    response = upload(client, derived_from_document_id=original["id"])
+    assert response.status_code == 400
+
+
+def test_create_document_derived_from_unknown_version_returns_400(client):
+    original = upload(client).json()
+    response = upload(
+        client, derived_from_document_id=original["id"], derived_from_version_number=99
+    )
+    assert response.status_code == 400
+
+
+def test_create_document_derived_from_unknown_document_returns_400(client):
+    response = upload(
+        client, derived_from_document_id="does-not-exist", derived_from_version_number=1
+    )
+    assert response.status_code == 400

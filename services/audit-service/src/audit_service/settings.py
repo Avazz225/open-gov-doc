@@ -21,7 +21,9 @@ class Settings(BaseServiceSettings):
     # dazu - Prozessinstanz-Start/-Abschluss und Task-Abschlüsse sind Teil
     # der nachvollziehbaren Dokumentverarbeitung. "notification.>" kam in P6-S2
     # dazu - Zustellversuche (erfolgreich/fehlgeschlagen) sind ebenfalls Teil der
-    # nachvollziehbaren Systemaktionen (5.3).
+    # nachvollziehbaren Systemaktionen (5.3). "case.>" kam in P6-S3 dazu -
+    # Anlage/Referenzänderung/Abschluss einer Umlaufmappe (2.3) sind ebenfalls
+    # Teil der nachvollziehbaren Vorgangsbearbeitung.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -31,4 +33,5 @@ class Settings(BaseServiceSettings):
         "ocr.>",
         "workflow.>",
         "notification.>",
+        "case.>",
     ]

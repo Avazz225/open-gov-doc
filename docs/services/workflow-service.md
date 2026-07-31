@@ -52,7 +52,7 @@ Ein asyncio-Hintergrund-Task (`_sla_poll_loop` in `main.py`, gestartet in `lifes
 | `workflow.task.completed` | `{task_id, completed_by}` |
 | `workflow.task.escalated` | `{process_definition_id, business_key, task_name, lane, escalation_email}` (P6-S2, gefeuert vom SLA-Poll-Loop bei einem ausgelösten Boundary-Timer; `escalation_email` ist ein opakes Prozessdatum aus `initial_data`, siehe SLA-Poll-Loop-Abschnitt) |
 
-**Konsumiert:** keine — reiner Producer. `notification-service` (P6-S2) ist der erste Konsument von `workflow.task.escalated`, siehe `docs/services/notification-service.md`. Kein anderer bestehender Service emittiert aktuell etwas, worauf workflow-service reagieren müsste (z. B. der `needs_review`-Flag aus `ocr.completed`, siehe `docs/services/ocr-service.md` "Offene Punkte") — diese Anbindung bleibt auf eine spätere Phase-6-Session verschoben, vermutlich zusammen mit dem generischen Approval-Mechanismus (P6-S4).
+**Konsumiert:** keine — reiner Producer. `notification-service` (P6-S2) ist der erste Konsument von `workflow.task.escalated`, `case-service` (P6-S3) der erste Konsument von `workflow.instance.completed` (löst dort den Abschluss-Snapshot einer Umlaufmappe aus, siehe `docs/services/case-service.md`), siehe je Service. Kein anderer bestehender Service emittiert aktuell etwas, worauf workflow-service reagieren müsste (z. B. der `needs_review`-Flag aus `ocr.completed`, siehe `docs/services/ocr-service.md` "Offene Punkte") — diese Anbindung bleibt auf eine spätere Phase-6-Session verschoben, vermutlich zusammen mit dem generischen Approval-Mechanismus (P6-S4).
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
@@ -79,7 +79,7 @@ Noch keine — folgt in Phase 11.
 - **SLA-Poll-Präzision an das Poll-Intervall gekoppelt** (Default 30s) — keine Echtzeit-Erkennung einer Eskalation, siehe ADR 0020.
 - **Keine verteilte Sperre bei mehreren `workflow-service`-Replikaten** — ein horizontal skaliertes Deployment würde denselben Boundary-Timer mehrfach feuern/publizieren, siehe ADR 0020 "Konsequenzen".
 - **Nur `DurationTimerEventDefinition`-basierte Boundary-Timer real getestet** (P6-S2) — `CycleTimerEventDefinition` (wiederkehrende Eskalation) und `TimeDateEventDefinition` (fester Zeitpunkt) werden von SpiffWorkflow nativ unterstützt, sind aber diese Session nicht mit einem eigenen Test abgedeckt.
-- **Keine Case-Service-Anbindung** (Umlaufmappen, prozessspezifische Bearbeitungskopien, 2.3) — **P6-S3**.
+- **Case-Service-Anbindung seit P6-S3**: `case-service` konsumiert `workflow.instance.completed` und matcht über `business_key` (den es beim Instanzstart auf die eigene Case-ID setzt) — workflow-service selbst musste dafür nicht geändert werden, siehe `docs/services/case-service.md`.
 - **Keine Signature Tasks** (3.10) — **P6-S7** (ehemals P6-S5).
 - **Kein Process Designer** — Prozesse können ausschließlich per BPMN-XML-Upload importiert werden, keine grafische Modellierung im System selbst — **P6-S8** (ehemals P6-S6, eigenständige Frontend-Anwendung mit `bpmn-js`, Lizenz siehe [ADR 0021](../adr/0021-bpmn-io-license-watermark.md)).
 - **Keine föderierten/installationsübergreifenden Prozessschritte** (7.4) — spätere Phase.

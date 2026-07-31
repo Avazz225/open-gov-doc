@@ -19,6 +19,9 @@ class DocumentOut(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    derived_from_document_id: str | None
+    derived_from_version_number: int | None
+    originating_case_id: str | None
 
     model_config = {"from_attributes": True}
 

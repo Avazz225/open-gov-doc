@@ -444,6 +444,35 @@ services:
     networks:
       - dms-net
 
+  case-service:
+    build:
+      context: ..
+      dockerfile: services/case-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://case-service:8000
+    ports:
+      - "${CASE_SERVICE_PORT:-8016}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      workflow-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      object-type-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   object-type-service:
     build:
       context: ..

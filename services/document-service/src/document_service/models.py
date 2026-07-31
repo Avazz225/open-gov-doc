@@ -26,6 +26,17 @@ class Document(Base):
     # Zeigt auf die aktuelle Hauptversion (nicht die zuletzt angelegte Zeile -
     # Konfliktkopien erhöhen diesen Zeiger nicht, siehe repository.checkin_version).
     current_version_number: Mapped[int] = mapped_column(Integer, default=0)
+    # Prozessspezifische Bearbeitungskopie (2.3, P6-S3, z. B. eine Schwärzung
+    # für die Akteneinsicht): eine solche Kopie ist ein ganz normales, eigenes
+    # Dokument mit eigener Versionierung/Auditierung, trägt nur zusätzlich
+    # diese drei opaken Herkunftsfelder - kein FK über Service-Grenzen hinweg,
+    # `derived_from_document_id` verweist auf `Document.id` innerhalb
+    # desselben Schemas und wird daher als echter FK modelliert.
+    derived_from_document_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("document.document.id"), nullable=True
+    )
+    derived_from_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    originating_case_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

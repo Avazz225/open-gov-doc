@@ -54,6 +54,9 @@ async def create_document(
     object_type_id: int | None,
     attributes: dict,
     created_by: str,
+    derived_from_document_id: str | None = None,
+    derived_from_version_number: int | None = None,
+    originating_case_id: str | None = None,
 ) -> Document:
     now = datetime.now(UTC)
     document = Document(
@@ -66,6 +69,9 @@ async def create_document(
         created_by=created_by,
         created_at=now,
         updated_at=now,
+        derived_from_document_id=derived_from_document_id,
+        derived_from_version_number=derived_from_version_number,
+        originating_case_id=originating_case_id,
     )
     session.add(document)
     session.add(

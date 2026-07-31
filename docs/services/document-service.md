@@ -9,7 +9,7 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String) — erzeugt Dokument + Version 1. Seit P5-S1: `422` bei einem Virenfund, `503` wenn der Virus-Scan Service nicht erreichbar ist (siehe unten). Seit **P5e-S2**: bei konfiguriertem Kennzeichengenerator wird `attributes["Kennzeichen"]` serverseitig vergeben, ein vom Client mitgesendeter Wert für diesen Schlüssel wird verworfen (siehe "Kennzeichengenerator" unten) |
+| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String, optional `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` für Bearbeitungskopien, siehe unten) — erzeugt Dokument + Version 1. Seit P5-S1: `422` bei einem Virenfund, `503` wenn der Virus-Scan Service nicht erreichbar ist (siehe unten). Seit **P5e-S2**: bei konfiguriertem Kennzeichengenerator wird `attributes["Kennzeichen"]` serverseitig vergeben, ein vom Client mitgesendeter Wert für diesen Schlüssel wird verworfen (siehe "Kennzeichengenerator" unten) |
 | `GET` | `/documents?folder_id=...` | Nicht gelöschte Dokumente eines Ordners (seit P4-S2, Grundlage der User-UI-Navigation) — unbekannter `folder_id` liefert `[]`, kein 404 |
 | `GET` | `/documents/{id}` | Metadaten |
 | `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400. Seit **P5e-S2**: eine Änderung an `attributes["Kennzeichen"]` wird mit `403` abgelehnt, außer der `X-DMS-Roles`-Header enthält `dms-admin` (siehe unten) |
@@ -29,7 +29,7 @@
 
 ## Datenmodell
 
-- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`.
+- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.).
 - `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a).
 - `document_lock`: genau eine aktive Zeile je gesperrtem Dokument (`document_id` als PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 - `upload_config`: einzelne Zeile (`id=1`, seit P5d-S1) — `allowed_content_types` (JSON-Liste, leer = keine Einschränkung), `updated_at`.
@@ -48,6 +48,14 @@ Baut auf dem Object-Type Service auf (siehe `docs/services/object-type-service.m
 - **Erste echte Rollenprüfung im gesamten System**: `PATCH /documents/{id}` erkennt eine Änderung an `attributes["Kennzeichen"]` durch Vergleich von alt (`document.attributes`) gegen neu (`payload.attributes`, vollständiger Ersatz statt Merge, siehe unten) — weichen sie voneinander ab (auch das kommentarlose Weglassen des Schlüssels in einem sonst vollständigen Attribut-Replace zählt als Änderung, da es den Wert effektiv auf `null` setzt), muss der vom Gateway injizierte `X-DMS-Roles`-Header (kommagetrennt) die Rolle aus `Settings.kennzeichen_admin_role` (Default `"dms-admin"`) enthalten, sonst `403`. Bislang wertete **kein** Service im gesamten System diesen Header aus (siehe `PROGRESS.md` "Autorisierung") — die Rolle wird vom Auth Service idempotent im Realm angelegt (`ensure_realm_and_client`), die Zuweisung an konkrete Nutzer läuft vorerst außerhalb des Systems über die Keycloak Admin Console (keine eigene Rollenverwaltungs-API/-UI, siehe `docs/services/auth-service.md` "Offene Punkte").
 - **Kein Format-Validitätscheck bei privilegierten manuellen Änderungen**: ein `dms-admin`-Principal kann einen beliebigen String setzen, auch einen, der nicht dem konfigurierten `kennzeichen_format` entspricht — bewusst nicht eingeschränkt, entspricht der reinen Rollenprüfung aus der Planung (siehe `PROGRESS.md`).
 - **Wo `Kennzeichen` angezeigt wird** (vor dem Dateinamen, global oder je Objekttyp override) ist noch offen — folgt mit **P5e-S3**.
+
+## Bearbeitungskopien (2.3, seit P6-S3)
+
+Eine prozessspezifische Bearbeitungskopie (klassisches Beispiel: eine Schwärzung für die Akteneinsicht) ist laut Konzept **kein neuer Version des Ursprungsdokuments**, sondern ein eigenständiges, gesondert hinterlegtes Dokument mit Verweis auf das Ursprungsdokument (inkl. konkreter Ausgangsversion) und den auslösenden Vorgang/die auslösende Umlaufmappe — und soll "vollständig auditiert und ebenfalls versioniert wie jede andere Dokumentaktion" sein.
+
+Diese Session hat dafür bewusst **keine neue Route** eingeführt, sondern `POST /documents` um drei optionale, nullable Formularfelder erweitert: `derived_from_document_id` (verweist auf `document.id`, echter FK innerhalb desselben Schemas), `derived_from_version_number` (Pflicht, sobald `derived_from_document_id` gesetzt ist — `400`, falls fehlend oder die referenzierte Version laut `repository.get_version()` nicht existiert), `originating_case_id` (opake Referenz auf eine Umlaufmappe im neuen `case-service`, keine Existenzprüfung — analog zu `folder_id`/`object_type_id`). Eine so angelegte Bearbeitungskopie ist danach ein **komplett eigenständiges Dokument**: eigene `id`, eigene Versionshistorie, durchläuft denselben Virenscan/Storage-Upload/Kennzeichen-Mechanismus wie jedes andere Dokument — die drei Felder sind reine Herkunftsmetadaten ohne Sonderbehandlung an anderer Stelle im Service.
+
+`case-service` (P6-S3) ist der vorgesehene Aufrufer (Schwärzung eines in einer Umlaufmappe referenzierten Dokuments), ruft diesen Endpunkt aber selbst nicht auf — die Erstellung einer Bearbeitungskopie ist ein manueller/prozessgesteuerter Vorgang außerhalb dieser Session, das Datenmodell/die API-Erweiterung ist die dafür nötige Grundlage.
 
 ## Speicherung der Inhalte (3.6-Anbindung)
 
@@ -91,7 +99,7 @@ Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** 
 
 | event_type | payload |
 |---|---|
-| `document.created` | `{title, created_by}` |
+| `document.created` | `{title, created_by}`, zusätzlich `{derived_from_document_id}` bei einer Bearbeitungskopie (seit P6-S3, s. u.) |
 | `document.version.created` | `{version_number, is_conflict, created_by}` |
 | `document.lock.force_released` | `{original_locked_by, released_by, reason}` |
 | `document.metadata.updated` | `{title}` (seit P4-S4) |
@@ -117,6 +125,7 @@ Noch keine — folgt in Phase 11.
 - **Keine Rollenzuweisungs-API/-UI**: `dms-admin` muss aktuell direkt über die Keycloak Admin Console zugewiesen werden (siehe oben, "Kennzeichengenerator").
 - Kein Vier-Augen-Prinzip für Force-Unlock (4.3, folgt P6-S4).
 - Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
-- Umlaufmappen-Referenzen (2.3) sind eine eigene, spätere Session (P6-S3) und greifen auf Dokumente/Versionen dieses Service zu, ohne dass hier bereits etwas vorbereitet wurde. Ersatzdarstellungen (2.4) sind seit P5-S2 umgesetzt (siehe `docs/services/rendering-service.md`), ohne dass dieser Service dafür geändert werden musste — der Rendering Service konsumiert die bereits vorhandenen `document.>`-Events und ruft die bereits vorhandenen Versions-/Content-Endpunkte auf.
+- **Umlaufmappen-Referenzen (2.3, seit P6-S3)**: der neue `case-service` greift ausschließlich lesend über `GET /documents/{id}` auf `current_version_number`/`deleted_at` zu — hier musste dafür nichts geändert werden. Bearbeitungskopien (ebenfalls 2.3) sind dagegen diese Session (siehe oben) — kein neuer Endpunkt, drei optionale Herkunftsfelder an `POST /documents`. Ersatzdarstellungen (2.4) sind seit P5-S2 umgesetzt (siehe `docs/services/rendering-service.md`), ohne dass dieser Service dafür geändert werden musste — der Rendering Service konsumiert die bereits vorhandenen `document.>`-Events und ruft die bereits vorhandenen Versions-/Content-Endpunkte auf.
+- **Keine Existenzprüfung für `originating_case_id`**: opake Referenz auf eine Umlaufmappe im `case-service`, analog zu `folder_id`/`object_type_id` — ein unbekannter Wert wird nicht abgelehnt.
 - Virenscan-Gating erhöht die Upload-Latenz um die Scan-Zeit und scannt auch dann, wenn ein Check-in wegen veralteter `expected_base_version_number`/Lock-Konflikt ohnehin abgelehnt würde (unnötige, aber nicht falsche Arbeit) — siehe ADR 0010 "Konsequenzen".
 - Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowedParentTypes` (siehe ADR 0013) — dieselbe Einschränkung wie beim Object-Type/Folder Service.

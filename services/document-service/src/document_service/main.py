@@ -89,6 +89,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS attributes JSON DEFAULT '{}'::json NOT NULL"
             )
         )
+        # Bearbeitungskopien (2.3, P6-S3) - additive, nullable Herkunftsfelder,
+        # gleiches Ad-hoc-Migrationsmuster wie oben.
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS derived_from_document_id VARCHAR(128) "
+                "REFERENCES document.document(id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS derived_from_version_number INTEGER"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS originating_case_id VARCHAR(128)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -185,6 +206,9 @@ async def create_document(
     folder_id: str | None = Form(None),
     object_type_id: int | None = Form(None),
     attributes: str | None = Form(None),
+    derived_from_document_id: str | None = Form(None),
+    derived_from_version_number: int | None = Form(None),
+    originating_case_id: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     try:
@@ -192,6 +216,25 @@ async def create_document(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="attributes ist kein gültiges JSON") from exc
     parsed_attributes.pop(KENNZEICHEN_ATTRIBUTE, None)
+
+    # Prozessspezifische Bearbeitungskopie (2.3, P6-S3, z. B. eine Schwärzung
+    # für die Akteneinsicht): keine neue Version des Ursprungsdokuments,
+    # sondern ein eigenständiges Dokument mit Verweis auf die konkrete
+    # Ausgangsversion - durchläuft ansonsten exakt dieselbe Pipeline
+    # (Virenscan, Storage, Versionierung, Audit) wie jedes andere Dokument.
+    if derived_from_document_id is not None:
+        if derived_from_version_number is None:
+            raise HTTPException(
+                status_code=400,
+                detail="derived_from_version_number ist Pflicht, wenn "
+                "derived_from_document_id gesetzt ist",
+            )
+        try:
+            await repository.get_version(
+                session, derived_from_document_id, derived_from_version_number
+            )
+        except repository.NotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     parent_folder = None
     if folder_id is not None:
@@ -252,11 +295,15 @@ async def create_document(
         object_type_id=object_type_id,
         attributes=parsed_attributes,
         created_by=created_by,
+        derived_from_document_id=derived_from_document_id,
+        derived_from_version_number=derived_from_version_number,
+        originating_case_id=originating_case_id,
     )
     await session.commit()
-    await publish_event(
-        "document.created", subject=document_id, payload={"title": title, "created_by": created_by}
-    )
+    event_payload = {"title": title, "created_by": created_by}
+    if derived_from_document_id is not None:
+        event_payload["derived_from_document_id"] = derived_from_document_id
+    await publish_event("document.created", subject=document_id, payload=event_payload)
     return document
 
 
