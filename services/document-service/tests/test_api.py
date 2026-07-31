@@ -6,6 +6,7 @@ from document_service.main import app
 from fastapi.testclient import TestClient
 
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 # Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
 # echten Antivirus-Produkten zu Integrationstestzwecken erkannt, hier zum
@@ -214,7 +215,8 @@ def test_force_release_then_conflicting_checkin(client):
         json={"released_by": "admin", "reason": "Mitarbeiter im Urlaub"},
     )
     assert force_response.status_code == 200
-    assert force_response.json()["locked_by"] == "alice"
+    assert force_response.json()["status"] == "released"
+    assert force_response.json()["lock"]["locked_by"] == "alice"
 
     # Sperre ist wirklich weg - Bob kann jetzt normal einchecken.
     bob_response = client.post(
@@ -231,6 +233,44 @@ def test_force_release_then_conflicting_checkin(client):
         files={"file": ("vertrag.pdf", b"alice-stale", "application/pdf")},
     )
     assert alice_response.json()["is_conflict"] is True
+
+
+def test_force_release_with_approval_required_defers_execution(client):
+    """Vier-Augen-Retrofit (4.3, P6-S4): mit aktivierter Genehmigungspflicht
+    wird die Sperre NICHT sofort aufgehoben - echte Integration gegen den
+    lokal laufenden permission-service, gleiches "kein Mocking von
+    Sibling-Services"-Muster wie folder_client/object_type_client."""
+    httpx.put(
+        f"{PERMISSION_SERVICE_URL}/approval-config/document.force_unlock",
+        json={"requires_approval": True},
+    )
+    try:
+        body = upload(client, content=b"v1").json()
+        document_id = body["id"]
+        client.post(
+            f"/documents/{document_id}/lock", json={"locked_by": "alice", "session_id": "s1"}
+        )
+
+        response = client.post(
+            f"/documents/{document_id}/lock/force-release",
+            json={"released_by": "admin", "reason": "Test"},
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "pending_approval"
+        assert result["approval_request_id"] is not None
+        assert result["lock"] is None
+
+        # Sperre ist weiterhin aktiv - keine sofortige Ausfuehrung, die
+        # tatsaechliche Ausfuehrung folgt asynchron ueber consumer.py, sobald
+        # das Approval-Event eintrifft (siehe test_consumer.py).
+        lock_response = client.get(f"/documents/{document_id}/lock")
+        assert lock_response.json()["locked_by"] == "alice"
+    finally:
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/document.force_unlock",
+            json={"requires_approval": False},
+        )
 
 
 def test_update_document_metadata(client):

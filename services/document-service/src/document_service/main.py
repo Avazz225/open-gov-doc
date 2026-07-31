@@ -24,6 +24,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service import repository
+from document_service.approval_client import ApprovalClient
+from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
 from document_service.models import Base
@@ -33,6 +35,7 @@ from document_service.schemas import (
     DocumentOut,
     DocumentUpdate,
     DocumentVersionOut,
+    ForceReleaseResult,
     LockAcquireRequest,
     LockForceReleaseRequest,
     LockOut,
@@ -117,10 +120,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.folder_client = FolderClient(settings.folder_service_base_url)
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
+    app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="document")
     await event_bus.connect()
     app.state.event_bus = event_bus
+
+    # Erster Konsument dieses Service überhaupt (P6-S4, 4.3): getrennter
+    # Client (ensure_stream=False), da document-service den Stream
+    # "permission" nicht selbst besitzt - gleiches Zwei-Client-Prinzip wie
+    # bei notification-service/case-service.
+    consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await consumer_bus.connect()
+    app.state.consumer_bus = consumer_bus
+    await start_consuming(consumer_bus, settings.subjects, app.state.session_factory, publish_event)
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
@@ -137,11 +150,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if registration:
         await registration.stop()
+    await consumer_bus.close()
     await event_bus.close()
     await app.state.storage.close()
     await app.state.folder_client.close()
     await app.state.object_type_client.close()
     await app.state.virus_scan_client.close()
+    await app.state.approval_client.close()
     await engine.dispose()
 
 
@@ -536,15 +551,30 @@ async def release_lock(
     await session.commit()
 
 
-@app.post("/documents/{document_id}/lock/force-release", response_model=LockOut)
+@app.post("/documents/{document_id}/lock/force-release", response_model=ForceReleaseResult)
 async def force_release_lock(
     document_id: str, payload: LockForceReleaseRequest, session: AsyncSession = Depends(get_session)
-) -> LockOut:
+) -> ForceReleaseResult:
     """Administrativer Force-Unlock (4.2) - besonders sensibler Audit-Fall.
-    Optionales Vier-Augen-Prinzip (4.3) ist noch nicht verdrahtet (folgt mit
-    dem generischen Approval-Mechanismus in P6-S4); dieser Endpunkt ist bis
-    dahin ungated und muss auf API-Gateway-Ebene (P4-S1) entsprechend restriktiv
-    autorisiert werden."""
+    Seit P6-S4 optional per generischem Vier-Augen-Mechanismus gegated (4.3):
+    ist `document.force_unlock` in permission-service als
+    genehmigungspflichtig konfiguriert, wird die Sperre NICHT sofort
+    aufgehoben, sondern ein Freigabe-Request angelegt - die eigentliche
+    Ausführung folgt erst über `consumer.py`, sobald das
+    `permission.approval.approved`-Event eintrifft. Per Default (keine
+    Konfiguration) bleibt das Verhalten unverändert: sofortige Ausführung."""
+    if await app.state.approval_client.requires_approval("document.force_unlock"):
+        request = await app.state.approval_client.create_request(
+            action_type="document.force_unlock",
+            initiated_by=payload.released_by,
+            payload={
+                "document_id": document_id,
+                "released_by": payload.released_by,
+                "reason": payload.reason,
+            },
+        )
+        return ForceReleaseResult(status="pending_approval", approval_request_id=request["id"])
+
     try:
         original_lock = await repository.force_release_lock(session, document_id)
     except repository.NotFoundError as exc:
@@ -559,4 +589,4 @@ async def force_release_lock(
             "reason": payload.reason,
         },
     )
-    return original_lock
+    return ForceReleaseResult(status="released", lock=original_lock)

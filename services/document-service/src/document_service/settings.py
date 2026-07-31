@@ -30,3 +30,13 @@ class Settings(BaseServiceSettings):
     # dürfen ein bereits vergebenes Kennzeichen (attributes["Kennzeichen"])
     # nachträglich ändern - für alle anderen ist es rein lesbar.
     kennzeichen_admin_role: str = "dms-admin"
+
+    # Generischer Vier-Augen-Approval-Mechanismus (4.3, P6-S4) - Force-Unlock
+    # fragt hier ab, ob Genehmigung nötig ist, und legt bei Bedarf einen
+    # Freigabe-Request an, statt sofort auszuführen.
+    permission_service_base_url: str = "http://localhost:8004"
+
+    # Welche Subjects document-service konsumiert (P6-S4) - erster Konsument
+    # dieses Service überhaupt, bisher reiner Producer. Nur der genehmigte
+    # Force-Unlock hat hier Bedeutung, siehe consumer.py.
+    subjects: list[str] = ["permission.approval.approved"]

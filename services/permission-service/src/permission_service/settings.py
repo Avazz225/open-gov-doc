@@ -13,3 +13,8 @@ class Settings(BaseServiceSettings):
     # Erwarteter Producer: Folder Service (P3-S3, noch nicht gebaut) unter
     # Stream "folder" - bis dahin per Tests simuliert.
     structure_subjects: list[str] = ["folder.>"]
+
+    # Selbst-Konsum des eigenen Vier-Augen-Approval-Events (4.3, P6-S4) für
+    # Aktionstypen, die permission-service selbst ausführt (Bereichssperren) -
+    # siehe approval_consumer.py.
+    approval_subjects: list[str] = ["permission.approval.approved"]

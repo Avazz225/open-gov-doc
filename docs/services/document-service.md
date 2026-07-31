@@ -91,7 +91,7 @@ Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** 
   - Stimmt dieser Wert mit der aktuellen Hauptversion überein → regulärer Check-in, neue Hauptversion.
   - Weicht er ab (z. B. weil in der Zwischenzeit jemand anderes nach einem Force-Unlock eingecheckt hat) → **Konfliktkopie**: eigenständige, weiterhin abrufbare Version (`is_conflict=true`, Dateiname `<name>_conflict_<user>_<zeitstempel>`), der Hauptversions-Zeiger bewegt sich nicht.
 - Ein eigener Check-in beendet immer die eigene Sperre (auch im Konfliktfall — die Ausgangsbasis war ohnehin veraltet).
-- Vier-Augen-Prinzip (4.3) für Force-Unlock ist noch nicht verdrahtet, folgt mit dem generischen Approval-Mechanismus in P6-S4.
+- **Vier-Augen-Prinzip (4.3) für Force-Unlock seit P6-S4 optional verdrahtet**: `POST /documents/{id}/lock/force-release` fragt vorher `GET /approval-config/document.force_unlock` beim Permission Service ab (`approval_client.py`). Ist Genehmigung aktiviert, wird die Sperre **nicht** sofort aufgehoben, sondern ein Freigabe-Request angelegt (Antwort `{status: "pending_approval", approval_request_id}`, Lock bleibt bestehen) — die tatsächliche Ausführung erfolgt erst über den neuen `consumer.py` (erster NATS-Konsument dieses Service überhaupt), sobald `permission.approval.approved` eintrifft. Ohne Konfiguration (Default) bleibt das Verhalten unverändert: sofortige Ausführung, Antwort `{status: "released", lock}`. Details/Architekturentscheidung siehe [ADR 0022](../adr/0022-four-eyes-approval-via-events.md) und `docs/services/permission-service.md` "Vier-Augen-Approval-Mechanismus".
 
 ## Events
 
@@ -105,7 +105,7 @@ Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** 
 | `document.metadata.updated` | `{title}` (seit P4-S4) |
 | `document.deleted` | `{deleted_by}` |
 
-**Konsumiert:** keine.
+**Konsumiert** (seit P6-S4, erster Konsument dieses Service überhaupt): `permission.approval.approved` — nur relevant, falls `action_type == "document.force_unlock"` (siehe `consumer.py`), alle anderen Aktionstypen werden ignoriert.
 
 **Audit-Anbindung**: Audit Service konsumiert seit dieser Session zusätzlich `document.>` (vorher nur `registry.>`) — 4.2 verlangt explizit vollständige Auditierung von Force-Unlock/Konfliktkopie. Force-Unlock und die daraus ggf. entstehende Konfliktkopie erzeugen zwei separate, aber im Audit-Trail über `subject=document_id` verknüpfbare Ereignisse.
 
@@ -123,7 +123,7 @@ Noch keine — folgt in Phase 11.
 
 - **Kennzeichen-Anzeige im Frontend** (vor dem Dateinamen, global oder je Objekttyp überschreibbar) noch nicht angebunden — folgt mit P5e-S3.
 - **Keine Rollenzuweisungs-API/-UI**: `dms-admin` muss aktuell direkt über die Keycloak Admin Console zugewiesen werden (siehe oben, "Kennzeichengenerator").
-- Kein Vier-Augen-Prinzip für Force-Unlock (4.3, folgt P6-S4).
+- Vier-Augen-Prinzip für Force-Unlock seit P6-S4 optional verfügbar (siehe oben) — Default bleibt ungated, ebenso kein Rückkanal, der `permission-service` einen fehlgeschlagenen (z. B. inzwischen anderweitig aufgelösten) Vollzug meldet.
 - Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
 - **Umlaufmappen-Referenzen (2.3, seit P6-S3)**: der neue `case-service` greift ausschließlich lesend über `GET /documents/{id}` auf `current_version_number`/`deleted_at` zu — hier musste dafür nichts geändert werden. Bearbeitungskopien (ebenfalls 2.3) sind dagegen diese Session (siehe oben) — kein neuer Endpunkt, drei optionale Herkunftsfelder an `POST /documents`. Ersatzdarstellungen (2.4) sind seit P5-S2 umgesetzt (siehe `docs/services/rendering-service.md`), ohne dass dieser Service dafür geändert werden musste — der Rendering Service konsumiert die bereits vorhandenen `document.>`-Events und ruft die bereits vorhandenen Versions-/Content-Endpunkte auf.
 - **Keine Existenzprüfung für `originating_case_id`**: opake Referenz auf eine Umlaufmappe im `case-service`, analog zu `folder_id`/`object_type_id` — ein unbekannter Wert wird nicht abgelehnt.

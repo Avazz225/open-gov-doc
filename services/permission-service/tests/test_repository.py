@@ -311,3 +311,118 @@ async def test_list_scope_locks_filters_by_resource(session):
     assert len(all_locks) == 2
     assert len(scoped) == 1
     assert scoped[0].resource_id == "folder-a"
+
+
+async def test_get_approval_config_defaults_to_false_when_unconfigured(session):
+    config = await repository.get_approval_config(session, "document.force_unlock")
+
+    assert config.requires_approval is False
+
+
+async def test_set_approval_config_persists_and_is_read_back(session):
+    await repository.set_approval_config(session, "document.force_unlock", requires_approval=True)
+
+    config = await repository.get_approval_config(session, "document.force_unlock")
+
+    assert config.requires_approval is True
+
+
+async def test_set_approval_config_upsert_updates_existing_row(session):
+    await repository.set_approval_config(session, "document.force_unlock", requires_approval=True)
+    await repository.set_approval_config(session, "document.force_unlock", requires_approval=False)
+
+    configs = await repository.list_approval_configs(session)
+
+    assert len(configs) == 1
+    assert configs[0].requires_approval is False
+
+
+async def test_create_and_get_approval_request(session):
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={"x": 1}
+    )
+
+    fetched = await repository.get_approval_request(session, request.id)
+
+    assert fetched.status == "pending"
+    assert fetched.payload == {"x": 1}
+
+
+async def test_get_unknown_approval_request_raises_not_found(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_approval_request(session, "does-not-exist")
+
+
+async def test_list_approval_requests_filters_by_status_and_action_type(session):
+    await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+    approved = await repository.create_approval_request(
+        session, action_type="permission.scope_lock.create", initiated_by="bob", payload={}
+    )
+    await repository.approve_request(session, approved.id, approved_by="carol")
+
+    all_requests = await repository.list_approval_requests(session)
+    pending_only = await repository.list_approval_requests(session, status="pending")
+    by_type = await repository.list_approval_requests(
+        session, action_type="permission.scope_lock.create"
+    )
+
+    assert len(all_requests) == 2
+    assert {r.action_type for r in pending_only} == {"document.force_unlock"}
+    assert [r.id for r in by_type] == [approved.id]
+
+
+async def test_approve_request_rejects_initiator_as_approver(session):
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+
+    with pytest.raises(repository.NotInitiatorAllowedError):
+        await repository.approve_request(session, request.id, approved_by="alice")
+
+
+async def test_approve_request_by_different_person_succeeds(session):
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+
+    approved = await repository.approve_request(session, request.id, approved_by="bob")
+
+    assert approved.status == "approved"
+    assert approved.approved_by == "bob"
+    assert approved.decided_at is not None
+
+
+async def test_approve_already_decided_request_raises_not_pending(session):
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+    await repository.approve_request(session, request.id, approved_by="bob")
+
+    with pytest.raises(repository.ApprovalRequestNotPendingError):
+        await repository.approve_request(session, request.id, approved_by="carol")
+
+
+async def test_reject_request_allows_initiator_to_withdraw_own_request(session):
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+
+    rejected = await repository.reject_request(
+        session, request.id, rejected_by="alice", reason="Doch nicht nötig"
+    )
+
+    assert rejected.status == "rejected"
+    assert rejected.rejected_by == "alice"
+    assert rejected.reason == "Doch nicht nötig"
+
+
+async def test_reject_already_decided_request_raises_not_pending(session):
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+    await repository.reject_request(session, request.id, rejected_by="bob", reason=None)
+
+    with pytest.raises(repository.ApprovalRequestNotPendingError):
+        await repository.reject_request(session, request.id, rejected_by="carol", reason=None)

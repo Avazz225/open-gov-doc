@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -70,6 +71,16 @@ class LockReleaseRequest(BaseModel):
 class LockForceReleaseRequest(BaseModel):
     released_by: str
     reason: str | None = None
+
+
+class ForceReleaseResult(BaseModel):
+    """Zwei mögliche Ausgänge (4.3, P6-S4): sofort ausgeführt, oder per
+    Vier-Augen-Prinzip zurückgestellt (siehe `approval_client.py`) - gleiches
+    Wrapper-Muster wie `CheckinResult`."""
+
+    status: Literal["released", "pending_approval"]
+    lock: LockOut | None = None
+    approval_request_id: str | None = None
 
 
 class UploadConfigIn(BaseModel):

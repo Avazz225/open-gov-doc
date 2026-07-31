@@ -76,6 +76,42 @@ class ScopeLock(Base):
     released_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
+class ApprovalActionConfig(Base):
+    """Vier-Augen-Konfiguration je Aktionstyp (4.3): "konfigurierbar pro
+    Aktionstyp, nicht global erzwungen" - fehlt eine Zeile für einen
+    Aktionstyp, gilt implizit ``requires_approval=False`` (siehe
+    ``repository.get_approval_config``)."""
+
+    __tablename__ = "approval_action_config"
+
+    action_type: Mapped[str] = mapped_column(String(128), primary_key=True)
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ApprovalRequest(Base):
+    """Generischer Freigabe-Request (4.3): eine Aktion mit aktivem Vier-Augen-
+    Flag legt hier eine Zeile an, statt sofort ausgeführt zu werden. Nach
+    Genehmigung führt NICHT dieser Service die eigentliche Aktion aus,
+    sondern publiziert ``permission.approval.approved`` - der initiierende
+    Service (oder dieser Service selbst als Konsument seines eigenen
+    Events, siehe ``approval_consumer.py``) führt die Aktion anhand von
+    ``payload`` aus."""
+
+    __tablename__ = "approval_request"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    action_type: Mapped[str] = mapped_column(String(128), index=True)
+    initiated_by: Mapped[str] = mapped_column(String(128))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    approved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    rejected_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EffectivePermissionCache(Base):
     """Materialisierter Cache (4.1) - wird bei jeder Rechte-/Strukturänderung
     vollständig geleert (siehe repository.invalidate_cache) statt granular je

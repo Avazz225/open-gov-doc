@@ -1,6 +1,5 @@
 import logging
 import time
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -13,9 +12,15 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from permission_service import repository
-from permission_service.models import Base, ResourceNode
+from permission_service import approval_consumer, repository, structure_consumer
+from permission_service.models import ApprovalRequest, Base, ResourceNode
 from permission_service.schemas import (
+    ApprovalActionConfigOut,
+    ApprovalActionConfigUpdate,
+    ApprovalDecision,
+    ApprovalRejection,
+    ApprovalRequestCreate,
+    ApprovalRequestOut,
     BatchCheckRequest,
     BatchCheckResult,
     CheckResult,
@@ -26,12 +31,12 @@ from permission_service.schemas import (
     RoleAssignmentOut,
     RoleCreate,
     RoleOut,
+    ScopeLockActionResult,
     ScopeLockCreate,
     ScopeLockOut,
     ScopeLockRelease,
 )
 from permission_service.settings import Settings
-from permission_service.structure_consumer import start_consuming
 
 settings = Settings()
 configure_logging(settings)
@@ -55,7 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
     app.state.event_bus = event_bus
-    await start_consuming(event_bus, settings.structure_subjects, app.state.session_factory)
+    await structure_consumer.start_consuming(
+        event_bus, settings.structure_subjects, app.state.session_factory
+    )
 
     # Eigener Producer-Client für publizierte Ereignisse (Bereichssperren, 4.7/5.3) -
     # getrennt vom obigen reinen Konsumenten-Client (ensure_stream=False), da ein
@@ -63,6 +70,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     publisher = NatsEventBusClient(settings.nats_url, stream="permission", ensure_stream=True)
     await publisher.connect()
     app.state.publisher = publisher
+
+    # Selbst-Konsum des eigenen Approval-Events (4.3, P6-S4): erst jetzt
+    # möglich, weil der Stream "permission" gerade eben durch den obigen
+    # publisher-Connect angelegt wurde - der reine Konsumenten-Client
+    # (event_bus) kann das Subject also erst ab hier abonnieren.
+    await approval_consumer.start_consuming(
+        event_bus, settings.approval_subjects, app.state.session_factory, publish_event
+    )
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
@@ -246,10 +261,159 @@ async def check_batch(
     return BatchCheckResult(results=results)
 
 
-@app.post("/scope-locks", response_model=ScopeLockOut, status_code=201)
+async def _request_approval(
+    session: AsyncSession, *, action_type: str, initiated_by: str, payload: dict
+) -> ApprovalRequest:
+    """Gemeinsamer Erstellungs-/Publish-Pfad für `POST /approval-requests`
+    und jeden gegateten Endpunkt (Scope-Locks hier, `document-service`s
+    Force-Unlock via HTTP) - vermeidet doppelte Publish-Logik."""
+    request = await repository.create_approval_request(
+        session, action_type=action_type, initiated_by=initiated_by, payload=payload
+    )
+    await session.commit()
+    await publish_event(
+        "permission.approval.requested",
+        {
+            "request_id": request.id,
+            "action_type": request.action_type,
+            "initiated_by": request.initiated_by,
+        },
+    )
+    return request
+
+
+@app.get("/approval-config", response_model=list[ApprovalActionConfigOut])
+async def list_approval_config(
+    session: AsyncSession = Depends(get_session),
+) -> list[ApprovalActionConfigOut]:
+    return await repository.list_approval_configs(session)
+
+
+@app.get("/approval-config/{action_type}", response_model=ApprovalActionConfigOut)
+async def get_approval_config(
+    action_type: str, session: AsyncSession = Depends(get_session)
+) -> ApprovalActionConfigOut:
+    return await repository.get_approval_config(session, action_type)
+
+
+@app.put("/approval-config/{action_type}", response_model=ApprovalActionConfigOut)
+async def put_approval_config(
+    action_type: str,
+    payload: ApprovalActionConfigUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> ApprovalActionConfigOut:
+    config = await repository.set_approval_config(
+        session, action_type, requires_approval=payload.requires_approval
+    )
+    await session.commit()
+    return config
+
+
+@app.post("/approval-requests", response_model=ApprovalRequestOut, status_code=201)
+async def create_approval_request(
+    payload: ApprovalRequestCreate, session: AsyncSession = Depends(get_session)
+) -> ApprovalRequestOut:
+    return await _request_approval(
+        session,
+        action_type=payload.action_type,
+        initiated_by=payload.initiated_by,
+        payload=payload.payload,
+    )
+
+
+@app.get("/approval-requests", response_model=list[ApprovalRequestOut])
+async def list_approval_requests(
+    status: str | None = None,
+    action_type: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[ApprovalRequestOut]:
+    return await repository.list_approval_requests(session, status=status, action_type=action_type)
+
+
+@app.get("/approval-requests/{request_id}", response_model=ApprovalRequestOut)
+async def get_approval_request(
+    request_id: str, session: AsyncSession = Depends(get_session)
+) -> ApprovalRequestOut:
+    try:
+        return await repository.get_approval_request(session, request_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/approval-requests/{request_id}/approve", response_model=ApprovalRequestOut)
+async def approve_approval_request(
+    request_id: str, payload: ApprovalDecision, session: AsyncSession = Depends(get_session)
+) -> ApprovalRequestOut:
+    try:
+        request = await repository.approve_request(
+            session, request_id, approved_by=payload.approved_by
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.NotInitiatorAllowedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except repository.ApprovalRequestNotPendingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "permission.approval.approved",
+        {
+            "request_id": request.id,
+            "action_type": request.action_type,
+            "initiated_by": request.initiated_by,
+            "approved_by": request.approved_by,
+            "payload": request.payload,
+        },
+    )
+    return request
+
+
+@app.post("/approval-requests/{request_id}/reject", response_model=ApprovalRequestOut)
+async def reject_approval_request(
+    request_id: str, payload: ApprovalRejection, session: AsyncSession = Depends(get_session)
+) -> ApprovalRequestOut:
+    try:
+        request = await repository.reject_request(
+            session, request_id, rejected_by=payload.rejected_by, reason=payload.reason
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.ApprovalRequestNotPendingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "permission.approval.rejected",
+        {
+            "request_id": request.id,
+            "action_type": request.action_type,
+            "initiated_by": request.initiated_by,
+            "rejected_by": request.rejected_by,
+            "reason": request.reason,
+        },
+    )
+    return request
+
+
+@app.post("/scope-locks", response_model=ScopeLockActionResult, status_code=201)
 async def create_scope_lock(
     payload: ScopeLockCreate, session: AsyncSession = Depends(get_session)
-) -> ScopeLockOut:
+) -> ScopeLockActionResult:
+    config = await repository.get_approval_config(session, "permission.scope_lock.create")
+    if config.requires_approval:
+        request = await _request_approval(
+            session,
+            action_type="permission.scope_lock.create",
+            initiated_by=payload.locked_by,
+            payload={
+                "resource_id": payload.resource_id,
+                "locked_by": payload.locked_by,
+                "reason": payload.reason,
+                "blocks_read": payload.blocks_read,
+                "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
+            },
+        )
+        return ScopeLockActionResult(status="pending_approval", approval_request_id=request.id)
+
     try:
         lock = await repository.create_scope_lock(
             session,
@@ -272,13 +436,23 @@ async def create_scope_lock(
             "blocks_read": lock.blocks_read,
         },
     )
-    return lock
+    return ScopeLockActionResult(status="created", scope_lock=lock)
 
 
-@app.delete("/scope-locks/{lock_id}", response_model=ScopeLockOut)
+@app.delete("/scope-locks/{lock_id}", response_model=ScopeLockActionResult)
 async def release_scope_lock(
     lock_id: int, payload: ScopeLockRelease, session: AsyncSession = Depends(get_session)
-) -> ScopeLockOut:
+) -> ScopeLockActionResult:
+    config = await repository.get_approval_config(session, "permission.scope_lock.release")
+    if config.requires_approval:
+        request = await _request_approval(
+            session,
+            action_type="permission.scope_lock.release",
+            initiated_by=payload.released_by,
+            payload={"lock_id": lock_id, "released_by": payload.released_by},
+        )
+        return ScopeLockActionResult(status="pending_approval", approval_request_id=request.id)
+
     try:
         lock = await repository.release_scope_lock(session, lock_id, payload.released_by)
     except repository.NotFoundError as exc:
@@ -292,7 +466,7 @@ async def release_scope_lock(
             "released_by": lock.released_by,
         },
     )
-    return lock
+    return ScopeLockActionResult(status="released", scope_lock=lock)
 
 
 @app.get("/scope-locks", response_model=list[ScopeLockOut])

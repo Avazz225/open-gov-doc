@@ -98,3 +98,51 @@ class BatchCheckRequest(BaseModel):
 
 class BatchCheckResult(BaseModel):
     results: dict[str, bool]
+
+
+class ApprovalActionConfigOut(BaseModel):
+    action_type: str
+    requires_approval: bool
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApprovalActionConfigUpdate(BaseModel):
+    requires_approval: bool
+
+
+class ApprovalRequestCreate(BaseModel):
+    action_type: str
+    initiated_by: str
+    payload: dict = {}
+
+
+class ApprovalRequestOut(BaseModel):
+    id: str
+    action_type: str
+    initiated_by: str
+    payload: dict
+    status: str
+    approved_by: str | None
+    rejected_by: str | None
+    reason: str | None
+    created_at: datetime
+    decided_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class ApprovalDecision(BaseModel):
+    approved_by: str
+
+
+class ApprovalRejection(BaseModel):
+    rejected_by: str
+    reason: str | None = None
+
+
+class ScopeLockActionResult(BaseModel):
+    status: Literal["created", "released", "pending_approval"]
+    scope_lock: ScopeLockOut | None = None
+    approval_request_id: str | None = None

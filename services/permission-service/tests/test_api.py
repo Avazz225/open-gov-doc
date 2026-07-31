@@ -234,7 +234,7 @@ def test_scope_lock_with_unknown_resource_returns_404(client):
 
 
 def test_scope_lock_blocks_write_check_with_reason(client):
-    lock = client.post(
+    created = client.post(
         "/scope-locks",
         json={
             "resource_id": ROOT_RESOURCE_ID,
@@ -242,6 +242,8 @@ def test_scope_lock_blocks_write_check_with_reason(client):
             "reason": "Revision läuft",
         },
     ).json()
+    assert created["status"] == "created"
+    lock = created["scope_lock"]
 
     result = client.get(
         "/check",
@@ -259,7 +261,8 @@ def test_scope_lock_blocks_write_check_with_reason(client):
 
     release = client.request("DELETE", f"/scope-locks/{lock['id']}", json={"released_by": "admin"})
     assert release.status_code == 200
-    assert release.json()["released_by"] == "admin"
+    assert release.json()["status"] == "released"
+    assert release.json()["scope_lock"]["released_by"] == "admin"
 
     after_release = client.get(
         "/check",
@@ -358,3 +361,106 @@ def test_effective_scope_locks_endpoint(client):
 def test_release_unknown_scope_lock_returns_404(client):
     response = client.request("DELETE", "/scope-locks/999999", json={"released_by": "admin"})
     assert response.status_code == 404
+
+
+def test_approval_config_defaults_to_false_and_is_settable(client):
+    default = client.get("/approval-config/document.force_unlock").json()
+    assert default["requires_approval"] is False
+
+    updated = client.put("/approval-config/document.force_unlock", json={"requires_approval": True})
+    assert updated.status_code == 200
+    assert updated.json()["requires_approval"] is True
+
+    listed = client.get("/approval-config").json()
+    assert any(
+        c["action_type"] == "document.force_unlock" and c["requires_approval"] is True
+        for c in listed
+    )
+
+
+def test_approval_request_lifecycle_via_api(client):
+    created = client.post(
+        "/approval-requests",
+        json={"action_type": "document.force_unlock", "initiated_by": "alice", "payload": {"x": 1}},
+    )
+    assert created.status_code == 201
+    request = created.json()
+    assert request["status"] == "pending"
+
+    fetched = client.get(f"/approval-requests/{request['id']}")
+    assert fetched.status_code == 200
+
+    same_person = client.post(
+        f"/approval-requests/{request['id']}/approve", json={"approved_by": "alice"}
+    )
+    assert same_person.status_code == 403
+
+    approved = client.post(
+        f"/approval-requests/{request['id']}/approve", json={"approved_by": "bob"}
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["approved_by"] == "bob"
+
+    double_decision = client.post(
+        f"/approval-requests/{request['id']}/approve", json={"approved_by": "carol"}
+    )
+    assert double_decision.status_code == 409
+
+
+def test_approval_request_reject_allows_initiator(client):
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "document.force_unlock", "initiated_by": "alice", "payload": {}},
+    ).json()
+
+    rejected = client.post(
+        f"/approval-requests/{request['id']}/reject",
+        json={"rejected_by": "alice", "reason": "Doch nicht nötig"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+
+
+def test_get_unknown_approval_request_returns_404(client):
+    response = client.get("/approval-requests/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_create_scope_lock_with_approval_required_defers_creation(client):
+    client.put("/approval-config/permission.scope_lock.create", json={"requires_approval": True})
+
+    response = client.post(
+        "/scope-locks",
+        json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin", "reason": "Migration"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending_approval"
+    assert body["approval_request_id"] is not None
+    assert body["scope_lock"] is None
+
+    # Die Sperre existiert noch nicht - Genehmigung erfolgt asynchron ueber
+    # das Event (siehe test_approval_consumer.py fuer die Konsumentenlogik).
+    active = client.get(f"/scope-locks/effective/{ROOT_RESOURCE_ID}").json()
+    assert active == []
+
+
+def test_release_scope_lock_with_approval_required_defers_release(client):
+    created = client.post(
+        "/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"}
+    ).json()
+    lock_id = created["scope_lock"]["id"]
+
+    client.put("/approval-config/permission.scope_lock.release", json={"requires_approval": True})
+
+    response = client.request("DELETE", f"/scope-locks/{lock_id}", json={"released_by": "admin"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending_approval"
+    assert body["approval_request_id"] is not None
+
+    still_active = client.get(f"/scope-locks/effective/{ROOT_RESOURCE_ID}").json()
+    assert len(still_active) == 1

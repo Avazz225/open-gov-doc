@@ -1,9 +1,12 @@
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from permission_service.models import (
+    ApprovalActionConfig,
+    ApprovalRequest,
     EffectivePermissionCache,
     ResourceNode,
     Role,
@@ -15,6 +18,15 @@ from permission_service.settings import ROOT_RESOURCE_ID
 
 class NotFoundError(Exception):
     pass
+
+
+class ApprovalRequestNotPendingError(Exception):
+    """Der Request wurde bereits genehmigt/abgelehnt - keine zweite Entscheidung möglich."""
+
+
+class NotInitiatorAllowedError(Exception):
+    """Vier-Augen-Kernregel (4.3): die genehmigende Person darf nicht mit der
+    initiierenden Person identisch sein."""
 
 
 async def invalidate_cache(session: AsyncSession) -> None:
@@ -232,3 +244,110 @@ async def get_active_scope_locks_for_resource(
         current_id = node.parent_id
 
     return active
+
+
+async def get_approval_config(session: AsyncSession, action_type: str) -> ApprovalActionConfig:
+    """Liest die Vier-Augen-Konfiguration für einen Aktionstyp (4.3). Fehlt
+    die Zeile, wird ein transientes (nicht persistiertes) Default-Objekt mit
+    ``requires_approval=False`` zurückgegeben - "konfigurierbar pro
+    Aktionstyp, nicht global erzwungen" heißt: ohne explizite Aktivierung
+    bleibt jede Aktion ungated."""
+    config = await session.get(ApprovalActionConfig, action_type)
+    if config is None:
+        return ApprovalActionConfig(
+            action_type=action_type, requires_approval=False, updated_at=datetime.now(UTC)
+        )
+    return config
+
+
+async def list_approval_configs(session: AsyncSession) -> list[ApprovalActionConfig]:
+    result = await session.execute(select(ApprovalActionConfig))
+    return list(result.scalars().all())
+
+
+async def set_approval_config(
+    session: AsyncSession, action_type: str, *, requires_approval: bool
+) -> ApprovalActionConfig:
+    config = await session.get(ApprovalActionConfig, action_type)
+    if config is None:
+        config = ApprovalActionConfig(
+            action_type=action_type,
+            requires_approval=requires_approval,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+    else:
+        config.requires_approval = requires_approval
+        config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def create_approval_request(
+    session: AsyncSession, *, action_type: str, initiated_by: str, payload: dict
+) -> ApprovalRequest:
+    request = ApprovalRequest(
+        id=str(uuid.uuid4()),
+        action_type=action_type,
+        initiated_by=initiated_by,
+        payload=payload,
+        status="pending",
+        created_at=datetime.now(UTC),
+    )
+    session.add(request)
+    await session.flush()
+    return request
+
+
+async def get_approval_request(session: AsyncSession, request_id: str) -> ApprovalRequest:
+    request = await session.get(ApprovalRequest, request_id)
+    if request is None:
+        raise NotFoundError(f"approval_request {request_id!r} unbekannt")
+    return request
+
+
+async def list_approval_requests(
+    session: AsyncSession, *, status: str | None = None, action_type: str | None = None
+) -> list[ApprovalRequest]:
+    stmt = select(ApprovalRequest)
+    if status is not None:
+        stmt = stmt.where(ApprovalRequest.status == status)
+    if action_type is not None:
+        stmt = stmt.where(ApprovalRequest.action_type == action_type)
+    result = await session.execute(stmt.order_by(ApprovalRequest.created_at))
+    return list(result.scalars().all())
+
+
+async def approve_request(
+    session: AsyncSession, request_id: str, *, approved_by: str
+) -> ApprovalRequest:
+    request = await get_approval_request(session, request_id)
+    if request.status != "pending":
+        raise ApprovalRequestNotPendingError(
+            f"approval_request {request_id!r} ist bereits {request.status!r}"
+        )
+    if approved_by == request.initiated_by:
+        raise NotInitiatorAllowedError(
+            "Genehmigende Person darf nicht mit der initiierenden Person identisch sein"
+        )
+    request.status = "approved"
+    request.approved_by = approved_by
+    request.decided_at = datetime.now(UTC)
+    await session.flush()
+    return request
+
+
+async def reject_request(
+    session: AsyncSession, request_id: str, *, rejected_by: str, reason: str | None
+) -> ApprovalRequest:
+    request = await get_approval_request(session, request_id)
+    if request.status != "pending":
+        raise ApprovalRequestNotPendingError(
+            f"approval_request {request_id!r} ist bereits {request.status!r}"
+        )
+    request.status = "rejected"
+    request.rejected_by = rejected_by
+    request.reason = reason
+    request.decided_at = datetime.now(UTC)
+    await session.flush()
+    return request
