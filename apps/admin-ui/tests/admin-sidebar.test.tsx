@@ -7,6 +7,23 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/users/",
 }));
 
+let mockPermissions: string[] = [];
+
+vi.mock("@/lib/auth-context", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth-context")>("@/lib/auth-context");
+  return {
+    ...actual,
+    useAuth: () => ({
+      user: { sub: "u1", username: "admin", email: null, realm_roles: [] },
+      permissions: mockPermissions,
+      accessToken: "token-123",
+      isLoading: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    }),
+  };
+});
+
 function renderSidebar() {
   return render(
     <I18nProvider>
@@ -18,6 +35,7 @@ function renderSidebar() {
 describe("AdminSidebar", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    mockPermissions = ["admin.user_management"];
   });
 
   it("shows both groups expanded by default with their nav items", () => {
@@ -27,6 +45,7 @@ describe("AdminSidebar", () => {
     expect(screen.getByText("Objekttypen")).toBeInTheDocument();
     expect(screen.getByText("Registry")).toBeInTheDocument();
     expect(screen.getByText("Installationsverwaltung")).toBeInTheDocument();
+    expect(screen.getByText("Superuser Break-Glass")).toBeInTheDocument();
   });
 
   it("collapses a group and persists the state across remounts", () => {
@@ -40,5 +59,14 @@ describe("AdminSidebar", () => {
     renderSidebar();
     expect(screen.queryByText("Nutzer & Rollen")).not.toBeInTheDocument();
     expect(screen.getByText("Installationsverwaltung")).toBeInTheDocument();
+  });
+
+  it("hides the users entry without the domain-admin-users capability (4.6)", () => {
+    mockPermissions = [];
+
+    renderSidebar();
+
+    expect(screen.queryByText("Nutzer & Rollen")).not.toBeInTheDocument();
+    expect(screen.getByText("Objekttypen")).toBeInTheDocument();
   });
 });

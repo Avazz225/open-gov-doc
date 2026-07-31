@@ -103,6 +103,7 @@ class BatchCheckResult(BaseModel):
 class ApprovalActionConfigOut(BaseModel):
     action_type: str
     requires_approval: bool
+    required_permission: str | None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -110,6 +111,7 @@ class ApprovalActionConfigOut(BaseModel):
 
 class ApprovalActionConfigUpdate(BaseModel):
     requires_approval: bool
+    required_permission: str | None = None
 
 
 class ApprovalRequestCreate(BaseModel):

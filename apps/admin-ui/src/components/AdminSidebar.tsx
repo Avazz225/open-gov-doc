@@ -4,10 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
+import { useAuth } from "@/lib/auth-context";
 
 interface NavItem {
   href: string;
   labelKey: string;
+  // Domänengetrennte Admin-Rollen (4.6, P6-S5): fehlt die Capability, wird
+  // der Eintrag ausgeblendet - Tiefen-Verteidigung übernimmt zusätzlich
+  // `RequireCapability` auf der Zielseite selbst, falls die URL direkt
+  // aufgerufen wird.
+  requiresCapability?: string;
 }
 
 interface NavGroup {
@@ -21,7 +27,7 @@ const GROUPS: NavGroup[] = [
     id: "management",
     labelKey: "nav.groupManagement",
     items: [
-      { href: "/users/", labelKey: "nav.users" },
+      { href: "/users/", labelKey: "nav.users", requiresCapability: "admin.user_management" },
       { href: "/object-types/", labelKey: "nav.objectTypes" },
       { href: "/kennzeichen-settings/", labelKey: "nav.kennzeichenSettings" },
       { href: "/registry/", labelKey: "nav.registry" },
@@ -45,6 +51,11 @@ const GROUPS: NavGroup[] = [
     labelKey: "nav.groupStorage",
     items: [{ href: "/storage-guard/", labelKey: "nav.storageGuard" }],
   },
+  {
+    id: "security",
+    labelKey: "nav.groupSecurity",
+    items: [{ href: "/superuser/", labelKey: "nav.superuser" }],
+  },
 ];
 
 const COLLAPSED_GROUPS_KEY = "dms.admin.collapsedGroups";
@@ -66,6 +77,7 @@ function loadCollapsedGroups(): Record<string, boolean> {
 export function AdminSidebar() {
   const { t } = useI18n();
   const pathname = usePathname();
+  const { permissions } = useAuth();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -83,6 +95,10 @@ export function AdminSidebar() {
   return (
     <nav className="admin-sidebar" aria-label={t("nav.ariaLabel")}>
       {GROUPS.map((group) => {
+        const visibleItems = group.items.filter(
+          (item) => !item.requiresCapability || permissions.includes(item.requiresCapability)
+        );
+        if (visibleItems.length === 0) return null;
         const isCollapsed = Boolean(collapsed[group.id]);
         return (
           <div className="sidebar-group" key={group.id}>
@@ -96,7 +112,7 @@ export function AdminSidebar() {
             </button>
             {!isCollapsed && (
               <ul className="sidebar-group-items">
-                {group.items.map((item) => (
+                {visibleItems.map((item) => (
                   <li key={item.href}>
                     <Link
                       href={item.href}

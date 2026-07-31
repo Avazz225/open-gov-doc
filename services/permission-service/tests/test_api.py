@@ -464,3 +464,73 @@ def test_release_scope_lock_with_approval_required_defers_release(client):
 
     still_active = client.get(f"/scope-locks/effective/{ROOT_RESOURCE_ID}").json()
     assert len(still_active) == 1
+
+
+def test_superuser_activate_is_preseeded_with_required_permission(client):
+    """4.6: Break-Glass-Aktivierung ist - anders als Force-Unlock/Scope-Lock
+    (P6-S4) - schon beim ersten Start gegated, nicht erst per Admin-Opt-in."""
+    config = client.get("/approval-config/auth.superuser.activate").json()
+
+    assert config["requires_approval"] is True
+    assert config["required_permission"] == "breakglass.approve"
+
+
+def test_domain_admin_roles_are_preseeded(client):
+    roles = {role["name"]: role for role in client.get("/roles").json()}
+
+    assert roles["domain-admin-users"]["permissions"] == ["admin.user_management"]
+    assert roles["breakglass-approver"]["permissions"] == ["breakglass.approve"]
+
+
+def _grant_permission_via_api(client, *, principal_id, permissions):
+    role = client.post(
+        "/roles", json={"name": f"role-for-{principal_id}", "permissions": permissions}
+    ).json()
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": principal_id,
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+
+def test_create_approval_request_without_required_permission_is_forbidden(client):
+    response = client.post(
+        "/approval-requests",
+        json={"action_type": "auth.superuser.activate", "initiated_by": "alice", "payload": {}},
+    )
+
+    assert response.status_code == 403
+
+
+def test_approve_approval_request_without_required_permission_is_forbidden(client):
+    _grant_permission_via_api(client, principal_id="alice", permissions=["breakglass.approve"])
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "auth.superuser.activate", "initiated_by": "alice", "payload": {}},
+    ).json()
+
+    response = client.post(
+        f"/approval-requests/{request['id']}/approve", json={"approved_by": "bob"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_break_glass_activation_via_api_with_two_group_members(client):
+    _grant_permission_via_api(client, principal_id="alice", permissions=["breakglass.approve"])
+    _grant_permission_via_api(client, principal_id="bob", permissions=["breakglass.approve"])
+    request = client.post(
+        "/approval-requests",
+        json={"action_type": "auth.superuser.activate", "initiated_by": "alice", "payload": {}},
+    ).json()
+
+    response = client.post(
+        f"/approval-requests/{request['id']}/approve", json={"approved_by": "bob"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "approved"

@@ -36,6 +36,9 @@ graphify-out/
 # --- Docker / lokale Daten ---
 infra/**/data/
 
+# --- Testlauf-Logs (scripts/run-tests.sh) ---
+.test-results/
+
 # --- OS / Editor ---
 .DS_Store
 .vscode/

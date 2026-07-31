@@ -29,6 +29,13 @@ class NotInitiatorAllowedError(Exception):
     initiierenden Person identisch sein."""
 
 
+class MissingRequiredPermissionError(Exception):
+    """Verschärfung für 4.6 (Break-Glass): der Aktionstyp verlangt laut
+    ``ApprovalActionConfig.required_permission`` eine bestimmte Capability an
+    der Wurzelressource - weder Initiator noch Genehmiger sind davon
+    ausgenommen."""
+
+
 async def invalidate_cache(session: AsyncSession) -> None:
     """Leert den gesamten materialisierten Cache (siehe Docstring an
     ``EffectivePermissionCache`` für die Begründung der Grobkörnigkeit)."""
@@ -56,6 +63,42 @@ async def create_role(
 async def list_roles(session: AsyncSession) -> list[Role]:
     result = await session.execute(select(Role))
     return list(result.scalars().all())
+
+
+async def get_role_by_name(session: AsyncSession, name: str) -> Role | None:
+    result = await session.execute(select(Role).where(Role.name == name))
+    return result.scalars().first()
+
+
+# Domänengetrennte Admin-Rollen (4.6) - systemeigen (in diesem Service, NICHT
+# als Keycloak-Realm-Rollen), damit sie unabhängig vom Identity Provider
+# funktionieren. Nur "domain-admin-users" bekommt diese Session ein
+# zugeordnetes technisches Keycloak-Konto + tatsächliche Durchsetzung (siehe
+# auth-service); die übrigen sechs Domänen sind laut 4.6 "standardmäßig
+# mitgeliefert", aber bewusst noch ohne Konto/Enforcement (deren fachliche
+# Funktionen existieren teils noch gar nicht, z. B. Lizenzverwaltung/
+# Query-Konsole). "breakglass-approver" ist keine Domäne aus 4.6, sondern die
+# Gruppen-Rolle für die Vier-Augen-Freigabe der Superuser-Aktivierung.
+DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
+    ("domain-admin-users", "Nutzer-/Rechteverwaltung", ["admin.user_management"]),
+    ("domain-admin-config", "Objekttyp-/Workflow-Konfiguration", ["admin.object_config"]),
+    ("domain-admin-storage", "Storage-/Backend-Verwaltung", ["admin.storage"]),
+    ("domain-admin-license", "Lizenzverwaltung", ["admin.license"]),
+    ("domain-admin-query-console", "Query-Konsole", ["admin.query_console"]),
+    ("domain-admin-deletion", "Löschadministration", ["admin.deletion"]),
+    (
+        "domain-admin-deletion-vs",
+        "Löschadministration (Verschlusssachen)",
+        ["admin.deletion_classified"],
+    ),
+    ("breakglass-approver", "Freigabegruppe Superuser-Break-Glass (4.6)", ["breakglass.approve"]),
+]
+
+
+async def ensure_domain_admin_roles(session: AsyncSession) -> None:
+    for name, description, permissions in DOMAIN_ADMIN_ROLES:
+        if await get_role_by_name(session, name) is None:
+            await create_role(session, name, description, permissions)
 
 
 async def create_role_assignment(
@@ -266,26 +309,47 @@ async def list_approval_configs(session: AsyncSession) -> list[ApprovalActionCon
 
 
 async def set_approval_config(
-    session: AsyncSession, action_type: str, *, requires_approval: bool
+    session: AsyncSession,
+    action_type: str,
+    *,
+    requires_approval: bool,
+    required_permission: str | None = None,
 ) -> ApprovalActionConfig:
     config = await session.get(ApprovalActionConfig, action_type)
     if config is None:
         config = ApprovalActionConfig(
             action_type=action_type,
             requires_approval=requires_approval,
+            required_permission=required_permission,
             updated_at=datetime.now(UTC),
         )
         session.add(config)
     else:
         config.requires_approval = requires_approval
+        config.required_permission = required_permission
         config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
 
 
+async def _require_permission_if_configured(
+    session: AsyncSession, config: ApprovalActionConfig, principal_id: str
+) -> None:
+    if config.required_permission is None:
+        return
+    entry = await get_effective_permissions(session, principal_id, ROOT_RESOURCE_ID)
+    if config.required_permission not in entry.permissions:
+        raise MissingRequiredPermissionError(
+            f"{principal_id!r} hält nicht die für {config.action_type!r} "
+            f"erforderliche Capability {config.required_permission!r}"
+        )
+
+
 async def create_approval_request(
     session: AsyncSession, *, action_type: str, initiated_by: str, payload: dict
 ) -> ApprovalRequest:
+    config = await get_approval_config(session, action_type)
+    await _require_permission_if_configured(session, config, initiated_by)
     request = ApprovalRequest(
         id=str(uuid.uuid4()),
         action_type=action_type,
@@ -330,6 +394,8 @@ async def approve_request(
         raise NotInitiatorAllowedError(
             "Genehmigende Person darf nicht mit der initiierenden Person identisch sein"
         )
+    config = await get_approval_config(session, request.action_type)
+    await _require_permission_if_configured(session, config, approved_by)
     request.status = "approved"
     request.approved_by = approved_by
     request.decided_at = datetime.now(UTC)

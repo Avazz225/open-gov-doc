@@ -1,6 +1,6 @@
 # notification-service
 
-**Verantwortung:** Notification Service (Konzept 7.1) - E-Mail-, In-App- und Webhook-Benachrichtigungen. Konsumiert `workflow.task.escalated` von `workflow-service` (SLA-Zeitüberwachung, P6-S2) und bietet zusätzlich einen generischen `POST /notifications`, den jeder Service direkt aufrufen kann.
+**Verantwortung:** Notification Service (Konzept 7.1) - E-Mail-, In-App- und Webhook-Benachrichtigungen. Konsumiert `workflow.task.escalated` von `workflow-service` (SLA-Zeitüberwachung, P6-S2) sowie seit P6-S5 `auth.superuser.activated` (Break-Glass-Sicherheitsbenachrichtigung, 4.6) und bietet zusätzlich einen generischen `POST /notifications`, den jeder Service direkt aufrufen kann.
 
 **Konzept-Referenz:** 7.1
 **Eigenes Postgres-Schema:** `notification` (Tabelle `notification`)
@@ -35,6 +35,10 @@ Abonniert **gezielt** `workflow.task.escalated` (nicht `workflow.>` - `workflow.
 
 Nach jeder Zustellung wird `notification.sent`/`notification.failed` publiziert.
 
+## `auth.superuser.activated`-Konsument (seit P6-S5, 4.6)
+
+Zweiter Zweig desselben `consumer.py`-Handlers, dispatcht nach `event.event_type` statt nach Payload-Feldern (anders als der SLA-Zweig, der keinen eigenen `event_type`-Vergleich braucht, da bislang nur ein Subject konsumiert wurde). Legt eine **einzelne** E-Mail-Notification an `settings.security_officer_email` an (fest konfiguriert, kein Empfänger-Auflösungsmechanismus wie bei `escalation_email` nötig) — Umsetzung der in 4.6 als "optional" beschriebenen Sicherheitsbenachrichtigung bei Break-Glass-Aktivierung.
+
 ## Events
 
 **Publiziert** (Stream `notification`, `ensure_stream=True`):
@@ -44,7 +48,7 @@ Nach jeder Zustellung wird `notification.sent`/`notification.failed` publiziert.
 | `notification.sent` | `{channel, recipient}` |
 | `notification.failed` | `{channel, recipient, error}` |
 
-**Konsumiert** (`durable="notification-service"`): `workflow.task.escalated` (aus `workflow-service`, siehe `docs/services/workflow-service.md`).
+**Konsumiert** (`durable="notification-service"`): `workflow.task.escalated` (aus `workflow-service`), seit P6-S5 zusätzlich `auth.superuser.activated` (aus `auth-service`, siehe `docs/services/auth-service.md`).
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
@@ -68,6 +72,6 @@ Noch keine - folgt in Phase 11.
 - **Keine Rollenprüfung/RBAC** - `POST /notifications` ist ungated aufrufbar, `recipient` ist ein unvalidierter String. Explizit **P6-S4** zugewiesen, gleiches Muster wie `workflow-service` seit P6-S1.
 - **Keine Empfänger-Auflösung über Rollen** - eine BPMN-Lane wird nur informativ als `recipient` für In-App-Notifications verwendet, nicht gegen echte Nutzerkonten/Rollen in `auth-service` aufgelöst (dort existiert aktuell auch keine Rollen-Abfrage für Nutzer). Sobald RBAC (P6-S4) steht, könnte eine "Vorgesetzten-Rolle" echten E-Mail-Adressen zugeordnet werden, statt sich auf das opake `escalation_email`-Prozessdatum zu verlassen.
 - **Kein Retry/keine Dead-Letter-Behandlung** - ein fehlgeschlagener Zustellversuch (SMTP/Webhook nicht erreichbar) bleibt dauerhaft `"failed"`, es gibt keinen automatischen erneuten Versuch. Offener Punkt für eine spätere Session, falls das operativ relevant wird.
-- **Kein Retrofit bestehender "loggt nur"-Alarmierungsstellen** - `storage-service` (und andere, in Konzept an verschiedenen Stellen erwähnte künftige Konsumenten wie Force-Unlock, Break-Glass, Löschfrist-Vorankündigung, Lizenz-Ablauf, Report-Versand, Monitoring-Eskalation) wurden in dieser Session **nicht** auf den neuen Service umgehängt - P6-S2s Titel nennt ausschließlich SLA-Zeitüberwachung. Jeder künftige Konsument trägt sein Subject selbst in `settings.py`s `subjects`-Liste ein, sobald er tatsächlich angebunden wird.
+- **Kein Retrofit bestehender "loggt nur"-Alarmierungsstellen** - `storage-service` (und andere, in Konzept an verschiedenen Stellen erwähnte künftige Konsumenten wie Force-Unlock, Löschfrist-Vorankündigung, Lizenz-Ablauf, Report-Versand, Monitoring-Eskalation) bleiben **nicht** auf den Service umgehängt. Break-Glass (4.6) ist seit P6-S5 die erste Ausnahme (siehe oben). Jeder künftige Konsument trägt sein Subject selbst in `settings.py`s `subjects`-Liste ein, sobald er tatsächlich angebunden wird.
 - **Ein Notification-Datensatz je Kanal, kein Multi-Channel-Fan-out aus einem Aufruf** - wer eine Eskalation über mehrere Kanäle gleichzeitig verteilen will (z. B. E-Mail und Webhook), muss `POST /notifications` mehrfach aufrufen. Der `workflow.task.escalated`-Konsument selbst deckt genau den in Konzept 7.1 beschriebenen Fall ab (immer In-App, optional zusätzlich E-Mail).
 - **Kein Rate-Limiting/Spam-Schutz** - ein Prozess mit sehr kurzem, wiederholt feuerndem Cycle-Timer (nicht getestet diese Session, siehe `docs/services/workflow-service.md` "Offene Punkte") könnte denselben Empfänger wiederholt benachrichtigen.

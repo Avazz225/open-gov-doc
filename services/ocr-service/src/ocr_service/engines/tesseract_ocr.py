@@ -82,9 +82,7 @@ class TesseractEngine(TextLayerExtractor):
             average_confidence=average_confidence,
             full_text=" ".join(w.text for w in words),
             pages=[
-                OcrPageResult(
-                    page_number=1, width=image.width, height=image.height, words=words
-                )
+                OcrPageResult(page_number=1, width=image.width, height=image.height, words=words)
             ],
             page_image=page_image,
             page_image_content_type=page_image_content_type,

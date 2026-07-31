@@ -38,8 +38,11 @@ async def upsert_rendition(
     rendition = await session.get(Rendition, key)
     if rendition is None:
         rendition = Rendition(
-            id=key, document_id=document_id, version_number=version_number,
-            rendition_type=rendition_type, created_at=now,
+            id=key,
+            document_id=document_id,
+            version_number=version_number,
+            rendition_type=rendition_type,
+            created_at=now,
         )
         session.add(rendition)
     rendition.source_filename = source_filename

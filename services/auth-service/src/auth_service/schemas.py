@@ -40,3 +40,8 @@ class UserOut(BaseModel):
 
 class ThemePreference(BaseModel):
     theme: ThemeName = "auto"
+
+
+class SuperuserStatus(BaseModel):
+    active: bool
+    expires_at: str | None = None

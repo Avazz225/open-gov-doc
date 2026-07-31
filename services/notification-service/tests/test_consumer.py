@@ -70,3 +70,27 @@ async def test_escalated_event_without_email_creates_only_in_app_notification(en
     assert notifications[0].channel == "in_app"
     assert notifications[0].recipient == "unassigned"
     assert len(published) == 1
+
+
+async def test_superuser_activated_event_creates_security_officer_email(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="auth.superuser.activated",
+        service_name="auth-service",
+        payload={"request_id": "req-1", "expires_at": "2026-01-01T00:30:00+00:00"},
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "email"
+    assert notifications[0].recipient == settings.security_officer_email
+    assert len(published) == 1

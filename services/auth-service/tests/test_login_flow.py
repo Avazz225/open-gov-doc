@@ -24,9 +24,7 @@ def test_login_wrong_password_returns_401(test_user):
 def test_me_returns_identity_for_valid_token(test_user):
     with TestClient(app) as client:
         tokens = client.post("/login", json=test_user).json()
-        response = client.get(
-            "/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
-        )
+        response = client.get("/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
 
     assert response.status_code == 200
     body = response.json()

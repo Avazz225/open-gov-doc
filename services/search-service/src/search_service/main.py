@@ -1,6 +1,5 @@
 import logging
 import time
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -185,9 +184,7 @@ async def search(
         access_type="read",
         resource_ids=list(resource_ids),
     )
-    readable = [
-        (doc, rank) for doc, rank in rows if allowed.get(doc.folder_id or "root", False)
-    ]
+    readable = [(doc, rank) for doc, rank in rows if allowed.get(doc.folder_id or "root", False)]
     page = readable[offset : offset + limit]
 
     facets = await repository.facet_counts(

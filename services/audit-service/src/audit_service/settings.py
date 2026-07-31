@@ -23,7 +23,11 @@ class Settings(BaseServiceSettings):
     # dazu - Zustellversuche (erfolgreich/fehlgeschlagen) sind ebenfalls Teil der
     # nachvollziehbaren Systemaktionen (5.3). "case.>" kam in P6-S3 dazu -
     # Anlage/Referenzänderung/Abschluss einer Umlaufmappe (2.3) sind ebenfalls
-    # Teil der nachvollziehbaren Vorgangsbearbeitung.
+    # Teil der nachvollziehbaren Vorgangsbearbeitung. "auth.>" kam in P6-S5
+    # dazu - Superuser-Break-Glass-Aktivierung/-Deaktivierung (4.6) verlangt
+    # explizit erhöhte Auditierungspriorität für den Lebenszyklus selbst
+    # (siehe ADR 0023 für die bewusst NICHT umgesetzte Priorisierung
+    # einzelner *während* der Aktivierung durchgeführter Fremdaktionen).
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -34,4 +38,5 @@ class Settings(BaseServiceSettings):
         "workflow.>",
         "notification.>",
         "case.>",
+        "auth.>",
     ]

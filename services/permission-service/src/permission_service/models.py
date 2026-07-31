@@ -86,6 +86,12 @@ class ApprovalActionConfig(Base):
 
     action_type: Mapped[str] = mapped_column(String(128), primary_key=True)
     requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Optionale Verschärfung von 4.3 auf 4.6 (Break-Glass): ist gesetzt, müssen
+    # sowohl Initiator als auch Genehmiger diese Capability an der Wurzel-
+    # ressource halten (zusätzlich zur Initiator≠Genehmiger-Regel) - ohne das
+    # wäre "irgendeine zweite Person" (4.3) zu schwach für "zwei verschiedene
+    # Mitglieder einer Berechtigungsgruppe" (4.6).
+    required_permission: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

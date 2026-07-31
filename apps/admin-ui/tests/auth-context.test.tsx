@@ -5,10 +5,12 @@ import { InstallationProvider, useInstallation } from "@/lib/installation-contex
 
 const loginMock = vi.fn();
 const getCurrentUserMock = vi.fn();
+const getEffectivePermissionsMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   login: (...args: unknown[]) => loginMock(...args),
   getCurrentUser: (...args: unknown[]) => getCurrentUserMock(...args),
+  getEffectivePermissions: (...args: unknown[]) => getEffectivePermissionsMock(...args),
   refreshToken: vi.fn(),
   setGatewayBaseUrl: vi.fn(),
   ApiError: class ApiError extends Error {
@@ -21,12 +23,13 @@ vi.mock("@/lib/api", () => ({
 }));
 
 function Probe() {
-  const { user, isLoading, login, logout } = useAuth();
+  const { user, permissions, isLoading, login, logout } = useAuth();
   const { installations, activeInstallation, switchInstallation, addInstallation } = useInstallation();
   return (
     <div>
       <span data-testid="loading">{String(isLoading)}</span>
       <span data-testid="user">{user?.username ?? "none"}</span>
+      <span data-testid="permissions">{permissions.join(",")}</span>
       <span data-testid="active-installation">{activeInstallation.name}</span>
       <button onClick={() => login("admin", "secret")}>login</button>
       <button onClick={logout}>logout</button>
@@ -63,6 +66,8 @@ describe("AuthProvider (admin-ui)", () => {
     window.localStorage.clear();
     loginMock.mockReset();
     getCurrentUserMock.mockReset();
+    getEffectivePermissionsMock.mockReset();
+    getEffectivePermissionsMock.mockResolvedValue([]);
   });
 
   it("login stores the session and exposes the current user", async () => {
@@ -88,6 +93,32 @@ describe("AuthProvider (admin-ui)", () => {
 
     await waitFor(() => expect(screen.getByTestId("user").textContent).toBe("admin"));
     expect(window.localStorage.getItem("dms.tokens.default")).not.toBeNull();
+  });
+
+  it("exposes the domain-admin capabilities loaded after login (4.6)", async () => {
+    loginMock.mockResolvedValue({
+      access_token: "access-1",
+      refresh_token: "refresh-1",
+      expires_in: 300,
+      token_type: "Bearer",
+    });
+    getCurrentUserMock.mockResolvedValue({
+      sub: "u1",
+      username: "admin",
+      email: null,
+      realm_roles: [],
+    });
+    getEffectivePermissionsMock.mockResolvedValue(["admin.user_management"]);
+
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("false"));
+    await act(async () => {
+      screen.getByText("login").click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("permissions").textContent).toBe("admin.user_management")
+    );
   });
 
   it("logout clears the stored session", async () => {

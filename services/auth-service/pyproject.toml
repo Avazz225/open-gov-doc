@@ -11,12 +11,14 @@ dependencies = [
     "dms-common",
     "dms-auth-client",
     "dms-registry-client",
+    "dms-eventbus-client",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-auth-client = { workspace = true }
 dms-registry-client = { workspace = true }
+dms-eventbus-client = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

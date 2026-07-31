@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from permission_service import approval_consumer, repository, structure_consumer
-from permission_service.models import ApprovalRequest, Base, ResourceNode
+from permission_service.models import ApprovalActionConfig, ApprovalRequest, Base, ResourceNode
 from permission_service.schemas import (
     ApprovalActionConfigOut,
     ApprovalActionConfigUpdate,
@@ -50,11 +50,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS permission"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Schema-Erweiterung (kein Alembic, siehe CONTRIBUTING.md):
+        # `required_permission` kam erst in P6-S5 dazu, `create_all` legt nur
+        # fehlende Tabellen an, keine fehlenden Spalten auf bestehenden.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.approval_action_config "
+                "ADD COLUMN IF NOT EXISTS required_permission VARCHAR(128)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
     async with app.state.session_factory() as session:
         await repository.ensure_root_resource(session)
+        await repository.ensure_domain_admin_roles(session)
+        # Break-Glass-Aktivierung (4.6) verlangt zwingend Vier-Augen mit
+        # Gruppenbindung - anders als Force-Unlock/Bereichssperren (P6-S4)
+        # bewusst schon beim Seeding als `requires_approval=True` mit
+        # `required_permission` vorbelegt, nicht erst per Admin-Opt-in. Nur
+        # beim allerersten Start gesetzt (idempotent wie die Rollen oben) -
+        # ein Betreiber könnte diese Zeile später bewusst über
+        # `PUT /approval-config/auth.superuser.activate` ändern, ohne dass
+        # ein Neustart das wieder überschreibt.
+        if await session.get(ApprovalActionConfig, "auth.superuser.activate") is None:
+            await repository.set_approval_config(
+                session,
+                "auth.superuser.activate",
+                requires_approval=True,
+                required_permission="breakglass.approve",
+            )
         await session.commit()
 
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
@@ -267,9 +292,12 @@ async def _request_approval(
     """Gemeinsamer Erstellungs-/Publish-Pfad für `POST /approval-requests`
     und jeden gegateten Endpunkt (Scope-Locks hier, `document-service`s
     Force-Unlock via HTTP) - vermeidet doppelte Publish-Logik."""
-    request = await repository.create_approval_request(
-        session, action_type=action_type, initiated_by=initiated_by, payload=payload
-    )
+    try:
+        request = await repository.create_approval_request(
+            session, action_type=action_type, initiated_by=initiated_by, payload=payload
+        )
+    except repository.MissingRequiredPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     await session.commit()
     await publish_event(
         "permission.approval.requested",
@@ -303,7 +331,10 @@ async def put_approval_config(
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalActionConfigOut:
     config = await repository.set_approval_config(
-        session, action_type, requires_approval=payload.requires_approval
+        session,
+        action_type,
+        requires_approval=payload.requires_approval,
+        required_permission=payload.required_permission,
     )
     await session.commit()
     return config
@@ -351,6 +382,8 @@ async def approve_approval_request(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.NotInitiatorAllowedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except repository.MissingRequiredPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except repository.ApprovalRequestNotPendingError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

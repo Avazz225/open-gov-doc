@@ -426,3 +426,125 @@ async def test_reject_already_decided_request_raises_not_pending(session):
 
     with pytest.raises(repository.ApprovalRequestNotPendingError):
         await repository.reject_request(session, request.id, rejected_by="carol", reason=None)
+
+
+async def test_ensure_domain_admin_roles_seeds_all_expected_roles(session):
+    await repository.ensure_domain_admin_roles(session)
+
+    roles = await repository.list_roles(session)
+    names = {role.name for role in roles}
+
+    assert names == {name for name, _, _ in repository.DOMAIN_ADMIN_ROLES}
+    users_role = await repository.get_role_by_name(session, "domain-admin-users")
+    assert users_role.permissions == ["admin.user_management"]
+    breakglass_role = await repository.get_role_by_name(session, "breakglass-approver")
+    assert breakglass_role.permissions == ["breakglass.approve"]
+
+
+async def test_ensure_domain_admin_roles_is_idempotent(session):
+    await repository.ensure_domain_admin_roles(session)
+    await repository.ensure_domain_admin_roles(session)
+
+    roles = await repository.list_roles(session)
+
+    assert len(roles) == len(repository.DOMAIN_ADMIN_ROLES)
+
+
+async def test_get_role_by_name_returns_none_when_missing(session):
+    assert await repository.get_role_by_name(session, "does-not-exist") is None
+
+
+async def _grant_permission(session, *, principal_id, role_name, permissions):
+    role = await repository.create_role(session, role_name, "", permissions)
+    await repository.create_role_assignment(
+        session,
+        principal_type="user",
+        principal_id=principal_id,
+        role_id=role.id,
+        resource_id=ROOT_RESOURCE_ID,
+    )
+
+
+async def test_create_approval_request_rejects_initiator_without_required_permission(session):
+    await repository.set_approval_config(
+        session,
+        "auth.superuser.activate",
+        requires_approval=True,
+        required_permission="breakglass.approve",
+    )
+
+    with pytest.raises(repository.MissingRequiredPermissionError):
+        await repository.create_approval_request(
+            session, action_type="auth.superuser.activate", initiated_by="alice", payload={}
+        )
+
+
+async def test_create_approval_request_allows_initiator_with_required_permission(session):
+    await repository.set_approval_config(
+        session,
+        "auth.superuser.activate",
+        requires_approval=True,
+        required_permission="breakglass.approve",
+    )
+    await _grant_permission(
+        session, principal_id="alice", role_name="approver", permissions=["breakglass.approve"]
+    )
+
+    request = await repository.create_approval_request(
+        session, action_type="auth.superuser.activate", initiated_by="alice", payload={}
+    )
+
+    assert request.status == "pending"
+
+
+async def test_approve_request_rejects_approver_without_required_permission(session):
+    await repository.set_approval_config(
+        session,
+        "auth.superuser.activate",
+        requires_approval=True,
+        required_permission="breakglass.approve",
+    )
+    await _grant_permission(
+        session, principal_id="alice", role_name="approver1", permissions=["breakglass.approve"]
+    )
+    request = await repository.create_approval_request(
+        session, action_type="auth.superuser.activate", initiated_by="alice", payload={}
+    )
+
+    with pytest.raises(repository.MissingRequiredPermissionError):
+        await repository.approve_request(session, request.id, approved_by="bob")
+
+
+async def test_approve_request_allows_approver_with_required_permission(session):
+    await repository.set_approval_config(
+        session,
+        "auth.superuser.activate",
+        requires_approval=True,
+        required_permission="breakglass.approve",
+    )
+    await _grant_permission(
+        session, principal_id="alice", role_name="approver1", permissions=["breakglass.approve"]
+    )
+    await _grant_permission(
+        session, principal_id="bob", role_name="approver2", permissions=["breakglass.approve"]
+    )
+    request = await repository.create_approval_request(
+        session, action_type="auth.superuser.activate", initiated_by="alice", payload={}
+    )
+
+    approved = await repository.approve_request(session, request.id, approved_by="bob")
+
+    assert approved.status == "approved"
+
+
+async def test_required_permission_none_does_not_affect_existing_action_types(session):
+    """Regression: `required_permission=None` (Default) darf bestehende,
+    ungegatete Aktionstypen (Scope-Lock/Force-Unlock, P6-S4) nicht
+    beeinträchtigen."""
+    request = await repository.create_approval_request(
+        session, action_type="document.force_unlock", initiated_by="alice", payload={}
+    )
+
+    approved = await repository.approve_request(session, request.id, approved_by="bob")
+
+    assert approved.status == "approved"

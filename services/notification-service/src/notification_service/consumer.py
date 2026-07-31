@@ -23,42 +23,73 @@ def make_handler(
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
-        data = event.payload
-        task_name = data.get("task_name", "?")
-        business_key = data.get("business_key")
-        subject = f"SLA überschritten: {task_name}"
-        body = (
-            f"Prozessinstanz {event.subject} (business_key={business_key!r}) hat den "
-            f"Task {task_name!r} nicht rechtzeitig abgeschlossen."
-        )
+        if event.event_type == "auth.superuser.activated":
+            await _handle_superuser_activated(session_factory, settings, publish_event, event)
+            return
+        await _handle_task_escalated(session_factory, settings, publish_event, event)
 
-        async with session_factory() as session:
-            recipient = data.get("lane") or "unassigned"
-            in_app = await repository.create_and_send(
+    return handle
+
+
+async def _handle_task_escalated(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    data = event.payload
+    task_name = data.get("task_name", "?")
+    business_key = data.get("business_key")
+    subject = f"SLA überschritten: {task_name}"
+    body = (
+        f"Prozessinstanz {event.subject} (business_key={business_key!r}) hat den "
+        f"Task {task_name!r} nicht rechtzeitig abgeschlossen."
+    )
+
+    async with session_factory() as session:
+        recipient = data.get("lane") or "unassigned"
+        in_app = await repository.create_and_send(
+            session, settings, channel="in_app", recipient=recipient, subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, in_app)
+
+        escalation_email = data.get("escalation_email")
+        if escalation_email:
+            email_notification = await repository.create_and_send(
                 session,
                 settings,
-                channel="in_app",
-                recipient=recipient,
+                channel="email",
+                recipient=escalation_email,
                 subject=subject,
                 body=body,
             )
             await session.commit()
-            await publish_notification_result(publish_event, in_app)
+            await publish_notification_result(publish_event, email_notification)
 
-            escalation_email = data.get("escalation_email")
-            if escalation_email:
-                email_notification = await repository.create_and_send(
-                    session,
-                    settings,
-                    channel="email",
-                    recipient=escalation_email,
-                    subject=subject,
-                    body=body,
-                )
-                await session.commit()
-                await publish_notification_result(publish_event, email_notification)
 
-    return handle
+async def _handle_superuser_activated(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Optionale Sicherheitsbenachrichtigung bei Break-Glass-Aktivierung (4.6,
+    P6-S5) - E-Mail an eine fest hinterlegte Sicherheitsverantwortliche
+    Adresse, kein Empfänger-Auflösungsmechanismus nötig (anders als bei
+    `escalation_email`, das aus dem Event selbst kommt)."""
+    expires_at = event.payload.get("expires_at", "?")
+    async with session_factory() as session:
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.security_officer_email,
+            subject="Superuser Break-Glass aktiviert",
+            body=f"Der Superuser-Zugang wurde aktiviert und läuft ab: {expires_at}.",
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
 
 
 async def publish_notification_result(

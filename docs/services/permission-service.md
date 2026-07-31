@@ -1,8 +1,8 @@
 # permission-service
 
-**Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume. Seit P6-S4 zusätzlich der generische Vier-Augen-Approval-Mechanismus (4.3), den auch andere Services (z. B. Document Service) nutzen.
+**Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume. Seit P6-S4 zusätzlich der generische Vier-Augen-Approval-Mechanismus (4.3), den auch andere Services (z. B. Document Service) nutzen. Seit P6-S5 zusätzlich Heimat der systemeigenen, domänengetrennten Admin-Rollen (4.6) — von Keycloak-Realm-Rollen komplett getrennt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md).
 
-**Konzept-Referenz:** 4.1, 4.3, 4.7
+**Konzept-Referenz:** 4.1, 4.3, 4.6, 4.7
 **Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`)
 
 ## API
@@ -26,10 +26,10 @@
 | `GET` | `/approval-config` | Alle konfigurierten Aktionstypen (4.3, seit P6-S4) |
 | `GET` | `/approval-config/{action_type}` | Konfiguration eines Aktionstyps — Default `requires_approval=false`, falls nie gesetzt |
 | `PUT` | `/approval-config/{action_type}` | Genehmigungspflicht für einen Aktionstyp setzen (Upsert) |
-| `POST` | `/approval-requests` | Freigabe-Request anlegen (`action_type`, `initiated_by`, `payload`) |
+| `POST` | `/approval-requests` | Freigabe-Request anlegen (`action_type`, `initiated_by`, `payload`) — `403`, falls der Aktionstyp eine `required_permission` (seit P6-S5) verlangt, die `initiated_by` nicht hält |
 | `GET` | `/approval-requests?status=&action_type=` | Requests auflisten, optional gefiltert |
 | `GET` | `/approval-requests/{id}` | Request-Detail (`404`) |
-| `POST` | `/approval-requests/{id}/approve` | Genehmigen (`approved_by`) — `403` falls identisch mit `initiated_by`, `409` falls bereits entschieden |
+| `POST` | `/approval-requests/{id}/approve` | Genehmigen (`approved_by`) — `403` falls identisch mit `initiated_by` **oder** falls die für den Aktionstyp konfigurierte `required_permission` fehlt (seit P6-S5), `409` falls bereits entschieden |
 | `POST` | `/approval-requests/{id}/reject` | Ablehnen (`rejected_by`, optional `reason`) — `409` falls bereits entschieden |
 | `GET` | `/healthz` | Health-Check |
 
@@ -40,7 +40,7 @@
 - `role_assignment`: `principal_type` (`user`|`group`), `principal_id`, `role_id`, `resource_id` — unique auf der Kombination.
 - `effective_permission_cache`: `(principal_id, resource_id)` → `roles`, `permissions`, `computed_at`. Wird bei jeder Rechte-/Strukturänderung **vollständig geleert** (bewusste Vereinfachung, siehe README) statt granular je Teilbaum invalidiert.
 - `scope_lock`: `id` (PK), `resource_id` (FK), `locked_by`, `reason`, `blocks_read` (bool, Default `false`), `expires_at` (nullable), `created_at`, `released_at`/`released_by` (nullable) — nie hart gelöscht, die Aufhebung wird dokumentiert statt die Zeile zu entfernen (Audit-Trail bleibt vollständig).
-- `approval_action_config` (4.3, seit P6-S4): `action_type` (PK, freier String), `requires_approval` (bool, Default `false`), `updated_at`. Fehlt eine Zeile für einen Aktionstyp, gilt implizit `false` (transientes Default-Objekt, nicht persistiert).
+- `approval_action_config` (4.3, seit P6-S4): `action_type` (PK, freier String), `requires_approval` (bool, Default `false`), `required_permission` (nullable String, seit **P6-S5**, 4.6), `updated_at`. Fehlt eine Zeile für einen Aktionstyp, gilt implizit `requires_approval=false`/`required_permission=null` (transientes Default-Objekt, nicht persistiert).
 - `approval_request` (4.3, seit P6-S4): `id` (UUID-str), `action_type`, `initiated_by`, `payload` (JSON — genug Information, um die Aktion später auszuführen), `status` (`pending`\|`approved`\|`rejected`), `approved_by`/`rejected_by`/`reason` (nullable), `created_at`, `decided_at` (nullable).
 
 ## Bereichssperren (4.7, seit P3-S4)
@@ -60,7 +60,25 @@ Generischer, pro Aktionstyp konfigurierbarer Freigabe-Mechanismus — siehe [ADR
 - **Ablauf bei aktivierter Genehmigungspflicht**: der gegatete Endpunkt (hier: `POST`/`DELETE /scope-locks`, extern: `document-service`s Force-Unlock) legt statt direkter Ausführung einen `ApprovalRequest` an (`status="pending"`) und publiziert `permission.approval.requested`. Eine zweite Person ruft `POST /approval-requests/{id}/approve` auf (`403`, falls `approved_by == initiated_by`) — dies publiziert `permission.approval.approved` mit dem ursprünglichen `payload`. **Die eigentliche Aktion wird nicht hier ausgeführt**, sondern von einem Konsumenten dieses Events.
 - **Selbst-Konsum für eigene Aktionstypen**: `permission-service` konsumiert `permission.approval.approved` selbst (`approval_consumer.py`) für `permission.scope_lock.create`/`.release` — exakt derselbe Mechanismus wie für einen fremden Service, keine Sonderbehandlung im `approve`-Handler. `document-service` konsumiert dasselbe Event für `document.force_unlock` (sein erster Konsument überhaupt, siehe `docs/services/document-service.md`).
 - **Kein Ausführungs-Rückkanal**: ein extern ausgeführter, aber fehlgeschlagener Vollzug (z. B. Sperre inzwischen anderweitig aufgehoben) bleibt beim ausführenden Service geloggt, `ApprovalRequest.status` bleibt bei `"approved"` — siehe ADR 0022 "Konsequenzen".
-- **Nicht Teil dieser Session**: Rechte-/Rollenänderungen (`POST /role-assignments` u. Ä.) sind ein weiteres, in 4.3 genanntes Beispiel für einen gate-fähigen Aktionstyp, aber in dieser Session nicht angebunden — der Mechanismus selbst ist generisch nutzbar, müsste dafür aber am jeweiligen Endpunkt genauso verdrahtet werden wie hier bei den Scope-Locks.
+- **Nicht Teil dieser Session**: Rechte-/Rollenänderungen (`POST /role-assignments` u. Ä.) sind ein weiteres, in 4.3 genanntes Beispiel für einen gate-fähigen Aktionstyp, aber weiterhin nicht angebunden — der Mechanismus selbst ist generisch nutzbar, müsste dafür aber am jeweiligen Endpunkt genauso verdrahtet werden wie hier bei den Scope-Locks.
+- **`required_permission` (4.6, seit P6-S5)**: generische Erweiterung von `ApprovalActionConfig` — ist gesetzt, müssen sowohl `initiated_by` als auch `approved_by` diese Capability laut `GET /effective-permissions/.../root` halten (zusätzlich zur Initiator≠Genehmiger-Regel), sonst `403` (`MissingRequiredPermissionError`). Wird für `auth.superuser.activate` beim Start fest auf `breakglass.approve` gesetzt (Superuser Break-Glass, siehe unten und `docs/services/auth-service.md`) — strengere Umsetzung von "zwei verschiedene Mitglieder einer Berechtigungsgruppe" (4.6) als das bloße "irgendeine zweite Person" aus 4.3. Bleibt für Scope-Locks/Force-Unlock `null`, unverändertes Verhalten.
+
+## Domänengetrennte Admin-Rollen (4.6, seit P6-S5)
+
+Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründung in [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). `repository.ensure_domain_admin_roles` seedet bei jedem Start idempotent 8 `Role`-Zeilen (falls nicht bereits vorhanden, per Name geprüft):
+
+| Rolle | Capability | Zugeordnetes technisches Konto |
+|---|---|---|
+| `domain-admin-users` | `admin.user_management` | `users-admin` (seit P6-S5 angelegt, `auth-service`) |
+| `domain-admin-config` | `admin.object_config` | noch keins |
+| `domain-admin-storage` | `admin.storage` | noch keins |
+| `domain-admin-license` | `admin.license` | noch keins |
+| `domain-admin-query-console` | `admin.query_console` | noch keins |
+| `domain-admin-deletion` | `admin.deletion` | noch keins |
+| `domain-admin-deletion-vs` | `admin.deletion_classified` | noch keins |
+| `breakglass-approver` | `breakglass.approve` | keins (echte Menschen, manuell zugewiesen) |
+
+Nur `domain-admin-users` ist diese Session tatsächlich durchgesetzt (`auth-service`s `/users`, Admin-UI-Gating) — die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement, da die zugehörigen fachlichen Funktionen teils noch nicht existieren (Lizenzverwaltung, Query-Konsole). `breakglass-approver` bekommt bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 verlangt zwei *verschiedene, echte* Personen, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, jetzt selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
 
 ## Batch-Check (seit P5-S4, Search Service)
 
@@ -109,7 +127,9 @@ Noch keine — folgt in Phase 11.
 
 - Gruppenmitgliedschaft wird nicht aufgelöst: `principal_id` einer Zuweisung muss exakt dem abgefragten Principal entsprechen. Eine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" ist nicht Teil dieser Session (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
 - Granularere Cache-Invalidierung (nur betroffener Teilbaum statt gesamter Cache) als spätere Optimierung möglich, ohne die API zu ändern.
-- **Vier-Augen-Prinzip (4.3) ist seit P6-S4 generisch verfügbar, aber nur für Bereichssperren + Document-Service-Force-Unlock verdrahtet** — Rechte-/Rollenänderungen (`POST /role-assignments`, `POST /roles`) nutzen ihn noch nicht, siehe "Vier-Augen-Approval-Mechanismus" oben.
+- **Vier-Augen-Prinzip (4.3) ist seit P6-S4 generisch verfügbar, seit P6-S5 auch mit optionaler Rollenbindung (`required_permission`)** — verdrahtet für Bereichssperren, Document-Service-Force-Unlock und Superuser-Break-Glass (`auth.superuser.activate`). Rechte-/Rollenänderungen (`POST /role-assignments`, `POST /roles`) nutzen ihn weiterhin nicht, siehe "Vier-Augen-Approval-Mechanismus" oben.
 - Keine Durchsetzung, wer Bereichssperren setzen/aufheben darf: Das Gateway (3.5, P4-S1) prüft nur, dass ein Aufrufer *irgendeinen* gültigen Bearer-Token hat, aber keine Autorisierung für die konkrete Aktion (`POST`/`DELETE /scope-locks`) — jeder authentifizierte Principal kann aktuell Sperren setzen/aufheben (optional mit Vier-Augen-Zwischenschritt, s. o., aber ohne Rollenprüfung, wer überhaupt initiieren/genehmigen darf). Eine echte Capability-Prüfung bräuchte, dass der Permission Service die vom Gateway weitergereichten Identitäts-Header auswertet (siehe `docs/services/gateway-service.md`) — analog zum bereits bestehenden offenen Punkt beim Document-Service-Force-Unlock.
 - **Kein Ausführungs-Rückkanal / keine Genehmigenden-Benachrichtigung** für den Approval-Mechanismus — siehe [ADR 0022](../adr/0022-four-eyes-approval-via-events.md) "Konsequenzen".
 - `GET /check` verlässt sich auf den Aufrufer, den korrekten `access_type` (`read`/`write`) mitzugeben — der Service selbst kennt keine feste Zuordnung Permission-Name → Zugriffsart.
+- **`POST`/`GET /roles` und `POST`/`GET`/`DELETE /role-assignments` bleiben ungated** (seit P6-S5 bewusst nicht angefasst): der Retrofit-Auftrag benannte explizit nur Auth-Service `/users` + Admin-UI, nicht diese Endpunkte selbst — zusätzlich hätte ein Gate hier den Bootstrap-Seeding-Aufruf von `auth-service` (der die allererste Rollenzuweisung anlegt) vor ein Henne-Ei-Problem gestellt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md).
+- **6 der 7 Domain-Admin-Rollen aus 4.6 ohne zugeordnetes technisches Konto** (seit P6-S5): siehe "Domänengetrennte Admin-Rollen" oben — folgt jeweils mit der künftigen Retrofit-Session der betreffenden Domäne.

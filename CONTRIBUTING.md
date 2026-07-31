@@ -13,6 +13,8 @@ Dieses Projekt wird über viele einzelne Arbeitssessions hinweg gebaut (siehe [`
 
 **Falle beim Docker-Smoke-Test**: `docker compose up -d` baut ein bereits existierendes Image **nicht** automatisch neu, auch wenn sich der Code geändert hat. Nach Code-Änderungen an einem Service vor dem Smoke-Test immer explizit `docker compose build <service>` (oder `up -d --build`) ausführen, sonst testet man versehentlich den alten Stand.
 
+**Tests laufen über `scripts/run-tests.sh`** (nicht mehr manuell Service für Service): bringt den Docker-Stack hoch, legt `dms_test` bei Bedarf an, exportiert `TEST_POSTGRES_DSN` explizit auf `dms_test` (der Default in den `conftest.py`-Dateien zeigt sonst auf die echte `dms`-Datenbank), stoppt vor dem Testlauf eines Services mit eigenem NATS-Konsumenten (`durable=<service-name>`) gezielt dessen Container und startet ihn danach wieder, und fasst am Ende alle Service-Ergebnisse plus `ruff check`/`ruff format --check` in einer Tabelle zusammen (Logs unter `.test-results/`). `scripts/run-tests.sh [service ...] [--build] [--no-ruff] [--down]` — ohne Argumente laufen alle Services mit `tests/`.
+
 ## Service-Aufbau
 
 Verbindliches Muster (Layout, `pyproject.toml`, `main.py`, Dockerfile) siehe

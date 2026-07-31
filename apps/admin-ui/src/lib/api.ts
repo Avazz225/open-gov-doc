@@ -86,6 +86,24 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
+// Domänengetrennte Admin-Rollen (4.6, P6-S5): systemeigen im Permission
+// Service, NICHT als Keycloak-Realm-Rolle (anders als `realm_roles` oben) -
+// dieselbe Quelle, die auch das Backend-Gating (z. B. Auth-Service `/users`)
+// nutzt, siehe ADR 0023.
+export async function getEffectivePermissions(
+  token: string,
+  principalId: string
+): Promise<string[]> {
+  const response = await request(
+    "permission-service",
+    `effective-permissions/${principalId}/root`,
+    {},
+    token
+  );
+  const body = (await response.json()) as { permissions: string[] };
+  return body.permissions;
+}
+
 export type ThemeName = "light" | "dark" | "high-contrast" | "auto";
 
 export async function getThemePreference(token: string): Promise<ThemeName> {
@@ -548,5 +566,64 @@ export interface ServiceInstance {
 
 export async function listServiceInstances(token: string): Promise<ServiceInstance[]> {
   const response = await request("registry-service", "instances", {}, token);
+  return response.json();
+}
+
+// Superuser Break-Glass (4.6, P6-S5) - Aktivierung selbst läuft über den
+// bereits bestehenden generischen Vier-Augen-Mechanismus des Permission
+// Service (P6-S4, ADR 0022), kein separates Approval-System hier.
+export interface SuperuserStatus {
+  active: boolean;
+  expires_at: string | null;
+}
+
+export async function getSuperuserStatus(token: string): Promise<SuperuserStatus> {
+  const response = await request("auth-service", "superuser/status", {}, token);
+  return response.json();
+}
+
+export interface ApprovalRequest {
+  id: string;
+  action_type: string;
+  initiated_by: string;
+  status: string;
+  approved_by: string | null;
+  created_at: string;
+}
+
+export async function requestSuperuserActivation(
+  token: string,
+  initiatedBy: string
+): Promise<ApprovalRequest> {
+  const response = await request(
+    "permission-service",
+    "approval-requests",
+    jsonInit({ action_type: "auth.superuser.activate", initiated_by: initiatedBy, payload: {} }),
+    token
+  );
+  return response.json();
+}
+
+export async function listPendingSuperuserActivations(token: string): Promise<ApprovalRequest[]> {
+  const response = await request(
+    "permission-service",
+    "approval-requests?status=pending&action_type=auth.superuser.activate",
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function approveApprovalRequest(
+  token: string,
+  requestId: string,
+  approvedBy: string
+): Promise<ApprovalRequest> {
+  const response = await request(
+    "permission-service",
+    `approval-requests/${requestId}/approve`,
+    jsonInit({ approved_by: approvedBy }),
+    token
+  );
   return response.json();
 }

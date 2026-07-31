@@ -1,8 +1,10 @@
 import uuid
 
 import pytest
-from auth_service.bootstrap import ensure_realm_and_client
+from auth_service.bootstrap import DOMAIN_ADMIN_USERS_USERNAME, ensure_realm_and_client
+from auth_service.main import app
 from auth_service.settings import Settings
+from fastapi.testclient import TestClient
 from keycloak import KeycloakAdmin
 
 settings = Settings()
@@ -11,6 +13,26 @@ settings = Settings()
 @pytest.fixture(scope="session", autouse=True)
 def _bootstrap():
     ensure_realm_and_client(settings)
+
+
+@pytest.fixture
+def client():
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def domain_admin_auth_headers(client) -> dict[str, str]:
+    """Login als das technische `users-admin`-Konto (4.6, P6-S5) - für alle
+    Tests, die `/users` (jetzt hinter der Domäne "Nutzer-/Rechteverwaltung"
+    gegated) aufrufen. Setzt voraus, dass `permission-service` erreichbar ist
+    (echte Rollenzuweisung beim App-Start, kein Mocking)."""
+    response = client.post(
+        "/login",
+        json={"username": DOMAIN_ADMIN_USERS_USERNAME, "password": DOMAIN_ADMIN_USERS_USERNAME},
+    )
+    response.raise_for_status()
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 @pytest.fixture

@@ -1,27 +1,42 @@
 from keycloak import KeycloakAdmin
 
+from auth_service import superuser
 from auth_service.settings import Settings
 
 
-def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
-    """Deklariertes User-Profile-Attribut für die Theme-Präferenz (8, P4-S6).
-    Keycloaks Declarative User Profile (seit Keycloak 25 Default) verwirft
-    jedes nicht deklarierte Attribut bei `update_user` still - kein Fehler,
-    einfach kein Effekt. Ohne diese Deklaration würde `admin_users.set_theme_preference`
-    also klaglos ins Leere laufen.
-    """
+def _declare_profile_attribute(admin: KeycloakAdmin, *, name: str, display_name: str) -> None:
+    """Gemeinsamer Deklarations-Helfer (P6-S5, extrahiert aus der vorherigen
+    Theme-spezifischen Funktion) - Keycloaks Declarative User Profile (seit
+    Keycloak 25 Default) verwirft jedes nicht deklarierte Attribut bei
+    `update_user` still, kein Fehler, einfach kein Effekt."""
     profile = admin.get_realm_users_profile()
-    if any(attribute["name"] == "dms_theme" for attribute in profile["attributes"]):
+    if any(attribute["name"] == name for attribute in profile["attributes"]):
         return
     profile["attributes"].append(
         {
-            "name": "dms_theme",
-            "displayName": "DMS Theme-Präferenz",
+            "name": name,
+            "displayName": display_name,
             "multivalued": False,
             "permissions": {"view": ["admin", "user"], "edit": ["admin", "user"]},
         }
     )
     admin.update_realm_users_profile(profile)
+
+
+def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
+    """Theme-Präferenz (8, P4-S6). Ohne diese Deklaration würde
+    `admin_users.set_theme_preference` klaglos ins Leere laufen."""
+    _declare_profile_attribute(admin, name="dms_theme", display_name="DMS Theme-Präferenz")
+
+
+def _ensure_superuser_expires_at_attribute(admin: KeycloakAdmin) -> None:
+    """Break-Glass-Ablaufzeitpunkt (4.6, P6-S5) - gleiches Deklarationsmuster
+    wie oben, sonst würde `superuser.activate()` klaglos ins Leere laufen."""
+    _declare_profile_attribute(
+        admin,
+        name=superuser.EXPIRES_AT_ATTRIBUTE,
+        display_name="DMS Superuser Break-Glass Ablaufzeitpunkt",
+    )
 
 
 def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
@@ -32,6 +47,40 @@ def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
     Service über die Keycloak Admin Console - eine eigene Rollenverwaltungs-API/
     -UI existiert noch nicht, siehe PROGRESS.md."""
     admin.create_realm_role(payload={"name": "dms-admin"}, skip_exists=True)
+
+
+DOMAIN_ADMIN_USERS_USERNAME = "users-admin"
+
+
+def _ensure_domain_admin_account(admin: KeycloakAdmin) -> None:
+    """Technisches Konto für die Domäne "Nutzer-/Rechteverwaltung" (4.6,
+    P6-S5) - Username=Passwort nach dem Muster ``<domain>-admin``, vom
+    Betreiber zu ändern. Die zugehörige Rolle lebt bewusst NICHT in Keycloak,
+    sondern systemeigen im Permission Service (siehe `permission_client.py`) -
+    dieser Schritt legt nur das Konto an; die Rollenzuweisung erfolgt separat
+    (async, gegen den Permission Service) im Lifespan von `main.py`, da
+    `KeycloakAdmin` synchron ist, ein HTTP-Aufruf gegen einen anderen Service
+    aber nicht."""
+    if admin.get_users(query={"username": DOMAIN_ADMIN_USERS_USERNAME, "exact": True}):
+        return
+    admin.create_user(
+        payload={
+            "username": DOMAIN_ADMIN_USERS_USERNAME,
+            "email": f"{DOMAIN_ADMIN_USERS_USERNAME}@system.local",
+            "enabled": True,
+            "emailVerified": True,
+            "firstName": "Domain-Admin",
+            "lastName": "Nutzerverwaltung",
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": DOMAIN_ADMIN_USERS_USERNAME,
+                    "temporary": False,
+                }
+            ],
+        },
+        exist_ok=True,
+    )
 
 
 def ensure_realm_and_client(settings: Settings) -> None:
@@ -85,4 +134,7 @@ def ensure_realm_and_client(settings: Settings) -> None:
         skip_exists=True,
     )
     _ensure_theme_attribute(admin)
+    _ensure_superuser_expires_at_attribute(admin)
     _ensure_dms_admin_role(admin)
+    superuser.ensure_superuser_account(admin)
+    _ensure_domain_admin_account(admin)

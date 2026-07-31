@@ -34,6 +34,7 @@
     "groupInstallations": "Installationen",
     "groupProcessing": "Verarbeitung",
     "groupStorage": "Speicher",
+    "groupSecurity": "Sicherheit",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
     "kennzeichenSettings": "Kennzeichen-Einstellungen",
@@ -41,7 +42,8 @@
     "installations": "Installationsverwaltung",
     "ocrSettings": "OCR-Einstellungen",
     "uploadSettings": "Format-Whitelist",
-    "storageGuard": "Speicher-Wächter"
+    "storageGuard": "Speicher-Wächter",
+    "superuser": "Superuser Break-Glass"
   },
   "home": {
     "title": "DMS Admin",
@@ -223,6 +225,21 @@
     "saved": "Gespeichert.",
     "reidentify": "Datenträger-Wechsel akzeptieren",
     "confirmReidentify": "Datenträger-Wechsel für Ziel \"{targetId}\" akzeptieren? Alle bisherigen Kopien auf diesem Ziel werden zur Nachreplikation vorgemerkt."
+  },
+  "superuser": {
+    "pageTitle": "Superuser Break-Glass",
+    "hint": "Der Superuser-Zugang ist standardmäßig deaktiviert (4.6). Die Aktivierung verlangt zwei verschiedene Personen mit der Rolle \"Freigabegruppe Superuser-Break-Glass\": eine fordert an, eine zweite genehmigt.",
+    "unreachable": "Auth Service nicht erreichbar.",
+    "statusTitle": "Status",
+    "statusActive": "Aktiv",
+    "statusInactive": "Inaktiv",
+    "expiresAt": "Läuft ab",
+    "requestTitle": "Aktivierung anfordern",
+    "requestButton": "Aktivierung anfordern",
+    "requestSent": "Freigabe-Request erstellt (ID: {id}) - eine zweite Person mit Freigabe-Rolle muss ihn genehmigen.",
+    "approveTitle": "Anforderung genehmigen",
+    "requestIdLabel": "Request-ID",
+    "approveButton": "Genehmigen"
   },
   "registry": {
     "pageTitle": "Registry-Übersicht",

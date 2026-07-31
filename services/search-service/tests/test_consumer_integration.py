@@ -70,7 +70,9 @@ async def test_text_update_handler_creates_row_from_scratch_without_prior_docume
     engine = build_engine(DSN)
     session_factory = make_session_factory(engine)
     document_client = DocumentServiceClient(DOCUMENT_SERVICE_URL)
-    folder_client = FolderServiceClient(os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008"))
+    folder_client = FolderServiceClient(
+        os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
+    )
     ocr_client = OcrServiceClient(os.environ.get("TEST_OCR_SERVICE_URL", "http://localhost:8012"))
     rendering_client = RenderingServiceClient(
         os.environ.get("TEST_RENDERING_SERVICE_URL", "http://localhost:8011")

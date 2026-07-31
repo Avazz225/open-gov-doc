@@ -112,9 +112,7 @@ async def test_unreachable_backend_with_known_identity_is_unverified(session, tm
     assert verified is False
 
 
-async def test_bootstrap_of_new_target_seeds_pending_copies_for_existing_objects(
-    session, tmp_path
-):
+async def test_bootstrap_of_new_target_seeds_pending_copies_for_existing_objects(session, tmp_path):
     """Rebalancing (3.6/7.2, P5c-S2): ein Ziel, das zum ersten Mal geprüft
     wird (z. B. neu zum Ziel-Set hinzugefügt), muss für bereits vorhandene
     Objekte automatisch `pending`-Kopien anlegen, damit `process-pending`

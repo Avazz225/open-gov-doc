@@ -179,10 +179,16 @@ services:
       DMS_KEYCLOAK_CLIENT_SECRET: ${AUTH_SERVICE_CLIENT_SECRET:-dms-api-dev-secret}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://auth-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_NATS_URL: nats://nats:4222
     ports:
       - "${AUTH_SERVICE_PORT:-8003}:8000"
     depends_on:
       keycloak:
+        condition: service_healthy
+      permission-service:
+        condition: service_started
+      nats:
         condition: service_healthy
     networks:
       - dms-net

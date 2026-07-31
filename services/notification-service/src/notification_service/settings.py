@@ -15,11 +15,15 @@ class Settings(BaseServiceSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
 
-    # Welche Subjects der Notification Service konsumiert (P6-S2). Gezielt statt
-    # `workflow.>`, da nur `workflow.task.escalated` Benachrichtigungs-Semantik hat -
-    # `workflow.instance.*`/`workflow.task.completed` lösen bewusst nichts aus. Künftige
-    # Producer (Force-Unlock, Break-Glass, Löschfrist-Vorankündigung, Lizenz-Ablauf, ...,
+    # Welche Subjects der Notification Service konsumiert (P6-S2, seit P6-S5
+    # auch `auth.superuser.activated`). Gezielt statt `workflow.>`/`auth.>`, da
+    # nur ausgewählte Ereignisse Benachrichtigungs-Semantik haben. Künftige
+    # Producer (Force-Unlock, Löschfrist-Vorankündigung, Lizenz-Ablauf, ...,
     # alle in Konzept an anderer Stelle erwähnt) tragen sich hier ein, sobald sie
     # tatsächlich angebunden werden - siehe "Offene Punkte" in
     # docs/services/notification-service.md.
-    subjects: list[str] = ["workflow.task.escalated"]
+    subjects: list[str] = ["workflow.task.escalated", "auth.superuser.activated"]
+
+    # Empfänger der optionalen Sicherheitsbenachrichtigung bei Break-Glass-
+    # Aktivierung (4.6, P6-S5).
+    security_officer_email: str = "security@dms.local"

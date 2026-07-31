@@ -91,13 +91,17 @@ async def test_process_version_generates_thumbnail_for_image():
     assert results[0].rendition_type == "thumbnail"
     assert results[0].status == "ready"
     assert recorder.events == [
-        ("rendering.completed", document_id, {
-            "version_number": 1,
-            "rendition_type": "thumbnail",
-            "target_filename": results[0].target_filename,
-            "status": "ready",
-            "error": None,
-        })
+        (
+            "rendering.completed",
+            document_id,
+            {
+                "version_number": 1,
+                "rendition_type": "thumbnail",
+                "target_filename": results[0].target_filename,
+                "status": "ready",
+                "error": None,
+            },
+        )
     ]
 
     storage = StorageClient(STORAGE_SERVICE_URL)

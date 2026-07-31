@@ -9,7 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, getCurrentUser, login as apiLogin, refreshToken as apiRefresh } from "./api";
+import {
+  ApiError,
+  getCurrentUser,
+  getEffectivePermissions,
+  login as apiLogin,
+  refreshToken as apiRefresh,
+} from "./api";
 import type { CurrentUser, TokenResponse } from "./api";
 import { useInstallation } from "./installation-context";
 
@@ -63,6 +69,10 @@ function toStoredTokens(response: TokenResponse): StoredTokens {
 
 interface AuthContextValue {
   user: CurrentUser | null;
+  // Domänengetrennte Admin-Rollen (4.6, P6-S5): systemeigene Capabilities aus
+  // dem Permission Service, NICHT aus `user.realm_roles` - getrennte Quelle,
+  // siehe api.ts `getEffectivePermissions`.
+  permissions: string[];
   accessToken: string | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
@@ -77,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const [tokens, setTokens] = useState<StoredTokens | null>(null);
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -84,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     setTokens(null);
     setUser(null);
+    setPermissions([]);
     saveStoredTokens(installationId, null);
   }, [installationId]);
 
@@ -94,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTokens(stored);
       const me = await getCurrentUser(stored.accessToken);
       setUser(me);
+      setPermissions(await getEffectivePermissions(stored.accessToken, me.sub));
     },
     [installationId]
   );
@@ -138,12 +151,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!stored || stored.expiresAt <= Date.now()) {
       setTokens(null);
       setUser(null);
+      setPermissions([]);
       setIsLoading(false);
       return;
     }
     setTokens(stored);
     getCurrentUser(stored.accessToken)
-      .then(setUser)
+      .then(async (me) => {
+        setUser(me);
+        setPermissions(await getEffectivePermissions(stored.accessToken, me.sub));
+      })
       .catch(() => clearSession())
       .finally(() => setIsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value: AuthContextValue = {
     user,
+    permissions,
     accessToken: tokens?.accessToken ?? null,
     isLoading,
     login,

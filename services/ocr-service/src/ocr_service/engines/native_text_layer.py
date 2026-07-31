@@ -50,9 +50,7 @@ class NativeTextLayerEngine(TextLayerExtractor):
             average_confidence=100.0,
             full_text=" ".join(w[4] for w in raw_words),
             pages=[
-                OcrPageResult(
-                    page_number=1, width=pixmap.width, height=pixmap.height, words=words
-                )
+                OcrPageResult(page_number=1, width=pixmap.width, height=pixmap.height, words=words)
             ],
             page_image=pixmap.tobytes("png"),
             page_image_content_type="image/png",
