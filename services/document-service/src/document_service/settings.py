@@ -24,3 +24,9 @@ class Settings(BaseServiceSettings):
     # Timeout ohne Aktivität, nach dem eine Bearbeitungssperre automatisch als
     # abgelaufen gilt (4.2) - kein Hintergrund-Sweep nötig, siehe repository.py.
     default_lock_timeout_seconds: float = 1800.0
+
+    # Erste echte Rollenprüfung im gesamten System (P5e-S2): nur Principals,
+    # deren vom Gateway injizierter `X-DMS-Roles`-Header diese Rolle enthält,
+    # dürfen ein bereits vergebenes Kennzeichen (attributes["Kennzeichen"])
+    # nachträglich ändern - für alle anderen ist es rein lesbar.
+    kennzeichen_admin_role: str = "dms-admin"

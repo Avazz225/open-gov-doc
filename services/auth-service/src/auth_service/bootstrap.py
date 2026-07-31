@@ -24,6 +24,16 @@ def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
     admin.update_realm_users_profile(profile)
 
 
+def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
+    """Realm-Rolle für die erste echte Rollenprüfung im gesamten System
+    (P5e-S2, privilegierte Kennzeichen-Änderung im Document Service) - idempotent
+    angelegt wie das Theme-Attribut oben, `skip_exists=True` macht Wiederholung
+    ungefährlich. Zuweisung an konkrete Nutzer erfolgt (vorerst) außerhalb dieses
+    Service über die Keycloak Admin Console - eine eigene Rollenverwaltungs-API/
+    -UI existiert noch nicht, siehe PROGRESS.md."""
+    admin.create_realm_role(payload={"name": "dms-admin"}, skip_exists=True)
+
+
 def ensure_realm_and_client(settings: Settings) -> None:
     """Idempotente Ersteinrichtung (analog zum `CREATE SCHEMA IF NOT EXISTS`-Muster
     der übrigen Services): legt Realm und OIDC-Client an, falls sie noch nicht
@@ -75,3 +85,4 @@ def ensure_realm_and_client(settings: Settings) -> None:
         skip_exists=True,
     )
     _ensure_theme_attribute(admin)
+    _ensure_dms_admin_role(admin)

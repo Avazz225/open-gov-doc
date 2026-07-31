@@ -186,3 +186,62 @@ def test_create_document_without_folder_is_rejected_when_root_not_allowed(
         files={"file": ("x.pdf", b"data", "application/pdf")},
     )
     assert response.status_code == 400
+
+
+@pytest.fixture
+def kennzeichen_object_type_id():
+    with httpx.Client(base_url=settings.object_type_service_base_url, timeout=10.0) as oc:
+        response = oc.post(
+            "/object-types",
+            json={
+                "name": "Rechnung-Kennzeichen-Doc-Test",
+                "applies_to": "document",
+                "kennzeichen_format": "{YYYY}-{Laufende_Nummer}",
+            },
+        )
+        response.raise_for_status()
+        type_id = response.json()["id"]
+        yield type_id
+        oc.delete(f"/object-types/{type_id}")
+
+
+def test_create_document_assigns_generated_kennzeichen(client, kennzeichen_object_type_id):
+    response = client.post(
+        "/documents",
+        data={"title": "X", "created_by": "alice", "object_type_id": kennzeichen_object_type_id},
+        files={"file": ("x.pdf", b"data", "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert response.json()["attributes"]["Kennzeichen"].endswith("-001")
+
+
+def test_create_document_ignores_client_supplied_kennzeichen_when_generator_configured(
+    client, kennzeichen_object_type_id
+):
+    response = client.post(
+        "/documents",
+        data={
+            "title": "X",
+            "created_by": "alice",
+            "object_type_id": kennzeichen_object_type_id,
+            "attributes": '{"Kennzeichen": "FAKE"}',
+        },
+        files={"file": ("x.pdf", b"data", "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert response.json()["attributes"]["Kennzeichen"] != "FAKE"
+
+
+def test_create_document_without_configured_generator_has_no_kennzeichen(client, object_type_id):
+    response = client.post(
+        "/documents",
+        data={
+            "title": "X",
+            "created_by": "alice",
+            "object_type_id": object_type_id,
+            "attributes": '{"Rechnungsnummer": "RE-1"}',
+        },
+        files={"file": ("x.pdf", b"data", "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert "Kennzeichen" not in response.json()["attributes"]

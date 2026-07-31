@@ -16,3 +16,10 @@ def test_settings_defaults():
     s = Settings(_env_file=None)
     assert s.service_name == "auth-service"
     assert s.keycloak_realm == "dms"
+
+
+def test_bootstrap_creates_dms_admin_role_idempotently(keycloak_admin):
+    ensure_realm_and_client(settings)
+    ensure_realm_and_client(settings)  # zweiter Aufruf darf nicht scheitern
+
+    assert keycloak_admin.get_realm_role("dms-admin")["name"] == "dms-admin"

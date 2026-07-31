@@ -9,10 +9,10 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String) — erzeugt Dokument + Version 1. Seit P5-S1: `422` bei einem Virenfund, `503` wenn der Virus-Scan Service nicht erreichbar ist (siehe unten) |
+| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String) — erzeugt Dokument + Version 1. Seit P5-S1: `422` bei einem Virenfund, `503` wenn der Virus-Scan Service nicht erreichbar ist (siehe unten). Seit **P5e-S2**: bei konfiguriertem Kennzeichengenerator wird `attributes["Kennzeichen"]` serverseitig vergeben, ein vom Client mitgesendeter Wert für diesen Schlüssel wird verworfen (siehe "Kennzeichengenerator" unten) |
 | `GET` | `/documents?folder_id=...` | Nicht gelöschte Dokumente eines Ordners (seit P4-S2, Grundlage der User-UI-Navigation) — unbekannter `folder_id` liefert `[]`, kein 404 |
 | `GET` | `/documents/{id}` | Metadaten |
-| `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400 |
+| `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400. Seit **P5e-S2**: eine Änderung an `attributes["Kennzeichen"]` wird mit `403` abgelehnt, außer der `X-DMS-Roles`-Header enthält `dms-admin` (siehe unten) |
 | `DELETE` | `/documents/{id}?deleted_by=...` | Weiche Löschung (`deleted_at` gesetzt, Metadaten bleiben) |
 | `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
@@ -39,6 +39,15 @@
 **Erzwungene Objekt-Hierarchie (2.2a, seit P5b-S1, ADR 0013)**: Die Existenzprüfung des Zielordners (`FolderClient.get()`, ersetzt das frühere reine `exists()`) liefert seither den vollen Ordner-Body inkl. dessen `object_type_id` — dieser wird zusammen mit `parent_is_root` (`true`, wenn `folder_id` fehlt oder `"root"` ist) an `POST /object-types/{id}/validate` übergeben, damit ein `allowedParentTypes` des Dokument-Objekttyps durchgesetzt werden kann. Nur relevant bei der Anlage (`POST /documents`) — Dokumente haben keine Verschiebe-Operation, `folder_id` bleibt nach Anlage unveränderlich (s. o.).
 
 **Ad-hoc-Schema-Migration**: `attributes` kam erst in P3-S3 zur bestehenden `document`-Tabelle dazu. Ohne Alembic (siehe `CONTRIBUTING.md`) übernimmt ein `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in der Lifespan-Startup-Routine diese additive, defaultbehaftete Änderung idempotent — funktioniert nur für genau diese Art von Änderung (neue, nullable/defaultbehaftete Spalte), nicht für Umbenennungen/Typänderungen/Entfernen von Spalten. Sobald Schemaänderungen komplexer werden, wird echtes Alembic-Tooling nötig (siehe „Offene Entscheidungen" in `PROGRESS.md`).
+
+## Kennzeichengenerator (2.2/4.4, seit P5e-S2)
+
+Baut auf dem Object-Type Service auf (siehe `docs/services/object-type-service.md` "Kennzeichengenerator") — dieser Service kennt selbst kein Format, sondern fragt bei jeder Dokumentanlage mit gesetztem `object_type_id` `POST /object-types/{id}/next-kennzeichen` ab (`ObjectTypeClient.next_kennzeichen()`, `404` = kein Generator konfiguriert, dann bleibt `attributes["Kennzeichen"]` schlicht unbelegt).
+
+- **`Kennzeichen` ist ein reservierter Attributschlüssel**: bei `POST /documents` wird ein vom Client mitgesendeter Wert für diesen Schlüssel immer verworfen (unabhängig davon, ob ein Generator konfiguriert ist) — die tatsächliche Zuweisung erfolgt ausschließlich serverseitig nach erfolgreicher Objekttyp-Validierung.
+- **Erste echte Rollenprüfung im gesamten System**: `PATCH /documents/{id}` erkennt eine Änderung an `attributes["Kennzeichen"]` durch Vergleich von alt (`document.attributes`) gegen neu (`payload.attributes`, vollständiger Ersatz statt Merge, siehe unten) — weichen sie voneinander ab (auch das kommentarlose Weglassen des Schlüssels in einem sonst vollständigen Attribut-Replace zählt als Änderung, da es den Wert effektiv auf `null` setzt), muss der vom Gateway injizierte `X-DMS-Roles`-Header (kommagetrennt) die Rolle aus `Settings.kennzeichen_admin_role` (Default `"dms-admin"`) enthalten, sonst `403`. Bislang wertete **kein** Service im gesamten System diesen Header aus (siehe `PROGRESS.md` "Autorisierung") — die Rolle wird vom Auth Service idempotent im Realm angelegt (`ensure_realm_and_client`), die Zuweisung an konkrete Nutzer läuft vorerst außerhalb des Systems über die Keycloak Admin Console (keine eigene Rollenverwaltungs-API/-UI, siehe `docs/services/auth-service.md` "Offene Punkte").
+- **Kein Format-Validitätscheck bei privilegierten manuellen Änderungen**: ein `dms-admin`-Principal kann einen beliebigen String setzen, auch einen, der nicht dem konfigurierten `kennzeichen_format` entspricht — bewusst nicht eingeschränkt, entspricht der reinen Rollenprüfung aus der Planung (siehe `PROGRESS.md`).
+- **Wo `Kennzeichen` angezeigt wird** (vor dem Dateinamen, global oder je Objekttyp override) ist noch offen — folgt mit **P5e-S3**.
 
 ## Speicherung der Inhalte (3.6-Anbindung)
 
@@ -104,6 +113,8 @@ Noch keine — folgt in Phase 11.
 
 ## Offene Punkte
 
+- **Kennzeichen-Anzeige im Frontend** (vor dem Dateinamen, global oder je Objekttyp überschreibbar) noch nicht angebunden — folgt mit P5e-S3.
+- **Keine Rollenzuweisungs-API/-UI**: `dms-admin` muss aktuell direkt über die Keycloak Admin Console zugewiesen werden (siehe oben, "Kennzeichengenerator").
 - Kein Vier-Augen-Prinzip für Force-Unlock (4.3, folgt P6-S4).
 - Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
 - Umlaufmappen-Referenzen (2.3) sind eine eigene, spätere Session (P6-S3) und greifen auf Dokumente/Versionen dieses Service zu, ohne dass hier bereits etwas vorbereitet wurde. Ersatzdarstellungen (2.4) sind seit P5-S2 umgesetzt (siehe `docs/services/rendering-service.md`), ohne dass dieser Service dafür geändert werden musste — der Rendering Service konsumiert die bereits vorhandenen `document.>`-Events und ruft die bereits vorhandenen Versions-/Content-Endpunkte auf.

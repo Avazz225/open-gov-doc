@@ -30,5 +30,16 @@ class ObjectTypeClient:
         response.raise_for_status()
         return response.json()["errors"]
 
+    async def next_kennzeichen(self, object_type_id: int) -> str | None:
+        """Kennzeichengenerator (2.2, P5e-S2) - `None` bedeutet, dass für diese
+        Dokumentklasse kein Generator konfiguriert ist (404), nicht dass der
+        Objekttyp selbst unbekannt wäre (der wurde bereits über `validate()`
+        geprüft, bevor dieser Aufruf erfolgt)."""
+        response = await self._client.post(f"/object-types/{object_type_id}/next-kennzeichen")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()["kennzeichen"]
+
     async def close(self) -> None:
         await self._client.aclose()

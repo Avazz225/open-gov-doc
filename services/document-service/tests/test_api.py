@@ -266,6 +266,70 @@ def test_update_document_metadata_unknown_document_returns_404(client):
     assert response.status_code == 404
 
 
+def test_create_document_discards_client_supplied_kennzeichen(client):
+    response = upload(client, attributes='{"Kennzeichen": "FAKE-001"}')
+    assert response.status_code == 201
+    assert "Kennzeichen" not in response.json()["attributes"]
+
+
+def test_update_kennzeichen_without_admin_role_returns_403(client):
+    body = upload(client, attributes='{"foo": "bar"}').json()
+    document_id = body["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"foo": "bar", "Kennzeichen": "2026-001"}},
+    )
+    assert response.status_code == 403
+
+
+def test_update_kennzeichen_with_admin_role_succeeds(client):
+    body = upload(client, attributes='{"foo": "bar"}').json()
+    document_id = body["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"foo": "bar", "Kennzeichen": "2026-001"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 200
+    assert response.json()["attributes"]["Kennzeichen"] == "2026-001"
+
+
+def test_update_kennzeichen_with_other_roles_still_returns_403(client):
+    body = upload(client, attributes='{"foo": "bar"}').json()
+    document_id = body["id"]
+
+    response = client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"foo": "bar", "Kennzeichen": "2026-001"}},
+        headers={"X-DMS-Roles": "some-other-role,another-role"},
+    )
+    assert response.status_code == 403
+
+
+def test_update_attributes_without_touching_kennzeichen_needs_no_role(client):
+    body = upload(client, attributes='{"foo": "bar"}').json()
+    document_id = body["id"]
+
+    response = client.patch(f"/documents/{document_id}", json={"attributes": {"foo": "baz"}})
+    assert response.status_code == 200
+    assert response.json()["attributes"] == {"foo": "baz"}
+
+
+def test_removing_existing_kennzeichen_via_attribute_replace_needs_admin_role(client):
+    body = upload(client, attributes='{"foo": "bar"}').json()
+    document_id = body["id"]
+    client.patch(
+        f"/documents/{document_id}",
+        json={"attributes": {"Kennzeichen": "2026-001"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+
+    response = client.patch(f"/documents/{document_id}", json={"attributes": {"foo": "bar"}})
+    assert response.status_code == 403
+
+
 def test_upload_content_type_is_sniffed_not_trusted(client):
     """P5d-S1: der vom Browser gesendete Header wird nicht mehr übernommen -
     hier klar sichtbar, da `upload()` Klartext-Inhalt als "application/pdf"

@@ -9,7 +9,17 @@ from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +51,17 @@ from document_service.virus_scan_client import (
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+
+# Reservierter Attributschlüssel für den Kennzeichengenerator (2.2, P5e-S2) -
+# ein vom Client mitgesendeter Wert wird bei der Anlage verworfen, die
+# Vergabe erfolgt ausschließlich serverseitig über den Object-Type Service.
+KENNZEICHEN_ATTRIBUTE = "Kennzeichen"
+
+
+def _has_kennzeichen_admin_role(x_dms_roles: str) -> bool:
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    return settings.kennzeichen_admin_role in roles
 
 
 def _object_key(document_id: str, checksum_sha256: str) -> str:
@@ -170,6 +191,7 @@ async def create_document(
         parsed_attributes = json.loads(attributes) if attributes else {}
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="attributes ist kein gültiges JSON") from exc
+    parsed_attributes.pop(KENNZEICHEN_ATTRIBUTE, None)
 
     parent_folder = None
     if folder_id is not None:
@@ -187,6 +209,10 @@ async def create_document(
         )
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
+
+        kennzeichen = await app.state.object_type_client.next_kennzeichen(object_type_id)
+        if kennzeichen is not None:
+            parsed_attributes[KENNZEICHEN_ATTRIBUTE] = kennzeichen
 
     data = await file.read()
     content_type = await _resolve_content_type(session, data)
@@ -253,12 +279,25 @@ async def get_document(
 
 @app.patch("/documents/{document_id}", response_model=DocumentOut)
 async def update_document(
-    document_id: str, payload: DocumentUpdate, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: DocumentUpdate,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if payload.attributes is not None:
+        old_kennzeichen = document.attributes.get(KENNZEICHEN_ATTRIBUTE)
+        new_kennzeichen = payload.attributes.get(KENNZEICHEN_ATTRIBUTE)
+        if new_kennzeichen != old_kennzeichen and not _has_kennzeichen_admin_role(x_dms_roles):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Nur die Rolle {settings.kennzeichen_admin_role!r} darf das "
+                f"Attribut {KENNZEICHEN_ATTRIBUTE!r} ändern",
+            )
 
     if document.object_type_id is not None:
         errors = await app.state.object_type_client.validate(
