@@ -57,6 +57,16 @@ class KennzeichenOut(BaseModel):
     kennzeichen: str
 
 
+class KennzeichenConfigIn(BaseModel):
+    show_before_filename: bool
+
+
+class KennzeichenConfigOut(KennzeichenConfigIn):
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ValidateRequest(BaseModel):
     name: str
     attributes: dict = {}

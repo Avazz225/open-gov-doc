@@ -104,6 +104,11 @@ export function ObjectTypeEditor() {
   const [attributes, setAttributes] = useState<AttributeDraft[]>([]);
   const [icon, setIcon] = useState("");
   const [allowedParentTypes, setAllowedParentTypes] = useState<Set<string>>(new Set());
+  const [kennzeichenFormat, setKennzeichenFormat] = useState("");
+  // "default" = kein Override (null), sonst "true"/"false" (Tri-State, P5e-S1).
+  const [kennzeichenDisplayOverride, setKennzeichenDisplayOverride] = useState<
+    "default" | "true" | "false"
+  >("default");
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -137,6 +142,8 @@ export function ObjectTypeEditor() {
     setAttributes([]);
     setIcon("");
     setAllowedParentTypes(new Set());
+    setKennzeichenFormat("");
+    setKennzeichenDisplayOverride("default");
   }
 
   function startEdit(ot: ObjectType) {
@@ -156,6 +163,14 @@ export function ObjectTypeEditor() {
     );
     setIcon(ot.icon ?? "");
     setAllowedParentTypes(new Set(ot.allowed_parent_types ?? []));
+    setKennzeichenFormat(ot.kennzeichen_format ?? "");
+    setKennzeichenDisplayOverride(
+      ot.kennzeichen_display_override === null
+        ? "default"
+        : ot.kennzeichen_display_override
+          ? "true"
+          : "false"
+    );
     setError(null);
   }
 
@@ -193,6 +208,15 @@ export function ObjectTypeEditor() {
     const backendAttributes = attributes.map(toBackendAttribute);
     const allowedParentTypesArray = allowedParentTypes.size > 0 ? Array.from(allowedParentTypes) : null;
     const iconValue = appliesTo === "folder" && icon ? icon : null;
+    // Kennzeichengenerator (2.2, P5e-S1/S3) ist nur für Dokumentklassen gültig
+    // - analog zu iconValue oben auf null erzwungen statt dem Backend die
+    // 422-Ablehnung zu überlassen, falls appliesTo="folder" gewählt ist.
+    const kennzeichenFormatValue =
+      appliesTo === "document" && kennzeichenFormat.trim() ? kennzeichenFormat.trim() : null;
+    const kennzeichenDisplayOverrideValue =
+      appliesTo === "document" && kennzeichenDisplayOverride !== "default"
+        ? kennzeichenDisplayOverride === "true"
+        : null;
 
     try {
       if (editingId === null) {
@@ -202,6 +226,8 @@ export function ObjectTypeEditor() {
           attributes: backendAttributes,
           allowedParentTypes: allowedParentTypesArray,
           icon: iconValue,
+          kennzeichenFormat: kennzeichenFormatValue,
+          kennzeichenDisplayOverride: kennzeichenDisplayOverrideValue,
         });
 
         // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
@@ -230,6 +256,8 @@ export function ObjectTypeEditor() {
           conditions: current?.conditions ?? [],
           allowedParentTypes: allowedParentTypesArray,
           icon: iconValue,
+          kennzeichenFormat: kennzeichenFormatValue,
+          kennzeichenDisplayOverride: kennzeichenDisplayOverrideValue,
         });
       }
       resetForm();
@@ -302,7 +330,35 @@ export function ObjectTypeEditor() {
                 </select>
               </label>
             )}
+            {appliesTo === "document" && (
+              <>
+                <label>
+                  {t("objectTypes.kennzeichenFormatLabel")}
+                  <input
+                    value={kennzeichenFormat}
+                    onChange={(e) => setKennzeichenFormat(e.target.value)}
+                    placeholder="{YYYY}-{Laufende_Nummer}"
+                  />
+                </label>
+                <label>
+                  {t("objectTypes.kennzeichenDisplayOverrideLabel")}
+                  <select
+                    value={kennzeichenDisplayOverride}
+                    onChange={(e) =>
+                      setKennzeichenDisplayOverride(e.target.value as "default" | "true" | "false")
+                    }
+                  >
+                    <option value="default">{t("objectTypes.kennzeichenDisplayOverrideDefault")}</option>
+                    <option value="true">{t("objectTypes.kennzeichenDisplayOverrideShow")}</option>
+                    <option value="false">{t("objectTypes.kennzeichenDisplayOverrideHide")}</option>
+                  </select>
+                </label>
+              </>
+            )}
           </div>
+          {appliesTo === "document" && (
+            <p className="hint">{t("objectTypes.kennzeichenFormatHint")}</p>
+          )}
 
           <h3>{t("objectTypes.attributesHeading")}</h3>
           {attributes.length === 0 && <p className="empty-state">{t("objectTypes.noAttributes")}</p>}

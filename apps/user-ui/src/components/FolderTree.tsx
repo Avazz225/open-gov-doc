@@ -8,8 +8,10 @@ import {
   listDocumentsInFolder,
   type DocumentSummary,
   type Folder,
+  type ObjectType,
 } from "@/lib/api";
 import { folderIcon } from "@/lib/icons";
+import { formatDocumentTitle } from "@/lib/kennzeichen";
 
 interface NodeChildren {
   folders: Folder[];
@@ -28,12 +30,16 @@ export function FolderTree({
   token,
   rootLabel,
   folderIcons,
+  documentTypeById,
+  kennzeichenShowByDefault,
   onOpenDocument,
   onNavigateToFolder,
 }: {
   token: string;
   rootLabel: string;
   folderIcons: Record<number, string | null>;
+  documentTypeById: Record<number, ObjectType>;
+  kennzeichenShowByDefault: boolean;
   onOpenDocument: (doc: DocumentSummary) => void;
   onNavigateToFolder: (path: Folder[]) => void;
 }) {
@@ -139,7 +145,7 @@ export function FolderTree({
             <span className="tree-row">
               <span className="tree-toggle-spacer" aria-hidden="true" />
               <button type="button" className="entry-name" onClick={() => onOpenDocument(doc)}>
-                📄 {doc.title}
+                📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
               </button>
             </span>
           </li>

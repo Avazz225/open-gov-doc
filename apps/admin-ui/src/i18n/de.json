@@ -36,6 +36,7 @@
     "groupStorage": "Speicher",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
+    "kennzeichenSettings": "Kennzeichen-Einstellungen",
     "registry": "Registry",
     "installations": "Installationsverwaltung",
     "ocrSettings": "OCR-Einstellungen",
@@ -126,6 +127,12 @@
       "invoice": "Rechnung",
       "contract": "Vertrag"
     },
+    "kennzeichenFormatLabel": "Kennzeichen-Format",
+    "kennzeichenFormatHint": "Platzhalter: {YYYY}/{YY} (Jahr), {MM}/{DD} (Monat/Tag), {Laufende_Nummer} (Pflicht, pro Jahr zurückgesetzt). Leer lassen = kein automatisches Kennzeichen.",
+    "kennzeichenDisplayOverrideLabel": "Kennzeichen-Anzeige",
+    "kennzeichenDisplayOverrideDefault": "Globalen Standard verwenden",
+    "kennzeichenDisplayOverrideShow": "Immer anzeigen",
+    "kennzeichenDisplayOverrideHide": "Nie anzeigen",
     "allowedParentTypesLabel": "Erlaubte Elternordner-Klassen",
     "allowedParentTypesRootOption": "Direkt unter der Wurzel ($ROOT)",
     "allowedParentTypesHint": "Keine Auswahl = überall platzierbar (Standard).",
@@ -189,6 +196,14 @@
     "unreachable": "Document Service nicht erreichbar.",
     "allowedContentTypes": "Erlaubte Content-Types",
     "allowedContentTypesHint": "Kommagetrennt, z. B. \"application/pdf, text/plain, application/json\" - leer = keine Einschränkung.",
+    "saved": "Gespeichert.",
+    "updatedAt": "Zuletzt geändert"
+  },
+  "kennzeichenSettings": {
+    "pageTitle": "Kennzeichen-Einstellungen",
+    "hint": "Globaler Standard, ob ein automatisch vergebenes Kennzeichen (2.2) vor dem Dateinamen angezeigt wird. Einzelne Dokumentenarten können diesen Standard im Objekttyp-Editor überschreiben.",
+    "unreachable": "Object-Type Service nicht erreichbar.",
+    "showBeforeFilename": "Kennzeichen vor Dateinamen anzeigen",
     "saved": "Gespeichert.",
     "updatedAt": "Zuletzt geändert"
   },

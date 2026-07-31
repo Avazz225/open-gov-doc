@@ -12,7 +12,13 @@ import {
   updateDocumentMetadata,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { KENNZEICHEN_ATTRIBUTE } from "@/lib/kennzeichen";
 import { LayoutFormFields } from "./LayoutFormFields";
+
+// Muss zur Document-Service-Settings `kennzeichen_admin_role` passen (Default,
+// P5e-S2) - nur Principals mit dieser Rolle dürfen ein bereits vergebenes
+// Kennzeichen ändern, alle anderen sehen es rein lesbar.
+const KENNZEICHEN_ADMIN_ROLE = "dms-admin";
 
 function attributeInputType(attrType: string | undefined): string {
   if (attrType === "integer" || attrType === "decimal") return "number";
@@ -36,8 +42,9 @@ export function MetadataPanel({
   document: DocumentSummary | null;
   onSaved: (updated: DocumentSummary) => void;
 }) {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const { t } = useI18n();
+  const isKennzeichenAdmin = Boolean(user?.realm_roles.includes(KENNZEICHEN_ADMIN_ROLE));
   const [objectType, setObjectType] = useState<ObjectType | null>(null);
   const [layout, setLayout] = useState<LayoutData | null>(null);
   const [title, setTitle] = useState("");
@@ -108,6 +115,23 @@ export function MetadataPanel({
           {t("metadata.titleLabel")}
           <input value={title} onChange={(e) => setTitle(e.target.value)} required />
         </label>
+
+        {KENNZEICHEN_ATTRIBUTE in activeDocument.attributes && (
+          <label>
+            {t("metadata.kennzeichenLabel")}
+            <input
+              value={values[KENNZEICHEN_ATTRIBUTE] ?? ""}
+              readOnly={!isKennzeichenAdmin}
+              disabled={!isKennzeichenAdmin}
+              onChange={(e) =>
+                setValues((prev) => ({ ...prev, [KENNZEICHEN_ATTRIBUTE]: e.target.value }))
+              }
+            />
+          </label>
+        )}
+        {KENNZEICHEN_ATTRIBUTE in activeDocument.attributes && !isKennzeichenAdmin && (
+          <p className="hint">{t("metadata.kennzeichenReadOnlyHint")}</p>
+        )}
 
         {objectType && layout ? (
           <LayoutFormFields

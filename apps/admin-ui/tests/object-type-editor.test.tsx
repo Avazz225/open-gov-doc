@@ -56,6 +56,8 @@ const RECHNUNG = {
   conditions: [{ if: "Betrag > 10000", then: "require:Kostenstelle" }],
   allowed_parent_types: null,
   icon: null,
+  kennzeichen_format: null,
+  kennzeichen_display_override: null,
 };
 
 const PROJEKTORDNER = {
@@ -67,6 +69,8 @@ const PROJEKTORDNER = {
   conditions: [],
   allowed_parent_types: ["$ROOT"],
   icon: "folder-star",
+  kennzeichen_format: null,
+  kennzeichen_display_override: null,
 };
 
 describe("ObjectTypeEditor", () => {
@@ -104,6 +108,8 @@ describe("ObjectTypeEditor", () => {
         attributes: [{ name: "Partner", type: "string", required: true }],
         allowedParentTypes: null,
         icon: null,
+        kennzeichenFormat: null,
+        kennzeichenDisplayOverride: null,
       })
     );
     // Kein abweichender Anzeigename vergeben -> kein Layout-Override nötig.
@@ -167,6 +173,8 @@ describe("ObjectTypeEditor", () => {
         conditions: [{ if: "Betrag > 10000", then: "require:Kostenstelle" }],
         allowedParentTypes: null,
         icon: null,
+        kennzeichenFormat: null,
+        kennzeichenDisplayOverride: null,
       })
     );
   });
@@ -182,6 +190,55 @@ describe("ObjectTypeEditor", () => {
     const parentTypeGroup = container.querySelector(".checkbox-group") as HTMLElement;
     expect(within(parentTypeGroup).getByText("Direkt unter der Wurzel ($ROOT)")).toBeInTheDocument();
     expect(within(parentTypeGroup).getByText("Projektordner")).toBeInTheDocument();
+  });
+
+  it("shows the kennzeichen fields only for document-applying types", async () => {
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+    expect(screen.getByLabelText("Kennzeichen-Format")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
+    expect(screen.queryByLabelText("Kennzeichen-Format")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Kennzeichen-Anzeige")).not.toBeInTheDocument();
+  });
+
+  it("submits a kennzeichen format and display override when creating a document type", async () => {
+    createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
+    fireEvent.change(screen.getByLabelText("Kennzeichen-Format"), {
+      target: { value: "{YYYY}-{Laufende_Nummer}" },
+    });
+    fireEvent.change(screen.getByLabelText("Kennzeichen-Anzeige"), { target: { value: "true" } });
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+
+    await waitFor(() =>
+      expect(createObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({
+          kennzeichenFormat: "{YYYY}-{Laufende_Nummer}",
+          kennzeichenDisplayOverride: true,
+        })
+      )
+    );
+  });
+
+  it("loads an existing kennzeichen format/override into the form for editing", async () => {
+    listObjectTypesMock.mockResolvedValue([
+      { ...RECHNUNG, kennzeichen_format: "{YYYY}-{Laufende_Nummer}", kennzeichen_display_override: false },
+      PROJEKTORDNER,
+    ]);
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+
+    const row = screen.getByText("Rechnung").closest("tr")!;
+    fireEvent.click(within(row).getByText("Bearbeiten"));
+
+    expect(await screen.findByLabelText("Kennzeichen-Format")).toHaveValue("{YYYY}-{Laufende_Nummer}");
+    expect(screen.getByLabelText("Kennzeichen-Anzeige")).toHaveValue("false");
   });
 
   it("deletes an object type", async () => {

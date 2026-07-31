@@ -31,6 +31,7 @@ const getSearchFacetsMock = vi.fn();
 const searchDocumentsMock = vi.fn();
 const listObjectTypesMock = vi.fn();
 const getObjectTypeLayoutMock = vi.fn();
+const getKennzeichenConfigMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -43,6 +44,7 @@ vi.mock("@/lib/api", () => ({
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
+  getKennzeichenConfig: (...args: unknown[]) => getKennzeichenConfigMock(...args),
   updateDocumentMetadata: (...args: unknown[]) => updateDocumentMetadataMock(...args),
   listRenditions: (...args: unknown[]) => listRenditionsMock(...args),
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
@@ -61,12 +63,18 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+// Veränderlich statt einer festen Rolle, damit Tests zur Kennzeichen-
+// Rollenprüfung (P5e-S3) `realm_roles` gezielt setzen können - `vi.hoisted`
+// nötig, da die `vi.mock`-Factory unten früher ausgeführt wird als normale
+// `const`/`let`-Deklarationen im Modul.
+const { authState } = vi.hoisted(() => ({ authState: { realmRoles: [] as string[] } }));
+
 vi.mock("@/lib/auth-context", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth-context")>("@/lib/auth-context");
   return {
     ...actual,
     useAuth: () => ({
-      user: { sub: "u1", username: "alice", email: null, realm_roles: [] },
+      user: { sub: "u1", username: "alice", email: null, realm_roles: authState.realmRoles },
       accessToken: "token-123",
       isLoading: false,
       login: vi.fn(),
@@ -137,6 +145,12 @@ describe("DocumentWorkspace", () => {
     // (siehe SearchPane.tsx `fallbackLayout`), damit bestehende Tests ohne
     // Layout-Bezug unverändert funktionieren.
     getObjectTypeLayoutMock.mockRejectedValue(new Error("no layout mocked for this test"));
+    getKennzeichenConfigMock.mockReset();
+    getKennzeichenConfigMock.mockResolvedValue({
+      show_before_filename: true,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    authState.realmRoles = [];
     window.localStorage.clear();
   });
 
@@ -850,6 +864,130 @@ describe("DocumentWorkspace", () => {
           attributes: { Partner: "Beispiel GmbH" },
         })
       )
+    );
+  });
+
+  it("prefixes a document's title with its Kennzeichen when the global default allows it", async () => {
+    const kennzeichenDoc = {
+      ...document1,
+      id: "d2",
+      title: "Vertrag.pdf",
+      object_type_id: 7,
+      attributes: { Kennzeichen: "2026-001" },
+    };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([kennzeichenDoc]);
+    listObjectTypesMock.mockImplementation(async (_token: string, appliesTo?: string) => {
+      if (appliesTo === "document") {
+        return [
+          {
+            id: 7,
+            name: "Vertrag",
+            applies_to: "document",
+            attributes: [],
+            icon: null,
+            kennzeichen_display_override: null,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/2026-001 Vertrag\.pdf/));
+
+    const tabBar = screen.getByRole("tablist");
+    expect(within(tabBar).getByText("2026-001 Vertrag.pdf")).toBeInTheDocument();
+  });
+
+  it("hides the Kennzeichen prefix when the object type overrides the global default off", async () => {
+    const kennzeichenDoc = {
+      ...document1,
+      id: "d2",
+      title: "Vertrag.pdf",
+      object_type_id: 7,
+      attributes: { Kennzeichen: "2026-001" },
+    };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([kennzeichenDoc]);
+    listObjectTypesMock.mockImplementation(async (_token: string, appliesTo?: string) => {
+      if (appliesTo === "document") {
+        return [
+          {
+            id: 7,
+            name: "Vertrag",
+            applies_to: "document",
+            attributes: [],
+            icon: null,
+            kennzeichen_display_override: false,
+          },
+        ];
+      }
+      return [];
+    });
+
+    renderWorkspace();
+
+    expect(await screen.findByText(/Vertrag\.pdf/)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-001/)).not.toBeInTheDocument();
+  });
+
+  it("shows an assigned Kennzeichen read-only for users without the dms-admin role", async () => {
+    const kennzeichenDoc = {
+      ...document1,
+      title: "Vertrag.pdf",
+      attributes: { Kennzeichen: "2026-001" },
+    };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([kennzeichenDoc]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Vertrag.pdf/));
+
+    const metadataPanel = screen.getByLabelText("Metadaten");
+    const kennzeichenInput = within(metadataPanel).getByLabelText("Kennzeichen");
+    expect(kennzeichenInput).toHaveValue("2026-001");
+    expect(kennzeichenInput).toBeDisabled();
+    expect(
+      within(metadataPanel).getByText(/Nur Nutzer mit der Rolle "dms-admin"/)
+    ).toBeInTheDocument();
+  });
+
+  it("lets a dms-admin user change an assigned Kennzeichen", async () => {
+    authState.realmRoles = ["dms-admin"];
+    const kennzeichenDoc = {
+      ...document1,
+      title: "Vertrag.pdf",
+      attributes: { Kennzeichen: "2026-001" },
+    };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([kennzeichenDoc]);
+    updateDocumentMetadataMock.mockResolvedValue({
+      ...kennzeichenDoc,
+      attributes: { Kennzeichen: "2026-999" },
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Vertrag.pdf/));
+
+    const metadataPanel = screen.getByLabelText("Metadaten");
+    const kennzeichenInput = within(metadataPanel).getByLabelText("Kennzeichen");
+    expect(kennzeichenInput).not.toBeDisabled();
+    await user.clear(kennzeichenInput);
+    await user.type(kennzeichenInput, "2026-999");
+    fireEvent.submit(within(metadataPanel).getByRole("form", { name: "Dokumentmetadaten bearbeiten" }));
+
+    await waitFor(() =>
+      expect(updateDocumentMetadataMock).toHaveBeenCalledWith("token-123", "d1", {
+        title: "Vertrag.pdf",
+        attributes: { Kennzeichen: "2026-999" },
+      })
     );
   });
 });

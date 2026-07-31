@@ -230,6 +230,11 @@ export interface ObjectType {
   conditions: Array<Record<string, unknown>>;
   allowed_parent_types: string[] | null;
   icon: string | null;
+  // Kennzeichengenerator (2.2, seit P5e-S1/S3) - beide nur für
+  // applies_to="document" gesetzt. kennzeichen_display_override ist ein
+  // Tri-State: null = globaler Standard (KennzeichenConfig) gilt.
+  kennzeichen_format: string | null;
+  kennzeichen_display_override: boolean | null;
 }
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -245,6 +250,8 @@ export async function createObjectType(
     attributes: ObjectTypeAttribute[];
     allowedParentTypes: string[] | null;
     icon: string | null;
+    kennzeichenFormat: string | null;
+    kennzeichenDisplayOverride: boolean | null;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -256,6 +263,8 @@ export async function createObjectType(
       attributes: params.attributes,
       allowed_parent_types: params.allowedParentTypes,
       icon: params.icon,
+      kennzeichen_format: params.kennzeichenFormat,
+      kennzeichen_display_override: params.kennzeichenDisplayOverride,
     }),
     token
   );
@@ -277,6 +286,8 @@ export async function updateObjectType(
     conditions: Array<Record<string, unknown>>;
     allowedParentTypes: string[] | null;
     icon: string | null;
+    kennzeichenFormat: string | null;
+    kennzeichenDisplayOverride: boolean | null;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -291,6 +302,8 @@ export async function updateObjectType(
         conditions: params.conditions,
         allowed_parent_types: params.allowedParentTypes,
         icon: params.icon,
+        kennzeichen_format: params.kennzeichenFormat,
+        kennzeichen_display_override: params.kennzeichenDisplayOverride,
       }),
     },
     token
@@ -438,6 +451,36 @@ export async function updateUploadConfig(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ allowed_content_types: payload.allowedContentTypes }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface KennzeichenConfig {
+  show_before_filename: boolean;
+  updated_at: string;
+}
+
+// Globaler Anzeige-Standard des Kennzeichengenerators (2.2, seit P5e-S3) -
+// lebt im Object-Type Service, nicht im Document Service, da dort auch schon
+// der per-Objekttyp-Override (`ObjectType.kennzeichen_display_override`) sitzt.
+export async function getKennzeichenConfig(token: string): Promise<KennzeichenConfig> {
+  const response = await request("object-type-service", "kennzeichen-config", {}, token);
+  return response.json();
+}
+
+export async function updateKennzeichenConfig(
+  token: string,
+  payload: { showBeforeFilename: boolean }
+): Promise<KennzeichenConfig> {
+  const response = await request(
+    "object-type-service",
+    "kennzeichen-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ show_before_filename: payload.showBeforeFilename }),
     },
     token
   );

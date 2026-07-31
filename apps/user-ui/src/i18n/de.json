@@ -84,6 +84,8 @@
     "heading": "Metadaten",
     "formLabel": "Dokumentmetadaten bearbeiten",
     "titleLabel": "Titel",
+    "kennzeichenLabel": "Kennzeichen",
+    "kennzeichenReadOnlyHint": "Nur Nutzer mit der Rolle \"dms-admin\" dürfen ein vergebenes Kennzeichen ändern.",
     "noSelection": "Kein Dokument ausgewählt.",
     "noObjectType": "Kein Objekttyp zugewiesen - keine weiteren Attribute.",
     "loadObjectTypeError": "Objekttyp konnte nicht geladen werden",

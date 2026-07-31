@@ -377,3 +377,18 @@ def test_next_kennzeichen_without_configured_format_returns_404(client):
 def test_next_kennzeichen_unknown_object_type_returns_404(client):
     response = client.post("/object-types/999999/next-kennzeichen")
     assert response.status_code == 404
+
+
+def test_get_kennzeichen_config_defaults_to_show_before_filename(client):
+    response = client.get("/kennzeichen-config")
+    assert response.status_code == 200
+    assert response.json()["show_before_filename"] is True
+
+
+def test_put_kennzeichen_config_persists(client):
+    put_response = client.put("/kennzeichen-config", json={"show_before_filename": False})
+    assert put_response.status_code == 200
+    assert put_response.json()["show_before_filename"] is False
+
+    get_response = client.get("/kennzeichen-config")
+    assert get_response.json()["show_before_filename"] is False

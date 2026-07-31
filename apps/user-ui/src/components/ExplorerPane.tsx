@@ -2,8 +2,15 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
-import { listObjectTypes, type DocumentSummary, type Folder } from "@/lib/api";
+import {
+  getKennzeichenConfig,
+  listObjectTypes,
+  type DocumentSummary,
+  type Folder,
+  type ObjectType,
+} from "@/lib/api";
 import { folderIcon } from "@/lib/icons";
+import { formatDocumentTitle } from "@/lib/kennzeichen";
 import { FolderTree } from "./FolderTree";
 import { UploadForm } from "./UploadForm";
 
@@ -77,6 +84,8 @@ export function ExplorerPane({
   const [showUpload, setShowUpload] = useState(false);
   const [viewMode, setViewMode] = useState<ExplorerViewMode>(loadViewMode);
   const [folderIconById, setFolderIconById] = useState<Record<number, string | null>>({});
+  const [documentTypeById, setDocumentTypeById] = useState<Record<number, ObjectType>>({});
+  const [kennzeichenShowByDefault, setKennzeichenShowByDefault] = useState(true);
 
   // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) - einmalig geladen, kein
   // Blocker für die übrige Anzeige, wenn das fehlschlägt (bleibt dann beim
@@ -87,6 +96,19 @@ export function ExplorerPane({
       .then((types) =>
         setFolderIconById(Object.fromEntries(types.map((ot) => [ot.id, ot.icon])))
       )
+      .catch(() => {});
+  }, [token]);
+
+  // Kennzeichen-Anzeige vor dem Dateinamen (2.2/8, P5e-S3) - Objekttyp-Override
+  // je Dokumentenart plus globaler Standard, siehe lib/kennzeichen.ts. Gleiches
+  // "einmalig laden, bei Fehlschlag beim Fallback bleiben"-Muster wie oben.
+  useEffect(() => {
+    if (!token) return;
+    listObjectTypes(token, "document")
+      .then((types) => setDocumentTypeById(Object.fromEntries(types.map((ot) => [ot.id, ot]))))
+      .catch(() => {});
+    getKennzeichenConfig(token)
+      .then((config) => setKennzeichenShowByDefault(config.show_before_filename))
       .catch(() => {});
   }, [token]);
 
@@ -134,7 +156,7 @@ export function ExplorerPane({
                 aria-selected={tab.id === activeTabId}
                 onClick={() => onSelectTab(tab.id)}
               >
-                {tab.title}
+                {formatDocumentTitle(tab, documentTypeById, kennzeichenShowByDefault)}
               </button>
               <button
                 type="button"
@@ -229,6 +251,8 @@ export function ExplorerPane({
           token={token}
           rootLabel={trail[0]?.name ?? t("folderBrowser.rootLabel")}
           folderIcons={folderIconById}
+          documentTypeById={documentTypeById}
+          kennzeichenShowByDefault={kennzeichenShowByDefault}
           onOpenDocument={onOpenDocument}
           onNavigateToFolder={onNavigateToFolder}
         />
@@ -297,7 +321,7 @@ export function ExplorerPane({
                   className="entry-name"
                   onClick={() => onOpenDocument(doc)}
                 >
-                  📄 {doc.title}
+                  📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
                 </button>
               </li>
             ))}

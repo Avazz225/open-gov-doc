@@ -16,6 +16,8 @@ from object_type_service import repository
 from object_type_service.layout import generate_smart_layout
 from object_type_service.models import Base, ObjectType
 from object_type_service.schemas import (
+    KennzeichenConfigIn,
+    KennzeichenConfigOut,
     KennzeichenOut,
     LayoutIn,
     LayoutOut,
@@ -201,6 +203,26 @@ async def next_kennzeichen(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     return KennzeichenOut(kennzeichen=kennzeichen)
+
+
+@app.get("/kennzeichen-config", response_model=KennzeichenConfigOut)
+async def get_kennzeichen_config(
+    session: AsyncSession = Depends(get_session),
+) -> KennzeichenConfigOut:
+    config = await repository.get_kennzeichen_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/kennzeichen-config", response_model=KennzeichenConfigOut)
+async def put_kennzeichen_config(
+    body: KennzeichenConfigIn, session: AsyncSession = Depends(get_session)
+) -> KennzeichenConfigOut:
+    config = await repository.update_kennzeichen_config(
+        session, show_before_filename=body.show_before_filename
+    )
+    await session.commit()
+    return config
 
 
 @app.get("/object-types/{object_type_id}/layouts/{purpose}", response_model=LayoutOut)

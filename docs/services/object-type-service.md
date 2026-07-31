@@ -19,6 +19,8 @@
 | `PUT` | `/object-types/{id}/layouts/{purpose}` | Speichert ein explizites Layout-Override — 422 bei Referenz auf ein unbekanntes Attribut, 404 bei unbekannter `object_type_id` |
 | `DELETE` | `/object-types/{id}/layouts/{purpose}` | Entfernt ein Override (Reset auf das generierte Smart Layout) — idempotent, 404 nur bei unbekannter `object_type_id` |
 | `POST` | `/object-types/{id}/next-kennzeichen` | Kennzeichengenerator (2.2, seit P5e-S1): atomarer Inkrement+Format-Aufruf, liefert `{kennzeichen: "2026-001"}` — 404 bei unbekannter `object_type_id` oder wenn kein `kennzeichen_format` konfiguriert ist |
+| `GET` | `/kennzeichen-config` | Globaler Anzeige-Standard lesen (`show_before_filename`, seit P5e-S3) |
+| `PUT` | `/kennzeichen-config` | Globalen Anzeige-Standard ändern — wirkt sofort für alle Dokumentenarten ohne eigenen `kennzeichen_display_override` |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -28,6 +30,8 @@
 `object_type_layout` (2.2b, seit P5b-S2): `object_type_id` + `purpose` (`"display"`\|`"search"`\|`"upload"`) als zusammengesetzter Primärschlüssel (Fremdschlüssel auf `object_type.id`, `ON DELETE CASCADE`), `layout` (JSON: `{rows: [{columns: [{attribute, label, required}]}], responsive_breakpoint_px}`), `created_at`/`updated_at`. Nur explizite Abweichungen vom generierten Smart Layout werden hier gespeichert (siehe ADR 0014) — fehlt eine Zeile, gilt automatisch der aktuelle generierte Stand.
 
 `object_type_sequence` (2.2, seit P5e-S1): `object_type_id` + `jahr` als zusammengesetzter Primärschlüssel (Fremdschlüssel auf `object_type.id`, `ON DELETE CASCADE`), `naechste_nummer` (Integer). Eine Zeile je Objekttyp und Jahr — siehe "Kennzeichengenerator" unten.
+
+`kennzeichen_config` (2.2, seit P5e-S3): einzelne Zeile (`id=1`, gleiches Muster wie `OcrConfig`/`UploadConfig`) — `show_before_filename` (Boolean, Default `true`), `updated_at`. Kein FK-Bezug zu `object_type`, daher separat von der `object_type`-CASCADE-Truncate in den Tests zu leeren.
 
 ## Objekttyp-Schema (2.2)
 
@@ -64,10 +68,11 @@ Jeder Objekttyp kann über `allowed_parent_types` festlegen, unter welchen Ordne
 Jede Dokumentklasse (`applies_to="document"`) kann ein Format-String-Feld `kennzeichen_format` erhalten, das bei jedem `POST .../next-kennzeichen`-Aufruf zu einem fertigen Aktenzeichen gerendert wird (z. B. `{YYYY}-{Laufende_Nummer}` → `2026-001`). `null` bedeutet: kein Generator konfiguriert.
 
 - **Unterstützte Platzhalter**: `{YYYY}` (vierstelliges Jahr), `{YY}` (zweistellig), `{MM}`/`{DD}` (zweistellig), `{Laufende_Nummer}` (dreistellig nullgepolstert, z. B. `001`, wächst darüber hinaus einfach in der Ziffernzahl). `kennzeichen_format` muss `{Laufende_Nummer}` enthalten und darf keine anderen Platzhalter referenzieren — sonst `422` bei Anlage/Änderung des Objekttyps (analog zur `allowedParentTypes`-Referenzprüfung, 2.2a).
-- **`kennzeichen_format`/`kennzeichen_display_override`** sind nur für `applies_to="document"` zulässig — `422` bei Ordnerklassen. `kennzeichen_display_override` ist ein Tri-State (`null`/`true`/`false`), der bei gesetztem Wert den globalen "Kennzeichen vor Dateinamen anzeigen"-Standard aus P5e-S2 für diese Dokumentenart überschreibt — hier nur gespeichert, noch nicht ausgewertet (folgt mit P5e-S2/S3).
+- **`kennzeichen_format`/`kennzeichen_display_override`** sind nur für `applies_to="document"` zulässig — `422` bei Ordnerklassen. `kennzeichen_display_override` ist ein Tri-State (`null`/`true`/`false`), der bei gesetztem Wert den globalen "Kennzeichen vor Dateinamen anzeigen"-Standard überschreibt.
 - **Zähler-Reset pro Jahr**: die laufende Nummer setzt sich am 1. Januar automatisch zurück, je Objekttyp unabhängig (`object_type_sequence`, Primärschlüssel `{object_type_id, jahr}`). Nutzerentscheidung aus der Phase-5e-Planung (siehe `PROGRESS.md`), nicht pro Tag oder global fortlaufend.
 - **Atomare, nebenläufigkeitssichere Vergabe**: `POST /object-types/{id}/next-kennzeichen` führt `INSERT ... ON CONFLICT DO NOTHING` (legt die Zähler-Zeile bei Bedarf an, ohne dass zwei gleichzeitige Erstaufrufe an einem Unique-Constraint scheitern) gefolgt von `SELECT ... FOR UPDATE` (sperrt die Zeile für die Dauer der Transaktion) aus — parallele Aufrufe werden dadurch serialisiert statt sich gegenseitig zu überschreiben. Live gegen den echten Stack sowie per `asyncio.gather`-Test mit fünf gleichzeitigen Aufrufen verifiziert (liefert garantiert `001`–`005`, keine Duplikate/Lücken).
-- **Wer die Vergabe tatsächlich auslöst und wo `Kennzeichen` landet** (reservierter Attributschlüssel, `403` bei nachträglicher Änderung ohne `dms-admin`-Rolle) ist Aufgabe von **P5e-S2** (Document Service) — dieser Service liefert nur den fertig gerenderten String auf Anfrage, ohne selbst zu wissen, dass/wo er verwendet wird.
+- **Wer die Vergabe tatsächlich auslöst und wo `Kennzeichen` landet** (reservierter Attributschlüssel, `403` bei nachträglicher Änderung ohne `dms-admin`-Rolle) ist Aufgabe des Document Service (**P5e-S2**, siehe `docs/services/document-service.md`) — dieser Service liefert nur den fertig gerenderten String auf Anfrage, ohne selbst zu wissen, dass/wo er verwendet wird.
+- **Globaler Anzeige-Standard** (`kennzeichen_config`, seit **P5e-S3**): `GET`/`PUT /kennzeichen-config` verwalten einen einzigen Schalter `show_before_filename` (Default `true`) — der von den Frontends aufgelöste effektive Wert je Dokumentenart ist `kennzeichen_display_override` (falls nicht `null`), sonst dieser globale Standard. Die Auflösung selbst passiert **client-seitig** in Admin-UI/User-UI, nicht hier — dieser Service liefert nur die beiden Rohwerte, kein eigener "resolved"-Endpunkt (kein Konsument bräuchte ihn synchron genug, um den zusätzlichen Roundtrip zu rechtfertigen).
 
 ## Formular-Layouts (2.2b, seit P5b-S2)
 
@@ -104,7 +109,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/object-type-service/tests`: Repository (CRUD, `allowed_parent_types`/`icon`-Validierung inkl. Ablehnung unbekannter/Nicht-Ordner-Referenzen, Layout-Upsert/-Reset/-Attributreferenzprüfung, Kennzeichengenerator-Format-Validierung, Jahres-Zähler inkl. Unabhängigkeit je Objekttyp sowie ein `asyncio.gather`-Nebenläufigkeitstest mit fünf parallelen Aufrufen), Smart-Layout-Generierung (`test_layout.py`, reine Funktionslogik), API (`/validate` inkl. `parent_is_root`/`parent_object_type_id`-Auflösung, 422 bei ungültigen 2.2a-Feldern, `/layouts/{purpose}` inkl. generiertem vs. gespeichertem Layout, 422/404-Fälle, `/next-kennzeichen` inkl. 404 ohne Format). **63 Tests, alle grün.**
+- `uv run pytest services/object-type-service/tests`: Repository (CRUD, `allowed_parent_types`/`icon`-Validierung inkl. Ablehnung unbekannter/Nicht-Ordner-Referenzen, Layout-Upsert/-Reset/-Attributreferenzprüfung, Kennzeichengenerator-Format-Validierung, Jahres-Zähler inkl. Unabhängigkeit je Objekttyp sowie ein `asyncio.gather`-Nebenläufigkeitstest mit fünf parallelen Aufrufen, globale Kennzeichen-Konfiguration inkl. Default), Smart-Layout-Generierung (`test_layout.py`, reine Funktionslogik), API (`/validate` inkl. `parent_is_root`/`parent_object_type_id`-Auflösung, 422 bei ungültigen 2.2a-Feldern, `/layouts/{purpose}` inkl. generiertem vs. gespeichertem Layout, 422/404-Fälle, `/next-kennzeichen` inkl. 404 ohne Format, `/kennzeichen-config` GET/PUT). **67 Tests, alle grün.**
 - **Live-Smoke-Test** (P5e-S1): `docker compose build object-type-service` + `up -d`, Objekttyp mit `kennzeichen_format` angelegt, zwei `POST .../next-kennzeichen`-Aufrufe lieferten `2026-001`/`2026-002`, dritter Objekttyp ohne Format lieferte `404` — Testdaten anschließend wieder gelöscht.
 
 ## Offene Punkte
@@ -114,4 +119,5 @@ Noch keine — folgt in Phase 11.
 - **Kein GUI-Editor für `allowed_parent_types`/`icon`/Formular-Layouts/Kennzeichengenerator** — folgt mit P5b-S3 (allowed_parent_types/icon) bzw. **P5e-S3** (Kennzeichengenerator); diese und die vorherige Session decken nur das Backend-Schema/die Durchsetzung/Generierung ab, verifiziert per curl/pytest.
 - Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowed_parent_types` (siehe ADR 0013); kein Rückwirkungs-Check für gespeicherte Layout-Overrides bei späteren Attributänderungen (siehe ADR 0014).
 - User-UI-Konsum der Layouts (Metadaten-Panel/Suchmaske/Upload-Dialog auf layoutgesteuertes Rendering umstellen) folgt erst mit P5b-S4.
-- **Kennzeichenvergabe noch nicht mit dem Document Service verdrahtet** — `POST .../next-kennzeichen` existiert und ist per Test/Smoke verifiziert, wird aber von keinem Aufrufer genutzt (folgt mit P5e-S2). Kein Rückwirkungs-Check, falls `kennzeichen_format` nachträglich geändert wird — bereits vergebene Kennzeichen behalten ihr altes Format.
+- Kein Rückwirkungs-Check, falls `kennzeichen_format` nachträglich geändert wird — bereits vergebene Kennzeichen behalten ihr altes Format.
+- **Kein serverseitiger "resolved display"-Endpunkt** für `kennzeichen_config`/`kennzeichen_display_override` — jedes Frontend löst Override-vs-Standard selbst auf (siehe "Kennzeichengenerator" oben). Bei einem dritten Konsumenten wäre das ggf. zu zentralisieren.

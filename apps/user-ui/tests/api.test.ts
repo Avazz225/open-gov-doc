@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createFolder, listChildFolders, login, updateDocumentMetadata } from "@/lib/api";
+import {
+  ApiError,
+  createFolder,
+  getKennzeichenConfig,
+  listChildFolders,
+  login,
+  updateDocumentMetadata,
+} from "@/lib/api";
 
 function mockFetchOnce(body: unknown, init: { ok?: boolean; status?: number } = {}) {
   const { ok = true, status = 200 } = init;
@@ -71,6 +78,22 @@ describe("api client", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://localhost:8009/api/document-service/documents/d1");
     expect(init.method).toBe("PATCH");
+  });
+
+  it("fetches the global kennzeichen display config via the object-type-service route", async () => {
+    const fetchMock = mockFetchOnce({
+      show_before_filename: true,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const config = await getKennzeichenConfig("token-123");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8009/api/object-type-service/kennzeichen-config",
+      expect.anything()
+    );
+    expect(config.show_before_filename).toBe(true);
   });
 
   it("raises ApiError with the backend's detail message on failure", async () => {

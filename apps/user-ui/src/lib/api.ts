@@ -177,6 +177,21 @@ export interface ObjectType {
   applies_to: string;
   attributes: ObjectTypeAttribute[];
   icon: string | null;
+  // Kennzeichengenerator (2.2, seit P5e-S1/S3) - nur für applies_to="document"
+  // gesetzt. kennzeichen_display_override ist ein Tri-State: null/undefined =
+  // globaler Standard (KennzeichenConfig) gilt, siehe lib/kennzeichen.ts.
+  kennzeichen_format?: string | null;
+  kennzeichen_display_override?: boolean | null;
+}
+
+export interface KennzeichenConfig {
+  show_before_filename: boolean;
+  updated_at: string;
+}
+
+export async function getKennzeichenConfig(token: string): Promise<KennzeichenConfig> {
+  const response = await request("object-type-service", "kennzeichen-config", {}, token);
+  return response.json();
 }
 
 export async function getObjectType(token: string, objectTypeId: number): Promise<ObjectType> {

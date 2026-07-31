@@ -54,6 +54,20 @@ class ObjectTypeSequence(Base):
     naechste_nummer: Mapped[int] = mapped_column(default=1)
 
 
+class KennzeichenConfig(Base):
+    """Globaler Anzeige-Standard für den Kennzeichengenerator (2.2, seit
+    P5e-S3) - bewusst eine einzelne Zeile mit fester ``id=1``, gleiches Muster
+    wie ``OcrConfig``/``UploadConfig`` der anderen Services (eine Installation,
+    keine Mandantentrennung, 3a). Einzelne Dokumentenarten können diesen
+    Standard über ``ObjectType.kennzeichen_display_override`` überschreiben."""
+
+    __tablename__ = "kennzeichen_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    show_before_filename: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ObjectTypeLayout(Base):
     """Formular-Layout je Objekttyp und Verwendungszweck (2.2b, seit P5b-S2):
     ``purpose`` ist ``"display"``|``"search"``|``"upload"``. Nur explizit vom

@@ -23,6 +23,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/users/", labelKey: "nav.users" },
       { href: "/object-types/", labelKey: "nav.objectTypes" },
+      { href: "/kennzeichen-settings/", labelKey: "nav.kennzeichenSettings" },
       { href: "/registry/", labelKey: "nav.registry" },
     ],
   },

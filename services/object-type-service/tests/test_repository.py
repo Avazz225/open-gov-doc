@@ -339,3 +339,14 @@ async def test_generate_next_kennzeichen_concurrent_calls_are_serialized(engine)
 
     results = await asyncio.gather(*[_generate_one() for _ in range(5)])
     assert sorted(results) == [f"{n:03d}" for n in range(1, 6)]
+
+
+async def test_get_kennzeichen_config_creates_default_on_first_read(session):
+    config = await repository.get_kennzeichen_config(session)
+    assert config.show_before_filename is True
+
+
+async def test_update_kennzeichen_config_persists(session):
+    await repository.update_kennzeichen_config(session, show_before_filename=False)
+    config = await repository.get_kennzeichen_config(session)
+    assert config.show_before_filename is False

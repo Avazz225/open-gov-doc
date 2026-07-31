@@ -22,6 +22,10 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS object_type"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE object_type.object_type CASCADE"))
+        # `kennzeichen_config` (P5e-S3) hat keine FK auf `object_type` und wird
+        # daher von der obigen CASCADE-Truncate nicht mit erfasst - eigene
+        # Zeile nötig, sonst bleibt der Zustand zwischen Tests hängen.
+        await conn.execute(text("TRUNCATE object_type.kennzeichen_config"))
     await eng.dispose()
     yield
 

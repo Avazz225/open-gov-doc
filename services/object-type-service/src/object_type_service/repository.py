@@ -6,12 +6,18 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from object_type_service.models import ObjectType, ObjectTypeLayout, ObjectTypeSequence
+from object_type_service.models import (
+    KennzeichenConfig,
+    ObjectType,
+    ObjectTypeLayout,
+    ObjectTypeSequence,
+)
 from object_type_service.schemas import LayoutIn, ObjectTypeCreate, ObjectTypeUpdate
 
 # Kennzeichengenerator-Platzhalter (P5e-S1) - siehe PROGRESS.md "Kennzeichengenerator".
 KENNZEICHEN_PLACEHOLDERS = {"YYYY", "YY", "MM", "DD", "Laufende_Nummer"}
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_]+)\}")
+_KENNZEICHEN_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -284,3 +290,28 @@ async def generate_next_kennzeichen(session: AsyncSession, object_type_id: int) 
         tag=now.day,
         laufende_nummer=laufende_nummer,
     )
+
+
+async def get_kennzeichen_config(session: AsyncSession) -> KennzeichenConfig:
+    """Liest die (einzige) globale Anzeige-Konfiguration, legt sie mit Default
+    an, falls sie noch nie gespeichert wurde (frischer Service, vor dem ersten
+    `PUT /kennzeichen-config`) - gleiches Muster wie `OcrConfig`/`UploadConfig`
+    der anderen Services."""
+    config = await session.get(KennzeichenConfig, _KENNZEICHEN_CONFIG_ID)
+    if config is None:
+        config = KennzeichenConfig(
+            id=_KENNZEICHEN_CONFIG_ID, show_before_filename=True, updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_kennzeichen_config(
+    session: AsyncSession, *, show_before_filename: bool
+) -> KennzeichenConfig:
+    config = await get_kennzeichen_config(session)
+    config.show_before_filename = show_before_filename
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
