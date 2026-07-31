@@ -1,6 +1,6 @@
 # workflow-service
 
-**Verantwortung:** Workflow Engine Grundgerüst (Konzept 7.1) — BPMN-2.0-Import und -Ausführung über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3, [ADR 0018](../adr/0018-spiffworkflow-lgpl-license.md)), Manual/Automatic Tasks, seit P6-S2 auch Timer/Boundary Events (SLA-Zeitüberwachung, [ADR 0020](../adr/0020-sla-timer-polling.md)). Kein UI (Process Designer folgt mit P6-S6), keine Rollenprüfung (folgt mit P6-S4).
+**Verantwortung:** Workflow Engine Grundgerüst (Konzept 7.1) — BPMN-2.0-Import und -Ausführung über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3, [ADR 0018](../adr/0018-spiffworkflow-lgpl-license.md)), Manual/Automatic Tasks, seit P6-S2 auch Timer/Boundary Events (SLA-Zeitüberwachung, [ADR 0020](../adr/0020-sla-timer-polling.md)). Kein UI (Process Designer folgt mit P6-S8), keine Rollenprüfung (folgt mit P6-S4–S6, siehe `PROGRESS.md` "Roadmap-Vorausplanung nach P6-S2").
 
 **Konzept-Referenz:** 7.1
 **Eigenes Postgres-Schema:** `workflow` (Tabellen `process_definition`, `process_instance`)
@@ -80,8 +80,8 @@ Noch keine — folgt in Phase 11.
 - **Keine verteilte Sperre bei mehreren `workflow-service`-Replikaten** — ein horizontal skaliertes Deployment würde denselben Boundary-Timer mehrfach feuern/publizieren, siehe ADR 0020 "Konsequenzen".
 - **Nur `DurationTimerEventDefinition`-basierte Boundary-Timer real getestet** (P6-S2) — `CycleTimerEventDefinition` (wiederkehrende Eskalation) und `TimeDateEventDefinition` (fester Zeitpunkt) werden von SpiffWorkflow nativ unterstützt, sind aber diese Session nicht mit einem eigenen Test abgedeckt.
 - **Keine Case-Service-Anbindung** (Umlaufmappen, prozessspezifische Bearbeitungskopien, 2.3) — **P6-S3**.
-- **Keine Signature Tasks** (3.10) — **P6-S5**.
-- **Kein Process Designer** — Prozesse können ausschließlich per BPMN-XML-Upload importiert werden, keine grafische Modellierung im System selbst — **P6-S6** (eigenständige Frontend-Anwendung mit `bpmn-js`).
+- **Keine Signature Tasks** (3.10) — **P6-S7** (ehemals P6-S5).
+- **Kein Process Designer** — Prozesse können ausschließlich per BPMN-XML-Upload importiert werden, keine grafische Modellierung im System selbst — **P6-S8** (ehemals P6-S6, eigenständige Frontend-Anwendung mit `bpmn-js`, Lizenz siehe [ADR 0021](../adr/0021-bpmn-io-license-watermark.md)).
 - **Keine föderierten/installationsübergreifenden Prozessschritte** (7.4) — spätere Phase.
 - **Import-Validierung ist rein strukturell** (SpiffWorkflow kann die Datei parsen, Prozess-ID auflösbar) — die in 7.1 beschriebene tiefere Validierung gegen im System verfügbare Objekttypen/Ordnerziele/Instanz-Ziele setzt Task-Typen voraus, die es in diesem Grundgerüst noch nicht gibt (z. B. ein "Dokument anlegen"-Task-Typ).
 - **`business_key` ist eine unvalidierte opake Referenz** — kein Abgleich gegen den Document Service, ob eine angegebene `document_id` tatsächlich existiert.

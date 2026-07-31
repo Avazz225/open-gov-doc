@@ -78,13 +78,15 @@ Damit ist "sauber strukturiert und dokumentiert" kein Abschlussschritt, sondern 
 | BPMN-Engine | `SpiffWorkflow` + `bpmn-js-spiffworkflow` — LGPLv3 als unveränderte Dependency akzeptiert, siehe [ADR 0018](docs/adr/0018-spiffworkflow-lgpl-license.md) (13) |
 | OCR | PaddleOCR (Standard) + Tesseract (`pytesseract`, Alternative) (3.9) |
 | Signatur | `pyHanko` (PAdES) (3.10) |
-| Frontend | React/Next.js, primär Client-Side-Rendering (8); `bpmn-js` für den Process Designer (P6-S6) |
+| Frontend | React/Next.js, primär Client-Side-Rendering (8); `bpmn-js`/`bpmn-js-spiffworkflow` für den Process Designer (P6-S8, "bpmn.io License" akzeptiert, siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md)) |
 | Monitoring | Prometheus-Exposition + Grafana-Templates + CheckMK-Anbindung (10.1) |
 | Containerisierung | Docker + `docker-compose` lokal; Kubernetes-Readiness erst ab P10 relevant |
 
 ## Session-Roadmap
 
 Jede Zeile = eine Session (Konzept-Referenz in Klammern). `P4-S3` markiert den ersten großen Meilenstein (lauffähiges Kern-DMS).
+
+**Ab Phase 7** beginnt jede Phase zusätzlich mit einer eigenen Kickoff-Planungssession `PN-S0` (Entscheidung im Rahmen der Roadmap-Vorausplanung nach P6-S2, siehe `PROGRESS.md`): Konzept-Abschnitte der Phase gegen den dann aktuellen Code-/Bibliotheksstand verifizieren, externe Abhängigkeiten/Lizenzen klären (ADR bei Bedarf, analog ADR 0018/0021), Session-Zuschnitt innerhalb der Phase bei Bedarf anpassen (analog der Phase-6-Restrukturierung unten), Recherche-Notizen direkt in diesem Dokument und in `PROGRESS.md` ergänzen — kein Implementierungscode. Vermeidet, dass Detailrecherche für weit entfernte Phasen schon jetzt (und damit bis zur tatsächlichen Umsetzung ggf. veraltet) gemacht wird, macht die nötige Vorarbeit aber explizit statt implizit. Phase 6 selbst bekam kein eigenes `P6-S0`, da diese Vorausplanungsrunde nach P6-S2 rückwirkend genau diese Rolle für den Rest von Phase 6 übernommen hat.
 
 ### Phase 0 — Repo- & Tooling-Fundament
 | Session | Deliverable |
@@ -175,18 +177,24 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 | P5e-S3 | **Admin-UI + User-UI: Generator-Konfiguration und Anzeige** (2.2/8): `ObjectTypeEditor` bekommt (nur bei `applies_to="document"`) ein Format-String-Feld sowie den Tri-State-Anzeige-Override; neue globale Einstellung (gleiches Einzelzeilen-Konfigurationsmuster wie `OcrConfig`/`UploadConfig`) für den Standard-Anzeigeschalter "Kennzeichen vor Dateinamen anzeigen". User-UI (`ExplorerPane`-Liste, Tab-Titel in `DocumentWorkspace`) blendet `attributes["Kennzeichen"]` vor dem Dateinamen ein, wenn der aufgelöste Schalter (Objekttyp-Override falls gesetzt, sonst globaler Standard) aktiv ist; `MetadataPanel` zeigt das Feld nur für `dms-admin`-Rolleninhaber editierbar, sonst rein lesbar. |
 
 ### Phase 6 — Workflow & Vorgänge
+
+**Rest der Phase nach P6-S2 vorausgeplant** (Nutzerwunsch, siehe `PROGRESS.md` "Roadmap-Vorausplanung nach P6-S2"): die ursprüngliche einzelne `P6-S4` ("Generischer Vier-Augen-Approval-Mechanismus + Superuser Break-Glass + Not-Shutdown") bündelte drei eigenständige Konzeptthemen (4.3/4.6/4.8) und zugleich den geplanten Nachhol-Termin für sechs bereits bewusst ungesicherte Stellen aus früheren Sessions (Force-Unlock, Bereichssperren, Nutzerverwaltung, Admin-UI, Workflow Service, Notification Service — siehe `PROGRESS.md` "Autorisierung") — zu viel für eine Session. Aufgeteilt in P6-S4/S5/S6 (Zuordnung der sechs Alt-Fälle nach thematischer Nähe, **provisorisch**, bei jeweiligem Sessionstart zu bestätigen). Die ursprünglichen P6-S5 (Signature Service) und P6-S6 (Process Designer) rücken entsprechend auf P6-S7/P6-S8; Referenzen auf die alten Nummern in bereits bestehenden Dokumenten wurden mit-aktualisiert.
+
 | Session | Deliverable |
 |---|---|
 | P6-S1 | Workflow Engine Grundgerüst: SpiffWorkflow, BPMN-Import/-Ausführung, Manual/Automatic Tasks (7.1) — Lizenzfrage bereits geklärt, siehe [ADR 0018](docs/adr/0018-spiffworkflow-lgpl-license.md) |
 | P6-S2 | SLA-Zeitüberwachung je Schritt (Timer/Boundary Events) + Notification Service |
-| P6-S3 | Case Service: Umlaufmappen, dynamische Referenz + Abschluss-Snapshot, prozessspez. Bearbeitungskopien (2.3) |
-| P6-S4 | Generischer Vier-Augen-Approval-Mechanismus + Superuser Break-Glass + Not-Shutdown (4.3/4.6/4.8) |
-| P6-S5 | Signature Service: pyHanko/PAdES, SES/AES/QES, Signature-Task-Typ (3.10) |
-| P6-S6 | **Process-Designer-UI** (eigenständige Frontend-Anwendung, **nicht** Teil der Admin-UI, siehe 7.1/8): grafische BPMN-2.0-Modellierung über `bpmn-js` gegen die Workflow Engine aus P6-S1, Import/Export von BPMN-XML, Validierung referenzierter Objekttypen/Ordnerziele/Instanz-Ziele beim Import |
+| P6-S3 | Case Service: Umlaufmappen, dynamische Referenz + Abschluss-Snapshot, prozessspez. Bearbeitungskopien (2.3). Vermutlich ein neuer, eigenständiger `case-service` (Konvention: eigener Microservice je fachlicher Domäne, wie workflow-service/notification-service) — Umlaufmappe ist ein RBAC-/constraint-fähiges Objekt mit eigenem Objekttyp und eigenem Workflow-Lebenszyklus (Abhängigkeit auf workflow-service aus P6-S1). Prozessspezifische Bearbeitungskopien (z. B. Schwärzungen für Akteneinsicht) sind laut 2.3 ein eigener Objekttyp mit Verweis auf Ursprungsdokument+Vorgang — vermutlich eher ein neuer Zweig im Document Service als im Case Service selbst, bei Sessionstart gegen den dann aktuellen document-service-Stand zu prüfen. **Cross-Phase-Abhängigkeit**: P15-S3 (Posteingang/Poststelle) baut später auf der hier entstehenden Umlaufmappen-API auf. |
+| P6-S4 | Generischer Vier-Augen-Approval-Mechanismus (4.3) + Retrofit: Force-Unlock (Document Service) und Bereichssperren (Permission Service) — beide von 4.3 selbst als Beispiel genannt und seit P3-S2/P3-S4 bewusst ungated. *(Provisorische Retrofit-Zuordnung, siehe Phase-Vorbemerkung oben.)* |
+| P6-S5 | Superuser Break-Glass + abgespeckte, domänengetrennte Admin-Rollen (4.6) + Retrofit: Auth-Service-Nutzerverwaltung (`/users`) und Admin-UI-Rollenprüfung hinter den neuen Domänenrollen (u. a. "Nutzer-/Rechteverwaltung") gaten — beide seit P4-S3 bewusst ungated. *(Provisorische Retrofit-Zuordnung, siehe Phase-Vorbemerkung oben.)* |
+| P6-S6 | Not-Shutdown: systemweite Notfallsperre & Wartungsmodus (4.8, baut auf der Break-Glass-Aktivierung aus P6-S5 auf, da der Wartungsmodus nur darüber wieder verlassen werden kann) + Retrofit: Workflow-Service-Autorisierung (Instanzstart/Task-Abschluss/Script-Task-Ausführung, seit P6-S1 ungated) und Notification-Service-Aufrufautorisierung (`POST /notifications`, seit P6-S2 ungated, inkl. Empfänger-Auflösung ohne RBAC). *(Provisorische Retrofit-Zuordnung, siehe Phase-Vorbemerkung oben.)* |
+| P6-S7 | Signature Service: pyHanko/PAdES, SES/AES/QES, Signature-Task-Typ (3.10). `pyHanko` ist MIT-lizenziert (kein ADR-Bedarf wie bei SpiffWorkflow/bpmn-js). Empfohlener Zuschnitt: Signature Service + austauschbare Signature-Provider-Connectoren (Plugin-Prinzip wie Storage-Backends/CMIS, 3.3) bauen, für dieses Grundgerüst nur SES/AES mit systeminternen/selbstsignierten Schlüsseln real umsetzen/testen — ein echter akkreditierter QTSP für QES braucht eine externe Geschäftsbeziehung und ist kein Automatisierungs-/Testfall dieser Session. *(Ehemals P6-S5.)* |
+| P6-S8 | **Process-Designer-UI** (eigenständige Frontend-Anwendung, **nicht** Teil der Admin-UI, siehe 7.1/8): grafische BPMN-2.0-Modellierung über `bpmn-js`/`bpmn-js-spiffworkflow` gegen die Workflow Engine aus P6-S1, Import/Export von BPMN-XML, Validierung referenzierter Objekttypen/Ordnerziele/Instanz-Ziele beim Import. **Lizenzfrage bereits geklärt**: `bpmn-js`/`bpmn-js-spiffworkflow` stehen unter der "bpmn.io License" (freie kommerzielle Nutzung, aber fest einprogrammiertes, nicht entfernbares bpmn.io-Wasserzeichen auf jedem gerenderten Diagramm, keine Kauf-Option zum Entfernen gefunden) — akzeptiert wie ADR 0018 bei SpiffWorkflow, siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). *(Ehemals P6-S6.)* |
 
 ### Phase 7 — Compliance & Aussonderung
 | Session | Deliverable |
 |---|---|
+| P7-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 5.2/5.2a/5.4/5.6 gegen den dann aktuellen Code-/Bibliotheksstand verifizieren, externe Abhängigkeiten/Lizenzen (u. a. XDOMEA-Tooling, KDBX-Bibliothek) klären, Session-Zuschnitt bei Bedarf anpassen |
 | P7-S1 | Aufbewahrung/Legal Hold + Zwangslöschung inkl. Löschregister (5.2/5.2a) |
 | P7-S2 | Reporting Service (Standardberichte) + Forensik-Trace (5.4) |
 | P7-S3 | Aussonderung & Langzeitarchivierung: PDF/A, XDOMEA, optionale KDBX-Schlüsselverwaltung (5.6) |
@@ -194,6 +202,7 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 ### Phase 8 — Diagnose-Werkzeuge
 | Session | Deliverable |
 |---|---|
+| P8-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 6.1/6.2 verifizieren, `pglast`/`libpg_query`-Bibliotheksstand + Lizenz prüfen, Session-Zuschnitt bei Bedarf anpassen |
 | P8-S1 | Query & Trace Service: Lesezugriff, pglast/libpg_query-Erweiterung (6.1) |
 | P8-S2 | Manipulationsmodus + alle Sicherungsstufen (Dry-Run, Vier-Augen, kritische Tabellen) |
 | P8-S3 | CLI-Tool (6.2) |
@@ -201,12 +210,14 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 ### Phase 9 — Lizenzsystem
 | Session | Deliverable |
 |---|---|
+| P9-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 9.1/9.2/9.3 verifizieren, Signaturverfahren für die Lizenzdatei festlegen, Session-Zuschnitt bei Bedarf anpassen |
 | P9-S1 | License Service: Dimensionen, signierte Lizenzdatei, Nutzungsprüfung (9.1/9.2) |
 | P9-S2 | Lizenzvermittlung über Registry, Demo-Modus/Sperrverhalten, Admin-UI-Integration (9.3) |
 
 ### Phase 10 — Orchestrierung & Rolling Updates
 | Session | Deliverable |
 |---|---|
+| P10-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 3.8/10.5 verifizieren, Plattform-Scheduler-Landschaft (Docker Compose/Swarm/Kubernetes) gegen den dann aktuellen Deploy-Stand prüfen, Session-Zuschnitt bei Bedarf anpassen |
 | P10-S1 | Plugin Orchestration Service Grundgerüst: Manifest-Format, Cold-Start-Platzierung (3.8) |
 | P10-S2 | Zeitprofil-bewusste Platzierung + FFD-Fallback + Plattform-Scheduler-Erkennung |
 | P10-S3 | Rolling Updates: Drain-Mechanismus, Expand/Contract bei Schema-Änderungen (10.5) |
@@ -214,6 +225,7 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 ### Phase 11 — Monitoring & Backup/Restore
 | Session | Deliverable |
 |---|---|
+| P11-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 10.1/10.4 verifizieren, Prometheus-/Grafana-/CheckMK-Anbindung gegen den dann aktuellen Infrastruktur-Stand prüfen, Session-Zuschnitt bei Bedarf anpassen |
 | P11-S1 | Sensor-Konzept + Monitoring Service, Prometheus-Exposition, Sensor-Registry (10.1) |
 | P11-S2 | Grafana-Dashboard-Templates + CheckMK-Anbindung |
 | P11-S3 | Backup/Restore Orchestrator: koordinierte Sicherung, Point-in-Time-Konsistenz (10.4) |
@@ -222,6 +234,7 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 ### Phase 12 — Connectoren & Migration
 | Session | Deliverable |
 |---|---|
+| P12-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 3.3/7.2/7.3 verifizieren, CMIS-vs-WebDAV-Referenz-Connector-Entscheidung vorbereiten, Session-Zuschnitt bei Bedarf anpassen |
 | P12-S1 | Connector-SDK + Referenz-Connector (CMIS oder WebDAV) (3.3) |
 | P12-S2 | Migration/Transfer Service: Sperren→Kopieren→Verifizieren→Freigabe→Löschung, Dry-Run (7.2) |
 | P12-S3 | Konfigurationsimport/-export Service (JSON, Schema-Versionierung) (7.3) |
@@ -229,6 +242,7 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 ### Phase 13 — Mehrfachinstallation & Föderation
 | Session | Deliverable |
 |---|---|
+| P13-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 3a/7.4 verifizieren, Ende-zu-Ende-Verschlüsselungsverfahren für föderierte Workflow-Schritte vorbereiten, Session-Zuschnitt bei Bedarf anpassen |
 | P13-S1 | Mehrfachinstallations-Grundlagen: Isolation, Installations-ID (3a) |
 | P13-S2 | Fleet-/Lizenz-Management-Service (übergeordnete Verwaltungsebene) |
 | P13-S3 | Federation Hub Service Grundgerüst: Adressbuch, Schaltzentrale, Versionskompatibilität (7.4) |
@@ -237,6 +251,7 @@ Nachträglich eingeschoben nach Abschluss von Phase 5d, gleiches Präzedenzmuste
 ### Phase 14 — Vergleich & Erweiterungs-Vorbereitung
 | Session | Deliverable |
 |---|---|
+| P14-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitte 7.5/8/12.2 verifizieren, Session-Zuschnitt bei Bedarf anpassen |
 | P14-S1 | Delta-/Vergleichsfunktion zwischen Installationen, Ignore-Regex (7.5) |
 | P14-S2 | Reviewer/Approval-UI + Migrations-Konsole (8) |
 | P14-S3 | Backlog-Kandidaten aus 12.2 (ERP-Konnektoren, Mobile, KI) sauber als Plugin-Erweiterungspunkte vorbereiten (nicht implementieren) + finaler Repo-weiter Doku-/Struktur-Audit |
@@ -247,6 +262,7 @@ Nachträglich eingeschoben (Nutzerwunsch): neben der konfigurierbaren Dokument-R
 
 | Session | Deliverable |
 |---|---|
+| P15-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitt 2.5 gegen den dann aktuellen Stand von Phase 7 (Aussonderung)/Phase 12 (Config-Import/Export)/Phase 13 (Federation Hub) verifizieren, da P15-S3/S5/S6 direkt darauf aufbauen, Session-Zuschnitt bei Bedarf anpassen |
 | P15-S1 | **Papierkorb-Familie** (2.5/4.6): regulärer Papierkorb + persönlicher Papierkorb (Filteransicht "eigene Löschmarkierungen") + strukturell getrennter Verschlusssachen-Papierkorb (Kennzeichnung über Objekttyp/Attribut, 2.2). Neue domänengetrennte Admin-Rollen **Löschadministration** und **Löschadministration (Verschlusssachen)** (4.6) mit endgültigem Löschrecht ausschließlich aus dem jeweiligen Papierkorb - reguläre Nutzer können nur markieren (Soft-Delete, bereits vorhanden), nicht endgültig löschen. |
 | P15-S2 | **Quarantäne-Bereich** (2.5/10.3): UI-Exposition der bereits bestehenden Virenscan-Quarantäne (storage-service `quarantine/{scan_id}`-Konvention, virus-scan-service) als eigener, rechtebeschränkter Bereich mit auditierten Aktionen "endgültig löschen" und "freigeben" (Fehlalarm-Fall). |
 | P15-S3 | **Posteingang/Postausgang + Poststelle-Rolle** (2.5/3.3/7.1): technischer Empfang extern eingehender/ausgehender Korrespondenz (z. B. E-Mail-Connector nach dem Connector-Prinzip, 3.3), Sichtung/Zuordnung durch eine dedizierte Poststelle-Rolle in einen Aktenplan oder eine (neue/bestehende) Umlaufmappe (2.3), optional als BPMN-Zuordnungsschritt (7.1). |
@@ -260,9 +276,10 @@ Nachträglich eingeschoben (Nutzerwunsch): der bisherige feste Drei-Spalten-Expl
 
 | Session | Deliverable |
 |---|---|
+| P16-S0 | Phasen-Kickoff-Planung (kein Implementierungscode): Konzept-Abschnitt 8 (flexibler Arbeitsbereich) verifizieren, Docking-Layout-Bibliothek für React evaluieren, Session-Zuschnitt bei Bedarf anpassen |
 | P16-S1 | **Dockbares Arbeitsbereich-Grundgerüst**: Panels (Explorer, Dokumenttabs, Vorschau, Metadaten) frei andockbar/verschiebbar/stapelbar, mehrere Dokumente gleichzeitig sicht- und anordenbar; Dokumenttabs künftig über der Vorschau statt über dem Explorer (neue Standardanordnung, 2.5/8), Explorer als eigenständiges Panel daneben. Layout-Präferenz je Gerät lokal gespeichert (nicht geräteübergreifend wie das Farbschema), mit "Zurücksetzen auf Standardanordnung". Bewusst **kein** Bestandteil dieser Session: freie CSS-/Themeanpassung durch Endnutzer (Konzept 8, bewusst zurückgestellt). |
 
-**67 Sessions insgesamt** (ursprünglich 43, seit P4-S3 um P4-S4/S5/S6 und P6-S6 ergänzt — direktes Nutzer-Feedback nach dem ersten echten Browser-Test des MVP; seit P5-S4 um Phase 5b (P5b-S1–S6) ergänzt — nachträglicher Ausbauwunsch nach Abschluss der Verarbeitungs-Phase; seit P5b-S6 um Phase 5c (P5c-S1/S2) ergänzt — Konsolidierungsrunde offener Punkte; seit P5c-S2 um Phase 5d (P5d-S1/S2) ergänzt — Nutzer-Feedback zu Vorschau-Lücken/OCR-Kostenkontrolle/Format-Governance/Upload-UX; seit P5d-S2 um Phase 5e (P5e-S1–S3) ergänzt — Nutzerwunsch nach einem konfigurierbaren Kennzeichengenerator (Aktenzeichen); seit P5e um Phase 15 (P15-S1–S6, Sonderbereiche/2.5) und Phase 16 (P16-S1, flexibler Arbeitsbereich) ergänzt — konzeptionelle Erweiterung um Sonderbereiche und ein VS-Code-artiges Arbeitsbereich-Layout, siehe `PROGRESS.md`), davon 12 bis zum MVP-Meilenstein (P4-S3).
+**79 Sessions insgesamt** (ursprünglich 43, seit P4-S3 um P4-S4/S5/S6 und P6-S6 [jetzt P6-S8, siehe unten] ergänzt — direktes Nutzer-Feedback nach dem ersten echten Browser-Test des MVP; seit P5-S4 um Phase 5b (P5b-S1–S6) ergänzt — nachträglicher Ausbauwunsch nach Abschluss der Verarbeitungs-Phase; seit P5b-S6 um Phase 5c (P5c-S1/S2) ergänzt — Konsolidierungsrunde offener Punkte; seit P5c-S2 um Phase 5d (P5d-S1/S2) ergänzt — Nutzer-Feedback zu Vorschau-Lücken/OCR-Kostenkontrolle/Format-Governance/Upload-UX; seit P5d-S2 um Phase 5e (P5e-S1–S3) ergänzt — Nutzerwunsch nach einem konfigurierbaren Kennzeichengenerator (Aktenzeichen); seit P5e um Phase 15 (P15-S1–S6, Sonderbereiche/2.5) und Phase 16 (P16-S1, flexibler Arbeitsbereich) ergänzt — konzeptionelle Erweiterung um Sonderbereiche und ein VS-Code-artiges Arbeitsbereich-Layout; **seit P6-S2 um 12 weitere Sessions ergänzt** (Roadmap-Vorausplanung, siehe `PROGRESS.md` "Roadmap-Vorausplanung nach P6-S2"): die ursprüngliche P6-S4 wurde in P6-S4/S5/S6 aufgeteilt (+2, ehemalige Signature/Process-Designer-Sessions rücken auf P6-S7/S8), und jede Phase ab Phase 7 bekam eine neue Kickoff-Planungssession `PN-S0` vorangestellt (+10, siehe "Session-Roadmap"-Hinweis oben) — davon 12 bis zum MVP-Meilenstein (P4-S3).
 
 ## PROGRESS.md — Resume-Mechanismus
 
@@ -276,5 +293,5 @@ Nachträglich eingeschoben (Nutzerwunsch): der bisherige feste Drei-Spalten-Expl
 
 - `docker-compose up` im betroffenen Bereich muss fehlerfrei starten.
 - `pytest` je Service läuft grün (Unit + einfache Integrationstests gegen die Compose-Umgebung).
-- Bei UI-Sessions (P4-S2, P4-S3, P4-S4, P4-S5, P4-S6, P5b-S3, P5b-S4, P6-S6, P14-S2, P15-S1, P15-S3, P15-S4, P16-S1): Dev-Server starten, Kernpfad (Login → Navigation → Upload/Freigabe je nach Session) manuell im Browser durchklicken, nicht nur Typecheck/Build. **Erfahrungswert aus P4-S2/S3**: Reine curl-basierte Verifikation reicht nicht aus — ein CORS-Bug (fehlende Preflight-Behandlung im Gateway) und Layout-/UX-Mängel wurden erst durch echtes Browser-Testen der Nutzerin/des Nutzers sichtbar. Steht in der jeweiligen Session-Umgebung kein Browser zur Verfügung, ist das explizit als Einschränkung zu kommunizieren statt stillschweigend nur curl-Checks als ausreichend zu behandeln.
+- Bei UI-Sessions (P4-S2, P4-S3, P4-S4, P4-S5, P4-S6, P5b-S3, P5b-S4, P6-S8, P14-S2, P15-S1, P15-S3, P15-S4, P16-S1): Dev-Server starten, Kernpfad (Login → Navigation → Upload/Freigabe je nach Session) manuell im Browser durchklicken, nicht nur Typecheck/Build. **Erfahrungswert aus P4-S2/S3**: Reine curl-basierte Verifikation reicht nicht aus — ein CORS-Bug (fehlende Preflight-Behandlung im Gateway) und Layout-/UX-Mängel wurden erst durch echtes Browser-Testen der Nutzerin/des Nutzers sichtbar. Steht in der jeweiligen Session-Umgebung kein Browser zur Verfügung, ist das explizit als Einschränkung zu kommunizieren statt stillschweigend nur curl-Checks als ausreichend zu behandeln.
 - Ab P8 zusätzlich: CLI-Smoke-Test der jeweils neuen Funktionalität.

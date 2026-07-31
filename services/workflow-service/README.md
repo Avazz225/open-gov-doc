@@ -4,7 +4,7 @@ Workflow Engine Grundgerüst (Konzept 7.1): BPMN-2.0-Import und -Ausführung
 über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3,
 siehe [ADR 0018](../../docs/adr/0018-spiffworkflow-lgpl-license.md)), Manual/
 Automatic Tasks. Reines Backend-Grundgerüst - kein UI, keine Rollenprüfung
-(erst [P6-S4](../../PROGRESS.md)), kein Process Designer (erst P6-S6).
+(erst [P6-S4–S6](../../PROGRESS.md)), kein Process Designer (erst P6-S8).
 
 ## Endpunkte
 
