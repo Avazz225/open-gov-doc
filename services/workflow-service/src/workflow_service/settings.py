@@ -15,3 +15,8 @@ class Settings(BaseServiceSettings):
     # Task-Upload) verlangen die Domain-Admin-Capability `admin.object_config`;
     # der SLA-Poll-Loop überspringt seinen Tick während aktivem Wartungsmodus.
     permission_service_base_url: str = "http://localhost:8004"
+
+    # Signature Task (3.10, P6-S7): `POST .../tasks/{id}/complete` verlangt bei
+    # einer als `taskType=signature` markierten Task eine gültige `signature_id`,
+    # siehe `signature_client.py`.
+    signature_service_base_url: str = "http://localhost:8017"

@@ -111,6 +111,7 @@ describe("ObjectTypeEditor", () => {
         icon: null,
         kennzeichenFormat: null,
         kennzeichenDisplayOverride: null,
+        requiredSignatureLevel: null,
       })
     );
     // Kein abweichender Anzeigename vergeben -> kein Layout-Override nötig.
@@ -176,6 +177,7 @@ describe("ObjectTypeEditor", () => {
         icon: null,
         kennzeichenFormat: null,
         kennzeichenDisplayOverride: null,
+        requiredSignatureLevel: null,
       })
     );
   });

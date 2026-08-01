@@ -425,6 +425,7 @@ services:
       DMS_SELF_ADDRESS: http://workflow-service:8000
       DMS_SLA_POLL_INTERVAL_SECONDS: ${WORKFLOW_SLA_POLL_INTERVAL_SECONDS:-30}
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_SIGNATURE_SERVICE_BASE_URL: http://signature-service:8000
     ports:
       - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
     depends_on:
@@ -433,6 +434,8 @@ services:
       nats:
         condition: service_healthy
       permission-service:
+        condition: service_started
+      signature-service:
         condition: service_started
     networks:
       - dms-net
@@ -489,6 +492,35 @@ services:
       document-service:
         condition: service_started
       object-type-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  signature-service:
+    build:
+      context: ..
+      dockerfile: services/signature-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://signature-service:8000
+    ports:
+      - "${SIGNATURE_SERVICE_PORT:-8017}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      document-service:
+        condition: service_started
+      object-type-service:
+        condition: service_started
+      auth-service:
         condition: service_started
     networks:
       - dms-net

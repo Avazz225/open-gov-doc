@@ -219,6 +219,123 @@ def test_get_unknown_instance_returns_404(client):
     assert response.status_code == 404
 
 
+def test_get_ready_tasks_surfaces_signature_task_extensions(
+    client, signature_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, signature_task_bpmn, name="Vertragsunterschrift", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"document_id": "doc-1"}},
+    ).json()
+
+    tasks = client.get(f"/instances/{instance['id']}/tasks").json()
+    assert len(tasks) == 1
+    assert tasks[0]["extensions"] == {"taskType": "signature", "requiredLevel": "aes"}
+
+
+def test_complete_signature_task_without_signature_id_returns_400(
+    client, signature_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, signature_task_bpmn, name="Vertragsunterschrift", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"document_id": "doc-1"}},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete", json={"completed_by": "bob"}
+    )
+    assert response.status_code == 400
+
+
+def test_complete_signature_task_with_unknown_signature_id_returns_400(
+    client, signature_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, signature_task_bpmn, name="Vertragsunterschrift", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"document_id": "doc-1"}},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "bob", "signature_id": "999999"},
+    )
+    assert response.status_code == 400
+
+
+def test_complete_signature_task_with_mismatched_document_returns_400(
+    client, signature_task_bpmn, admin_headers, real_signature
+):
+    document_id, signature_id, _level = real_signature
+    definition_id = _upload_definition(
+        client, signature_task_bpmn, name="Vertragsunterschrift", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"document_id": "ein-anderes-dokument"}},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "bob", "signature_id": str(signature_id)},
+    )
+    assert response.status_code == 400
+    assert document_id != "ein-anderes-dokument"
+
+
+def test_complete_signature_task_with_insufficient_level_returns_400(
+    client, signature_task_bpmn, admin_headers, real_ses_signature
+):
+    document_id, signature_id, level = real_ses_signature
+    assert level == "ses"
+    definition_id = _upload_definition(
+        client, signature_task_bpmn, name="Vertragsunterschrift", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"document_id": document_id}},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "bob", "signature_id": str(signature_id)},
+    )
+    assert response.status_code == 400
+
+
+def test_complete_signature_task_with_valid_signature_succeeds(
+    client, signature_task_bpmn, admin_headers, real_signature
+):
+    document_id, signature_id, level = real_signature
+    assert level == "aes"
+    definition_id = _upload_definition(
+        client, signature_task_bpmn, name="Vertragsunterschrift", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"document_id": document_id}},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "bob", "signature_id": str(signature_id)},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+
 def test_list_instances_filters_by_status(client, manual_task_bpmn, no_tasks_bpmn, admin_headers):
     running_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers

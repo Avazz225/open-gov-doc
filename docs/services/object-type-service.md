@@ -1,18 +1,18 @@
 # object-type-service
 
-**Verantwortung:** Objekttyp-Definitionen (Attribute, Pflichtfelder, Namenskonventionen, bedingte Regeln) für Dokumente und Ordner (Konzept 2.2) sowie deren Validierung (4.5, "Constraint Engine").
+**Verantwortung:** Objekttyp-Definitionen (Attribute, Pflichtfelder, Namenskonventionen, bedingte Regeln) für Dokumente und Ordner (Konzept 2.2) sowie deren Validierung (4.5, "Constraint Engine"). Seit **P6-S7** trägt jede Dokumentklasse zusätzlich ein optionales Mindest-Signaturniveau (3.10), durchgesetzt vom `signature-service`, nicht hier.
 
-**Konzept-Referenz:** 2.2, 4.5
+**Konzept-Referenz:** 2.2, 4.5, 3.10
 **Eigenes Postgres-Schema:** `object_type` (Tabelle `object_type`)
 
 ## API
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/object-types` | Anlegen (`name`, `applies_to`, `attributes`, `naming_constraints`, `conditions`, `allowed_parent_types`, `icon`) — 409 bei doppeltem Namen, 422 bei ungültigem `allowed_parent_types`/`icon` (siehe 2.2a unten) |
+| `POST` | `/object-types` | Anlegen (`name`, `applies_to`, `attributes`, `naming_constraints`, `conditions`, `allowed_parent_types`, `icon`, `required_signature_level`) — 409 bei doppeltem Namen, 422 bei ungültigem `allowed_parent_types`/`icon`/`required_signature_level` (siehe 2.2a bzw. "Mindest-Signaturniveau" unten) |
 | `GET` | `/object-types?applies_to=document\|folder` | Liste, optional gefiltert |
 | `GET` | `/object-types/{id}` | Einzelne Definition |
-| `PUT` | `/object-types/{id}` | Definition ersetzen (Attribute/Naming/Conditions/`allowed_parent_types`/`icon`) — `name`/`applies_to` bleiben unveränderlich |
+| `PUT` | `/object-types/{id}` | Definition ersetzen (Attribute/Naming/Conditions/`allowed_parent_types`/`icon`/`required_signature_level`) — `name`/`applies_to` bleiben unveränderlich |
 | `DELETE` | `/object-types/{id}` | Löschen |
 | `POST` | `/object-types/{id}/validate` | `{name, attributes, parent_object_type_id?, parent_is_root?}` → `{valid, errors}` — Platzierungs-Parameter seit P5b-S1 (2.2a) |
 | `GET` | `/object-types/{id}/layouts/{purpose}` | Formular-Layout (`purpose`: `display`\|`search`\|`upload`, 2.2b, seit P5b-S2) — liefert ein gespeichertes Override (`is_custom: true`) oder ein aus den aktuellen Attributen generiertes Smart Layout (`is_custom: false`), 404 bei unbekannter `object_type_id` |
@@ -25,7 +25,7 @@
 
 ## Datenmodell
 
-`object_type`: `id`, `name` (unique), `applies_to` (`"document"`\|`"folder"`), `attributes` (JSON-Liste, siehe Schema unten), `naming_constraints` (JSON, nullable), `conditions` (JSON-Liste), `allowed_parent_types` (JSON-Liste von Objekttyp-Namen oder `"$ROOT"`, nullable — 2.2a, seit P5b-S1), `icon` (String, nullable, nur für `applies_to="folder"` — 2.2a, seit P5b-S1), `kennzeichen_format` (String, nullable, nur für `applies_to="document"` — 2.2, seit P5e-S1), `kennzeichen_display_override` (Boolean, nullable, Tri-State, nur für `applies_to="document"` — 2.2, seit P5e-S1), `created_at`/`updated_at`.
+`object_type`: `id`, `name` (unique), `applies_to` (`"document"`\|`"folder"`), `attributes` (JSON-Liste, siehe Schema unten), `naming_constraints` (JSON, nullable), `conditions` (JSON-Liste), `allowed_parent_types` (JSON-Liste von Objekttyp-Namen oder `"$ROOT"`, nullable — 2.2a, seit P5b-S1), `icon` (String, nullable, nur für `applies_to="folder"` — 2.2a, seit P5b-S1), `kennzeichen_format` (String, nullable, nur für `applies_to="document"` — 2.2, seit P5e-S1), `kennzeichen_display_override` (Boolean, nullable, Tri-State, nur für `applies_to="document"` — 2.2, seit P5e-S1), `required_signature_level` (String `"ses"`\|`"aes"`\|`"qes"`, nullable, nur für `applies_to="document"` — 3.10, seit P6-S7), `created_at`/`updated_at`.
 
 `object_type_layout` (2.2b, seit P5b-S2): `object_type_id` + `purpose` (`"display"`\|`"search"`\|`"upload"`) als zusammengesetzter Primärschlüssel (Fremdschlüssel auf `object_type.id`, `ON DELETE CASCADE`), `layout` (JSON: `{rows: [{columns: [{attribute, label, required}]}], responsive_breakpoint_px}`), `created_at`/`updated_at`. Nur explizite Abweichungen vom generierten Smart Layout werden hier gespeichert (siehe ADR 0014) — fehlt eine Zeile, gilt automatisch der aktuelle generierte Stand.
 
@@ -74,6 +74,10 @@ Jede Dokumentklasse (`applies_to="document"`) kann ein Format-String-Feld `kennz
 - **Wer die Vergabe tatsächlich auslöst und wo `Kennzeichen` landet** (reservierter Attributschlüssel, `403` bei nachträglicher Änderung ohne `dms-admin`-Rolle) ist Aufgabe des Document Service (**P5e-S2**, siehe `docs/services/document-service.md`) — dieser Service liefert nur den fertig gerenderten String auf Anfrage, ohne selbst zu wissen, dass/wo er verwendet wird.
 - **Globaler Anzeige-Standard** (`kennzeichen_config`, seit **P5e-S3**): `GET`/`PUT /kennzeichen-config` verwalten einen einzigen Schalter `show_before_filename` (Default `true`) — der von den Frontends aufgelöste effektive Wert je Dokumentenart ist `kennzeichen_display_override` (falls nicht `null`), sonst dieser globale Standard. Die Auflösung selbst passiert **client-seitig** in Admin-UI/User-UI, nicht hier — dieser Service liefert nur die beiden Rohwerte, kein eigener "resolved"-Endpunkt (kein Konsument bräuchte ihn synchron genug, um den zusätzlichen Roundtrip zu rechtfertigen).
 
+## Mindest-Signaturniveau (3.10, seit P6-S7)
+
+`required_signature_level` (`null`/`"ses"`/`"aes"`/`"qes"`) ist wie `kennzeichen_format`/`kennzeichen_display_override` nur für Dokumentklassen zulässig (`422` bei Ordnerklassen, gleiche Validierungsfunktion wie die übrigen dokumentklassen-exklusiven Felder). Dieser Service **setzt das Niveau nicht selbst durch** — er liefert es nur auf Anfrage; die eigentliche Durchsetzung passiert bei jedem Signiervorgang im `signature-service` (`GET /object-types/{id}` dort abgefragt, `400` bei zu niedrigem angefordertem Niveau), siehe `docs/services/signature-service.md`.
+
 ## Formular-Layouts (2.2b, seit P5b-S2)
 
 Jeder Objekttyp trägt zusätzlich zu seinen Attributen ein Formular-Layout je Verwendungszweck (`display`/`search`/`upload`) — ein Zeilen/Spalten-Grid, das steuert, wie die Attribute in der User-UI (Metadaten-Anzeige, Suchmaske, Upload-Dialog, alle erst ab P5b-S4 tatsächlich angebunden) angeordnet werden.
@@ -109,7 +113,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/object-type-service/tests`: Repository (CRUD, `allowed_parent_types`/`icon`-Validierung inkl. Ablehnung unbekannter/Nicht-Ordner-Referenzen, Layout-Upsert/-Reset/-Attributreferenzprüfung, Kennzeichengenerator-Format-Validierung, Jahres-Zähler inkl. Unabhängigkeit je Objekttyp sowie ein `asyncio.gather`-Nebenläufigkeitstest mit fünf parallelen Aufrufen, globale Kennzeichen-Konfiguration inkl. Default), Smart-Layout-Generierung (`test_layout.py`, reine Funktionslogik), API (`/validate` inkl. `parent_is_root`/`parent_object_type_id`-Auflösung, 422 bei ungültigen 2.2a-Feldern, `/layouts/{purpose}` inkl. generiertem vs. gespeichertem Layout, 422/404-Fälle, `/next-kennzeichen` inkl. 404 ohne Format, `/kennzeichen-config` GET/PUT). **67 Tests, alle grün.**
+- `uv run pytest services/object-type-service/tests`: Repository (CRUD, `allowed_parent_types`/`icon`-Validierung inkl. Ablehnung unbekannter/Nicht-Ordner-Referenzen, Layout-Upsert/-Reset/-Attributreferenzprüfung, Kennzeichengenerator-Format-Validierung, Jahres-Zähler inkl. Unabhängigkeit je Objekttyp sowie ein `asyncio.gather`-Nebenläufigkeitstest mit fünf parallelen Aufrufen, globale Kennzeichen-Konfiguration inkl. Default), Smart-Layout-Generierung (`test_layout.py`, reine Funktionslogik), API (`/validate` inkl. `parent_is_root`/`parent_object_type_id`-Auflösung, 422 bei ungültigen 2.2a-Feldern, `/layouts/{purpose}` inkl. generiertem vs. gespeichertem Layout, 422/404-Fälle, `/next-kennzeichen` inkl. 404 ohne Format, `/kennzeichen-config` GET/PUT). Seit **P6-S7** zusätzlich: `required_signature_level` auf Ordnerklassen abgelehnt (422), auf Dokumentklassen persistiert (Repository + API). **71 Tests, alle grün** (vorher 67).
 - **Live-Smoke-Test** (P5e-S1): `docker compose build object-type-service` + `up -d`, Objekttyp mit `kennzeichen_format` angelegt, zwei `POST .../next-kennzeichen`-Aufrufe lieferten `2026-001`/`2026-002`, dritter Objekttyp ohne Format lieferte `404` — Testdaten anschließend wieder gelöscht.
 
 ## Offene Punkte

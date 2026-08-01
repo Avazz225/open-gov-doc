@@ -101,6 +101,16 @@ def _validate_kennzeichen_display_override(applies_to: str, value: bool | None) 
         )
 
 
+def _validate_required_signature_level(applies_to: str, value: str | None) -> None:
+    """Mindest-Signaturniveau (3.10, seit P6-S7) ist nur für Dokumentklassen
+    sinnvoll - Ordner werden nicht signiert, gleiche Einschränkung wie beim
+    Kennzeichengenerator."""
+    if value is not None and applies_to != "document":
+        raise InvalidFieldError(
+            "required_signature_level ist nur für Dokumentklassen (applies_to='document') zulässig"
+        )
+
+
 async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -> ObjectType:
     existing = await session.execute(select(ObjectType).where(ObjectType.name == payload.name))
     if existing.scalar_one_or_none() is not None:
@@ -109,6 +119,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_icon(payload.applies_to, payload.icon)
     _validate_kennzeichen_format(payload.applies_to, payload.kennzeichen_format)
     _validate_kennzeichen_display_override(payload.applies_to, payload.kennzeichen_display_override)
+    _validate_required_signature_level(payload.applies_to, payload.required_signature_level)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -121,6 +132,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         icon=payload.icon,
         kennzeichen_format=payload.kennzeichen_format,
         kennzeichen_display_override=payload.kennzeichen_display_override,
+        required_signature_level=payload.required_signature_level,
         created_at=now,
         updated_at=now,
     )
@@ -156,6 +168,7 @@ async def update_object_type(
     _validate_kennzeichen_display_override(
         object_type.applies_to, payload.kennzeichen_display_override
     )
+    _validate_required_signature_level(object_type.applies_to, payload.required_signature_level)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
@@ -163,6 +176,7 @@ async def update_object_type(
     object_type.icon = payload.icon
     object_type.kennzeichen_format = payload.kennzeichen_format
     object_type.kennzeichen_display_override = payload.kennzeichen_display_override
+    object_type.required_signature_level = payload.required_signature_level
     object_type.updated_at = datetime.now(UTC)
     await session.flush()
     return object_type

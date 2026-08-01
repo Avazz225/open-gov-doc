@@ -109,6 +109,10 @@ export function ObjectTypeEditor() {
   const [kennzeichenDisplayOverride, setKennzeichenDisplayOverride] = useState<
     "default" | "true" | "false"
   >("default");
+  // Mindest-Signaturniveau (3.10, seit P6-S7) - "none" = keine Anforderung.
+  const [requiredSignatureLevel, setRequiredSignatureLevel] = useState<
+    "none" | "ses" | "aes" | "qes"
+  >("none");
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -144,6 +148,7 @@ export function ObjectTypeEditor() {
     setAllowedParentTypes(new Set());
     setKennzeichenFormat("");
     setKennzeichenDisplayOverride("default");
+    setRequiredSignatureLevel("none");
   }
 
   function startEdit(ot: ObjectType) {
@@ -171,6 +176,7 @@ export function ObjectTypeEditor() {
           ? "true"
           : "false"
     );
+    setRequiredSignatureLevel(ot.required_signature_level ?? "none");
     setError(null);
   }
 
@@ -217,6 +223,11 @@ export function ObjectTypeEditor() {
       appliesTo === "document" && kennzeichenDisplayOverride !== "default"
         ? kennzeichenDisplayOverride === "true"
         : null;
+    // Mindest-Signaturniveau (3.10) ist wie Kennzeichen-Felder nur für
+    // Dokumentklassen gültig - dieselbe clientseitige Erzwingung statt einer
+    // 422-Ablehnung durch das Backend zu riskieren.
+    const requiredSignatureLevelValue =
+      appliesTo === "document" && requiredSignatureLevel !== "none" ? requiredSignatureLevel : null;
 
     try {
       if (editingId === null) {
@@ -228,6 +239,7 @@ export function ObjectTypeEditor() {
           icon: iconValue,
           kennzeichenFormat: kennzeichenFormatValue,
           kennzeichenDisplayOverride: kennzeichenDisplayOverrideValue,
+          requiredSignatureLevel: requiredSignatureLevelValue,
         });
 
         // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
@@ -258,6 +270,7 @@ export function ObjectTypeEditor() {
           icon: iconValue,
           kennzeichenFormat: kennzeichenFormatValue,
           kennzeichenDisplayOverride: kennzeichenDisplayOverrideValue,
+          requiredSignatureLevel: requiredSignatureLevelValue,
         });
       }
       resetForm();
@@ -351,6 +364,20 @@ export function ObjectTypeEditor() {
                     <option value="default">{t("objectTypes.kennzeichenDisplayOverrideDefault")}</option>
                     <option value="true">{t("objectTypes.kennzeichenDisplayOverrideShow")}</option>
                     <option value="false">{t("objectTypes.kennzeichenDisplayOverrideHide")}</option>
+                  </select>
+                </label>
+                <label>
+                  {t("objectTypes.requiredSignatureLevelLabel")}
+                  <select
+                    value={requiredSignatureLevel}
+                    onChange={(e) =>
+                      setRequiredSignatureLevel(e.target.value as "none" | "ses" | "aes" | "qes")
+                    }
+                  >
+                    <option value="none">{t("objectTypes.requiredSignatureLevelNone")}</option>
+                    <option value="ses">{t("objectTypes.requiredSignatureLevelSes")}</option>
+                    <option value="aes">{t("objectTypes.requiredSignatureLevelAes")}</option>
+                    <option value="qes">{t("objectTypes.requiredSignatureLevelQes")}</option>
                   </select>
                 </label>
               </>

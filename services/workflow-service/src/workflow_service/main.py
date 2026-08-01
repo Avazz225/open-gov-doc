@@ -24,10 +24,13 @@ from workflow_service.schemas import (
     TaskCompleteRequest,
 )
 from workflow_service.settings import Settings
+from workflow_service.signature_client import SignatureServiceClient
 
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+_SIGNATURE_LEVEL_RANK = {"ses": 0, "aes": 1, "qes": 2}
 
 
 async def _sla_poll_loop(
@@ -83,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
 
     # Reiner Producer (kein Consumer, siehe docs/services/workflow-service.md
     # "Events") - eigener Stream, ein Producer muss ihn selbst anlegen (ADR 0001).
@@ -114,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await registration.stop()
     await event_bus.close()
     await app.state.permission_client.close()
+    await app.state.signature_client.close()
     await engine.dispose()
 
 
@@ -301,7 +306,61 @@ async def get_ready_tasks(
         tasks = await repository.get_ready_tasks(session, instance_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return [ReadyTaskOut(id=t.id, name=t.name, lane=t.lane, data=t.data) for t in tasks]
+    return [
+        ReadyTaskOut(id=t.id, name=t.name, lane=t.lane, data=t.data, extensions=t.extensions)
+        for t in tasks
+    ]
+
+
+async def _require_valid_signature_if_needed(
+    session: AsyncSession, instance_id: str, task_id: str, payload: TaskCompleteRequest
+) -> None:
+    """Signature Task (3.10, P6-S7): eine als `taskType=signature` markierte
+    Task (siehe `spiff_adapter.py`s Camunda-Extensions) verlangt eine echte,
+    beim Signature Service erzeugte Signatur statt eines beliebigen
+    Abschlusses - `document_id` kommt aus der generischen Task-Prozessdaten
+    (`data`, kein eigenes Schema-Feld, da workflow-service kein
+    Dokument-Konzept kennt), `requiredLevel` aus den BPMN-Extensions
+    (Default `ses`, falls nicht gesetzt)."""
+    tasks = await repository.get_ready_tasks(session, instance_id)
+    task = next((t for t in tasks if t.id == task_id), None)
+    if task is None or task.extensions.get("taskType") != "signature":
+        return
+
+    if not payload.signature_id:
+        raise HTTPException(
+            status_code=400, detail="Signature Task verlangt eine signature_id im Request-Body"
+        )
+    signature = await app.state.signature_client.get_signature(payload.signature_id)
+    if signature is None:
+        raise HTTPException(
+            status_code=400, detail=f"signature_id {payload.signature_id!r} unbekannt"
+        )
+
+    expected_document_id = task.data.get("document_id")
+    if not expected_document_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Signature Task ohne document_id in den Prozessdaten - nicht signierbar",
+        )
+    if signature["document_id"] != expected_document_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"signature_id {payload.signature_id!r} gehört zu Dokument "
+                f"{signature['document_id']!r}, erwartet wurde {expected_document_id!r}"
+            ),
+        )
+
+    required_level = task.extensions.get("requiredLevel", "ses")
+    if _SIGNATURE_LEVEL_RANK[signature["level"]] < _SIGNATURE_LEVEL_RANK[required_level]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Signature Task verlangt mindestens Niveau {required_level!r}, "
+                f"signature_id {payload.signature_id!r} hat Niveau {signature['level']!r}"
+            ),
+        )
 
 
 @app.post("/instances/{instance_id}/tasks/{task_id}/complete", response_model=ProcessInstanceOut)
@@ -314,6 +373,7 @@ async def complete_task(
 ) -> ProcessInstanceOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
     try:
+        await _require_valid_signature_if_needed(session, instance_id, task_id, payload)
         instance = await repository.complete_task(
             session, instance_id, task_id, completed_by=payload.completed_by, data=payload.data
         )

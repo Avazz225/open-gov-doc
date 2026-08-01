@@ -32,6 +32,9 @@ const searchDocumentsMock = vi.fn();
 const listObjectTypesMock = vi.fn();
 const getObjectTypeLayoutMock = vi.fn();
 const getKennzeichenConfigMock = vi.fn();
+const listSignaturesMock = vi.fn();
+const createSignatureMock = vi.fn();
+const verifySignatureMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -54,6 +57,9 @@ vi.mock("@/lib/api", () => ({
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
   getSearchFacets: (...args: unknown[]) => getSearchFacetsMock(...args),
   searchDocuments: (...args: unknown[]) => searchDocumentsMock(...args),
+  listSignatures: (...args: unknown[]) => listSignaturesMock(...args),
+  createSignature: (...args: unknown[]) => createSignatureMock(...args),
+  verifySignature: (...args: unknown[]) => verifySignatureMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -113,6 +119,10 @@ describe("DocumentWorkspace", () => {
     listOcrResultsMock.mockReset();
     listOcrResultsMock.mockResolvedValue([]);
     downloadOcrPageImageMock.mockReset();
+    listSignaturesMock.mockReset();
+    listSignaturesMock.mockResolvedValue([]);
+    createSignatureMock.mockReset();
+    verifySignatureMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {

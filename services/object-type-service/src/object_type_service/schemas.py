@@ -14,6 +14,9 @@ class LayoutPurpose(StrEnum):
     upload = "upload"
 
 
+SignatureLevel = Literal["ses", "aes", "qes"]
+
+
 class ObjectTypeCreate(BaseModel):
     name: str
     applies_to: Literal["document", "folder"]
@@ -24,6 +27,7 @@ class ObjectTypeCreate(BaseModel):
     icon: str | None = None
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None
+    required_signature_level: SignatureLevel | None = None
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -34,6 +38,7 @@ class ObjectTypeUpdate(BaseModel):
     icon: str | None = None
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None
+    required_signature_level: SignatureLevel | None = None
 
 
 class ObjectTypeOut(BaseModel):
@@ -47,6 +52,7 @@ class ObjectTypeOut(BaseModel):
     icon: str | None
     kennzeichen_format: str | None
     kennzeichen_display_override: bool | None
+    required_signature_level: str | None
     created_at: datetime
     updated_at: datetime
 

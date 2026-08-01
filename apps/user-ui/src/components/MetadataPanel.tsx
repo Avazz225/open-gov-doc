@@ -14,6 +14,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { KENNZEICHEN_ATTRIBUTE } from "@/lib/kennzeichen";
 import { LayoutFormFields } from "./LayoutFormFields";
+import { SignaturesPanel } from "./SignaturesPanel";
 
 // Muss zur Document-Service-Settings `kennzeichen_admin_role` passen (Default,
 // P5e-S2) - nur Principals mit dieser Rolle dürfen ein bereits vergebenes
@@ -168,6 +169,8 @@ export function MetadataPanel({
           {isSaving ? t("metadata.saving") : t("common.save")}
         </button>
       </form>
+
+      <SignaturesPanel document={activeDocument} />
     </section>
   );
 }

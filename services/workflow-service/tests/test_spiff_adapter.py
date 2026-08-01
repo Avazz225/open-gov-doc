@@ -49,6 +49,26 @@ def test_script_task_runs_automatically_and_leaves_manual_task_ready(manual_task
     assert ready[0].name == "manual"
 
 
+def test_manual_task_without_extensions_has_empty_extensions_dict(manual_task_bpmn):
+    spec, _ = sa.parse_bpmn(manual_task_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.run_ready_steps(wf)
+    ready = sa.ready_manual_tasks(wf)
+    assert ready[0].extensions == {}
+
+
+def test_signature_task_extensions_are_parsed(signature_task_bpmn):
+    """Grundlage des Signature Task (3.10, P6-S7): `camunda:properties`
+    werden über den CamundaParser-Wechsel in `task_spec.extensions` sichtbar,
+    ohne dass der BPMN-Task-Typ (`manualTask`) sich ändert."""
+    spec, _ = sa.parse_bpmn(signature_task_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.run_ready_steps(wf)
+    ready = sa.ready_manual_tasks(wf)
+    assert len(ready) == 1
+    assert ready[0].extensions == {"taskType": "signature", "requiredLevel": "aes"}
+
+
 def test_serialize_deserialize_roundtrip_preserves_ready_task_id(manual_task_bpmn):
     spec, _ = sa.parse_bpmn(manual_task_bpmn, None)
     wf = sa.new_workflow(spec)

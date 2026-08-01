@@ -271,6 +271,26 @@ async def test_create_with_kennzeichen_display_override_on_folder_type_raises(se
         )
 
 
+async def test_create_with_required_signature_level_on_folder_type_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="OrdnerMitSignaturniveau", applies_to="folder", required_signature_level="aes"
+            ),
+        )
+
+
+async def test_create_with_required_signature_level_on_document_type_succeeds(session):
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="VertragMitSignaturpflicht", applies_to="document", required_signature_level="aes"
+        ),
+    )
+    assert created.required_signature_level == "aes"
+
+
 async def test_generate_next_kennzeichen_increments_per_object_type(session):
     created = await repository.create_object_type(
         session,

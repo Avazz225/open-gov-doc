@@ -471,6 +471,80 @@ export async function downloadOcrPageImage(token: string, ocrResultId: string): 
   return response.blob();
 }
 
+// Signature Service (3.10, P6-S7) - elektronische Signatur (SES/AES/QES),
+// bindet sich an die konkrete Dokumentversion. Signieren erzeugt serverseitig
+// eine neue Dokumentversion (die PAdES-Signatur verändert die PDF-Bytes) -
+// diese Session aktualisiert die Versionsanzeige an anderer Stelle (z. B.
+// PreviewPane) nicht automatisch, siehe docs/services/user-ui.md.
+export type SignatureLevel = "ses" | "aes" | "qes";
+
+export interface SignatureSummary {
+  id: number;
+  document_id: string;
+  source_version_number: number;
+  version_number: number;
+  level: SignatureLevel;
+  connector_id: string;
+  signer_principal_id: string;
+  signer_display_name: string;
+  certificate_subject: string;
+  certificate_serial: string;
+  certificate_not_before: string;
+  certificate_not_after: string;
+  reason: string | null;
+  signed_at: string;
+}
+
+export interface SignatureVerification {
+  valid: boolean;
+  integrity_intact: boolean;
+  certificate_expired: boolean;
+  errors: string[];
+}
+
+export async function listSignatures(
+  token: string,
+  documentId: string
+): Promise<SignatureSummary[]> {
+  const query = new URLSearchParams({ document_id: documentId });
+  const response = await request("signature-service", `signatures?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function createSignature(
+  token: string,
+  params: { documentId: string; level: SignatureLevel; signerPrincipalId: string }
+): Promise<SignatureSummary> {
+  const response = await request(
+    "signature-service",
+    "signatures",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document_id: params.documentId,
+        level: params.level,
+        signer_principal_id: params.signerPrincipalId,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function verifySignature(
+  token: string,
+  signatureId: number
+): Promise<SignatureVerification> {
+  const response = await request(
+    "signature-service",
+    `signatures/${signatureId}/verify`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 // Search Service (3.7, P5-S4, ADR 0012: Postgres Volltextsuche statt
 // dediziertem Suchindex) - Facetten orientieren sich am Objekttyp-Schema.
 export interface SearchResult extends DocumentSummary {

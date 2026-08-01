@@ -35,6 +35,11 @@ class ObjectType(Base):
     # Tri-State-Override (None = kein Override, es gilt der globale Standard
     # aus P5e-S2) des globalen "Kennzeichen vor Dateinamen anzeigen"-Schalters.
     kennzeichen_display_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Mindest-Signaturniveau (3.10, seit P6-S7) - nur für applies_to == "document"
+    # gesetzt (Ordner werden nicht signiert). None = keine Anforderung. Wird vom
+    # Signature Service bei jedem Signiervorgang gegen das angeforderte Niveau
+    # geprüft (`ses` < `aes` < `qes`), siehe signature-service/main.py.
+    required_signature_level: Mapped[str | None] = mapped_column(String(8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

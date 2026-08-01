@@ -347,6 +347,31 @@ def test_create_with_kennzeichen_format_missing_laufende_nummer_returns_422(clie
     assert response.status_code == 422
 
 
+def test_create_with_required_signature_level_on_folder_type_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "OrdnerMitSignaturniveauAPI",
+            "applies_to": "folder",
+            "required_signature_level": "aes",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_with_required_signature_level_on_document_type_succeeds(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "VertragMitSignaturpflichtAPI",
+            "applies_to": "document",
+            "required_signature_level": "aes",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["required_signature_level"] == "aes"
+
+
 def test_next_kennzeichen_returns_incrementing_formatted_values(client):
     object_type_id = client.post(
         "/object-types",

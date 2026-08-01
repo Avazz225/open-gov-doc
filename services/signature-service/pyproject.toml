@@ -1,0 +1,29 @@
+[project]
+name = "signature-service"
+version = "0.1.0"
+description = "Signature Service: eIDAS-konforme elektronische Signatur (SES/AES/QES), Broker vor externen QTSPs (Konzept 3.10, P6-S7)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "cryptography>=42.0",
+    "pyhanko>=0.25",
+    "dms-common",
+    "dms-db-base",
+    "dms-eventbus-client",
+    "dms-registry-client",
+]
+
+[tool.uv.sources]
+dms-common = { workspace = true }
+dms-db-base = { workspace = true }
+dms-eventbus-client = { workspace = true }
+dms-registry-client = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/signature_service"]

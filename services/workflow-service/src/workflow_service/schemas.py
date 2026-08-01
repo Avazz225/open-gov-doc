@@ -41,8 +41,16 @@ class ReadyTaskOut(BaseModel):
     name: str
     lane: str | None
     data: dict
+    # Camunda-`extensionElements`-Properties (3.10, P6-S7) - insbesondere
+    # `taskType=signature`/`requiredLevel=...` bei einem Signature Task, siehe
+    # spiff_adapter.py. Leer bei jedem gewöhnlichen Manual Task.
+    extensions: dict[str, str] = {}
 
 
 class TaskCompleteRequest(BaseModel):
     completed_by: str
     data: dict = {}
+    # Pflicht, wenn die Task laut `extensions["taskType"] == "signature"`
+    # markiert ist (3.10) - verweist auf eine zuvor beim Signature Service
+    # erzeugte Signatur, siehe main.py._require_valid_signature_if_needed.
+    signature_id: str | None = None

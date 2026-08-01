@@ -95,6 +95,24 @@
     "saveError": "Speichern fehlgeschlagen",
     "saving": "Speichere..."
   },
+  "signatures": {
+    "heading": "Signaturen",
+    "noSignatures": "Dieses Dokument ist noch nicht signiert.",
+    "loadError": "Signaturen konnten nicht geladen werden",
+    "signButton": "Jetzt signieren",
+    "signing": "Signiere...",
+    "signError": "Signieren fehlgeschlagen",
+    "levelLabel": "Niveau",
+    "levelSes": "SES",
+    "levelAes": "AES",
+    "levelQesUnavailable": "QES (kein Anbieter konfiguriert)",
+    "signedBy": "Signiert von {name} am {date}",
+    "verifyButton": "Prüfen",
+    "verifying": "Prüfe...",
+    "verifyError": "Prüfung fehlgeschlagen",
+    "statusValid": "Gültig",
+    "statusInvalid": "Ungültig"
+  },
   "preview": {
     "paneLabel": "Vorschau",
     "noSelection": "Kein Dokument ausgewählt.",

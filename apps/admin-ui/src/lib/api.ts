@@ -253,6 +253,10 @@ export interface ObjectType {
   // Tri-State: null = globaler Standard (KennzeichenConfig) gilt.
   kennzeichen_format: string | null;
   kennzeichen_display_override: boolean | null;
+  // Mindest-Signaturniveau (3.10, seit P6-S7) - nur für applies_to="document"
+  // gesetzt, null = keine Anforderung. Wird vom Signature Service bei jedem
+  // Signiervorgang durchgesetzt, hier nur konfiguriert.
+  required_signature_level: "ses" | "aes" | "qes" | null;
 }
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -270,6 +274,7 @@ export async function createObjectType(
     icon: string | null;
     kennzeichenFormat: string | null;
     kennzeichenDisplayOverride: boolean | null;
+    requiredSignatureLevel: "ses" | "aes" | "qes" | null;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -283,6 +288,7 @@ export async function createObjectType(
       icon: params.icon,
       kennzeichen_format: params.kennzeichenFormat,
       kennzeichen_display_override: params.kennzeichenDisplayOverride,
+      required_signature_level: params.requiredSignatureLevel,
     }),
     token
   );
@@ -306,6 +312,7 @@ export async function updateObjectType(
     icon: string | null;
     kennzeichenFormat: string | null;
     kennzeichenDisplayOverride: boolean | null;
+    requiredSignatureLevel: "ses" | "aes" | "qes" | null;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -322,6 +329,7 @@ export async function updateObjectType(
         icon: params.icon,
         kennzeichen_format: params.kennzeichenFormat,
         kennzeichen_display_override: params.kennzeichenDisplayOverride,
+        required_signature_level: params.requiredSignatureLevel,
       }),
     },
     token

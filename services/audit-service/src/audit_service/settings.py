@@ -28,6 +28,9 @@ class Settings(BaseServiceSettings):
     # explizit erhöhte Auditierungspriorität für den Lebenszyklus selbst
     # (siehe ADR 0023 für die bewusst NICHT umgesetzte Priorisierung
     # einzelner *während* der Aktivierung durchgeführter Fremdaktionen).
+    # "signature.>" kam in P6-S7 dazu - elektronische Signaturen (3.10) sind
+    # kryptografisch an eine konkrete Dokumentversion gebunden und damit
+    # ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -39,4 +42,5 @@ class Settings(BaseServiceSettings):
         "notification.>",
         "case.>",
         "auth.>",
+        "signature.>",
     ]

@@ -8,7 +8,15 @@ nicht nur aus der Doku übernommen:
 
 - Parsing: `SpiffWorkflow.bpmn.parser.BpmnParser` - `add_bpmn_str(bytes|str)`,
   `get_process_ids()` (liefert **nur** ausführbare Top-Level-Prozesse, filtert bereits
-  intern auf `process_executable`), `get_spec(process_id)`.
+  intern auf `process_executable`), `get_spec(process_id)`. Seit P6-S7 wird stattdessen
+  `SpiffWorkflow.camunda.parser.CamundaParser` verwendet (Unterklasse von `BpmnDmnParser`,
+  identische `add_bpmn_str`/`get_process_ids`/`get_spec`-Oberfläche) - mappt `manualTask`
+  weiterhin auf `ManualTask` (`.manual is True` unverändert), parst aber zusätzlich
+  `bpmn:extensionElements/camunda:properties/camunda:property`-Knoten in
+  `task_spec.extensions` (dict, string-wertig). Grundlage für den neuen "Signature Task"
+  (3.10): ein BPMN-`manualTask` mit `camunda:properties` `taskType=signature`/
+  `requiredLevel=...` bleibt technisch ein gewöhnlicher Manual Task (kein neues BPMN-
+  Element, kein Modeler-Tooling-Bruch), ist aber über `extensions` fachlich erkennbar.
 - Ausführung: `SpiffWorkflow.bpmn.workflow.BpmnWorkflow(spec)`, `do_engine_steps()`
   (führt alle bereiten nicht-manuellen Tasks - u. a. Script Tasks - automatisch aus und
   hält vor einem Manual/User Task an), `is_completed()`.
@@ -38,16 +46,22 @@ nicht nur aus der Doku übernommen:
   Routing-Logik schreiben, nur `refresh_waiting_tasks()`+`do_engine_steps()` aufrufen.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from SpiffWorkflow.bpmn.parser import BpmnParser
 from SpiffWorkflow.bpmn.serializer import BpmnWorkflowSerializer
 from SpiffWorkflow.bpmn.specs.mixins.events.intermediate_event import BoundaryEvent
 from SpiffWorkflow.bpmn.workflow import BpmnWorkflow
+from SpiffWorkflow.camunda.parser import CamundaParser
+from SpiffWorkflow.camunda.serializer.config import CAMUNDA_CONFIG
 from SpiffWorkflow.task import Task, TaskState
 
-_SERIALIZER = BpmnWorkflowSerializer(BpmnWorkflowSerializer.configure())
+# `CAMUNDA_CONFIG` statt `BpmnWorkflowSerializer.configure()` - der Wechsel auf
+# `CamundaParser` (s. u.) mappt `userTask` auf Camundas eigene `UserTask`-
+# Spec-Klasse statt der BPMN-Default-Klasse; ohne den passenden Converter
+# schlägt die JSON-Serialisierung bereits bestehender Fixtures mit
+# `userTask`-Elementen (z. B. boundary_timer_on_task.bpmn) fehl.
+_SERIALIZER = BpmnWorkflowSerializer(BpmnWorkflowSerializer.configure(CAMUNDA_CONFIG))
 
 
 class BpmnParseError(Exception):
@@ -63,6 +77,7 @@ class TaskInfo:
     name: str
     lane: str | None
     data: dict[str, Any]
+    extensions: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -72,8 +87,8 @@ class FiredBoundaryEvent:
     data: dict[str, Any]
 
 
-def _new_parser(xml: str) -> BpmnParser:
-    parser = BpmnParser()
+def _new_parser(xml: str) -> CamundaParser:
+    parser = CamundaParser()
     try:
         # lxml akzeptiert bei einer XML-Encoding-Deklaration (<?xml ... encoding="UTF-8"?>)
         # ausschließlich bytes, keine bereits dekodierten str - deshalb hier explizit
@@ -148,6 +163,7 @@ def ready_manual_tasks(wf: BpmnWorkflow) -> list[TaskInfo]:
             name=task.task_spec.bpmn_name or task.task_spec.name,
             lane=getattr(task.task_spec, "lane", None),
             data=dict(task.data),
+            extensions=dict(getattr(task.task_spec, "extensions", None) or {}),
         )
         for task in tasks
     ]

@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import httpx
 import pytest
@@ -115,3 +116,118 @@ def boundary_timer_bpmn() -> str:
     path = os.path.join(os.path.dirname(__file__), "fixtures", "boundary_timer_on_task.bpmn")
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+@pytest.fixture
+def signature_task_bpmn() -> str:
+    """Ein einzelner Manual Task mit `camunda:properties`-Extension
+    `taskType=signature`/`requiredLevel=aes` (3.10, P6-S7) - siehe
+    spiff_adapter.py für die CamundaParser-Umstellung, die diese Extensions
+    überhaupt sichtbar macht."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "signature_task.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+SIGNATURE_SERVICE_URL = os.environ.get("TEST_SIGNATURE_SERVICE_URL", "http://localhost:8017")
+AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
+
+
+def _read_sample_pdf() -> bytes:
+    """Synchroner Helfer statt `open()` direkt in einer `async def`-Fixture
+    (ruff ASYNC230) - reine lokale Dateilesung, keine echte Blockierungsgefahr
+    in diesen Tests, aber der Linter unterscheidet nicht danach."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "sample.pdf")
+    with open(path, "rb") as f:
+        return f.read()
+
+
+@pytest.fixture
+async def real_signer():
+    """Echtes `auth-service`-Konto (kein Mocking) - Grundlage für eine echte,
+    beim Signature Service erzeugte Signatur (siehe `real_signature`)."""
+    username = f"wf-sig-test-{uuid.uuid4().hex[:8]}"
+    async with httpx.AsyncClient(base_url=AUTH_SERVICE_URL) as client:
+        token = (
+            await client.post("/login", json={"username": "users-admin", "password": "users-admin"})
+        ).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        created = (
+            await client.post(
+                "/users",
+                json={
+                    "username": username,
+                    "email": f"{username}@example.com",
+                    "password": "testpass123",
+                    "first_name": "Workflow",
+                    "last_name": "Signer",
+                },
+                headers=headers,
+            )
+        ).json()
+        yield username
+        await client.delete(f"/users/{created['id']}", headers=headers)
+
+
+@pytest.fixture
+async def real_signature(real_signer):
+    """Echtes, gegen document-service + signature-service erzeugtes signiertes
+    PDF (kein Mocking von Sibling-Services) - liefert `(document_id,
+    signature_id, level)`. Grundlage für den Signature-Task-Gating-Test in
+    test_api.py."""
+    pdf_bytes = _read_sample_pdf()
+
+    async with httpx.AsyncClient(base_url=DOCUMENT_SERVICE_URL) as doc_client:
+        document = (
+            await doc_client.post(
+                "/documents",
+                data={"title": "Workflow-Signatur-Testdokument", "created_by": "alice"},
+                files={"file": ("sample.pdf", pdf_bytes, "application/pdf")},
+            )
+        ).json()
+
+    async with httpx.AsyncClient(base_url=SIGNATURE_SERVICE_URL) as sig_client:
+        response = await sig_client.post(
+            "/signatures",
+            json={
+                "document_id": document["id"],
+                "level": "aes",
+                "signer_principal_id": real_signer,
+            },
+        )
+        response.raise_for_status()
+        signature = response.json()
+
+    yield document["id"], signature["id"], signature["level"]
+
+
+@pytest.fixture
+async def real_ses_signature(real_signer):
+    """Wie `real_signature`, aber Niveau SES - Grundlage für den
+    Mindestniveau-Ablehnungstest (`requiredLevel=aes` in
+    `signature_task.bpmn`)."""
+    pdf_bytes = _read_sample_pdf()
+
+    async with httpx.AsyncClient(base_url=DOCUMENT_SERVICE_URL) as doc_client:
+        document = (
+            await doc_client.post(
+                "/documents",
+                data={"title": "Workflow-SES-Testdokument", "created_by": "alice"},
+                files={"file": ("sample.pdf", pdf_bytes, "application/pdf")},
+            )
+        ).json()
+
+    async with httpx.AsyncClient(base_url=SIGNATURE_SERVICE_URL) as sig_client:
+        response = await sig_client.post(
+            "/signatures",
+            json={
+                "document_id": document["id"],
+                "level": "ses",
+                "signer_principal_id": real_signer,
+            },
+        )
+        response.raise_for_status()
+        signature = response.json()
+
+    yield document["id"], signature["id"], signature["level"]
