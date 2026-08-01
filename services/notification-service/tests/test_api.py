@@ -15,15 +15,46 @@ def test_healthz(client):
     assert response.json()["service"] == "notification-service"
 
 
-def test_create_in_app_notification_returns_sent(client):
+def test_create_in_app_notification_for_unknown_recipient_returns_400(client):
     response = client.post(
         "/notifications",
         json={"channel": "in_app", "recipient": "dept-head", "subject": "S", "body": "B"},
+    )
+    assert response.status_code == 400
+
+
+def test_create_in_app_notification_returns_sent(client, real_recipient):
+    username, _email = real_recipient
+    response = client.post(
+        "/notifications",
+        json={"channel": "in_app", "recipient": username, "subject": "S", "body": "B"},
     )
     assert response.status_code == 201
     body = response.json()
     assert body["status"] == "sent"
     assert body["channel"] == "in_app"
+
+
+def test_create_email_notification_for_unknown_recipient_returns_400(client):
+    response = client.post(
+        "/notifications",
+        json={
+            "channel": "email",
+            "recipient": "does-not-exist@example.com",
+            "subject": "S",
+            "body": "B",
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_create_email_notification_for_real_recipient_is_accepted(client, real_recipient):
+    _username, email = real_recipient
+    response = client.post(
+        "/notifications",
+        json={"channel": "email", "recipient": email, "subject": "S", "body": "B"},
+    )
+    assert response.status_code == 201
 
 
 def test_create_webhook_notification_records_failure_when_unreachable(client):
@@ -45,16 +76,13 @@ def test_get_unknown_notification_returns_404(client):
     assert response.status_code == 404
 
 
-def test_list_notifications_filters_by_recipient(client):
+def test_list_notifications_filters_by_recipient(client, real_recipient):
+    username, _email = real_recipient
     client.post(
         "/notifications",
-        json={"channel": "in_app", "recipient": "alice", "subject": "S1", "body": "B"},
+        json={"channel": "in_app", "recipient": username, "subject": "S1", "body": "B"},
     )
-    client.post(
-        "/notifications",
-        json={"channel": "in_app", "recipient": "bob", "subject": "S2", "body": "B"},
-    )
-    response = client.get("/notifications", params={"recipient": "alice"})
+    response = client.get("/notifications", params={"recipient": username})
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["subject"] == "S1"

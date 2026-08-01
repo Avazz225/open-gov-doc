@@ -185,3 +185,62 @@ async def test_missing_resource_at_execution_time_is_logged_not_raised(engine):
     await handler(event.to_bytes())  # darf nicht raisen
 
     assert published == []
+
+
+async def test_approved_not_shutdown_trigger_activates_and_publishes(engine):
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        await repository.ensure_root_resource(session)
+        await session.commit()
+
+    published = []
+
+    async def fake_publish(event_type, payload):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(session_factory, fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-5",
+            "action_type": "system.not_shutdown.trigger",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {"triggered_by": "alice", "reason": "Verdacht"},
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        mode = await repository.get_or_seed_maintenance_mode(session)
+    assert mode.active is True
+    assert mode.triggered_by == "alice"
+    assert published == [
+        ("permission.maintenance_mode.activated", {"triggered_by": "alice", "reason": "Verdacht"})
+    ]
+
+
+async def test_not_shutdown_trigger_with_missing_keys_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, payload):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-6",
+            "action_type": "system.not_shutdown.trigger",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {"x": 1},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []

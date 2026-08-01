@@ -10,3 +10,8 @@ class Settings(BaseServiceSettings):
     # Begrenzt die Erkennungspräzision einer SLA-Überschreitung auf dieses Intervall -
     # kein Push-Mechanismus vorhanden, siehe ADR 0020.
     sla_poll_interval_seconds: int = 30
+
+    # Retrofit P6-S6 (4.8/Autorisierung): Prozessdefinitionen (BPMN-/Script-
+    # Task-Upload) verlangen die Domain-Admin-Capability `admin.object_config`;
+    # der SLA-Poll-Loop überspringt seinen Tick während aktivem Wartungsmodus.
+    permission_service_base_url: str = "http://localhost:8004"

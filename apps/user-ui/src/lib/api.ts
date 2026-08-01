@@ -535,3 +535,14 @@ export async function searchDocuments(token: string, params: SearchParams): Prom
   const response = await request("search-service", `search?${query.toString()}`, {}, token);
   return response.json();
 }
+
+// Not-Shutdown (4.8, P6-S6) - reines Status-Banner, keine Bedienelemente
+// (nur der aktivierte Superuser ist während der Sperre handlungsfähig, 4.8).
+export interface MaintenanceMode {
+  active: boolean;
+}
+
+export async function getMaintenanceStatus(token: string): Promise<MaintenanceMode> {
+  const response = await request("permission-service", "maintenance-mode", {}, token);
+  return response.json();
+}

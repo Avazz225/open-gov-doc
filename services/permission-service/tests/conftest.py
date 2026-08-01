@@ -42,7 +42,8 @@ async def _clean_tables():
             text(
                 "TRUNCATE permission.role_assignment, permission.effective_permission_cache, "
                 "permission.role, permission.scope_lock, permission.resource_node, "
-                "permission.approval_request, permission.approval_action_config CASCADE"
+                "permission.approval_request, permission.approval_action_config, "
+                "permission.system_maintenance_mode CASCADE"
             )
         )
     await eng.dispose()

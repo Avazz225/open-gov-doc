@@ -58,3 +58,43 @@ class InstanceResolver:
 
     def pick(self, instances: list[dict]) -> dict:
         return random.choice(instances)
+
+
+class MaintenanceStateClient:
+    """Fragt den Wartungsmodus-Status (4.8, P6-S6) direkt bei `permission-service`
+    ab - über denselben `InstanceResolver` wie jeder proxied Request, da das
+    Gateway keine feste Service-URL kennt (alles läuft über die Registry).
+    Kurzes Caching (`cache_ttl_seconds`) wie bei `InstanceResolver`, aus
+    demselben Grund: nicht jeder einzelne Request soll einen zusätzlichen
+    Roundtrip kosten. Schlägt die Abfrage fehl (`permission-service`
+    unerreichbar), wird **nicht** aktiv angenommen (fail-open) - ein
+    kurzzeitig unerreichbarer `permission-service` soll nicht versehentlich
+    das gesamte System lahmlegen, das wäre ein Verfügbarkeits-Eigentor,
+    keine Sicherheitsmaßnahme."""
+
+    def __init__(
+        self, *, client: httpx.AsyncClient, resolver: InstanceResolver, cache_ttl_seconds: float
+    ) -> None:
+        self._client = client
+        self._resolver = resolver
+        self._cache_ttl = cache_ttl_seconds
+        self._cached_at: float = 0.0
+        self._cached_active: bool = False
+
+    async def is_active(self) -> bool:
+        now = time.monotonic()
+        if now - self._cached_at < self._cache_ttl:
+            return self._cached_active
+
+        try:
+            instances = await self._resolver.resolve("permission-service")
+            if not instances:
+                return self._cached_active
+            instance = self._resolver.pick(instances)
+            response = await self._client.get(f"{instance['address'].rstrip('/')}/maintenance-mode")
+            response.raise_for_status()
+            self._cached_active = response.json()["active"]
+        except httpx.HTTPError:
+            pass
+        self._cached_at = now
+        return self._cached_active

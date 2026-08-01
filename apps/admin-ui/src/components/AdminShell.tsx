@@ -5,6 +5,7 @@ import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { AdminSidebar } from "./AdminSidebar";
 import { InstallationSwitcher } from "./InstallationSwitcher";
+import { MaintenanceBanner } from "./MaintenanceBanner";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // Management-Dashboard-Layout (P4-S5, Nutzer-Feedback nach P4-S3, Konzept 8):
@@ -19,6 +20,7 @@ export function AdminShell({ title, children }: { title: string; children: React
 
   return (
     <div className="admin-shell">
+      <MaintenanceBanner />
       <div className="top-bar">
         <h1>{title}</h1>
         <div className="top-bar-actions">

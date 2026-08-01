@@ -133,3 +133,21 @@ class EffectivePermissionCache(Base):
     roles: Mapped[list[str]] = mapped_column(JSON)
     permissions: Mapped[list[str]] = mapped_column(JSON)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SystemMaintenanceMode(Base):
+    """Systemweite Notfallsperre & Wartungsmodus (4.8, P6-S6) - Singleton
+    (feste ``id=1``, gleiches Muster wie ``OcrConfig``/``GuardConfig`` in
+    anderen Services). Wird nie gelöscht, nur umgeschaltet - ``triggered_by``/
+    ``lifted_by`` bleiben als Audit-Spur auch nach Aufhebung stehen, bis zur
+    nächsten Aktivierung."""
+
+    __tablename__ = "system_maintenance_mode"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lifted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lifted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

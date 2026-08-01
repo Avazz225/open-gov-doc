@@ -8,11 +8,11 @@ from dms_auth_client import TokenValidator, make_current_user_dependency
 from dms_common import configure_logging
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from auth_service import admin_users, keycloak_client, superuser
 from auth_service.admin_users import UserAlreadyExistsError, UserNotFoundError, build_admin_client
-from auth_service.bootstrap import DOMAIN_ADMIN_USERS_USERNAME, ensure_realm_and_client
+from auth_service.bootstrap import DOMAIN_ADMIN_ACCOUNTS, ensure_realm_and_client
 from auth_service.consumer import start_consuming
 from auth_service.keycloak_client import InvalidCredentialsError
 from auth_service.permission_client import PermissionServiceClient
@@ -54,24 +54,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.keycloak_admin = build_admin_client(settings)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
-    # Best-Effort (P6-S5): der Permission Service könnte beim eigenen Start
-    # noch nicht erreichbar sein - kein Retry-Loop, heilt beim nächsten
-    # Neustart (gleiches Prinzip wie SubjectNotFoundError in structure_consumer.py).
-    try:
-        domain_admin_users = admin_users.list_users(app.state.keycloak_admin)
-        domain_admin_id = next(
-            u["id"] for u in domain_admin_users if u["username"] == DOMAIN_ADMIN_USERS_USERNAME
-        )
-        await app.state.permission_client.ensure_role_assignment(
-            principal_id=domain_admin_id, role_name="domain-admin-users"
-        )
-    except Exception:
-        logger.warning(
-            "Rollenzuweisung für %r konnte nicht sichergestellt werden - Permission "
-            "Service noch nicht erreichbar? Wird beim nächsten Neustart erneut versucht.",
-            DOMAIN_ADMIN_USERS_USERNAME,
-            exc_info=True,
-        )
+    # Best-Effort (P6-S5, seit P6-S6 für zwei Domänen statt einer): der
+    # Permission Service könnte beim eigenen Start noch nicht erreichbar sein
+    # - kein Retry-Loop, heilt beim nächsten Neustart (gleiches Prinzip wie
+    # SubjectNotFoundError in structure_consumer.py).
+    known_users = admin_users.list_users(app.state.keycloak_admin)
+    for username, role_name, _last_name in DOMAIN_ADMIN_ACCOUNTS:
+        try:
+            account_id = next(u["id"] for u in known_users if u["username"] == username)
+            await app.state.permission_client.ensure_role_assignment(
+                principal_id=account_id, role_name=role_name
+            )
+        except Exception:
+            logger.warning(
+                "Rollenzuweisung für %r konnte nicht sichergestellt werden - Permission "
+                "Service noch nicht erreichbar? Wird beim nächsten Neustart erneut versucht.",
+                username,
+                exc_info=True,
+            )
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="auth")
     await event_bus.connect()
@@ -139,7 +139,22 @@ def healthz() -> dict:
 
 
 @app.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest) -> TokenResponse:
+async def login(
+    payload: LoginRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+) -> TokenResponse:
+    """Not-Shutdown (4.8, P6-S6): das Gateway broadcastet den Wartungsmodus-
+    Status auf jedem durchgelassenen Request per Header, statt dass jeder
+    Backend-Service selbst bei `permission-service` pollen muss (siehe ADR
+    0024). Ist der Wartungsmodus aktiv, werden neue Logins außer für den
+    Superuser abgelehnt - der Superuser-Login funktioniert unabhängig davon
+    ohnehin nur, wenn das Konto zuvor per Break-Glass (4.6) aktiviert wurde."""
+    maintenance_active = x_dms_maintenance_active.lower() == "true"
+    if maintenance_active and payload.username != superuser.SUPERUSER_USERNAME:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Login nur für den Superuser möglich",
+        )
     try:
         tokens = await keycloak_client.login(settings, payload.username, payload.password)
     except InvalidCredentialsError as exc:
@@ -244,7 +259,11 @@ def get_superuser_status() -> SuperuserStatus:
         active, expires_at = superuser.get_status(app.state.keycloak_admin)
     except superuser.SuperuserNotConfiguredError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return SuperuserStatus(active=active, expires_at=expires_at.isoformat() if expires_at else None)
+    return SuperuserStatus(
+        active=active,
+        expires_at=expires_at.isoformat() if expires_at else None,
+        principal_id=superuser.get_principal_id(app.state.keycloak_admin),
+    )
 
 
 @app.post("/superuser/deactivate", status_code=status.HTTP_204_NO_CONTENT)

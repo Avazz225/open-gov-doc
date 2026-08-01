@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from notification_service import repository
+from notification_service.auth_client import AuthServiceClient
 from notification_service.consumer import publish_notification_result, start_consuming
 from notification_service.models import Base
 from notification_service.schemas import NotificationCreate, NotificationOut
@@ -31,6 +32,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.run_sync(Base.metadata.create_all)
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
+    app.state.auth_client = AuthServiceClient(
+        settings.auth_service_base_url,
+        admin_username=settings.auth_service_admin_username,
+        admin_password=settings.auth_service_admin_password,
+    )
 
     # Producer (eigener Stream "notification", `notification.sent`/`.failed`) UND
     # Konsument (`workflow.task.escalated`) - zwei getrennte Client-Instanzen, wie in
@@ -65,6 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await registration.stop()
     await consumer.close()
     await producer.close()
+    await app.state.auth_client.close()
     await engine.dispose()
 
 
@@ -92,6 +99,17 @@ def healthz() -> dict:
 async def create_notification(
     payload: NotificationCreate, session: AsyncSession = Depends(get_session)
 ) -> NotificationOut:
+    """Retrofit P6-S6 (Aufrufautorisierung): der öffentliche Endpunkt prüft
+    seit dieser Session, dass `recipient` für `channel in {"email","in_app"}`
+    ein echtes `auth-service`-Konto ist, statt ihn blind zu übernehmen -
+    `channel="webhook"` bleibt ungeprüft (Ziel ist eine URL, keine Identität).
+    Der interne Alarmierungspfad (SLA/Break-Glass/Not-Shutdown) läuft nie über
+    diesen Endpunkt, siehe `auth_client.py`."""
+    if not await app.state.auth_client.recipient_exists(payload.recipient, channel=payload.channel):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unbekannter Empfänger {payload.recipient!r} für Kanal {payload.channel!r}",
+        )
     notification = await repository.create_and_send(
         session,
         settings,

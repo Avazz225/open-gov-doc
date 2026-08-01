@@ -16,14 +16,29 @@ class Settings(BaseServiceSettings):
     smtp_password: str | None = None
 
     # Welche Subjects der Notification Service konsumiert (P6-S2, seit P6-S5
-    # auch `auth.superuser.activated`). Gezielt statt `workflow.>`/`auth.>`, da
-    # nur ausgewählte Ereignisse Benachrichtigungs-Semantik haben. Künftige
-    # Producer (Force-Unlock, Löschfrist-Vorankündigung, Lizenz-Ablauf, ...,
-    # alle in Konzept an anderer Stelle erwähnt) tragen sich hier ein, sobald sie
-    # tatsächlich angebunden werden - siehe "Offene Punkte" in
-    # docs/services/notification-service.md.
-    subjects: list[str] = ["workflow.task.escalated", "auth.superuser.activated"]
+    # auch `auth.superuser.activated`, seit P6-S6 zusätzlich
+    # `permission.maintenance_mode.activated`). Gezielt statt `workflow.>`/
+    # `auth.>`/`permission.>`, da nur ausgewählte Ereignisse Benachrichtigungs-
+    # Semantik haben. Künftige Producer (Force-Unlock, Löschfrist-
+    # Vorankündigung, Lizenz-Ablauf, ..., alle in Konzept an anderer Stelle
+    # erwähnt) tragen sich hier ein, sobald sie tatsächlich angebunden werden -
+    # siehe "Offene Punkte" in docs/services/notification-service.md.
+    subjects: list[str] = [
+        "workflow.task.escalated",
+        "auth.superuser.activated",
+        "permission.maintenance_mode.activated",
+    ]
 
     # Empfänger der optionalen Sicherheitsbenachrichtigung bei Break-Glass-
-    # Aktivierung (4.6, P6-S5).
+    # Aktivierung (4.6, P6-S5) und Not-Shutdown (4.8, P6-S6).
     security_officer_email: str = "security@dms.local"
+
+    # Retrofit P6-S6 (Aufrufautorisierung): Empfänger-Existenzprüfung für
+    # `POST /notifications` gegen echte auth-service-Konten. `GET /users` ist
+    # seit P6-S5 selbst gegated (Capability `admin.user_management`) - dieser
+    # Service authentifiziert sich dafür mit dem technischen `users-admin`-
+    # Konto aus P6-S5 (Domäne "Nutzer-/Rechteverwaltung"), genau der
+    # vorgesehene Anwendungsfall für automatisierte interne Aufrufe.
+    auth_service_base_url: str = "http://localhost:8003"
+    auth_service_admin_username: str = "users-admin"
+    auth_service_admin_password: str = "users-admin"

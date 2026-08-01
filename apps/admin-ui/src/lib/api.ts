@@ -575,6 +575,7 @@ export async function listServiceInstances(token: string): Promise<ServiceInstan
 export interface SuperuserStatus {
   active: boolean;
   expires_at: string | null;
+  principal_id: string | null;
 }
 
 export async function getSuperuserStatus(token: string): Promise<SuperuserStatus> {
@@ -623,6 +624,57 @@ export async function approveApprovalRequest(
     "permission-service",
     `approval-requests/${requestId}/approve`,
     jsonInit({ approved_by: approvedBy }),
+    token
+  );
+  return response.json();
+}
+
+// Not-Shutdown (4.8, P6-S6) - Auslösung nutzt denselben generischen Vier-
+// Augen-Mechanismus wie Break-Glass, hier aber mit einem direkten
+// Ausführungspfad (siehe permission-service `POST /maintenance-mode/trigger`),
+// falls kein Vier-Augen-Zwischenschritt konfiguriert ist.
+export interface MaintenanceMode {
+  active: boolean;
+  reason: string | null;
+  triggered_by: string | null;
+  activated_at: string | null;
+  lifted_by: string | null;
+  lifted_at: string | null;
+}
+
+export async function getMaintenanceStatus(token: string): Promise<MaintenanceMode> {
+  const response = await request("permission-service", "maintenance-mode", {}, token);
+  return response.json();
+}
+
+export interface MaintenanceModeActionResult {
+  status: "activated" | "pending_approval";
+  maintenance_mode: MaintenanceMode | null;
+  approval_request_id: string | null;
+}
+
+export async function triggerMaintenanceMode(
+  token: string,
+  triggeredBy: string,
+  reason: string
+): Promise<MaintenanceModeActionResult> {
+  const response = await request(
+    "permission-service",
+    "maintenance-mode/trigger",
+    jsonInit({ triggered_by: triggeredBy, reason: reason || null }),
+    token
+  );
+  return response.json();
+}
+
+export async function liftMaintenanceMode(
+  token: string,
+  liftedBy: string
+): Promise<MaintenanceMode> {
+  const response = await request(
+    "permission-service",
+    "maintenance-mode/lift",
+    jsonInit({ lifted_by: liftedBy }),
     token
   );
   return response.json();

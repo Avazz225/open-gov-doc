@@ -1,0 +1,43 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useI18n } from "@/i18n";
+import { getMaintenanceStatus } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+
+// Not-Shutdown (4.8, P6-S6): "von jedem regulären UI-Zugriff klar
+// signalisiert" - Poll-Intervall bewusst grob (30s), da eine Sekunde
+// Verzögerung bei der Anzeige unkritisch ist, verglichen mit der
+// eigentlichen, serverseitig bereits sofort wirksamen Sperre (Gateway/
+// auth-service, siehe ADR 0024). Rendert nichts, außer der Wartungsmodus
+// ist tatsächlich aktiv (kein leeres Banner im Normalbetrieb).
+export function MaintenanceBanner() {
+  const { accessToken } = useAuth();
+  const { t } = useI18n();
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const status = await getMaintenanceStatus(accessToken as string);
+        if (!cancelled) setActive(status.active);
+      } catch {
+        // Unerreichbarer permission-service soll die restliche UI nicht
+        // blockieren - Banner bleibt einfach aus.
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [accessToken]);
+
+  if (!active) return null;
+  return <div className="maintenance-banner">{t("maintenanceBanner.text")}</div>;
+}

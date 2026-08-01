@@ -23,6 +23,22 @@ class Settings(BaseServiceSettings):
     # selbst (man braucht ja erst einen Token, um einen Token zu bekommen).
     public_routes: list[str] = ["auth-service:login", "auth-service:refresh"]
 
+    # Not-Shutdown (4.8, P6-S6): während aktivem Wartungsmodus werden alle
+    # proxied Requests mit 503 abgelehnt, außer diese Routen (Login/Refresh/Me/
+    # Superuser-Status bleiben erreichbar, damit sich zumindest der Superuser
+    # anmelden kann - `auth-service` selbst lehnt jeden anderen Benutzernamen
+    # ab, siehe dortiges `POST /login`; die beiden Wartungsmodus-Endpunkte
+    # selbst müssen naturgemäß während der Sperre erreichbar bleiben).
+    maintenance_mode_allowed_routes: list[str] = [
+        "auth-service:login",
+        "auth-service:refresh",
+        "auth-service:me",
+        "auth-service:superuser/status",
+        "permission-service:maintenance-mode",
+        "permission-service:maintenance-mode/lift",
+    ]
+    maintenance_cache_ttl_seconds: float = 5.0
+
     rate_limit_max_requests: int = 120
     rate_limit_window_seconds: float = 60.0
 

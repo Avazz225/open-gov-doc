@@ -1,9 +1,9 @@
 # permission-service
 
-**Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume. Seit P6-S4 zusätzlich der generische Vier-Augen-Approval-Mechanismus (4.3), den auch andere Services (z. B. Document Service) nutzen. Seit P6-S5 zusätzlich Heimat der systemeigenen, domänengetrennten Admin-Rollen (4.6) — von Keycloak-Realm-Rollen komplett getrennt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md).
+**Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume. Seit P6-S4 zusätzlich der generische Vier-Augen-Approval-Mechanismus (4.3), den auch andere Services (z. B. Document Service) nutzen. Seit P6-S5 zusätzlich Heimat der systemeigenen, domänengetrennten Admin-Rollen (4.6) — von Keycloak-Realm-Rollen komplett getrennt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Seit P6-S6 zusätzlich Heimat des systemweiten Wartungsmodus-Zustands (Not-Shutdown, 4.8) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-**Konzept-Referenz:** 4.1, 4.3, 4.6, 4.7
-**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`)
+**Konzept-Referenz:** 4.1, 4.3, 4.6, 4.7, 4.8
+**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`)
 
 ## API
 
@@ -31,6 +31,9 @@
 | `GET` | `/approval-requests/{id}` | Request-Detail (`404`) |
 | `POST` | `/approval-requests/{id}/approve` | Genehmigen (`approved_by`) — `403` falls identisch mit `initiated_by` **oder** falls die für den Aktionstyp konfigurierte `required_permission` fehlt (seit P6-S5), `409` falls bereits entschieden |
 | `POST` | `/approval-requests/{id}/reject` | Ablehnen (`rejected_by`, optional `reason`) — `409` falls bereits entschieden |
+| `GET` | `/maintenance-mode` | Wartungsmodus-Status (4.8, seit P6-S6): `{active, reason, triggered_by, activated_at, lifted_by, lifted_at}` |
+| `POST` | `/maintenance-mode/trigger` | Auslösen (`triggered_by`, optional `reason`) — prüft immer zuerst die Capability `system.not_shutdown.trigger` bei `triggered_by` (`403` sonst), dann direkte Aktivierung oder Vier-Augen-Freigabe je nach `approval-config`; Antwort `{status: "activated"\|"pending_approval", maintenance_mode, approval_request_id}` |
+| `POST` | `/maintenance-mode/lift` | Aufheben (`lifted_by`) — `403`, falls `lifted_by` nicht dem aktuell aktiven Superuser entspricht (Cross-Service-Check gegen `auth-service`, s. u.) |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -42,6 +45,7 @@
 - `scope_lock`: `id` (PK), `resource_id` (FK), `locked_by`, `reason`, `blocks_read` (bool, Default `false`), `expires_at` (nullable), `created_at`, `released_at`/`released_by` (nullable) — nie hart gelöscht, die Aufhebung wird dokumentiert statt die Zeile zu entfernen (Audit-Trail bleibt vollständig).
 - `approval_action_config` (4.3, seit P6-S4): `action_type` (PK, freier String), `requires_approval` (bool, Default `false`), `required_permission` (nullable String, seit **P6-S5**, 4.6), `updated_at`. Fehlt eine Zeile für einen Aktionstyp, gilt implizit `requires_approval=false`/`required_permission=null` (transientes Default-Objekt, nicht persistiert).
 - `approval_request` (4.3, seit P6-S4): `id` (UUID-str), `action_type`, `initiated_by`, `payload` (JSON — genug Information, um die Aktion später auszuführen), `status` (`pending`\|`approved`\|`rejected`), `approved_by`/`rejected_by`/`reason` (nullable), `created_at`, `decided_at` (nullable).
+- `system_maintenance_mode` (4.8, seit P6-S6): Singleton (`id=1`, fest, gleiches Muster wie `OcrConfig`/`GuardConfig`), `active` (bool), `reason` (nullable), `triggered_by` (nullable), `activated_at` (nullable), `lifted_by`/`lifted_at` (nullable) — bei erneuter Aktivierung nach einer Aufhebung werden `lifted_by`/`lifted_at` zurückgesetzt.
 
 ## Bereichssperren (4.7, seit P3-S4)
 
@@ -70,15 +74,25 @@ Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründu
 | Rolle | Capability | Zugeordnetes technisches Konto |
 |---|---|---|
 | `domain-admin-users` | `admin.user_management` | `users-admin` (seit P6-S5 angelegt, `auth-service`) |
-| `domain-admin-config` | `admin.object_config` | noch keins |
+| `domain-admin-config` | `admin.object_config` | `config-admin` (seit **P6-S6** angelegt, `auth-service`) |
 | `domain-admin-storage` | `admin.storage` | noch keins |
 | `domain-admin-license` | `admin.license` | noch keins |
 | `domain-admin-query-console` | `admin.query_console` | noch keins |
 | `domain-admin-deletion` | `admin.deletion` | noch keins |
 | `domain-admin-deletion-vs` | `admin.deletion_classified` | noch keins |
 | `breakglass-approver` | `breakglass.approve` | keins (echte Menschen, manuell zugewiesen) |
+| `domain-admin-emergency` | `system.not_shutdown.trigger` | keins (seit **P6-S6**, echte Menschen, manuell zugewiesen — siehe "Not-Shutdown" unten) |
 
-Nur `domain-admin-users` ist diese Session tatsächlich durchgesetzt (`auth-service`s `/users`, Admin-UI-Gating) — die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement, da die zugehörigen fachlichen Funktionen teils noch nicht existieren (Lizenzverwaltung, Query-Konsole). `breakglass-approver` bekommt bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 verlangt zwei *verschiedene, echte* Personen, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, jetzt selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
+`domain-admin-users` und (seit **P6-S6**) `domain-admin-config` sind tatsächlich durchgesetzt (`auth-service`s `/users` bzw. `workflow-service`s Prozessdefinitions-Endpunkte, Admin-UI-Gating) — die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement, da die zugehörigen fachlichen Funktionen teils noch nicht existieren (Lizenzverwaltung, Query-Konsole). `breakglass-approver` und (seit P6-S6) `domain-admin-emergency` bekommen bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 bzw. die Auslöse-Berechtigung aus 4.8 verlangt eine echte, individuell zurechenbare Person, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
+
+## Not-Shutdown (4.8, seit P6-S6)
+
+Systemweite Notfallsperre + Wartungsmodus — vollständige Architekturbegründung in [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md). Kurzfassung:
+
+- **Auslösen** (`POST /maintenance-mode/trigger`): prüft **immer** direkt die Capability `system.not_shutdown.trigger` bei `triggered_by` über eine neue, aus `_require_permission_if_configured` extrahierte `repository.require_capability()`-Funktion — anders als bei den bisherigen Vier-Augen-Fällen (Bereichssperren, Break-Glass) gibt es hier eine Baseline-Rechteprüfung auch **ohne** aktiviertes Vier-Augen-Prinzip, da 4.8 "frei konfigurierbar, wer auslösen darf" wörtlich verlangt. Ist `ApprovalActionConfig("system.not_shutdown.trigger").requires_approval` gesetzt (Default `false`, **nicht** wie Break-Glass hart auf `true` vorbelegt), läuft die eigentliche Aktivierung stattdessen über den bestehenden Vier-Augen-Mechanismus (P6-S4).
+- **Aufheben** (`POST /maintenance-mode/lift`): ausschließlich der aktuell aktive Superuser (4.6) darf aufheben — geprüft über einen neuen `auth_client.py` (`GET /superuser/status` am Auth Service, um `principal_id` erweitert). `403`, falls kein Superuser aktiv ist oder `lifted_by` nicht mit dessen `principal_id` übereinstimmt. **Erster Cross-Service-Aufruf des Permission Service in dieser Richtung** (Auth Service ruft den Permission Service bereits seit P6-S5 auf) — bewusst kein Docker-Compose-`depends_on` dafür, da der Aufruf request-zeitlich ist, nicht beim eigenen Start (siehe ADR 0024).
+- **Selbst-Konsum**: bei aktivierter Genehmigungspflicht konsumiert dieser Service `permission.approval.approved` für `action_type="system.not_shutdown.trigger"` selbst (dritter Zweig in `approval_consumer.py`, gleiches Prinzip wie die Bereichssperren).
+- **Durchgesetzt wird die Sperre nicht hier, sondern vom Gateway** (`docs/services/gateway-service.md`) — dieser Service liefert nur den Zustand (`GET /maintenance-mode`) und die Aktivierungs-/Aufhebungs-Logik.
 
 ## Batch-Check (seit P5-S4, Search Service)
 
@@ -114,6 +128,8 @@ Live end-to-end verifiziert (P3-S3): ein über die echte Folder-Service-API ange
 | `permission.approval.requested` | `{request_id, action_type, initiated_by}` (seit P6-S4) |
 | `permission.approval.approved` | `{request_id, action_type, initiated_by, approved_by, payload}` (seit P6-S4) |
 | `permission.approval.rejected` | `{request_id, action_type, initiated_by, rejected_by, reason}` (seit P6-S4) |
+| `permission.maintenance_mode.activated` | `{triggered_by, reason}` (seit P6-S6, 4.8) |
+| `permission.maintenance_mode.lifted` | `{lifted_by}` (seit P6-S6, 4.8) |
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
@@ -132,4 +148,7 @@ Noch keine — folgt in Phase 11.
 - **Kein Ausführungs-Rückkanal / keine Genehmigenden-Benachrichtigung** für den Approval-Mechanismus — siehe [ADR 0022](../adr/0022-four-eyes-approval-via-events.md) "Konsequenzen".
 - `GET /check` verlässt sich auf den Aufrufer, den korrekten `access_type` (`read`/`write`) mitzugeben — der Service selbst kennt keine feste Zuordnung Permission-Name → Zugriffsart.
 - **`POST`/`GET /roles` und `POST`/`GET`/`DELETE /role-assignments` bleiben ungated** (seit P6-S5 bewusst nicht angefasst): der Retrofit-Auftrag benannte explizit nur Auth-Service `/users` + Admin-UI, nicht diese Endpunkte selbst — zusätzlich hätte ein Gate hier den Bootstrap-Seeding-Aufruf von `auth-service` (der die allererste Rollenzuweisung anlegt) vor ein Henne-Ei-Problem gestellt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md).
-- **6 der 7 Domain-Admin-Rollen aus 4.6 ohne zugeordnetes technisches Konto** (seit P6-S5): siehe "Domänengetrennte Admin-Rollen" oben — folgt jeweils mit der künftigen Retrofit-Session der betreffenden Domäne.
+- **5 der 7 Domain-Admin-Rollen aus 4.6 ohne zugeordnetes technisches Konto** (seit P6-S5/S6): siehe "Domänengetrennte Admin-Rollen" oben — folgt jeweils mit der künftigen Retrofit-Session der betreffenden Domäne.
+- **Federation Hub (7.4) und Plugin-Instanzen (3.8) existieren nicht** (4.8, seit P6-S6): der Wartungsmodus kann daher weder "Föderations-Vorgänge pausieren" noch "Plugin-Instanzen anhalten" — beide Wirkungen aus 4.8 bleiben unimplementiert, siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
+- **Kein systemweites Schreibverbot jenseits des Gateways** (4.8, seit P6-S6): direkte Service-zu-Service-Schreibaufrufe am Gateway vorbei sind während des Wartungsmodus weiterhin möglich, siehe ADR 0024.
+- **Keine erhöhte Auditierungspriorität für Not-Shutdown-Events** (4.8, seit P6-S6): `AuditEvent` hat weiterhin kein Prioritätsfeld, siehe ADR 0023/0024.

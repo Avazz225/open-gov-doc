@@ -1,5 +1,7 @@
 import os
+import uuid
 
+import httpx
 import pytest
 from dms_db_base import build_engine, make_session_factory
 from notification_service.models import Base
@@ -53,3 +55,36 @@ async def session(engine):
 @pytest.fixture
 def settings() -> Settings:
     return Settings()
+
+
+AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
+
+
+@pytest.fixture
+async def real_recipient():
+    """Echtes `auth-service`-Konto (kein Mocking, P6-S6-Retrofit: `POST
+    /notifications` prüft die Empfänger-Existenz) - erzeugt über das
+    bestehende technische `users-admin`-Konto (P6-S5), am Ende wieder
+    gelöscht. Liefert `(username, email)`."""
+    username = f"notif-test-{uuid.uuid4().hex[:8]}"
+    email = f"{username}@example.com"
+    async with httpx.AsyncClient(base_url=AUTH_SERVICE_URL) as client:
+        token = (
+            await client.post("/login", json={"username": "users-admin", "password": "users-admin"})
+        ).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        created = (
+            await client.post(
+                "/users",
+                json={
+                    "username": username,
+                    "email": email,
+                    "password": "testpass123",
+                    "first_name": "Notif",
+                    "last_name": "Test",
+                },
+                headers=headers,
+            )
+        ).json()
+        yield username, email
+        await client.delete(f"/users/{created['id']}", headers=headers)

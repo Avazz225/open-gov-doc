@@ -50,37 +50,45 @@ def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
 
 
 DOMAIN_ADMIN_USERS_USERNAME = "users-admin"
+DOMAIN_ADMIN_CONFIG_USERNAME = "config-admin"
+
+# Technische Konten je Domäne, für die diese Session bereits eine echte
+# Durchsetzung verdrahtet (`(username, systemeigene Permission-Service-Rolle,
+# Nachname für die Keycloak-Pflichtfelder)`) - `users-admin`/"Nutzer-/
+# Rechteverwaltung" seit P6-S5, `config-admin`/"Objekttyp-/Workflow-
+# Konfiguration" seit P6-S6 (Workflow-Definitionen/Script-Task-Upload). Die
+# übrigen 5 in `permission_service.repository.DOMAIN_ADMIN_ROLES` geseedeten
+# Domänen bekommen bewusst noch kein Konto (siehe dortige Begründung).
+DOMAIN_ADMIN_ACCOUNTS: list[tuple[str, str, str]] = [
+    (DOMAIN_ADMIN_USERS_USERNAME, "domain-admin-users", "Nutzerverwaltung"),
+    (DOMAIN_ADMIN_CONFIG_USERNAME, "domain-admin-config", "Workflow-Konfiguration"),
+]
 
 
-def _ensure_domain_admin_account(admin: KeycloakAdmin) -> None:
-    """Technisches Konto für die Domäne "Nutzer-/Rechteverwaltung" (4.6,
-    P6-S5) - Username=Passwort nach dem Muster ``<domain>-admin``, vom
-    Betreiber zu ändern. Die zugehörige Rolle lebt bewusst NICHT in Keycloak,
-    sondern systemeigen im Permission Service (siehe `permission_client.py`) -
-    dieser Schritt legt nur das Konto an; die Rollenzuweisung erfolgt separat
-    (async, gegen den Permission Service) im Lifespan von `main.py`, da
-    `KeycloakAdmin` synchron ist, ein HTTP-Aufruf gegen einen anderen Service
-    aber nicht."""
-    if admin.get_users(query={"username": DOMAIN_ADMIN_USERS_USERNAME, "exact": True}):
-        return
-    admin.create_user(
-        payload={
-            "username": DOMAIN_ADMIN_USERS_USERNAME,
-            "email": f"{DOMAIN_ADMIN_USERS_USERNAME}@system.local",
-            "enabled": True,
-            "emailVerified": True,
-            "firstName": "Domain-Admin",
-            "lastName": "Nutzerverwaltung",
-            "credentials": [
-                {
-                    "type": "password",
-                    "value": DOMAIN_ADMIN_USERS_USERNAME,
-                    "temporary": False,
-                }
-            ],
-        },
-        exist_ok=True,
-    )
+def _ensure_domain_admin_accounts(admin: KeycloakAdmin) -> None:
+    """Technische Konten für die aktuell durchgesetzten Domänen (4.6, seit
+    P6-S5). Username=Passwort nach dem Muster ``<domain>-admin``, vom
+    Betreiber zu ändern. Die zugehörigen Rollen leben bewusst NICHT in
+    Keycloak, sondern systemeigen im Permission Service (siehe
+    `permission_client.py`) - dieser Schritt legt nur die Konten an; die
+    Rollenzuweisung erfolgt separat (async, gegen den Permission Service) im
+    Lifespan von `main.py`, da `KeycloakAdmin` synchron ist, ein HTTP-Aufruf
+    gegen einen anderen Service aber nicht."""
+    for username, _role_name, last_name in DOMAIN_ADMIN_ACCOUNTS:
+        if admin.get_users(query={"username": username, "exact": True}):
+            continue
+        admin.create_user(
+            payload={
+                "username": username,
+                "email": f"{username}@system.local",
+                "enabled": True,
+                "emailVerified": True,
+                "firstName": "Domain-Admin",
+                "lastName": last_name,
+                "credentials": [{"type": "password", "value": username, "temporary": False}],
+            },
+            exist_ok=True,
+        )
 
 
 def ensure_realm_and_client(settings: Settings) -> None:
@@ -137,4 +145,4 @@ def ensure_realm_and_client(settings: Settings) -> None:
     _ensure_superuser_expires_at_attribute(admin)
     _ensure_dms_admin_role(admin)
     superuser.ensure_superuser_account(admin)
-    _ensure_domain_admin_account(admin)
+    _ensure_domain_admin_accounts(admin)

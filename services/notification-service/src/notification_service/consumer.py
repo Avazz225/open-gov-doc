@@ -26,6 +26,11 @@ def make_handler(
         if event.event_type == "auth.superuser.activated":
             await _handle_superuser_activated(session_factory, settings, publish_event, event)
             return
+        if event.event_type == "permission.maintenance_mode.activated":
+            await _handle_maintenance_mode_activated(
+                session_factory, settings, publish_event, event
+            )
+            return
         await _handle_task_escalated(session_factory, settings, publish_event, event)
 
     return handle
@@ -87,6 +92,29 @@ async def _handle_superuser_activated(
             recipient=settings.security_officer_email,
             subject="Superuser Break-Glass aktiviert",
             body=f"Der Superuser-Zugang wurde aktiviert und läuft ab: {expires_at}.",
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_maintenance_mode_activated(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Sicherheitsbenachrichtigung bei Not-Shutdown-Aktivierung (4.8, P6-S6) -
+    gleiches Muster wie `_handle_superuser_activated` (P6-S5)."""
+    triggered_by = event.payload.get("triggered_by", "?")
+    reason = event.payload.get("reason") or "kein Grund angegeben"
+    async with session_factory() as session:
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.security_officer_email,
+            subject="Systemweite Notfallsperre ausgelöst",
+            body=f"Der Wartungsmodus wurde von {triggered_by!r} ausgelöst. Grund: {reason}.",
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)

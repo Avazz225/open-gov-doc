@@ -94,3 +94,28 @@ async def test_superuser_activated_event_creates_security_officer_email(engine, 
     assert notifications[0].channel == "email"
     assert notifications[0].recipient == settings.security_officer_email
     assert len(published) == 1
+
+
+async def test_maintenance_mode_activated_event_creates_security_officer_email(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="permission.maintenance_mode.activated",
+        service_name="permission-service",
+        payload={"triggered_by": "alice", "reason": "Verdacht auf unautorisierten Zugriff"},
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "email"
+    assert notifications[0].recipient == settings.security_officer_email
+    assert "alice" in notifications[0].body
+    assert len(published) == 1

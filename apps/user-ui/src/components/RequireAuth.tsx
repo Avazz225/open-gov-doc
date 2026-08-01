@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { MaintenanceBanner } from "./MaintenanceBanner";
 
 // Statischer Export hat keinen Server, der Redirects vor dem Rendern
 // ausführen könnte (kein Middleware-Äquivalent) - der Schutz greift daher
@@ -25,5 +26,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (!user) {
     return null;
   }
-  return <>{children}</>;
+  return (
+    <>
+      <MaintenanceBanner />
+      {children}
+    </>
+  );
 }

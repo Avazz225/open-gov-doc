@@ -61,3 +61,16 @@ def test_deactivate_if_expired_deactivates_past_activation(keycloak_admin):
 
 def test_deactivate_if_expired_is_noop_when_not_active(keycloak_admin):
     assert superuser.deactivate_if_expired(keycloak_admin) is False
+
+
+def test_get_principal_id_returns_the_superuser_keycloak_id(keycloak_admin):
+    """Grundlage für den P6-S6-Cross-Service-Check: permission-service muss
+    verifizieren können, dass ein `maintenance-mode/lift`-Aufrufer wirklich
+    der aktive Superuser ist."""
+    principal_id = superuser.get_principal_id(keycloak_admin)
+
+    assert principal_id is not None
+    users = keycloak_admin.get_users(
+        query={"username": superuser.SUPERUSER_USERNAME, "exact": True}
+    )
+    assert principal_id == users[0]["id"]

@@ -534,3 +534,101 @@ def test_break_glass_activation_via_api_with_two_group_members(client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
+
+
+def test_get_maintenance_mode_defaults_to_inactive(client):
+    response = client.get("/maintenance-mode")
+
+    assert response.status_code == 200
+    assert response.json()["active"] is False
+
+
+def test_trigger_maintenance_mode_without_permission_is_forbidden(client):
+    response = client.post(
+        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_trigger_maintenance_mode_activates_directly_with_permission(client):
+    _grant_permission_via_api(
+        client, principal_id="alice", permissions=["system.not_shutdown.trigger"]
+    )
+
+    response = client.post(
+        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "activated"
+    assert body["maintenance_mode"]["active"] is True
+    assert body["maintenance_mode"]["triggered_by"] == "alice"
+
+    status = client.get("/maintenance-mode").json()
+    assert status["active"] is True
+
+
+def test_trigger_maintenance_mode_defers_when_approval_required(client):
+    _grant_permission_via_api(
+        client, principal_id="alice", permissions=["system.not_shutdown.trigger"]
+    )
+    client.put(
+        "/approval-config/system.not_shutdown.trigger",
+        json={"requires_approval": True, "required_permission": "system.not_shutdown.trigger"},
+    )
+
+    response = client.post(
+        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending_approval"
+    assert body["approval_request_id"] is not None
+
+    status = client.get("/maintenance-mode").json()
+    assert status["active"] is False
+
+
+def test_trigger_maintenance_mode_via_approval_flow_activates_after_second_approver(client):
+    _grant_permission_via_api(
+        client, principal_id="alice", permissions=["system.not_shutdown.trigger"]
+    )
+    _grant_permission_via_api(
+        client, principal_id="bob", permissions=["system.not_shutdown.trigger"]
+    )
+    client.put(
+        "/approval-config/system.not_shutdown.trigger",
+        json={"requires_approval": True, "required_permission": "system.not_shutdown.trigger"},
+    )
+    request = client.post(
+        "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}
+    ).json()
+
+    approval = client.post(
+        f"/approval-requests/{request['approval_request_id']}/approve",
+        json={"approved_by": "bob"},
+    )
+
+    assert approval.status_code == 200
+    status = client.get("/maintenance-mode").json()
+    assert status["active"] is True
+    assert status["triggered_by"] == "alice"
+
+
+def test_lift_maintenance_mode_without_active_superuser_is_forbidden(client):
+    """Echter Aufruf gegen den laufenden `auth-service` (kein Mocking,
+    gleiches Prinzip wie in P6-S4/S5) - ohne aktivierten Superuser muss das
+    Aufheben in jedem Fall abgelehnt werden."""
+    _grant_permission_via_api(
+        client, principal_id="alice", permissions=["system.not_shutdown.trigger"]
+    )
+    client.post("/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": None})
+
+    response = client.post("/maintenance-mode/lift", json={"lifted_by": "alice"})
+
+    assert response.status_code == 403
+    status = client.get("/maintenance-mode").json()
+    assert status["active"] is True

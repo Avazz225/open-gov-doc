@@ -148,3 +148,29 @@ class ScopeLockActionResult(BaseModel):
     status: Literal["created", "released", "pending_approval"]
     scope_lock: ScopeLockOut | None = None
     approval_request_id: str | None = None
+
+
+class MaintenanceModeOut(BaseModel):
+    active: bool
+    reason: str | None
+    triggered_by: str | None
+    activated_at: datetime | None
+    lifted_by: str | None
+    lifted_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class MaintenanceModeTrigger(BaseModel):
+    triggered_by: str
+    reason: str | None = None
+
+
+class MaintenanceModeLift(BaseModel):
+    lifted_by: str
+
+
+class MaintenanceModeActionResult(BaseModel):
+    status: Literal["activated", "pending_approval"]
+    maintenance_mode: MaintenanceModeOut | None = None
+    approval_request_id: str | None = None

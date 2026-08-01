@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from permission_service import approval_consumer, repository, structure_consumer
+from permission_service.auth_client import AuthServiceClient
 from permission_service.models import ApprovalActionConfig, ApprovalRequest, Base, ResourceNode
 from permission_service.schemas import (
     ApprovalActionConfigOut,
@@ -25,6 +26,10 @@ from permission_service.schemas import (
     BatchCheckResult,
     CheckResult,
     EffectivePermissionsOut,
+    MaintenanceModeActionResult,
+    MaintenanceModeLift,
+    MaintenanceModeOut,
+    MaintenanceModeTrigger,
     ResourceNodeOut,
     ResourceNodeUpdate,
     RoleAssignmentCreate,
@@ -80,7 +85,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 requires_approval=True,
                 required_permission="breakglass.approve",
             )
+        # Not-Shutdown (4.8, P6-S6): anders als Break-Glass NICHT hart auf
+        # requires_approval=True vorbelegt ("optional konfigurierbar je
+        # Installation") - required_permission ist trotzdem schon gesetzt,
+        # damit eine spätere Aktivierung von requires_approval sofort korrekt
+        # rollengebunden ist, ohne dass ein Betreiber daran denken muss.
+        if await session.get(ApprovalActionConfig, "system.not_shutdown.trigger") is None:
+            await repository.set_approval_config(
+                session,
+                "system.not_shutdown.trigger",
+                requires_approval=False,
+                required_permission="system.not_shutdown.trigger",
+            )
+        await repository.get_or_seed_maintenance_mode(session)
         await session.commit()
+
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
@@ -121,6 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await registration.stop()
     await publisher.close()
     await event_bus.close()
+    await app.state.auth_client.close()
     await engine.dispose()
 
 
@@ -514,3 +535,72 @@ async def effective_scope_locks(
     resource_id: str, session: AsyncSession = Depends(get_session)
 ) -> list[ScopeLockOut]:
     return await repository.get_active_scope_locks_for_resource(session, resource_id)
+
+
+@app.get("/maintenance-mode", response_model=MaintenanceModeOut)
+async def get_maintenance_mode(session: AsyncSession = Depends(get_session)) -> MaintenanceModeOut:
+    mode = await repository.get_or_seed_maintenance_mode(session)
+    await session.commit()
+    return mode
+
+
+@app.post("/maintenance-mode/trigger", response_model=MaintenanceModeActionResult, status_code=201)
+async def trigger_maintenance_mode(
+    payload: MaintenanceModeTrigger, session: AsyncSession = Depends(get_session)
+) -> MaintenanceModeActionResult:
+    """Not-Shutdown-Auslösung (4.8, P6-S6): anders als Bereichssperren/Force-
+    Unlock (P6-S4) verlangt bereits der *direkte* Pfad (ohne Vier-Augen) eine
+    Baseline-Rechteprüfung - "frei konfigurierbar, wer auslösen darf, keine
+    fest verdrahtete Rolle" (4.8) ist keine optionale Ergänzung wie bei 4.3,
+    sondern von Anfang an verbindlich."""
+    try:
+        await repository.require_capability(
+            session, payload.triggered_by, "system.not_shutdown.trigger"
+        )
+    except repository.MissingRequiredPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    config = await repository.get_approval_config(session, "system.not_shutdown.trigger")
+    if config.requires_approval:
+        request = await _request_approval(
+            session,
+            action_type="system.not_shutdown.trigger",
+            initiated_by=payload.triggered_by,
+            payload={"triggered_by": payload.triggered_by, "reason": payload.reason},
+        )
+        return MaintenanceModeActionResult(
+            status="pending_approval", approval_request_id=request.id
+        )
+
+    mode = await repository.activate_maintenance_mode(
+        session, triggered_by=payload.triggered_by, reason=payload.reason
+    )
+    await session.commit()
+    await publish_event(
+        "permission.maintenance_mode.activated",
+        {"triggered_by": mode.triggered_by, "reason": mode.reason},
+    )
+    return MaintenanceModeActionResult(status="activated", maintenance_mode=mode)
+
+
+@app.post("/maintenance-mode/lift", response_model=MaintenanceModeOut)
+async def lift_maintenance_mode(
+    payload: MaintenanceModeLift, session: AsyncSession = Depends(get_session)
+) -> MaintenanceModeOut:
+    """Nur der aktuell aktive Superuser darf aufheben (4.8) - dessen Identität
+    lebt in auth-service (P6-S5), daher der Cross-Service-Check statt einer
+    eigenen zweiten Quelle der Wahrheit hier."""
+    active, superuser_id = await app.state.auth_client.get_active_superuser()
+    if not active or superuser_id != payload.lifted_by:
+        raise HTTPException(
+            status_code=403,
+            detail="Nur der aktuell aktive Superuser darf den Wartungsmodus aufheben",
+        )
+
+    mode = await repository.lift_maintenance_mode(session, lifted_by=payload.lifted_by)
+    await session.commit()
+    await publish_event(
+        "permission.maintenance_mode.lifted",
+        {"lifted_by": mode.lifted_by},
+    )
+    return mode

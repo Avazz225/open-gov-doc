@@ -103,3 +103,46 @@ def test_preferences_reject_missing_token():
         response = client.get("/me/preferences")
 
     assert response.status_code == 401
+
+
+def test_login_rejects_non_superuser_during_maintenance_mode(test_user):
+    """Not-Shutdown (4.8, P6-S6): das Gateway broadcastet den Status per
+    Header, ohne Gateway (wie hier im Test) wird er direkt gesetzt."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/login", json=test_user, headers={"X-DMS-Maintenance-Active": "true"}
+        )
+
+    assert response.status_code == 503
+
+
+def test_login_allows_superuser_username_during_maintenance_mode():
+    """Der eigentliche Login schlägt trotzdem fehl (Superuser-Konto ist per
+    Default deaktiviert/hat kein bekanntes Passwort in diesem Test) - dieser
+    Test bestätigt nur, dass die Wartungsmodus-Sperre selbst NICHT greift,
+    also `401` statt `503` zurückkommt."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/login",
+            json={"username": "superuser", "password": "wrong-password"},
+            headers={"X-DMS-Maintenance-Active": "true"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_login_unaffected_when_maintenance_mode_inactive(test_user):
+    with TestClient(app) as client:
+        response = client.post(
+            "/login", json=test_user, headers={"X-DMS-Maintenance-Active": "false"}
+        )
+
+    assert response.status_code == 200
+
+
+def test_superuser_status_endpoint_includes_principal_id():
+    with TestClient(app) as client:
+        response = client.get("/superuser/status")
+
+    assert response.status_code == 200
+    assert response.json()["principal_id"] is not None

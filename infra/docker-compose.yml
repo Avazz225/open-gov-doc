@@ -203,6 +203,11 @@ services:
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://permission-service:8000
+      # Kein `depends_on: auth-service` hier (würde einen Zyklus mit
+      # auth-services `depends_on: permission-service` aus P6-S5 bilden,
+      # Docker Compose verbietet das). Unkritisch: der Aufruf passiert nur bei
+      # `POST /maintenance-mode/lift` zur Laufzeit, nicht beim eigenen Start.
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
     ports:
       - "${PERMISSION_SERVICE_PORT:-8004}:8000"
     depends_on:
@@ -419,6 +424,7 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://workflow-service:8000
       DMS_SLA_POLL_INTERVAL_SECONDS: ${WORKFLOW_SLA_POLL_INTERVAL_SECONDS:-30}
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
     depends_on:
@@ -426,6 +432,8 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      permission-service:
+        condition: service_started
     networks:
       - dms-net
 
@@ -441,6 +449,7 @@ services:
       DMS_SELF_ADDRESS: http://notification-service:8000
       DMS_SMTP_HOST: mailpit
       DMS_SMTP_PORT: "1025"
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
     ports:
       - "${NOTIFICATION_SERVICE_PORT:-8015}:8000"
     depends_on:
@@ -449,6 +458,8 @@ services:
       nats:
         condition: service_healthy
       mailpit:
+        condition: service_started
+      auth-service:
         condition: service_started
     networks:
       - dms-net

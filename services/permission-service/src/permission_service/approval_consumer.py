@@ -24,13 +24,29 @@ def make_handler(
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
         action_type = event.payload.get("action_type")
-        if action_type not in ("permission.scope_lock.create", "permission.scope_lock.release"):
+        known_action_types = (
+            "permission.scope_lock.create",
+            "permission.scope_lock.release",
+            "system.not_shutdown.trigger",
+        )
+        if action_type not in known_action_types:
             return
         action_payload = event.payload.get("payload") or {}
 
         async with session_factory() as session:
             try:
-                if action_type == "permission.scope_lock.create":
+                if action_type == "system.not_shutdown.trigger":
+                    mode = await repository.activate_maintenance_mode(
+                        session,
+                        triggered_by=action_payload["triggered_by"],
+                        reason=action_payload.get("reason"),
+                    )
+                    await session.commit()
+                    await publish_event(
+                        "permission.maintenance_mode.activated",
+                        {"triggered_by": mode.triggered_by, "reason": mode.reason},
+                    )
+                elif action_type == "permission.scope_lock.create":
                     expires_at_raw = action_payload.get("expires_at")
                     lock = await repository.create_scope_lock(
                         session,

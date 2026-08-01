@@ -5,8 +5,12 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   approveApprovalRequest,
+  getMaintenanceStatus,
   getSuperuserStatus,
+  liftMaintenanceMode,
   requestSuperuserActivation,
+  triggerMaintenanceMode,
+  type MaintenanceMode,
   type SuperuserStatus,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -20,14 +24,17 @@ import { useAuth } from "@/lib/auth-context";
 // müssen anfordern und genehmigen - identisch mit jedem anderen gegateten
 // Aktionstyp aus P6-S4, hier nur mit erzwungener Rollenbindung.
 export function SuperuserBreakGlass() {
-  const { user, accessToken } = useAuth();
+  const { user, permissions, accessToken } = useAuth();
   const { t } = useI18n();
   const [status, setStatus] = useState<SuperuserStatus | null>(null);
+  const [maintenance, setMaintenance] = useState<MaintenanceMode | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [requestedId, setRequestedId] = useState<string | null>(null);
   const [approveRequestId, setApproveRequestId] = useState("");
+  const [shutdownReason, setShutdownReason] = useState("");
+  const [shutdownResult, setShutdownResult] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -35,7 +42,12 @@ export function SuperuserBreakGlass() {
     setUnreachable(false);
     setError(null);
     try {
-      setStatus(await getSuperuserStatus(accessToken));
+      const [superuserStatus, maintenanceStatus] = await Promise.all([
+        getSuperuserStatus(accessToken),
+        getMaintenanceStatus(accessToken),
+      ]);
+      setStatus(superuserStatus);
+      setMaintenance(maintenanceStatus);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -68,6 +80,29 @@ export function SuperuserBreakGlass() {
     try {
       await approveApprovalRequest(accessToken, approveRequestId, user.sub);
       setApproveRequestId("");
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.loadError"));
+    }
+  }
+
+  async function handleTriggerShutdown() {
+    if (!accessToken || !user) return;
+    setError(null);
+    try {
+      const result = await triggerMaintenanceMode(accessToken, user.sub, shutdownReason);
+      setShutdownResult(result.status);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("common.loadError"));
+    }
+  }
+
+  async function handleLiftShutdown() {
+    if (!accessToken || !user) return;
+    setError(null);
+    try {
+      await liftMaintenanceMode(accessToken, user.sub);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.loadError"));
@@ -114,6 +149,38 @@ export function SuperuserBreakGlass() {
         <button type="button" onClick={handleApprove} disabled={!approveRequestId}>
           {t("superuser.approveButton")}
         </button>
+      </section>
+
+      <section>
+        <h2>{t("notShutdown.title")}</h2>
+        <p>
+          <strong>
+            {maintenance?.active ? t("notShutdown.statusActive") : t("notShutdown.statusInactive")}
+          </strong>
+          {maintenance?.active && maintenance.triggered_by && (
+            <> — {t("notShutdown.triggeredBy")}: {maintenance.triggered_by}</>
+          )}
+        </p>
+        {permissions.includes("system.not_shutdown.trigger") && !maintenance?.active && (
+          <div>
+            <label>
+              {t("notShutdown.reasonLabel")}
+              <input
+                value={shutdownReason}
+                onChange={(e) => setShutdownReason(e.target.value)}
+              />
+            </label>
+            <button type="button" onClick={handleTriggerShutdown}>
+              {t("notShutdown.triggerButton")}
+            </button>
+            {shutdownResult && <p>{t(`notShutdown.result.${shutdownResult}`)}</p>}
+          </div>
+        )}
+        {maintenance?.active && status?.active && status.principal_id === user?.sub && (
+          <button type="button" onClick={handleLiftShutdown}>
+            {t("notShutdown.liftButton")}
+          </button>
+        )}
       </section>
     </div>
   );

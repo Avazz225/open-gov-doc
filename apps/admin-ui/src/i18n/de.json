@@ -241,6 +241,22 @@
     "requestIdLabel": "Request-ID",
     "approveButton": "Genehmigen"
   },
+  "notShutdown": {
+    "title": "Systemweite Notfallsperre (Not-Shutdown)",
+    "statusActive": "Aktiv",
+    "statusInactive": "Inaktiv",
+    "triggeredBy": "Ausgelöst von",
+    "reasonLabel": "Grund (optional)",
+    "triggerButton": "Notfallsperre auslösen",
+    "liftButton": "Notfallsperre aufheben",
+    "result": {
+      "activated": "Notfallsperre aktiviert.",
+      "pending_approval": "Freigabe-Request erstellt - eine zweite Person mit der Rolle \"Not-Shutdown-Auslösung\" muss ihn genehmigen."
+    }
+  },
+  "maintenanceBanner": {
+    "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
+  },
   "registry": {
     "pageTitle": "Registry-Übersicht",
     "serviceType": "Servicetyp",

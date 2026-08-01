@@ -12,6 +12,7 @@ from permission_service.models import (
     Role,
     RoleAssignment,
     ScopeLock,
+    SystemMaintenanceMode,
 )
 from permission_service.settings import ROOT_RESOURCE_ID
 
@@ -92,6 +93,12 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         ["admin.deletion_classified"],
     ),
     ("breakglass-approver", "Freigabegruppe Superuser-Break-Glass (4.6)", ["breakglass.approve"]),
+    # Ebenfalls kein Konzept-4.6-Domänen-Eintrag, sondern die Auslöse-Rolle für
+    # die Notfallsperre (4.8, P6-S6) - bewusst ohne automatisches technisches
+    # Konto (wie breakglass-approver, nicht wie users-admin/config-admin):
+    # eine Notfallsperre soll einer echten, individuell zurechenbaren Person
+    # zugeordnet bleiben, kein geteiltes Konto.
+    ("domain-admin-emergency", "Not-Shutdown-Auslösung (4.8)", ["system.not_shutdown.trigger"]),
 ]
 
 
@@ -332,17 +339,25 @@ async def set_approval_config(
     return config
 
 
+async def require_capability(session: AsyncSession, principal_id: str, permission: str) -> None:
+    """Direkte Baseline-Rechteprüfung an der Wurzelressource - anders als
+    `_require_permission_if_configured` unten (die nur *im Kontext eines
+    Approval-Requests* greift) auch für Endpunkte ohne jedes Vier-Augen-
+    Zwischenspiel nutzbar (z. B. `POST /maintenance-mode/trigger`, wenn
+    `requires_approval=False`, 4.8/P6-S6)."""
+    entry = await get_effective_permissions(session, principal_id, ROOT_RESOURCE_ID)
+    if permission not in entry.permissions:
+        raise MissingRequiredPermissionError(
+            f"{principal_id!r} hält nicht die erforderliche Capability {permission!r}"
+        )
+
+
 async def _require_permission_if_configured(
     session: AsyncSession, config: ApprovalActionConfig, principal_id: str
 ) -> None:
     if config.required_permission is None:
         return
-    entry = await get_effective_permissions(session, principal_id, ROOT_RESOURCE_ID)
-    if config.required_permission not in entry.permissions:
-        raise MissingRequiredPermissionError(
-            f"{principal_id!r} hält nicht die für {config.action_type!r} "
-            f"erforderliche Capability {config.required_permission!r}"
-        )
+    await require_capability(session, principal_id, config.required_permission)
 
 
 async def create_approval_request(
@@ -417,3 +432,42 @@ async def reject_request(
     request.decided_at = datetime.now(UTC)
     await session.flush()
     return request
+
+
+MAINTENANCE_MODE_ID = 1
+
+
+async def get_or_seed_maintenance_mode(session: AsyncSession) -> SystemMaintenanceMode:
+    """Singleton-Zeile (4.8, P6-S6) - wird beim ersten Zugriff angelegt statt
+    beim Service-Start unbedingt vorausgesetzt, gleiches Muster wie
+    `get_approval_config`s transientes Default-Objekt, nur hier tatsächlich
+    persistiert (der Status muss über Neustarts hinweg erhalten bleiben)."""
+    mode = await session.get(SystemMaintenanceMode, MAINTENANCE_MODE_ID)
+    if mode is None:
+        mode = SystemMaintenanceMode(id=MAINTENANCE_MODE_ID, active=False)
+        session.add(mode)
+        await session.flush()
+    return mode
+
+
+async def activate_maintenance_mode(
+    session: AsyncSession, *, triggered_by: str, reason: str | None
+) -> SystemMaintenanceMode:
+    mode = await get_or_seed_maintenance_mode(session)
+    mode.active = True
+    mode.reason = reason
+    mode.triggered_by = triggered_by
+    mode.activated_at = datetime.now(UTC)
+    mode.lifted_by = None
+    mode.lifted_at = None
+    await session.flush()
+    return mode
+
+
+async def lift_maintenance_mode(session: AsyncSession, *, lifted_by: str) -> SystemMaintenanceMode:
+    mode = await get_or_seed_maintenance_mode(session)
+    mode.active = False
+    mode.lifted_by = lifted_by
+    mode.lifted_at = datetime.now(UTC)
+    await session.flush()
+    return mode

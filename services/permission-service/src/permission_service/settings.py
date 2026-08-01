@@ -15,6 +15,10 @@ class Settings(BaseServiceSettings):
     structure_subjects: list[str] = ["folder.>"]
 
     # Selbst-Konsum des eigenen Vier-Augen-Approval-Events (4.3, P6-S4) für
-    # Aktionstypen, die permission-service selbst ausführt (Bereichssperren) -
-    # siehe approval_consumer.py.
+    # Aktionstypen, die permission-service selbst ausführt (Bereichssperren,
+    # seit P6-S6 zusätzlich die Not-Shutdown-Auslösung) - siehe approval_consumer.py.
     approval_subjects: list[str] = ["permission.approval.approved"]
+
+    # Erster Cross-Service-Aufruf dieses Service (P6-S6, 4.8): nur der aktive
+    # Superuser darf den Wartungsmodus aufheben, dessen Identität lebt in auth-service.
+    auth_service_base_url: str = "http://localhost:8003"

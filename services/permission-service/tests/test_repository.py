@@ -439,6 +439,8 @@ async def test_ensure_domain_admin_roles_seeds_all_expected_roles(session):
     assert users_role.permissions == ["admin.user_management"]
     breakglass_role = await repository.get_role_by_name(session, "breakglass-approver")
     assert breakglass_role.permissions == ["breakglass.approve"]
+    emergency_role = await repository.get_role_by_name(session, "domain-admin-emergency")
+    assert emergency_role.permissions == ["system.not_shutdown.trigger"]
 
 
 async def test_ensure_domain_admin_roles_is_idempotent(session):
@@ -548,3 +550,67 @@ async def test_required_permission_none_does_not_affect_existing_action_types(se
     approved = await repository.approve_request(session, request.id, approved_by="bob")
 
     assert approved.status == "approved"
+
+
+async def test_require_capability_raises_when_missing(session):
+    with pytest.raises(repository.MissingRequiredPermissionError):
+        await repository.require_capability(session, "alice", "system.not_shutdown.trigger")
+
+
+async def test_require_capability_passes_when_held(session):
+    await _grant_permission(
+        session,
+        principal_id="alice",
+        role_name="emergency",
+        permissions=["system.not_shutdown.trigger"],
+    )
+
+    await repository.require_capability(session, "alice", "system.not_shutdown.trigger")
+
+
+async def test_get_or_seed_maintenance_mode_defaults_to_inactive(session):
+    mode = await repository.get_or_seed_maintenance_mode(session)
+
+    assert mode.active is False
+    assert mode.triggered_by is None
+
+
+async def test_get_or_seed_maintenance_mode_is_idempotent(session):
+    first = await repository.get_or_seed_maintenance_mode(session)
+    second = await repository.get_or_seed_maintenance_mode(session)
+
+    assert first.id == second.id == repository.MAINTENANCE_MODE_ID
+
+
+async def test_activate_maintenance_mode_sets_fields(session):
+    mode = await repository.activate_maintenance_mode(
+        session, triggered_by="alice", reason="Verdacht auf unautorisierten Zugriff"
+    )
+
+    assert mode.active is True
+    assert mode.triggered_by == "alice"
+    assert mode.reason == "Verdacht auf unautorisierten Zugriff"
+    assert mode.activated_at is not None
+    assert mode.lifted_by is None
+
+
+async def test_lift_maintenance_mode_clears_active_flag(session):
+    await repository.activate_maintenance_mode(session, triggered_by="alice", reason=None)
+
+    mode = await repository.lift_maintenance_mode(session, lifted_by="superuser-id")
+
+    assert mode.active is False
+    assert mode.lifted_by == "superuser-id"
+    assert mode.lifted_at is not None
+
+
+async def test_reactivating_after_lift_clears_previous_lift_fields(session):
+    await repository.activate_maintenance_mode(session, triggered_by="alice", reason=None)
+    await repository.lift_maintenance_mode(session, lifted_by="superuser-id")
+
+    mode = await repository.activate_maintenance_mode(session, triggered_by="bob", reason="Erneut")
+
+    assert mode.active is True
+    assert mode.triggered_by == "bob"
+    assert mode.lifted_by is None
+    assert mode.lifted_at is None

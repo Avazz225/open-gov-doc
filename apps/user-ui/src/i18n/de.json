@@ -12,6 +12,9 @@
     "loadError": "Laden fehlgeschlagen",
     "deleteError": "Löschen fehlgeschlagen"
   },
+  "maintenanceBanner": {
+    "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
+  },
   "login": {
     "heading": "Anmelden",
     "username": "Benutzername",

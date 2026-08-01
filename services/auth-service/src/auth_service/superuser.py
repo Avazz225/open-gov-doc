@@ -74,6 +74,16 @@ def get_status(admin: KeycloakAdmin) -> tuple[bool, datetime | None]:
     return bool(raw.get("enabled", False)), expires_at
 
 
+def get_principal_id(admin: KeycloakAdmin) -> str | None:
+    """Keycloak-`sub` des Superuser-Kontos - nötig, damit `permission-service`
+    (4.8, P6-S6) prüfen kann, ob ein `POST /maintenance-mode/lift`-Aufrufer
+    tatsächlich der aktive Superuser ist. `None`, falls das Konto (z. B. in
+    einer frischen Testumgebung) noch nicht angelegt wurde, statt zu werfen -
+    der Aufrufer behandelt das wie "kein aktiver Superuser"."""
+    users = admin.get_users(query={"username": SUPERUSER_USERNAME, "exact": True})
+    return users[0]["id"] if users else None
+
+
 def deactivate_if_expired(admin: KeycloakAdmin) -> bool:
     """Wird vom Poll-Loop (`main.py`) periodisch aufgerufen (ADR 0020-Muster) -
     gibt True zurück, wenn tatsächlich deaktiviert wurde (für den Event-Publish

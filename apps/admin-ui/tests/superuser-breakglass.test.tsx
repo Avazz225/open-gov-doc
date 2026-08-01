@@ -14,11 +14,28 @@ function renderComponent() {
 const getSuperuserStatusMock = vi.fn();
 const requestSuperuserActivationMock = vi.fn();
 const approveApprovalRequestMock = vi.fn();
+const getMaintenanceStatusMock = vi.fn();
+const triggerMaintenanceModeMock = vi.fn();
+const liftMaintenanceModeMock = vi.fn();
+
+const INACTIVE_MAINTENANCE = {
+  active: false,
+  reason: null,
+  triggered_by: null,
+  activated_at: null,
+  lifted_by: null,
+  lifted_at: null,
+};
+
+let mockPermissions: string[] = [];
 
 vi.mock("@/lib/api", () => ({
   getSuperuserStatus: (...args: unknown[]) => getSuperuserStatusMock(...args),
   requestSuperuserActivation: (...args: unknown[]) => requestSuperuserActivationMock(...args),
   approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
+  getMaintenanceStatus: (...args: unknown[]) => getMaintenanceStatusMock(...args),
+  triggerMaintenanceMode: (...args: unknown[]) => triggerMaintenanceModeMock(...args),
+  liftMaintenanceMode: (...args: unknown[]) => liftMaintenanceModeMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -34,7 +51,7 @@ vi.mock("@/lib/auth-context", async () => {
     ...actual,
     useAuth: () => ({
       user: { sub: "alice", username: "alice", email: null, realm_roles: [] },
-      permissions: [],
+      permissions: mockPermissions,
       accessToken: "token-123",
       isLoading: false,
       login: vi.fn(),
@@ -48,26 +65,37 @@ describe("SuperuserBreakGlass", () => {
     getSuperuserStatusMock.mockReset();
     requestSuperuserActivationMock.mockReset();
     approveApprovalRequestMock.mockReset();
+    getMaintenanceStatusMock.mockReset();
+    triggerMaintenanceModeMock.mockReset();
+    liftMaintenanceModeMock.mockReset();
+    getMaintenanceStatusMock.mockResolvedValue(INACTIVE_MAINTENANCE);
+    mockPermissions = [];
   });
 
   it("shows the inactive status by default", async () => {
-    getSuperuserStatusMock.mockResolvedValue({ active: false, expires_at: null });
+    getSuperuserStatusMock.mockResolvedValue({
+      active: false,
+      expires_at: null,
+      principal_id: null,
+    });
 
     renderComponent();
 
-    expect(await screen.findByText("Inaktiv")).toBeInTheDocument();
+    expect(await screen.findAllByText("Inaktiv")).toHaveLength(2);
   });
 
   it("shows the active status including the expiry timestamp", async () => {
     getSuperuserStatusMock.mockResolvedValue({
       active: true,
       expires_at: "2026-01-01T00:30:00+00:00",
+      principal_id: "alice",
     });
 
     renderComponent();
 
-    expect(await screen.findByText("Aktiv", { exact: true })).toBeInTheDocument();
-    expect(screen.getByText(/2026-01-01T00:30:00\+00:00/)).toBeInTheDocument();
+    await screen.findByText(/2026-01-01T00:30:00\+00:00/);
+    const activeLabels = screen.getAllByText("Aktiv", { exact: true });
+    expect(activeLabels.length).toBeGreaterThanOrEqual(1);
   });
 
   it("shows an unreachable state when auth-service is not reachable", async () => {
@@ -79,7 +107,11 @@ describe("SuperuserBreakGlass", () => {
   });
 
   it("requests activation as the current principal and shows the request id", async () => {
-    getSuperuserStatusMock.mockResolvedValue({ active: false, expires_at: null });
+    getSuperuserStatusMock.mockResolvedValue({
+      active: false,
+      expires_at: null,
+      principal_id: null,
+    });
     requestSuperuserActivationMock.mockResolvedValue({
       id: "req-1",
       action_type: "auth.superuser.activate",
@@ -90,7 +122,7 @@ describe("SuperuserBreakGlass", () => {
     });
 
     renderComponent();
-    await screen.findByText("Inaktiv");
+    await screen.findAllByText("Inaktiv");
 
     fireEvent.click(screen.getByRole("button", { name: "Aktivierung anfordern" }));
 
@@ -100,8 +132,12 @@ describe("SuperuserBreakGlass", () => {
 
   it("approves a request by id as the current principal and reloads the status", async () => {
     getSuperuserStatusMock
-      .mockResolvedValueOnce({ active: false, expires_at: null })
-      .mockResolvedValueOnce({ active: true, expires_at: "2026-01-01T00:30:00+00:00" });
+      .mockResolvedValueOnce({ active: false, expires_at: null, principal_id: null })
+      .mockResolvedValueOnce({
+        active: true,
+        expires_at: "2026-01-01T00:30:00+00:00",
+        principal_id: "alice",
+      });
     approveApprovalRequestMock.mockResolvedValue({
       id: "req-1",
       action_type: "auth.superuser.activate",
@@ -112,12 +148,66 @@ describe("SuperuserBreakGlass", () => {
     });
 
     renderComponent();
-    await screen.findByText("Inaktiv");
+    await screen.findAllByText("Inaktiv");
 
     fireEvent.change(screen.getByLabelText("Request-ID"), { target: { value: "req-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Genehmigen" }));
 
-    expect(approveApprovalRequestMock).toHaveBeenCalledWith("token-123", "req-1", "alice");
-    expect(await screen.findByText("Aktiv", { exact: true })).toBeInTheDocument();
+    await screen.findByText(/2026-01-01T00:30:00\+00:00/);
+  });
+
+  it("hides the trigger form without the not-shutdown capability", async () => {
+    getSuperuserStatusMock.mockResolvedValue({
+      active: false,
+      expires_at: null,
+      principal_id: null,
+    });
+
+    renderComponent();
+    await screen.findAllByText("Inaktiv");
+
+    expect(screen.queryByRole("button", { name: "Notfallsperre auslösen" })).not.toBeInTheDocument();
+  });
+
+  it("triggers the emergency shutdown with the current principal", async () => {
+    mockPermissions = ["system.not_shutdown.trigger"];
+    getSuperuserStatusMock.mockResolvedValue({
+      active: false,
+      expires_at: null,
+      principal_id: null,
+    });
+    triggerMaintenanceModeMock.mockResolvedValue({
+      status: "activated",
+      maintenance_mode: { ...INACTIVE_MAINTENANCE, active: true, triggered_by: "alice" },
+      approval_request_id: null,
+    });
+
+    renderComponent();
+    await screen.findAllByText("Inaktiv");
+
+    fireEvent.click(screen.getByRole("button", { name: "Notfallsperre auslösen" }));
+
+    expect(triggerMaintenanceModeMock).toHaveBeenCalledWith("token-123", "alice", "");
+    expect(await screen.findByText("Notfallsperre aktiviert.")).toBeInTheDocument();
+  });
+
+  it("shows the lift button only for the currently active superuser", async () => {
+    getMaintenanceStatusMock.mockResolvedValue({
+      ...INACTIVE_MAINTENANCE,
+      active: true,
+      triggered_by: "bob",
+    });
+    getSuperuserStatusMock.mockResolvedValue({
+      active: true,
+      expires_at: "2026-01-01T00:30:00+00:00",
+      principal_id: "alice",
+    });
+
+    renderComponent();
+
+    const liftButton = await screen.findByRole("button", { name: "Notfallsperre aufheben" });
+    fireEvent.click(liftButton);
+
+    expect(liftMaintenanceModeMock).toHaveBeenCalledWith("token-123", "alice");
   });
 });

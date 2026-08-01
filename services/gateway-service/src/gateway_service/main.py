@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from gateway_service.rate_limiter import RateLimiter
 from gateway_service.settings import Settings
-from gateway_service.upstream import InstanceResolver, filter_headers
+from gateway_service.upstream import InstanceResolver, MaintenanceStateClient, filter_headers
 
 settings = Settings()
 configure_logging(settings)
@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.rate_limiter = RateLimiter(
         max_requests=settings.rate_limit_max_requests,
         window_seconds=settings.rate_limit_window_seconds,
+    )
+    app.state.maintenance_state = MaintenanceStateClient(
+        client=http_client,
+        resolver=app.state.instance_resolver,
+        cache_ttl_seconds=settings.maintenance_cache_ttl_seconds,
     )
     # Auf app.state statt Modulkonstante, damit Tests eine gegen lokale
     # Test-Schlüssel validierende Instanz einsetzen können, ohne einen echten
@@ -93,6 +98,18 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     rate_limit_key = client_host
     identity_headers: dict[str, str] = {}
 
+    # Not-Shutdown (4.8, P6-S6): einziger zentraler Durchsetzungspunkt, da
+    # jeder proxied Request diese Funktion durchläuft. Eine kleine Allow-Liste
+    # bleibt erreichbar (Login/Refresh/Me/Superuser-Status, die beiden
+    # Wartungsmodus-Endpunkte selbst) - `auth-service` lehnt Logins für jeden
+    # außer den Superuser selbst zusätzlich serverseitig ab (siehe unten).
+    maintenance_active = await request.app.state.maintenance_state.is_active()
+    if maintenance_active and route_key not in settings.maintenance_mode_allowed_routes:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Systemweite Notfallsperre aktiv - Wartungsmodus",
+        )
+
     if route_key not in settings.public_routes:
         token = _extract_bearer_token(request.headers.get("authorization"))
         try:
@@ -127,6 +144,10 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     body = await request.body()
     headers = filter_headers(request.headers)
     headers.update(identity_headers)
+    # Broadcast statt Polling (ADR 0024): jeder durchgelassene Backend-Service
+    # kann den Wartungsmodus-Status auswerten, ohne selbst eine Verbindung zu
+    # permission-service aufzubauen (z. B. auth-service `POST /login`).
+    headers["X-DMS-Maintenance-Active"] = "true" if maintenance_active else "false"
 
     try:
         upstream_response = await request.app.state.http_client.request(

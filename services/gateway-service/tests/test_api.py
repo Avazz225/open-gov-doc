@@ -131,6 +131,41 @@ async def test_valid_token_routes_via_registry_to_real_instance(client, make_tok
         await _deregister_instance(service_type, instance_id)
 
 
+class _StubMaintenanceState:
+    """Ersetzt `app.state.maintenance_state` für kontrollierte Tests - genau
+    wie `test_rate_limit_returns_429_after_threshold` unten `app.state.
+    rate_limiter` ersetzt, statt echten Wartungsmodus auf dem geteilten,
+    live laufenden `permission-service` zu aktivieren (dessen Zustand
+    außerhalb dieses Testlaufs sichtbar bliebe, siehe PROGRESS.md "Tooling &
+    Testing" - dieselbe Vorsicht wie beim NATS-/Keycloak-Sharing)."""
+
+    def __init__(self, active: bool) -> None:
+        self._active = active
+
+    async def is_active(self) -> bool:
+        return self._active
+
+
+def test_maintenance_mode_blocks_non_allowlisted_routes(client, make_token):
+    app.state.maintenance_state = _StubMaintenanceState(True)
+    token = make_token()
+
+    response = client.get(
+        "/api/audit-service/healthz", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Systemweite Notfallsperre aktiv - Wartungsmodus"
+
+
+def test_maintenance_mode_allows_allowlisted_routes(client):
+    app.state.maintenance_state = _StubMaintenanceState(True)
+
+    response = client.post("/api/auth-service/login", json={"username": "x", "password": "y"})
+
+    assert response.json().get("detail") != "Systemweite Notfallsperre aktiv - Wartungsmodus"
+
+
 def test_rate_limit_returns_429_after_threshold(client):
     app.state.rate_limiter = RateLimiter(max_requests=2, window_seconds=60.0)
 

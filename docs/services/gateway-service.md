@@ -1,8 +1,8 @@
 # gateway-service
 
-**Verantwortung:** Zentrales API-Gateway/BFF — einziger vorgesehener öffentlicher Einstiegspunkt: Bearer-Token-Validierung, Rate Limiting, dynamisches Routing zu Backend-Services über die Registry (Konzept 3.5).
+**Verantwortung:** Zentrales API-Gateway/BFF — einziger vorgesehener öffentlicher Einstiegspunkt: Bearer-Token-Validierung, Rate Limiting, dynamisches Routing zu Backend-Services über die Registry (Konzept 3.5). Seit P6-S6 zusätzlich zentraler Durchsetzungspunkt für den systemweiten Wartungsmodus (Not-Shutdown, 4.8) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-**Konzept-Referenz:** 3.5
+**Konzept-Referenz:** 3.5, 4.8
 **Eigenes Postgres-Schema:** keines (zustandslos)
 
 ## API
@@ -30,6 +30,12 @@ erst einen Token braucht). Bei Erfolg werden die Identitäts-Claims als
 `X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`-Header an den Downstream
 weitergereicht (aktuell von keinem Backend-Service konsumiert, siehe
 [ADR 0005](../adr/0005-gateway-registry-routing-and-inprocess-rate-limiting.md)).
+
+## Not-Shutdown / Wartungsmodus (4.8, seit P6-S6)
+
+`proxy()` fragt zu Beginn jedes Requests (vor dem `public_routes`-Check) über einen neuen `MaintenanceStateClient` den Wartungsmodus-Status des Permission Service ab — analog zum `InstanceResolver`-Muster über die Registry aufgelöst statt über eine feste URL, mit kurzem Caching (`maintenance_cache_ttl_seconds`, Default 5s). Ist der Wartungsmodus aktiv, wird jeder Request außerhalb von `settings.maintenance_mode_allowed_routes` (Login/Refresh/Me/Superuser-Status, Permission-Service-Maintenance-Mode-Status/-Lift) mit `503` abgelehnt. Schlägt die Statusabfrage selbst fehl (Permission Service unerreichbar), **fällt der Client offen** (letzter gecachter Wert, Default `false`) — ein unerreichbarer Permission Service soll nicht den gesamten proxied Verkehr blockieren.
+
+Auf jeden durchgelassenen Request (auch außerhalb des Wartungsmodus) wird zusätzlich ein `X-DMS-Maintenance-Active: true`/`false`-Header mitgegeben — Backend-Services, die selbst auf den Zustand reagieren müssen (`auth-service`s `/login`, `workflow-service`s Instanzstart/Task-Abschluss), lesen ihn direkt statt eine eigene Polling-Verbindung zum Permission Service aufzubauen (Header-Broadcast-Muster statt N×Polling, siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md)). **Der Login-Aufruf selbst muss folglich über das Gateway laufen**, damit der Wartungsmodus-Header überhaupt gesetzt wird — ein direkter Aufruf des Auth Service am Gateway vorbei sieht den Header nie und ist damit vom Wartungsmodus nicht betroffen (dieselbe strukturelle Grenze wie bei den direkt veröffentlichten Backend-Ports, ADR 0005).
 
 ## CORS
 
@@ -59,9 +65,14 @@ Noch keine — folgt in Phase 11.
 
 ## Offene Punkte
 
-- Identitäts-Header (`X-DMS-*`) werden von Backend-Services noch nicht
-  konsumiert — Endpunkte mit Principal-Bedarf nehmen ihn weiterhin explizit
-  als Parameter entgegen (z. B. `permission-service`s `/check`).
+- Identitäts-Header (`X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`) werden
+  von den meisten Backend-Services weiterhin nicht konsumiert — Endpunkte mit
+  Principal-Bedarf nehmen ihn weiterhin explizit als Parameter/Body-Feld
+  entgegen (z. B. `permission-service`s `/check`). **Ausnahme seit P5-S4**:
+  `search-service` liest `X-DMS-Principal`. **Der neue
+  `X-DMS-Maintenance-Active`-Header (4.8, seit P6-S6) wird dagegen bereits von
+  zwei Services konsumiert** (`auth-service`s `/login`, `workflow-service`s
+  Instanzstart/Task-Abschluss) — siehe "Not-Shutdown / Wartungsmodus" oben.
 - Backend-Service-Ports sind in der Docker-Compose-Umgebung weiterhin direkt
   veröffentlicht (Entwickler-Komfort) — ein echtes Netzwerk-Perimeter, das
   Backends ausschließlich über das Gateway erreichbar macht, ist ein späterer

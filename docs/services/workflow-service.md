@@ -1,23 +1,23 @@
 # workflow-service
 
-**Verantwortung:** Workflow Engine Grundgerüst (Konzept 7.1) — BPMN-2.0-Import und -Ausführung über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3, [ADR 0018](../adr/0018-spiffworkflow-lgpl-license.md)), Manual/Automatic Tasks, seit P6-S2 auch Timer/Boundary Events (SLA-Zeitüberwachung, [ADR 0020](../adr/0020-sla-timer-polling.md)). Kein UI (Process Designer folgt mit P6-S8), keine Rollenprüfung (folgt mit P6-S4–S6, siehe `PROGRESS.md` "Roadmap-Vorausplanung nach P6-S2").
+**Verantwortung:** Workflow Engine Grundgerüst (Konzept 7.1) — BPMN-2.0-Import und -Ausführung über [SpiffWorkflow](https://github.com/sartography/SpiffWorkflow) (LGPLv3, [ADR 0018](../adr/0018-spiffworkflow-lgpl-license.md)), Manual/Automatic Tasks, seit P6-S2 auch Timer/Boundary Events (SLA-Zeitüberwachung, [ADR 0020](../adr/0020-sla-timer-polling.md)). Kein UI (Process Designer folgt mit P6-S8). Seit **P6-S6** teilweise gegated: Prozessdefinitionen anlegen/löschen erfordert die Capability `admin.object_config` (4.6-Retrofit), Instanzstart/Task-Abschluss bleiben für jeden authentifizierten Principal offen, respektieren aber den systemweiten Wartungsmodus (Not-Shutdown, 4.8) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-**Konzept-Referenz:** 7.1
+**Konzept-Referenz:** 7.1, 4.6, 4.8
 **Eigenes Postgres-Schema:** `workflow` (Tabellen `process_definition`, `process_instance`)
 
 ## API
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/process-definitions` | Anlegen (multipart: `bpmn_xml` Datei, `name`, optional `process_id`) — parst die BPMN-XML über SpiffWorkflow; ohne `process_id` wird automatisch aufgelöst, aber nur wenn die Datei genau einen ausführbaren Top-Level-Prozess enthält. `409` bei Namenskollision, `422` bei nicht parsbarer/mehrdeutiger BPMN-Datei |
+| `POST` | `/process-definitions` | Anlegen (multipart: `bpmn_xml` Datei, `name`, optional `process_id`) — parst die BPMN-XML über SpiffWorkflow; ohne `process_id` wird automatisch aufgelöst, aber nur wenn die Datei genau einen ausführbaren Top-Level-Prozess enthält. `409` bei Namenskollision, `422` bei nicht parsbarer/mehrdeutiger BPMN-Datei. **Seit P6-S6**: erfordert `X-DMS-Principal` mit der Capability `admin.object_config` (4.6), sonst `403` |
 | `GET` | `/process-definitions` | Liste (nur Metadaten, ohne `bpmn_xml`) |
 | `GET` | `/process-definitions/{id}` | Detail inkl. `bpmn_xml` — `404` |
-| `DELETE` | `/process-definitions/{id}` | Löschen — `409` falls noch Prozessinstanzen existieren, sonst `204` |
-| `POST` | `/process-definitions/{id}/instances` | Instanz starten (`created_by`, optional `business_key`, `initial_data`) — führt alle bereiten automatischen Tasks sofort aus (`do_engine_steps()`), Status ist `"completed"`, wenn der Prozess dabei ohne Manual Task durchläuft, sonst `"running"` |
+| `DELETE` | `/process-definitions/{id}` | Löschen — `409` falls noch Prozessinstanzen existieren, sonst `204`. **Seit P6-S6**: gegated wie `POST /process-definitions` |
+| `POST` | `/process-definitions/{id}/instances` | Instanz starten (`created_by`, optional `business_key`, `initial_data`) — führt alle bereiten automatischen Tasks sofort aus (`do_engine_steps()`), Status ist `"completed"`, wenn der Prozess dabei ohne Manual Task durchläuft, sonst `"running"`. **Seit P6-S6**: `503` bei aktivem `X-DMS-Maintenance-Active`-Header (4.8), sonst weiterhin offen für jeden authentifizierten Principal |
 | `GET` | `/instances/{id}` | Status/Metadaten — `404` |
 | `GET` | `/instances?process_definition_id=&status=&business_key=` | Gefilterte Liste |
 | `GET` | `/instances/{id}/tasks` | Aktuell bereite Manual/User Tasks (`id`, `name`, `lane`, `data`) |
-| `POST` | `/instances/{id}/tasks/{task_id}/complete` | Task abschließen (`completed_by`, optional `data`) — `404` bei unbekannter Instanz, `409` wenn `task_id` nicht (mehr) bereit ist (bereits abgeschlossen, falsche ID) |
+| `POST` | `/instances/{id}/tasks/{task_id}/complete` | Task abschließen (`completed_by`, optional `data`) — `404` bei unbekannter Instanz, `409` wenn `task_id` nicht (mehr) bereit ist (bereits abgeschlossen, falsche ID). **Seit P6-S6**: `503` bei aktivem Wartungsmodus, gleiches Muster wie Instanzstart |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -39,7 +39,15 @@ Jede Prozessinstanz speichert ausschließlich den vollständigen, von `BpmnWorkf
 
 ## SLA-Poll-Loop (P6-S2, ADR 0020)
 
-Ein asyncio-Hintergrund-Task (`_sla_poll_loop` in `main.py`, gestartet in `lifespan`) prüft alle `sla_poll_interval_seconds` (Default 30s, `DMS_SLA_POLL_INTERVAL_SECONDS`) **jede** Instanz mit `status="running"`: deserialisieren, `spiff_adapter.check_timers()`, Blob neu persistieren, gefeuerte Boundary-Events als `workflow.task.escalated` publizieren. Kein Push-Mechanismus, keine verteilte Sperre bei mehreren `workflow-service`-Replikaten — siehe [ADR 0020](../adr/0020-sla-timer-polling.md) für die vollständige Begründung und die dokumentierten Grenzen.
+Ein asyncio-Hintergrund-Task (`_sla_poll_loop` in `main.py`, gestartet in `lifespan`) prüft alle `sla_poll_interval_seconds` (Default 30s, `DMS_SLA_POLL_INTERVAL_SECONDS`) **jede** Instanz mit `status="running"`: deserialisieren, `spiff_adapter.check_timers()`, Blob neu persistieren, gefeuerte Boundary-Events als `workflow.task.escalated` publizieren. Kein Push-Mechanismus, keine verteilte Sperre bei mehreren `workflow-service`-Replikaten — siehe [ADR 0020](../adr/0020-sla-timer-polling.md) für die vollständige Begründung und die dokumentierten Grenzen. **Seit P6-S6**: prüft vor jedem Tick zusätzlich über den neuen `permission_client.py` (`is_maintenance_active()`, `GET /maintenance-mode` am Permission Service) direkt, ob der systemweite Wartungsmodus (4.8) aktiv ist, und überspringt den Tick dann komplett — kein eingehender Request, an den das Gateway einen `X-DMS-Maintenance-Active`-Header hängen könnte, daher die einzige Stelle in diesem Service mit einer eigenen Polling-Verbindung zum Permission Service statt Header-Auswertung.
+
+## Autorisierung & Wartungsmodus (4.6/4.8, seit P6-S6)
+
+Bewusst begrenzter Retrofit (Nutzerentscheidung: "Admin-Aktionen gaten, Alltagsnutzung offen", siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md)):
+
+- **Prozessdefinitionen anlegen/löschen** (BPMN-/Script-Task-Upload) erfordern die Capability `admin.object_config` — echter Aufruf gegen den Permission Service über einen neuen, dünnen `permission_client.py` (gleiches Muster wie `auth-service`s Rollen-Client aus P6-S5), `403` ohne die Capability oder ohne `X-DMS-Principal`-Header. `auth-service` legt dafür ein zweites technisches Konto `config-admin`/`config-admin` an (Domäne "Workflow-Konfiguration"). Da Skript-Code ausschließlich über diesen jetzt gegateten Upload ins System gelangt (keine separate Ausführungs-Route), sichert das faktisch auch die Script-Task-Ausführung ab, ohne einen eigenen Check dafür zu brauchen.
+- **Instanzstart/Task-Abschluss bleiben bewusst ungegatet** für jeden authentifizierten Principal — normale Fachnutzung soll keine Domain-Admin-Rolle brauchen. Stattdessen respektieren beide Endpunkte den neuen systemweiten Wartungsmodus (4.8): `503`, solange der vom Gateway injizierte `X-DMS-Maintenance-Active`-Header `"true"` ist.
+- **`created_by`/`completed_by` bleiben weiterhin reine, ungeprüfte Strings** — die Gating-Entscheidung betrifft nur, *ob* eine Aktion ausgeführt werden darf, nicht, ob der angegebene Name stimmt (unverändert seit P6-S1).
 
 ## Events
 
@@ -66,16 +74,17 @@ Noch keine — folgt in Phase 11.
 
 `uv run pytest services/workflow-service/tests`:
 - `test_spiff_adapter.py` — isolierter Test des SpiffWorkflow-Wrappers gegen echte BPMN-Test-Fixtures (`tests/fixtures/`, aus dem offiziellen SpiffWorkflow-GitHub-Repo übernommen, nicht handgeschrieben, um Namespace-/Schema-Fehler zu vermeiden): Parsing/Auto-Erkennung der Prozess-ID, Ausführung eines Script Tasks parallel zu einem wartenden Manual Task, Serialisierungs-Rundreise (Task-ID bleibt stabil), Task-Abschluss bis zur vollständigen Prozessbeendigung, Lane-Extraktion mit und ohne BPMN-Lanes im Modell, seit P6-S2: `check_timers()` feuert einen non-interrupting Boundary-Timer, `escalation_email` aus `initial_data` ist im Datenschnappschuss sichtbar, der ursprüngliche Task bleibt danach normal abschließbar.
-- `test_repository.py`/`test_api.py` — Anlegen+Duplikat-/Ungültig-Fälle, Instanzstart (mit wartendem Manual Task vs. vollautomatisch sofort abgeschlossen), bereite Tasks auflisten, Task abschließen bis zum Abschluss der Instanz, doppeltes Abschließen desselben Tasks abgelehnt, Löschung einer referenzierten Prozessdefinition abgelehnt, Filterung der Instanzliste nach Status, seit P6-S2: `advance_timers()` feuert das Boundary-Event und persistiert den aktualisierten Blob.
+- `test_repository.py`/`test_api.py` — Anlegen+Duplikat-/Ungültig-Fälle, Instanzstart (mit wartendem Manual Task vs. vollautomatisch sofort abgeschlossen), bereite Tasks auflisten, Task abschließen bis zum Abschluss der Instanz, doppeltes Abschließen desselben Tasks abgelehnt, Löschung einer referenzierten Prozessdefinition abgelehnt, Filterung der Instanzliste nach Status, seit P6-S2: `advance_timers()` feuert das Boundary-Event und persistiert den aktualisierten Blob, seit **P6-S6**: `create_process_definition`/`delete_process_definition` ohne `admin.object_config` → `403` (echter Aufruf gegen den live laufenden Permission Service, kein Mocking — ein session-scoped `admin_headers`-Fixture in `conftest.py` weist die Capability idempotent einem Test-Principal zu), Instanzstart/Task-Abschluss bei aktivem `X-DMS-Maintenance-Active`-Header → `503`.
 - Läuft wie jeder andere Service gegen echte Infrastruktur (Postgres, NATS) — kein Mocking. Wie immer: niemals gegen die laufende Entwicklungs-Datenbank, siehe `PROGRESS.md` "Tooling & Testing".
 - Der volle Poll-Loop selbst (`_sla_poll_loop`) wird nicht per Sleep-Wartezeit in der Testsuite geprüft (nicht deterministisch genug) — stattdessen per Live-Smoke-Test mit kurzem `DMS_SLA_POLL_INTERVAL_SECONDS` gegen den gebauten Container verifiziert.
+- **52 Tests** (vorher 46, 6 neu: siehe oben).
 - **Live-Smoke-Test**: `docker compose build workflow-service` + `up -d`, echte BPMN-Datei über curl hochgeladen, Instanz gestartet, bereite Tasks aufgelistet, Task abgeschlossen, Instanzstatus `"completed"` bestätigt — Testdaten anschließend gelöscht. Seit P6-S2 zusätzlich: BPMN-Datei mit Boundary-Timer + `escalation_email` gestartet, nach kurzem Warten über `notification-service` bestätigt, dass eine Eskalations-Benachrichtigung zugestellt wurde.
 - Reine Backend-Session, kein Browser-Test nötig (nicht in der UI-Sessions-Liste von `IMPLEMENTATION_PLAN.md`).
 
 ## Offene Punkte
 
-- **Keine Rollenprüfung/RBAC** — weder ein `X-DMS-Roles`-Stringcheck (wie beim Kennzeichen-Feature, P5e-S2) noch ein echter `permission-service`-Aufruf. `completed_by`/`created_by` sind reine, ungeprüfte Strings. Explizit **P6-S4** zugewiesen (genereller Vier-Augen-Approval-Mechanismus + Superuser Break-Glass).
-- **Script Tasks führen serverseitig beliebigen, in der BPMN-XML eingebetteten Python-Code aus** (SpiffWorkflows Standard-Scripting-Umgebung) — ohne Rollenprüfung am Upload-Endpunkt ein reales Sicherheitsthema, sobald BPMN-Import nicht mehr nur von vertrauenswürdigen internen Nutzern erfolgt (7.1 sieht Import aus externen Werkzeugen als Kernfeature vor). Bewusste Entscheidung nach Rückfrage: für den aktuellen internen Test-/Entwicklungsbetrieb aktiviert, als offener Punkt an P6-S4 verwiesen statt vorab eingeschränkt oder als No-Op-Stub gebaut.
+- **Rollenprüfung seit P6-S6 nur für Prozessdefinitionen** (`admin.object_config`) — Instanzstart/Task-Abschluss bleiben bewusst für jeden authentifizierten Principal offen (Nutzerentscheidung, siehe "Autorisierung & Wartungsmodus" oben und [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md)); `completed_by`/`created_by` sind weiterhin reine, ungeprüfte Strings.
+- **Script Tasks führen serverseitig beliebigen, in der BPMN-XML eingebetteten Python-Code aus** (SpiffWorkflows Standard-Scripting-Umgebung) — seit **P6-S6** faktisch durch das `admin.object_config`-Gating am Upload-Endpunkt abgesichert (kein separater Ausführungs-Endpunkt, Skript-Code gelangt ausschließlich über den jetzt gegateten Upload ins System). Vor produktivem Mehrnutzerbetrieb mit BPMN-Import durch nicht vollständig vertrauenswürdige Domain-Admins weiterhin zu revisitieren.
 - **SLA-Poll-Präzision an das Poll-Intervall gekoppelt** (Default 30s) — keine Echtzeit-Erkennung einer Eskalation, siehe ADR 0020.
 - **Keine verteilte Sperre bei mehreren `workflow-service`-Replikaten** — ein horizontal skaliertes Deployment würde denselben Boundary-Timer mehrfach feuern/publizieren, siehe ADR 0020 "Konsequenzen".
 - **Nur `DurationTimerEventDefinition`-basierte Boundary-Timer real getestet** (P6-S2) — `CycleTimerEventDefinition` (wiederkehrende Eskalation) und `TimeDateEventDefinition` (fester Zeitpunkt) werden von SpiffWorkflow nativ unterstützt, sind aber diese Session nicht mit einem eigenen Test abgedeckt.

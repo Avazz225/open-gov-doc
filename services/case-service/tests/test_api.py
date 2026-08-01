@@ -17,16 +17,18 @@ def client():
 
 
 @pytest.fixture
-def process_definition_id() -> int:
+def process_definition_id(workflow_admin_headers: dict[str, str]) -> int:
     """Real gegen den lokal laufenden workflow-service angelegt (P6-S1) -
     gleiches "kein Mocking von Sibling-Services"-Muster wie document-services
-    folder_client/object_type_client-Integrationstests."""
+    folder_client/object_type_client-Integrationstests. Seit P6-S6 verlangt
+    dieser Endpunkt die Capability `admin.object_config`, siehe conftest.py."""
     path = os.path.join(os.path.dirname(__file__), "fixtures", "script_and_manual.bpmn")
     with open(path, "rb") as f:
         response = httpx.post(
             f"{WORKFLOW_SERVICE_URL}/process-definitions",
             data={"name": f"case-service-test-{uuid.uuid4()}"},
             files={"bpmn_xml": ("process.bpmn", f, "application/xml")},
+            headers=workflow_admin_headers,
         )
     response.raise_for_status()
     return response.json()["id"]

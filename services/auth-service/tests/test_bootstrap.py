@@ -1,4 +1,8 @@
-from auth_service.bootstrap import DOMAIN_ADMIN_USERS_USERNAME, ensure_realm_and_client
+from auth_service.bootstrap import (
+    DOMAIN_ADMIN_CONFIG_USERNAME,
+    DOMAIN_ADMIN_USERS_USERNAME,
+    ensure_realm_and_client,
+)
 from auth_service.settings import Settings
 from auth_service.superuser import SUPERUSER_USERNAME
 
@@ -31,6 +35,19 @@ def test_bootstrap_creates_domain_admin_account_idempotently(keycloak_admin):
     ensure_realm_and_client(settings)  # zweiter Aufruf darf nicht scheitern
 
     users = keycloak_admin.get_users(query={"username": DOMAIN_ADMIN_USERS_USERNAME, "exact": True})
+    assert len(users) == 1
+    assert users[0]["enabled"] is True
+
+
+def test_bootstrap_creates_config_admin_account_idempotently(keycloak_admin):
+    """Zweite Domäne mit echtem Konto (P6-S6, Workflow-Konfiguration) -
+    gleiches Muster wie users-admin."""
+    ensure_realm_and_client(settings)
+    ensure_realm_and_client(settings)  # zweiter Aufruf darf nicht scheitern
+
+    users = keycloak_admin.get_users(
+        query={"username": DOMAIN_ADMIN_CONFIG_USERNAME, "exact": True}
+    )
     assert len(users) == 1
     assert users[0]["enabled"] is True
 

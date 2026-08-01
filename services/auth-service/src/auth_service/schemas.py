@@ -45,3 +45,6 @@ class ThemePreference(BaseModel):
 class SuperuserStatus(BaseModel):
     active: bool
     expires_at: str | None = None
+    # Seit P6-S6 (4.8): permission-service muss prüfen können, ob ein
+    # `POST /maintenance-mode/lift`-Aufrufer tatsächlich der aktive Superuser ist.
+    principal_id: str | None = None
