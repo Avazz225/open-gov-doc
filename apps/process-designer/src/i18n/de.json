@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "title": "DMS Process Designer",
+    "description": "Grafische BPMN-2.0-Modellierung (Process Designer, Konzept 7.1/8)"
+  },
+  "common": {
+    "logout": "Abmelden",
+    "loading": "Lade...",
+    "create": "Anlegen",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "open": "Öffnen",
+    "back": "Zurück zur Liste",
+    "loadError": "Laden fehlgeschlagen",
+    "deleteError": "Löschen fehlgeschlagen"
+  },
+  "theme": {
+    "label": "Design",
+    "auto": "Automatisch",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "highContrast": "Hoher Kontrast"
+  },
+  "maintenanceBanner": {
+    "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
+  },
+  "login": {
+    "heading": "Anmelden",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "submitting": "Melde an...",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "processList": {
+    "heading": "Prozessdefinitionen",
+    "newButton": "Neu erstellen",
+    "nameColumn": "Name",
+    "versionColumn": "Version",
+    "processIdColumn": "Prozess-ID",
+    "updatedColumn": "Zuletzt geändert",
+    "actionsColumn": "Aktionen",
+    "empty": "Noch keine Prozessdefinitionen vorhanden.",
+    "history": "Versionshistorie",
+    "historyToggleShow": "Versionen anzeigen",
+    "historyToggleHide": "Versionen ausblenden",
+    "deleteConfirm": "Diese Version wirklich löschen?",
+    "noCapabilityHint": "Speichern/Löschen erfordert die Domain-Admin-Rolle \"Workflow-Konfiguration\"."
+  },
+  "designer": {
+    "newHeading": "Neue Prozessdefinition",
+    "editHeading": "Prozessdefinition bearbeiten",
+    "nameLabel": "Name",
+    "nameHint": "Unveränderter Name speichert eine neue Version dieser Familie, ein anderer Name legt eine neue Familie an.",
+    "importButton": "Datei importieren",
+    "exportButton": "Als XML exportieren",
+    "saveButton": "Speichern",
+    "saving": "Speichere...",
+    "saveSuccess": "Gespeichert als Version {version}.",
+    "saveError": "Speichern fehlgeschlagen",
+    "importError": "Import fehlgeschlagen - BPMN-Datei nicht lesbar",
+    "loadError": "Prozessdefinition konnte nicht geladen werden"
+  },
+  "signatureTask": {
+    "groupLabel": "Signatur (3.10)",
+    "requiredLabel": "Signatur erforderlich",
+    "levelLabel": "Mindestniveau",
+    "levelSes": "SES",
+    "levelAes": "AES",
+    "levelQes": "QES"
+  }
+}

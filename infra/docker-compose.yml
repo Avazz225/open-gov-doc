@@ -620,3 +620,18 @@ services:
         condition: service_started
     networks:
       - dms-net
+
+  process-designer:
+    build:
+      context: ..
+      dockerfile: apps/process-designer/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_BASE_URL: ${PROCESS_DESIGNER_GATEWAY_BASE_URL:-http://localhost:8009}
+    restart: unless-stopped
+    ports:
+      - "${PROCESS_DESIGNER_PORT:-3002}:80"
+    depends_on:
+      gateway-service:
+        condition: service_started
+    networks:
+      - dms-net

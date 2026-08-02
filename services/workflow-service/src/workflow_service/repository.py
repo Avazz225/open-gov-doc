@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from workflow_service import spiff_adapter
@@ -21,10 +21,6 @@ class TimerAdvanceResult:
 
 
 class NotFoundError(Exception):
-    pass
-
-
-class DuplicateNameError(Exception):
     pass
 
 
@@ -48,11 +44,15 @@ class TaskNotReadyError(Exception):
 async def create_process_definition(
     session: AsyncSession, *, name: str, bpmn_xml: str, process_id: str | None
 ) -> ProcessDefinition:
-    existing = await session.execute(
-        select(ProcessDefinition).where(ProcessDefinition.name == name)
+    """``name`` ist seit P6-S8 der Prozessfamilien-Schlüssel (2.1a-artiges
+    Versionierungsmuster, wie bei Dokumentversionen) - ein Aufruf unter einem
+    bereits existierenden Namen legt automatisch die nächste Version an,
+    statt abgelehnt zu werden. Frühere Versionen bleiben unverändert
+    abrufbar/startbar, kein Überschreiben."""
+    max_version = await session.execute(
+        select(func.max(ProcessDefinition.version)).where(ProcessDefinition.name == name)
     )
-    if existing.scalar_one_or_none() is not None:
-        raise DuplicateNameError(f"Prozessdefinition {name!r} existiert bereits")
+    next_version = (max_version.scalar_one() or 0) + 1
 
     try:
         _, resolved_process_id = spiff_adapter.parse_bpmn(bpmn_xml, process_id)
@@ -62,6 +62,7 @@ async def create_process_definition(
     now = datetime.now(UTC)
     definition = ProcessDefinition(
         name=name,
+        version=next_version,
         bpmn_process_id=resolved_process_id,
         bpmn_xml=bpmn_xml,
         created_at=now,
@@ -81,8 +82,28 @@ async def get_process_definition(
     return definition
 
 
-async def list_process_definitions(session: AsyncSession) -> list[ProcessDefinition]:
-    result = await session.execute(select(ProcessDefinition).order_by(ProcessDefinition.name))
+async def list_process_definitions(
+    session: AsyncSession, *, name: str | None = None
+) -> list[ProcessDefinition]:
+    """Ohne `name`-Filter wird je Prozessfamilie nur die jeweils neueste
+    Version geliefert (`DISTINCT ON`, Postgres-spezifisch wie an anderen
+    Stellen dieses Projekts, z. B. `INSERT ... ON CONFLICT DO NOTHING`) -
+    eine wachsende Versionshistorie soll die Übersichtsliste nicht zumüllen.
+    Mit `name`-Filter wird stattdessen die vollständige Versionshistorie
+    dieser einen Familie geliefert, neueste Version zuerst."""
+    if name is not None:
+        result = await session.execute(
+            select(ProcessDefinition)
+            .where(ProcessDefinition.name == name)
+            .order_by(ProcessDefinition.version.desc())
+        )
+        return list(result.scalars().all())
+
+    result = await session.execute(
+        select(ProcessDefinition)
+        .distinct(ProcessDefinition.name)
+        .order_by(ProcessDefinition.name, ProcessDefinition.version.desc())
+    )
     return list(result.scalars().all())
 
 

@@ -1,23 +1,33 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("workflow")
 
 
 class ProcessDefinition(Base):
-    """Eine importierte BPMN-2.0-Prozessdefinition (2.2/7.1, P6-S1). Kein
-    eigener Process-Designer in dieser Session (folgt mit P6-S6) - Import
-    ausschließlich per BPMN-XML-Upload. Keine Versionierung: ein erneuter
-    Upload unter demselben ``name`` wird abgelehnt (409), nicht als neue
-    Version angelegt - offener Punkt, siehe docs/services/workflow-service.md."""
+    """Eine importierte BPMN-2.0-Prozessdefinition (2.2/7.1, P6-S1). Import
+    per BPMN-XML-Upload, seit P6-S8 auch aus dem eigenständigen Process
+    Designer (`apps/process-designer`). ``name`` ist seit P6-S8 der
+    Prozessfamilien-Schlüssel, nicht mehr global eindeutig - Eindeutigkeit
+    gilt jetzt für ``(name, version)``: ein erneuter Upload unter demselben
+    ``name`` legt automatisch die nächste Version an (siehe
+    `repository.create_process_definition`), statt mit 409 abgelehnt zu
+    werden. Eine Prozessinstanz bindet sich über ``process_definition_id``
+    immer an eine konkrete, unveränderliche Version - spätere neue Versionen
+    derselben Familie wirken sich nie rückwirkend auf bereits laufende
+    Instanzen aus."""
 
     __tablename__ = "process_definition"
+    __table_args__ = (
+        UniqueConstraint("name", "version", name="ux_process_definition_name_version"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(256), unique=True)
+    name: Mapped[str] = mapped_column(String(256))
+    version: Mapped[int] = mapped_column(Integer, default=1)
     # Die interne Prozess-ID aus der BPMN-XML selbst (`<bpmn:process id="...">"`),
     # nicht der hier vergebene Anzeigename - wird für jeden `spiff_adapter.parse_bpmn`-
     # Aufruf beim Instanzstart erneut gebraucht.

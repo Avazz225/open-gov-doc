@@ -47,12 +47,34 @@ def test_create_and_get_process_definition(client, manual_task_bpmn, admin_heade
     assert "bpmn:definitions" in get_response.json()["bpmn_xml"]
 
 
-def test_create_process_definition_duplicate_name_returns_409(
+def test_create_process_definition_with_existing_name_creates_next_version(
+    client, manual_task_bpmn, admin_headers
+):
+    first = _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
+    second = _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["version"] == 1
+    assert second.json()["version"] == 2
+
+
+def test_list_process_definitions_returns_only_latest_version_by_default(
     client, manual_task_bpmn, admin_headers
 ):
     _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
-    response = _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
-    assert response.status_code == 409
+    _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
+    response = client.get("/process-definitions")
+    [approval] = [d for d in response.json() if d["name"] == "Approval"]
+    assert approval["version"] == 2
+
+
+def test_list_process_definitions_with_name_filter_returns_full_history(
+    client, manual_task_bpmn, admin_headers
+):
+    _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
+    _upload_definition(client, manual_task_bpmn, name="Approval", headers=admin_headers)
+    response = client.get("/process-definitions", params={"name": "Approval"})
+    assert [d["version"] for d in response.json()] == [2, 1]
 
 
 def test_create_process_definition_invalid_bpmn_returns_422(client, admin_headers):

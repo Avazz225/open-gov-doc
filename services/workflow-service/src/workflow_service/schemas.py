@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class ProcessDefinitionOut(BaseModel):
     id: int
     name: str
+    version: int
     bpmn_process_id: str
     created_at: datetime
     updated_at: datetime

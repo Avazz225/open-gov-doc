@@ -1,0 +1,27 @@
+# 0027 — Workflow Service: Prozessdefinition-Versionierung über `name` als Familienschlüssel
+
+**Status:** akzeptiert
+**Kontext:** P6-S8 (Process Designer). Bei der Plan-Rückfrage entschied der Nutzer, dass echte Prozess-Versionierung bereits in dieser Session nachgerüstet werden soll, statt weiterhin offener Punkt zu bleiben (seit P6-S1 dokumentiert: "ein erneuter Upload unter demselben `name` wird abgelehnt (409), nicht als neue Version angelegt"). Der neue, eigenständige Process Designer braucht eine sinnvolle "Speichern"-Semantik für bereits importierte/bearbeitete Prozessdefinitionen — ohne Versionierung hätte jedes erneute Speichern entweder fehlschlagen (409) oder einen künstlich anderen Namen erzwingen müssen.
+
+## Entscheidung
+
+**`name` wird vom global eindeutigen Bezeichner zum Prozessfamilien-Schlüssel.** Neue Spalte `process_definition.version` (Integer, Default 1). Eindeutigkeit gilt jetzt für `(name, version)` statt `name` allein (`UniqueConstraint`/Unique-Index `ux_process_definition_name_version`). `POST /process-definitions` unter einem bereits existierenden Namen berechnet serverseitig automatisch `max(version je name) + 1` und legt eine neue Zeile an — der bisherige `409`-Ablehnungspfad (`DuplicateNameError`) entfällt ersatzlos, zwei Definitionen mit demselben Namen sind jetzt der Normalfall, keine Fehlerbedingung mehr.
+
+**`GET /process-definitions` liefert per Default nur die jeweils neueste Version je Name** (`SELECT DISTINCT ON (name) ... ORDER BY name, version DESC`, Postgres-spezifisch). Ein neuer optionaler `?name=`-Filter liefert stattdessen die vollständige Versionshistorie einer einzelnen Familie, neueste zuerst.
+
+**Prozessinstanzen bleiben unverändert an eine konkrete Version gebunden**: `process_instance.process_definition_id` verweist wie bisher auf eine bestimmte `id`, nicht auf eine Familie — eine neue Version wirkt sich nie rückwirkend auf bereits laufende oder bereits abgeschlossene Instanzen aus. `POST .../{id}/instances` und `DELETE /process-definitions/{id}` mussten deshalb **nicht geändert werden**.
+
+**Ad-hoc-Migration für bestehende Datenbanken** (kein Alembic in dieser frühen Phase, siehe `CONTRIBUTING.md`): `ALTER TABLE ... ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`, `ALTER TABLE ... DROP CONSTRAINT IF EXISTS process_definition_name_key` (Postgres' eigener Default-Name für die bisherige inline-`UNIQUE`-Spalten-Constraint, empirisch am laufenden Dev-Stack per `\d workflow.process_definition` bestätigt), `CREATE UNIQUE INDEX IF NOT EXISTS ux_process_definition_name_version ON (name, version)` — ein Unique-Index statt einer Unique-Constraint, da Postgres kein `ADD CONSTRAINT IF NOT EXISTS` kennt (im Gegensatz zu `CREATE INDEX IF NOT EXISTS`), aber beide Mechanismen dieselbe Eindeutigkeitsgarantie liefern.
+
+## Begründung
+
+- **Name-als-Familienschlüssel statt separatem `process_key`-Feld**: vermeidet ein zusätzliches, vom Nutzer separat zu pflegendes Identifikationsfeld — der bereits vorhandene, vom Nutzer selbst vergebene Anzeigename übernimmt diese Rolle direkt. Der Process Designer kann dadurch "Speichern" ohne Sonderlogik anbieten: Name unverändert lassen → neue Version, Name ändern → neue Familie.
+- **Keine Änderung an `process_instance`/Instanzstart nötig**: Instanzen zeigen bereits auf eine konkrete `id`, nicht auf einen Namen — Versionierung ist dadurch eine in sich geschlossene Erweiterung von `process_definition` allein, ohne Rückwirkung auf den bereits produktiv laufenden Ausführungspfad (ADR 0019).
+- **`DISTINCT ON` statt einer Subquery/Window-Function für "neueste Version je Name"**: Postgres-natives, bereits an anderer Stelle dieses Projekts genutztes Muster (`INSERT ... ON CONFLICT DO NOTHING` im Kennzeichengenerator ist ein ähnliches Beispiel für "bewusst Postgres-spezifisch statt DB-agnostisch", da dieses Projekt durchgängig gegen Postgres entwickelt).
+- **Unique-Index statt Unique-Constraint für die idempotente Migration**: Postgres unterstützt `ADD CONSTRAINT IF NOT EXISTS` nicht (anders als MySQL/älteres Verhalten mancher anderer Datenbanken), wohl aber `CREATE UNIQUE INDEX IF NOT EXISTS` — funktional äquivalent für die Eindeutigkeitsdurchsetzung, ohne eine `DO $$ ... EXCEPTION ...`-PL/pgSQL-Krücke zu brauchen.
+
+## Konsequenzen
+
+- **Keine Race-Condition-Sperre bei der Versionsvergabe** (`SELECT max(version)` gefolgt von `INSERT`, kein `SELECT ... FOR UPDATE`) — bewusst dieselbe, bereits etablierte Vereinfachung wie bei `document-service`s Versionsnummern-Vergabe (`checkin_version`): ein seltener, echter Gleichzeitigkeitskonflikt zweier paralleler Speicherversuche unter demselben Namen würde an der `(name, version)`-Unique-Constraint scheitern (nicht abgefangen,führt zu einem `500`) statt automatisch aufgelöst zu werden — für ein Grundgerüst ohne hochfrequente parallele Prozessdefinitions-Speicherungen akzeptiert.
+- **Keine UI/API zum expliziten "Zurückrollen" auf eine ältere Version als neue neueste Version** — eine ältere Version lässt sich weiterhin öffnen/starten, aber "diese alte Version erneut als neueste speichern" bräuchte einen manuellen erneuten Upload ihres `bpmn_xml`, keinen eigenen "Rollback"-Endpunkt.
+- **Kein Löschen ganzer Familien** — `DELETE /process-definitions/{id}` bleibt pro Version, eine Familie mit mehreren Versionen muss einzeln durchgelöscht werden (jede weiterhin blockiert, solange sie eigene Instanzen hat).

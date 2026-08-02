@@ -10,16 +10,21 @@ async def test_create_process_definition_auto_detects_process_id(session, manual
     )
     assert definition.bpmn_process_id == "Process_cozt5fu"
     assert definition.name == "Approval"
+    assert definition.version == 1
 
 
-async def test_create_process_definition_duplicate_name_raises(session, manual_task_bpmn):
-    await repository.create_process_definition(
+async def test_create_process_definition_with_existing_name_creates_next_version(
+    session, manual_task_bpmn
+):
+    first = await repository.create_process_definition(
         session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
     )
-    with pytest.raises(repository.DuplicateNameError):
-        await repository.create_process_definition(
-            session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
-        )
+    second = await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    assert first.version == 1
+    assert second.version == 2
+    assert first.id != second.id
 
 
 async def test_create_process_definition_invalid_bpmn_raises(session):
@@ -43,6 +48,33 @@ async def test_list_process_definitions(session, manual_task_bpmn, no_tasks_bpmn
     )
     definitions = await repository.list_process_definitions(session)
     assert {d.name for d in definitions} == {"Approval", "NoTasks"}
+
+
+async def test_list_process_definitions_without_name_filter_returns_latest_version_only(
+    session, manual_task_bpmn
+):
+    await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    definitions = await repository.list_process_definitions(session)
+    [approval] = [d for d in definitions if d.name == "Approval"]
+    assert approval.version == 2
+
+
+async def test_list_process_definitions_with_name_filter_returns_full_history(
+    session, manual_task_bpmn
+):
+    await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    await repository.create_process_definition(
+        session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    versions = await repository.list_process_definitions(session, name="Approval")
+    assert [d.version for d in versions] == [2, 1]
 
 
 async def test_delete_process_definition_without_instances_succeeds(session, manual_task_bpmn):

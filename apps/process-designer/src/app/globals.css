@@ -1,0 +1,224 @@
+/* Cross-UI-Theming (8, P4-S6, siehe ADR 0009): CSS-Variablen statt fest
+   verdrahteter Farben, damit `data-theme` auf <html> (gesetzt von
+   `ThemeProvider`) Hell/Dunkel/Hoher-Kontrast umschalten kann, unabhängig
+   von der OS-Einstellung. Identische Variablen wie user-ui/admin-ui. */
+:root {
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+
+  --dms-bg: #ffffff;
+  --dms-fg: #1a1a1a;
+  --dms-border: rgba(128, 128, 128, 0.25);
+  --dms-hover-bg: rgba(128, 128, 128, 0.12);
+  --dms-accent: #2563eb;
+  --dms-accent-bg: rgba(37, 99, 235, 0.15);
+  --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
+  --dms-success: #16a34a;
+  --dms-success-bg: #16a34a33;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dms-bg: #16181c;
+    --dms-fg: #e8e8e8;
+    --dms-border: rgba(200, 200, 200, 0.2);
+    --dms-hover-bg: rgba(200, 200, 200, 0.15);
+    --dms-accent: #60a5fa;
+    --dms-accent-bg: rgba(96, 165, 250, 0.2);
+    --dms-danger: #f87171;
+    --dms-danger-bg: #f8717133;
+    --dms-success: #4ade80;
+    --dms-success-bg: #4ade8033;
+  }
+}
+
+:root[data-theme="light"] {
+  --dms-bg: #ffffff;
+  --dms-fg: #1a1a1a;
+  --dms-border: rgba(128, 128, 128, 0.25);
+  --dms-hover-bg: rgba(128, 128, 128, 0.12);
+  --dms-accent: #2563eb;
+  --dms-accent-bg: rgba(37, 99, 235, 0.15);
+  --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
+  --dms-success: #16a34a;
+  --dms-success-bg: #16a34a33;
+}
+
+:root[data-theme="dark"] {
+  --dms-bg: #16181c;
+  --dms-fg: #e8e8e8;
+  --dms-border: rgba(200, 200, 200, 0.2);
+  --dms-hover-bg: rgba(200, 200, 200, 0.15);
+  --dms-accent: #60a5fa;
+  --dms-accent-bg: rgba(96, 165, 250, 0.2);
+  --dms-danger: #f87171;
+  --dms-danger-bg: #f8717133;
+  --dms-success: #4ade80;
+  --dms-success-bg: #4ade8033;
+}
+
+/* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
+   keine transparenten Akzentflächen (schlecht lesbar bei hohem Kontrast). */
+:root[data-theme="high-contrast"] {
+  --dms-bg: #000000;
+  --dms-fg: #ffffff;
+  --dms-border: #ffffff;
+  --dms-hover-bg: #333333;
+  --dms-accent: #ffff00;
+  --dms-accent-bg: #ffff00;
+  --dms-danger: #ff6b6b;
+  --dms-danger-bg: #000000;
+  --dms-success: #6bff6b;
+  --dms-success-bg: #000000;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--dms-bg);
+  color: var(--dms-fg);
+}
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--dms-border);
+}
+
+.top-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.hint {
+  opacity: 0.8;
+  font-size: 0.9rem;
+}
+
+.entry-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.entry-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--dms-border);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.login-form {
+  max-width: 320px;
+  margin: 4rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.error-text {
+  color: var(--dms-danger);
+}
+
+.success-text {
+  color: var(--dms-success, #2e7d32);
+}
+
+.empty-state {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--dms-border);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+.maintenance-banner {
+  background: var(--dms-danger-bg);
+  color: var(--dms-danger);
+  padding: 0.5rem 1.5rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Process Designer Canvas (P6-S8, Konzept 7.1) */
+
+.designer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.designer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--dms-border);
+  flex-wrap: wrap;
+}
+
+.designer-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.designer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* bpmn-js braucht einen Container mit expliziter Höhe (verwaltet sein
+   eigenes SVG-Canvas intern) - flex: 1 füllt den verbleibenden Platz unter
+   der Toolbar. */
+.designer-canvas {
+  flex: 1;
+  min-width: 0;
+}
+
+.designer-properties-panel {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--dms-border);
+  overflow-y: auto;
+}

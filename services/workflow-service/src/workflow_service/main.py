@@ -83,6 +83,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
         await conn.run_sync(Base.metadata.create_all)
+        # Prozess-Versionierung (P6-S8): `name` war vorher global eindeutig,
+        # ist jetzt der Prozessfamilien-Schlüssel - Eindeutigkeit gilt seither
+        # für (name, version). `create_all` legt fehlende TABELLEN/Constraints
+        # nur für neue Deployments an, ändert aber keine bestehenden - daher
+        # ad-hoc für bereits existierende Datenbanken (kein Alembic in dieser
+        # frühen Phase, siehe CONTRIBUTING.md). Postgres kennt kein
+        # `ADD CONSTRAINT IF NOT EXISTS`, wohl aber `DROP CONSTRAINT IF EXISTS`
+        # und `CREATE UNIQUE INDEX IF NOT EXISTS` - ein Unique-Index ist
+        # äquivalent zur früheren Unique-Constraint-Durchsetzung.
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_definition "
+                "ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.process_definition "
+                "DROP CONSTRAINT IF EXISTS process_definition_name_key"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_process_definition_name_version "
+                "ON workflow.process_definition (name, version)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
@@ -193,8 +220,6 @@ async def create_process_definition(
         definition = await repository.create_process_definition(
             session, name=name, bpmn_xml=xml_text, process_id=process_id
         )
-    except repository.DuplicateNameError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except repository.InvalidBpmnError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
@@ -203,9 +228,11 @@ async def create_process_definition(
 
 @app.get("/process-definitions", response_model=list[ProcessDefinitionOut])
 async def list_process_definitions(
-    session: AsyncSession = Depends(get_session),
+    name: str | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[ProcessDefinitionOut]:
-    return await repository.list_process_definitions(session)
+    """Ohne `name`: neueste Version je Prozessfamilie (P6-S8). Mit `name`:
+    vollständige Versionshistorie dieser Familie, neueste zuerst."""
+    return await repository.list_process_definitions(session, name=name)
 
 
 @app.get("/process-definitions/{process_definition_id}", response_model=ProcessDefinitionDetailOut)
