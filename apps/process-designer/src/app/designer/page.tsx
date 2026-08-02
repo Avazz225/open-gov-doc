@@ -3,13 +3,15 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
   createProcessDefinition,
   getProcessDefinition,
+  listFederationInstallations,
 } from "@/lib/api";
+import type { FederationInstallationSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { RequireAuth } from "@/components/RequireAuth";
 import type { BpmnDesignerHandle } from "@/components/BpmnDesigner";
@@ -53,6 +55,13 @@ function DesignerPageInner() {
 
   const [name, setName] = useState("");
   const [initialXml, setInitialXml] = useState<string | null>(null);
+  // `null` = noch nicht geladen - Rendern von BpmnDesigner wartet darauf, damit
+  // die Föderations-Properties-Panel-Gruppe (7.4, P6-S9) beim allerersten
+  // Aufbau des Modelers bereits die richtige Installationsliste injiziert
+  // bekommt (siehe components/BpmnDesigner.tsx).
+  const [federationInstallations, setFederationInstallations] = useState<
+    FederationInstallationSummary[] | null
+  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
@@ -75,6 +84,15 @@ function DesignerPageInner() {
       setInitialXml(STARTER_BPMN_XML);
     }
   }
+
+  useEffect(() => {
+    if (!accessToken) return;
+    listFederationInstallations(accessToken)
+      .then(setFederationInstallations)
+      // Fail-open statt den ganzen Designer zu blockieren - ohne erreichbaren
+      // Hub bleibt die Föderations-Gruppe einfach ausgeblendet.
+      .catch(() => setFederationInstallations([]));
+  }, [accessToken]);
 
   const handleReady = useCallback((handle: BpmnDesignerHandle) => {
     handleRef.current = handle;
@@ -170,9 +188,10 @@ function DesignerPageInner() {
           </span>
         )}
       </div>
-      {initialXml !== null && (
+      {initialXml !== null && federationInstallations !== null && (
         <BpmnDesigner
           initialXml={initialXml}
+          federationInstallations={federationInstallations}
           onReady={handleReady}
           onImportError={(message) => setLoadError(message)}
         />

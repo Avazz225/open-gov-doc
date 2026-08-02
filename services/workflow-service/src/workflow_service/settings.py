@@ -20,3 +20,21 @@ class Settings(BaseServiceSettings):
     # einer als `taskType=signature` markierten Task eine gültige `signature_id`,
     # siehe `signature_client.py`.
     signature_service_base_url: str = "http://localhost:8017"
+
+    # Federation Hub (7.4, P6-S9): opt-in - bleibt `None`, meldet sich diese
+    # Installation nicht am Hub an, bietet der Process Designer föderierte
+    # Prozessschritte auch gar nicht erst an (siehe `federation_client.py`).
+    federation_hub_base_url: str | None = None
+    # Basis-URL, unter der DIESE Installation vom Hub aus über den eigenen
+    # Gateway erreichbar ist (nicht die interne Adresse dieses Containers -
+    # der Hub liefert über `/api/workflow-service/...`, damit auch die
+    # Gateway-JWT-/Wartungsmodus-Logik greift, siehe ADR 0028).
+    installation_gateway_base_url: str = "http://gateway-service:8000"
+    installation_display_name: str = "DMS-Installation (workflow-service)"
+    installation_version: str = "1.0"
+    installation_min_compatible_peer_version: str = "1.0"
+    # Empfängerseitige Zuordnung `targetProcessType` (aus dem föderierten
+    # BPMN-Schritt der Absenderseite) -> lokaler `process_definition`-Name.
+    # Rein konfigurationsbasiert, kein automatischer Prozesskatalog-Abgleich
+    # zwischen Installationen (siehe docs/services/workflow-service.md).
+    federation_process_type_map: dict[str, str] = {}

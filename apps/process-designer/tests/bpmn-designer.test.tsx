@@ -33,8 +33,10 @@ vi.mock("@bpmn-io/properties-panel", () => ({
   CheckboxEntry: vi.fn(),
   Group: vi.fn(),
   SelectEntry: vi.fn(),
+  TextFieldEntry: vi.fn(),
   isCheckboxEntryEdited: vi.fn(),
   isSelectEntryEdited: vi.fn(),
+  isTextFieldEntryEdited: vi.fn(),
 }));
 
 const STARTER_XML = "<bpmn:definitions />";
@@ -49,13 +51,15 @@ describe("BpmnDesigner", () => {
   });
 
   it("instantiates the modeler with the properties panel modules and imports the initial XML", async () => {
-    render(<BpmnDesigner initialXml={STARTER_XML} />);
+    render(<BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} />);
 
     expect(modelerConstructorMock).toHaveBeenCalledTimes(1);
     const options = modelerConstructorMock.mock.calls[0][0] as {
       additionalModules: unknown[];
     };
-    expect(options.additionalModules).toHaveLength(4);
+    // 4 bisherige Module + FederatedStepPropertiesProviderModule + die
+    // didi-Inline-Bindung für die statische Installationsliste (P6-S9).
+    expect(options.additionalModules).toHaveLength(6);
 
     await waitFor(() => expect(importXMLMock).toHaveBeenCalledWith(STARTER_XML));
   });
@@ -64,7 +68,13 @@ describe("BpmnDesigner", () => {
     importXMLMock.mockRejectedValueOnce(new Error("kaputte Datei"));
     const onImportError = vi.fn();
 
-    render(<BpmnDesigner initialXml={STARTER_XML} onImportError={onImportError} />);
+    render(
+      <BpmnDesigner
+        initialXml={STARTER_XML}
+        federationInstallations={[]}
+        onImportError={onImportError}
+      />
+    );
 
     await waitFor(() => expect(onImportError).toHaveBeenCalledWith("kaputte Datei"));
   });
@@ -74,6 +84,7 @@ describe("BpmnDesigner", () => {
     render(
       <BpmnDesigner
         initialXml={STARTER_XML}
+        federationInstallations={[]}
         onReady={(h) => {
           handle = h;
         }}
@@ -95,7 +106,9 @@ describe("BpmnDesigner", () => {
   });
 
   it("destroys the modeler on unmount", async () => {
-    const { unmount } = render(<BpmnDesigner initialXml={STARTER_XML} />);
+    const { unmount } = render(
+      <BpmnDesigner initialXml={STARTER_XML} federationInstallations={[]} />
+    );
     await waitFor(() => expect(modelerConstructorMock).toHaveBeenCalledTimes(1));
 
     unmount();

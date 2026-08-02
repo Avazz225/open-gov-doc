@@ -31,6 +31,11 @@ def make_handler(
                 session_factory, settings, publish_event, event
             )
             return
+        if event.event_type == "workflow.federation.inbound_received":
+            await _handle_federation_inbound_received(
+                session_factory, settings, publish_event, event
+            )
+            return
         await _handle_task_escalated(session_factory, settings, publish_event, event)
 
     return handle
@@ -66,6 +71,49 @@ async def _handle_task_escalated(
                 settings,
                 channel="email",
                 recipient=escalation_email,
+                subject=subject,
+                body=body,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, email_notification)
+
+
+async def _handle_federation_inbound_received(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Benachrichtigung der Zielinstallation bei einer eingehenden föderierten
+    Übergabe (7.4, P6-S9) - gleiches `notify_email`-Muster wie
+    `escalation_email` bei `_handle_task_escalated`: ein optionales, opakes
+    Prozessdatum aus der Payload der Absenderseite, keine feste
+    Empfänger-Auflösung (workflow-service kennt kein RBAC-Konzept für
+    Federation). Immer zusätzlich eine In-App-Notification, da es keinen
+    Lane-Namen für einen frisch von außen gestarteten Prozess gibt."""
+    data = event.payload
+    from_installation_id = data.get("from_installation_id", "?")
+    process_type = data.get("process_type", "?")
+    subject = f"Neue föderierte Übergabe: {process_type}"
+    body = (
+        f"Installation {from_installation_id!r} hat einen Prozessschritt "
+        f"({process_type!r}) übergeben - neue lokale Instanz {event.subject!r} gestartet."
+    )
+
+    async with session_factory() as session:
+        in_app = await repository.create_and_send(
+            session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, in_app)
+
+        notify_email = data.get("notify_email")
+        if notify_email:
+            email_notification = await repository.create_and_send(
+                session,
+                settings,
+                channel="email",
+                recipient=notify_email,
                 subject=subject,
                 body=body,
             )
@@ -150,8 +198,22 @@ async def start_consuming(
 ) -> None:
     handler = make_handler(session_factory, settings, publish_event)
     for subject in subjects:
+        # Ein durable-Konsumentenname ist pro Stream eindeutig, nicht pro Subject -
+        # `workflow.federation.inbound_received` (seit P6-S9) teilt sich den
+        # "workflow"-Stream mit dem bereits bestehenden `workflow.task.escalated`
+        # (P6-S2). Ein zweiter `subscribe()`-Aufruf mit demselben Durable-Namen
+        # "notification-service" für ein anderes Filter-Subject auf demselben
+        # Stream schlägt mit "consumer is already bound to a subscription" fehl -
+        # daher ein eigener, zweiter Durable-Name nur für das neue Subject. Die
+        # drei bereits bestehenden Subjects behalten ihren ursprünglichen
+        # Durable-Namen (keine Neuzustellung ihres bisherigen Verlaufs).
+        durable = (
+            "notification-service-federation"
+            if subject == "workflow.federation.inbound_received"
+            else "notification-service"
+        )
         try:
-            await bus.subscribe(subject, handler, durable="notification-service")
+            await bus.subscribe(subject, handler, durable=durable)
         except SubjectNotFoundError:
             logger.warning(
                 "Kein Stream für Subject %r gefunden - noch kein Producer gestartet? "

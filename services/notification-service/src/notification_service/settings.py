@@ -27,6 +27,9 @@ class Settings(BaseServiceSettings):
         "workflow.task.escalated",
         "auth.superuser.activated",
         "permission.maintenance_mode.activated",
+        # Federation Hub (7.4, P6-S9): Benachrichtigung der Zielinstallation bei
+        # einer eingehenden föderierten Übergabe, siehe consumer.py.
+        "workflow.federation.inbound_received",
     ]
 
     # Empfänger der optionalen Sicherheitsbenachrichtigung bei Break-Glass-

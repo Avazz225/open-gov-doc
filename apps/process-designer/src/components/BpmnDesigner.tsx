@@ -8,6 +8,8 @@ import {
 } from "bpmn-js-properties-panel";
 import camundaModdleDescriptor from "camunda-bpmn-moddle/resources/camunda.json";
 import { useEffect, useRef } from "react";
+import type { FederationInstallation } from "./FederatedStepPropertiesProvider";
+import { FederatedStepPropertiesProviderModule } from "./FederatedStepPropertiesProvider";
 import { SignatureTaskPropertiesProviderModule } from "./SignatureTaskPropertiesProvider";
 
 import "bpmn-js/dist/assets/diagram-js.css";
@@ -21,6 +23,12 @@ export interface BpmnDesignerHandle {
 
 interface BpmnDesignerProps {
   initialXml: string;
+  // Statisch beim Erzeugen des Modelers injiziert (7.4, P6-S9) - vom
+  // aufrufenden `designer/page.tsx` einmalig vor dem Mounten geladen (siehe
+  // `lib/api.ts#listFederationInstallations`). Leer, wenn kein Federation Hub
+  // konfiguriert ist - `FederatedStepPropertiesProvider` blendet die
+  // gesamte Gruppe dann aus.
+  federationInstallations: FederationInstallation[];
   onImportError?: (message: string) => void;
   // Callback-Prop statt `forwardRef`/`useImperativeHandle` - vermeidet jede
   // Unsicherheit über Ref-Weiterreichung durch `next/dynamic` (mit dem diese
@@ -38,7 +46,12 @@ interface BpmnDesignerProps {
 // `next/dynamic`/`{ssr:false}` vom aufrufenden Code eingebunden (direkte
 // DOM-Zugriffe beim Modul-Import vertragen sich nicht mit Next.js'
 // Build-Zeit-Renderdurchlauf unter `output:"export"`).
-export function BpmnDesigner({ initialXml, onImportError, onReady }: BpmnDesignerProps) {
+export function BpmnDesigner({
+  initialXml,
+  federationInstallations,
+  onImportError,
+  onReady,
+}: BpmnDesignerProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const propertiesPanelRef = useRef<HTMLDivElement>(null);
 
@@ -53,6 +66,10 @@ export function BpmnDesigner({ initialXml, onImportError, onReady }: BpmnDesigne
         BpmnPropertiesProviderModule,
         CamundaPlatformPropertiesProviderModule,
         SignatureTaskPropertiesProviderModule,
+        FederatedStepPropertiesProviderModule,
+        // Kein eigenes bpmn-js-Modul, sondern eine didi-Inline-Bindung für die
+        // statische Installationsliste (siehe FederatedStepPropertiesProvider.tsx).
+        { federationInstallations: ["value", federationInstallations] },
       ],
       moddleExtensions: { camunda: camundaModdleDescriptor },
     });

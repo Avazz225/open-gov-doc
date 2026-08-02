@@ -96,6 +96,72 @@ async def test_superuser_activated_event_creates_security_officer_email(engine, 
     assert len(published) == 1
 
 
+async def test_federation_inbound_received_with_notify_email_creates_in_app_and_email(
+    engine, settings
+):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="workflow.federation.inbound_received",
+        service_name="workflow-service",
+        subject="instance-3",
+        payload={
+            "business_key": None,
+            "from_installation_id": "install-abc",
+            "process_type": "external-review",
+            "notify_email": "reviewer@example.com",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert {n.channel for n in notifications} == {"in_app", "email"}
+    in_app = next(n for n in notifications if n.channel == "in_app")
+    assert in_app.recipient == "unassigned"
+    email = next(n for n in notifications if n.channel == "email")
+    assert email.recipient == "reviewer@example.com"
+    assert "install-abc" in email.body
+    assert len(published) == 2
+
+
+async def test_federation_inbound_received_without_notify_email_creates_only_in_app(
+    engine, settings
+):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="workflow.federation.inbound_received",
+        service_name="workflow-service",
+        subject="instance-4",
+        payload={
+            "business_key": None,
+            "from_installation_id": "install-abc",
+            "process_type": "external-review",
+            "notify_email": None,
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert len(published) == 1
+
+
 async def test_maintenance_mode_activated_event_creates_security_officer_email(engine, settings):
     published = []
 

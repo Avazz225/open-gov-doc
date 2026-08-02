@@ -1,6 +1,6 @@
 # notification-service
 
-**Verantwortung:** Notification Service (Konzept 7.1) - E-Mail-, In-App- und Webhook-Benachrichtigungen. Konsumiert `workflow.task.escalated` von `workflow-service` (SLA-Zeitüberwachung, P6-S2) sowie seit P6-S5 `auth.superuser.activated` (Break-Glass-Sicherheitsbenachrichtigung, 4.6) und seit P6-S6 `permission.maintenance_mode.activated` (Not-Shutdown-Sicherheitsbenachrichtigung, 4.8) und bietet zusätzlich einen generischen `POST /notifications`, den jeder Service direkt aufrufen kann. Seit **P6-S6** prüft dieser Endpunkt die Empfänger-Existenz gegen echte `auth-service`-Konten und bleibt bewusst auch während des systemweiten Wartungsmodus erreichbar (wird für die Alarmierung selbst gebraucht) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
+**Verantwortung:** Notification Service (Konzept 7.1) - E-Mail-, In-App- und Webhook-Benachrichtigungen. Konsumiert `workflow.task.escalated` von `workflow-service` (SLA-Zeitüberwachung, P6-S2) sowie seit P6-S5 `auth.superuser.activated` (Break-Glass-Sicherheitsbenachrichtigung, 4.6), seit P6-S6 `permission.maintenance_mode.activated` (Not-Shutdown-Sicherheitsbenachrichtigung, 4.8) und seit P6-S9 `workflow.federation.inbound_received` (Federation Hub, 7.4) und bietet zusätzlich einen generischen `POST /notifications`, den jeder Service direkt aufrufen kann. Seit **P6-S6** prüft dieser Endpunkt die Empfänger-Existenz gegen echte `auth-service`-Konten und bleibt bewusst auch während des systemweiten Wartungsmodus erreichbar (wird für die Alarmierung selbst gebraucht) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
 **Konzept-Referenz:** 7.1, 4.8
 **Eigenes Postgres-Schema:** `notification` (Tabelle `notification`)
@@ -43,6 +43,12 @@ Zweiter Zweig desselben `consumer.py`-Handlers, dispatcht nach `event.event_type
 
 Dritter Zweig desselben `consumer.py`-Handlers, identisches Dispatch-Prinzip wie der Break-Glass-Zweig — legt eine einzelne E-Mail-Notification an `settings.security_officer_email` an ("Systemweite Notfallsperre ausgelöst"). Dieser Konsument läuft unverändert weiter, **auch während der systemweite Wartungsmodus selbst aktiv ist** — der Service ist dafür bewusst nicht Teil der Gateway-Blockade (siehe unten), sonst könnte er genau die Alarmierung nicht zustellen, die 4.8 für seine eigene Aktivierung verlangt.
 
+## `workflow.federation.inbound_received`-Konsument (seit P6-S9, 7.4)
+
+Vierter Zweig desselben `consumer.py`-Handlers — Benachrichtigung der Zielinstallation bei einer eingehenden föderierten Übergabe über den Federation Hub (siehe `docs/services/workflow-service.md` "Federation"). Gleiches `notify_email`-Muster wie beim SLA-Zweig: immer eine In-App-Notification (Empfänger `"unassigned"`, da es für einen frisch von außen gestarteten Prozess keinen Lane-Namen gibt), zusätzlich eine E-Mail, falls die Absenderseite ein `notify_email`-Prozessdatum mitgegeben hat.
+
+**Echter Bug gefunden und behoben**: `workflow.federation.inbound_received` teilt sich den `"workflow"`-Stream mit dem bereits bestehenden `workflow.task.escalated` (P6-S2). Ein durable JetStream-Konsumentenname ist pro **Stream**, nicht pro Subject eindeutig — ein zweiter `subscribe()`-Aufruf mit demselben Durable-Namen `"notification-service"`, aber einem anderen Filter-Subject auf demselben Stream, schlägt mit `"consumer is already bound to a subscription"` fehl (reproduzierbar bei jedem Neustart/Testlauf). Fix in `start_consuming()`: das neue Subject bekommt einen eigenen, zweiten Durable-Namen (`"notification-service-federation"`) — die drei bereits bestehenden Subjects behalten ihren ursprünglichen Namen (keine Neuzustellung von deren bisherigem Verlauf).
+
 ## Empfänger-Existenzprüfung (`POST /notifications`, seit P6-S6, 4.8-Retrofit)
 
 Neuer, dünner `auth_client.py`: `recipient_exists(recipient, channel)` — für `channel="webhook"` immer `True` (Ziel ist eine URL, keine Identität), sonst `GET /users` am Auth Service und Abgleich gegen `username`/`email`. Da `GET /users` seit P6-S5 hinter der Capability `admin.user_management` gegated ist, authentifiziert sich `notification-service` dafür als das bestehende technische Konto `users-admin` (`POST /login` bei **jedem** Aufruf, kein Token-Caching — akzeptierter Latenz-Trade-off für ein niedrigfrequentes internes Prüfen, kein drittes technisches Konto eingeführt). `POST /notifications` lehnt einen unbekannten Empfänger für `email`/`in_app` mit `400` ab, **bevor** `repository.create_and_send` aufgerufen wird — der `workflow.task.escalated`-Konsument und die beiden Sicherheitsbenachrichtigungs-Konsumenten (`auth.superuser.activated`, `permission.maintenance_mode.activated`) rufen `repository.create_and_send` weiterhin direkt auf, nicht über diesen HTTP-Endpunkt, und sind von der Prüfung daher unberührt (siehe "Empfänger-Auflösung" in den Offenen Punkten).
@@ -60,7 +66,7 @@ Neuer, dünner `auth_client.py`: `recipient_exists(recipient, channel)` — für
 | `notification.sent` | `{channel, recipient}` |
 | `notification.failed` | `{channel, recipient, error}` |
 
-**Konsumiert** (`durable="notification-service"`): `workflow.task.escalated` (aus `workflow-service`), seit P6-S5 zusätzlich `auth.superuser.activated` (aus `auth-service`), seit P6-S6 zusätzlich `permission.maintenance_mode.activated` (aus `permission-service`, siehe `docs/services/permission-service.md`).
+**Konsumiert** (`durable="notification-service"`): `workflow.task.escalated` (aus `workflow-service`), seit P6-S5 zusätzlich `auth.superuser.activated` (aus `auth-service`), seit P6-S6 zusätzlich `permission.maintenance_mode.activated` (aus `permission-service`, siehe `docs/services/permission-service.md`), seit P6-S9 zusätzlich `workflow.federation.inbound_received` (aus `workflow-service`, siehe `docs/services/workflow-service.md` "Federation").
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
@@ -76,7 +82,7 @@ Noch keine - folgt in Phase 11.
 - `test_delivery.py` - E-Mail real gegen `mailpit`, Webhook gegen einen lokal in der Testsuite gestarteten `http.server`, jeweils Erfolgs- und Fehlerfall (unerreichbarer SMTP-Server/unerreichbare URL).
 - `test_repository.py` - `create_and_send` inkl. Persistenz des Fehlerfalls, Filterung nach `recipient`/`channel`.
 - `test_api.py` - alle Endpunkte inkl. `404`.
-- `test_consumer.py` - simuliertes `workflow.task.escalated`-Event (direkt an `consumer.make_handler`, ohne echtes NATS) erzeugt die erwarteten In-App-/E-Mail-Notifications, inkl. Fall ohne `escalation_email` (nur In-App); seit **P6-S6** zusätzlich ein simuliertes `permission.maintenance_mode.activated`-Event erzeugt die Sicherheitsbenachrichtigung an `security_officer_email`.
+- `test_consumer.py` - simuliertes `workflow.task.escalated`-Event (direkt an `consumer.make_handler`, ohne echtes NATS) erzeugt die erwarteten In-App-/E-Mail-Notifications, inkl. Fall ohne `escalation_email` (nur In-App); seit **P6-S6** zusätzlich ein simuliertes `permission.maintenance_mode.activated`-Event erzeugt die Sicherheitsbenachrichtigung an `security_officer_email`; seit **P6-S9** zusätzlich ein simuliertes `workflow.federation.inbound_received`-Event mit/ohne `notify_email` (In-App+E-Mail bzw. nur In-App, gleiches Muster wie beim SLA-Zweig).
 - Seit **P6-S6** zusätzlich: `test_api.py` nutzt ein neues `real_recipient`-Fixture (legt real einen Nutzer über den live laufenden `auth-service` an, `users-admin`-Login) für die Erfolgsfälle, sowie eigene Tests für `400` bei unbekanntem Empfänger (`email`/`in_app`) — kein Mocking von `auth-service`.
 - **22 Tests** (vorher 18, 4 neu: siehe oben).
 - Reine Backend-Session, kein Browser-Test nötig.

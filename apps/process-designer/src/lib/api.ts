@@ -199,3 +199,20 @@ export async function deleteProcessDefinition(token: string, id: number): Promis
     token
   );
 }
+
+// Federation Hub (7.4, P6-S9) - Proxy von workflow-service auf das
+// Hub-Adressbuch (`GET /federation/installations`, ungegated wie andere
+// GETs). Leere Liste ohne konfigurierten Hub - der Designer bietet
+// föderierte Prozessschritte dann gar nicht erst an (siehe
+// components/FederatedStepPropertiesProvider.tsx).
+export interface FederationInstallationSummary {
+  id: string;
+  display_name: string;
+}
+
+export async function listFederationInstallations(
+  token: string
+): Promise<FederationInstallationSummary[]> {
+  const response = await request("workflow-service", "federation/installations", {}, token);
+  return response.json();
+}

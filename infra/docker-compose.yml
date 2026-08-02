@@ -426,6 +426,15 @@ services:
       DMS_SLA_POLL_INTERVAL_SECONDS: ${WORKFLOW_SLA_POLL_INTERVAL_SECONDS:-30}
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_SIGNATURE_SERVICE_BASE_URL: http://signature-service:8000
+      # Federation Hub (7.4, P6-S9) - in diesem gebündelten Dev-Stack per
+      # Default aktiv (der mitgelieferte `federation-hub-service` läuft
+      # sowieso), damit der Selbst-Loopback-Smoke-Test ohne manuellen Schritt
+      # funktioniert. Eine echte Installation würde diese Variable schlicht
+      # leer lassen (opt-in, siehe docs/services/workflow-service.md).
+      DMS_FEDERATION_HUB_BASE_URL: ${WORKFLOW_SERVICE_FEDERATION_HUB_BASE_URL:-http://federation-hub-service:8000}
+      DMS_INSTALLATION_GATEWAY_BASE_URL: http://gateway-service:8000
+      DMS_INSTALLATION_DISPLAY_NAME: ${WORKFLOW_SERVICE_INSTALLATION_DISPLAY_NAME:-DMS-Dev-Installation}
+      DMS_FEDERATION_PROCESS_TYPE_MAP: ${WORKFLOW_SERVICE_FEDERATION_PROCESS_TYPE_MAP:-{}}
     ports:
       - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
     depends_on:
@@ -436,6 +445,8 @@ services:
       permission-service:
         condition: service_started
       signature-service:
+        condition: service_started
+      federation-hub-service:
         condition: service_started
     networks:
       - dms-net
@@ -522,6 +533,28 @@ services:
         condition: service_started
       auth-service:
         condition: service_started
+    networks:
+      - dms-net
+
+  # Federation Hub (Konzept 7.4, P6-S9): bewusst KEIN interner Service dieser
+  # Installation (siehe docs/services/federation-hub-service.md) - kein
+  # `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, kein `depends_on` von
+  # `gateway-service`. Wird hier nur der lokalen Entwicklung/dem
+  # Selbst-Loopback-Smoke-Test halber mitgeliefert (ADR 0028) - ein Betreiber
+  # würde ihn in Produktion vollständig separat betreiben, ggf. sogar für
+  # mehrere fremde Installationen gemeinsam.
+  federation-hub-service:
+    build:
+      context: ..
+      dockerfile: services/federation-hub-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+    ports:
+      - "${FEDERATION_HUB_SERVICE_PORT:-8018}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - dms-net
 

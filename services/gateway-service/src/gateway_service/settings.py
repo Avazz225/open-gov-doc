@@ -21,7 +21,16 @@ class Settings(BaseServiceSettings):
     # "{service_type}:{path}" (Pfad ohne führenden Slash, exakter Match) - Routen,
     # die ohne Bearer-Token erreichbar sein müssen, allen voran Login/Refresh
     # selbst (man braucht ja erst einen Token, um einen Token zu bekommen).
-    public_routes: list[str] = ["auth-service:login", "auth-service:refresh"]
+    # Seit P6-S9 zusätzlich die beiden Federation-Hub-Inbound-Endpunkte (7.4) -
+    # der Hub ist kein eingeloggter Principal, authentisiert sich stattdessen
+    # über eine eigene Signatur (`X-Federation-Hub-Signature`, siehe
+    # `workflow_service.main._verify_hub_signature`).
+    public_routes: list[str] = [
+        "auth-service:login",
+        "auth-service:refresh",
+        "workflow-service:federation/inbound",
+        "workflow-service:federation/inbound-result",
+    ]
 
     # Not-Shutdown (4.8, P6-S6): während aktivem Wartungsmodus werden alle
     # proxied Requests mit 503 abgelehnt, außer diese Routen (Login/Refresh/Me/

@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from workflow_service import spiff_adapter
-from workflow_service.models import ProcessDefinition, ProcessInstance
+from workflow_service.models import FederationTask, ProcessDefinition, ProcessInstance
 
 
 @dataclass
@@ -240,3 +240,101 @@ async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
         )
     await session.flush()
     return results
+
+
+async def create_federation_task(
+    session: AsyncSession,
+    *,
+    process_instance_id: str,
+    task_id: str | None,
+    handover_id: str,
+    direction: str,
+    origin_installation_id: str | None,
+    status: str,
+) -> FederationTask:
+    """Bindeglied zu einem beim Federation Hub laufenden Handover (7.4,
+    P6-S9) - siehe `models.FederationTask`. Ein `unique`-Index auf
+    `handover_id` verhindert, dass derselbe Handover versehentlich zweimal
+    verknüpft wird."""
+    now = datetime.now(UTC)
+    federation_task = FederationTask(
+        process_instance_id=process_instance_id,
+        task_id=task_id,
+        handover_id=handover_id,
+        direction=direction,
+        origin_installation_id=origin_installation_id,
+        status=status,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(federation_task)
+    await session.flush()
+    return federation_task
+
+
+async def get_federation_task_by_task(
+    session: AsyncSession, process_instance_id: str, task_id: str
+) -> FederationTask | None:
+    result = await session.execute(
+        select(FederationTask).where(
+            FederationTask.process_instance_id == process_instance_id,
+            FederationTask.task_id == task_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_federation_task_by_handover(
+    session: AsyncSession, handover_id: str, *, direction: str = "outbound"
+) -> FederationTask | None:
+    """Default `direction="outbound"`: `POST /federation/inbound-result` meldet
+    stets das Ergebnis eines selbst initiierten (outbound) Handover zurück.
+    Ohne den Richtungsfilter wäre die Zeile im Selbst-Loopback-Smoke-Test
+    (dieselbe `handover_id` existiert dort sowohl als outbound- als auch als
+    inbound-Zeile, siehe `models.FederationTask`) nicht eindeutig."""
+    result = await session.execute(
+        select(FederationTask).where(
+            FederationTask.handover_id == handover_id, FederationTask.direction == direction
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_inbound_federation_task_for_instance(
+    session: AsyncSession, process_instance_id: str
+) -> FederationTask | None:
+    """Findet den eingehenden Handover, der diese (per `POST
+    /federation/inbound` gestartete) Instanz ausgelöst hat - Grundlage dafür,
+    an welche `origin_installation_id`/welchen `handover_id` ein
+    `federated_return`-Task in dieser Instanz sein Ergebnis zurückschickt.
+    Bewusst vereinfachend genau ein eingehender Handover je Instanz (siehe
+    docs/services/workflow-service.md "Offene Punkte")."""
+    result = await session.execute(
+        select(FederationTask).where(
+            FederationTask.process_instance_id == process_instance_id,
+            FederationTask.direction == "inbound",
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def update_federation_task_status(
+    session: AsyncSession, federation_task: FederationTask, status: str
+) -> None:
+    federation_task.status = status
+    federation_task.updated_at = datetime.now(UTC)
+    await session.flush()
+
+
+async def mark_inbound_federation_task_returned(
+    session: AsyncSession, federation_task: FederationTask, *, task_id: str, status: str
+) -> None:
+    """Verknüpft den bislang task-losen eingehenden `FederationTask`-Eintrag
+    (siehe `get_inbound_federation_task_for_instance`) nachträglich mit dem
+    `federated_return`-Task, der das Ergebnis tatsächlich zurückgeschickt hat -
+    dient danach als Dispatch-Sperre gegen ein doppeltes Zurücksenden
+    (`get_federation_task_by_task` findet die Zeile ab jetzt über `task_id`)."""
+    federation_task.task_id = task_id
+    federation_task.status = status
+    federation_task.updated_at = datetime.now(UTC)
+    await session.flush()

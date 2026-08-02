@@ -18,6 +18,16 @@ os.environ["DMS_POSTGRES_DSN"] = DSN
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 os.environ["DMS_NATS_URL"] = NATS_URL
 
+# Federation Hub (7.4, P6-S9) - echt gegen den laufenden federation-hub-service
+# registriert (kein Mocking, gleiches Prinzip wie permission-service/
+# signature-service oben). `workflow_service.main` liest `settings` beim
+# Modul-Import einmalig, daher muss dies wie DMS_POSTGRES_DSN/DMS_NATS_URL vor
+# jedem `from workflow_service.main import app` gesetzt sein.
+FEDERATION_HUB_SERVICE_URL = os.environ.get(
+    "TEST_FEDERATION_HUB_SERVICE_URL", "http://localhost:8018"
+)
+os.environ["DMS_FEDERATION_HUB_BASE_URL"] = FEDERATION_HUB_SERVICE_URL
+
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 # Fester Principal statt uuid4() je Testlauf, damit die Rollenzuweisung
 # idempotent bleibt (Unique-Constraint auf permission-service-Seite) - echter

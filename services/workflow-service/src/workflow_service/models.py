@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("workflow")
@@ -65,3 +65,65 @@ class ProcessInstance(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FederationIdentity(Base):
+    """Eigene Federation-Identität dieser Installation (7.4, P6-S9) - bewusst
+    eine einzelne Zeile mit fester ``id=1``, gleiches Singleton-Muster wie
+    `signature-service`s `InternalCa`. Wird beim ersten Start mit
+    konfiguriertem `Settings.federation_hub_base_url` erzeugt (eigenes
+    RSA-2048-Schlüsselpaar, siehe `federation_crypto.py`) und danach
+    idempotent wiederverwendet - andere Installationen verschlüsseln Payloads
+    für uns mit `public_key_pem`, `private_key_pem` entschlüsselt sie wieder.
+    `api_key` ist der vom Hub bei der Registrierung einmalig ausgegebene
+    Klartext-Key (wird für jeden eigenen Aufruf gegen den Hub als Bearer-Token
+    mitgeschickt); `hub_public_key_pem` ist der einmalig abgerufene öffentliche
+    Schlüssel des Hub (Trust-on-First-Use, ADR 0028), mit dem eingehende, vom
+    Hub signierte Zustellungen verifiziert werden."""
+
+    __tablename__ = "federation_identity"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    installation_id: Mapped[str] = mapped_column(String(128))
+    private_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    api_key: Mapped[str] = mapped_column(String(128))
+    hub_public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FederationTask(Base):
+    """Bindeglied zwischen einem lokalen Manual-Task/einer lokalen Instanz und
+    einem beim Hub laufenden Handover (7.4, P6-S9) - verhindert doppeltes
+    Dispatchen desselben `federated`/`federated_return`-Tasks (siehe
+    `main.py._dispatch_pending_federation_tasks`) und hält bei einer
+    eingehenden (`direction="inbound"`) Übergabe fest, an welche
+    `origin_installation_id`/welchen `handover_id` ein späterer
+    `federated_return`-Task sein Ergebnis zurückschicken muss. ``task_id`` ist
+    bei einer rein eingehenden Zeile (die neue Instanz selbst, bevor sie einen
+    `federated_return`-Task erreicht hat) noch ``None``.
+
+    Eindeutigkeit gilt für ``(handover_id, direction)``, nicht ``handover_id``
+    allein: im Normalfall sieht eine einzelne Installation einen `handover_id`
+    ohnehin nur aus genau einer Richtung (entweder sie hat ihn selbst erzeugt,
+    oder sie empfängt ihn) - **außer** beim in dieser Session verwendeten
+    Selbst-Loopback-Smoke-Test (eine Installation übergibt an sich selbst),
+    wo derselbe `handover_id` in derselben Datenbank sowohl als `outbound`-
+    als auch als `inbound`-Zeile auftritt."""
+
+    __tablename__ = "federation_task"
+    __table_args__ = (
+        UniqueConstraint("handover_id", "direction", name="ux_federation_task_handover_direction"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    process_instance_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow.process_instance.id"), index=True
+    )
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    handover_id: Mapped[str] = mapped_column(String(36), index=True)
+    direction: Mapped[str] = mapped_column(String(16))  # "outbound" | "inbound"
+    origin_installation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

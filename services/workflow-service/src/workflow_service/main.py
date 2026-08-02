@@ -1,19 +1,24 @@
 import asyncio
+import json
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
+import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from workflow_service import repository
-from workflow_service.models import Base
+from workflow_service import federation_crypto, repository, spiff_adapter
+from workflow_service.federation_client import FederationHubClient
+from workflow_service.models import Base, FederationIdentity
 from workflow_service.permission_client import PermissionServiceClient
 from workflow_service.schemas import (
     ProcessDefinitionDetailOut,
@@ -31,6 +36,8 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 _SIGNATURE_LEVEL_RANK = {"ses": 0, "aes": 1, "qes": 2}
+_FEDERATION_IDENTITY_ID = 1
+_FEDERATED_TASK_TYPES = ("federated", "federated_return")
 
 
 async def _sla_poll_loop(
@@ -76,6 +83,70 @@ async def _sla_poll_loop(
         await asyncio.sleep(settings.sla_poll_interval_seconds)
 
 
+async def _ensure_federation_identity(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> FederationHubClient | None:
+    """Einmalige Selbstregistrierung am Federation Hub (7.4, P6-S9) - opt-in,
+    bleibt `None` ohne konfigurierten `settings.federation_hub_base_url`
+    (siehe `docs/services/workflow-service.md` "Federation"). Analog zu
+    `maybe_start_registration` aus `dms-registry-client`, aber bewusst kein
+    Wiederverwenden dieser Lib: der Hub ist kein interner
+    Service-Discovery-Eintrag dieser Installation, sondern ein externer,
+    installationsübergreifender Dienst mit eigenem Registrierungs-/
+    Auth-Protokoll (API-Key statt Heartbeat, RSA-Schlüsselpaar statt
+    Health-Endpoint, siehe `federation_client.py`/`federation_crypto.py`)."""
+    if not settings.federation_hub_base_url:
+        return None
+    client = FederationHubClient(settings.federation_hub_base_url)
+    callback_base_url = f"{settings.installation_gateway_base_url}/api/workflow-service"
+    async with session_factory() as session:
+        identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+        if identity is None:
+            private_pem, public_pem = federation_crypto.generate_keypair()
+            hub_public_key_pem = await client.get_hub_public_key()
+            installation_id = str(uuid.uuid4())
+            registration = await client.register(
+                api_key=None,
+                installation_id=installation_id,
+                display_name=settings.installation_display_name,
+                callback_base_url=callback_base_url,
+                public_key_pem=public_pem.decode("utf-8"),
+                version=settings.installation_version,
+                min_compatible_peer_version=settings.installation_min_compatible_peer_version,
+            )
+            identity = FederationIdentity(
+                id=_FEDERATION_IDENTITY_ID,
+                installation_id=installation_id,
+                private_key_pem=private_pem,
+                public_key_pem=public_pem,
+                api_key=registration["api_key"],
+                hub_public_key_pem=hub_public_key_pem.encode("utf-8"),
+                created_at=datetime.now(UTC),
+            )
+            session.add(identity)
+            await session.commit()
+        else:
+            # Re-Registrierung bei jedem Start (Upsert wie bei der internen
+            # Registry) - hält z. B. `callback_base_url`/`version` aktuell,
+            # falls sich Settings zwischen Neustarts geändert haben. Ein
+            # Fehlschlag (Hub gerade nicht erreichbar) blockiert den eigenen
+            # Start nicht - Federation ist ein Zusatznutzen, kein Hard-
+            # Dependency dieser Installation.
+            try:
+                await client.register(
+                    api_key=identity.api_key,
+                    installation_id=identity.installation_id,
+                    display_name=settings.installation_display_name,
+                    callback_base_url=callback_base_url,
+                    public_key_pem=identity.public_key_pem.decode("utf-8"),
+                    version=settings.installation_version,
+                    min_compatible_peer_version=settings.installation_min_compatible_peer_version,
+                )
+            except httpx.HTTPError:
+                logger.warning("federation_hub_reregistration_failed")
+    return client
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -110,10 +181,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ON workflow.process_definition (name, version)"
             )
         )
+        # Federation Hub (P6-S9): `federation_task.handover_id` war zunächst
+        # allein eindeutig - im Selbst-Loopback-Smoke-Test (eine Installation
+        # übergibt an sich selbst) trägt aber sowohl die outbound- als auch die
+        # inbound-Zeile denselben `handover_id` in derselben Datenbank, siehe
+        # `models.FederationTask`. Eindeutigkeit gilt seither für
+        # `(handover_id, direction)` - gleiches idempotentes Migrationsmuster
+        # wie bei der Prozessdefinition-Versionierung oben.
+        await conn.execute(
+            text("DROP INDEX IF EXISTS workflow.ix_workflow_federation_task_handover_id")
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_workflow_federation_task_handover_id "
+                "ON workflow.federation_task (handover_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_federation_task_handover_direction "
+                "ON workflow.federation_task (handover_id, direction)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
+    app.state.federation_client = await _ensure_federation_identity(app.state.session_factory)
 
     # Reiner Producer (kein Consumer, siehe docs/services/workflow-service.md
     # "Events") - eigener Stream, ein Producer muss ihn selbst anlegen (ADR 0001).
@@ -146,6 +240,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.close()
     await app.state.permission_client.close()
     await app.state.signature_client.close()
+    if app.state.federation_client is not None:
+        await app.state.federation_client.close()
     await engine.dispose()
 
 
@@ -167,6 +263,157 @@ async def publish_event(event_type: str, subject: str, payload: dict) -> None:
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+async def _dispatch_outbound_federated_task(
+    session: AsyncSession, instance_id: str, task: spiff_adapter.TaskInfo
+) -> None:
+    """Automatischer Handover (7.4): ein `taskType=federated`-Task wird nie
+    von einem Menschen abgeschlossen (siehe `_reject_manual_federated_completion`),
+    sondern sobald bereit sofort an den Federation Hub übergeben."""
+    identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+    target_installation_id = task.extensions.get("targetInstallationId")
+    target_process_type = task.extensions.get("targetProcessType")
+    if identity is None or not target_installation_id or not target_process_type:
+        logger.warning(
+            "federated_task_missing_configuration",
+            extra={"instance_id": instance_id, "task_id": task.id},
+        )
+        return
+
+    installations = await app.state.federation_client.list_installations()
+    target = next((i for i in installations if i["id"] == target_installation_id), None)
+    if target is None:
+        logger.warning(
+            "federated_task_unknown_target",
+            extra={"instance_id": instance_id, "target_installation_id": target_installation_id},
+        )
+        return
+
+    encrypted_payload = federation_crypto.encrypt_for(
+        target["public_key_pem"].encode("utf-8"), task.data
+    )
+
+    # Der `handover_id` wird bewusst hier (nicht vom Hub) erzeugt und die
+    # eigene FederationTask-Zeile bereits VOR dem Hub-Aufruf committet: der
+    # Hub kann synchron bis zurück in diese Installation zustellen (z. B. ein
+    # Handover an die eigene installation_id, siehe ADR 0028
+    # "Selbst-Loopback") - ohne diesen Commit wäre die Zeile bei einem
+    # verschachtelten Rückruf (`/federation/inbound-result`) noch nicht
+    # sichtbar (Postgres-Transaktionsisolation), da die äußere Transaktion
+    # erst nach Rückkehr aus `create_handover()` committet.
+    handover_id = str(uuid.uuid4())
+    await repository.create_federation_task(
+        session,
+        process_instance_id=instance_id,
+        task_id=task.id,
+        handover_id=handover_id,
+        direction="outbound",
+        origin_installation_id=None,
+        status="pending",
+    )
+    await session.commit()
+
+    try:
+        handover = await app.state.federation_client.create_handover(
+            identity.api_key,
+            handover_id=handover_id,
+            to_installation_id=target_installation_id,
+            process_type=target_process_type,
+            encrypted_payload=encrypted_payload,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "federated_handover_creation_failed: %s",
+            exc,
+            extra={"instance_id": instance_id, "task_id": task.id},
+        )
+        return
+
+    federation_task = await repository.get_federation_task_by_handover(session, handover_id)
+    if federation_task is not None:
+        await repository.update_federation_task_status(session, federation_task, handover["status"])
+        await session.commit()
+
+
+async def _dispatch_federated_return_task(
+    session: AsyncSession, instance_id: str, task: spiff_adapter.TaskInfo
+) -> None:
+    """Gegenstück auf der Empfängerseite (7.4): schickt das Ergebnis eines
+    `taskType=federated_return`-Task automatisch über den Federation Hub an
+    die ursprüngliche Installation zurück, sobald der Task bereit ist."""
+    identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+    inbound = await repository.get_inbound_federation_task_for_instance(session, instance_id)
+    if identity is None or inbound is None or inbound.origin_installation_id is None:
+        logger.warning(
+            "federated_return_task_missing_origin",
+            extra={"instance_id": instance_id, "task_id": task.id},
+        )
+        return
+
+    installations = await app.state.federation_client.list_installations()
+    origin = next((i for i in installations if i["id"] == inbound.origin_installation_id), None)
+    if origin is None:
+        logger.warning(
+            "federated_return_task_unknown_origin",
+            extra={
+                "instance_id": instance_id,
+                "origin_installation_id": inbound.origin_installation_id,
+            },
+        )
+        return
+
+    encrypted_result = federation_crypto.encrypt_for(
+        origin["public_key_pem"].encode("utf-8"), task.data
+    )
+    try:
+        result = await app.state.federation_client.send_result(
+            identity.api_key,
+            inbound.handover_id,
+            outcome="completed",
+            encrypted_result=encrypted_result,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "federated_return_send_failed: %s",
+            exc,
+            extra={"instance_id": instance_id, "task_id": task.id},
+        )
+        return
+
+    # Der Hub selbst antwortet mit 200, auch wenn die Weiterleitung an die
+    # Ursprungsinstallation dahinter fehlschlägt (siehe
+    # `federation_hub_service.main.submit_handover_result`) - `result["status"]`
+    # spiegelt den tatsächlichen Zustellungserfolg, nicht nur die eigene
+    # erfolgreiche Übergabe an den Hub.
+    status = "returned" if result.get("status") == "completed" else "return_delivery_failed"
+    await repository.mark_inbound_federation_task_returned(
+        session, inbound, task_id=task.id, status=status
+    )
+
+
+async def _dispatch_pending_federation_tasks(session: AsyncSession, instance_id: str) -> None:
+    """Wird nach jeder Operation aufgerufen, die neue bereite Tasks erzeugen
+    kann (Instanzstart, Task-Abschluss, SLA-Poll-Tick, Federation-Inbound) -
+    erkennt neu bereite `federated`/`federated_return`-Tasks und löst die
+    passende Aktion aus. Bereits dispatchte Tasks werden über
+    `FederationTask`-Zeilen übersprungen (keine doppelte Zustellung)."""
+    if app.state.federation_client is None:
+        return
+    try:
+        tasks = await repository.get_ready_tasks(session, instance_id)
+    except repository.NotFoundError:
+        return
+    for task in tasks:
+        task_type = task.extensions.get("taskType")
+        if task_type not in _FEDERATED_TASK_TYPES:
+            continue
+        if await repository.get_federation_task_by_task(session, instance_id, task.id) is not None:
+            continue
+        if task_type == "federated":
+            await _dispatch_outbound_federated_task(session, instance_id, task)
+        else:
+            await _dispatch_federated_return_task(session, instance_id, task)
 
 
 async def _require_object_config(x_dms_principal: str) -> None:
@@ -297,6 +544,8 @@ async def start_instance(
             subject=instance.id,
             payload={"business_key": instance.business_key},
         )
+    await _dispatch_pending_federation_tasks(session, instance.id)
+    await session.commit()
     return instance
 
 
@@ -390,6 +639,24 @@ async def _require_valid_signature_if_needed(
         )
 
 
+async def _reject_manual_federated_completion(
+    session: AsyncSession, instance_id: str, task_id: str
+) -> None:
+    """Ein `federated`/`federated_return`-Task (7.4, P6-S9) wird ausschließlich
+    automatisch über den Federation Hub abgeschlossen (siehe
+    `_dispatch_pending_federation_tasks`) - ein direkter `.../complete`-Aufruf
+    (versehentlich oder durch einen Menschen) wird abgelehnt, sonst könnte ein
+    Handover-Ergebnis nie mehr zugestellt werden, weil der Task lokal bereits
+    fertig ist."""
+    tasks = await repository.get_ready_tasks(session, instance_id)
+    task = next((t for t in tasks if t.id == task_id), None)
+    if task is not None and task.extensions.get("taskType") in _FEDERATED_TASK_TYPES:
+        raise HTTPException(
+            status_code=409,
+            detail="Dieser Task wird automatisch über den Federation Hub abgeschlossen",
+        )
+
+
 @app.post("/instances/{instance_id}/tasks/{task_id}/complete", response_model=ProcessInstanceOut)
 async def complete_task(
     instance_id: str,
@@ -401,6 +668,7 @@ async def complete_task(
     await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         await _require_valid_signature_if_needed(session, instance_id, task_id, payload)
+        await _reject_manual_federated_completion(session, instance_id, task_id)
         instance = await repository.complete_task(
             session, instance_id, task_id, completed_by=payload.completed_by, data=payload.data
         )
@@ -420,4 +688,170 @@ async def complete_task(
             subject=instance_id,
             payload={"business_key": instance.business_key},
         )
+    await _dispatch_pending_federation_tasks(session, instance_id)
+    await session.commit()
     return instance
+
+
+@app.get("/federation/installations")
+async def list_federation_installations() -> list[dict]:
+    """Proxy auf das Hub-Adressbuch (7.4) - ungegated wie andere `GET`s, siehe
+    `docs/services/process-designer.md`. Ohne konfigurierten Hub eine leere
+    Liste, damit der Process Designer föderierte Prozessschritte gar nicht
+    erst als Option anbietet (Konzept 7.1)."""
+    if app.state.federation_client is None:
+        return []
+    return await app.state.federation_client.list_installations()
+
+
+async def _verify_hub_signature(
+    session: AsyncSession, body: bytes, signature: str
+) -> FederationIdentity:
+    identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+    if identity is None:
+        raise HTTPException(status_code=503, detail="Federation Hub nicht konfiguriert")
+    if not federation_crypto.verify_body(identity.hub_public_key_pem, body, signature):
+        raise HTTPException(status_code=401, detail="Ungültige oder fehlende Hub-Signatur")
+    return identity
+
+
+@app.post(
+    "/federation/inbound", response_model=ProcessInstanceOut, status_code=status.HTTP_201_CREATED
+)
+async def federation_inbound(
+    request: Request,
+    x_dms_maintenance_active: str = Header(default="false"),
+    session: AsyncSession = Depends(get_session),
+) -> ProcessInstanceOut:
+    """Empfängt eine neue, vom Federation Hub vermittelte Übergabe (7.4) -
+    startet lokal eine neue Instanz des über
+    `settings.federation_process_type_map` zugeordneten Prozesses. Bewusst
+    öffentlich (kein `X-DMS-Principal`, siehe `gateway-service`s
+    `public_routes`) - authentisiert wird stattdessen über die
+    `X-Federation-Hub-Signature`. Respektiert wie Instanzstart/Task-Abschluss
+    den Wartungsmodus (4.8) - ein föderierter Schritt ist Alltagsverarbeitung,
+    kein Admin-Vorgang."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    body = await request.body()
+    identity = await _verify_hub_signature(
+        session, body, request.headers.get("X-Federation-Hub-Signature", "")
+    )
+    payload = json.loads(body)
+    process_type = payload["process_type"]
+    local_name = settings.federation_process_type_map.get(process_type)
+    if local_name is None:
+        raise HTTPException(
+            status_code=422, detail=f"Kein lokales Prozess-Mapping für {process_type!r}"
+        )
+    definitions = await repository.list_process_definitions(session, name=local_name)
+    if not definitions:
+        raise HTTPException(status_code=422, detail=f"Keine Prozessdefinition {local_name!r}")
+    try:
+        decrypted_payload = federation_crypto.decrypt_with(
+            identity.private_key_pem, payload["encrypted_payload"]
+        )
+    except federation_crypto.DecryptionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    instance = await repository.start_instance(
+        session,
+        definitions[0].id,  # neueste Version zuerst, siehe list_process_definitions
+        created_by="federation-hub",
+        business_key=None,
+        initial_data=decrypted_payload,
+    )
+    await repository.create_federation_task(
+        session,
+        process_instance_id=instance.id,
+        task_id=None,
+        handover_id=payload["handover_id"],
+        direction="inbound",
+        origin_installation_id=payload["from_installation_id"],
+        status="received",
+    )
+    await session.commit()
+    await publish_event(
+        "workflow.instance.started",
+        subject=instance.id,
+        payload={"process_definition_id": definitions[0].id, "created_by": "federation-hub"},
+    )
+    await publish_event(
+        "workflow.federation.inbound_received",
+        subject=instance.id,
+        payload={
+            "business_key": instance.business_key,
+            "from_installation_id": payload["from_installation_id"],
+            "process_type": process_type,
+            "notify_email": decrypted_payload.get("notify_email"),
+        },
+    )
+    if instance.status == "completed":
+        await publish_event(
+            "workflow.instance.completed",
+            subject=instance.id,
+            payload={"business_key": instance.business_key},
+        )
+    await _dispatch_pending_federation_tasks(session, instance.id)
+    await session.commit()
+    return instance
+
+
+@app.post("/federation/inbound-result")
+async def federation_inbound_result(
+    request: Request,
+    x_dms_maintenance_active: str = Header(default="false"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Empfängt die Rückmeldung eines zuvor selbst initiierten Handover (7.4) -
+    schließt den ursprünglich wartenden `taskType=federated`-Task
+    programmatisch ab (nicht über den regulären `.../complete`-Endpunkt, der
+    genau diesen Task-Typ ablehnt, siehe `_reject_manual_federated_completion`).
+    Respektiert wie andere Fachverarbeitung den Wartungsmodus (4.8)."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    body = await request.body()
+    identity = await _verify_hub_signature(
+        session, body, request.headers.get("X-Federation-Hub-Signature", "")
+    )
+    payload = json.loads(body)
+    federation_task = await repository.get_federation_task_by_handover(
+        session, payload["handover_id"]
+    )
+    if federation_task is None or federation_task.task_id is None:
+        raise HTTPException(
+            status_code=404, detail=f"handover_id {payload['handover_id']!r} unbekannt"
+        )
+    try:
+        result_data = federation_crypto.decrypt_with(
+            identity.private_key_pem, payload["encrypted_result"]
+        )
+    except federation_crypto.DecryptionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        instance = await repository.complete_task(
+            session,
+            federation_task.process_instance_id,
+            federation_task.task_id,
+            completed_by="federation-hub",
+            data=result_data,
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.TaskNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await repository.update_federation_task_status(session, federation_task, "completed")
+    await session.commit()
+    await publish_event(
+        "workflow.task.completed",
+        subject=federation_task.process_instance_id,
+        payload={"task_id": federation_task.task_id, "completed_by": "federation-hub"},
+    )
+    if instance.status == "completed":
+        await publish_event(
+            "workflow.instance.completed",
+            subject=instance.id,
+            payload={"business_key": instance.business_key},
+        )
+    await _dispatch_pending_federation_tasks(session, instance.id)
+    await session.commit()
+    return {"status": "ok"}
