@@ -40,6 +40,15 @@ class ObjectType(Base):
     # Signature Service bei jedem Signiervorgang gegen das angeforderte Niveau
     # geprüft (`ses` < `aes` < `qes`), siehe signature-service/main.py.
     required_signature_level: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Aufbewahrung (5.2, seit P7-S1): Standard-Aufbewahrungsfrist in Tagen ab
+    # Anlage, für applies_to == "document" UND "folder" gleichermaßen gültig
+    # (gilt für beide Session P7-S1/P7-S1b). None = kein Typ-Standard, Frist
+    # bleibt manuell zu setzen.
+    default_retention_days: Mapped[int | None] = mapped_column(nullable=True)
+    # Tri-State-Override (None = kein Override, es gilt der globale Standard
+    # aus RetentionConfig) - ob ein Löschgrund bei Zwangslöschung Pflicht ist
+    # (5.2a), gleiches Muster wie kennzeichen_display_override.
+    deletion_reason_required_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

@@ -66,6 +66,27 @@ describe("api client", () => {
       name: "Neu",
       parent_id: "root",
       created_by: "alice",
+      object_type_id: null,
+    });
+  });
+
+  it("includes the chosen folder class (Ordnerklasse) when creating a folder", async () => {
+    const fetchMock = mockFetchOnce({ id: "f1", name: "Neu" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFolder("token-123", {
+      name: "Neu",
+      parentId: "root",
+      createdBy: "alice",
+      objectTypeId: 5,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "Neu",
+      parent_id: "root",
+      created_by: "alice",
+      object_type_id: 5,
     });
   });
 

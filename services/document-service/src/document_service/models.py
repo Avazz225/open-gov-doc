@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
@@ -38,6 +39,36 @@ class Document(Base):
     derived_from_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     originating_case_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Aufbewahrung/Zwangslöschung (5.2/5.2a, seit P7-S1): ein gemeinsames
+    # Feldpaar für beide Konzeptabschnitte - `retention_until` erreicht,
+    # `full_deletion=False` löst den bestehenden Soft-Delete aus (`deleted_at`
+    # oben), `full_deletion=True` löst stattdessen die sofortige physische
+    # Löschung aus (siehe `_retention_poll_loop` in main.py). Manuell gesetzt
+    # oder einmalig aus `ObjectType.default_retention_days` übernommen.
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Löschgrund (5.2a) - nur während der Planungsphase auf dem Dokument
+    # gehalten (notwendig, da die Ausführung Tage/Wochen später erfolgt).
+    # Bei tatsächlicher physischer Löschung wandert der Grund in
+    # `DeletionRegisterEntry`/das Audit-Event, die `Document`-Zeile selbst
+    # wird dabei komplett entfernt - der Grund überlebt das Objekt also nur
+    # dort, nie als Property eines noch existierenden Objekts.
+    pending_deletion_reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Löscherinnerung (5.2a, optional) - `deletion_reminder_sent_at`
+    # verhindert Mehrfachversand über aufeinanderfolgende Poll-Durchläufe
+    # hinweg. `reminder_notify_email` ist ein opakes, beim Terminieren
+    # mitgegebenes Datum - gleiches Muster wie `escalation_email`/
+    # `notify_email` bei workflow-service (keine Rollen-/Konto-Auflösung).
+    deletion_reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reminder_notify_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Verhindert, dass der Poll-Loop bei aktiviertem Vier-Augen-Prinzip
+    # (4.3) bei jedem Durchlauf erneut einen Freigabe-Request für dieselbe
+    # fällige Zwangslöschung anlegt, solange die Genehmigung noch aussteht.
+    force_delete_approval_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -99,3 +130,77 @@ class DocumentLock(Base):
     based_on_version_number: Mapped[int] = mapped_column(Integer)
     locked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LegalHold(Base):
+    """Legal Hold (5.2, seit P7-S1): sperrt ein Dokument unabhängig von
+    dessen regulärer Aufbewahrungsfrist, bis der Hold explizit aufgehoben
+    wird - überschreibt sowohl regulären Soft-Delete als auch Zwangslöschung
+    im Poll-Loop (siehe main.py). Aktiv = ``released_at IS NULL``. Eigene
+    Zeile statt eines einzelnen Felds auf ``Document``, da die Historie
+    (wer/wann gesetzt/aufgehoben) selbst auditrelevant ist - mehrere
+    vergangene Holds je Dokument bleiben so nachvollziehbar."""
+
+    __tablename__ = "legal_hold"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("document.document.id"), index=True
+    )
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    set_by: Mapped[str] = mapped_column(String(128))
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    released_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeletionRegisterEntry(Base):
+    """Löschregister (5.2a, seit P7-S1): ein Eintrag je tatsächlich
+    durchgeführter physischer Löschung - sowohl die geplante Zwangslöschung
+    (``trigger="forced_deletion"``) als auch die routinemäßige
+    Papierkorb-Fristablauf-Bereinigung (``trigger="trash_expiry"``) legen
+    hier eine Zeile an. Bewusst KEIN FK auf ``Document.id`` - das gelöschte
+    Dokument existiert zu diesem Zeitpunkt bereits nicht mehr, das Register
+    ist der einzige verbleibende Nachweis (siehe Konzept: Abgleich nach
+    Backup-Wiederherstellung, ob zwischenzeitlich gelöschte Objekte
+    unbeabsichtigt zurückkamen). Nicht selbst hash-verkettet wie
+    audit-service - jede Zeile wird zusätzlich als reguläres Event
+    publiziert, das dort mitgeschrieben wird (siehe docs/services/
+    document-service.md "Offene Punkte" zur noch fehlenden separaten
+    Backup-Politik, Phase 11)."""
+
+    __tablename__ = "deletion_register_entry"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id: Mapped[str] = mapped_column(String(128), index=True)
+    trigger: Mapped[str] = mapped_column(String(32))  # "forced_deletion" | "trash_expiry"
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RetentionConfig(Base):
+    """Admin-UI-editierbare Aufbewahrungs-Grundeinstellungen (5.2/5.2a, seit
+    P7-S1) - gleiches Einzelzeilen-Muster wie ``UploadConfig``."""
+
+    __tablename__ = "retention_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Installationsweiter Default, je ObjectType per
+    # ``deletion_reason_required_override`` überschreibbar (Tri-State).
+    deletion_reason_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    # None = keine Löscherinnerung (Werkseinstellung, "eher seltener genutzt"
+    # laut Konzept).
+    reminder_lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TrashConfig(Base):
+    """Papierkorb-Wiederherstellungsfrist (5.2, seit P7-S1) - gleiches
+    Einzelzeilen-Muster wie ``UploadConfig``/``RetentionConfig``."""
+
+    __tablename__ = "trash_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    restore_period_days: Mapped[int] = mapped_column(Integer, default=30)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

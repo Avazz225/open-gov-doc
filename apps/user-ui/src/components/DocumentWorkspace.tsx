@@ -143,13 +143,14 @@ export function DocumentWorkspace() {
     setDocuments((prev) => prev.map((doc) => (doc.id === updated.id ? updated : doc)));
   }
 
-  async function handleCreateFolder(name: string): Promise<boolean> {
+  async function handleCreateFolder(name: string, objectTypeId?: number): Promise<boolean> {
     if (!accessToken || !user) return false;
     try {
       await apiCreateFolder(accessToken, {
         name,
         parentId: currentFolder.id,
         createdBy: user.username,
+        objectTypeId,
       });
       await load(currentFolder.id);
       return true;

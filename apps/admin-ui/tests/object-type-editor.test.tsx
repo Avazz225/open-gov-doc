@@ -59,6 +59,8 @@ const RECHNUNG = {
   icon: null,
   kennzeichen_format: null,
   kennzeichen_display_override: null,
+  default_retention_days: null,
+  deletion_reason_required_override: null,
 };
 
 const PROJEKTORDNER = {
@@ -72,6 +74,8 @@ const PROJEKTORDNER = {
   icon: "folder-star",
   kennzeichen_format: null,
   kennzeichen_display_override: null,
+  default_retention_days: null,
+  deletion_reason_required_override: null,
 };
 
 describe("ObjectTypeEditor", () => {
@@ -112,6 +116,8 @@ describe("ObjectTypeEditor", () => {
         kennzeichenFormat: null,
         kennzeichenDisplayOverride: null,
         requiredSignatureLevel: null,
+        defaultRetentionDays: null,
+        deletionReasonRequiredOverride: null,
       })
     );
     // Kein abweichender Anzeigename vergeben -> kein Layout-Override nötig.
@@ -178,6 +184,8 @@ describe("ObjectTypeEditor", () => {
         kennzeichenFormat: null,
         kennzeichenDisplayOverride: null,
         requiredSignatureLevel: null,
+        defaultRetentionDays: null,
+        deletionReasonRequiredOverride: null,
       })
     );
   });
@@ -253,5 +261,56 @@ describe("ObjectTypeEditor", () => {
     fireEvent.click(within(row).getByText("Löschen"));
 
     await waitFor(() => expect(deleteObjectTypeMock).toHaveBeenCalledWith("token-123", 1));
+  });
+
+  it("shows retention fields for both document and folder types (5.2, P7-S1)", async () => {
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+    expect(screen.getByLabelText("Standard-Aufbewahrungsfrist (Tage)")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
+    // Anders als Kennzeichen/Signatur bleiben die Aufbewahrungsfelder auch
+    // für Ordnerklassen sichtbar.
+    expect(screen.getByLabelText("Standard-Aufbewahrungsfrist (Tage)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Löschgrund-Pflicht")).toBeInTheDocument();
+  });
+
+  it("submits default_retention_days and deletion_reason_required_override when creating a type", async () => {
+    createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
+    fireEvent.change(screen.getByLabelText("Standard-Aufbewahrungsfrist (Tage)"), {
+      target: { value: "90" },
+    });
+    fireEvent.change(screen.getByLabelText("Löschgrund-Pflicht"), { target: { value: "true" } });
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+
+    await waitFor(() =>
+      expect(createObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({
+          defaultRetentionDays: 90,
+          deletionReasonRequiredOverride: true,
+        })
+      )
+    );
+  });
+
+  it("loads an existing retention default/override into the form for editing", async () => {
+    listObjectTypesMock.mockResolvedValue([
+      { ...RECHNUNG, default_retention_days: 30, deletion_reason_required_override: true },
+      PROJEKTORDNER,
+    ]);
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+
+    const row = screen.getByText("Rechnung").closest("tr")!;
+    fireEvent.click(within(row).getByText("Bearbeiten"));
+
+    expect(await screen.findByLabelText("Standard-Aufbewahrungsfrist (Tage)")).toHaveValue(30);
+    expect(screen.getByLabelText("Löschgrund-Pflicht")).toHaveValue("true");
   });
 });

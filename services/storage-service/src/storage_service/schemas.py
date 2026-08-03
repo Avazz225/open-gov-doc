@@ -28,6 +28,7 @@ class ObjectCopyOut(BaseModel):
     checksum_sha256: str | None
     attempts: int
     last_error: str | None
+    retention_until: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -64,3 +65,6 @@ class GuardStatusEntry(BaseModel):
     device_id: str | None
     verified_at: datetime | None
     pending_copies: int
+    # Aufbewahrung/WORM (5.1/5.2a, seit P7-S1) - nur lesend, das Ziel-Set
+    # selbst bleibt reine Deployment-Konfiguration (kein Editor dafür).
+    object_lock_mode: str | None = None

@@ -43,6 +43,12 @@ class ObjectCopy(Base):
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Aufbewahrung/WORM (5.1/5.2a, seit P7-S1): steht diese Kopie noch unter
+    # einer in der Zukunft liegenden Frist, blockiert `retention_guard` ihre
+    # Löschung - unabhängig vom Backend-Typ (auch `local`, das kein echtes
+    # Object Lock kennen kann). Nur bei Zielen mit `object_lock_mode` in der
+    # Settings-Konfiguration wird zusätzlich echtes S3 Object Lock genutzt.
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

@@ -113,6 +113,13 @@ export function ObjectTypeEditor() {
   const [requiredSignatureLevel, setRequiredSignatureLevel] = useState<
     "none" | "ses" | "aes" | "qes"
   >("none");
+  // Aufbewahrung (5.2, seit P7-S1) - gilt für Dokument- UND Ordnerklassen,
+  // anders als Kennzeichen/Signatur oben. Leerer String = kein Typ-Default.
+  const [defaultRetentionDays, setDefaultRetentionDays] = useState("");
+  // Tri-State wie kennzeichenDisplayOverride oben.
+  const [deletionReasonRequiredOverride, setDeletionReasonRequiredOverride] = useState<
+    "default" | "true" | "false"
+  >("default");
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -149,6 +156,8 @@ export function ObjectTypeEditor() {
     setKennzeichenFormat("");
     setKennzeichenDisplayOverride("default");
     setRequiredSignatureLevel("none");
+    setDefaultRetentionDays("");
+    setDeletionReasonRequiredOverride("default");
   }
 
   function startEdit(ot: ObjectType) {
@@ -177,6 +186,16 @@ export function ObjectTypeEditor() {
           : "false"
     );
     setRequiredSignatureLevel(ot.required_signature_level ?? "none");
+    setDefaultRetentionDays(
+      ot.default_retention_days === null ? "" : String(ot.default_retention_days)
+    );
+    setDeletionReasonRequiredOverride(
+      ot.deletion_reason_required_override === null
+        ? "default"
+        : ot.deletion_reason_required_override
+          ? "true"
+          : "false"
+    );
     setError(null);
   }
 
@@ -228,6 +247,14 @@ export function ObjectTypeEditor() {
     // 422-Ablehnung durch das Backend zu riskieren.
     const requiredSignatureLevelValue =
       appliesTo === "document" && requiredSignatureLevel !== "none" ? requiredSignatureLevel : null;
+    // Aufbewahrung (5.2, P7-S1) - gilt für beide appliesTo-Werte, deshalb
+    // keine der obigen appliesTo-Erzwingungen.
+    const defaultRetentionDaysValue =
+      defaultRetentionDays.trim() === "" ? null : Number(defaultRetentionDays);
+    const deletionReasonRequiredOverrideValue =
+      deletionReasonRequiredOverride !== "default"
+        ? deletionReasonRequiredOverride === "true"
+        : null;
 
     try {
       if (editingId === null) {
@@ -240,6 +267,8 @@ export function ObjectTypeEditor() {
           kennzeichenFormat: kennzeichenFormatValue,
           kennzeichenDisplayOverride: kennzeichenDisplayOverrideValue,
           requiredSignatureLevel: requiredSignatureLevelValue,
+          defaultRetentionDays: defaultRetentionDaysValue,
+          deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
         });
 
         // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
@@ -271,6 +300,8 @@ export function ObjectTypeEditor() {
           kennzeichenFormat: kennzeichenFormatValue,
           kennzeichenDisplayOverride: kennzeichenDisplayOverrideValue,
           requiredSignatureLevel: requiredSignatureLevelValue,
+          defaultRetentionDays: defaultRetentionDaysValue,
+          deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
         });
       }
       resetForm();
@@ -386,6 +417,32 @@ export function ObjectTypeEditor() {
           {appliesTo === "document" && (
             <p className="hint">{t("objectTypes.kennzeichenFormatHint")}</p>
           )}
+
+          <div className="form-grid">
+            <label>
+              {t("objectTypes.defaultRetentionDaysLabel")}
+              <input
+                type="number"
+                min="0"
+                value={defaultRetentionDays}
+                onChange={(e) => setDefaultRetentionDays(e.target.value)}
+                placeholder={t("objectTypes.defaultRetentionDaysPlaceholder")}
+              />
+            </label>
+            <label>
+              {t("objectTypes.deletionReasonRequiredOverrideLabel")}
+              <select
+                value={deletionReasonRequiredOverride}
+                onChange={(e) =>
+                  setDeletionReasonRequiredOverride(e.target.value as "default" | "true" | "false")
+                }
+              >
+                <option value="default">{t("objectTypes.deletionReasonRequiredOverrideDefault")}</option>
+                <option value="true">{t("objectTypes.deletionReasonRequiredOverrideRequired")}</option>
+                <option value="false">{t("objectTypes.deletionReasonRequiredOverrideOptional")}</option>
+              </select>
+            </label>
+          </div>
 
           <h3>{t("objectTypes.attributesHeading")}</h3>
           {attributes.length === 0 && <p className="empty-state">{t("objectTypes.noAttributes")}</p>}

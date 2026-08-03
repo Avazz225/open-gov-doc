@@ -7,6 +7,7 @@ import type { DocumentSummary } from "@/lib/api";
 const listSignaturesMock = vi.fn();
 const createSignatureMock = vi.fn();
 const verifySignatureMock = vi.fn();
+const listDocumentVersionsMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -15,6 +16,7 @@ vi.mock("@/lib/api", async () => {
     listSignatures: (...args: unknown[]) => listSignaturesMock(...args),
     createSignature: (...args: unknown[]) => createSignatureMock(...args),
     verifySignature: (...args: unknown[]) => verifySignatureMock(...args),
+    listDocumentVersions: (...args: unknown[]) => listDocumentVersionsMock(...args),
   };
 });
 
@@ -43,7 +45,25 @@ const DOCUMENT: DocumentSummary = {
   created_by: "alice",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  retention_until: null,
+  full_deletion: false,
+  pending_deletion_reason: null,
 };
+
+function pdfVersion(versionNumber = 1) {
+  return {
+    version_number: versionNumber,
+    filename: "vertrag.pdf",
+    content_type: "application/pdf",
+    size_bytes: 1234,
+    checksum_sha256: "abc",
+    is_conflict: false,
+    based_on_version_number: null,
+    comment: null,
+    created_by: "alice",
+    created_at: "2026-01-01T00:00:00Z",
+  };
+}
 
 function renderPanel() {
   return render(
@@ -58,6 +78,8 @@ describe("SignaturesPanel", () => {
     listSignaturesMock.mockReset();
     createSignatureMock.mockReset();
     verifySignatureMock.mockReset();
+    listDocumentVersionsMock.mockReset();
+    listDocumentVersionsMock.mockResolvedValue([pdfVersion()]);
   });
 
   it("shows an empty-state message when no signatures exist yet", async () => {
@@ -96,7 +118,9 @@ describe("SignaturesPanel", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("AES")).toBeInTheDocument();
+    // Gezielt auf das Level-Badge der Signatur beschränkt - die
+    // Signieren-Auswahl darunter hat ebenfalls eine "AES"-Option.
+    expect(await screen.findByText("AES", { selector: ".signature-level" })).toBeInTheDocument();
     expect(screen.getByText(/Alice Test/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Prüfen"));
@@ -137,5 +161,21 @@ describe("SignaturesPanel", () => {
       })
     );
     expect(await screen.findByText(/DMS System \(SES\)/)).toBeInTheDocument();
+  });
+
+  it("hides the sign-offer for a non-PDF current version and shows a hint instead", async () => {
+    listSignaturesMock.mockResolvedValue([]);
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        ...pdfVersion(),
+        filename: "notiz.txt",
+        content_type: "text/plain",
+      },
+    ]);
+
+    renderPanel();
+
+    expect(await screen.findByText(/keine elektronische Signatur möglich/)).toBeInTheDocument();
+    expect(screen.queryByText("Jetzt signieren")).not.toBeInTheDocument();
   });
 });

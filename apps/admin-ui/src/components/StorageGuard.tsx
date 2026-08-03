@@ -103,6 +103,7 @@ export function StorageGuard() {
                 <th>{t("storageGuard.deviceId")}</th>
                 <th>{t("storageGuard.verifiedAt")}</th>
                 <th>{t("storageGuard.pendingCopies")}</th>
+                <th>{t("storageGuard.objectLockMode")}</th>
                 <th />
               </tr>
             </thead>
@@ -118,6 +119,11 @@ export function StorageGuard() {
                         ? t("storageGuard.resyncing", { count: entry.pending_copies })
                         : t("storageGuard.inSync")}
                     </span>
+                  </td>
+                  <td>
+                    {entry.object_lock_mode === "governance"
+                      ? t("storageGuard.objectLockModeGovernance")
+                      : t("storageGuard.objectLockModeNone")}
                   </td>
                   <td>
                     <button

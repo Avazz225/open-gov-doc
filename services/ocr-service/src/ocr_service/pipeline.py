@@ -120,12 +120,19 @@ async def process_version(
             publish_event=publish_event,
         )
 
+    # `page_image_storage_key` ist ein Präfix, keine vollständige Objekt-ID
+    # mehr - die tatsächlichen Objekte liegen als `{prefix}-{seite}.png`, eine
+    # Datei je Seite (Bugfix: mehrseitige PDFs zeigten bislang immer nur
+    # Seite 1, weil hier ausschließlich "page-1.png" geschrieben wurde).
     page_image_storage_key = None
-    if extraction.page_image is not None:
-        page_image_storage_key = f"ocr/{document_id}/{version_number}/page-1.png"
-        await storage.upload(
-            page_image_storage_key, extraction.page_image, extraction.page_image_content_type
-        )
+    if extraction.page_images:
+        page_image_storage_key = f"ocr/{document_id}/{version_number}/page"
+        for page_number, page_image in enumerate(extraction.page_images, start=1):
+            await storage.upload(
+                f"{page_image_storage_key}-{page_number}.png",
+                page_image,
+                extraction.page_image_content_type,
+            )
 
     status = (
         "needs_review"

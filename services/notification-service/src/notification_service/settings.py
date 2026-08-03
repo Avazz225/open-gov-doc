@@ -30,6 +30,9 @@ class Settings(BaseServiceSettings):
         # Federation Hub (7.4, P6-S9): Benachrichtigung der Zielinstallation bei
         # einer eingehenden föderierten Übergabe, siehe consumer.py.
         "workflow.federation.inbound_received",
+        # Löscherinnerung (5.2a, P7-S1) - eigenes, bisher nicht von diesem
+        # Service konsumiertes "document"-Stream-Subject, siehe consumer.py.
+        "document.deletion.reminder",
     ]
 
     # Empfänger der optionalen Sicherheitsbenachrichtigung bei Break-Glass-

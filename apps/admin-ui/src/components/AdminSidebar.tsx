@@ -52,6 +52,14 @@ const GROUPS: NavGroup[] = [
     items: [{ href: "/storage-guard/", labelKey: "nav.storageGuard" }],
   },
   {
+    id: "compliance",
+    labelKey: "nav.groupCompliance",
+    items: [
+      { href: "/retention-settings/", labelKey: "nav.retentionSettings" },
+      { href: "/deletion-register/", labelKey: "nav.deletionRegister" },
+    ],
+  },
+  {
     id: "security",
     labelKey: "nav.groupSecurity",
     items: [{ href: "/superuser/", labelKey: "nav.superuser" }],

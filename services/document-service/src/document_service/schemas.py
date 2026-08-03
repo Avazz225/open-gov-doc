@@ -23,6 +23,10 @@ class DocumentOut(BaseModel):
     derived_from_document_id: str | None
     derived_from_version_number: int | None
     originating_case_id: str | None
+    retention_until: datetime | None
+    full_deletion: bool
+    pending_deletion_reason: str | None
+    reminder_notify_email: str | None
 
     model_config = {"from_attributes": True}
 
@@ -89,6 +93,71 @@ class UploadConfigIn(BaseModel):
 
 
 class UploadConfigOut(UploadConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class RetentionUpdate(BaseModel):
+    """Aufbewahrung/Zwangslöschung setzen (5.2/5.2a, seit P7-S1). `reason`
+    wird serverseitig gegen `RetentionConfig`/`ObjectType`-Override geprüft
+    (Pflicht/optional) - siehe main.py._resolve_deletion_reason_required."""
+
+    retention_until: datetime | None = None
+    full_deletion: bool = False
+    reason: str | None = None
+    notify_email: str | None = None
+
+
+class LegalHoldCreate(BaseModel):
+    document_id: str
+    set_by: str
+    reason: str | None = None
+
+
+class LegalHoldReleaseRequest(BaseModel):
+    released_by: str
+
+
+class LegalHoldOut(BaseModel):
+    id: str
+    document_id: str
+    reason: str | None
+    set_by: str
+    set_at: datetime
+    released_by: str | None
+    released_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class DeletionRegisterEntryOut(BaseModel):
+    id: str
+    document_id: str
+    trigger: Literal["forced_deletion", "trash_expiry"]
+    reason: str | None
+    triggered_by: str | None
+    occurred_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RetentionConfigIn(BaseModel):
+    deletion_reason_required: bool = False
+    reminder_lead_days: int | None = None
+
+
+class RetentionConfigOut(RetentionConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class TrashConfigIn(BaseModel):
+    restore_period_days: int = 30
+
+
+class TrashConfigOut(TrashConfigIn):
     model_config = {"from_attributes": True}
 
     updated_at: datetime

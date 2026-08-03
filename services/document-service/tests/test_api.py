@@ -495,3 +495,185 @@ def test_create_document_derived_from_unknown_document_returns_400(client):
         client, derived_from_document_id="does-not-exist", derived_from_version_number=1
     )
     assert response.status_code == 400
+
+
+# --- Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) ---------
+
+
+def test_put_retention_sets_fields(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": True, "reason": "Test"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retention_until"].startswith("2030-01-01")
+    assert body["full_deletion"] is True
+    assert body["pending_deletion_reason"] == "Test"
+
+
+def test_put_retention_unknown_document_returns_404(client):
+    response = client.put(
+        "/documents/does-not-exist/retention",
+        json={"retention_until": None, "full_deletion": False},
+    )
+    assert response.status_code == 404
+
+
+def test_put_retention_requires_reason_when_configured(client):
+    client.put(
+        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": None}
+    )
+    document_id = upload(client).json()["id"]
+
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": True},
+    )
+
+    assert response.status_code == 422
+    # Aufräumen für nachfolgende Tests.
+    client.put(
+        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+    )
+
+
+def test_put_retention_reason_not_required_for_regular_soft_delete(client):
+    """Löschgrund-Pflicht (5.2a) gilt nur für `full_deletion=True` - eine
+    reguläre Aufbewahrungsfrist ohne Zwangslöschung braucht keinen Grund."""
+    client.put(
+        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": None}
+    )
+    document_id = upload(client).json()["id"]
+
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": False},
+    )
+
+    assert response.status_code == 200
+    client.put(
+        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+    )
+
+
+def test_restore_document_within_period(client):
+    document_id = upload(client).json()["id"]
+    client.request("DELETE", f"/documents/{document_id}?deleted_by=admin")
+
+    response = client.post(f"/documents/{document_id}/restore")
+
+    assert response.status_code == 200
+    assert response.json()["deleted_at"] is None
+
+
+def test_restore_document_not_deleted_returns_409(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/restore")
+
+    assert response.status_code == 409
+
+
+def test_restore_unknown_document_returns_404(client):
+    response = client.post("/documents/does-not-exist/restore")
+    assert response.status_code == 404
+
+
+def test_list_deleted_documents_shows_only_trash(client):
+    kept = upload(client, folder_id="root").json()
+    deleted = upload(client, folder_id="root").json()
+    client.request("DELETE", f"/documents/{deleted['id']}?deleted_by=admin")
+
+    response = client.get("/documents/deleted", params={"folder_id": "root"})
+
+    assert response.status_code == 200
+    ids = [d["id"] for d in response.json()]
+    assert deleted["id"] in ids
+    assert kept["id"] not in ids
+    # Der reguläre Listing-Endpunkt zeigt weiterhin nur nicht-gelöschte Dokumente.
+    regular = client.get("/documents", params={"folder_id": "root"}).json()
+    assert deleted["id"] not in [d["id"] for d in regular]
+
+
+def test_legal_hold_lifecycle(client):
+    document_id = upload(client).json()["id"]
+
+    create_response = client.post(
+        "/legal-holds",
+        json={"document_id": document_id, "set_by": "alice", "reason": "Rechtsstreit"},
+    )
+    assert create_response.status_code == 201
+    hold = create_response.json()
+    assert hold["released_at"] is None
+
+    list_response = client.get(
+        "/legal-holds", params={"document_id": document_id, "active_only": True}
+    )
+    assert len(list_response.json()) == 1
+
+    release_response = client.post(
+        f"/legal-holds/{hold['id']}/release", json={"released_by": "bob"}
+    )
+    assert release_response.status_code == 200
+    assert release_response.json()["released_by"] == "bob"
+
+    list_after_release = client.get(
+        "/legal-holds", params={"document_id": document_id, "active_only": True}
+    )
+    assert list_after_release.json() == []
+
+
+def test_release_legal_hold_twice_returns_409(client):
+    document_id = upload(client).json()["id"]
+    hold = client.post(
+        "/legal-holds", json={"document_id": document_id, "set_by": "alice", "reason": None}
+    ).json()
+    client.post(f"/legal-holds/{hold['id']}/release", json={"released_by": "alice"})
+
+    response = client.post(f"/legal-holds/{hold['id']}/release", json={"released_by": "alice"})
+
+    assert response.status_code == 409
+
+
+def test_create_legal_hold_unknown_document_returns_404(client):
+    response = client.post(
+        "/legal-holds", json={"document_id": "does-not-exist", "set_by": "alice", "reason": None}
+    )
+    assert response.status_code == 404
+
+
+def test_deletion_register_empty_by_default(client):
+    response = client.get("/deletion-register")
+    assert response.status_code == 200
+
+
+def test_retention_config_get_and_put(client):
+    get_response = client.get("/retention-config")
+    assert get_response.status_code == 200
+    assert get_response.json()["deletion_reason_required"] is False
+
+    put_response = client.put(
+        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": 5}
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["reminder_lead_days"] == 5
+    # Aufräumen.
+    client.put(
+        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+    )
+
+
+def test_trash_config_get_and_put(client):
+    get_response = client.get("/trash-config")
+    assert get_response.status_code == 200
+    assert get_response.json()["restore_period_days"] == 30
+
+    put_response = client.put("/trash-config", json={"restore_period_days": 10})
+    assert put_response.status_code == 200
+    assert put_response.json()["restore_period_days"] == 10
+    # Aufräumen.
+    client.put("/trash-config", json={"restore_period_days": 30})

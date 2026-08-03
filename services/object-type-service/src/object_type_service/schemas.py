@@ -28,6 +28,8 @@ class ObjectTypeCreate(BaseModel):
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None
     required_signature_level: SignatureLevel | None = None
+    default_retention_days: int | None = None
+    deletion_reason_required_override: bool | None = None
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -39,6 +41,8 @@ class ObjectTypeUpdate(BaseModel):
     kennzeichen_format: str | None = None
     kennzeichen_display_override: bool | None = None
     required_signature_level: SignatureLevel | None = None
+    default_retention_days: int | None = None
+    deletion_reason_required_override: bool | None = None
 
 
 class ObjectTypeOut(BaseModel):
@@ -53,6 +57,8 @@ class ObjectTypeOut(BaseModel):
     kennzeichen_format: str | None
     kennzeichen_display_override: bool | None
     required_signature_level: str | None
+    default_retention_days: int | None
+    deletion_reason_required_override: bool | None
     created_at: datetime
     updated_at: datetime
 

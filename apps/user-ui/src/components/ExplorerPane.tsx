@@ -4,7 +4,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   getKennzeichenConfig,
+  listDeletedDocuments,
   listObjectTypes,
+  restoreDocument,
   type DocumentSummary,
   type Folder,
   type ObjectType,
@@ -68,7 +70,7 @@ export function ExplorerPane({
   onOpenDocument: (doc: DocumentSummary) => void;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
-  onCreateFolder: (name: string) => Promise<boolean>;
+  onCreateFolder: (name: string, objectTypeId?: number) => Promise<boolean>;
   onRenameFolder: (folderId: string, name: string) => Promise<boolean>;
   onDeleteFolder: (folderId: string) => Promise<boolean>;
   token: string;
@@ -84,18 +86,28 @@ export function ExplorerPane({
   const [showUpload, setShowUpload] = useState(false);
   const [viewMode, setViewMode] = useState<ExplorerViewMode>(loadViewMode);
   const [folderIconById, setFolderIconById] = useState<Record<number, string | null>>({});
+  const [folderObjectTypes, setFolderObjectTypes] = useState<ObjectType[]>([]);
+  const [newFolderObjectTypeId, setNewFolderObjectTypeId] = useState("");
   const [documentTypeById, setDocumentTypeById] = useState<Record<number, ObjectType>>({});
   const [kennzeichenShowByDefault, setKennzeichenShowByDefault] = useState(true);
+  const [showTrash, setShowTrash] = useState(false);
+  const [trashDocuments, setTrashDocuments] = useState<DocumentSummary[]>([]);
+  const [isTrashLoading, setIsTrashLoading] = useState(false);
+  const [trashError, setTrashError] = useState<string | null>(null);
 
-  // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) - einmalig geladen, kein
-  // Blocker für die übrige Anzeige, wenn das fehlschlägt (bleibt dann beim
-  // generischen Ordner-Symbol, siehe `folderIcon()`-Fallback).
+  // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
+  // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
+  // die Ordnerklasse beim Erstellen gar nicht wählbar, obwohl das Backend sie
+  // seit P3-S3 unterstützt) - einmalig geladen, kein Blocker für die übrige
+  // Anzeige, wenn das fehlschlägt (bleibt dann beim generischen
+  // Ordner-Symbol/keiner Klassenauswahl, siehe `folderIcon()`-Fallback).
   useEffect(() => {
     if (!token) return;
     listObjectTypes(token, "folder")
-      .then((types) =>
-        setFolderIconById(Object.fromEntries(types.map((ot) => [ot.id, ot.icon])))
-      )
+      .then((types) => {
+        setFolderIconById(Object.fromEntries(types.map((ot) => [ot.id, ot.icon])));
+        setFolderObjectTypes(types);
+      })
       .catch(() => {});
   }, [token]);
 
@@ -112,6 +124,35 @@ export function ExplorerPane({
       .catch(() => {});
   }, [token]);
 
+  // Papierkorb-Umschalter (5.2, seit P7-S1) - bewusst minimal: nur der
+  // aktuelle Ordner, keine eigene Sonderbereich-Navigation (siehe Phase 15).
+  function reloadTrash() {
+    if (!token) return;
+    setIsTrashLoading(true);
+    setTrashError(null);
+    listDeletedDocuments(token, currentFolderId)
+      .then(setTrashDocuments)
+      .catch(() => setTrashError(t("explorer.trashLoadError")))
+      .finally(() => setIsTrashLoading(false));
+  }
+
+  useEffect(() => {
+    if (!showTrash) return;
+    reloadTrash();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showTrash, token, currentFolderId]);
+
+  async function handleRestore(doc: DocumentSummary) {
+    if (!token) return;
+    try {
+      await restoreDocument(token, doc.id);
+      reloadTrash();
+      onUploaded();
+    } catch {
+      setTrashError(t("explorer.trashRestoreError"));
+    }
+  }
+
   function changeViewMode(mode: ExplorerViewMode) {
     setViewMode(mode);
     window.localStorage.setItem(VIEW_MODE_KEY, mode);
@@ -120,9 +161,11 @@ export function ExplorerPane({
   async function handleCreateSubmit(event: FormEvent) {
     event.preventDefault();
     if (!newFolderName.trim()) return;
-    const ok = await onCreateFolder(newFolderName.trim());
+    const objectTypeId = newFolderObjectTypeId ? Number(newFolderObjectTypeId) : undefined;
+    const ok = await onCreateFolder(newFolderName.trim(), objectTypeId);
     if (ok) {
       setNewFolderName("");
+      setNewFolderObjectTypeId("");
       setIsCreatingFolder(false);
     }
   }
@@ -191,6 +234,14 @@ export function ExplorerPane({
         <button type="button" onClick={() => setShowUpload((v) => !v)}>
           {t("explorer.toggleUpload")}
         </button>
+        <button
+          type="button"
+          aria-pressed={showTrash}
+          className={showTrash ? "view-mode-active" : undefined}
+          onClick={() => setShowTrash((v) => !v)}
+        >
+          {t("explorer.toggleTrash")}
+        </button>
         <span className="view-mode-toggle" role="group" aria-label={t("explorer.viewModeLabel")}>
           <button
             type="button"
@@ -223,6 +274,20 @@ export function ExplorerPane({
             placeholder={t("explorer.newFolderPlaceholder")}
             autoFocus
           />
+          {folderObjectTypes.length > 0 && (
+            <select
+              aria-label={t("explorer.newFolderObjectTypeLabel")}
+              value={newFolderObjectTypeId}
+              onChange={(e) => setNewFolderObjectTypeId(e.target.value)}
+            >
+              <option value="">{t("explorer.newFolderNoObjectType")}</option>
+              {folderObjectTypes.map((ot) => (
+                <option key={ot.id} value={ot.id}>
+                  {ot.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button type="submit">{t("common.create")}</button>
           <button type="button" onClick={() => setIsCreatingFolder(false)}>
             {t("common.cancel")}
@@ -246,7 +311,35 @@ export function ExplorerPane({
         </p>
       )}
 
-      {viewMode === "tree" ? (
+      {showTrash ? (
+        <>
+          {trashError && (
+            <p className="error-text" role="alert">
+              {trashError}
+            </p>
+          )}
+          {isTrashLoading ? (
+            <p>{t("common.loading")}</p>
+          ) : trashDocuments.length === 0 ? (
+            <p className="empty-state">{t("explorer.trashEmpty")}</p>
+          ) : (
+            <ul className="entry-list">
+              {trashDocuments.map((doc) => (
+                <li className="entry-row" key={doc.id}>
+                  <span className="entry-name">
+                    📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
+                  </span>
+                  <span className="actions">
+                    <button type="button" onClick={() => handleRestore(doc)}>
+                      {t("explorer.restoreDocument")}
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : viewMode === "tree" ? (
         <FolderTree
           token={token}
           rootLabel={trail[0]?.name ?? t("folderBrowser.rootLabel")}

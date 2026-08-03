@@ -36,6 +36,7 @@ Ein einziges breites Subject-Abo (`document.>`, nicht zwei Einzel-Subscriptions)
 | Rasterbilder (`image/*`) | PNG-Thumbnail, max. 256×256 | `ThumbnailRenderer` (Pillow) | `thumbnail` |
 | `.docx` | `.txt`-Textextraktion | `DocxTextExtractionRenderer` (python-docx) | `substitute_text` |
 | `.pptx` | `.txt`-Textextraktion je Folie | `PptxTextExtractionRenderer` (python-pptx) | `substitute_text` |
+| `.ods` | `.txt`-Textextraktion je Tabellenblatt | `OdsTextExtractionRenderer` (odfpy, nachgezogen per Bugfix nach Nutzer-Feedback — `.ods` hatte zuvor überhaupt keinen Renderer) | `substitute_text` |
 | `.pdf` | PDF-Archivkopie (Best-Effort-Metadaten-Tagging) | `PdfArchiveRenderer` (pypdf) | `pdf_archive` |
 
 Neue Regeln werden ergänzt, indem eine weitere `Renderer`-Klasse in `renderers/__init__.py` registriert wird, ohne bestehenden Code zu ändern (`RENDERERS`-Liste, `select_renderers()`).

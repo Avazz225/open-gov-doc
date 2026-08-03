@@ -36,6 +36,9 @@ def make_handler(
                 session_factory, settings, publish_event, event
             )
             return
+        if event.event_type == "document.deletion.reminder":
+            await _handle_deletion_reminder(session_factory, settings, publish_event, event)
+            return
         await _handle_task_escalated(session_factory, settings, publish_event, event)
 
     return handle
@@ -98,6 +101,48 @@ async def _handle_federation_inbound_received(
     body = (
         f"Installation {from_installation_id!r} hat einen Prozessschritt "
         f"({process_type!r}) übergeben - neue lokale Instanz {event.subject!r} gestartet."
+    )
+
+    async with session_factory() as session:
+        in_app = await repository.create_and_send(
+            session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, in_app)
+
+        notify_email = data.get("notify_email")
+        if notify_email:
+            email_notification = await repository.create_and_send(
+                session,
+                settings,
+                channel="email",
+                recipient=notify_email,
+                subject=subject,
+                body=body,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, email_notification)
+
+
+async def _handle_deletion_reminder(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Löscherinnerung vor einer terminierten Aufbewahrungsfrist/
+    Zwangslöschung (5.2a, P7-S1) - gleiches `notify_email`-Muster wie
+    `escalation_email`/`notify_email` an anderer Stelle: ein optionales,
+    opakes Datum aus der Payload des Producers (document-service), keine
+    Empfänger-Auflösung über Rollen/Konten."""
+    data = event.payload
+    title = data.get("title", "?")
+    full_deletion = data.get("full_deletion", False)
+    action = "physisch zwangsgelöscht" if full_deletion else "in den Papierkorb verschoben"
+    subject = f"Löschfrist erreicht bald: {title}"
+    body = (
+        f"Dokument {title!r} (id={event.subject}) wird am "
+        f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
     )
 
     async with session_factory() as session:

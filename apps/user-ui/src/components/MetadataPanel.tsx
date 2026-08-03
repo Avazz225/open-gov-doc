@@ -14,6 +14,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { KENNZEICHEN_ATTRIBUTE } from "@/lib/kennzeichen";
 import { LayoutFormFields } from "./LayoutFormFields";
+import { RetentionPanel } from "./RetentionPanel";
 import { SignaturesPanel } from "./SignaturesPanel";
 
 // Muss zur Document-Service-Settings `kennzeichen_admin_role` passen (Default,
@@ -171,6 +172,7 @@ export function MetadataPanel({
       </form>
 
       <SignaturesPanel document={activeDocument} />
+      <RetentionPanel document={activeDocument} />
     </section>
   );
 }

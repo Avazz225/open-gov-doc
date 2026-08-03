@@ -1,11 +1,23 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from document_service.models import Document, DocumentLock, DocumentVersion, UploadConfig
+from document_service.models import (
+    DeletionRegisterEntry,
+    Document,
+    DocumentLock,
+    DocumentVersion,
+    LegalHold,
+    RetentionConfig,
+    TrashConfig,
+    UploadConfig,
+)
 
 _UPLOAD_CONFIG_ID = 1
+_RETENTION_CONFIG_ID = 1
+_TRASH_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -18,6 +30,20 @@ class LockConflictError(Exception):
 
 class LockNotHeldError(Exception):
     """Regulärer Unlock-Versuch durch jemanden, der die Sperre nicht hält."""
+
+
+class NotDeletedError(Exception):
+    """Wiederherstellungsversuch für ein Dokument, das gar nicht im
+    Papierkorb liegt (5.2, seit P7-S1)."""
+
+
+class RestorePeriodExpiredError(Exception):
+    """Die konfigurierte Papierkorb-Wiederherstellungsfrist ist bereits
+    abgelaufen (5.2, seit P7-S1)."""
+
+
+class AlreadyReleasedError(Exception):
+    """Ein Legal Hold wurde bereits zuvor aufgehoben (5.2, seit P7-S1)."""
 
 
 async def get_document(session: AsyncSession, document_id: str) -> Document:
@@ -57,6 +83,7 @@ async def create_document(
     derived_from_document_id: str | None = None,
     derived_from_version_number: int | None = None,
     originating_case_id: str | None = None,
+    retention_until: datetime | None = None,
 ) -> Document:
     now = datetime.now(UTC)
     document = Document(
@@ -72,6 +99,11 @@ async def create_document(
         derived_from_document_id=derived_from_document_id,
         derived_from_version_number=derived_from_version_number,
         originating_case_id=originating_case_id,
+        # Aufbewahrung (5.2, seit P7-S1): einmalig aus
+        # `ObjectType.default_retention_days` übernommen, falls beim Anlegen
+        # kein manuelles Datum gesetzt wurde (siehe main.py create_document) -
+        # spätere Änderungen am Typ-Default wirken sich nicht rückwirkend aus.
+        retention_until=retention_until,
     )
     session.add(document)
     session.add(
@@ -115,14 +147,71 @@ async def update_document_metadata(
 
 
 async def delete_document(session: AsyncSession, document_id: str, *, deleted_by: str) -> Document:
-    """Weiche Löschung (Sichtbarkeit aus, Metadaten bleiben). Aufbewahrung/
-    Zwangslöschung/Löschregister (5.2/5.2a) sind bewusst nicht Teil dieser
-    Session - folgen mit dem Compliance-Service (Phase 7)."""
+    """Weiche Löschung (Sichtbarkeit aus, Metadaten bleiben) - manuell über
+    die API ausgelöst. Seit P7-S1 wandert ein weich gelöschtes Dokument in
+    den Papierkorb (`restore_document`/`list_deleted_documents`) und wird
+    nach Ablauf von `TrashConfig.restore_period_days` automatisch physisch
+    bereinigt (siehe `list_expired_trash`/main.py `_retention_poll_loop`)."""
     document = await get_document(session, document_id)
     document.deleted_at = datetime.now(UTC)
     document.updated_at = document.deleted_at
     await session.flush()
     return document
+
+
+async def restore_document(session: AsyncSession, document_id: str) -> Document:
+    """Papierkorb-Wiederherstellung (5.2, seit P7-S1) - nur innerhalb der
+    konfigurierten Frist möglich (`TrashConfig.restore_period_days`)."""
+    document = await get_document(session, document_id)
+    if document.deleted_at is None:
+        raise NotDeletedError(f"Dokument {document_id!r} ist nicht gelöscht")
+    config = await get_trash_config(session)
+    deadline = document.deleted_at + timedelta(days=config.restore_period_days)
+    if datetime.now(UTC) > deadline:
+        raise RestorePeriodExpiredError(
+            f"Wiederherstellungsfrist ({config.restore_period_days} Tage) ist abgelaufen"
+        )
+    document.deleted_at = None
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
+async def list_deleted_documents(session: AsyncSession, folder_id: str) -> list[Document]:
+    """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1) - Gegenstück zu
+    `list_documents_by_folder` (dort werden gelöschte Dokumente ausgeschlossen)."""
+    result = await session.execute(
+        select(Document)
+        .where(Document.folder_id == folder_id, Document.deleted_at.isnot(None))
+        .order_by(Document.title)
+    )
+    return list(result.scalars().all())
+
+
+async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
+    """Vollständige, unwiederbringliche Entfernung (5.2a, seit P7-S1) - im
+    Unterschied zu `delete_document` (Soft-Delete) bleibt danach nichts mehr
+    in diesem Schema übrig außer einem separaten `DeletionRegisterEntry`
+    (siehe main.py._execute_forced_deletion/_purge_expired_trash), der
+    bewusst KEINEN FK auf `Document.id` hat. Entfernt zuerst alle
+    abhängigen Zeilen (Versionen, eine evtl. verwaiste Sperre, die
+    Legal-Hold-Historie), damit die FK-Constraints nicht verletzt werden."""
+    document = await get_document(session, document_id)
+    for version in await list_versions(session, document_id):
+        await session.delete(version)
+    lock = await session.get(DocumentLock, document_id)
+    if lock is not None:
+        await session.delete(lock)
+    for hold in await list_holds(session, document_id):
+        await session.delete(hold)
+    # Ohne expliziten Zwischen-Flush ordnet SQLAlchemys Unit-of-Work die
+    # anschließende DELETE-Anweisung für `document` nicht zuverlässig NACH
+    # den obigen (keine deklarierten `relationship()`s zwischen diesen
+    # Modellen, nur rohe FK-Spalten) - Postgres lehnt die Löschung des
+    # Elternobjekts sonst mit einer FK-Verletzung ab.
+    await session.flush()
+    await session.delete(document)
+    await session.flush()
 
 
 async def list_versions(session: AsyncSession, document_id: str) -> list[DocumentVersion]:
@@ -321,3 +410,197 @@ async def update_upload_config(
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
+
+
+# --- Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) ---------
+
+
+async def set_retention(
+    session: AsyncSession,
+    document_id: str,
+    *,
+    retention_until: datetime | None,
+    full_deletion: bool,
+    reason: str | None,
+    notify_email: str | None = None,
+) -> Document:
+    document = await get_document(session, document_id)
+    document.retention_until = retention_until
+    document.full_deletion = full_deletion
+    document.pending_deletion_reason = reason
+    document.reminder_notify_email = notify_email
+    # Neu terminiert (oder Termin geändert) - eine bereits versendete
+    # Erinnerung für den alten Termin ist hinfällig, eine neue kann wieder
+    # fällig werden. Ein zuvor angelegter Freigabe-Request für den alten
+    # Termin gilt ebenfalls nicht mehr automatisch.
+    document.deletion_reminder_sent_at = None
+    document.force_delete_approval_requested_at = None
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
+async def create_legal_hold(
+    session: AsyncSession, document_id: str, *, set_by: str, reason: str | None
+) -> LegalHold:
+    await get_document(session, document_id)
+    hold = LegalHold(
+        id=str(uuid.uuid4()),
+        document_id=document_id,
+        reason=reason,
+        set_by=set_by,
+        set_at=datetime.now(UTC),
+    )
+    session.add(hold)
+    await session.flush()
+    return hold
+
+
+async def release_legal_hold(session: AsyncSession, hold_id: str, *, released_by: str) -> LegalHold:
+    hold = await session.get(LegalHold, hold_id)
+    if hold is None:
+        raise NotFoundError(f"Legal Hold {hold_id!r} unbekannt")
+    if hold.released_at is not None:
+        raise AlreadyReleasedError(f"Legal Hold {hold_id!r} wurde bereits aufgehoben")
+    hold.released_by = released_by
+    hold.released_at = datetime.now(UTC)
+    await session.flush()
+    return hold
+
+
+async def list_holds(
+    session: AsyncSession, document_id: str, *, active_only: bool = False
+) -> list[LegalHold]:
+    query = select(LegalHold).where(LegalHold.document_id == document_id)
+    if active_only:
+        query = query.where(LegalHold.released_at.is_(None))
+    result = await session.execute(query.order_by(LegalHold.set_at.desc()))
+    return list(result.scalars().all())
+
+
+async def has_active_hold(session: AsyncSession, document_id: str) -> bool:
+    result = await session.execute(
+        select(LegalHold.id)
+        .where(LegalHold.document_id == document_id, LegalHold.released_at.is_(None))
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def create_deletion_register_entry(
+    session: AsyncSession,
+    document_id: str,
+    *,
+    trigger: str,
+    reason: str | None,
+    triggered_by: str | None,
+) -> DeletionRegisterEntry:
+    entry = DeletionRegisterEntry(
+        id=str(uuid.uuid4()),
+        document_id=document_id,
+        trigger=trigger,
+        reason=reason,
+        triggered_by=triggered_by,
+        occurred_at=datetime.now(UTC),
+    )
+    session.add(entry)
+    await session.flush()
+    return entry
+
+
+async def list_deletion_register(
+    session: AsyncSession, *, document_id: str | None = None
+) -> list[DeletionRegisterEntry]:
+    query = select(DeletionRegisterEntry)
+    if document_id is not None:
+        query = query.where(DeletionRegisterEntry.document_id == document_id)
+    result = await session.execute(query.order_by(DeletionRegisterEntry.occurred_at.desc()))
+    return list(result.scalars().all())
+
+
+async def get_retention_config(session: AsyncSession) -> RetentionConfig:
+    config = await session.get(RetentionConfig, _RETENTION_CONFIG_ID)
+    if config is None:
+        config = RetentionConfig(
+            id=_RETENTION_CONFIG_ID,
+            deletion_reason_required=False,
+            reminder_lead_days=None,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_retention_config(
+    session: AsyncSession, *, deletion_reason_required: bool, reminder_lead_days: int | None
+) -> RetentionConfig:
+    config = await get_retention_config(session)
+    config.deletion_reason_required = deletion_reason_required
+    config.reminder_lead_days = reminder_lead_days
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def get_trash_config(session: AsyncSession) -> TrashConfig:
+    config = await session.get(TrashConfig, _TRASH_CONFIG_ID)
+    if config is None:
+        config = TrashConfig(
+            id=_TRASH_CONFIG_ID, restore_period_days=30, updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_trash_config(session: AsyncSession, *, restore_period_days: int) -> TrashConfig:
+    config = await get_trash_config(session)
+    config.restore_period_days = restore_period_days
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def list_due_for_reminder(session: AsyncSession, *, lead_days: int) -> list[Document]:
+    """Löscherinnerung (5.2a, optional): Dokumente, deren Frist innerhalb der
+    Vorlaufzeit liegt, noch nicht gelöscht sind, noch keine Erinnerung
+    bekamen und keinen aktiven Legal Hold haben."""
+    threshold = datetime.now(UTC) + timedelta(days=lead_days)
+    result = await session.execute(
+        select(Document).where(
+            Document.retention_until.isnot(None),
+            Document.retention_until <= threshold,
+            Document.deleted_at.is_(None),
+            Document.deletion_reminder_sent_at.is_(None),
+        )
+    )
+    candidates = list(result.scalars().all())
+    return [d for d in candidates if not await has_active_hold(session, d.id)]
+
+
+async def list_due_for_retention_action(session: AsyncSession) -> list[Document]:
+    """Dokumente mit fälliger Aufbewahrungsfrist (5.2/5.2a) ohne aktiven
+    Legal Hold - `full_deletion` entscheidet im Aufrufer (main.py), ob
+    regulärer Soft-Delete oder physische Zwangslöschung folgt."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Document).where(
+            Document.retention_until.isnot(None),
+            Document.retention_until <= now,
+            Document.deleted_at.is_(None),
+        )
+    )
+    candidates = list(result.scalars().all())
+    return [d for d in candidates if not await has_active_hold(session, d.id)]
+
+
+async def list_expired_trash(session: AsyncSession, *, restore_period_days: int) -> list[Document]:
+    """Papierkorb-Einträge, deren Wiederherstellungsfrist abgelaufen ist
+    (5.2) - Legal Hold blockiert auch die routinemäßige Bereinigung."""
+    deadline = datetime.now(UTC) - timedelta(days=restore_period_days)
+    result = await session.execute(
+        select(Document).where(Document.deleted_at.isnot(None), Document.deleted_at <= deadline)
+    )
+    candidates = list(result.scalars().all())
+    return [d for d in candidates if not await has_active_hold(session, d.id)]

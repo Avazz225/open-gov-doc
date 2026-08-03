@@ -1,16 +1,37 @@
 import hashlib
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from storage_service.main import app
+from storage_service.settings import BackendTargetConfig
 
 
 @pytest.fixture
 def client():
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def governance_client(client):
+    """Schaltet das einzige konfigurierte Testziel ("local") nachträglich auf
+    `object_lock_mode="governance"` um (5.1/5.2a, seit P7-S1) - der
+    `LocalFilesystemBackend` kennt technisch kein echtes Object Lock, das
+    genügt aber, um den reinen Anwendungsschicht-Guard (`retention_guard.py`)
+    isoliert von einer echten S3-Anbindung zu testen (die läuft gegen
+    MinIO in test_s3_backend.py)."""
+    original = app.state.target_configs
+    app.state.target_configs = [
+        BackendTargetConfig(
+            id=t.id, type=t.type, base_path=t.base_path, object_lock_mode="governance"
+        )
+        for t in original
+    ]
+    yield client
+    app.state.target_configs = original
 
 
 def _key() -> str:
@@ -86,6 +107,67 @@ def test_delete_removes_object_and_metadata(client):
 def test_delete_unknown_key_returns_404(client):
     response = client.delete(f"/objects/{_key()}")
     assert response.status_code == 404
+
+
+def test_delete_without_retain_until_is_unaffected_by_governance_mode(governance_client):
+    """Ohne beim Schreiben gesetztes `retain_until` bleibt ein Objekt frei
+    löschbar, selbst wenn das Ziel Governance-Mode aktiviert hat."""
+    key = _key()
+    governance_client.put(f"/objects/{key}", content=b"data")
+
+    response = governance_client.delete(f"/objects/{key}")
+
+    assert response.status_code == 204
+
+
+def test_delete_blocked_by_governance_mode_without_bypass(governance_client):
+    key = _key()
+    retain_until = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    governance_client.put(f"/objects/{key}", content=b"data", params={"retain_until": retain_until})
+
+    response = governance_client.delete(f"/objects/{key}")
+
+    assert response.status_code == 403
+    assert governance_client.get(f"/objects/{key}").status_code == 200
+
+
+def test_delete_blocked_by_governance_mode_with_bypass_but_wrong_role(governance_client):
+    key = _key()
+    retain_until = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    governance_client.put(f"/objects/{key}", content=b"data", params={"retain_until": retain_until})
+
+    response = governance_client.delete(
+        f"/objects/{key}",
+        params={"bypass_governance": "true"},
+        headers={"x-dms-roles": "dms-user"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_delete_succeeds_with_bypass_and_correct_role(governance_client):
+    key = _key()
+    retain_until = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    governance_client.put(f"/objects/{key}", content=b"data", params={"retain_until": retain_until})
+
+    response = governance_client.delete(
+        f"/objects/{key}",
+        params={"bypass_governance": "true"},
+        headers={"x-dms-roles": "dms-user,dms-admin"},
+    )
+
+    assert response.status_code == 204
+    assert governance_client.get(f"/objects/{key}").status_code == 404
+
+
+def test_expired_retain_until_does_not_block_deletion(governance_client):
+    key = _key()
+    retain_until = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    governance_client.put(f"/objects/{key}", content=b"data", params={"retain_until": retain_until})
+
+    response = governance_client.delete(f"/objects/{key}")
+
+    assert response.status_code == 204
 
 
 def test_overwrite_updates_metadata(client):

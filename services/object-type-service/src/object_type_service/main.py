@@ -75,6 +75,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS required_signature_level VARCHAR(8)"
             )
         )
+        # Aufbewahrung (5.2, P7-S1) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS default_retention_days INTEGER"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS deletion_reason_required_override BOOLEAN"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

@@ -37,6 +37,21 @@ class Settings(BaseServiceSettings):
     permission_service_base_url: str = "http://localhost:8004"
 
     # Welche Subjects document-service konsumiert (P6-S4) - erster Konsument
-    # dieses Service überhaupt, bisher reiner Producer. Nur der genehmigte
-    # Force-Unlock hat hier Bedeutung, siehe consumer.py.
+    # dieses Service überhaupt, bisher reiner Producer. Force-Unlock UND
+    # (seit P7-S1) Zwangslöschung reagieren hier auf genehmigte
+    # Freigabe-Requests, siehe consumer.py.
     subjects: list[str] = ["permission.approval.approved"]
+
+    # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - Poll-
+    # Intervall des `_retention_poll_loop` (main.py), gleiches Idiom wie
+    # workflow-service's `sla_poll_interval_seconds` (ADR 0020). Datumsbasierte
+    # Fristen brauchen keine minütliche Auflösung, Default entsprechend grob.
+    retention_poll_interval_seconds: float = 3600.0
+
+    # Rolle, mit der document-service sich beim Storage Service ausweist,
+    # wenn es im Zuge einer sanktionierten Zwangslöschung eine aktive
+    # Governance-Mode-Sperre bewusst umgeht (5.1/5.2a) - muss mit
+    # `storage-service`s `governance_bypass_role` übereinstimmen (Default
+    # auf beiden Seiten `dms-admin`, unabhängig konfigurierbar wie
+    # `kennzeichen_admin_role`).
+    governance_bypass_role: str = "dms-admin"

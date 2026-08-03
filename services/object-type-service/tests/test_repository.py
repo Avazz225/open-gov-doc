@@ -291,6 +291,36 @@ async def test_create_with_required_signature_level_on_document_type_succeeds(se
     assert created.required_signature_level == "aes"
 
 
+async def test_create_with_default_retention_days_on_folder_type_succeeds(session):
+    """Anders als kennzeichen_display_override/required_signature_level gilt
+    die Aufbewahrungsfrist (5.2) bewusst für BEIDE applies_to-Werte."""
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(name="OrdnerMitFrist", applies_to="folder", default_retention_days=90),
+    )
+    assert created.default_retention_days == 90
+
+
+async def test_create_with_negative_default_retention_days_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="DokMitUngueltigerFrist", applies_to="document", default_retention_days=-1
+            ),
+        )
+
+
+async def test_update_deletion_reason_required_override_persists(session):
+    created = await repository.create_object_type(
+        session, ObjectTypeCreate(name="DokMitLoeschgrund", applies_to="document")
+    )
+    updated = await repository.update_object_type(
+        session, created.id, ObjectTypeUpdate(deletion_reason_required_override=True)
+    )
+    assert updated.deletion_reason_required_override is True
+
+
 async def test_generate_next_kennzeichen_increments_per_object_type(session):
     created = await repository.create_object_type(
         session,

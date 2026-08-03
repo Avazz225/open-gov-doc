@@ -372,6 +372,33 @@ def test_create_with_required_signature_level_on_document_type_succeeds(client):
     assert response.json()["required_signature_level"] == "aes"
 
 
+def test_create_with_default_retention_days_on_folder_type_succeeds(client):
+    """Aufbewahrung (5.2) gilt anders als Kennzeichen/Signatur für beide
+    applies_to-Werte."""
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "OrdnerMitFristAPI",
+            "applies_to": "folder",
+            "default_retention_days": 365,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["default_retention_days"] == 365
+
+
+def test_create_with_negative_default_retention_days_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "DokMitUngueltigerFristAPI",
+            "applies_to": "document",
+            "default_retention_days": -5,
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_next_kennzeichen_returns_incrementing_formatted_values(client):
     object_type_id = client.post(
         "/object-types",

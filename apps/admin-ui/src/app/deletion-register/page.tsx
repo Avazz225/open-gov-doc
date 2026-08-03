@@ -1,0 +1,17 @@
+"use client";
+
+import { AdminShell } from "@/components/AdminShell";
+import { DeletionRegister } from "@/components/DeletionRegister";
+import { RequireAuth } from "@/components/RequireAuth";
+import { useI18n } from "@/i18n";
+
+export default function DeletionRegisterPage() {
+  const { t } = useI18n();
+  return (
+    <RequireAuth>
+      <AdminShell title={t("deletionRegister.pageTitle")}>
+        <DeletionRegister />
+      </AdminShell>
+    </RequireAuth>
+  );
+}

@@ -13,13 +13,13 @@ class _AlwaysFailingBackend(StorageBackend):
     Fehlerpfade (Quorum nicht erreicht, Primärziel down, Retry-Queue) ohne
     Mocking der Infrastruktur zu erzeugen."""
 
-    async def write(self, key: str, data: bytes) -> None:
+    async def write(self, key: str, data: bytes, *, lock_until=None) -> None:
         raise ConnectionError("Ziel nicht erreichbar")
 
     async def read(self, key: str) -> bytes:
         raise ObjectNotFoundError(key)
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: str, *, bypass_governance: bool = False) -> None:
         return None
 
     async def exists(self, key: str) -> bool:

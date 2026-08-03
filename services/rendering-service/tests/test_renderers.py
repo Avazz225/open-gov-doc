@@ -2,11 +2,15 @@ from io import BytesIO
 
 import pytest
 from docx import Document
+from odf.opendocument import OpenDocumentSpreadsheet
+from odf.table import Table, TableCell, TableRow
+from odf.text import P
 from PIL import Image
 from pptx import Presentation
 from pypdf import PdfReader
 from rendering_service.renderers import select_renderers
 from rendering_service.renderers.docx_text import DocxTextExtractionRenderer
+from rendering_service.renderers.ods_text import OdsTextExtractionRenderer
 from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
 from rendering_service.renderers.pptx_text import PptxTextExtractionRenderer
 from rendering_service.renderers.thumbnail import ThumbnailRenderer
@@ -33,6 +37,20 @@ def _real_pptx(title: str) -> bytes:
     slide.shapes.title.text = title
     buf = BytesIO()
     prs.save(buf)
+    return buf.getvalue()
+
+
+def _real_ods(sheet_name: str, cell_text: str) -> bytes:
+    doc = OpenDocumentSpreadsheet()
+    table = Table(name=sheet_name)
+    row = TableRow()
+    cell = TableCell()
+    cell.addElement(P(text=cell_text))
+    row.addElement(cell)
+    table.addElement(row)
+    doc.spreadsheet.addElement(table)
+    buf = BytesIO()
+    doc.save(buf)
     return buf.getvalue()
 
 
@@ -87,6 +105,23 @@ async def test_pptx_text_extraction_renderer():
 
 
 @pytest.mark.asyncio
+async def test_ods_text_extraction_renderer():
+    renderer = OdsTextExtractionRenderer()
+    assert renderer.supports(content_type=None, filename="tabelle.ods")
+    assert renderer.supports(
+        content_type="application/vnd.oasis.opendocument.spreadsheet", filename="a"
+    )
+    assert not renderer.supports(content_type=None, filename="tabelle.xlsx")
+
+    data = _real_ods("Kosten", "Gesamtsumme")
+    output = await renderer.render(data, filename="tabelle.ods", content_type=None)
+    assert output.target_filename == "tabelle.txt"
+    assert output.target_content_type == "text/plain; charset=utf-8"
+    assert b"Kosten" in output.data
+    assert b"Gesamtsumme" in output.data
+
+
+@pytest.mark.asyncio
 async def test_pdf_archive_renderer_preserves_pages():
     renderer = PdfArchiveRenderer()
     assert renderer.supports(content_type="application/pdf", filename="akte.pdf")
@@ -105,5 +140,8 @@ def test_select_renderers_matches_expected_rules():
 
     docx_renderers = select_renderers(content_type=None, filename="a.docx")
     assert {r.rendition_type for r in docx_renderers} == {"substitute_text"}
+
+    ods_renderers = select_renderers(content_type=None, filename="a.ods")
+    assert {r.rendition_type for r in ods_renderers} == {"substitute_text"}
 
     assert select_renderers(content_type="text/csv", filename="a.csv") == []

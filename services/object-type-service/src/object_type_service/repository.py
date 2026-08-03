@@ -111,6 +111,14 @@ def _validate_required_signature_level(applies_to: str, value: str | None) -> No
         )
 
 
+def _validate_default_retention_days(value: int | None) -> None:
+    """Aufbewahrung (5.2, seit P7-S1) gilt für Dokument- UND Ordnerklassen
+    gleichermaßen (anders als Kennzeichen/Signatur) - keine applies_to-
+    Einschränkung, nur ein Wertebereichscheck."""
+    if value is not None and value < 0:
+        raise InvalidFieldError("default_retention_days darf nicht negativ sein")
+
+
 async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -> ObjectType:
     existing = await session.execute(select(ObjectType).where(ObjectType.name == payload.name))
     if existing.scalar_one_or_none() is not None:
@@ -120,6 +128,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_kennzeichen_format(payload.applies_to, payload.kennzeichen_format)
     _validate_kennzeichen_display_override(payload.applies_to, payload.kennzeichen_display_override)
     _validate_required_signature_level(payload.applies_to, payload.required_signature_level)
+    _validate_default_retention_days(payload.default_retention_days)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -133,6 +142,8 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         kennzeichen_format=payload.kennzeichen_format,
         kennzeichen_display_override=payload.kennzeichen_display_override,
         required_signature_level=payload.required_signature_level,
+        default_retention_days=payload.default_retention_days,
+        deletion_reason_required_override=payload.deletion_reason_required_override,
         created_at=now,
         updated_at=now,
     )
@@ -169,6 +180,7 @@ async def update_object_type(
         object_type.applies_to, payload.kennzeichen_display_override
     )
     _validate_required_signature_level(object_type.applies_to, payload.required_signature_level)
+    _validate_default_retention_days(payload.default_retention_days)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
@@ -177,6 +189,8 @@ async def update_object_type(
     object_type.kennzeichen_format = payload.kennzeichen_format
     object_type.kennzeichen_display_override = payload.kennzeichen_display_override
     object_type.required_signature_level = payload.required_signature_level
+    object_type.default_retention_days = payload.default_retention_days
+    object_type.deletion_reason_required_override = payload.deletion_reason_required_override
     object_type.updated_at = datetime.now(UTC)
     await session.flush()
     return object_type

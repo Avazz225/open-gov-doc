@@ -1,5 +1,6 @@
 from rendering_service.renderers.docx_text import DocxTextExtractionRenderer
 from rendering_service.renderers.interface import Renderer, RenderOutput
+from rendering_service.renderers.ods_text import OdsTextExtractionRenderer
 from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
 from rendering_service.renderers.pptx_text import PptxTextExtractionRenderer
 from rendering_service.renderers.thumbnail import ThumbnailRenderer
@@ -14,6 +15,7 @@ RENDERERS: list[Renderer] = [
     ThumbnailRenderer(),
     DocxTextExtractionRenderer(),
     PptxTextExtractionRenderer(),
+    OdsTextExtractionRenderer(),
     PdfArchiveRenderer(),
 ]
 

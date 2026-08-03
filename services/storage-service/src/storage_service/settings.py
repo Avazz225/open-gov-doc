@@ -18,6 +18,13 @@ class BackendTargetConfig(BaseModel):
     secret_key: str | None = None
     bucket: str | None = None
     region: str | None = None
+    # WORM/Object-Lock (5.1/5.2a, seit P7-S1) - bewusst nur "governance" als
+    # gültiger Wert (kein "compliance"): Compliance-Mode würde die vom
+    # Konzept verlangte Zwangslöschungs-Ausnahme technisch unmöglich machen.
+    # Nur für type="s3" wirksam als echtes S3 Object Lock (siehe
+    # S3Backend.ensure_bucket/write) - der Anwendungsschicht-Guard
+    # (retention_guard.py) greift unabhängig vom Backend-Typ.
+    object_lock_mode: Literal["governance"] | None = None
 
     @model_validator(mode="after")
     def _check_required_fields_for_type(self) -> "BackendTargetConfig":
@@ -60,3 +67,9 @@ class Settings(BaseServiceSettings):
     # geforderte "Alarmierung", solange kein Notification Service existiert
     # (folgt Phase 6): wird stattdessen als Error-Log-Zeile ausgegeben.
     max_replication_attempts: int = 5
+
+    # Rolle, die eine Löschung trotz aktiver Governance-Sperre erzwingen darf
+    # (`?bypass_governance=true`, 5.1/5.2a) - geprüft über den vom Gateway
+    # weitergereichten `X-DMS-Roles`-Header, gleiches serverseitige
+    # Rollen-Header-Muster wie `document_service.kennzeichen_admin_role`.
+    governance_bypass_role: str = "dms-admin"

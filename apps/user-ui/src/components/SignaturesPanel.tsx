@@ -5,6 +5,7 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   createSignature,
+  listDocumentVersions,
   listSignatures,
   verifySignature,
   type DocumentSummary,
@@ -13,6 +14,13 @@ import {
   type SignatureVerification,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+
+// Signaturformat ist aktuell ausschließlich PAdES (3.10) - der
+// Signature Service lehnt jede andere aktuelle Version serverseitig mit
+// einem Fehler ab (`main.py`: `content_type != "application/pdf"`). Ohne
+// diese Prüfung bot die UI das Signieren-Formular für jedes Dokument an,
+// auch wenn ein Klick garantiert scheitern musste (Nutzer-Feedback).
+const SIGNABLE_CONTENT_TYPE = "application/pdf";
 
 // Anbau-Muster wie OCR-/Renditions-Anzeige in PreviewPane.tsx (eigener
 // list*-Aufruf, eigener Lade-Effekt, non-blocking Fallback-UI) - unter das
@@ -30,6 +38,7 @@ export function SignaturesPanel({ document: activeDocument }: { document: Docume
   const [isSigning, setIsSigning] = useState(false);
   const [verifications, setVerifications] = useState<Record<number, SignatureVerification>>({});
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
+  const [isSignable, setIsSignable] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -39,6 +48,29 @@ export function SignaturesPanel({ document: activeDocument }: { document: Docume
       .then(setSignatures)
       .catch(() => setError(t("signatures.loadError")));
   }, [accessToken, activeDocument.id, t]);
+
+  // Aktuelle Version auf Signierbarkeit prüfen (nur PDF, siehe oben) - eigener
+  // Aufruf statt eines Props-Durchreichens von `PreviewPane`, da beide
+  // Komponenten unabhängig voneinander eingebunden werden.
+  useEffect(() => {
+    setIsSignable(false);
+    if (!accessToken) return;
+    let cancelled = false;
+    listDocumentVersions(accessToken, activeDocument.id)
+      .then((versions) => {
+        if (cancelled) return;
+        const current = versions.find(
+          (v) => v.version_number === activeDocument.current_version_number
+        );
+        setIsSignable(current?.content_type === SIGNABLE_CONTENT_TYPE);
+      })
+      .catch(() => {
+        if (!cancelled) setIsSignable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, activeDocument.id, activeDocument.current_version_number]);
 
   async function handleSign() {
     if (!accessToken || !user) return;
@@ -111,21 +143,25 @@ export function SignaturesPanel({ document: activeDocument }: { document: Docume
         </ul>
       )}
 
-      <div className="signature-actions">
-        <label>
-          {t("signatures.levelLabel")}
-          <select value={level} onChange={(e) => setLevel(e.target.value as SignatureLevel)}>
-            <option value="ses">{t("signatures.levelSes")}</option>
-            <option value="aes">{t("signatures.levelAes")}</option>
-            <option value="qes" disabled>
-              {t("signatures.levelQesUnavailable")}
-            </option>
-          </select>
-        </label>
-        <button type="button" onClick={handleSign} disabled={isSigning}>
-          {isSigning ? t("signatures.signing") : t("signatures.signButton")}
-        </button>
-      </div>
+      {isSignable ? (
+        <div className="signature-actions">
+          <label>
+            {t("signatures.levelLabel")}
+            <select value={level} onChange={(e) => setLevel(e.target.value as SignatureLevel)}>
+              <option value="ses">{t("signatures.levelSes")}</option>
+              <option value="aes">{t("signatures.levelAes")}</option>
+              <option value="qes" disabled>
+                {t("signatures.levelQesUnavailable")}
+              </option>
+            </select>
+          </label>
+          <button type="button" onClick={handleSign} disabled={isSigning}>
+            {isSigning ? t("signatures.signing") : t("signatures.signButton")}
+          </button>
+        </div>
+      ) : (
+        <p className="hint">{t("signatures.notSignable")}</p>
+      )}
 
       {error && (
         <p className="error-text" role="alert">

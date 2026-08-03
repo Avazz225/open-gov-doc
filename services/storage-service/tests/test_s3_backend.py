@@ -1,8 +1,10 @@
 import hashlib
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from botocore.exceptions import ClientError
 from storage_service.backends.interface import ObjectNotFoundError
 from storage_service.backends.s3_backend import S3Backend
 
@@ -27,6 +29,36 @@ async def backend():
         response = await s3.list_objects_v2(Bucket=bucket)
         for obj in response.get("Contents", []):
             await s3.delete_object(Bucket=bucket, Key=obj["Key"])
+        await s3.delete_bucket(Bucket=bucket)
+
+
+@pytest.fixture
+async def locked_backend():
+    """Eigenes, frisches Bucket MIT Object Lock (5.1/5.2a, seit P7-S1) - kann
+    nicht auf ein bestehendes Bucket nachgerüstet werden (S3-API-Grenze,
+    siehe ADR 0030), deshalb eine eigene Fixture statt Wiederverwendung von
+    ``backend`` oben. Aufräumen muss `BypassGovernanceRetention` setzen, sonst
+    schlägt das Löschen gesperrter Testobjekte selbst fehl."""
+    bucket = f"test-locked-{uuid.uuid4().hex[:8]}"
+    b = S3Backend(
+        endpoint_url=ENDPOINT_URL,
+        access_key=ACCESS_KEY,
+        secret_key=SECRET_KEY,
+        bucket=bucket,
+        region="us-east-1",
+        object_lock_enabled=True,
+    )
+    await b.ensure_bucket()
+    yield b
+    async with b._client() as s3:  # noqa: SLF001 - Testaufräumen, kein Produktionscode
+        response = await s3.list_object_versions(Bucket=bucket)
+        for version in response.get("Versions", []) + response.get("DeleteMarkers", []):
+            await s3.delete_object(
+                Bucket=bucket,
+                Key=version["Key"],
+                VersionId=version["VersionId"],
+                BypassGovernanceRetention=True,
+            )
         await s3.delete_bucket(Bucket=bucket)
 
 
@@ -74,3 +106,32 @@ async def test_overwrite_replaces_content(backend):
     await backend.write("f.txt", b"second")
 
     assert await backend.read("f.txt") == b"second"
+
+
+async def test_object_lock_blocks_delete_without_bypass(locked_backend):
+    lock_until = datetime.now(UTC) + timedelta(days=1)
+    await locked_backend.write("gesperrt.txt", b"schuetzenswert", lock_until=lock_until)
+
+    with pytest.raises(ClientError):
+        await locked_backend.delete("gesperrt.txt")
+
+    assert await locked_backend.exists("gesperrt.txt") is True
+
+
+async def test_object_lock_delete_succeeds_with_bypass(locked_backend):
+    lock_until = datetime.now(UTC) + timedelta(days=1)
+    await locked_backend.write("gesperrt2.txt", b"schuetzenswert", lock_until=lock_until)
+
+    await locked_backend.delete("gesperrt2.txt", bypass_governance=True)
+
+    assert await locked_backend.exists("gesperrt2.txt") is False
+
+
+async def test_write_without_lock_until_stays_freely_deletable(locked_backend):
+    """Ein Ziel mit Object-Lock-fähigem Bucket löscht trotzdem frei, solange
+    kein `lock_until` beim Schreiben gesetzt wurde."""
+    await locked_backend.write("ungesperrt.txt", b"frei")
+
+    await locked_backend.delete("ungesperrt.txt")
+
+    assert await locked_backend.exists("ungesperrt.txt") is False

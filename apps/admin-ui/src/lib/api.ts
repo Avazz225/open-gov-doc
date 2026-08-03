@@ -257,6 +257,12 @@ export interface ObjectType {
   // gesetzt, null = keine Anforderung. Wird vom Signature Service bei jedem
   // Signiervorgang durchgesetzt, hier nur konfiguriert.
   required_signature_level: "ses" | "aes" | "qes" | null;
+  // Aufbewahrung (5.2, seit P7-S1) - gilt anders als Kennzeichen/Signatur für
+  // applies_to="document" UND "folder" gleichermaßen. deletion_reason_
+  // required_override ist ein Tri-State wie kennzeichen_display_override:
+  // null = installationsweiter Standard (RetentionConfig) gilt.
+  default_retention_days: number | null;
+  deletion_reason_required_override: boolean | null;
 }
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -275,6 +281,8 @@ export async function createObjectType(
     kennzeichenFormat: string | null;
     kennzeichenDisplayOverride: boolean | null;
     requiredSignatureLevel: "ses" | "aes" | "qes" | null;
+    defaultRetentionDays: number | null;
+    deletionReasonRequiredOverride: boolean | null;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -289,6 +297,8 @@ export async function createObjectType(
       kennzeichen_format: params.kennzeichenFormat,
       kennzeichen_display_override: params.kennzeichenDisplayOverride,
       required_signature_level: params.requiredSignatureLevel,
+      default_retention_days: params.defaultRetentionDays,
+      deletion_reason_required_override: params.deletionReasonRequiredOverride,
     }),
     token
   );
@@ -313,6 +323,8 @@ export async function updateObjectType(
     kennzeichenFormat: string | null;
     kennzeichenDisplayOverride: boolean | null;
     requiredSignatureLevel: "ses" | "aes" | "qes" | null;
+    defaultRetentionDays: number | null;
+    deletionReasonRequiredOverride: boolean | null;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -330,6 +342,8 @@ export async function updateObjectType(
         kennzeichen_format: params.kennzeichenFormat,
         kennzeichen_display_override: params.kennzeichenDisplayOverride,
         required_signature_level: params.requiredSignatureLevel,
+        default_retention_days: params.defaultRetentionDays,
+        deletion_reason_required_override: params.deletionReasonRequiredOverride,
       }),
     },
     token
@@ -483,6 +497,80 @@ export async function updateUploadConfig(
   return response.json();
 }
 
+// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
+// Get/Update-Muster wie UploadConfig oben, ebenfalls document-service.
+export interface RetentionConfig {
+  deletion_reason_required: boolean;
+  reminder_lead_days: number | null;
+  updated_at: string;
+}
+
+export async function getRetentionConfig(token: string): Promise<RetentionConfig> {
+  const response = await request("document-service", "retention-config", {}, token);
+  return response.json();
+}
+
+export async function updateRetentionConfig(
+  token: string,
+  payload: { deletionReasonRequired: boolean; reminderLeadDays: number | null }
+): Promise<RetentionConfig> {
+  const response = await request(
+    "document-service",
+    "retention-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deletion_reason_required: payload.deletionReasonRequired,
+        reminder_lead_days: payload.reminderLeadDays,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface TrashConfig {
+  restore_period_days: number;
+  updated_at: string;
+}
+
+export async function getTrashConfig(token: string): Promise<TrashConfig> {
+  const response = await request("document-service", "trash-config", {}, token);
+  return response.json();
+}
+
+export async function updateTrashConfig(
+  token: string,
+  payload: { restorePeriodDays: number }
+): Promise<TrashConfig> {
+  const response = await request(
+    "document-service",
+    "trash-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restore_period_days: payload.restorePeriodDays }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface DeletionRegisterEntry {
+  id: string;
+  document_id: string;
+  trigger: "forced_deletion" | "trash_expiry";
+  reason: string | null;
+  triggered_by: string | null;
+  occurred_at: string;
+}
+
+export async function listDeletionRegister(token: string): Promise<DeletionRegisterEntry[]> {
+  const response = await request("document-service", "deletion-register", {}, token);
+  return response.json();
+}
+
 export interface KennzeichenConfig {
   show_before_filename: boolean;
   updated_at: string;
@@ -545,6 +633,9 @@ export interface GuardStatusEntry {
   device_id: string | null;
   verified_at: string | null;
   pending_copies: number;
+  // Aufbewahrung/WORM (5.1/5.2a, seit P7-S1) - nur lesend, siehe
+  // docs/adr/0030-storage-object-lock-governance-mode.md.
+  object_lock_mode: "governance" | null;
 }
 
 export async function getGuardStatus(token: string): Promise<GuardStatusEntry[]> {

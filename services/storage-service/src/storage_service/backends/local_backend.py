@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from storage_service.backends.interface import ObjectNotFoundError, StorageBackend
@@ -42,7 +43,11 @@ class LocalFilesystemBackend(StorageBackend):
         tmp_path.write_bytes(data)
         os.replace(tmp_path, path)
 
-    async def write(self, key: str, data: bytes) -> None:
+    async def write(self, key: str, data: bytes, *, lock_until: datetime | None = None) -> None:
+        # `lock_until` hat auf dem lokalen Dateisystem keine technische
+        # Entsprechung (kein Object-Lock-Äquivalent) - wird bewusst ignoriert,
+        # nicht simuliert. Die portable Durchsetzung übernimmt
+        # `retention_guard.py` unabhängig vom Backend-Typ.
         await asyncio.to_thread(self._write_sync, self._path_for(key), data)
 
     async def read(self, key: str) -> bytes:
@@ -51,7 +56,7 @@ class LocalFilesystemBackend(StorageBackend):
             raise ObjectNotFoundError(key)
         return await asyncio.to_thread(path.read_bytes)
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: str, *, bypass_governance: bool = False) -> None:
         await asyncio.to_thread(self._path_for(key).unlink, True)
 
     async def exists(self, key: str) -> bool:

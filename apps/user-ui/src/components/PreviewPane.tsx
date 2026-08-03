@@ -6,6 +6,7 @@ import {
   type DocumentSummary,
   type DocumentVersion,
   type OcrResultSummary,
+  type RenditionSummary,
   downloadDocumentVersion,
   downloadOcrPageImage,
   downloadRenditionContent,
@@ -40,30 +41,28 @@ function isTextPreviewable(contentType: string | null): boolean {
   return contentType.startsWith("text/") || contentType === "application/json";
 }
 
-// Ermittelt das Anzeigebild für die ausgewählte Version: existiert ein
-// OCR-Ergebnis, hat der OCR Service für PDFs sein eigenes Seitenbild gerastert
-// (rendering-service erzeugt keine PDF-Thumbnails, siehe ADR 0011) - dieses
-// wird zuerst versucht, da es garantiert im selben Pixelraster wie die
-// Wort-Bounding-Boxen liegt. Für Rasterbilder liefert der OCR Service kein
-// eigenes Seitenbild (409) - dann greift die bestehende
-// rendering-service-Thumbnail-Rendition.
-async function loadDisplayImage(
+function findReadyRendition(
+  renditions: RenditionSummary[],
+  renditionType: string
+): RenditionSummary | undefined {
+  return renditions.find((r) => r.rendition_type === renditionType && r.status === "ready");
+}
+
+// Lädt das Seitenbild eines OCR-Ergebnisses; fällt für Rasterbilder (die der
+// OCR Service ohne eigenständiges Seitenbild verarbeitet, 409) auf die
+// bestehende rendering-service-Thumbnail-Rendition zurück.
+async function loadOcrOrThumbnailImage(
   token: string,
-  documentId: string,
-  versionNumber: number,
-  ocrResult: OcrResultSummary | null
+  ocrResult: OcrResultSummary,
+  pageNumber: number,
+  renditions: RenditionSummary[]
 ): Promise<Blob> {
-  if (ocrResult) {
-    try {
-      return await downloadOcrPageImage(token, ocrResult.id);
-    } catch {
-      // fällt durch auf die Rendition unten (Rasterbild-Fall oder Fehler)
-    }
+  try {
+    return await downloadOcrPageImage(token, ocrResult.id, pageNumber);
+  } catch {
+    // fällt durch auf die Rendition unten (Rasterbild-Fall oder Fehler)
   }
-  const renditions = await listRenditions(token, documentId, versionNumber);
-  const thumbnail = renditions.find(
-    (r) => r.rendition_type === "thumbnail" && r.status === "ready"
-  );
+  const thumbnail = findReadyRendition(renditions, "thumbnail");
   if (!thumbnail) throw new Error("keine Vorschau verfügbar");
   return downloadRenditionContent(token, thumbnail.id);
 }
@@ -86,6 +85,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [ocrResult, setOcrResult] = useState<OcrResultSummary | null>(null);
+  const [renditions, setRenditions] = useState<RenditionSummary[]>([]);
+  const [selectedPage, setSelectedPage] = useState(1);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgRenderedHeight, setImgRenderedHeight] = useState(0);
 
@@ -125,6 +126,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       setThumbnailUrl(null);
       setTextContent(null);
       setOcrResult(null);
+      setRenditions([]);
+      setSelectedPage(1);
       return;
     }
 
@@ -138,6 +141,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     setThumbnailUrl(null);
     setTextContent(null);
     setOcrResult(null);
+    setRenditions([]);
+    setSelectedPage(1);
 
     async function load() {
       if (!accessToken || !activeDocument || selectedVersion === null) return;
@@ -145,6 +150,36 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       if (isTextPreviewable(contentType)) {
         try {
           const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
+          if (cancelled) return;
+          const text = await blob.text();
+          setTextContent(
+            text.length > MAX_PREVIEW_CHARS ? `${text.slice(0, MAX_PREVIEW_CHARS)}\n…` : text
+          );
+          setPreviewKind("text");
+        } catch {
+          if (!cancelled) setPreviewKind("none");
+        }
+        return;
+      }
+
+      let fetchedRenditions: RenditionSummary[] = [];
+      try {
+        fetchedRenditions = await listRenditions(accessToken, activeDocument.id, selectedVersion);
+      } catch {
+        fetchedRenditions = [];
+      }
+      if (cancelled) return;
+      setRenditions(fetchedRenditions);
+
+      // Ersatzdarstellung als Text (DOCX/PPTX/ODS, 2.4) - der
+      // rendering-service erzeugt dafür eine "substitute_text"-Rendition
+      // statt eines Thumbnails; ohne diesen Zweig blieb die Vorschau für
+      // diese Formate leer, obwohl die Rendition längst existierte
+      // (Nutzer-Feedback).
+      const substitute = findReadyRendition(fetchedRenditions, "substitute_text");
+      if (substitute) {
+        try {
+          const blob = await downloadRenditionContent(accessToken, substitute.id);
           if (cancelled) return;
           const text = await blob.text();
           setTextContent(
@@ -166,18 +201,28 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         // Text-Overlay aus, das Thumbnail wird trotzdem versucht.
         ocr = null;
       }
+      if (cancelled) return;
+      if (ocr) {
+        // Das eigentliche Seitenbild lädt der separate Effekt unten (hängt
+        // von `selectedPage` ab, oben bereits auf 1 zurückgesetzt) - so löst
+        // ein späterer Seitenwechsel keinen kompletten Reload aus.
+        setOcrResult(ocr);
+        return;
+      }
+
+      const thumbnail = findReadyRendition(fetchedRenditions, "thumbnail");
+      if (!thumbnail) {
+        setPreviewKind("none");
+        return;
+      }
       try {
-        const blob = await loadDisplayImage(accessToken, activeDocument.id, selectedVersion, ocr);
+        const blob = await downloadRenditionContent(accessToken, thumbnail.id);
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setThumbnailUrl(objectUrl);
         setPreviewKind("image");
-        setOcrResult(ocr);
       } catch {
-        if (!cancelled) {
-          setPreviewKind("none");
-          setOcrResult(null);
-        }
+        if (!cancelled) setPreviewKind("none");
       }
     }
 
@@ -189,6 +234,38 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, activeDocument?.id, selectedVersion, versions]);
+
+  // Lädt/wechselt das Seitenbild eines OCR-Ergebnisses, getrennt vom Effekt
+  // oben: ein Seitenwechsel (Nutzer-Feedback: mehrseitige PDFs zeigten bisher
+  // immer nur Seite 1) soll nur ein neues Seitenbild nachladen, nicht erneut
+  // OCR-Ergebnis/Renditionen abfragen.
+  useEffect(() => {
+    if (!accessToken || !ocrResult) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPreviewKind("loading");
+
+    async function loadPage() {
+      if (!accessToken || !ocrResult) return;
+      try {
+        const blob = await loadOcrOrThumbnailImage(accessToken, ocrResult, selectedPage, renditions);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setThumbnailUrl(objectUrl);
+        setPreviewKind("image");
+      } catch {
+        if (!cancelled) setPreviewKind("none");
+      }
+    }
+
+    void loadPage();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, ocrResult, selectedPage]);
 
   // Misst die tatsächlich gerenderte Bildhöhe, damit die Overlay-Wort-Spans
   // bei jeder Splitter-Breite/jedem Zoom die richtige Schriftgröße bekommen.
@@ -222,7 +299,7 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     );
   }
 
-  const ocrPage = ocrResult?.pages[0];
+  const ocrPage = ocrResult?.pages.find((p) => p.page_number === selectedPage);
 
   return (
     <section className="preview-pane" aria-label={t("preview.paneLabel")}>
@@ -238,6 +315,22 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
             {versions.map((version) => (
               <option key={version.version_number} value={version.version_number}>
                 {t("preview.versionOption", { number: version.version_number })}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {ocrResult && ocrResult.pages.length > 1 && (
+        <label className="page-select">
+          {t("preview.pageSelectLabel")}
+          <select
+            value={selectedPage}
+            onChange={(event) => setSelectedPage(Number(event.target.value))}
+          >
+            {ocrResult.pages.map((page) => (
+              <option key={page.page_number} value={page.page_number}>
+                {t("preview.pageOption", { number: page.page_number })}
               </option>
             ))}
           </select>

@@ -15,7 +15,7 @@ async def test_upsert_then_get(session):
         average_confidence=100.0,
         full_text="Hallo Welt",
         pages=[{"page_number": 1, "width": 100, "height": 100, "words": []}],
-        page_image_storage_key=f"ocr/{document_id}/1/page-1.png",
+        page_image_storage_key=f"ocr/{document_id}/1/page",
         error_message=None,
     )
     await session.commit()

@@ -177,7 +177,18 @@ class InternalSelfSignedConnector(SignatureProviderConnector):
             cms_signer = signers.SimpleSigner.load(
                 key_file.name, cert_file.name, ca_chain_files=(ca_file.name,)
             )
-            writer = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes))
+            # `strict=False`: viele reale PDF-Erzeuger (u. a. LibreOffice)
+            # schreiben eine hybride Querverweistabelle (klassische Xref-Tabelle
+            # + zusätzlicher `/XRefStm` für Reader vor PDF 1.5) - pyHanko lehnt
+            # das im strikten Modus mit einem `SigningError` ab, da eine
+            # hybride Historie theoretisch für "Shadow Attacks" beim
+            # nachträglichen Validieren missbraucht werden könnte. Das betrifft
+            # hier aber die bereits vor dieser Signatur bestehende Dokument-
+            # historie, nicht die inkrementelle Änderung, die wir selbst
+            # anhängen - für eine erste Signatur eines hochgeladenen Dokuments
+            # ist das ein zu häufiger, legitimer Fall, um ihn pauschal
+            # abzulehnen.
+            writer = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
             meta = signers.PdfSignatureMetadata(
                 field_name="DMSSignature", reason="Elektronische Signatur (DMS, 3.10)"
             )
@@ -195,7 +206,10 @@ class InternalSelfSignedConnector(SignatureProviderConnector):
         )
 
     async def verify(self, pdf_bytes: bytes) -> VerificationResult:
-        reader = PdfFileReader(io.BytesIO(pdf_bytes))
+        # `strict=False` aus demselben Grund wie in `sign()` - ein Dokument mit
+        # hybrider Querverweistabelle in seiner Vorhistorie lässt sich sonst
+        # auch nach erfolgreicher Signatur nicht mehr verifizieren.
+        reader = PdfFileReader(io.BytesIO(pdf_bytes), strict=False)
         if not reader.embedded_signatures:
             return VerificationResult(
                 integrity_intact=False,

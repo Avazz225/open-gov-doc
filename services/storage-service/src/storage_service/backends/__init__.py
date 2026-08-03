@@ -23,6 +23,7 @@ def build_backend(target: BackendTargetConfig) -> StorageBackend:
             secret_key=target.secret_key,
             bucket=target.bucket,
             region=target.region,
+            object_lock_enabled=target.object_lock_mode is not None,
         )
     raise ValueError(f"Unbekannter Backend-Typ: {target.type!r}")
 

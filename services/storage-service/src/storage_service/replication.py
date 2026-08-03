@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,13 +37,27 @@ async def write_with_redundancy(
     key: str,
     data: bytes,
     checksum: str,
+    retention_until: datetime | None = None,
+    lock_target_ids: set[str] | None = None,
 ) -> dict[str, str]:
     """Schreibt ``data`` gemäß Schreibstrategie auf die konfigurierten Ziele
     und pflegt je Ziel eine ``object_copy``-Zeile. Gibt ``{backend_id: status}``
-    zurück oder wirft ``PrimaryWriteError``/``QuorumNotReachedError``."""
+    zurück oder wirft ``PrimaryWriteError``/``QuorumNotReachedError``.
+
+    ``retention_until`` (5.1/5.2a, seit P7-S1) wird auf JEDER ``object_copy``-
+    Zeile vermerkt (Grundlage für `retention_guard.py`, backend-unabhängig) -
+    echtes S3 Object Lock beim Schreiben selbst bekommt aber nur ein Ziel aus
+    ``lock_target_ids`` (die konfigurierten `object_lock_mode`-Ziele)."""
+    lock_target_ids = lock_target_ids or set()
     if strategy == "quorum":
         results = await asyncio.gather(
-            *(backends[target].write(key, data) for target in targets), return_exceptions=True
+            *(
+                backends[target].write(
+                    key, data, lock_until=retention_until if target in lock_target_ids else None
+                )
+                for target in targets
+            ),
+            return_exceptions=True,
         )
         statuses: dict[str, str] = {}
         for target, result in zip(targets, results, strict=True):
@@ -53,7 +68,14 @@ async def write_with_redundancy(
                 )
             else:
                 statuses[target] = "ok"
-                await repository.record_copy(session, key, target, status="ok", checksum=checksum)
+                await repository.record_copy(
+                    session,
+                    key,
+                    target,
+                    status="ok",
+                    checksum=checksum,
+                    retention_until=retention_until,
+                )
 
         successes = sum(1 for status in statuses.values() if status == "ok")
         if successes < quorum_count:
@@ -70,15 +92,21 @@ async def write_with_redundancy(
     # Hintergrundtask - siehe ADR 0004).
     primary = targets[0]
     try:
-        await backends[primary].write(key, data)
+        await backends[primary].write(
+            key, data, lock_until=retention_until if primary in lock_target_ids else None
+        )
     except Exception as exc:
         raise PrimaryWriteError(str(exc)) from exc
 
     statuses = {primary: "ok"}
-    await repository.record_copy(session, key, primary, status="ok", checksum=checksum)
+    await repository.record_copy(
+        session, key, primary, status="ok", checksum=checksum, retention_until=retention_until
+    )
     for secondary in targets[1:]:
         statuses[secondary] = "pending"
-        await repository.record_copy(session, key, secondary, status="pending")
+        await repository.record_copy(
+            session, key, secondary, status="pending", retention_until=retention_until
+        )
     return statuses
 
 
@@ -101,11 +129,19 @@ async def read_with_fallback(
 
 
 async def delete_from_all(
-    session: AsyncSession, *, backends: dict[str, StorageBackend], targets: list[str], key: str
+    session: AsyncSession,
+    *,
+    backends: dict[str, StorageBackend],
+    targets: list[str],
+    key: str,
+    bypass_governance: bool = False,
 ) -> None:
+    """``bypass_governance`` (5.1/5.2a) wird an jedes Backend durchgereicht -
+    die eigentliche Autorisierungsprüfung (Rolle, aktive Sperre) liegt bereits
+    vor diesem Aufruf in `retention_guard.py`/`main.py`."""
     for target in targets:
         with contextlib.suppress(ObjectNotFoundError):
-            await backends[target].delete(key)
+            await backends[target].delete(key, bypass_governance=bypass_governance)
     await repository.delete_copies_for_key(session, key)
 
 
@@ -184,6 +220,12 @@ async def process_pending(
 
         try:
             data = await backends[source.backend_id].read(copy.object_key)
+            # `lock_until` wird hier bewusst NICHT an das Backend
+            # durchgereicht (offener Punkt, siehe docs/services/
+            # storage-service.md): ein Ziel, das erst nach dem ursprünglichen
+            # Schreibvorgang per Nachreplikation befüllt wird, bekäme sonst
+            # kein echtes S3 Object Lock - der Anwendungsschicht-Guard
+            # (`retention_until` unten) greift trotzdem unabhängig davon.
             await backends[copy.backend_id].write(copy.object_key, data)
         except Exception as exc:
             new_attempts = copy.attempts + 1
@@ -219,6 +261,7 @@ async def process_pending(
             status="ok",
             checksum=hashlib.sha256(data).hexdigest(),
             increment_attempt=True,
+            retention_until=source.retention_until,
         )
 
     return {

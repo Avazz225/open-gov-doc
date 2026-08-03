@@ -62,13 +62,25 @@ async def test_native_text_layer_engine_extracts_words_with_bboxes():
     assert page.page_number == 1
     assert page.width > 0 and page.height > 0
     assert any(w.text == "Hallo" for w in page.words)
-    assert result.page_image is not None
+    assert len(result.page_images) == 1
     assert result.page_image_content_type == "image/png"
     # Bounding-Box-Koordinaten müssen innerhalb der Seitenbild-Pixelmaße liegen -
     # sonst würde das Overlay im Frontend über den Bildrand hinausragen.
     for word in page.words:
         assert 0 <= word.left <= page.width
         assert 0 <= word.top <= page.height
+
+
+async def test_native_text_layer_engine_extracts_all_pages_not_just_the_first():
+    engine = NativeTextLayerEngine()
+    data = _multi_page_pdf(3)
+
+    result = await engine.extract(data, filename="akte.pdf", content_type="application/pdf")
+
+    assert len(result.pages) == 3
+    assert [p.page_number for p in result.pages] == [1, 2, 3]
+    assert len(result.page_images) == 3
+    assert all(len(img) > 0 for img in result.page_images)
 
 
 @pytest.mark.skipif(
@@ -86,7 +98,7 @@ async def test_tesseract_engine_extracts_text_from_raster_image():
     assert result.pages[0].width == 600
     assert result.pages[0].height == 200
     assert "TESTWORT" in result.full_text.upper()
-    assert result.page_image is None  # Rasterbild - kein eigenständiges Seitenbild nötig
+    assert result.page_images == []  # Rasterbild - kein eigenständiges Seitenbild nötig
     assert 0.0 <= result.average_confidence <= 100.0
 
 
@@ -102,8 +114,24 @@ async def test_tesseract_engine_rasterizes_scanned_pdf():
     result = await engine.extract(data, filename="scan.pdf", content_type="application/pdf")
 
     assert result.engine == "tesseract"
-    assert result.page_image is not None  # PDF - eigenständiges Seitenbild wird erzeugt
+    assert len(result.page_images) == 1  # PDF - eigenständiges Seitenbild wird erzeugt
     assert result.page_image_content_type == "image/png"
+
+
+@pytest.mark.skipif(
+    not _TESSERACT_AVAILABLE,
+    reason="tesseract-ocr nicht auf diesem Host installiert - Verifikation erfolgt "
+    "im echten Docker-Container",
+)
+async def test_tesseract_engine_rasterizes_every_page_of_a_scanned_pdf():
+    engine = TesseractEngine()
+    data = _multi_page_pdf(2)  # `_blank_pdf`-artige Seiten ohne Textlayer
+
+    result = await engine.extract(data, filename="scan.pdf", content_type="application/pdf")
+
+    assert result.engine == "tesseract"
+    assert len(result.pages) == 2
+    assert len(result.page_images) == 2
 
 
 def test_select_engine_picks_native_for_text_pdf():

@@ -162,6 +162,66 @@ async def test_federation_inbound_received_without_notify_email_creates_only_in_
     assert len(published) == 1
 
 
+async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="document.deletion.reminder",
+        service_name="document-service",
+        subject="doc-1",
+        payload={
+            "title": "Vertrag.pdf",
+            "retention_until": "2030-01-01T00:00:00+00:00",
+            "full_deletion": True,
+            "notify_email": "records@example.com",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert {n.channel for n in notifications} == {"in_app", "email"}
+    email = next(n for n in notifications if n.channel == "email")
+    assert email.recipient == "records@example.com"
+    assert "Vertrag.pdf" in email.body
+    assert len(published) == 2
+
+
+async def test_deletion_reminder_without_notify_email_creates_only_in_app(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="document.deletion.reminder",
+        service_name="document-service",
+        subject="doc-2",
+        payload={
+            "title": "Notiz.txt",
+            "retention_until": "2030-01-01T00:00:00+00:00",
+            "full_deletion": False,
+            "notify_email": None,
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert len(published) == 1
+
+
 async def test_maintenance_mode_activated_event_creates_security_officer_email(engine, settings):
     published = []
 

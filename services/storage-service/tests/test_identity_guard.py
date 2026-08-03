@@ -13,13 +13,13 @@ class _UnreachableBackend(StorageBackend):
     statt `ObjectNotFoundError`, um "Backend nicht erreichbar" von "Marker-
     Datei fehlt" zu unterscheiden."""
 
-    async def write(self, key: str, data: bytes) -> None:
+    async def write(self, key: str, data: bytes, *, lock_until=None) -> None:
         raise ConnectionError("Ziel nicht erreichbar")
 
     async def read(self, key: str) -> bytes:
         raise ConnectionError("Ziel nicht erreichbar")
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: str, *, bypass_governance: bool = False) -> None:
         raise ConnectionError("Ziel nicht erreichbar")
 
     async def exists(self, key: str) -> bool:

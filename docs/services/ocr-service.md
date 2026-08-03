@@ -11,7 +11,7 @@
 |---|---|---|
 | `GET` | `/ocr-results?document_id=...&version_number=...` | OCR-Ergebnisse zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) |
 | `GET` | `/ocr-results/{id}` | Einzelnes OCR-Ergebnis (Volltext, Wort-Bounding-Boxen, Konfidenz) — 404 bei unbekannter `id` |
-| `GET` | `/ocr-results/{id}/page-image` | Vom OCR Service selbst gerastertes Seitenbild (nur PDFs, siehe unten) — 404 bei unbekannter `id`, 409 wenn kein eigenständiges Seitenbild existiert (Rasterbild-Fall) |
+| `GET` | `/ocr-results/{id}/page-image?page_number=...` | Vom OCR Service selbst gerastertes Seitenbild einer Seite (nur PDFs, siehe unten; `page_number` optional, Default `1`) — 404 bei unbekannter `id` oder außerhalb des gültigen Seitenbereichs, 409 wenn kein eigenständiges Seitenbild existiert (Rasterbild-Fall) |
 | `GET` | `/config` | Aktuelle Konfiguration (`max_word_count`, `batch_size`, `allowed_content_types`, `updated_at`) — legt beim allerersten Aufruf die Default-Zeile an (P5b-S5) |
 | `PUT` | `/config` | Aktualisiert `max_word_count`/`batch_size`/`allowed_content_types`, wirkt ohne Neustart auf das nächste verarbeitete Dokument (Admin-UI "OCR-Einstellungen") |
 | `GET` | `/healthz` | Health-Check |
@@ -25,10 +25,10 @@ Konsumiert `document.created`/`document.version.created` vom Document Service �
 1. Metadaten/Originalinhalt werden über die HTTP-API des Document Service bezogen (kein direkter Zugriff auf dessen Schema/Storage-Key, 3.1).
 2. **Automatische Erkennung, ob OCR überhaupt nötig ist** (3.9): Bei PDFs wird zuerst versucht, den vorhandenen Textlayer direkt auszulesen (PyMuPDF `get_text("words")`) — liefert Seite 1 mindestens 20 nicht-leere Zeichen, gilt der Textlayer als nutzbar, es findet **keine** Bilderkennung statt (`NativeTextLayerEngine`, Konfidenz immer 100.0, exakt statt geschätzt). Sonst (gescanntes PDF ohne Textlayer, oder ein Rasterbild direkt) läuft `TesseractEngine`.
 3. Andere Formate (`.docx`, `.pptx`, Video, ...) werden von keiner Engine unterstützt — es entsteht kein OCR-Ergebnis, kein Event (deren Textextraktion übernimmt bereits `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer` aus P5-S2).
-4. Für PDFs rastert der jeweilige Engine-Pfad zusätzlich ein eigenständiges Seitenbild (Seite 1, `raster_dpi=150`) und legt es über den Storage Service ab — rendering-service erzeugt **keine** PDF-Thumbnails (`ThumbnailRenderer.supports()` prüft nur `image/*`), dieses Seitenbild ist aktuell die einzige Bildvorschau für PDFs im System. Für Rasterbilder entsteht kein eigenständiges Seitenbild — die Vorschau nutzt die bereits vorhandene `thumbnail`-Rendition aus rendering-service, OCR liefert dafür die nativen Pixelmaße des Originalbilds als Referenzgröße für die Wort-Koordinaten.
+4. Für PDFs rastert der jeweilige Engine-Pfad zusätzlich **ein eigenständiges Seitenbild je Seite** (`raster_dpi=150`) und legt sie über den Storage Service ab — rendering-service erzeugt **keine** PDF-Thumbnails (`ThumbnailRenderer.supports()` prüft nur `image/*`), diese Seitenbilder sind aktuell die einzige Bildvorschau für PDFs im System. Für Rasterbilder entsteht kein eigenständiges Seitenbild — die Vorschau nutzt die bereits vorhandene `thumbnail`-Rendition aus rendering-service, OCR liefert dafür die nativen Pixelmaße des Originalbilds als Referenzgröße für die Wort-Koordinaten.
 5. Ergebnis wird dauerhaft unter dem natürlichen Schlüssel gespeichert (Upsert, idempotent bei Redelivery) und als `ocr.completed`/`ocr.failed` veröffentlicht.
 
-**Nur Seite 1**: konsistent mit rendering-service's eigenem Ein-Bild-Thumbnail-Scope — Mehrseiten-OCR ist nicht Teil dieser Session.
+**Alle Seiten, nicht nur die erste** (Bugfix nach Nutzer-Feedback, ursprünglich nur Seite 1 unterstützt): `NativeTextLayerEngine`/`TesseractEngine` durchlaufen alle Seiten des Dokuments (`OcrExtractionResult.page_images: list[bytes]`, 1:1 zu `pages`), die Pipeline legt ein Bild je Seite ab. Der Textlayer-Verfügbarkeitscheck (`_native_text_available()`) prüft weiterhin nur Seite 1 als Heuristik für die Engine-Auswahl — ein Dokument gilt damit ganz oder gar nicht als "hat nutzbaren Textlayer", eine Seiten-gemischte Erkennung (z. B. Seite 1 nativ, Seite 2 gescannt) ist nicht vorgesehen.
 
 ## Konfigurierbarkeit (3.9, P5b-S5, [ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md))
 
@@ -64,7 +64,7 @@ rendering-service abonniert zusätzlich `ocr.completed` (eigener Durable-Name `r
 ## Anbindung an das Backend
 
 - **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (Metadaten) und `.../content` (Originalbytes) — kein direkter Zugriff auf dessen Schema/Storage-Key.
-- **Storage Service** (3.6): `PUT`/`GET /objects/ocr/{document_id}/{version_number}/page-1.png` — Persistenz der eigenständigen PDF-Seitenbilder.
+- **Storage Service** (3.6): `PUT`/`GET /objects/ocr/{document_id}/{version_number}/page-{seitenzahl}.png` — Persistenz der eigenständigen PDF-Seitenbilder, ein Objekt je Seite (`OcrResult.page_image_storage_key` speichert dabei nur das Präfix ohne Seitensuffix).
 
 ## Events
 
@@ -93,7 +93,7 @@ Noch keine — folgt in Phase 11.
 ## Offene Punkte
 
 - **PaddleOCR nicht implementiert**: nur die Plugin-Schnittstelle lässt es zu, siehe ADR 0011.
-- **Nur Seite 1**: Mehrseiten-OCR/-Vorschau ist nicht Teil dieser Session.
+- **Textlayer-Verfügbarkeit wird nur anhand Seite 1 entschieden**: `select_engine()` prüft nicht seitenweise, ob ein nutzbarer Textlayer existiert — ein PDF mit z. B. nativer Seite 1 und gescannter Seite 2 bekäme fälschlich `NativeTextLayerEngine` für das gesamte Dokument (Seite 2 hätte dann keine erkannten Wörter). Bewusste Vereinfachung, kein bekannter Anwendungsfall dafür bisher.
 - **`needs_review` ohne echte Workflow-Anbindung**: BPMN-gestützte manuelle Nachprüfung folgt frühestens mit P6-S1/P6-S4.
 - **Keine automatische Nachverarbeitung bei dauerhaftem `failed`**: kein Retry-Mechanismus, analog zu rendering-service.
 - **Keine Autorisierung** (wie bei allen bisherigen Services): Gateway prüft nur Token-Gültigkeit, keine Rollenprüfung.

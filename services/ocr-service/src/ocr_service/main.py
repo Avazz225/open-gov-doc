@@ -159,7 +159,7 @@ async def get_ocr_result(
 
 @app.get("/ocr-results/{ocr_result_id}/page-image")
 async def download_page_image(
-    ocr_result_id: str, session: AsyncSession = Depends(get_session)
+    ocr_result_id: str, page_number: int = 1, session: AsyncSession = Depends(get_session)
 ) -> Response:
     try:
         result = await repository.get_ocr_result(session, ocr_result_id)
@@ -171,5 +171,9 @@ async def download_page_image(
             detail="Kein eigenständiges Seitenbild für dieses Ergebnis "
             "(Rasterbild - siehe rendering-service-Thumbnail)",
         )
-    data = await app.state.storage.download(result.page_image_storage_key)
+    if page_number < 1 or page_number > len(result.pages):
+        raise HTTPException(status_code=404, detail=f"Seite {page_number} existiert nicht")
+    # `page_image_storage_key` ist seit dem Mehrseiten-Bugfix ein Präfix ohne
+    # Seitensuffix, siehe `pipeline.process_version`.
+    data = await app.state.storage.download(f"{result.page_image_storage_key}-{page_number}.png")
     return Response(content=data, media_type="image/png")

@@ -120,7 +120,7 @@ export async function listChildFolders(token: string, folderId: string): Promise
 
 export async function createFolder(
   token: string,
-  params: { name: string; parentId: string; createdBy: string }
+  params: { name: string; parentId: string; createdBy: string; objectTypeId?: number }
 ): Promise<Folder> {
   const response = await request(
     "folder-service",
@@ -132,6 +132,7 @@ export async function createFolder(
         name: params.name,
         parent_id: params.parentId,
         created_by: params.createdBy,
+        object_type_id: params.objectTypeId ?? null,
       }),
     },
     token
@@ -262,6 +263,10 @@ export interface DocumentSummary {
   created_by: string;
   created_at: string;
   updated_at: string;
+  // Aufbewahrung/Zwangslöschung (5.2/5.2a, seit P7-S1).
+  retention_until: string | null;
+  full_deletion: boolean;
+  pending_deletion_reason: string | null;
 }
 
 export async function listDocumentsInFolder(
@@ -319,6 +324,121 @@ export async function updateDocumentMetadata(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
+    },
+    token
+  );
+  return response.json();
+}
+
+// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1).
+export async function putDocumentRetention(
+  token: string,
+  documentId: string,
+  params: {
+    retentionUntil: string | null;
+    fullDeletion: boolean;
+    reason?: string | null;
+    notifyEmail?: string | null;
+  }
+): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/retention`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        retention_until: params.retentionUntil,
+        full_deletion: params.fullDeletion,
+        reason: params.reason ?? null,
+        notify_email: params.notifyEmail ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function restoreDocument(token: string, documentId: string): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/restore`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export async function listDeletedDocuments(
+  token: string,
+  folderId: string
+): Promise<DocumentSummary[]> {
+  const response = await request(
+    "document-service",
+    `documents/deleted?folder_id=${encodeURIComponent(folderId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export interface LegalHold {
+  id: string;
+  document_id: string;
+  reason: string | null;
+  set_by: string;
+  set_at: string;
+  released_by: string | null;
+  released_at: string | null;
+}
+
+export async function listLegalHolds(
+  token: string,
+  documentId: string,
+  activeOnly = false
+): Promise<LegalHold[]> {
+  const response = await request(
+    "document-service",
+    `legal-holds?document_id=${encodeURIComponent(documentId)}&active_only=${activeOnly}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createLegalHold(
+  token: string,
+  params: { documentId: string; setBy: string; reason?: string | null }
+): Promise<LegalHold> {
+  const response = await request(
+    "document-service",
+    "legal-holds",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document_id: params.documentId,
+        set_by: params.setBy,
+        reason: params.reason ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function releaseLegalHold(
+  token: string,
+  holdId: string,
+  releasedBy: string
+): Promise<LegalHold> {
+  const response = await request(
+    "document-service",
+    `legal-holds/${encodeURIComponent(holdId)}/release`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ released_by: releasedBy }),
     },
     token
   );
@@ -461,10 +581,14 @@ export async function listOcrResults(
   return response.json();
 }
 
-export async function downloadOcrPageImage(token: string, ocrResultId: string): Promise<Blob> {
+export async function downloadOcrPageImage(
+  token: string,
+  ocrResultId: string,
+  pageNumber = 1
+): Promise<Blob> {
   const response = await request(
     "ocr-service",
-    `ocr-results/${encodeURIComponent(ocrResultId)}/page-image`,
+    `ocr-results/${encodeURIComponent(ocrResultId)}/page-image?page_number=${pageNumber}`,
     {},
     token
   );

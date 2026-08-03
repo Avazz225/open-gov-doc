@@ -64,10 +64,13 @@ async def record_copy(
     checksum: str | None = None,
     last_error: str | None = None,
     increment_attempt: bool = False,
+    retention_until: datetime | None = None,
 ) -> ObjectCopy:
     """Legt eine Zeile in ``object_copy`` an oder aktualisiert sie (3.6) -
     ein Aufruf pro (object_key, backend_id) je Schreib-/Replikations-/
-    Fixity-Versuch."""
+    Fixity-Versuch. ``retention_until`` (5.1/5.2a, seit P7-S1) wird nur bei
+    explizit gesetztem Wert übernommen - ein bereits gesetzter Wert bleibt
+    bei Aufrufen ohne dieses Argument (Fixity-Checks, Fehlerfälle) erhalten."""
     now = datetime.now(UTC)
     existing = await session.get(ObjectCopy, (object_key, backend_id))
     if existing is None:
@@ -82,6 +85,8 @@ async def record_copy(
         existing.checksum_sha256 = checksum
     if increment_attempt:
         existing.attempts += 1
+    if retention_until is not None:
+        existing.retention_until = retention_until
     existing.updated_at = now
 
     await session.flush()

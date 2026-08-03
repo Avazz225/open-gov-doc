@@ -26,7 +26,13 @@ class OcrExtractionResult:
     average_confidence: float
     full_text: str
     pages: list[OcrPageResult]
-    page_image: bytes | None  # PNG-Bytes, nur für PDFs gesetzt (siehe engines/__init__.py)
+    # Ein Seitenbild je Eintrag in `pages` (gleicher Index, 1:1), nur für PDFs
+    # gesetzt (siehe engines/__init__.py) - leer für Rasterbilder, die keine
+    # eigene OCR-Seitenbild-Rendition brauchen (siehe rendering-service-
+    # Thumbnail). War früher ein einzelnes `bytes | None`-Feld ausschließlich
+    # für die erste Seite (Bugfix: mehrseitige PDF-Vorschau zeigte immer nur
+    # Seite 1, egal welche Version/welcher Ausschnitt ausgewählt war).
+    page_images: list[bytes]
     page_image_content_type: str | None
 
 

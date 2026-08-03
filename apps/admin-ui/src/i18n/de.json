@@ -35,6 +35,7 @@
     "groupProcessing": "Verarbeitung",
     "groupStorage": "Speicher",
     "groupSecurity": "Sicherheit",
+    "groupCompliance": "Compliance",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
     "kennzeichenSettings": "Kennzeichen-Einstellungen",
@@ -43,7 +44,9 @@
     "ocrSettings": "OCR-Einstellungen",
     "uploadSettings": "Format-Whitelist",
     "storageGuard": "Speicher-Wächter",
-    "superuser": "Superuser Break-Glass"
+    "superuser": "Superuser Break-Glass",
+    "retentionSettings": "Aufbewahrung & Papierkorb",
+    "deletionRegister": "Löschregister"
   },
   "home": {
     "title": "DMS Admin",
@@ -140,6 +143,12 @@
     "requiredSignatureLevelSes": "SES (Einfache elektronische Signatur)",
     "requiredSignatureLevelAes": "AES (Fortgeschrittene elektronische Signatur)",
     "requiredSignatureLevelQes": "QES (Qualifizierte elektronische Signatur)",
+    "defaultRetentionDaysLabel": "Standard-Aufbewahrungsfrist (Tage)",
+    "defaultRetentionDaysPlaceholder": "Kein Standard",
+    "deletionReasonRequiredOverrideLabel": "Löschgrund-Pflicht",
+    "deletionReasonRequiredOverrideDefault": "Installationsweiter Standard",
+    "deletionReasonRequiredOverrideRequired": "Pflicht",
+    "deletionReasonRequiredOverrideOptional": "Optional",
     "allowedParentTypesLabel": "Erlaubte Elternordner-Klassen",
     "allowedParentTypesRootOption": "Direkt unter der Wurzel ($ROOT)",
     "allowedParentTypesHint": "Keine Auswahl = überall platzierbar (Standard).",
@@ -206,6 +215,30 @@
     "saved": "Gespeichert.",
     "updatedAt": "Zuletzt geändert"
   },
+  "retentionSettings": {
+    "pageTitle": "Aufbewahrung & Papierkorb",
+    "hint": "Installationsweite Grundeinstellungen für Zwangslöschung (5.2a) und Papierkorb (5.2) - je Objekttyp im Objekttyp-Editor überschreibbar (Löschgrund-Pflicht) bzw. ergänzend (Standard-Aufbewahrungsfrist).",
+    "unreachable": "Document Service nicht erreichbar.",
+    "deletionReasonRequired": "Löschgrund bei Zwangslöschung verpflichtend",
+    "reminderLeadDays": "Löscherinnerung, Vorlaufzeit (Tage)",
+    "reminderLeadDaysPlaceholder": "Keine Erinnerung",
+    "restorePeriodDays": "Papierkorb-Wiederherstellungsfrist (Tage)",
+    "saved": "Gespeichert.",
+    "updatedAt": "Zuletzt geändert"
+  },
+  "deletionRegister": {
+    "pageTitle": "Löschregister",
+    "hint": "Jede physische Löschung (Zwangslöschung oder abgelaufene Papierkorb-Frist, 5.2a) wird hier vermerkt - unabhängig von der (noch fehlenden, siehe Phase 11) separaten Backup-Politik zusätzlich als reguläres Audit-Event publiziert.",
+    "unreachable": "Document Service nicht erreichbar.",
+    "empty": "Noch keine Einträge.",
+    "documentId": "Dokument-ID",
+    "trigger": "Auslöser",
+    "triggerForcedDeletion": "Zwangslöschung",
+    "triggerTrashExpiry": "Papierkorb-Frist abgelaufen",
+    "reason": "Grund",
+    "triggeredBy": "Ausgelöst durch",
+    "occurredAt": "Zeitpunkt"
+  },
   "kennzeichenSettings": {
     "pageTitle": "Kennzeichen-Einstellungen",
     "hint": "Globaler Standard, ob ein automatisch vergebenes Kennzeichen (2.2) vor dem Dateinamen angezeigt wird. Einzelne Dokumentenarten können diesen Standard im Objekttyp-Editor überschreiben.",
@@ -225,6 +258,9 @@
     "pendingCopies": "Status",
     "inSync": "synchron",
     "resyncing": "wird nachrepliziert ({count})",
+    "objectLockMode": "Object Lock (5.1/5.2a)",
+    "objectLockModeGovernance": "Governance-Mode",
+    "objectLockModeNone": "kein Object Lock",
     "empty": "Keine Ziele konfiguriert.",
     "allowDegradedStart": "Degradierten Start erlauben, wenn mindestens ein Ziel nachweislich unverändert ist",
     "saved": "Gespeichert.",

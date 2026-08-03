@@ -39,21 +39,7 @@ class TesseractEngine(TextLayerExtractor):
             content_type=content_type, filename=filename
         )
 
-    async def extract(
-        self, data: bytes, *, filename: str, content_type: str | None
-    ) -> OcrExtractionResult:
-        page_image: bytes | None = None
-        page_image_content_type: str | None = None
-        if is_raster_image(content_type=content_type, filename=filename):
-            image = Image.open(BytesIO(data))
-            image.load()
-        else:
-            doc = fitz.open(stream=data, filetype="pdf")
-            pixmap = doc[0].get_pixmap(dpi=_settings.raster_dpi)
-            page_image = pixmap.tobytes("png")
-            page_image_content_type = "image/png"
-            image = Image.open(BytesIO(page_image))
-
+    def _words_from_image(self, image: Image.Image) -> tuple[list[OcrWordResult], list[float]]:
         ocr_data = pytesseract.image_to_data(
             image, output_type=pytesseract.Output.DICT, lang="deu+eng"
         )
@@ -75,15 +61,56 @@ class TesseractEngine(TextLayerExtractor):
                 )
             )
             confidences.append(confidence)
+        return words, confidences
 
-        average_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    async def extract(
+        self, data: bytes, *, filename: str, content_type: str | None
+    ) -> OcrExtractionResult:
+        if is_raster_image(content_type=content_type, filename=filename):
+            image = Image.open(BytesIO(data))
+            image.load()
+            words, confidences = self._words_from_image(image)
+            average_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+            return OcrExtractionResult(
+                engine=self.engine_name,
+                average_confidence=average_confidence,
+                full_text=" ".join(w.text for w in words),
+                pages=[
+                    OcrPageResult(
+                        page_number=1, width=image.width, height=image.height, words=words
+                    )
+                ],
+                page_images=[],  # Rasterbild - kein eigenständiges Seitenbild nötig
+                page_image_content_type=None,
+            )
+
+        # Mehrseitiges PDF: jede Seite einzeln rastern und OCR'en (nicht nur
+        # Seite 1, siehe `OcrExtractionResult.page_images`-Kommentar).
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages: list[OcrPageResult] = []
+        page_images: list[bytes] = []
+        all_words: list[OcrWordResult] = []
+        all_confidences: list[float] = []
+        for page_index in range(len(doc)):
+            pixmap = doc[page_index].get_pixmap(dpi=_settings.raster_dpi)
+            page_image_bytes = pixmap.tobytes("png")
+            page_images.append(page_image_bytes)
+            image = Image.open(BytesIO(page_image_bytes))
+            words, confidences = self._words_from_image(image)
+            pages.append(
+                OcrPageResult(
+                    page_number=page_index + 1, width=image.width, height=image.height, words=words
+                )
+            )
+            all_words.extend(words)
+            all_confidences.extend(confidences)
+
+        average_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
         return OcrExtractionResult(
             engine=self.engine_name,
             average_confidence=average_confidence,
-            full_text=" ".join(w.text for w in words),
-            pages=[
-                OcrPageResult(page_number=1, width=image.width, height=image.height, words=words)
-            ],
-            page_image=page_image,
-            page_image_content_type=page_image_content_type,
+            full_text=" ".join(w.text for w in all_words),
+            pages=pages,
+            page_images=page_images,
+            page_image_content_type="image/png",
         )

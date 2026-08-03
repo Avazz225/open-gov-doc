@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from document_service import repository
@@ -277,3 +278,247 @@ async def test_update_upload_config_persists_values(session):
 
     fetched = await repository.get_upload_config(session)
     assert fetched.allowed_content_types == ["application/pdf", "text/plain"]
+
+
+# --- Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) ---------
+
+
+async def test_set_retention_persists_fields_and_resets_bookkeeping(session):
+    document = await _make_document(session)
+    document.deletion_reminder_sent_at = datetime.now(UTC)
+    document.force_delete_approval_requested_at = datetime.now(UTC)
+    await session.flush()
+    retention_until = datetime.now(UTC) + timedelta(days=30)
+
+    updated = await repository.set_retention(
+        session,
+        document.id,
+        retention_until=retention_until,
+        full_deletion=True,
+        reason="Aufbewahrungsfrist abgelaufen",
+        notify_email="records@example.com",
+    )
+
+    assert updated.retention_until == retention_until
+    assert updated.full_deletion is True
+    assert updated.pending_deletion_reason == "Aufbewahrungsfrist abgelaufen"
+    assert updated.reminder_notify_email == "records@example.com"
+    # Neu terminiert - alte Buchführung ist hinfällig.
+    assert updated.deletion_reminder_sent_at is None
+    assert updated.force_delete_approval_requested_at is None
+
+
+async def test_restore_document_within_period_clears_deleted_at(session):
+    document = await _make_document(session)
+    await repository.delete_document(session, document.id, deleted_by="alice")
+
+    restored = await repository.restore_document(session, document.id)
+
+    assert restored.deleted_at is None
+
+
+async def test_restore_document_not_deleted_raises(session):
+    document = await _make_document(session)
+
+    with pytest.raises(repository.NotDeletedError):
+        await repository.restore_document(session, document.id)
+
+
+async def test_restore_document_after_period_expired_raises(session):
+    document = await _make_document(session)
+    await repository.update_trash_config(session, restore_period_days=1)
+    deleted = await repository.delete_document(session, document.id, deleted_by="alice")
+    deleted.deleted_at = datetime.now(UTC) - timedelta(days=2)
+    await session.flush()
+
+    with pytest.raises(repository.RestorePeriodExpiredError):
+        await repository.restore_document(session, document.id)
+
+
+async def test_list_deleted_documents_only_shows_soft_deleted(session):
+    kept = await _make_document(session, folder_id="root")
+    deleted = await _make_document(session, folder_id="root")
+    await repository.delete_document(session, deleted.id, deleted_by="alice")
+
+    result = await repository.list_deleted_documents(session, "root")
+
+    ids = [d.id for d in result]
+    assert deleted.id in ids
+    assert kept.id not in ids
+
+
+async def test_hard_delete_document_removes_document_and_versions(session):
+    document = await _make_document(session)
+
+    await repository.hard_delete_document(session, document.id)
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_document(session, document.id)
+
+
+async def test_hard_delete_document_removes_legal_hold_history(session):
+    """Auch eine bereits aufgehobene (historische) Legal-Hold-Zeile referenziert
+    das Dokument per FK - die harte Löschung muss sie mitentfernen, sonst
+    verletzt sie die FK-Constraint."""
+    document = await _make_document(session)
+    hold = await repository.create_legal_hold(session, document.id, set_by="alice", reason=None)
+    await repository.release_legal_hold(session, hold.id, released_by="alice")
+
+    await repository.hard_delete_document(session, document.id)
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_document(session, document.id)
+
+
+async def test_create_and_release_legal_hold(session):
+    document = await _make_document(session)
+
+    hold = await repository.create_legal_hold(
+        session, document.id, set_by="alice", reason="Rechtsstreit"
+    )
+    assert await repository.has_active_hold(session, document.id) is True
+
+    released = await repository.release_legal_hold(session, hold.id, released_by="bob")
+    assert released.released_by == "bob"
+    assert await repository.has_active_hold(session, document.id) is False
+
+
+async def test_release_already_released_hold_raises(session):
+    document = await _make_document(session)
+    hold = await repository.create_legal_hold(session, document.id, set_by="alice", reason=None)
+    await repository.release_legal_hold(session, hold.id, released_by="alice")
+
+    with pytest.raises(repository.AlreadyReleasedError):
+        await repository.release_legal_hold(session, hold.id, released_by="alice")
+
+
+async def test_create_legal_hold_for_unknown_document_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.create_legal_hold(session, "does-not-exist", set_by="alice", reason=None)
+
+
+async def test_list_holds_active_only_filters_released(session):
+    document = await _make_document(session)
+    released_hold = await repository.create_legal_hold(
+        session, document.id, set_by="a", reason=None
+    )
+    await repository.release_legal_hold(session, released_hold.id, released_by="a")
+    active_hold = await repository.create_legal_hold(session, document.id, set_by="b", reason=None)
+
+    all_holds = await repository.list_holds(session, document.id)
+    active_only = await repository.list_holds(session, document.id, active_only=True)
+
+    assert {h.id for h in all_holds} == {released_hold.id, active_hold.id}
+    assert {h.id for h in active_only} == {active_hold.id}
+
+
+async def test_deletion_register_entry_roundtrip(session):
+    entry = await repository.create_deletion_register_entry(
+        session, "doc-1", trigger="forced_deletion", reason="Frist abgelaufen", triggered_by="alice"
+    )
+
+    all_entries = await repository.list_deletion_register(session)
+    filtered = await repository.list_deletion_register(session, document_id="doc-1")
+    other = await repository.list_deletion_register(session, document_id="doc-2")
+
+    assert entry.id in [e.id for e in all_entries]
+    assert [e.id for e in filtered] == [entry.id]
+    assert other == []
+
+
+async def test_retention_config_defaults_and_update(session):
+    default = await repository.get_retention_config(session)
+    assert default.deletion_reason_required is False
+    assert default.reminder_lead_days is None
+
+    updated = await repository.update_retention_config(
+        session, deletion_reason_required=True, reminder_lead_days=7
+    )
+    assert updated.deletion_reason_required is True
+    assert updated.reminder_lead_days == 7
+
+
+async def test_trash_config_defaults_and_update(session):
+    default = await repository.get_trash_config(session)
+    assert default.restore_period_days == 30
+
+    updated = await repository.update_trash_config(session, restore_period_days=60)
+    assert updated.restore_period_days == 60
+
+
+async def test_list_due_for_reminder_respects_lead_days_and_hold(session):
+    due_soon = await _make_document(session)
+    due_soon.retention_until = datetime.now(UTC) + timedelta(days=2)
+    await session.flush()
+
+    too_far = await _make_document(session)
+    too_far.retention_until = datetime.now(UTC) + timedelta(days=30)
+    await session.flush()
+
+    on_hold = await _make_document(session)
+    on_hold.retention_until = datetime.now(UTC) + timedelta(days=2)
+    await session.flush()
+    await repository.create_legal_hold(session, on_hold.id, set_by="alice", reason=None)
+
+    due = await repository.list_due_for_reminder(session, lead_days=7)
+
+    ids = {d.id for d in due}
+    assert due_soon.id in ids
+    assert too_far.id not in ids
+    assert on_hold.id not in ids
+
+
+async def test_list_due_for_reminder_skips_already_notified(session):
+    document = await _make_document(session)
+    document.retention_until = datetime.now(UTC) + timedelta(days=1)
+    document.deletion_reminder_sent_at = datetime.now(UTC)
+    await session.flush()
+
+    due = await repository.list_due_for_reminder(session, lead_days=7)
+
+    assert document.id not in {d.id for d in due}
+
+
+async def test_list_due_for_retention_action_excludes_hold_and_future(session):
+    due = await _make_document(session)
+    due.retention_until = datetime.now(UTC) - timedelta(days=1)
+    await session.flush()
+
+    future = await _make_document(session)
+    future.retention_until = datetime.now(UTC) + timedelta(days=1)
+    await session.flush()
+
+    on_hold = await _make_document(session)
+    on_hold.retention_until = datetime.now(UTC) - timedelta(days=1)
+    await session.flush()
+    await repository.create_legal_hold(session, on_hold.id, set_by="alice", reason=None)
+
+    result = await repository.list_due_for_retention_action(session)
+
+    ids = {d.id for d in result}
+    assert due.id in ids
+    assert future.id not in ids
+    assert on_hold.id not in ids
+
+
+async def test_list_expired_trash_excludes_hold_and_not_yet_expired(session):
+    expired = await _make_document(session)
+    await repository.delete_document(session, expired.id, deleted_by="alice")
+    expired.deleted_at = datetime.now(UTC) - timedelta(days=40)
+    await session.flush()
+
+    recent = await _make_document(session)
+    await repository.delete_document(session, recent.id, deleted_by="alice")
+
+    on_hold = await _make_document(session)
+    await repository.delete_document(session, on_hold.id, deleted_by="alice")
+    on_hold.deleted_at = datetime.now(UTC) - timedelta(days=40)
+    await session.flush()
+    await repository.create_legal_hold(session, on_hold.id, set_by="alice", reason=None)
+
+    result = await repository.list_expired_trash(session, restore_period_days=30)
+
+    ids = {d.id for d in result}
+    assert expired.id in ids
+    assert recent.id not in ids
+    assert on_hold.id not in ids

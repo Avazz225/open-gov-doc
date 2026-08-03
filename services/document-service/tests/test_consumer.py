@@ -1,6 +1,12 @@
+import os
+import uuid
+
 from dms_db_base import make_session_factory
 from dms_eventbus_client import Event
 from document_service import consumer, repository
+from document_service.storage_client import StorageClient
+
+STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 
 
 def _session_factory(engine):
@@ -38,7 +44,7 @@ async def test_approved_force_unlock_releases_lock_and_publishes(engine):
     async def fake_publish(event_type, subject, payload):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(session_factory, fake_publish)
+    handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
     event = Event(
         event_type="permission.approval.approved",
         service_name="permission-service",
@@ -71,7 +77,7 @@ async def test_unrelated_action_type_is_ignored(engine):
     async def fake_publish(event_type, subject, payload):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
     event = Event(
         event_type="permission.approval.approved",
         service_name="permission-service",
@@ -113,7 +119,7 @@ async def test_approved_force_unlock_for_already_unlocked_document_is_logged_not
     async def fake_publish(event_type, subject, payload):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(session_factory, fake_publish)
+    handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
     event = Event(
         event_type="permission.approval.approved",
         service_name="permission-service",
@@ -142,7 +148,7 @@ async def test_approved_event_without_document_id_is_logged_not_raised(engine):
     async def fake_publish(event_type, subject, payload):
         published.append((event_type, subject, payload))
 
-    handler = consumer.make_handler(_session_factory(engine), fake_publish)
+    handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
     event = Event(
         event_type="permission.approval.approved",
         service_name="permission-service",
@@ -152,6 +158,104 @@ async def test_approved_event_without_document_id_is_logged_not_raised(engine):
             "initiated_by": "admin",
             "approved_by": "supervisor",
             "payload": {"x": 1},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []
+
+
+async def test_approved_force_delete_executes_physical_deletion(engine):
+    """Zwangslöschung (5.2a, seit P7-S1) - Genehmigung über
+    `permission.approval.approved` führt die zuvor per Vier-Augen-Prinzip
+    zurückgestellte physische Löschung tatsächlich aus (gleiches Muster wie
+    der bestehende Force-Unlock-Konsument)."""
+    session_factory = _session_factory(engine)
+    storage = StorageClient(STORAGE_SERVICE_URL)
+    document_id = str(uuid.uuid4())
+    key = f"documents/{document_id}/{uuid.uuid4().hex}"
+    try:
+        await storage.upload(key, b"geheime-akte", "text/plain")
+        async with session_factory() as session:
+            await repository.create_document(
+                session,
+                document_id=document_id,
+                title="Geheime Akte",
+                filename="akte.txt",
+                content_type="text/plain",
+                size_bytes=12,
+                checksum_sha256="x" * 64,
+                storage_object_key=key,
+                folder_id=None,
+                object_type_id=None,
+                attributes={},
+                created_by="alice",
+            )
+            await session.commit()
+
+        published = []
+
+        async def fake_publish(event_type, subject, payload):
+            published.append((event_type, subject, payload))
+
+        handler = consumer.make_handler(session_factory, storage, "dms-admin", fake_publish)
+        event = Event(
+            event_type="permission.approval.approved",
+            service_name="permission-service",
+            payload={
+                "request_id": "req-5",
+                "action_type": "document.force_delete",
+                "initiated_by": "system:retention-poll",
+                "approved_by": "supervisor",
+                "payload": {
+                    "document_id": document_id,
+                    "reason": "Frist abgelaufen",
+                    "triggered_by": "system:retention-poll",
+                },
+            },
+        )
+
+        await handler(event.to_bytes())
+
+        async with session_factory() as session:
+            try:
+                await repository.get_document(session, document_id)
+                raise AssertionError("Dokument hätte entfernt sein müssen")
+            except repository.NotFoundError:
+                pass
+            entries = await repository.list_deletion_register(session, document_id=document_id)
+            assert len(entries) == 1
+            assert entries[0].trigger == "forced_deletion"
+
+        expected_event = (
+            "document.force_deleted",
+            document_id,
+            {"reason": "Frist abgelaufen", "triggered_by": "system:retention-poll"},
+        )
+        assert expected_event in published
+    finally:
+        await storage.close()
+
+
+async def test_approved_force_delete_for_already_removed_document_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(
+        _session_factory(engine), StorageClient(STORAGE_SERVICE_URL), "dms-admin", fake_publish
+    )
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-6",
+            "action_type": "document.force_delete",
+            "initiated_by": "system:retention-poll",
+            "approved_by": "supervisor",
+            "payload": {"document_id": "does-not-exist", "reason": None},
         },
     )
 

@@ -35,6 +35,12 @@ const getKennzeichenConfigMock = vi.fn();
 const listSignaturesMock = vi.fn();
 const createSignatureMock = vi.fn();
 const verifySignatureMock = vi.fn();
+const putDocumentRetentionMock = vi.fn();
+const restoreDocumentMock = vi.fn();
+const listDeletedDocumentsMock = vi.fn();
+const listLegalHoldsMock = vi.fn();
+const createLegalHoldMock = vi.fn();
+const releaseLegalHoldMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -60,6 +66,12 @@ vi.mock("@/lib/api", () => ({
   listSignatures: (...args: unknown[]) => listSignaturesMock(...args),
   createSignature: (...args: unknown[]) => createSignatureMock(...args),
   verifySignature: (...args: unknown[]) => verifySignatureMock(...args),
+  putDocumentRetention: (...args: unknown[]) => putDocumentRetentionMock(...args),
+  restoreDocument: (...args: unknown[]) => restoreDocumentMock(...args),
+  listDeletedDocuments: (...args: unknown[]) => listDeletedDocumentsMock(...args),
+  listLegalHolds: (...args: unknown[]) => listLegalHoldsMock(...args),
+  createLegalHold: (...args: unknown[]) => createLegalHoldMock(...args),
+  releaseLegalHold: (...args: unknown[]) => releaseLegalHoldMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -123,6 +135,14 @@ describe("DocumentWorkspace", () => {
     listSignaturesMock.mockResolvedValue([]);
     createSignatureMock.mockReset();
     verifySignatureMock.mockReset();
+    putDocumentRetentionMock.mockReset();
+    restoreDocumentMock.mockReset();
+    listDeletedDocumentsMock.mockReset();
+    listDeletedDocumentsMock.mockResolvedValue([]);
+    listLegalHoldsMock.mockReset();
+    listLegalHoldsMock.mockResolvedValue([]);
+    createLegalHoldMock.mockReset();
+    releaseLegalHoldMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {
@@ -349,6 +369,100 @@ describe("DocumentWorkspace", () => {
     expect(previewPane.querySelectorAll(".ocr-word")).toHaveLength(0);
   });
 
+  it("shows a substitute_text rendition as a text preview (DOCX/PPTX/ODS)", async () => {
+    const docxDocument = { ...document1, id: "d4", title: "vertrag.docx" };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([docxDocument]);
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        version_number: 1,
+        filename: "vertrag.docx",
+        content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 5,
+        checksum_sha256: "d",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    listRenditionsMock.mockResolvedValue([
+      {
+        id: "d4:1:substitute",
+        document_id: "d4",
+        version_number: 1,
+        rendition_type: "substitute_text",
+        source_filename: "vertrag.docx",
+        source_content_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        target_filename: "vertrag.txt",
+        target_content_type: "text/plain; charset=utf-8",
+        size_bytes: 20,
+        status: "ready",
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadRenditionContentMock.mockResolvedValue(
+      new Blob(["Vertragsinhalt als Text"], { type: "text/plain" })
+    );
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/vertrag.docx/));
+
+    const previewPane = screen.getByLabelText("Vorschau");
+    expect(await within(previewPane).findByText("Vertragsinhalt als Text")).toBeInTheDocument();
+    expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "d4:1:substitute");
+    expect(listOcrResultsMock).not.toHaveBeenCalled();
+  });
+
+  it("lets a multi-page PDF's page be switched, reloading only the page image", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listRenditionsMock.mockResolvedValue([]);
+    listOcrResultsMock.mockResolvedValue([
+      {
+        id: "d1:1",
+        document_id: "d1",
+        version_number: 1,
+        status: "ready",
+        engine: "native_text_layer",
+        average_confidence: 100.0,
+        full_text: "Seite 1 Seite 2",
+        pages: [
+          { page_number: 1, width: 200, height: 100, words: [] },
+          { page_number: 2, width: 200, height: 100, words: [] },
+        ],
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadOcrPageImageMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const previewPane = screen.getByLabelText("Vorschau");
+    await within(previewPane).findByRole("img");
+    await waitFor(() => expect(downloadOcrPageImageMock).toHaveBeenCalledWith("token-123", "d1:1", 1));
+
+    await user.selectOptions(within(previewPane).getByLabelText("Seite auswählen"), "2");
+
+    await waitFor(() => expect(downloadOcrPageImageMock).toHaveBeenCalledWith("token-123", "d1:1", 2));
+    // Ein Seitenwechsel lädt nur das Seitenbild neu, nicht erneut Renditionen/OCR-Ergebnisse.
+    expect(listRenditionsMock).toHaveBeenCalledTimes(1);
+    expect(listOcrResultsMock).toHaveBeenCalledTimes(1);
+  });
+
   it("lets the user pick an older version and reloads renditions/OCR for it", async () => {
     listChildFoldersMock.mockResolvedValue([]);
     listDocumentsInFolderMock.mockResolvedValue([document1]);
@@ -462,6 +576,39 @@ describe("DocumentWorkspace", () => {
     await waitFor(() => expect(listChildFoldersMock).toHaveBeenCalledTimes(2));
   });
 
+  it("lets a folder class be chosen when creating a folder", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    createFolderMock.mockResolvedValue({});
+    listObjectTypesMock.mockImplementation(async (_token: string, appliesTo?: string) => {
+      if (appliesTo === "folder") {
+        return [
+          { id: 5, name: "Projektordner", applies_to: "folder", attributes: [], icon: null },
+        ];
+      }
+      return [];
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await waitFor(() => expect(listChildFoldersMock).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByText("Neuer Ordner"));
+    await user.type(screen.getByPlaceholderText("Ordnername"), "Projekt A");
+    await user.selectOptions(screen.getByLabelText("Ordnerklasse"), "5");
+    await user.click(screen.getByText("Anlegen"));
+
+    await waitFor(() =>
+      expect(createFolderMock).toHaveBeenCalledWith("token-123", {
+        name: "Projekt A",
+        parentId: "root",
+        createdBy: "alice",
+        objectTypeId: 5,
+      })
+    );
+  });
+
   it("deletes a folder after confirmation", async () => {
     listChildFoldersMock.mockResolvedValue([
       { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
@@ -476,6 +623,33 @@ describe("DocumentWorkspace", () => {
     await user.click(await screen.findByLabelText("Alt löschen"));
 
     await waitFor(() => expect(deleteFolderMock).toHaveBeenCalledWith("token-123", "f1"));
+  });
+
+  it("shows the trash toggle and restores a deleted document (5.2, seit P7-S1)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    const deletedDoc = { ...document1, id: "d-trash", title: "Altvertrag.pdf", deleted_at: "2026-01-05T00:00:00Z" };
+    listDeletedDocumentsMock.mockResolvedValue([deletedDoc]);
+    restoreDocumentMock.mockResolvedValue({ ...deletedDoc, deleted_at: null });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await waitFor(() => expect(listChildFoldersMock).toHaveBeenCalledTimes(1));
+    expect(listDeletedDocumentsMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText("Papierkorb anzeigen"));
+
+    await waitFor(() =>
+      expect(listDeletedDocumentsMock).toHaveBeenCalledWith("token-123", "root")
+    );
+    expect(await screen.findByText(/Altvertrag.pdf/)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Wiederherstellen"));
+
+    await waitFor(() =>
+      expect(restoreDocumentMock).toHaveBeenCalledWith("token-123", "d-trash")
+    );
   });
 
   it("saves edited metadata and updates the open tab's title", async () => {

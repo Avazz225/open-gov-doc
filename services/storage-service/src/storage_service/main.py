@@ -3,15 +3,16 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from storage_service import identity_guard, replication, repository
+from storage_service import identity_guard, replication, repository, retention_guard
 from storage_service.backends import ObjectNotFoundError, S3Backend, build_backends, resolve_targets
 from storage_service.models import Base
 from storage_service.schemas import (
@@ -105,11 +106,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS storage"))
         await conn.run_sync(Base.metadata.create_all)
+        # Aufbewahrung/WORM (5.1/5.2a, P7-S1) - Ad-hoc-Migrationsmuster wie
+        # in jedem anderen Service dieser Phase (kein Alembic).
+        await conn.execute(
+            text(
+                "ALTER TABLE storage.object_copy "
+                "ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
     app.state.targets = resolve_targets(settings)
     app.state.backends = build_backends(settings)
+    app.state.target_configs = settings.targets
+    # Ziele mit aktivem Governance-Mode (5.1/5.2a) - bekommen beim Schreiben
+    # echtes S3 Object Lock, alle anderen Ziele bleiben rein auf den
+    # Anwendungsschicht-Guard (`retention_guard.py`) angewiesen.
+    app.state.lock_target_ids = {t.id for t in settings.targets if t.object_lock_mode is not None}
     for backend in app.state.backends.values():
         if isinstance(backend, S3Backend):
             await backend.ensure_bucket()
@@ -156,7 +170,10 @@ def healthz() -> dict:
 
 @app.put("/objects/{key:path}", response_model=ObjectMetadataOut, status_code=201)
 async def upload_object(
-    key: str, request: Request, session: AsyncSession = Depends(get_session)
+    key: str,
+    request: Request,
+    retain_until: datetime | None = None,
+    session: AsyncSession = Depends(get_session),
 ) -> ObjectMetadataOut:
     data = await request.body()
     if not data:
@@ -183,6 +200,8 @@ async def upload_object(
             key=key,
             data=data,
             checksum=checksum,
+            retention_until=retain_until,
+            lock_target_ids=app.state.lock_target_ids,
         )
     except replication.PrimaryWriteError as exc:
         await session.rollback()
@@ -222,14 +241,50 @@ async def download_object(key: str, session: AsyncSession = Depends(get_session)
 
 
 @app.delete("/objects/{key:path}", status_code=204)
-async def delete_object(key: str, session: AsyncSession = Depends(get_session)) -> None:
+async def delete_object(
+    key: str,
+    bypass_governance: bool = False,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
     try:
         await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
 
+    # WORM/Object-Lock-Guard (5.1/5.2a, seit P7-S1): blockiert die Löschung,
+    # solange mindestens ein Ziel mit aktivem `object_lock_mode` noch eine in
+    # der Zukunft liegende Aufbewahrungsfrist für dieses Objekt hat - außer,
+    # der Aufrufer fordert `bypass_governance=true` UND hat die konfigurierte
+    # Rolle (Default `dms-admin`, siehe `settings.governance_bypass_role`).
+    locked_targets = await retention_guard.find_locked_targets(
+        session, key, targets=app.state.target_configs
+    )
+    if locked_targets:
+        if not bypass_governance:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Objekt ist unter Governance-Mode-Aufbewahrung gesperrt "
+                    f"(Ziele: {locked_targets}) - Löschung erfordert "
+                    "?bypass_governance=true mit passender Rolle"
+                ),
+            )
+        if not retention_guard.has_governance_bypass_role(x_dms_roles, settings):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Rolle {settings.governance_bypass_role!r} erforderlich, um eine "
+                    f"Governance-Mode-Sperre zu umgehen (Ziele: {locked_targets})"
+                ),
+            )
+
     await replication.delete_from_all(
-        session, backends=app.state.backends, targets=app.state.targets, key=key
+        session,
+        backends=app.state.backends,
+        targets=app.state.targets,
+        key=key,
+        bypass_governance=bool(locked_targets) and bypass_governance,
     )
     await repository.delete_metadata(session, key)
     await session.commit()
@@ -342,11 +397,13 @@ async def reidentify_target(
 
     await session.commit()
     pending_counts = await repository.count_pending_copies_by_backend(session)
+    lock_modes = {t.id: t.object_lock_mode for t in app.state.target_configs}
     return GuardStatusEntry(
         target_id=target_id,
         device_id=identity.device_id,
         verified_at=identity.verified_at,
         pending_copies=pending_counts.get(target_id, 0),
+        object_lock_mode=lock_modes.get(target_id),
     )
 
 
@@ -358,12 +415,14 @@ async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list
     degradierten Start befindet sich noch in der Wiederherstellung."""
     identities = {i.target_id: i for i in await repository.list_backend_identities(session)}
     pending_counts = await repository.count_pending_copies_by_backend(session)
+    lock_modes = {t.id: t.object_lock_mode for t in app.state.target_configs}
     return [
         GuardStatusEntry(
             target_id=target_id,
             device_id=identities[target_id].device_id if target_id in identities else None,
             verified_at=identities[target_id].verified_at if target_id in identities else None,
             pending_copies=pending_counts.get(target_id, 0),
+            object_lock_mode=lock_modes.get(target_id),
         )
         for target_id in app.state.targets
     ]

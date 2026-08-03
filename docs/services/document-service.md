@@ -2,8 +2,8 @@
 
 **Verantwortung:** Dokumente als Kernentität (Konzept 2.1) — CRUD, dauerhafte Versionierung (2.1a, kein Überschreiben/Verwerfen), Bearbeitungssperre bei externer Bearbeitung inkl. Force-Unlock und Konfliktkopie (4.2). Hält selbst nie Dateiinhalte — jeder Byte-Zugriff läuft über die HTTP-API des Storage Service (3.6).
 
-**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6
-**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`)
+**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)
+**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`)
 
 ## API
 
@@ -13,7 +13,16 @@
 | `GET` | `/documents?folder_id=...` | Nicht gelöschte Dokumente eines Ordners (seit P4-S2, Grundlage der User-UI-Navigation) — unbekannter `folder_id` liefert `[]`, kein 404 |
 | `GET` | `/documents/{id}` | Metadaten |
 | `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400. Seit **P5e-S2**: eine Änderung an `attributes["Kennzeichen"]` wird mit `403` abgelehnt, außer der `X-DMS-Roles`-Header enthält `dms-admin` (siehe unten) |
-| `DELETE` | `/documents/{id}?deleted_by=...` | Weiche Löschung (`deleted_at` gesetzt, Metadaten bleiben) |
+| `DELETE` | `/documents/{id}?deleted_by=...` | Weiche Löschung (`deleted_at` gesetzt, Metadaten bleiben) — Papierkorb, siehe "Aufbewahrung & Legal Hold" unten für die automatische Variante über den Poll-Loop |
+| `GET` | `/documents/deleted?folder_id=...` | Gelöschte (im Papierkorb befindliche) Dokumente eines Ordners (5.2, seit P7-S1) — vor `/documents/{id}` registriert, damit `"deleted"` nicht als `{id}` interpretiert wird |
+| `POST` | `/documents/{id}/restore` | Wiederherstellung aus dem Papierkorb (5.2, seit P7-S1) — `404` wenn nicht gelöscht, `409` wenn `TrashConfig.restore_period_days` bereits überschritten ist |
+| `PUT` | `/documents/{id}/retention` | Aufbewahrungsfrist/Zwangslöschungs-Flag setzen (`retention_until`, `full_deletion`, optional `reason`/`notify_email`, 5.2/5.2a, seit P7-S1) — `422`, wenn ein Löschgrund Pflicht ist (`RetentionConfig.deletion_reason_required`/`ObjectType.deletion_reason_required_override`) und fehlt |
+| `POST` | `/legal-holds` | Legal Hold setzen (`document_id`, `set_by`, optional `reason`, 5.2, seit P7-S1) — überschreibt jede fällige Aktion, bis er aufgehoben wird |
+| `POST` | `/legal-holds/{id}/release` | Legal Hold aufheben (`released_by`) |
+| `GET` | `/legal-holds?document_id=...&active_only=...` | Legal Holds eines Dokuments |
+| `GET` | `/deletion-register?...` | Löschregister lesen (5.2a, seit P7-S1) — eigene, sofort abfragbare API, siehe unten |
+| `GET`/`PUT` | `/retention-config` | Installationsweite Aufbewahrungs-Konfiguration (`deletion_reason_required`, `reminder_lead_days`, seit P7-S1) |
+| `GET`/`PUT` | `/trash-config` | Papierkorb-Konfiguration (`restore_period_days`, seit P7-S1) |
 | `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
 | `GET` | `/documents/{id}/versions/{n}` | Metadaten einer konkreten Version |
@@ -29,10 +38,14 @@
 
 ## Datenmodell
 
-- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.).
+- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, seit P7-S1, s. u.).
 - `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a).
 - `document_lock`: genau eine aktive Zeile je gesperrtem Dokument (`document_id` als PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 - `upload_config`: einzelne Zeile (`id=1`, seit P5d-S1) — `allowed_content_types` (JSON-Liste, leer = keine Einschränkung), `updated_at`.
+- `legal_hold` (5.2, seit P7-S1): `id` (UUID PK), `document_id` (FK auf `document.id`), `reason` (nullable), `set_by`, `set_at`, `released_by` (nullable), `released_at` (nullable) — aktiv, solange `released_at IS NULL`.
+- `deletion_register_entry` (5.2a, seit P7-S1): `id` (UUID PK), `document_id` (**bewusst kein FK** — die referenzierte `document`-Zeile ist zum Zeitpunkt des Eintrags bereits physisch entfernt), `trigger` (`"forced_deletion"`\|`"trash_expiry"`), `reason` (nullable), `triggered_by` (nullable), `occurred_at`.
+- `retention_config` (5.2/5.2a, seit P7-S1): einzelne Zeile (`id=1`, gleiches Muster wie `UploadConfig`) — `deletion_reason_required` (Boolean), `reminder_lead_days` (Integer, nullable).
+- `trash_config` (5.2, seit P7-S1): einzelne Zeile (`id=1`) — `restore_period_days` (Integer, Default 30).
 
 `folder_id`/`object_type_id` sind opake Referenzen ohne FK-Erzwingung über Service-Grenzen hinweg, werden aber seit P3-S3 aktiv geprüft: `folder_id` (falls gesetzt) muss beim Folder Service existieren (sonst 400), `object_type_id` (falls gesetzt) validiert `attributes`+`title` gegen den Object-Type Service (sonst 400 mit Fehlerliste). Seit P4-S4 gilt dieselbe Validierung auch für `PATCH /documents/{id}` — `folder_id`/`object_type_id` selbst bleiben dabei bewusst unveränderlich (Verschieben/Retypisieren sind eigene Operationen mit anderen Konsistenzfragen, kein reines Metadaten-Update).
 
@@ -93,6 +106,27 @@ Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** 
 - Ein eigener Check-in beendet immer die eigene Sperre (auch im Konfliktfall — die Ausgangsbasis war ohnehin veraltet).
 - **Vier-Augen-Prinzip (4.3) für Force-Unlock seit P6-S4 optional verdrahtet**: `POST /documents/{id}/lock/force-release` fragt vorher `GET /approval-config/document.force_unlock` beim Permission Service ab (`approval_client.py`). Ist Genehmigung aktiviert, wird die Sperre **nicht** sofort aufgehoben, sondern ein Freigabe-Request angelegt (Antwort `{status: "pending_approval", approval_request_id}`, Lock bleibt bestehen) — die tatsächliche Ausführung erfolgt erst über den neuen `consumer.py` (erster NATS-Konsument dieses Service überhaupt), sobald `permission.approval.approved` eintrifft. Ohne Konfiguration (Default) bleibt das Verhalten unverändert: sofortige Ausführung, Antwort `{status: "released", lock}`. Details/Architekturentscheidung siehe [ADR 0022](../adr/0022-four-eyes-approval-via-events.md) und `docs/services/permission-service.md` "Vier-Augen-Approval-Mechanismus".
 
+## Aufbewahrung & Legal Hold (5.2, seit P7-S1)
+
+Ein gemeinsames Feldpaar deckt sowohl die reguläre Aufbewahrungsfrist (5.2) als auch die Zwangslöschung (5.2a) ab: `Document.retention_until` (Datum) + `full_deletion` (Boolean). Beim Erreichen von `retention_until` ohne aktiven Legal Hold entscheidet `full_deletion`: `false` → regulärer Papierkorb (bestehende `deleted_at`-Logik), `true` → direkt physische Löschung (siehe "Zwangslöschung & Löschregister" unten).
+
+- **Kein neuer BPMN-/Timer-Dienst**: `workflow-service` hat keinen generischen "Callback nach N Tagen"-Mechanismus, nur echte Prozessinstanzen mit Timer-/Boundary-Events. Stattdessen bekommt dieser Service einen eigenen `_retention_poll_loop` (`Settings.retention_poll_interval_seconds`, Default 3600s) — exakt dasselbe Idiom wie `workflow-service`s `_sla_poll_loop` ([ADR 0020](../adr/0020-sla-timer-polling.md)). Eine BPMN-Anbindung bleibt ein späterer, optionaler Ausbau; das Konzept selbst erlaubt die direkte, prozessunabhängige Konfiguration am Objekt/Objekttyp ausdrücklich.
+- **Default-Frist je Objekttyp**: `default_retention_days` auf `ObjectType` (siehe `docs/services/object-type-service.md`) wird beim Anlegen eines Dokuments **einmalig** zu einem konkreten `created_at + default_retention_days`-Datum aufgelöst — kein wiederholtes Nachschlagen, falls sich der Typ-Default später ändert. Ein beim Anlegen/über `PUT .../retention` manuell gesetztes `retention_until` hat Vorrang.
+- **Legal Hold überschreibt jede fällige Aktion** (weder Papierkorb noch physische Löschung noch Löscherinnerung), solange er aktiv ist (`legal_hold.released_at IS NULL`) — wörtliche Umsetzung von 5.2. Mehrere Holds je Dokument sind möglich; jeder muss einzeln aufgehoben werden, damit das Dokument wieder "frei" ist.
+- **Löscherinnerung** (optional, `RetentionConfig.reminder_lead_days`): kein eigener Timer, sondern ein dritter Zweig desselben Poll-Loops — erkennt "innerhalb der Vorlaufzeit, Erinnerung noch nicht gesendet" (`Document.deletion_reminder_sent_at`) und publiziert `document.deletion.reminder` (konsumiert von `notification-service`, siehe dort).
+- **Papierkorb mit Wiederherstellungsfrist**: `TrashConfig.restore_period_days` (Default 30) bestimmt, wie lange `POST /documents/{id}/restore` nach dem Soft-Delete noch möglich ist (`409` danach) — abgelaufene Einträge werden vom selben Poll-Loop physisch bereinigt (`trigger="trash_expiry"` im Löschregister, siehe unten), **ohne** automatischen Governance-Bypass (siehe dort).
+
+## Zwangslöschung & Löschregister (5.2a, seit P7-S1)
+
+Ergänzend zur regulären Aufbewahrungsfrist: das umgekehrte Szenario, bei dem ein Dokument nach Ablauf **verpflichtend physisch** gelöscht wird (`full_deletion=true`), inklusive optionalem Löschgrund und einem separaten, vom gelöschten Objekt unabhängigen Löschregister.
+
+- **Löschgrund nur transient auf dem Dokument**: `Document.pending_deletion_reason` wird ausschließlich zwischen Terminierung und tatsächlicher Ausführung gehalten (Tage/Wochen Abstand möglich). Bei der eigentlichen physischen Löschung wandert der Grund in die persistente `deletion_register_entry`-Zeile **und** in ein `document.force_deleted`-Event (Audit-Trail) — die `Document`-Zeile selbst wird komplett entfernt. Der Grund "überlebt" das Objekt also nur in Register + Audit-Trail, nie als Property eines noch existierenden Objekts.
+- **Pflicht/optional konfigurierbar**: `RetentionConfig.deletion_reason_required` (installationsweiter Default) + `ObjectType.deletion_reason_required_override` (Tri-State, überschreibt den globalen Default für einzelne Dokumentklassen) — `PUT /documents/{id}/retention` lehnt einen fehlenden Grund mit `422` ab, wenn er laut Auflösung Pflicht ist.
+- **Vier-Augen-Prinzip (4.3, optional)**: wiederverwendet 1:1 den bestehenden Force-Unlock-Präzedenzfall (`approval_client.py`, `consumer.py`) über den neuen Aktionstyp `document.force_delete` — keine Änderung an `permission-service` nötig außer der Konfigurationszeile (`PUT /approval-config/document.force_delete`). Ist Genehmigung aktiviert, legt der Poll-Loop statt sofortiger Ausführung einen Freigabe-Request an (`Document.force_delete_approval_requested_at` verhindert doppelte Requests bei jedem weiteren Durchlauf); die tatsächliche Löschung erfolgt erst über einen neuen Consumer-Handler, sobald `permission.approval.approved` mit `action_type == "document.force_delete"` eintrifft.
+- **Physische Löschung** (`retention_actions.execute_forced_deletion`): löscht jede `document_version` über `storage-service` mit `bypass_governance=True` — die sanktionierte Ausnahme vom Object-Lock-Schutz aus 5.1 (siehe `docs/services/storage-service.md` "Object-Lock/WORM", [ADR 0030](../adr/0030-storage-object-lock-governance-mode.md)) —, schreibt die `deletion_register_entry`, entfernt `Document`+`DocumentVersion`-Zeilen und publiziert `document.force_deleted`. Papierkorb-Ablauf (`trigger="trash_expiry"`) läuft dagegen **ohne** automatischen Bypass (`retention_actions.purge_expired_trash_entry`) — bei Blockade durch eine Governance-Sperre bleibt der Eintrag für einen späteren Durchlauf stehen, kein stiller Datenverlust durch einen unbeabsichtigten Bypass.
+- **Löschregister nicht hash-verkettet** (anders als `audit-service`) und **nicht Backup-differenziert** — die vom Konzept verlangte "separat gesicherte, vom regulären Backup-Zyklus unabhängige" Aufbewahrung ist nicht vollständig erfüllbar, da es noch keine Backup/Restore-Phase gibt (Phase 11). Kompensiert dadurch, dass jede Zeile zusätzlich als reguläres Event publiziert wird, das `audit-service`s bestehende hash-verkettete Kette mitschreibt — dieselbe Tamper-Evidence wie überall sonst, nur (noch) keine separate Backup-Politik. Bewusst eine eigene, sofort abfragbare `GET /deletion-register`-API in diesem Service statt einer Abhängigkeit von einer künftigen `audit-service`-Filter-API.
+- **Legal-Hold-Rollenprüfung**: keine neue RBAC-Differenzierung in dieser Session — wer einen Legal Hold setzen/aufheben darf, ist (wie die meisten Aktionen ohne Backend-Rollenprüfung außer den bereits bestehenden Ausnahmen) offen, siehe "Offene Punkte".
+
 ## Events
 
 **Publiziert** (Stream `document`, `ensure_stream=True`):
@@ -104,8 +138,11 @@ Jeder Upload (Anlegen *und* Check-in) wird **synchron und vor jedem Schreiben** 
 | `document.lock.force_released` | `{original_locked_by, released_by, reason}` |
 | `document.metadata.updated` | `{title}` (seit P4-S4) |
 | `document.deleted` | `{deleted_by}` |
+| `document.deletion.reminder` | `{retention_until, full_deletion}` (5.2a, seit P7-S1, konsumiert von `notification-service`) |
+| `document.force_deleted` | `{trigger: "forced_deletion", reason, triggered_by}` (5.2a, seit P7-S1) |
+| `document.trash_purged` | `{trigger: "trash_expiry"}` (5.2a, seit P7-S1) |
 
-**Konsumiert** (seit P6-S4, erster Konsument dieses Service überhaupt): `permission.approval.approved` — nur relevant, falls `action_type == "document.force_unlock"` (siehe `consumer.py`), alle anderen Aktionstypen werden ignoriert.
+**Konsumiert** (seit P6-S4, erster Konsument dieses Service überhaupt): `permission.approval.approved` — relevant für `action_type == "document.force_unlock"` (Force-Unlock, seit P6-S4) und seit P7-S1 zusätzlich `action_type == "document.force_delete"` (führt die zuvor aufgeschobene Zwangslöschung aus, siehe "Zwangslöschung & Löschregister" oben); alle anderen Aktionstypen werden ignoriert.
 
 **Audit-Anbindung**: Audit Service konsumiert seit dieser Session zusätzlich `document.>` (vorher nur `registry.>`) — 4.2 verlangt explizit vollständige Auditierung von Force-Unlock/Konfliktkopie. Force-Unlock und die daraus ggf. entstehende Konfliktkopie erzeugen zwei separate, aber im Audit-Trail über `subject=document_id` verknüpfbare Ereignisse.
 
@@ -124,7 +161,10 @@ Noch keine — folgt in Phase 11.
 - **Kennzeichen-Anzeige im Frontend** (vor dem Dateinamen, global oder je Objekttyp überschreibbar) noch nicht angebunden — folgt mit P5e-S3.
 - **Keine Rollenzuweisungs-API/-UI**: `dms-admin` muss aktuell direkt über die Keycloak Admin Console zugewiesen werden (siehe oben, "Kennzeichengenerator").
 - Vier-Augen-Prinzip für Force-Unlock seit P6-S4 optional verfügbar (siehe oben) — Default bleibt ungated, ebenso kein Rückkanal, der `permission-service` einen fehlgeschlagenen (z. B. inzwischen anderweitig aufgelösten) Vollzug meldet.
-- Aufbewahrung/Zwangslöschung/Löschregister (5.2/5.2a) nicht Teil dieser Session — `DELETE` ist eine einfache weiche Löschung, keine Compliance-Funktion (folgt Phase 7).
+- **Aufbewahrung/Legal Hold/Zwangslöschung nur für Dokumente** (5.2/5.2a, seit P7-S1) — Ordner haben noch kein Soft-Delete-Konzept überhaupt und folgen erst mit der geplanten Folgesession **P7-S1b**, die dasselbe Muster (Papierkorb, Legal Hold, Zwangslöschung, Löschregister) auf Ordner überträgt.
+- **Keine Legal-Hold-Rollenprüfung** (5.2, seit P7-S1) — wer einen Hold setzen/aufheben darf, ist nicht eingeschränkt, siehe oben.
+- **Löschregister nicht Backup-differenziert** (5.2a) — kompensiert nur über die Audit-Service-Hash-Kette, siehe oben; echte Backup-Trennung erst mit Phase 11.
+- **Löschregister/Legal-Hold-Tabellen leben in diesem Service statt einem eigenen Compliance-Service** — bewusst, um eine verfrühte Auslagerung zu vermeiden, bevor der Bedarf über mehr als einen Objekttyp hinweg feststeht (neu zu bewerten, sobald z. B. Umlaufmappen ebenfalls Aufbewahrung brauchen, Phase 15).
 - **Umlaufmappen-Referenzen (2.3, seit P6-S3)**: der neue `case-service` greift ausschließlich lesend über `GET /documents/{id}` auf `current_version_number`/`deleted_at` zu — hier musste dafür nichts geändert werden. Bearbeitungskopien (ebenfalls 2.3) sind dagegen diese Session (siehe oben) — kein neuer Endpunkt, drei optionale Herkunftsfelder an `POST /documents`. Ersatzdarstellungen (2.4) sind seit P5-S2 umgesetzt (siehe `docs/services/rendering-service.md`), ohne dass dieser Service dafür geändert werden musste — der Rendering Service konsumiert die bereits vorhandenen `document.>`-Events und ruft die bereits vorhandenen Versions-/Content-Endpunkte auf.
 - **Keine Existenzprüfung für `originating_case_id`**: opake Referenz auf eine Umlaufmappe im `case-service`, analog zu `folder_id`/`object_type_id` — ein unbekannter Wert wird nicht abgelehnt.
 - Virenscan-Gating erhöht die Upload-Latenz um die Scan-Zeit und scannt auch dann, wenn ein Check-in wegen veralteter `expected_base_version_number`/Lock-Konflikt ohnehin abgelehnt würde (unnötige, aber nicht falsche Arbeit) — siehe ADR 0010 "Konsequenzen".

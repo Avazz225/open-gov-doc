@@ -64,6 +64,8 @@
     "newFolder": "Neuer Ordner",
     "newFolderFormLabel": "Neuen Ordner anlegen",
     "newFolderPlaceholder": "Ordnername",
+    "newFolderObjectTypeLabel": "Ordnerklasse",
+    "newFolderNoObjectType": "Keine Ordnerklasse",
     "renameFolderFormLabel": "Ordner umbenennen",
     "renameFolder": "{name} umbenennen",
     "deleteFolder": "{name} löschen",
@@ -80,7 +82,12 @@
     "treeLabel": "Ordner-Baumansicht",
     "treeLoadError": "Ordnerinhalt konnte nicht geladen werden",
     "expandFolder": "{name} aufklappen",
-    "collapseFolder": "{name} zuklappen"
+    "collapseFolder": "{name} zuklappen",
+    "toggleTrash": "Papierkorb anzeigen",
+    "trashEmpty": "Papierkorb ist leer",
+    "trashLoadError": "Papierkorb konnte nicht geladen werden",
+    "trashRestoreError": "Dokument konnte nicht wiederhergestellt werden (Frist ggf. abgelaufen)",
+    "restoreDocument": "Wiederherstellen"
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -111,7 +118,23 @@
     "verifying": "Prüfe...",
     "verifyError": "Prüfung fehlgeschlagen",
     "statusValid": "Gültig",
-    "statusInvalid": "Ungültig"
+    "statusInvalid": "Ungültig",
+    "notSignable": "Für dieses Dateiformat ist keine elektronische Signatur möglich (nur PDF)."
+  },
+  "retention": {
+    "heading": "Aufbewahrung & Löschung",
+    "retentionUntilLabel": "Aufbewahren bis",
+    "fullDeletionLabel": "Nach Ablauf vollständig löschen (Zwangslöschung)",
+    "reasonLabel": "Löschgrund",
+    "save": "Speichern",
+    "saving": "Speichere...",
+    "saved": "Gespeichert.",
+    "saveError": "Aufbewahrung konnte nicht gespeichert werden",
+    "legalHoldActive": "Legal Hold aktiv (gesetzt von {setBy})",
+    "legalHoldReasonLabel": "Grund für Legal Hold",
+    "setLegalHold": "Legal Hold setzen",
+    "releaseLegalHold": "Legal Hold aufheben",
+    "holdError": "Legal Hold konnte nicht geändert werden"
   },
   "preview": {
     "paneLabel": "Vorschau",
@@ -120,6 +143,8 @@
     "noRendition": "Für dieses Dokument liegt noch keine Vorschau vor.",
     "versionSelectLabel": "Version auswählen",
     "versionOption": "Version {number}",
+    "pageSelectLabel": "Seite auswählen",
+    "pageOption": "Seite {number}",
     "ocrNeedsReview": "OCR-Text hat geringe Erkennungssicherheit – bitte prüfen"
   },
   "search": {

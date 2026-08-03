@@ -1,4 +1,5 @@
 import hashlib
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from storage_service.backends.interface import ObjectNotFoundError
@@ -39,6 +40,19 @@ async def test_delete_removes_object(backend):
 
 async def test_delete_missing_is_noop(backend):
     await backend.delete("never-existed.txt")
+
+
+async def test_lock_until_and_bypass_governance_are_accepted_but_have_no_effect(backend):
+    """Das lokale Dateisystem hat keine Object-Lock-Entsprechung (5.1/5.2a) -
+    beide Parameter müssen angenommen werden (einheitliches Interface), aber
+    ein "gesperrtes" Objekt bleibt hier trotzdem normal löschbar (ehrlich
+    dokumentierte Grenze, siehe retention_guard.py/ADR 0030)."""
+    lock_until = datetime.now(UTC) + timedelta(days=1)
+    await backend.write("waere-gesperrt.txt", b"x", lock_until=lock_until)
+
+    await backend.delete("waere-gesperrt.txt", bypass_governance=False)
+
+    assert await backend.exists("waere-gesperrt.txt") is False
 
 
 async def test_checksum_matches_sha256(backend):
