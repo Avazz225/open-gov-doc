@@ -87,6 +87,22 @@ class ForceReleaseResult(BaseModel):
     approval_request_id: str | None = None
 
 
+class TrashRequest(BaseModel):
+    deleted_by: str
+
+
+class TrashResult(BaseModel):
+    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - gleiches
+    Zwei-Ausgänge-Wrapper-Muster wie `ForceReleaseResult`: sofort ausgeführt,
+    oder per Vier-Augen-Prinzip (Aktionstyp `document.delete`, unabhängig von
+    der bereits bestehenden retentionsgetriggerten `document.force_delete`)
+    zurückgestellt."""
+
+    status: Literal["trashed", "pending_approval"]
+    document: DocumentOut | None = None
+    approval_request_id: str | None = None
+
+
 class UploadConfigIn(BaseModel):
     # Leer = keine Einschränkung (Default, siehe models.UploadConfig).
     allowed_content_types: list[str] = Field(default_factory=list)

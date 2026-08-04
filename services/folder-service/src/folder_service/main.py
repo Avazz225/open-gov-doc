@@ -33,6 +33,7 @@ from folder_service.schemas import (
     TrashConfigIn,
     TrashConfigOut,
     TrashRequest,
+    TrashResult,
 )
 from folder_service.settings import ROOT_FOLDER_ID, Settings
 
@@ -248,7 +249,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
     app.state.consumer_bus = consumer_bus
-    await start_consuming(consumer_bus, settings.subjects, app.state.session_factory, publish_event)
+    await start_consuming(
+        consumer_bus,
+        settings.subjects,
+        app.state.session_factory,
+        publish_event,
+        app.state.document_client,
+    )
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
@@ -462,13 +469,27 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
     )
 
 
-@app.post("/folders/{folder_id}/trash", response_model=FolderOut)
+@app.post("/folders/{folder_id}/trash", response_model=TrashResult)
 async def trash_folder(
     folder_id: str, payload: TrashRequest, session: AsyncSession = Depends(get_session)
-) -> FolderOut:
+) -> TrashResult:
     """Papierkorb-Weg (5.2, seit P7-S1b) - kaskadiert über den gesamten
     aktiven Teilbaum (Unterordner + enthaltene Dokumente, siehe
-    repository.soft_delete_folder)."""
+    repository.soft_delete_folder). Seit P7-S1c optional per generischem
+    Vier-Augen-Mechanismus gegated (4.3, Aktionstyp `folder.delete`,
+    unabhängig von der bereits bestehenden retentionsgetriggerten
+    `folder.force_delete`) - Löschantrag-Workflow für reguläre Nutzer,
+    exaktes Muster wie `document_service.main.trash_document`/
+    `force_release_lock` (P6-S4). Per Default (keine Konfiguration) bleibt
+    das Verhalten unverändert: sofortige Ausführung."""
+    if await app.state.approval_client.requires_approval("folder.delete"):
+        request = await app.state.approval_client.create_request(
+            action_type="folder.delete",
+            initiated_by=payload.deleted_by,
+            payload={"folder_id": folder_id, "deleted_by": payload.deleted_by},
+        )
+        return TrashResult(status="pending_approval", approval_request_id=request["id"])
+
     try:
         folder = await repository.soft_delete_folder(
             session,
@@ -482,7 +503,7 @@ async def trash_folder(
     await publish_event(
         "folder.trashed", subject=folder_id, payload={"deleted_by": payload.deleted_by}
     )
-    return folder
+    return TrashResult(status="trashed", folder=folder)
 
 
 @app.post("/folders/{folder_id}/restore", response_model=FolderOut)

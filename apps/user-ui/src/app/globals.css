@@ -157,6 +157,43 @@ body {
   white-space: nowrap;
 }
 
+/* Generisches Rechtsklick-Kontextmenü (5.2, seit P7-S1c) - `position: fixed`
+   statt relativ zu einem Elternelement, da es am tatsächlichen Klickpunkt
+   erscheinen muss, nicht an einer festen UI-Ecke wie `.icon-rail-popover`. */
+.context-menu {
+  position: fixed;
+  min-width: 12rem;
+  padding: 0.25rem;
+  background: var(--dms-surface);
+  color: var(--dms-surface-fg);
+  border: 1px solid var(--dms-border);
+  border-radius: 0.375rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 0.25rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: var(--dms-accent);
+  color: var(--dms-accent-fg, #fff);
+}
+
+.context-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .theme-switcher {
   display: flex;
   flex-direction: column;

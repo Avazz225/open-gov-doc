@@ -49,6 +49,11 @@ const putFolderRetentionMock = vi.fn();
 const listFolderLegalHoldsMock = vi.fn();
 const createFolderLegalHoldMock = vi.fn();
 const releaseFolderLegalHoldMock = vi.fn();
+const trashDocumentMock = vi.fn();
+const getApprovalConfigMock = vi.fn();
+const listApprovalRequestsMock = vi.fn();
+const approveApprovalRequestMock = vi.fn();
+const rejectApprovalRequestMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -65,6 +70,11 @@ vi.mock("@/lib/api", () => ({
   listFolderLegalHolds: (...args: unknown[]) => listFolderLegalHoldsMock(...args),
   createFolderLegalHold: (...args: unknown[]) => createFolderLegalHoldMock(...args),
   releaseFolderLegalHold: (...args: unknown[]) => releaseFolderLegalHoldMock(...args),
+  trashDocument: (...args: unknown[]) => trashDocumentMock(...args),
+  getApprovalConfig: (...args: unknown[]) => getApprovalConfigMock(...args),
+  listApprovalRequests: (...args: unknown[]) => listApprovalRequestsMock(...args),
+  approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
+  rejectApprovalRequest: (...args: unknown[]) => rejectApprovalRequestMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
@@ -167,6 +177,18 @@ describe("DocumentWorkspace", () => {
     listFolderLegalHoldsMock.mockResolvedValue([]);
     createFolderLegalHoldMock.mockReset();
     releaseFolderLegalHoldMock.mockReset();
+    trashDocumentMock.mockReset();
+    getApprovalConfigMock.mockReset();
+    getApprovalConfigMock.mockResolvedValue({
+      action_type: "folder.delete",
+      requires_approval: false,
+      required_permission: null,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    listApprovalRequestsMock.mockReset();
+    listApprovalRequestsMock.mockResolvedValue([]);
+    approveApprovalRequestMock.mockReset();
+    rejectApprovalRequestMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {
@@ -633,20 +655,80 @@ describe("DocumentWorkspace", () => {
     );
   });
 
-  it("moves a folder to the trash after confirmation (5.2, seit P7-S1b)", async () => {
+  it("moves a folder to the trash after confirmation via the context menu (5.2, seit P7-S1c)", async () => {
     listChildFoldersMock.mockResolvedValue([
       { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
     ]);
     listDocumentsInFolderMock.mockResolvedValue([]);
-    trashFolderMock.mockResolvedValue(undefined);
+    trashFolderMock.mockResolvedValue({
+      status: "trashed",
+      folder: { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
+      approval_request_id: null,
+    });
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const user = userEvent.setup();
     renderWorkspace();
 
-    await user.click(await screen.findByLabelText("Alt löschen"));
+    const folderNameButton = await screen.findByText(/Alt/);
+    fireEvent.contextMenu(folderNameButton.closest("li")!);
+    await user.click(await screen.findByText("Alt löschen"));
 
     await waitFor(() => expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1", "alice"));
+  });
+
+  it("shows a pending-approval message instead of deleting when folder.delete requires approval (5.2, seit P7-S1c)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    getApprovalConfigMock.mockImplementation(async (_token: string, actionType: string) => ({
+      action_type: actionType,
+      requires_approval: actionType === "folder.delete",
+      required_permission: null,
+      updated_at: "2026-01-01T00:00:00Z",
+    }));
+    trashFolderMock.mockResolvedValue({
+      status: "pending_approval",
+      folder: null,
+      approval_request_id: "req-1",
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const folderNameButton = await screen.findByText(/Alt/);
+    fireEvent.contextMenu(folderNameButton.closest("li")!);
+    await user.click(await screen.findByText('Löschung für "Alt" beantragen'));
+
+    expect(
+      await screen.findByText(
+        "Löschantrag gestellt - wartet auf Genehmigung durch eine zweite Person."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("shows delete capability for documents via the context menu (5.2, seit P7-S1c)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    trashDocumentMock.mockResolvedValue({
+      status: "trashed",
+      document: { ...document1, deleted_at: "2026-01-05T00:00:00Z" },
+      approval_request_id: null,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const documentButton = await screen.findByText(/Rechnung.pdf/);
+    fireEvent.contextMenu(documentButton.closest("li")!);
+    await user.click(await screen.findByText('"Rechnung.pdf" löschen'));
+
+    await waitFor(() =>
+      expect(trashDocumentMock).toHaveBeenCalledWith("token-123", "d1", "alice")
+    );
   });
 
   it("shows the trash toggle and restores a deleted document (5.2, seit P7-S1)", async () => {

@@ -1,8 +1,12 @@
+import os
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from folder_service.main import app
+
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 
 @pytest.fixture
@@ -97,7 +101,10 @@ def test_trash_and_restore_folder_calls_document_cascade(client):
 
     trash_response = client.post(f"/folders/{parent['id']}/trash", json={"deleted_by": "alice"})
     assert trash_response.status_code == 200
-    assert trash_response.json()["deleted_at"] is not None
+    trash_result = trash_response.json()
+    assert trash_result["status"] == "trashed"
+    assert trash_result["folder"]["deleted_at"] is not None
+    assert trash_result["approval_request_id"] is None
     assert client.get(f"/folders/{parent['id']}").status_code == 404
     app.state.document_client.cascade_trash.assert_awaited_once_with(
         [parent["id"]], via_folder_id=parent["id"], deleted_by="alice"
@@ -107,6 +114,34 @@ def test_trash_and_restore_folder_calls_document_cascade(client):
     assert restore_response.status_code == 200
     assert restore_response.json()["deleted_at"] is None
     app.state.document_client.cascade_restore.assert_awaited_once_with(parent["id"])
+
+
+def test_trash_folder_with_approval_required_defers_execution(client):
+    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - echte
+    Integration gegen den lokal laufenden permission-service, gleiches
+    Muster wie document-service's analoger Test."""
+    httpx.put(
+        f"{PERMISSION_SERVICE_URL}/approval-config/folder.delete",
+        json={"requires_approval": True},
+    )
+    try:
+        created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+
+        response = client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "pending_approval"
+        assert result["approval_request_id"] is not None
+        assert result["folder"] is None
+
+        # Ordner ist weiterhin nicht gelöscht.
+        assert client.get(f"/folders/{created['id']}").status_code == 200
+    finally:
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/folder.delete",
+            json={"requires_approval": False},
+        )
 
 
 def test_restore_folder_not_deleted_returns_409(client):

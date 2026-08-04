@@ -168,17 +168,49 @@ export async function deleteFolder(token: string, folderId: string): Promise<voi
   );
 }
 
-// Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
-// P7-S1b) - 1:1 dasselbe Muster wie die Dokument-Pendants weiter unten, nur
-// gegen `folder-service`-Endpunkte.
+// Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - zwei
+// mögliche Ausgänge, gleiches Wrapper-Muster für Ordner und Dokumente:
+// sofort ausgeführt, oder per Vier-Augen-Prinzip zurückgestellt (Aktionstyp
+// `folder.delete`/`document.delete`, unabhängig von der bereits
+// bestehenden retentionsgetriggerten Zwangslöschung).
+export interface FolderTrashResult {
+  status: "trashed" | "pending_approval";
+  folder: Folder | null;
+  approval_request_id: string | null;
+}
+
 export async function trashFolder(
   token: string,
   folderId: string,
   deletedBy: string
-): Promise<Folder> {
+): Promise<FolderTrashResult> {
   const response = await request(
     "folder-service",
     `folders/${encodeURIComponent(folderId)}/trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted_by: deletedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface DocumentTrashResult {
+  status: "trashed" | "pending_approval";
+  document: DocumentSummary | null;
+  approval_request_id: string | null;
+}
+
+export async function trashDocument(
+  token: string,
+  documentId: string,
+  deletedBy: string
+): Promise<DocumentTrashResult> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/trash`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -879,5 +911,91 @@ export interface MaintenanceMode {
 
 export async function getMaintenanceStatus(token: string): Promise<MaintenanceMode> {
   const response = await request("permission-service", "maintenance-mode", {}, token);
+  return response.json();
+}
+
+// Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - generischer
+// Vier-Augen-Mechanismus des Permission Service (4.3, seit P6-S4), hier zum
+// ersten Mal von der User-UI selbst genutzt (bisher nur `document.force_
+// unlock`/`document.force_delete`/`folder.force_delete`, ohne jede UI).
+export interface ApprovalConfig {
+  action_type: string;
+  requires_approval: boolean;
+  required_permission: string | null;
+  updated_at: string;
+}
+
+export async function getApprovalConfig(token: string, actionType: string): Promise<ApprovalConfig> {
+  const response = await request(
+    "permission-service",
+    `approval-config/${encodeURIComponent(actionType)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export interface ApprovalRequest {
+  id: string;
+  action_type: string;
+  initiated_by: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "approved" | "rejected";
+  approved_by: string | null;
+  rejected_by: string | null;
+  reason: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export async function listApprovalRequests(
+  token: string,
+  params: { actionType: string; status?: string }
+): Promise<ApprovalRequest[]> {
+  const query = new URLSearchParams({ action_type: params.actionType });
+  if (params.status) query.set("status", params.status);
+  const response = await request(
+    "permission-service",
+    `approval-requests?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function approveApprovalRequest(
+  token: string,
+  requestId: string,
+  approvedBy: string
+): Promise<ApprovalRequest> {
+  const response = await request(
+    "permission-service",
+    `approval-requests/${encodeURIComponent(requestId)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved_by: approvedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function rejectApprovalRequest(
+  token: string,
+  requestId: string,
+  rejectedBy: string,
+  reason?: string | null
+): Promise<ApprovalRequest> {
+  const response = await request(
+    "permission-service",
+    `approval-requests/${encodeURIComponent(requestId)}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rejected_by: rejectedBy, reason: reason ?? null }),
+    },
+    token
+  );
   return response.json();
 }

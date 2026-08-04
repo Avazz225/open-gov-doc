@@ -43,6 +43,19 @@ class TrashRequest(BaseModel):
     deleted_by: str
 
 
+class TrashResult(BaseModel):
+    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - zwei
+    mögliche Ausgänge, gleiches Wrapper-Muster wie `document_service.
+    ForceReleaseResult`/`TrashResult`: sofort ausgeführt, oder per
+    Vier-Augen-Prinzip (Aktionstyp `folder.delete`, unabhängig von der
+    bereits bestehenden retentionsgetriggerten `folder.force_delete`)
+    zurückgestellt."""
+
+    status: Literal["trashed", "pending_approval"]
+    folder: FolderOut | None = None
+    approval_request_id: str | None = None
+
+
 class RetentionUpdate(BaseModel):
     retention_until: datetime | None = None
     full_deletion: bool = False

@@ -17,8 +17,9 @@ def make_handler(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
     """Führt zuvor per Vier-Augen-Prinzip (4.3, P6-S4) zurückgestellte
-    Aktionen erst nach Genehmigung aus: Force-Unlock (P6-S4) und, seit
-    P7-S1, Zwangslöschung (5.2a, `document.force_delete`). Andere
+    Aktionen erst nach Genehmigung aus: Force-Unlock (P6-S4), seit P7-S1
+    Zwangslöschung (5.2a, `document.force_delete`) und seit P7-S1c
+    Löschantrag für reguläre Nutzer (5.2, `document.delete`). Andere
     Aktionstypen (z. B. Bereichssperren) gehören nicht zu diesem Service und
     werden ignoriert."""
 
@@ -29,6 +30,9 @@ def make_handler(
             await _handle_force_delete_approved(
                 session_factory, storage, governance_bypass_role, publish_event, event
             )
+            return
+        if action_type == "document.delete":
+            await _handle_delete_approved(session_factory, publish_event, event)
             return
         if action_type != "document.force_unlock":
             return
@@ -115,6 +119,41 @@ async def _handle_force_delete_approved(
                 "triggered_by": action_payload.get("triggered_by"),
             },
         )
+
+
+async def _handle_delete_approved(
+    session_factory: async_sessionmaker[AsyncSession],
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - führt
+    eine zuvor per Vier-Augen-Prinzip zurückgestellte reguläre
+    Papierkorb-Verschiebung aus, sobald sie genehmigt wurde. Identisches
+    Muster wie der `document.force_unlock`-Zweig oben, nur mit
+    `repository.delete_document` statt `force_release_lock`."""
+    action_payload = event.payload.get("payload") or {}
+    document_id = action_payload.get("document_id")
+    if not document_id:
+        logger.warning(
+            "permission.approval.approved für document.delete ohne document_id "
+            "im payload erhalten - ignoriert: %r",
+            action_payload,
+        )
+        return
+
+    async with session_factory() as session:
+        deleted_by = action_payload.get("deleted_by")
+        try:
+            await repository.delete_document(session, document_id, deleted_by=deleted_by)
+        except repository.NotFoundError:
+            logger.warning(
+                "Genehmigter Löschantrag für document_id=%r konnte nicht ausgeführt werden "
+                "(Dokument inzwischen bereits anderweitig entfernt)",
+                document_id,
+            )
+            return
+        await session.commit()
+        await publish_event("document.deleted", document_id, {"deleted_by": deleted_by})
 
 
 async def start_consuming(

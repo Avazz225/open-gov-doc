@@ -15,7 +15,7 @@
 | `GET` | `/folders/{id}/children` | Direkte Unterordner (nicht gelöschte) |
 | `PATCH` | `/folders/{id}` | Umbenennen und/oder verschieben (`parent_id`) und/oder Attribute ändern |
 | `DELETE` | `/folders/{id}` | Sofortiger Hard-Delete — 409, falls noch Unterordner vorhanden. Fallback für bereits-leere, nie-retention-behaftete Fälle; der reguläre Weg ist seit P7-S1b `POST .../trash` |
-| `POST` | `/folders/{id}/trash` | Papierkorb-Weg (5.2, seit P7-S1b) — kaskadiert über den gesamten aktiven Teilbaum |
+| `POST` | `/folders/{id}/trash` | Papierkorb-Weg (5.2, seit P7-S1b) — kaskadiert über den gesamten aktiven Teilbaum. Seit **P7-S1c** optional per Vier-Augen-Prinzip gegated (Aktionstyp `folder.delete`, Löschantrag-Workflow für reguläre Nutzer) — Response `TrashResult{status: "trashed"\|"pending_approval", folder, approval_request_id}` |
 | `POST` | `/folders/{id}/restore` | Papierkorb-Wiederherstellung inkl. kaskadierter Unterordner/Dokumente (5.2, seit P7-S1b) |
 | `PUT` | `/folders/{id}/retention` | Aufbewahrungsfrist/Zwangslöschung terminieren (5.2/5.2a, seit P7-S1b) |
 | `POST` | `/legal-holds` | Legal Hold setzen (5.2, seit P7-S1b) |
@@ -50,6 +50,10 @@ Trägt ein Folder einen `object_type_id`, wird beim Anlegen `POST /object-types/
 - **Löscherinnerung**: `folder.deletion.reminder`-Event, konsumiert von einem neuen `notification-service`-Consumer (1:1 Kopie des `document.deletion.reminder`-Consumers, nur `name` statt `title` im Payload).
 - Storage-Bezug: keiner — Ordner haben keinen eigenen Inhalt, `hard_delete_folder` ist eine reine DB-Zeilen-Entfernung (nach Aufräumen der Legal-Hold-Historie, gleiches Zwischen-Flush-Muster wie `document_service.repository.hard_delete_document`).
 
+## Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c)
+
+Eigener Aktionstyp `folder.delete`, getrennt von `folder.force_delete` — Letzteres bleibt für die retentionsgetriggerte Zwangslöschung, `folder.delete` gatet die manuelle, nutzerausgelöste `POST /folders/{id}/trash` (Gate-Prüfung direkt im Endpunkt, `TrashResult`-Wrapper). Bei Genehmigung führt ein neuer `consumer.py`-Zweig (`_handle_delete_approved`) `repository.soft_delete_folder` aus — identische Kaskade auf Unterordner/Dokumente wie beim direkten Aufruf. Keine neue Selbstgenehmigungs-Logik nötig (`permission-service` verhindert bereits generisch Initiator == Genehmiger). Siehe `docs/services/document-service.md` für die ausführliche Architekturbegründung (identisches Muster) und `docs/services/user-ui.md` für die neue Genehmigungs-Inbox.
+
 ## Struktur-Events (Vertrag mit Permission Service)
 
 Publiziert (Stream `folder`, `ensure_stream=True`) exakt den Vertrag, den der Permission Service seit P2-S2 provisorisch erwartet hatte (`docs/services/permission-service.md`):
@@ -79,7 +83,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-**67 Tests** (`test_api.py`, `test_repository.py`, `test_object_type_validation.py`, `test_events.py`, `test_retention.py`, `test_retention_actions.py`, `test_consumer.py`) — die letzten drei Dateien neu seit P7-S1b (Kaskaden-Logik gegen einen Fake-`DocumentClient`, Poll-Loop-Zweige direkt aufgerufen wie bei `document-service`, Vier-Augen-Consumer-Integration, inkl. eines Regressionstests für einen beim Live-Smoke-Test gefundenen echten Bug — siehe `PROGRESS.md`: die Nicht-leer-Prüfung vor einer Zwangslöschung hielt einen Ordner mit nur einem bereits soft-gelöschten Unterordner fälschlich für leer und crashte an der Postgres-FK-Constraint; `has_any_child_folder_row` prüft seither zusätzlich ohne `deleted_at`-Filter).
+**71 Tests** (vorher 67, 4 neu seit **P7-S1c**: `pending_approval`-Zweig von `POST /folders/{id}/trash` gegen den lokal laufenden `permission-service`, drei neue `test_consumer.py`-Tests für den `folder.delete`-Zweig) (`test_api.py`, `test_repository.py`, `test_object_type_validation.py`, `test_events.py`, `test_retention.py`, `test_retention_actions.py`, `test_consumer.py`) — die letzten drei Dateien neu seit P7-S1b (Kaskaden-Logik gegen einen Fake-`DocumentClient`, Poll-Loop-Zweige direkt aufgerufen wie bei `document-service`, Vier-Augen-Consumer-Integration, inkl. eines Regressionstests für einen beim Live-Smoke-Test gefundenen echten Bug — siehe `PROGRESS.md`: die Nicht-leer-Prüfung vor einer Zwangslöschung hielt einen Ordner mit nur einem bereits soft-gelöschten Unterordner fälschlich für leer und crashte an der Postgres-FK-Constraint; `has_any_child_folder_row` prüft seither zusätzlich ohne `deleted_at`-Filter).
 
 ## Offene Punkte
 

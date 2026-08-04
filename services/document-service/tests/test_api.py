@@ -560,6 +560,50 @@ def test_put_retention_reason_not_required_for_regular_soft_delete(client):
     )
 
 
+def test_trash_document_immediate_by_default(client):
+    """Löschantrag-Workflow (5.2, seit P7-S1c) - ohne konfigurierte
+    Genehmigungspflicht bleibt das Verhalten identisch zum bestehenden
+    `DELETE /documents/{id}`: sofortige Ausführung."""
+    document_id = upload(client).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "trashed"
+    assert result["document"]["deleted_at"] is not None
+    assert result["approval_request_id"] is None
+
+
+def test_trash_document_with_approval_required_defers_execution(client):
+    """Echte Integration gegen den lokal laufenden permission-service,
+    gleiches Muster wie `test_force_release_with_approval_required_defers_
+    execution` (4.3, P6-S4)."""
+    httpx.put(
+        f"{PERMISSION_SERVICE_URL}/approval-config/document.delete",
+        json={"requires_approval": True},
+    )
+    try:
+        document_id = upload(client).json()["id"]
+
+        response = client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "pending_approval"
+        assert result["approval_request_id"] is not None
+        assert result["document"] is None
+
+        # Dokument ist weiterhin nicht gelöscht - die tatsächliche Ausführung
+        # folgt asynchron über consumer.py (siehe test_consumer.py).
+        assert client.get(f"/documents/{document_id}").json()["deleted_at"] is None
+    finally:
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/document.delete",
+            json={"requires_approval": False},
+        )
+
+
 def test_restore_document_within_period(client):
     document_id = upload(client).json()["id"]
     client.request("DELETE", f"/documents/{document_id}?deleted_by=admin")

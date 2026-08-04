@@ -10,9 +10,11 @@ import {
   listChildFolders,
   listDocumentsInFolder,
   renameFolder as apiRenameFolder,
+  trashDocument as apiTrashDocument,
   trashFolder as apiTrashFolder,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { ApprovalsPane } from "./ApprovalsPane";
 import { ExplorerPane } from "./ExplorerPane";
 import { IconRail, type WorkspaceView } from "./IconRail";
 import { MetadataPanel } from "./MetadataPanel";
@@ -172,17 +174,34 @@ export function DocumentWorkspace() {
     }
   }
 
-  async function handleDeleteFolder(folderId: string): Promise<boolean> {
+  async function handleDeleteFolder(folderId: string): Promise<"trashed" | "pending_approval" | false> {
     if (!accessToken) return false;
     try {
       // Seit P7-S1b: regulärer Papierkorb-Weg statt sofortigem Hard-Delete
       // (kaskadiert über Unterordner + enthaltene Dokumente, siehe
-      // docs/services/folder-service.md).
-      await apiTrashFolder(accessToken, folderId, user?.username ?? "");
-      await load(currentFolder.id);
-      return true;
+      // docs/services/folder-service.md). Seit P7-S1c optional per
+      // Vier-Augen-Prinzip zurückgestellt (`document.delete`/`folder.
+      // delete`, siehe ExplorerPane) - nur bei sofortiger Ausführung neu
+      // laden, ein Löschantrag ändert an der Liste noch nichts.
+      const result = await apiTrashFolder(accessToken, folderId, user?.username ?? "");
+      if (result.status === "trashed") await load(currentFolder.id);
+      return result.status;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("explorer.deleteFolderError"));
+      return false;
+    }
+  }
+
+  async function handleDeleteDocument(
+    documentId: string
+  ): Promise<"trashed" | "pending_approval" | false> {
+    if (!accessToken) return false;
+    try {
+      const result = await apiTrashDocument(accessToken, documentId, user?.username ?? "");
+      if (result.status === "trashed") await load(currentFolder.id);
+      return result.status;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("explorer.deleteDocumentError"));
       return false;
     }
   }
@@ -240,6 +259,7 @@ export function DocumentWorkspace() {
                   onCreateFolder={handleCreateFolder}
                   onRenameFolder={handleRenameFolder}
                   onDeleteFolder={handleDeleteFolder}
+                  onDeleteDocument={handleDeleteDocument}
                   token={accessToken ?? ""}
                   createdBy={user?.username ?? ""}
                   currentFolderId={currentFolder.id}
@@ -253,8 +273,10 @@ export function DocumentWorkspace() {
                 />
                 <MetadataPanel document={activeDocument} onSaved={handleMetadataSaved} />
               </>
-            ) : (
+            ) : view === "search" ? (
               <SearchPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
+            ) : (
+              <ApprovalsPane token={accessToken ?? ""} currentUsername={user?.username ?? ""} />
             )}
           </div>
           <Splitter

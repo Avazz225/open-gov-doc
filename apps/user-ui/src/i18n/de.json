@@ -49,6 +49,7 @@
     "label": "Cross-Cutting-Navigation",
     "documents": "Dokumente",
     "search": "Suche",
+    "approvals": "Genehmigungen",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -91,7 +92,15 @@
     "trashRestoreFolderError": "Ordner konnte nicht wiederhergestellt werden (Frist ggf. abgelaufen)",
     "restoreDocument": "Wiederherstellen",
     "restoreFolder": "Wiederherstellen",
-    "folderRetention": "Aufbewahrung für {name}"
+    "folderRetention": "Aufbewahrung für {name}",
+    "requestDeleteFolder": "Löschung für \"{name}\" beantragen",
+    "confirmRequestDeleteFolder": "Löschung für Ordner \"{name}\" beantragen? Eine zweite Person muss zustimmen.",
+    "deleteDocument": "\"{name}\" löschen",
+    "requestDeleteDocument": "Löschung für \"{name}\" beantragen",
+    "confirmDeleteDocument": "Dokument \"{name}\" wirklich löschen?",
+    "confirmRequestDeleteDocument": "Löschung für Dokument \"{name}\" beantragen? Eine zweite Person muss zustimmen.",
+    "deleteDocumentError": "Dokument konnte nicht gelöscht werden",
+    "deleteRequestPending": "Löschantrag gestellt - wartet auf Genehmigung durch eine zweite Person."
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -142,6 +151,20 @@
   },
   "folderRetention": {
     "heading": "Aufbewahrung & Löschung: {name}"
+  },
+  "approvals": {
+    "paneLabel": "Genehmigungen",
+    "heading": "Offene Löschanträge",
+    "hint": "Vier-Augen-Prinzip für Löschanträge (5.2, seit P7-S1c) - die genehmigende Person darf nicht mit der antragstellenden Person identisch sein.",
+    "empty": "Keine offenen Löschanträge.",
+    "loadError": "Löschanträge konnten nicht geladen werden",
+    "decisionError": "Entscheidung konnte nicht gespeichert werden",
+    "typeDocument": "Dokument",
+    "typeFolder": "Ordner",
+    "requestedBy": "beantragt von {name}",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "cannotApproveOwn": "Eigene Anträge können nicht selbst genehmigt werden"
   },
   "preview": {
     "paneLabel": "Vorschau",

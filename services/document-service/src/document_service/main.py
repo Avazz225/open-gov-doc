@@ -56,6 +56,8 @@ from document_service.schemas import (
     RetentionUpdate,
     TrashConfigIn,
     TrashConfigOut,
+    TrashRequest,
+    TrashResult,
     UploadConfigIn,
     UploadConfigOut,
 )
@@ -688,6 +690,43 @@ async def delete_document(
     await session.commit()
     await publish_event("document.deleted", subject=document_id, payload={"deleted_by": deleted_by})
     return document
+
+
+@app.post("/documents/{document_id}/trash", response_model=TrashResult)
+async def trash_document(
+    document_id: str, payload: TrashRequest, session: AsyncSession = Depends(get_session)
+) -> TrashResult:
+    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - optional
+    per generischem Vier-Augen-Mechanismus gegated (4.3, Aktionstyp
+    `document.delete`, unabhängig von der bereits bestehenden
+    retentionsgetriggerten `document.force_delete`): ist `document.delete`
+    genehmigungspflichtig konfiguriert, wird NICHT sofort gelöscht, sondern
+    ein Freigabe-Request angelegt - die eigentliche Ausführung folgt erst
+    über `consumer.py`, sobald `permission.approval.approved` eintrifft. Per
+    Default (keine Konfiguration) bleibt das Verhalten unverändert: sofortige
+    Ausführung, exaktes Muster wie `force_release_lock` (4.2, P6-S4). Neben
+    dem bestehenden `DELETE /documents/{id}` - dieser Endpunkt bleibt
+    unverändert als ungegateter Weg bestehen, da bislang kein Frontend ihn
+    überhaupt aufruft."""
+    if await app.state.approval_client.requires_approval("document.delete"):
+        request = await app.state.approval_client.create_request(
+            action_type="document.delete",
+            initiated_by=payload.deleted_by,
+            payload={"document_id": document_id, "deleted_by": payload.deleted_by},
+        )
+        return TrashResult(status="pending_approval", approval_request_id=request["id"])
+
+    try:
+        document = await repository.delete_document(
+            session, document_id, deleted_by=payload.deleted_by
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.deleted", subject=document_id, payload={"deleted_by": payload.deleted_by}
+    )
+    return TrashResult(status="trashed", document=document)
 
 
 @app.post("/documents/{document_id}/restore", response_model=DocumentOut)

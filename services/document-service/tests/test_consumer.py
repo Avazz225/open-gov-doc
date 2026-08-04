@@ -262,3 +262,100 @@ async def test_approved_force_delete_for_already_removed_document_is_logged_not_
     await handler(event.to_bytes())  # darf nicht raisen
 
     assert published == []
+
+
+async def test_approved_delete_soft_deletes_document(engine):
+    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) -
+    Genehmigung führt die zuvor per Vier-Augen-Prinzip zurückgestellte
+    reguläre Papierkorb-Verschiebung tatsächlich aus."""
+    session_factory = _session_factory(engine)
+    document_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        await repository.create_document(
+            session,
+            document_id=document_id,
+            title="Vertrag",
+            filename="vertrag.pdf",
+            content_type="application/pdf",
+            size_bytes=3,
+            checksum_sha256="abc",
+            storage_object_key=f"documents/{document_id}/abc",
+            folder_id=None,
+            object_type_id=None,
+            attributes={},
+            created_by="alice",
+        )
+        await session.commit()
+
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-7",
+            "action_type": "document.delete",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {"document_id": document_id, "deleted_by": "alice"},
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        document = await repository.get_document(session, document_id)
+        assert document.deleted_at is not None
+    assert published == [("document.deleted", document_id, {"deleted_by": "alice"})]
+
+
+async def test_approved_delete_for_already_removed_document_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-8",
+            "action_type": "document.delete",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {"document_id": "does-not-exist", "deleted_by": "alice"},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []
+
+
+async def test_approved_delete_without_document_id_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-9",
+            "action_type": "document.delete",
+            "initiated_by": "alice",
+            "approved_by": "bob",
+            "payload": {"x": 1},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []

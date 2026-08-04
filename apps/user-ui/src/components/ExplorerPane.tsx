@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
+  getApprovalConfig,
   getKennzeichenConfig,
   listDeletedDocuments,
   listDeletedFolders,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/api";
 import { folderIcon } from "@/lib/icons";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FolderRetentionModal } from "./FolderRetentionModal";
 import { FolderTree } from "./FolderTree";
 import { UploadForm } from "./UploadForm";
@@ -55,6 +57,7 @@ export function ExplorerPane({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onDeleteDocument,
   token,
   createdBy,
   currentFolderId,
@@ -75,7 +78,8 @@ export function ExplorerPane({
   onCloseTab: (id: string) => void;
   onCreateFolder: (name: string, objectTypeId?: number) => Promise<boolean>;
   onRenameFolder: (folderId: string, name: string) => Promise<boolean>;
-  onDeleteFolder: (folderId: string) => Promise<boolean>;
+  onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
+  onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
   createdBy: string;
   currentFolderId: string;
@@ -99,6 +103,12 @@ export function ExplorerPane({
   const [isTrashLoading, setIsTrashLoading] = useState(false);
   const [trashError, setTrashError] = useState<string | null>(null);
   const [retentionModalFolder, setRetentionModalFolder] = useState<Folder | null>(null);
+  const [folderDeleteRequiresApproval, setFolderDeleteRequiresApproval] = useState(false);
+  const [documentDeleteRequiresApproval, setDocumentDeleteRequiresApproval] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(
+    null
+  );
 
   // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
   // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
@@ -126,6 +136,23 @@ export function ExplorerPane({
       .catch(() => {});
     getKennzeichenConfig(token)
       .then((config) => setKennzeichenShowByDefault(config.show_before_filename))
+      .catch(() => {});
+  }, [token]);
+
+  // Löschantrag-Workflow (5.2, seit P7-S1c): einmalig geladen, ob die
+  // reguläre Papierkorb-Aktion per Vier-Augen-Prinzip genehmigungspflichtig
+  // konfiguriert ist - bestimmt nur die Beschriftung ("Löschen" vs.
+  // "Löschung beantragen"), die eigentliche Durchsetzung passiert serverseitig
+  // in document-service/folder-service unabhängig davon. Bei Fehlschlag
+  // (z. B. permission-service nicht erreichbar) bleibt der sichere Default
+  // "false" - identisches Fallback-Prinzip wie bei den Klassen-Icons oben.
+  useEffect(() => {
+    if (!token) return;
+    getApprovalConfig(token, "folder.delete")
+      .then((config) => setFolderDeleteRequiresApproval(config.requires_approval))
+      .catch(() => {});
+    getApprovalConfig(token, "document.delete")
+      .then((config) => setDocumentDeleteRequiresApproval(config.requires_approval))
       .catch(() => {});
   }, [token]);
 
@@ -206,8 +233,60 @@ export function ExplorerPane({
   }
 
   async function handleDelete(folder: Folder) {
-    if (!window.confirm(t("explorer.confirmDeleteFolder", { name: folder.name }))) return;
-    await onDeleteFolder(folder.id);
+    const confirmText = folderDeleteRequiresApproval
+      ? t("explorer.confirmRequestDeleteFolder", { name: folder.name })
+      : t("explorer.confirmDeleteFolder", { name: folder.name });
+    if (!window.confirm(confirmText)) return;
+    setDeleteMessage(null);
+    const result = await onDeleteFolder(folder.id);
+    if (result === "pending_approval") setDeleteMessage(t("explorer.deleteRequestPending"));
+  }
+
+  async function handleDeleteDocument(doc: DocumentSummary) {
+    const confirmText = documentDeleteRequiresApproval
+      ? t("explorer.confirmRequestDeleteDocument", {
+          name: formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault),
+        })
+      : t("explorer.confirmDeleteDocument", {
+          name: formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault),
+        });
+    if (!window.confirm(confirmText)) return;
+    setDeleteMessage(null);
+    const result = await onDeleteDocument(doc.id);
+    if (result === "pending_approval") setDeleteMessage(t("explorer.deleteRequestPending"));
+  }
+
+  function openFolderContextMenu(event: ReactMouseEvent, folder: Folder) {
+    event.preventDefault();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: folderDeleteRequiresApproval
+            ? t("explorer.requestDeleteFolder", { name: folder.name })
+            : t("explorer.deleteFolder", { name: folder.name }),
+          onSelect: () => handleDelete(folder),
+        },
+      ],
+    });
+  }
+
+  function openDocumentContextMenu(event: ReactMouseEvent, doc: DocumentSummary) {
+    event.preventDefault();
+    const name = formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault);
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: documentDeleteRequiresApproval
+            ? t("explorer.requestDeleteDocument", { name })
+            : t("explorer.deleteDocument", { name }),
+          onSelect: () => handleDeleteDocument(doc),
+        },
+      ],
+    });
   }
 
   return (
@@ -334,6 +413,8 @@ export function ExplorerPane({
         </p>
       )}
 
+      {deleteMessage && <p className="hint">{deleteMessage}</p>}
+
       {showTrash ? (
         <>
           {trashError && (
@@ -396,7 +477,11 @@ export function ExplorerPane({
           )}
           <ul className="entry-list">
             {folders.map((folder) => (
-              <li className="entry-row" key={folder.id}>
+              <li
+                className="entry-row"
+                key={folder.id}
+                onContextMenu={(e) => openFolderContextMenu(e, folder)}
+              >
                 {renamingFolderId === folder.id ? (
                   <form
                     className="inline-form"
@@ -440,20 +525,17 @@ export function ExplorerPane({
                       >
                         🕒
                       </button>
-                      <button
-                        type="button"
-                        aria-label={t("explorer.deleteFolder", { name: folder.name })}
-                        onClick={() => handleDelete(folder)}
-                      >
-                        🗑
-                      </button>
                     </span>
                   </>
                 )}
               </li>
             ))}
             {documents.map((doc) => (
-              <li className="entry-row" key={doc.id}>
+              <li
+                className="entry-row"
+                key={doc.id}
+                onContextMenu={(e) => openDocumentContextMenu(e, doc)}
+              >
                 <button
                   type="button"
                   className="entry-name"
@@ -471,6 +553,15 @@ export function ExplorerPane({
         <FolderRetentionModal
           folder={retentionModalFolder}
           onClose={() => setRetentionModalFolder(null)}
+        />
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </section>
