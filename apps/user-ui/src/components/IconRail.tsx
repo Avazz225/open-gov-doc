@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useI18n } from "@/i18n";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
-export type WorkspaceView = "documents" | "search" | "approvals";
+export type WorkspaceView = "documents" | "search" | "approvals" | "favorites";
 
 // Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
 // Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
@@ -49,6 +49,15 @@ export function IconRail({
         onClick={() => onSelectView("approvals")}
       >
         <span aria-hidden="true">✅</span>
+      </button>
+      <button
+        type="button"
+        className={`icon-rail-button${activeView === "favorites" ? " icon-rail-active" : ""}`}
+        title={t("iconRail.favorites")}
+        aria-current={activeView === "favorites" ? "page" : undefined}
+        onClick={() => onSelectView("favorites")}
+      >
+        <span aria-hidden="true">⭐</span>
       </button>
       <div className="icon-rail-settings">
         <button

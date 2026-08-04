@@ -50,6 +50,7 @@
     "documents": "Dokumente",
     "search": "Suche",
     "approvals": "Genehmigungen",
+    "favorites": "Favoriten",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -100,7 +101,10 @@
     "confirmDeleteDocument": "Dokument \"{name}\" wirklich löschen?",
     "confirmRequestDeleteDocument": "Löschung für Dokument \"{name}\" beantragen? Eine zweite Person muss zustimmen.",
     "deleteDocumentError": "Dokument konnte nicht gelöscht werden",
-    "deleteRequestPending": "Löschantrag gestellt - wartet auf Genehmigung durch eine zweite Person."
+    "deleteRequestPending": "Löschantrag gestellt - wartet auf Genehmigung durch eine zweite Person.",
+    "addFavorite": "\"{name}\" zu Favoriten hinzufügen",
+    "removeFavorite": "\"{name}\" aus Favoriten entfernen",
+    "favoriteError": "Favorit konnte nicht geändert werden"
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -165,6 +169,19 @@
     "approve": "Genehmigen",
     "reject": "Ablehnen",
     "cannotApproveOwn": "Eigene Anträge können nicht selbst genehmigt werden"
+  },
+  "favorites": {
+    "paneLabel": "Favoriten",
+    "heading": "Favoriten/Merkliste",
+    "hint": "Schnelles Wiederfinden häufig gebrauchter Dokumente und Ordner (seit P7-S1d).",
+    "empty": "Noch keine Favoriten.",
+    "loadError": "Favoriten konnten nicht geladen werden",
+    "removeError": "Favorit konnte nicht entfernt werden",
+    "typeDocument": "Dokument",
+    "typeFolder": "Ordner",
+    "unresolvedName": "(nicht mehr verfügbar)",
+    "open": "Öffnen",
+    "remove": "Entfernen"
   },
   "preview": {
     "paneLabel": "Vorschau",

@@ -30,7 +30,9 @@ class Settings(BaseServiceSettings):
     # einzelner *während* der Aktivierung durchgeführter Fremdaktionen).
     # "signature.>" kam in P6-S7 dazu - elektronische Signaturen (3.10) sind
     # kryptografisch an eine konkrete Dokumentversion gebunden und damit
-    # ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung.
+    # ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung. "favorite.>"
+    # kam in P7-S1d dazu - Favoriten-Änderungen sollen wie jede andere
+    # Nutzeraktion im Audit-Trail nachvollziehbar bleiben.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -43,4 +45,5 @@ class Settings(BaseServiceSettings):
         "case.>",
         "auth.>",
         "signature.>",
+        "favorite.>",
     ]

@@ -51,6 +51,29 @@ describe("ContextMenu", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("supports multiple independent items (seit P7-S1d, Favoriten-Eintrag neben Löschen)", () => {
+    const onSelectDelete = vi.fn();
+    const onSelectFavorite = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        items={[
+          { label: "Löschen", onSelect: onSelectDelete },
+          { label: "Zu Favoriten hinzufügen", onSelect: onSelectFavorite },
+        ]}
+        onClose={onClose}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Zu Favoriten hinzufügen"));
+
+    expect(onSelectFavorite).toHaveBeenCalled();
+    expect(onSelectDelete).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("closes on Escape", () => {
     const onClose = vi.fn();
     render(<ContextMenu x={0} y={0} items={[{ label: "Löschen", onSelect: vi.fn() }]} onClose={onClose} />);

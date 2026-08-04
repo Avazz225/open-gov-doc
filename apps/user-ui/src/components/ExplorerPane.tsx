@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
+  addFavorite,
   getApprovalConfig,
   getKennzeichenConfig,
   listDeletedDocuments,
   listDeletedFolders,
+  listFavorites,
   listObjectTypes,
+  removeFavorite,
   restoreDocument,
   restoreFolder,
   type DocumentSummary,
@@ -109,6 +112,8 @@ export function ExplorerPane({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(
     null
   );
+  const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
 
   // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
   // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
@@ -155,6 +160,41 @@ export function ExplorerPane({
       .then((config) => setDocumentDeleteRequiresApproval(config.requires_approval))
       .catch(() => {});
   }, [token]);
+
+  // Favoriten/Merkliste (schnelles Wiederfinden, seit P7-S1d): einmalig alle
+  // Favoriten des aktuellen Nutzers laden (beide Objekttypen in einem Aufruf,
+  // `favorite-service` filtert nicht standardmäßig nach Typ), als
+  // "type:id"-Set für O(1)-Mitgliedschaftsprüfung im Kontextmenü/⭐-Präfix.
+  // Nach jeder Änderung neu geladen statt optimistisch aktualisiert, gleiches
+  // "Quelle der Wahrheit bleibt der Server"-Prinzip wie beim Papierkorb.
+  const reloadFavorites = useCallback(() => {
+    if (!token || !createdBy) return;
+    listFavorites(token, createdBy)
+      .then((favorites) =>
+        setFavoriteKeys(new Set(favorites.map((f) => `${f.object_type}:${f.object_id}`)))
+      )
+      .catch(() => {});
+  }, [token, createdBy]);
+
+  useEffect(() => {
+    reloadFavorites();
+  }, [reloadFavorites]);
+
+  async function toggleFavorite(objectType: "document" | "folder", objectId: string) {
+    if (!token || !createdBy) return;
+    setFavoriteError(null);
+    const key = `${objectType}:${objectId}`;
+    try {
+      if (favoriteKeys.has(key)) {
+        await removeFavorite(token, { user_id: createdBy, object_type: objectType, object_id: objectId });
+      } else {
+        await addFavorite(token, { user_id: createdBy, object_type: objectType, object_id: objectId });
+      }
+      reloadFavorites();
+    } catch {
+      setFavoriteError(t("explorer.favoriteError"));
+    }
+  }
 
   // Papierkorb-Umschalter (5.2, seit P7-S1, um Ordner erweitert seit
   // P7-S1b) - bewusst minimal: nur der aktuelle Ordner, keine eigene
@@ -258,6 +298,7 @@ export function ExplorerPane({
 
   function openFolderContextMenu(event: ReactMouseEvent, folder: Folder) {
     event.preventDefault();
+    const isFavorite = favoriteKeys.has(`folder:${folder.id}`);
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -268,6 +309,12 @@ export function ExplorerPane({
             : t("explorer.deleteFolder", { name: folder.name }),
           onSelect: () => handleDelete(folder),
         },
+        {
+          label: isFavorite
+            ? t("explorer.removeFavorite", { name: folder.name })
+            : t("explorer.addFavorite", { name: folder.name }),
+          onSelect: () => toggleFavorite("folder", folder.id),
+        },
       ],
     });
   }
@@ -275,6 +322,7 @@ export function ExplorerPane({
   function openDocumentContextMenu(event: ReactMouseEvent, doc: DocumentSummary) {
     event.preventDefault();
     const name = formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault);
+    const isFavorite = favoriteKeys.has(`document:${doc.id}`);
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -284,6 +332,10 @@ export function ExplorerPane({
             ? t("explorer.requestDeleteDocument", { name })
             : t("explorer.deleteDocument", { name }),
           onSelect: () => handleDeleteDocument(doc),
+        },
+        {
+          label: isFavorite ? t("explorer.removeFavorite", { name }) : t("explorer.addFavorite", { name }),
+          onSelect: () => toggleFavorite("document", doc.id),
         },
       ],
     });
@@ -415,6 +467,12 @@ export function ExplorerPane({
 
       {deleteMessage && <p className="hint">{deleteMessage}</p>}
 
+      {favoriteError && (
+        <p className="error-text" role="alert">
+          {favoriteError}
+        </p>
+      )}
+
       {showTrash ? (
         <>
           {trashError && (
@@ -505,6 +563,7 @@ export function ExplorerPane({
                       className="entry-name"
                       onClick={() => onOpenFolder(folder)}
                     >
+                      {favoriteKeys.has(`folder:${folder.id}`) && "⭐ "}
                       {folderIcon(
                         folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null
                       )}{" "}
@@ -541,6 +600,7 @@ export function ExplorerPane({
                   className="entry-name"
                   onClick={() => onOpenDocument(doc)}
                 >
+                  {favoriteKeys.has(`document:${doc.id}`) && "⭐ "}
                   📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
                 </button>
               </li>

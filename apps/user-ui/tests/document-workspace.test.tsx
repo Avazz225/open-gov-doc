@@ -54,6 +54,11 @@ const getApprovalConfigMock = vi.fn();
 const listApprovalRequestsMock = vi.fn();
 const approveApprovalRequestMock = vi.fn();
 const rejectApprovalRequestMock = vi.fn();
+const listFavoritesMock = vi.fn();
+const addFavoriteMock = vi.fn();
+const removeFavoriteMock = vi.fn();
+const getDocumentMock = vi.fn();
+const getFolderMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -75,6 +80,11 @@ vi.mock("@/lib/api", () => ({
   listApprovalRequests: (...args: unknown[]) => listApprovalRequestsMock(...args),
   approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
   rejectApprovalRequest: (...args: unknown[]) => rejectApprovalRequestMock(...args),
+  listFavorites: (...args: unknown[]) => listFavoritesMock(...args),
+  addFavorite: (...args: unknown[]) => addFavoriteMock(...args),
+  removeFavorite: (...args: unknown[]) => removeFavoriteMock(...args),
+  getDocument: (...args: unknown[]) => getDocumentMock(...args),
+  getFolder: (...args: unknown[]) => getFolderMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
@@ -189,6 +199,12 @@ describe("DocumentWorkspace", () => {
     listApprovalRequestsMock.mockResolvedValue([]);
     approveApprovalRequestMock.mockReset();
     rejectApprovalRequestMock.mockReset();
+    listFavoritesMock.mockReset();
+    listFavoritesMock.mockResolvedValue([]);
+    addFavoriteMock.mockReset();
+    removeFavoriteMock.mockReset();
+    getDocumentMock.mockReset();
+    getFolderMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {
@@ -729,6 +745,77 @@ describe("DocumentWorkspace", () => {
     await waitFor(() =>
       expect(trashDocumentMock).toHaveBeenCalledWith("token-123", "d1", "alice")
     );
+  });
+
+  it("adds a document to favorites via the context menu, showing the ⭐ marker (seit P7-S1d)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listFavoritesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "fav-1",
+          user_id: "alice",
+          object_type: "document",
+          object_id: "d1",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+    addFavoriteMock.mockResolvedValue({});
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const documentButton = await screen.findByText(/Rechnung.pdf/);
+    fireEvent.contextMenu(documentButton.closest("li")!);
+    await user.click(await screen.findByText('"Rechnung.pdf" zu Favoriten hinzufügen'));
+
+    await waitFor(() =>
+      expect(addFavoriteMock).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "document",
+        object_id: "d1",
+      })
+    );
+    await waitFor(() => {
+      const button = screen.getByText(/Rechnung\.pdf/).closest("button");
+      expect(button?.textContent).toContain("⭐");
+    });
+  });
+
+  it("opens a favorited folder from the Favoriten view and rebuilds the breadcrumb (seit P7-S1d)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    listFavoritesMock.mockResolvedValue([
+      {
+        id: "fav-1",
+        user_id: "alice",
+        object_type: "folder",
+        object_id: "b",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    getFolderMock.mockImplementation(async (_token: string, folderId: string) => {
+      if (folderId === "b") {
+        return { id: "b", name: "B", parent_id: "a", object_type_id: null, attributes: {} };
+      }
+      if (folderId === "a") {
+        return { id: "a", name: "A", parent_id: "root", object_type_id: null, attributes: {} };
+      }
+      throw new Error(`unexpected folder id ${folderId}`);
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(screen.getByTitle("Favoriten"));
+    await user.click(await screen.findByText(/B/));
+    await user.click(screen.getByText("Öffnen"));
+
+    const breadcrumbs = await screen.findByLabelText("Ordnerpfad");
+    expect(within(breadcrumbs).getByText("Start")).toBeInTheDocument();
+    expect(within(breadcrumbs).getByText("A")).toBeInTheDocument();
+    expect(within(breadcrumbs).getByText("B")).toBeInTheDocument();
   });
 
   it("shows the trash toggle and restores a deleted document (5.2, seit P7-S1)", async () => {

@@ -999,3 +999,69 @@ export async function rejectApprovalRequest(
   );
   return response.json();
 }
+
+// Einzelabruf (seit P7-S1d) - beide Endpunkte existieren bereits seit
+// langem, nur bislang keine Frontend-Funktion dafür. Werden von
+// `FavoritesPane`/dem Favoriten-Öffnen-Pfad gebraucht, um Anzeigenamen bzw.
+// (bei Ordnern) die Eltern-Kette bis zur Wurzel aufzulösen.
+export async function getDocument(token: string, documentId: string): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function getFolder(token: string, folderId: string): Promise<Folder> {
+  const response = await request("folder-service", `folders/${encodeURIComponent(folderId)}`, {}, token);
+  return response.json();
+}
+
+// Favoriten/Merkliste (schnelles Wiederfinden, seit P7-S1d) - neuer, bewusst
+// entkoppelter `favorite-service` ohne referenzielle Prüfung gegen
+// document-/folder-service (siehe docs/services/favorite-service.md).
+export interface Favorite {
+  id: string;
+  user_id: string;
+  object_type: "document" | "folder";
+  object_id: string;
+  created_at: string;
+}
+
+export async function listFavorites(
+  token: string,
+  userId: string,
+  objectType?: "document" | "folder"
+): Promise<Favorite[]> {
+  const query = new URLSearchParams({ user_id: userId });
+  if (objectType) query.set("object_type", objectType);
+  const response = await request("favorite-service", `favorites?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+export async function addFavorite(
+  token: string,
+  params: { user_id: string; object_type: "document" | "folder"; object_id: string }
+): Promise<Favorite> {
+  const response = await request(
+    "favorite-service",
+    "favorites",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function removeFavorite(
+  token: string,
+  params: { user_id: string; object_type: "document" | "folder"; object_id: string }
+): Promise<void> {
+  const query = new URLSearchParams(params);
+  await request("favorite-service", `favorites?${query.toString()}`, { method: "DELETE" }, token);
+}

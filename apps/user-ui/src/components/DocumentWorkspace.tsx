@@ -7,6 +7,7 @@ import {
   type DocumentSummary,
   type Folder,
   createFolder as apiCreateFolder,
+  getFolder as apiGetFolder,
   listChildFolders,
   listDocumentsInFolder,
   renameFolder as apiRenameFolder,
@@ -16,6 +17,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { ApprovalsPane } from "./ApprovalsPane";
 import { ExplorerPane } from "./ExplorerPane";
+import { FavoritesPane } from "./FavoritesPane";
 import { IconRail, type WorkspaceView } from "./IconRail";
 import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
@@ -206,6 +208,34 @@ export function DocumentWorkspace() {
     }
   }
 
+  // "Öffnen" aus der Favoriten-Merkliste (schnelles Wiederfinden, seit
+  // P7-S1d). Dokument: `openDocumentTab` ist bereits unabhängig vom aktuell
+  // angezeigten Ordner, keine Navigation nötig. Ordner: läuft die
+  // `parent_id`-Kette clientseitig über den bestehenden `GET /folders/{id}`
+  // bis zur Wurzel (`"root"`) hoch, um den vollständigen Breadcrumb-Pfad für
+  // `navigateToFolder` (P5b-S4) zu rekonstruieren - kein neuer
+  // Backend-Endpunkt dafür nötig.
+  function handleOpenFavoriteDocument(doc: DocumentSummary) {
+    openDocumentTab(doc);
+    setView("documents");
+  }
+
+  async function handleOpenFavoriteFolder(folder: Folder) {
+    if (!accessToken) return;
+    const path: Folder[] = [folder];
+    let current = folder;
+    while (current.parent_id && current.parent_id !== "root") {
+      try {
+        current = await apiGetFolder(accessToken, current.parent_id);
+        path.unshift(current);
+      } catch {
+        break;
+      }
+    }
+    navigateToFolder(path);
+    setView("documents");
+  }
+
   function handleVerticalResize(offsetPx: number) {
     const rect = outerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -275,8 +305,15 @@ export function DocumentWorkspace() {
               </>
             ) : view === "search" ? (
               <SearchPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
-            ) : (
+            ) : view === "approvals" ? (
               <ApprovalsPane token={accessToken ?? ""} currentUsername={user?.username ?? ""} />
+            ) : (
+              <FavoritesPane
+                token={accessToken ?? ""}
+                currentUsername={user?.username ?? ""}
+                onOpenDocument={handleOpenFavoriteDocument}
+                onOpenFolder={handleOpenFavoriteFolder}
+              />
             )}
           </div>
           <Splitter
