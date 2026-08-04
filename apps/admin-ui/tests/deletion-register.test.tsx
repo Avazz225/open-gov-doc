@@ -12,9 +12,11 @@ function renderDeletionRegister() {
 }
 
 const listDeletionRegisterMock = vi.fn();
+const listFolderDeletionRegisterMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listDeletionRegister: (...args: unknown[]) => listDeletionRegisterMock(...args),
+  listFolderDeletionRegister: (...args: unknown[]) => listFolderDeletionRegisterMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -42,6 +44,8 @@ vi.mock("@/lib/auth-context", async () => {
 describe("DeletionRegister", () => {
   beforeEach(() => {
     listDeletionRegisterMock.mockReset();
+    listFolderDeletionRegisterMock.mockReset();
+    listFolderDeletionRegisterMock.mockResolvedValue([]);
   });
 
   it("shows an empty-state message when there are no entries", async () => {
@@ -52,7 +56,7 @@ describe("DeletionRegister", () => {
     expect(await screen.findByText("Noch keine Einträge.")).toBeInTheDocument();
   });
 
-  it("lists entries with resolved trigger labels", async () => {
+  it("lists document and folder entries together with resolved trigger labels", async () => {
     listDeletionRegisterMock.mockResolvedValue([
       {
         id: "reg-1",
@@ -71,14 +75,28 @@ describe("DeletionRegister", () => {
         occurred_at: "2026-01-02T00:00:00Z",
       },
     ]);
+    listFolderDeletionRegisterMock.mockResolvedValue([
+      {
+        id: "reg-3",
+        folder_id: "folder-1",
+        trigger: "forced_deletion",
+        reason: "Aufgeräumt",
+        triggered_by: "bob",
+        occurred_at: "2026-01-03T00:00:00Z",
+      },
+    ]);
 
     renderDeletionRegister();
 
     expect(await screen.findByText("doc-1")).toBeInTheDocument();
-    expect(screen.getByText("Zwangslöschung")).toBeInTheDocument();
+    expect(screen.getAllByText("Zwangslöschung")).toHaveLength(2);
     expect(screen.getByText("Aufbewahrungsfrist abgelaufen")).toBeInTheDocument();
     expect(screen.getByText("doc-2")).toBeInTheDocument();
     expect(screen.getByText("Papierkorb-Frist abgelaufen")).toBeInTheDocument();
+    expect(screen.getByText("folder-1")).toBeInTheDocument();
+    expect(screen.getByText("Aufgeräumt")).toBeInTheDocument();
+    expect(screen.getAllByText("Dokument")).toHaveLength(2);
+    expect(screen.getByText("Ordner")).toBeInTheDocument();
   });
 
   it("shows an unreachable state when document-service is not reachable", async () => {

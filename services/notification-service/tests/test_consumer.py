@@ -162,6 +162,41 @@ async def test_federation_inbound_received_without_notify_email_creates_only_in_
     assert len(published) == 1
 
 
+async def test_folder_deletion_reminder_with_notify_email_creates_in_app_and_email(
+    engine, settings
+):
+    """1:1 dasselbe Muster wie `document.deletion.reminder` (P7-S1), hier für
+    `folder.deletion.reminder` (5.2a, P7-S1b)."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="folder.deletion.reminder",
+        service_name="folder-service",
+        subject="folder-1",
+        payload={
+            "name": "Projektakte",
+            "retention_until": "2030-01-01T00:00:00+00:00",
+            "full_deletion": True,
+            "notify_email": "records@example.com",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert {n.channel for n in notifications} == {"in_app", "email"}
+    email = next(n for n in notifications if n.channel == "email")
+    assert email.recipient == "records@example.com"
+    assert "Projektakte" in email.body
+    assert len(published) == 2
+
+
 async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(engine, settings):
     published = []
 

@@ -177,6 +177,60 @@ async def restore_document(session: AsyncSession, document_id: str) -> Document:
     return document
 
 
+async def cascade_trash_by_folder_ids(
+    session: AsyncSession, folder_ids: list[str], *, via_folder_id: str, deleted_by: str
+) -> list[str]:
+    """Kaskadierter Papierkorb-Weg für einen ganzen Ordner-Teilbaum (5.2, seit
+    P7-S1b) - vom `folder-service` synchron aufgerufen, wenn ein Ordner
+    (inkl. Unterordnern) in den Papierkorb verschoben wird. `deleted_via_
+    folder_id` markiert die Herkunft, damit `cascade_restore_by_via_folder_id`
+    beim Wiederherstellen NUR diese Dokumente zurückholt, keine unabhängig
+    einzeln gelöschten im selben Ordner."""
+    if not folder_ids:
+        return []
+    result = await session.execute(
+        select(Document).where(Document.folder_id.in_(folder_ids), Document.deleted_at.is_(None))
+    )
+    documents = list(result.scalars().all())
+    now = datetime.now(UTC)
+    for document in documents:
+        document.deleted_at = now
+        document.deleted_via_folder_id = via_folder_id
+        document.updated_at = now
+    await session.flush()
+    return [document.id for document in documents]
+
+
+async def cascade_restore_by_via_folder_id(session: AsyncSession, via_folder_id: str) -> list[str]:
+    """Gegenstück zu `cascade_trash_by_folder_ids` - stellt nur Dokumente
+    wieder her, die genau über diesen Ordner kaskadiert gelöscht wurden."""
+    result = await session.execute(
+        select(Document).where(Document.deleted_via_folder_id == via_folder_id)
+    )
+    documents = list(result.scalars().all())
+    now = datetime.now(UTC)
+    for document in documents:
+        document.deleted_at = None
+        document.deleted_via_folder_id = None
+        document.updated_at = now
+    await session.flush()
+    return [document.id for document in documents]
+
+
+async def count_active_by_folder_ids(session: AsyncSession, folder_ids: list[str]) -> int:
+    """Nicht-leer-Prüfung vor Ordner-Zwangslöschung (5.2a, seit P7-S1b) -
+    `folder-service` fragt darüber ab, ob noch aktive (nicht gelöschte)
+    Dokumente im zu löschenden Teilbaum liegen."""
+    if not folder_ids:
+        return 0
+    result = await session.execute(
+        select(func.count())
+        .select_from(Document)
+        .where(Document.folder_id.in_(folder_ids), Document.deleted_at.is_(None))
+    )
+    return result.scalar_one()
+
+
 async def list_deleted_documents(session: AsyncSession, folder_id: str) -> list[Document]:
     """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1) - Gegenstück zu
     `list_documents_by_folder` (dort werden gelöschte Dokumente ausgeschlossen)."""

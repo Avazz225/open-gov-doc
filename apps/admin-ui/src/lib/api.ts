@@ -571,6 +571,72 @@ export async function listDeletionRegister(token: string): Promise<DeletionRegis
   return response.json();
 }
 
+// Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b) -
+// eigene, unabhängig konfigurierbare Configs (nicht dieselben Zeilen wie
+// document-service, siehe docs/services/folder-service.md).
+export async function getFolderRetentionConfig(token: string): Promise<RetentionConfig> {
+  const response = await request("folder-service", "retention-config", {}, token);
+  return response.json();
+}
+
+export async function updateFolderRetentionConfig(
+  token: string,
+  payload: { deletionReasonRequired: boolean; reminderLeadDays: number | null }
+): Promise<RetentionConfig> {
+  const response = await request(
+    "folder-service",
+    "retention-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deletion_reason_required: payload.deletionReasonRequired,
+        reminder_lead_days: payload.reminderLeadDays,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function getFolderTrashConfig(token: string): Promise<TrashConfig> {
+  const response = await request("folder-service", "trash-config", {}, token);
+  return response.json();
+}
+
+export async function updateFolderTrashConfig(
+  token: string,
+  payload: { restorePeriodDays: number }
+): Promise<TrashConfig> {
+  const response = await request(
+    "folder-service",
+    "trash-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restore_period_days: payload.restorePeriodDays }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface FolderDeletionRegisterEntry {
+  id: string;
+  folder_id: string;
+  trigger: "forced_deletion" | "trash_expiry";
+  reason: string | null;
+  triggered_by: string | null;
+  occurred_at: string;
+}
+
+export async function listFolderDeletionRegister(
+  token: string
+): Promise<FolderDeletionRegisterEntry[]> {
+  const response = await request("folder-service", "deletion-register", {}, token);
+  return response.json();
+}
+
 export interface KennzeichenConfig {
   show_before_filename: boolean;
   updated_at: string;

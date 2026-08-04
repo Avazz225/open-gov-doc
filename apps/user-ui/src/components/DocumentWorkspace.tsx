@@ -7,10 +7,10 @@ import {
   type DocumentSummary,
   type Folder,
   createFolder as apiCreateFolder,
-  deleteFolder as apiDeleteFolder,
   listChildFolders,
   listDocumentsInFolder,
   renameFolder as apiRenameFolder,
+  trashFolder as apiTrashFolder,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ExplorerPane } from "./ExplorerPane";
@@ -175,7 +175,10 @@ export function DocumentWorkspace() {
   async function handleDeleteFolder(folderId: string): Promise<boolean> {
     if (!accessToken) return false;
     try {
-      await apiDeleteFolder(accessToken, folderId);
+      // Seit P7-S1b: regulärer Papierkorb-Weg statt sofortigem Hard-Delete
+      // (kaskadiert über Unterordner + enthaltene Dokumente, siehe
+      // docs/services/folder-service.md).
+      await apiTrashFolder(accessToken, folderId, user?.username ?? "");
       await load(currentFolder.id);
       return true;
     } catch (err) {

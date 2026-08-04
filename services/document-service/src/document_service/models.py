@@ -39,6 +39,13 @@ class Document(Base):
     derived_from_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     originating_case_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Kaskaden-Herkunft (5.2, seit P7-S1b): gesetzt, wenn dieses Dokument nicht
+    # einzeln, sondern weil sein übergeordneter Ordner in den Papierkorb
+    # verschoben wurde (`POST /documents/cascade-trash`) gelöscht wurde -
+    # `POST /documents/cascade-restore` stellt beim Wiederherstellen des
+    # Ordners NUR dadurch kaskadierte Dokumente wieder her, kein unabhängig
+    # einzeln gelöschtes Dokument im selben Ordner.
+    deleted_via_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Aufbewahrung/Zwangslöschung (5.2/5.2a, seit P7-S1): ein gemeinsames
     # Feldpaar für beide Konzeptabschnitte - `retention_until` erreicht,
     # `full_deletion=False` löst den bestehenden Soft-Delete aus (`deleted_at`

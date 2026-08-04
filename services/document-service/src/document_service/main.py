@@ -33,7 +33,12 @@ from document_service.folder_client import FolderClient
 from document_service.models import Base, Document
 from document_service.object_type_client import ObjectTypeClient
 from document_service.schemas import (
+    CascadeRestoreRequest,
+    CascadeResult,
+    CascadeTrashRequest,
     CheckinResult,
+    CountActiveRequest,
+    CountActiveResult,
     DeletionRegisterEntryOut,
     DocumentOut,
     DocumentUpdate,
@@ -279,6 +284,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE document.document "
                 "ADD COLUMN IF NOT EXISTS force_delete_approval_requested_at TIMESTAMPTZ"
+            )
+        )
+        # Kaskaden-Herkunft für Ordner-Papierkorb (5.2, seit P7-S1b).
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS deleted_via_folder_id VARCHAR(128)"
             )
         )
     app.state.engine = engine
@@ -561,6 +573,55 @@ async def list_deleted_documents(
     `/documents/{document_id}` registriert sein, sonst würde FastAPI
     "deleted" fälschlich als `document_id` interpretieren."""
     return await repository.list_deleted_documents(session, folder_id)
+
+
+@app.post("/documents/cascade-trash", response_model=CascadeResult)
+async def cascade_trash(
+    payload: CascadeTrashRequest, session: AsyncSession = Depends(get_session)
+) -> CascadeResult:
+    """Interner Service-zu-Service-Aufruf von `folder-service` (5.2, seit
+    P7-S1b): soft-löscht alle aktiven Dokumente in den angegebenen Ordnern,
+    wenn deren Ordner (samt Teilbaum) in den Papierkorb verschoben wird -
+    synchron statt eventbasiert, damit ein sofortiges `GET /documents/deleted`
+    danach bereits konsistent ist. Keine eigene Rollenprüfung, gleiche
+    Vertrauensstellung wie der bestehende `FolderClient`-Aufruf in
+    umgekehrter Richtung."""
+    document_ids = await repository.cascade_trash_by_folder_ids(
+        session,
+        payload.folder_ids,
+        via_folder_id=payload.via_folder_id,
+        deleted_by=payload.deleted_by,
+    )
+    await session.commit()
+    for document_id in document_ids:
+        await publish_event(
+            "document.deleted", subject=document_id, payload={"deleted_by": payload.deleted_by}
+        )
+    return CascadeResult(document_ids=document_ids)
+
+
+@app.post("/documents/cascade-restore", response_model=CascadeResult)
+async def cascade_restore(
+    payload: CascadeRestoreRequest, session: AsyncSession = Depends(get_session)
+) -> CascadeResult:
+    """Gegenstück zu `cascade_trash` - stellt beim Wiederherstellen eines
+    Ordners nur die dadurch kaskadiert gelöschten Dokumente wieder her."""
+    document_ids = await repository.cascade_restore_by_via_folder_id(session, payload.via_folder_id)
+    await session.commit()
+    for document_id in document_ids:
+        await publish_event("document.restored", subject=document_id, payload={})
+    return CascadeResult(document_ids=document_ids)
+
+
+@app.post("/documents/count-active", response_model=CountActiveResult)
+async def count_active(
+    payload: CountActiveRequest, session: AsyncSession = Depends(get_session)
+) -> CountActiveResult:
+    """Nicht-leer-Prüfung vor Ordner-Zwangslöschung (5.2a, seit P7-S1b) -
+    `folder-service` fragt vor der physischen Entfernung eines Ordners ab,
+    ob dessen Teilbaum noch aktive Dokumente enthält."""
+    count = await repository.count_active_by_folder_ids(session, payload.folder_ids)
+    return CountActiveResult(count=count)
 
 
 @app.get("/documents/{document_id}", response_model=DocumentOut)

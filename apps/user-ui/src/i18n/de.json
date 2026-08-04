@@ -9,6 +9,7 @@
     "create": "Anlegen",
     "cancel": "Abbrechen",
     "save": "Speichern",
+    "close": "Schließen",
     "loadError": "Laden fehlgeschlagen",
     "deleteError": "Löschen fehlgeschlagen"
   },
@@ -87,7 +88,10 @@
     "trashEmpty": "Papierkorb ist leer",
     "trashLoadError": "Papierkorb konnte nicht geladen werden",
     "trashRestoreError": "Dokument konnte nicht wiederhergestellt werden (Frist ggf. abgelaufen)",
-    "restoreDocument": "Wiederherstellen"
+    "trashRestoreFolderError": "Ordner konnte nicht wiederhergestellt werden (Frist ggf. abgelaufen)",
+    "restoreDocument": "Wiederherstellen",
+    "restoreFolder": "Wiederherstellen",
+    "folderRetention": "Aufbewahrung für {name}"
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -135,6 +139,9 @@
     "setLegalHold": "Legal Hold setzen",
     "releaseLegalHold": "Legal Hold aufheben",
     "holdError": "Legal Hold konnte nicht geändert werden"
+  },
+  "folderRetention": {
+    "heading": "Aufbewahrung & Löschung: {name}"
   },
   "preview": {
     "paneLabel": "Vorschau",

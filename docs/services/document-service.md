@@ -23,6 +23,9 @@
 | `GET` | `/deletion-register?...` | Löschregister lesen (5.2a, seit P7-S1) — eigene, sofort abfragbare API, siehe unten |
 | `GET`/`PUT` | `/retention-config` | Installationsweite Aufbewahrungs-Konfiguration (`deletion_reason_required`, `reminder_lead_days`, seit P7-S1) |
 | `GET`/`PUT` | `/trash-config` | Papierkorb-Konfiguration (`restore_period_days`, seit P7-S1) |
+| `POST` | `/documents/cascade-trash` | Interner Service-zu-Service-Aufruf von `folder-service` (`folder_ids`, `via_folder_id`, `deleted_by`, 5.2, seit P7-S1b) — soft-löscht alle aktiven Dokumente in den angegebenen Ordnern, wenn deren Ordner in den Papierkorb verschoben wird |
+| `POST` | `/documents/cascade-restore` | Gegenstück zu `cascade-trash` (`via_folder_id`) — stellt nur die dadurch kaskadiert gelöschten Dokumente wieder her |
+| `POST` | `/documents/count-active` | Interner Aufruf von `folder-service` (`folder_ids`) — Nicht-leer-Prüfung vor einer Ordner-Zwangslöschung |
 | `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
 | `GET` | `/documents/{id}/versions/{n}` | Metadaten einer konkreten Version |
@@ -38,7 +41,7 @@
 
 ## Datenmodell
 
-- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, seit P7-S1, s. u.).
+- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, seit P7-S1, s. u.), `deleted_via_folder_id` (5.2, seit P7-S1b) — gesetzt, wenn dieses Dokument nicht einzeln, sondern kaskadiert über `POST /documents/cascade-trash` gelöscht wurde (weil sein Ordner in den Papierkorb verschoben wurde); `POST /documents/cascade-restore` stellt darüber gezielt nur die dadurch kaskadierten Dokumente wieder her, kein unabhängig einzeln gelöschtes.
 - `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a).
 - `document_lock`: genau eine aktive Zeile je gesperrtem Dokument (`document_id` als PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 - `upload_config`: einzelne Zeile (`id=1`, seit P5d-S1) — `allowed_content_types` (JSON-Liste, leer = keine Einschränkung), `updated_at`.
@@ -161,7 +164,7 @@ Noch keine — folgt in Phase 11.
 - **Kennzeichen-Anzeige im Frontend** (vor dem Dateinamen, global oder je Objekttyp überschreibbar) noch nicht angebunden — folgt mit P5e-S3.
 - **Keine Rollenzuweisungs-API/-UI**: `dms-admin` muss aktuell direkt über die Keycloak Admin Console zugewiesen werden (siehe oben, "Kennzeichengenerator").
 - Vier-Augen-Prinzip für Force-Unlock seit P6-S4 optional verfügbar (siehe oben) — Default bleibt ungated, ebenso kein Rückkanal, der `permission-service` einen fehlgeschlagenen (z. B. inzwischen anderweitig aufgelösten) Vollzug meldet.
-- **Aufbewahrung/Legal Hold/Zwangslöschung nur für Dokumente** (5.2/5.2a, seit P7-S1) — Ordner haben noch kein Soft-Delete-Konzept überhaupt und folgen erst mit der geplanten Folgesession **P7-S1b**, die dasselbe Muster (Papierkorb, Legal Hold, Zwangslöschung, Löschregister) auf Ordner überträgt.
+- **Ordner haben seit P7-S1b ihr eigenes, paralleles Aufbewahrungs-/Legal-Hold-/Zwangslöschungs-Muster** (`folder-service`, eigene Tabellen statt Wiederverwendung dieser hier) — dieser Service ist über die neuen `cascade-trash`/`cascade-restore`/`count-active`-Endpunkte (s. o.) synchron eingebunden, wenn ein Ordner in den Papierkorb verschoben/wiederhergestellt bzw. auf Nicht-Leerheit vor Zwangslöschung geprüft wird. Siehe `docs/services/folder-service.md`.
 - **Keine Legal-Hold-Rollenprüfung** (5.2, seit P7-S1) — wer einen Hold setzen/aufheben darf, ist nicht eingeschränkt, siehe oben.
 - **Löschregister nicht Backup-differenziert** (5.2a) — kompensiert nur über die Audit-Service-Hash-Kette, siehe oben; echte Backup-Trennung erst mit Phase 11.
 - **Löschregister/Legal-Hold-Tabellen leben in diesem Service statt einem eigenen Compliance-Service** — bewusst, um eine verfrühte Auslagerung zu vermeiden, bevor der Bedarf über mehr als einen Objekttyp hinweg feststeht (neu zu bewerten, sobald z. B. Umlaufmappen ebenfalls Aufbewahrung brauchen, Phase 15).

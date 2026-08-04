@@ -39,6 +39,9 @@ def make_handler(
         if event.event_type == "document.deletion.reminder":
             await _handle_deletion_reminder(session_factory, settings, publish_event, event)
             return
+        if event.event_type == "folder.deletion.reminder":
+            await _handle_folder_deletion_reminder(session_factory, settings, publish_event, event)
+            return
         await _handle_task_escalated(session_factory, settings, publish_event, event)
 
     return handle
@@ -142,6 +145,46 @@ async def _handle_deletion_reminder(
     subject = f"Löschfrist erreicht bald: {title}"
     body = (
         f"Dokument {title!r} (id={event.subject}) wird am "
+        f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
+    )
+
+    async with session_factory() as session:
+        in_app = await repository.create_and_send(
+            session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, in_app)
+
+        notify_email = data.get("notify_email")
+        if notify_email:
+            email_notification = await repository.create_and_send(
+                session,
+                settings,
+                channel="email",
+                recipient=notify_email,
+                subject=subject,
+                body=body,
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, email_notification)
+
+
+async def _handle_folder_deletion_reminder(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Löscherinnerung für Ordner (5.2a, P7-S1b) - 1:1 dasselbe Muster wie
+    `_handle_deletion_reminder` (P7-S1), nur für `folder-service`s
+    `name`-Feld statt `title`."""
+    data = event.payload
+    name = data.get("name", "?")
+    full_deletion = data.get("full_deletion", False)
+    action = "physisch zwangsgelöscht" if full_deletion else "in den Papierkorb verschoben"
+    subject = f"Löschfrist erreicht bald: {name}"
+    body = (
+        f"Ordner {name!r} (id={event.subject}) wird am "
         f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
     )
 

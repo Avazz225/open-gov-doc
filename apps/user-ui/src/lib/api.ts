@@ -106,6 +106,11 @@ export interface Folder {
   parent_id: string | null;
   object_type_id: number | null;
   attributes: Record<string, unknown>;
+  deleted_at: string | null;
+  // Aufbewahrung/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b).
+  retention_until: string | null;
+  full_deletion: boolean;
+  pending_deletion_reason: string | null;
 }
 
 export async function listChildFolders(token: string, folderId: string): Promise<Folder[]> {
@@ -161,6 +166,138 @@ export async function deleteFolder(token: string, folderId: string): Promise<voi
     { method: "DELETE" },
     token
   );
+}
+
+// Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
+// P7-S1b) - 1:1 dasselbe Muster wie die Dokument-Pendants weiter unten, nur
+// gegen `folder-service`-Endpunkte.
+export async function trashFolder(
+  token: string,
+  folderId: string,
+  deletedBy: string
+): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted_by: deletedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function restoreFolder(token: string, folderId: string): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/restore`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export async function listDeletedFolders(token: string, parentId: string): Promise<Folder[]> {
+  const response = await request(
+    "folder-service",
+    `folders/deleted?parent_id=${encodeURIComponent(parentId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function putFolderRetention(
+  token: string,
+  folderId: string,
+  params: {
+    retentionUntil: string | null;
+    fullDeletion: boolean;
+    reason?: string | null;
+    notifyEmail?: string | null;
+  }
+): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/retention`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        retention_until: params.retentionUntil,
+        full_deletion: params.fullDeletion,
+        reason: params.reason ?? null,
+        notify_email: params.notifyEmail ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export interface FolderLegalHold {
+  id: string;
+  folder_id: string;
+  reason: string | null;
+  set_by: string;
+  set_at: string;
+  released_by: string | null;
+  released_at: string | null;
+}
+
+export async function listFolderLegalHolds(
+  token: string,
+  folderId: string,
+  activeOnly = false
+): Promise<FolderLegalHold[]> {
+  const response = await request(
+    "folder-service",
+    `legal-holds?folder_id=${encodeURIComponent(folderId)}&active_only=${activeOnly}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createFolderLegalHold(
+  token: string,
+  params: { folderId: string; setBy: string; reason?: string | null }
+): Promise<FolderLegalHold> {
+  const response = await request(
+    "folder-service",
+    "legal-holds",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        folder_id: params.folderId,
+        set_by: params.setBy,
+        reason: params.reason ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function releaseFolderLegalHold(
+  token: string,
+  holdId: string,
+  releasedBy: string
+): Promise<FolderLegalHold> {
+  const response = await request(
+    "folder-service",
+    `legal-holds/${encodeURIComponent(holdId)}/release`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ released_by: releasedBy }),
+    },
+    token
+  );
+  return response.json();
 }
 
 export interface ObjectTypeAttribute {

@@ -5,14 +5,17 @@ import { useI18n } from "@/i18n";
 import {
   getKennzeichenConfig,
   listDeletedDocuments,
+  listDeletedFolders,
   listObjectTypes,
   restoreDocument,
+  restoreFolder,
   type DocumentSummary,
   type Folder,
   type ObjectType,
 } from "@/lib/api";
 import { folderIcon } from "@/lib/icons";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
+import { FolderRetentionModal } from "./FolderRetentionModal";
 import { FolderTree } from "./FolderTree";
 import { UploadForm } from "./UploadForm";
 
@@ -92,8 +95,10 @@ export function ExplorerPane({
   const [kennzeichenShowByDefault, setKennzeichenShowByDefault] = useState(true);
   const [showTrash, setShowTrash] = useState(false);
   const [trashDocuments, setTrashDocuments] = useState<DocumentSummary[]>([]);
+  const [trashFolders, setTrashFolders] = useState<Folder[]>([]);
   const [isTrashLoading, setIsTrashLoading] = useState(false);
   const [trashError, setTrashError] = useState<string | null>(null);
+  const [retentionModalFolder, setRetentionModalFolder] = useState<Folder | null>(null);
 
   // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
   // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
@@ -124,14 +129,21 @@ export function ExplorerPane({
       .catch(() => {});
   }, [token]);
 
-  // Papierkorb-Umschalter (5.2, seit P7-S1) - bewusst minimal: nur der
-  // aktuelle Ordner, keine eigene Sonderbereich-Navigation (siehe Phase 15).
+  // Papierkorb-Umschalter (5.2, seit P7-S1, um Ordner erweitert seit
+  // P7-S1b) - bewusst minimal: nur der aktuelle Ordner, keine eigene
+  // Sonderbereich-Navigation (siehe Phase 15).
   function reloadTrash() {
     if (!token) return;
     setIsTrashLoading(true);
     setTrashError(null);
-    listDeletedDocuments(token, currentFolderId)
-      .then(setTrashDocuments)
+    Promise.all([
+      listDeletedDocuments(token, currentFolderId),
+      listDeletedFolders(token, currentFolderId),
+    ])
+      .then(([documents, folders]) => {
+        setTrashDocuments(documents);
+        setTrashFolders(folders);
+      })
       .catch(() => setTrashError(t("explorer.trashLoadError")))
       .finally(() => setIsTrashLoading(false));
   }
@@ -150,6 +162,17 @@ export function ExplorerPane({
       onUploaded();
     } catch {
       setTrashError(t("explorer.trashRestoreError"));
+    }
+  }
+
+  async function handleRestoreFolder(folder: Folder) {
+    if (!token) return;
+    try {
+      await restoreFolder(token, folder.id);
+      reloadTrash();
+      onUploaded();
+    } catch {
+      setTrashError(t("explorer.trashRestoreFolderError"));
     }
   }
 
@@ -320,10 +343,25 @@ export function ExplorerPane({
           )}
           {isTrashLoading ? (
             <p>{t("common.loading")}</p>
-          ) : trashDocuments.length === 0 ? (
+          ) : trashDocuments.length === 0 && trashFolders.length === 0 ? (
             <p className="empty-state">{t("explorer.trashEmpty")}</p>
           ) : (
             <ul className="entry-list">
+              {trashFolders.map((folder) => (
+                <li className="entry-row" key={folder.id}>
+                  <span className="entry-name">
+                    {folderIcon(
+                      folder.object_type_id !== null ? folderIconById[folder.object_type_id] : null
+                    )}{" "}
+                    {folder.name}
+                  </span>
+                  <span className="actions">
+                    <button type="button" onClick={() => handleRestoreFolder(folder)}>
+                      {t("explorer.restoreFolder")}
+                    </button>
+                  </span>
+                </li>
+              ))}
               {trashDocuments.map((doc) => (
                 <li className="entry-row" key={doc.id}>
                   <span className="entry-name">
@@ -397,6 +435,13 @@ export function ExplorerPane({
                       </button>
                       <button
                         type="button"
+                        aria-label={t("explorer.folderRetention", { name: folder.name })}
+                        onClick={() => setRetentionModalFolder(folder)}
+                      >
+                        🕒
+                      </button>
+                      <button
+                        type="button"
                         aria-label={t("explorer.deleteFolder", { name: folder.name })}
                         onClick={() => handleDelete(folder)}
                       >
@@ -420,6 +465,13 @@ export function ExplorerPane({
             ))}
           </ul>
         </>
+      )}
+
+      {retentionModalFolder && (
+        <FolderRetentionModal
+          folder={retentionModalFolder}
+          onClose={() => setRetentionModalFolder(null)}
+        />
       )}
     </section>
   );

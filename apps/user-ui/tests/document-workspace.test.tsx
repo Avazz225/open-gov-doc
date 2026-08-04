@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentWorkspace } from "@/components/DocumentWorkspace";
 import { I18nProvider } from "@/i18n";
+import type { Folder } from "@/lib/api";
 
 function renderWorkspace() {
   return render(
@@ -41,6 +42,13 @@ const listDeletedDocumentsMock = vi.fn();
 const listLegalHoldsMock = vi.fn();
 const createLegalHoldMock = vi.fn();
 const releaseLegalHoldMock = vi.fn();
+const trashFolderMock = vi.fn();
+const restoreFolderMock = vi.fn();
+const listDeletedFoldersMock = vi.fn();
+const putFolderRetentionMock = vi.fn();
+const listFolderLegalHoldsMock = vi.fn();
+const createFolderLegalHoldMock = vi.fn();
+const releaseFolderLegalHoldMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -50,6 +58,13 @@ vi.mock("@/lib/api", () => ({
   createFolder: (...args: unknown[]) => createFolderMock(...args),
   renameFolder: (...args: unknown[]) => renameFolderMock(...args),
   deleteFolder: (...args: unknown[]) => deleteFolderMock(...args),
+  trashFolder: (...args: unknown[]) => trashFolderMock(...args),
+  restoreFolder: (...args: unknown[]) => restoreFolderMock(...args),
+  listDeletedFolders: (...args: unknown[]) => listDeletedFoldersMock(...args),
+  putFolderRetention: (...args: unknown[]) => putFolderRetentionMock(...args),
+  listFolderLegalHolds: (...args: unknown[]) => listFolderLegalHoldsMock(...args),
+  createFolderLegalHold: (...args: unknown[]) => createFolderLegalHoldMock(...args),
+  releaseFolderLegalHold: (...args: unknown[]) => releaseFolderLegalHoldMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
@@ -143,6 +158,15 @@ describe("DocumentWorkspace", () => {
     listLegalHoldsMock.mockResolvedValue([]);
     createLegalHoldMock.mockReset();
     releaseLegalHoldMock.mockReset();
+    trashFolderMock.mockReset();
+    restoreFolderMock.mockReset();
+    listDeletedFoldersMock.mockReset();
+    listDeletedFoldersMock.mockResolvedValue([]);
+    putFolderRetentionMock.mockReset();
+    listFolderLegalHoldsMock.mockReset();
+    listFolderLegalHoldsMock.mockResolvedValue([]);
+    createFolderLegalHoldMock.mockReset();
+    releaseFolderLegalHoldMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {
@@ -609,12 +633,12 @@ describe("DocumentWorkspace", () => {
     );
   });
 
-  it("deletes a folder after confirmation", async () => {
+  it("moves a folder to the trash after confirmation (5.2, seit P7-S1b)", async () => {
     listChildFoldersMock.mockResolvedValue([
       { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
     ]);
     listDocumentsInFolderMock.mockResolvedValue([]);
-    deleteFolderMock.mockResolvedValue(undefined);
+    trashFolderMock.mockResolvedValue(undefined);
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const user = userEvent.setup();
@@ -622,7 +646,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByLabelText("Alt löschen"));
 
-    await waitFor(() => expect(deleteFolderMock).toHaveBeenCalledWith("token-123", "f1"));
+    await waitFor(() => expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1", "alice"));
   });
 
   it("shows the trash toggle and restores a deleted document (5.2, seit P7-S1)", async () => {
@@ -649,6 +673,78 @@ describe("DocumentWorkspace", () => {
 
     await waitFor(() =>
       expect(restoreDocumentMock).toHaveBeenCalledWith("token-123", "d-trash")
+    );
+  });
+
+  it("shows deleted folders in the trash and restores them (5.2, seit P7-S1b)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    const deletedFolder: Folder = {
+      id: "f-trash",
+      name: "Alte Akte",
+      parent_id: "root",
+      object_type_id: null,
+      attributes: {},
+      deleted_at: "2026-01-05T00:00:00Z",
+      retention_until: null,
+      full_deletion: false,
+      pending_deletion_reason: null,
+    };
+    listDeletedFoldersMock.mockResolvedValue([deletedFolder]);
+    restoreFolderMock.mockResolvedValue({ ...deletedFolder, deleted_at: null });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await waitFor(() => expect(listChildFoldersMock).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByText("Papierkorb anzeigen"));
+
+    await waitFor(() =>
+      expect(listDeletedFoldersMock).toHaveBeenCalledWith("token-123", "root")
+    );
+    expect(await screen.findByText(/Alte Akte/)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Wiederherstellen"));
+
+    await waitFor(() => expect(restoreFolderMock).toHaveBeenCalledWith("token-123", "f-trash"));
+  });
+
+  it("opens the folder retention modal and saves a retention date (5.2, seit P7-S1b)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      {
+        id: "f1",
+        name: "Alt",
+        parent_id: "root",
+        object_type_id: null,
+        attributes: {},
+        deleted_at: null,
+        retention_until: null,
+        full_deletion: false,
+        pending_deletion_reason: null,
+      },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    putFolderRetentionMock.mockResolvedValue({});
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByLabelText("Aufbewahrung für Alt"));
+    await waitFor(() =>
+      expect(listFolderLegalHoldsMock).toHaveBeenCalledWith("token-123", "f1", true)
+    );
+
+    fireEvent.change(screen.getByLabelText("Aufbewahren bis"), {
+      target: { value: "2026-12-31" },
+    });
+    fireEvent.click(screen.getByText("Speichern"));
+
+    await waitFor(() =>
+      expect(putFolderRetentionMock).toHaveBeenCalledWith("token-123", "f1", {
+        retentionUntil: new Date("2026-12-31").toISOString(),
+        fullDeletion: false,
+        reason: null,
+      })
     );
   });
 

@@ -1,7 +1,8 @@
+import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("folder")
@@ -23,6 +24,83 @@ class Folder(Base):
     # Service-Grenzen hinweg (analog zu document-service).
     object_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     attributes: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
+    # P7-S1b) - 1:1 dasselbe Feldpaar-Muster wie `document_service.Document`
+    # (siehe P7-S1), hier zusätzlich um die Kaskaden-Herkunft ergänzt.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Gesetzt, wenn dieser Ordner nicht einzeln, sondern weil ein
+    # übergeordneter Ordner in den Papierkorb verschoben wurde, mitgelöscht
+    # wurde - `restore_folder` stellt beim Wiederherstellen des Elternordners
+    # NUR dadurch kaskadierte Unterordner wieder her.
+    deleted_via_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
+    pending_deletion_reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    deletion_reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reminder_notify_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    force_delete_approval_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LegalHold(Base):
+    """Legal Hold für Ordner (5.2, seit P7-S1b) - strukturgleich zu
+    `document_service.LegalHold` (P7-S1), aber eigenständige Tabelle im
+    `folder`-Schema statt einer Wiederverwendung über Service-Grenzen
+    hinweg. Aktiv = ``released_at IS NULL``."""
+
+    __tablename__ = "legal_hold"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    folder_id: Mapped[str] = mapped_column(String(128), ForeignKey("folder.folder.id"), index=True)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    set_by: Mapped[str] = mapped_column(String(128))
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    released_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeletionRegisterEntry(Base):
+    """Löschregister für Ordner (5.2a, seit P7-S1b) - strukturgleich zu
+    `document_service.DeletionRegisterEntry`. Bewusst kein FK auf
+    ``Folder.id`` - der gelöschte Ordner existiert zu diesem Zeitpunkt
+    bereits nicht mehr."""
+
+    __tablename__ = "deletion_register_entry"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    folder_id: Mapped[str] = mapped_column(String(128), index=True)
+    trigger: Mapped[str] = mapped_column(String(32))  # "forced_deletion" | "trash_expiry"
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RetentionConfig(Base):
+    """Admin-UI-editierbare Aufbewahrungs-Grundeinstellungen für Ordner
+    (5.2/5.2a, seit P7-S1b) - eigene Konfiguration, unabhängig von
+    `document_service.RetentionConfig` (ein Installationsbetreiber kann für
+    Ordner andere Vorgaben brauchen als für Dokumente)."""
+
+    __tablename__ = "retention_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    deletion_reason_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminder_lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TrashConfig(Base):
+    """Papierkorb-Wiederherstellungsfrist für Ordner (5.2, seit P7-S1b) -
+    eigene Konfiguration, unabhängig von `document_service.TrashConfig`."""
+
+    __tablename__ = "trash_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    restore_period_days: Mapped[int] = mapped_column(Integer, default=30)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

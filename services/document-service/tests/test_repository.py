@@ -522,3 +522,48 @@ async def test_list_expired_trash_excludes_hold_and_not_yet_expired(session):
     assert expired.id in ids
     assert recent.id not in ids
     assert on_hold.id not in ids
+
+
+async def test_cascade_trash_soft_deletes_only_documents_in_given_folders(session):
+    in_scope = await _make_document(session, folder_id="folder-a")
+    out_of_scope = await _make_document(session, folder_id="folder-b")
+
+    ids = await repository.cascade_trash_by_folder_ids(
+        session, ["folder-a"], via_folder_id="folder-a", deleted_by="system:folder-cascade"
+    )
+
+    assert ids == [in_scope.id]
+    reloaded_in_scope = await repository.get_document(session, in_scope.id)
+    assert reloaded_in_scope.deleted_at is not None
+    assert reloaded_in_scope.deleted_via_folder_id == "folder-a"
+    reloaded_out_of_scope = await repository.get_document(session, out_of_scope.id)
+    assert reloaded_out_of_scope.deleted_at is None
+
+
+async def test_cascade_restore_only_restores_documents_deleted_via_that_folder(session):
+    cascaded = await _make_document(session, folder_id="folder-a")
+    await repository.cascade_trash_by_folder_ids(
+        session, ["folder-a"], via_folder_id="folder-a", deleted_by="system:folder-cascade"
+    )
+    independent = await _make_document(session, folder_id="folder-a")
+    await repository.delete_document(session, independent.id, deleted_by="alice")
+
+    ids = await repository.cascade_restore_by_via_folder_id(session, "folder-a")
+
+    assert ids == [cascaded.id]
+    reloaded_cascaded = await repository.get_document(session, cascaded.id)
+    assert reloaded_cascaded.deleted_at is None
+    assert reloaded_cascaded.deleted_via_folder_id is None
+    reloaded_independent = await repository.get_document(session, independent.id)
+    assert reloaded_independent.deleted_at is not None
+
+
+async def test_count_active_by_folder_ids_excludes_deleted(session):
+    await _make_document(session, folder_id="folder-a")
+    deleted = await _make_document(session, folder_id="folder-a")
+    await repository.delete_document(session, deleted.id, deleted_by="alice")
+    await _make_document(session, folder_id="folder-b")
+
+    count = await repository.count_active_by_folder_ids(session, ["folder-a"])
+
+    assert count == 1

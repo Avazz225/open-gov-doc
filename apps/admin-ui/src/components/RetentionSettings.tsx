@@ -4,8 +4,12 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  getFolderRetentionConfig,
+  getFolderTrashConfig,
   getRetentionConfig,
   getTrashConfig,
+  updateFolderRetentionConfig,
+  updateFolderTrashConfig,
   updateRetentionConfig,
   updateTrashConfig,
   type RetentionConfig,
@@ -13,99 +17,132 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
-// Lade-/Speicher-Muster wie UploadSettings/OcrSettings, hier zwei getrennte
-// Configs (document-service) in einem gemeinsamen Formular.
-export function RetentionSettings() {
-  const { accessToken } = useAuth();
-  const { t } = useI18n();
-  const [retentionConfig, setRetentionConfig] = useState<RetentionConfig | null>(null);
-  const [trashConfig, setTrashConfig] = useState<TrashConfig | null>(null);
-  const [unreachable, setUnreachable] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
+interface SectionState {
+  retentionConfig: RetentionConfig | null;
+  trashConfig: TrashConfig | null;
+  unreachable: boolean;
+  error: string | null;
+  isLoading: boolean;
+  isSaving: boolean;
+  savedAt: number | null;
+  deletionReasonRequired: boolean;
+  reminderLeadDaysInput: string;
+  restorePeriodDaysInput: string;
+}
 
-  const [deletionReasonRequired, setDeletionReasonRequired] = useState(false);
-  const [reminderLeadDaysInput, setReminderLeadDaysInput] = useState("");
-  const [restorePeriodDaysInput, setRestorePeriodDaysInput] = useState("30");
+const initialSectionState: SectionState = {
+  retentionConfig: null,
+  trashConfig: null,
+  unreachable: false,
+  error: null,
+  isLoading: true,
+  isSaving: false,
+  savedAt: null,
+  deletionReasonRequired: false,
+  reminderLeadDaysInput: "",
+  restorePeriodDaysInput: "30",
+};
+
+// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
+// Lade-/Speicher-Muster wie UploadSettings/OcrSettings. Seit P7-S1b zwei
+// unabhängige Sektionen (Dokumente über document-service, Ordner über
+// folder-service - eigene, unabhängig konfigurierbare Configs, siehe
+// docs/services/folder-service.md), damit z. B. eine andere
+// Papierkorb-Frist für Ordner als für Dokumente möglich ist.
+function RetentionSection({
+  heading,
+  hint,
+  unreachableLabel,
+  get,
+  update,
+}: {
+  heading: string;
+  hint?: string;
+  unreachableLabel: string;
+  get: () => Promise<{ retention: RetentionConfig; trash: TrashConfig }>;
+  update: (payload: {
+    deletionReasonRequired: boolean;
+    reminderLeadDays: number | null;
+    restorePeriodDays: number;
+  }) => Promise<{ retention: RetentionConfig; trash: TrashConfig }>;
+}) {
+  const { t } = useI18n();
+  const [state, setState] = useState<SectionState>(initialSectionState);
 
   const reload = useCallback(async () => {
-    if (!accessToken) return;
-    setIsLoading(true);
-    setUnreachable(false);
-    setError(null);
+    setState((prev) => ({ ...prev, isLoading: true, unreachable: false, error: null }));
     try {
-      const [retention, trash] = await Promise.all([
-        getRetentionConfig(accessToken),
-        getTrashConfig(accessToken),
-      ]);
-      setRetentionConfig(retention);
-      setTrashConfig(trash);
-      setDeletionReasonRequired(retention.deletion_reason_required);
-      setReminderLeadDaysInput(
-        retention.reminder_lead_days === null ? "" : String(retention.reminder_lead_days)
-      );
-      setRestorePeriodDaysInput(String(trash.restore_period_days));
+      const { retention, trash } = await get();
+      setState((prev) => ({
+        ...prev,
+        retentionConfig: retention,
+        trashConfig: trash,
+        deletionReasonRequired: retention.deletion_reason_required,
+        reminderLeadDaysInput:
+          retention.reminder_lead_days === null ? "" : String(retention.reminder_lead_days),
+        restorePeriodDaysInput: String(trash.restore_period_days),
+        isLoading: false,
+      }));
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        setUnreachable(true);
-      }
-    } finally {
-      setIsLoading(false);
+      setState((prev) => ({
+        ...prev,
+        isLoading: false,
+        unreachable: !(err instanceof ApiError),
+        error: err instanceof ApiError ? err.message : null,
+      }));
     }
-  }, [accessToken]);
+  }, [get]);
 
   useEffect(() => {
     reload();
-  }, [reload]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!accessToken) return;
-    setError(null);
-    setSavedAt(null);
-    setIsSaving(true);
+    setState((prev) => ({ ...prev, error: null, savedAt: null, isSaving: true }));
     try {
       const reminderLeadDays =
-        reminderLeadDaysInput.trim() === "" ? null : Number(reminderLeadDaysInput);
-      const [retention, trash] = await Promise.all([
-        updateRetentionConfig(accessToken, {
-          deletionReasonRequired,
-          reminderLeadDays,
-        }),
-        updateTrashConfig(accessToken, {
-          restorePeriodDays: Number(restorePeriodDaysInput),
-        }),
-      ]);
-      setRetentionConfig(retention);
-      setTrashConfig(trash);
-      setSavedAt(Date.now());
+        state.reminderLeadDaysInput.trim() === "" ? null : Number(state.reminderLeadDaysInput);
+      const { retention, trash } = await update({
+        deletionReasonRequired: state.deletionReasonRequired,
+        reminderLeadDays,
+        restorePeriodDays: Number(state.restorePeriodDaysInput),
+      });
+      setState((prev) => ({
+        ...prev,
+        retentionConfig: retention,
+        trashConfig: trash,
+        savedAt: Date.now(),
+        isSaving: false,
+      }));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("common.loadError"));
-    } finally {
-      setIsSaving(false);
+      setState((prev) => ({
+        ...prev,
+        error: err instanceof ApiError ? err.message : t("common.loadError"),
+        isSaving: false,
+      }));
     }
   }
 
   return (
     <div className="card">
-      <p className="hint">{t("retentionSettings.hint")}</p>
+      <h3>{heading}</h3>
+      {hint && <p className="hint">{hint}</p>}
 
-      {isLoading ? (
+      {state.isLoading ? (
         <p>{t("common.loading")}</p>
-      ) : unreachable ? (
-        <p className="empty-state">{t("retentionSettings.unreachable")}</p>
+      ) : state.unreachable ? (
+        <p className="empty-state">{unreachableLabel}</p>
       ) : (
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className="checkbox-label">
             <input
               type="checkbox"
-              checked={deletionReasonRequired}
-              onChange={(e) => setDeletionReasonRequired(e.target.checked)}
+              checked={state.deletionReasonRequired}
+              onChange={(e) =>
+                setState((prev) => ({ ...prev, deletionReasonRequired: e.target.checked }))
+              }
             />
             {t("retentionSettings.deletionReasonRequired")}
           </label>
@@ -114,8 +151,10 @@ export function RetentionSettings() {
             <input
               type="number"
               min="0"
-              value={reminderLeadDaysInput}
-              onChange={(e) => setReminderLeadDaysInput(e.target.value)}
+              value={state.reminderLeadDaysInput}
+              onChange={(e) =>
+                setState((prev) => ({ ...prev, reminderLeadDaysInput: e.target.value }))
+              }
               placeholder={t("retentionSettings.reminderLeadDaysPlaceholder")}
             />
           </label>
@@ -125,30 +164,90 @@ export function RetentionSettings() {
               type="number"
               min="0"
               required
-              value={restorePeriodDaysInput}
-              onChange={(e) => setRestorePeriodDaysInput(e.target.value)}
+              value={state.restorePeriodDaysInput}
+              onChange={(e) =>
+                setState((prev) => ({ ...prev, restorePeriodDaysInput: e.target.value }))
+              }
             />
           </label>
           <div className="actions">
-            <button type="submit" disabled={isSaving}>
+            <button type="submit" disabled={state.isSaving}>
               {t("common.save")}
             </button>
           </div>
         </form>
       )}
 
-      {error && (
+      {state.error && (
         <p className="error-text" role="alert">
-          {error}
+          {state.error}
         </p>
       )}
-      {savedAt !== null && !error && <p className="hint">{t("retentionSettings.saved")}</p>}
-      {retentionConfig && trashConfig && (
+      {state.savedAt !== null && !state.error && (
+        <p className="hint">{t("retentionSettings.saved")}</p>
+      )}
+      {state.retentionConfig && state.trashConfig && (
         <p className="hint">
           {t("retentionSettings.updatedAt")}:{" "}
-          {new Date(retentionConfig.updated_at).toLocaleString()}
+          {new Date(state.retentionConfig.updated_at).toLocaleString()}
         </p>
       )}
     </div>
+  );
+}
+
+export function RetentionSettings() {
+  const { accessToken } = useAuth();
+  const { t } = useI18n();
+
+  if (!accessToken) return null;
+
+  return (
+    <>
+      <p className="hint">{t("retentionSettings.hint")}</p>
+      <RetentionSection
+        heading={t("retentionSettings.documentsHeading")}
+        unreachableLabel={t("retentionSettings.unreachable")}
+        get={async () => {
+          const [retention, trash] = await Promise.all([
+            getRetentionConfig(accessToken),
+            getTrashConfig(accessToken),
+          ]);
+          return { retention, trash };
+        }}
+        update={async (payload) => {
+          const [retention, trash] = await Promise.all([
+            updateRetentionConfig(accessToken, {
+              deletionReasonRequired: payload.deletionReasonRequired,
+              reminderLeadDays: payload.reminderLeadDays,
+            }),
+            updateTrashConfig(accessToken, { restorePeriodDays: payload.restorePeriodDays }),
+          ]);
+          return { retention, trash };
+        }}
+      />
+      <RetentionSection
+        heading={t("retentionSettings.foldersHeading")}
+        hint={t("retentionSettings.foldersHint")}
+        unreachableLabel={t("retentionSettings.foldersUnreachable")}
+        get={async () => {
+          const [retention, trash] = await Promise.all([
+            getFolderRetentionConfig(accessToken),
+            getFolderTrashConfig(accessToken),
+          ]);
+          return { retention, trash };
+        }}
+        update={async (payload) => {
+          const [retention, trash] = await Promise.all([
+            updateFolderRetentionConfig(accessToken, {
+              deletionReasonRequired: payload.deletionReasonRequired,
+              reminderLeadDays: payload.reminderLeadDays,
+            }),
+            updateFolderTrashConfig(accessToken, { restorePeriodDays: payload.restorePeriodDays }),
+          ]);
+          return { retention, trash };
+        }}
+      />
+    </>
   );
 }

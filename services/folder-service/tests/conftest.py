@@ -24,7 +24,12 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS folder"))
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("TRUNCATE folder.folder CASCADE"))
+        await conn.execute(
+            text(
+                "TRUNCATE folder.legal_hold, folder.deletion_register_entry, folder.folder, "
+                "folder.retention_config, folder.trash_config CASCADE"
+            )
+        )
     await eng.dispose()
     yield
 

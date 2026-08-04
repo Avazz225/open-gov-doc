@@ -596,6 +596,16 @@ services:
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://folder-service:8000
+      # Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
+      # P7-S1b): Kaskaden-Aufrufe an document-service (kein depends_on hier
+      # möglich - document-service hängt selbst bereits von folder-service
+      # ab, ein zyklisches depends_on ist in docker-compose nicht zulässig;
+      # der HTTP-Client toleriert das, da nur zur Aufrufzeit gebraucht),
+      # Vier-Augen-Prinzip über permission-service, Poll-Intervall wie
+      # document-service's `retention_poll_interval_seconds` (P7-S1).
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_RETENTION_POLL_INTERVAL_SECONDS: ${FOLDER_SERVICE_RETENTION_POLL_INTERVAL_SECONDS:-3600}
     ports:
       - "${FOLDER_SERVICE_PORT:-8008}:8000"
     depends_on:
@@ -604,6 +614,8 @@ services:
       nats:
         condition: service_healthy
       object-type-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net

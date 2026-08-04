@@ -161,3 +161,28 @@ class TrashConfigOut(TrashConfigIn):
     model_config = {"from_attributes": True}
 
     updated_at: datetime
+
+
+class CascadeTrashRequest(BaseModel):
+    """Interner Service-zu-Service-Aufruf von `folder-service` (5.2, seit
+    P7-S1b) - siehe main.py `POST /documents/cascade-trash`."""
+
+    folder_ids: list[str]
+    via_folder_id: str
+    deleted_by: str
+
+
+class CascadeRestoreRequest(BaseModel):
+    via_folder_id: str
+
+
+class CascadeResult(BaseModel):
+    document_ids: list[str]
+
+
+class CountActiveRequest(BaseModel):
+    folder_ids: list[str]
+
+
+class CountActiveResult(BaseModel):
+    count: int

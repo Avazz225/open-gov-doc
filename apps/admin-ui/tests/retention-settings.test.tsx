@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RetentionSettings } from "@/components/RetentionSettings";
 import { I18nProvider } from "@/i18n";
@@ -15,12 +15,20 @@ const getRetentionConfigMock = vi.fn();
 const updateRetentionConfigMock = vi.fn();
 const getTrashConfigMock = vi.fn();
 const updateTrashConfigMock = vi.fn();
+const getFolderRetentionConfigMock = vi.fn();
+const updateFolderRetentionConfigMock = vi.fn();
+const getFolderTrashConfigMock = vi.fn();
+const updateFolderTrashConfigMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getRetentionConfig: (...args: unknown[]) => getRetentionConfigMock(...args),
   updateRetentionConfig: (...args: unknown[]) => updateRetentionConfigMock(...args),
   getTrashConfig: (...args: unknown[]) => getTrashConfigMock(...args),
   updateTrashConfig: (...args: unknown[]) => updateTrashConfigMock(...args),
+  getFolderRetentionConfig: (...args: unknown[]) => getFolderRetentionConfigMock(...args),
+  updateFolderRetentionConfig: (...args: unknown[]) => updateFolderRetentionConfigMock(...args),
+  getFolderTrashConfig: (...args: unknown[]) => getFolderTrashConfigMock(...args),
+  updateFolderTrashConfig: (...args: unknown[]) => updateFolderTrashConfigMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -45,15 +53,37 @@ vi.mock("@/lib/auth-context", async () => {
   };
 });
 
+function documentsCard() {
+  return screen.getByText("Dokumente").closest(".card") as HTMLElement;
+}
+
+function foldersCard() {
+  return screen.getByText("Ordner").closest(".card") as HTMLElement;
+}
+
 describe("RetentionSettings", () => {
   beforeEach(() => {
     getRetentionConfigMock.mockReset();
     updateRetentionConfigMock.mockReset();
     getTrashConfigMock.mockReset();
     updateTrashConfigMock.mockReset();
+    getFolderRetentionConfigMock.mockReset();
+    updateFolderRetentionConfigMock.mockReset();
+    getFolderTrashConfigMock.mockReset();
+    updateFolderTrashConfigMock.mockReset();
+
+    getFolderRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getFolderTrashConfigMock.mockResolvedValue({
+      restore_period_days: 30,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
   });
 
-  it("loads and shows the current configuration", async () => {
+  it("loads and shows the current configuration for documents and folders independently", async () => {
     getRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: true,
       reminder_lead_days: 14,
@@ -63,24 +93,44 @@ describe("RetentionSettings", () => {
       restore_period_days: 30,
       updated_at: "2026-01-01T00:00:00Z",
     });
+    getFolderRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: 7,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getFolderTrashConfigMock.mockResolvedValue({
+      restore_period_days: 60,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
 
     renderRetentionSettings();
 
-    expect(await screen.findByLabelText("Löschgrund bei Zwangslöschung verpflichtend")).toBeChecked();
-    expect(screen.getByDisplayValue("14")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("30")).toBeInTheDocument();
+    await screen.findByText("Dokumente");
+    expect(
+      within(documentsCard()).getByLabelText("Löschgrund bei Zwangslöschung verpflichtend")
+    ).toBeChecked();
+    expect(within(documentsCard()).getByDisplayValue("14")).toBeInTheDocument();
+    expect(within(documentsCard()).getByDisplayValue("30")).toBeInTheDocument();
+
+    expect(
+      within(foldersCard()).getByLabelText("Löschgrund bei Zwangslöschung verpflichtend")
+    ).not.toBeChecked();
+    expect(within(foldersCard()).getByDisplayValue("7")).toBeInTheDocument();
+    expect(within(foldersCard()).getByDisplayValue("60")).toBeInTheDocument();
   });
 
-  it("shows an unreachable state when document-service is not reachable", async () => {
+  it("shows an unreachable state per section when a service is not reachable", async () => {
     getRetentionConfigMock.mockRejectedValue(new TypeError("Failed to fetch"));
     getTrashConfigMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
     renderRetentionSettings();
 
     expect(await screen.findByText("Document Service nicht erreichbar.")).toBeInTheDocument();
+    // Ordner-Sektion bleibt unabhängig funktionsfähig.
+    expect(await within(foldersCard()).findByDisplayValue("30")).toBeInTheDocument();
   });
 
-  it("saves both configs", async () => {
+  it("saves both document configs", async () => {
     getRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: false,
       reminder_lead_days: null,
@@ -101,18 +151,22 @@ describe("RetentionSettings", () => {
     });
 
     renderRetentionSettings();
-    await screen.findByDisplayValue("30");
+    await within(documentsCard()).findByDisplayValue("30");
 
-    fireEvent.click(screen.getByLabelText("Löschgrund bei Zwangslöschung verpflichtend"));
-    fireEvent.change(screen.getByLabelText("Löscherinnerung, Vorlaufzeit (Tage)"), {
-      target: { value: "7" },
-    });
-    fireEvent.change(screen.getByLabelText("Papierkorb-Wiederherstellungsfrist (Tage)"), {
-      target: { value: "60" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(
+      within(documentsCard()).getByLabelText("Löschgrund bei Zwangslöschung verpflichtend")
+    );
+    fireEvent.change(
+      within(documentsCard()).getByLabelText("Löscherinnerung, Vorlaufzeit (Tage)"),
+      { target: { value: "7" } }
+    );
+    fireEvent.change(
+      within(documentsCard()).getByLabelText("Papierkorb-Wiederherstellungsfrist (Tage)"),
+      { target: { value: "60" } }
+    );
+    fireEvent.click(within(documentsCard()).getByRole("button", { name: "Speichern" }));
 
-    expect(await screen.findByText("Gespeichert.")).toBeInTheDocument();
+    expect(await within(documentsCard()).findByText("Gespeichert.")).toBeInTheDocument();
     expect(updateRetentionConfigMock).toHaveBeenCalledWith("token-123", {
       deletionReasonRequired: true,
       reminderLeadDays: 7,
@@ -120,5 +174,51 @@ describe("RetentionSettings", () => {
     expect(updateTrashConfigMock).toHaveBeenCalledWith("token-123", {
       restorePeriodDays: 60,
     });
+  });
+
+  it("saves both folder configs independently from documents", async () => {
+    getRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getTrashConfigMock.mockResolvedValue({
+      restore_period_days: 30,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    updateFolderRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: true,
+      reminder_lead_days: 5,
+      updated_at: "2026-01-02T00:00:00Z",
+    });
+    updateFolderTrashConfigMock.mockResolvedValue({
+      restore_period_days: 90,
+      updated_at: "2026-01-02T00:00:00Z",
+    });
+
+    renderRetentionSettings();
+    await within(foldersCard()).findByDisplayValue("30");
+
+    fireEvent.click(
+      within(foldersCard()).getByLabelText("Löschgrund bei Zwangslöschung verpflichtend")
+    );
+    fireEvent.change(within(foldersCard()).getByLabelText("Löscherinnerung, Vorlaufzeit (Tage)"), {
+      target: { value: "5" },
+    });
+    fireEvent.change(
+      within(foldersCard()).getByLabelText("Papierkorb-Wiederherstellungsfrist (Tage)"),
+      { target: { value: "90" } }
+    );
+    fireEvent.click(within(foldersCard()).getByRole("button", { name: "Speichern" }));
+
+    expect(await within(foldersCard()).findByText("Gespeichert.")).toBeInTheDocument();
+    expect(updateFolderRetentionConfigMock).toHaveBeenCalledWith("token-123", {
+      deletionReasonRequired: true,
+      reminderLeadDays: 5,
+    });
+    expect(updateFolderTrashConfigMock).toHaveBeenCalledWith("token-123", {
+      restorePeriodDays: 90,
+    });
+    expect(updateRetentionConfigMock).not.toHaveBeenCalled();
   });
 });

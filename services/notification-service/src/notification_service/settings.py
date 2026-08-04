@@ -33,6 +33,11 @@ class Settings(BaseServiceSettings):
         # Löscherinnerung (5.2a, P7-S1) - eigenes, bisher nicht von diesem
         # Service konsumiertes "document"-Stream-Subject, siehe consumer.py.
         "document.deletion.reminder",
+        # Löscherinnerung für Ordner (5.2a, P7-S1b) - eigenes, bisher nicht von
+        # diesem Service konsumiertes "folder"-Stream-Subject. Erstes Subject
+        # dieses Service auf dem "folder"-Stream, daher kein zweiter Durable-
+        # Name nötig (anders als `workflow.federation.inbound_received`).
+        "folder.deletion.reminder",
     ]
 
     # Empfänger der optionalen Sicherheitsbenachrichtigung bei Break-Glass-

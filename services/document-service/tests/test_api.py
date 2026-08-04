@@ -599,6 +599,40 @@ def test_list_deleted_documents_shows_only_trash(client):
     assert deleted["id"] not in [d["id"] for d in regular]
 
 
+def test_cascade_trash_and_restore_roundtrip(client):
+    """Interner Kaskaden-Weg für folder-service (5.2, seit P7-S1b) - siehe
+    docs/services/folder-service.md."""
+    document_id = upload(client, folder_id="root").json()["id"]
+
+    trash_response = client.post(
+        "/documents/cascade-trash",
+        json={
+            "folder_ids": ["root"],
+            "via_folder_id": "root",
+            "deleted_by": "system:folder-cascade",
+        },
+    )
+    assert trash_response.status_code == 200
+    assert trash_response.json()["document_ids"] == [document_id]
+    assert client.get(f"/documents/{document_id}").json()["deleted_at"] is not None
+
+    restore_response = client.post("/documents/cascade-restore", json={"via_folder_id": "root"})
+    assert restore_response.status_code == 200
+    assert restore_response.json()["document_ids"] == [document_id]
+    assert client.get(f"/documents/{document_id}").json()["deleted_at"] is None
+
+
+def test_count_active_excludes_deleted(client):
+    upload(client, folder_id="root")
+    deleted_id = upload(client, folder_id="root").json()["id"]
+    client.request("DELETE", f"/documents/{deleted_id}?deleted_by=admin")
+
+    response = client.post("/documents/count-active", json={"folder_ids": ["root"]})
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+
+
 def test_legal_hold_lifecycle(client):
     document_id = upload(client).json()["id"]
 
