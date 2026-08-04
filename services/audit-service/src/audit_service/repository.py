@@ -156,7 +156,7 @@ async def list_events(
         query = query.where(AuditEvent.occurred_at >= since)
     if until is not None:
         query = query.where(AuditEvent.occurred_at <= until)
-    query = query.order_by(AuditEvent.id).limit(limit)
+    query = query.order_by(AuditEvent.id.desc()).limit(limit)
     result = await session.execute(query)
     return list(result.scalars().all())
 

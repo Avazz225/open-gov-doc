@@ -61,6 +61,30 @@ def test_upload_download_roundtrip(client):
     assert download.headers["content-type"].startswith("text/plain")
 
 
+def _local_usage(client) -> dict:
+    body = client.get("/storage/usage").json()
+    for entry in body:
+        if entry["backend"] == "local":
+            return entry
+    return {"backend": "local", "object_count": 0, "total_size_bytes": 0}
+
+
+def test_storage_usage_aggregates_by_backend(client):
+    # Kein Test-Isolation-Reset zwischen den `client`-basierten API-Tests in
+    # dieser Datei (siehe conftest.py - nur die `engine`/`session`-Fixtures
+    # räumen auf) - deshalb Delta statt Absolutwert, robust gegen bereits
+    # von anderen Tests hochgeladene Objekte.
+    before = _local_usage(client)
+    content_a = b"hello world"
+    content_b = b"a bit more content"
+    client.put(f"/objects/{_key()}", content=content_a, headers={"content-type": "text/plain"})
+    client.put(f"/objects/{_key()}", content=content_b, headers={"content-type": "text/plain"})
+
+    after = _local_usage(client)
+    assert after["object_count"] == before["object_count"] + 2
+    assert after["total_size_bytes"] == before["total_size_bytes"] + len(content_a) + len(content_b)
+
+
 def test_upload_empty_body_returns_400(client):
     response = client.put(f"/objects/{_key()}", content=b"")
     assert response.status_code == 400

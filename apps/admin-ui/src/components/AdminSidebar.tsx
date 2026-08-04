@@ -64,6 +64,11 @@ const GROUPS: NavGroup[] = [
     labelKey: "nav.groupSecurity",
     items: [{ href: "/superuser/", labelKey: "nav.superuser" }],
   },
+  {
+    id: "reports",
+    labelKey: "nav.groupReports",
+    items: [{ href: "/reports/", labelKey: "nav.reports" }],
+  },
 ];
 
 const COLLAPSED_GROUPS_KEY = "dms.admin.collapsedGroups";

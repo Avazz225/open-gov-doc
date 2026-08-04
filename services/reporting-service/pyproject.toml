@@ -1,0 +1,28 @@
+[project]
+name = "reporting-service"
+version = "0.1.0"
+description = "Standardberichte (Dokumentenaufkommen, offene Workflow-Aufgaben, Speicherverbrauch, Nutzeraktivitaet), CSV/PDF-Export, planbarer Versand (Konzept 5.4a)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "reportlab>=4.2",
+    "dms-common",
+    "dms-db-base",
+    "dms-eventbus-client",
+    "dms-registry-client",
+]
+
+[tool.uv.sources]
+dms-common = { workspace = true }
+dms-db-base = { workspace = true }
+dms-eventbus-client = { workspace = true }
+dms-registry-client = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reporting_service"]

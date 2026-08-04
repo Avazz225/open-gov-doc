@@ -23,6 +23,7 @@ from storage_service.schemas import (
     ObjectCopyOut,
     ObjectMetadataOut,
     ReplicationRunResult,
+    StorageUsageEntry,
     VerifyResult,
 )
 from storage_service.settings import Settings
@@ -298,6 +299,19 @@ async def get_object_metadata(
         return await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
+
+
+@app.get("/storage/usage", response_model=list[StorageUsageEntry])
+async def get_storage_usage(
+    session: AsyncSession = Depends(get_session),
+) -> list[StorageUsageEntry]:
+    """Speicherverbrauch je Backend (5.4a, seit P7-S2b) - Grundlage für den
+    gleichnamigen Standardbericht im Reporting Service."""
+    rows = await repository.get_storage_usage(session)
+    return [
+        StorageUsageEntry(backend=backend, object_count=count, total_size_bytes=total_size)
+        for backend, count, total_size in rows
+    ]
 
 
 @app.get("/object-verify/{key:path}/all", response_model=list[FixityEntry])

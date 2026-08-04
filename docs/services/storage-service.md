@@ -16,6 +16,7 @@
 | `GET` | `/objects/{key:path}/copies` | Kopien-Status je konfiguriertem Ziel (`pending`/`ok`/`failed`/`failed_permanent`) |
 | `GET` | `/object-verify/{key:path}` | Fixity-Check des Primärziels: Prüfsumme neu lesen, mit Referenzwert vergleichen |
 | `GET` | `/object-verify/{key:path}/all` | Fixity-Check über **alle** konfigurierten Ziele, aktualisiert `object_copy` |
+| `GET` | `/storage/usage` | Aggregierter Speicherverbrauch je Backend (`{backend, object_count, total_size_bytes}[]`, `GROUP BY backend` über `object_metadata`, seit P7-S2b) — einziger Konsument bislang: der Speicherverbrauch-Bericht des `reporting-service` (siehe `docs/services/reporting-service.md`), Live-Abfrage statt eigenem Read-Modell |
 | `POST` | `/replication/process-pending` | Retry-Queue verarbeiten - repliziert ausstehende Kopien nach, für periodischen externen Aufruf gedacht |
 | `GET` | `/guard-config` | Aktuelle Wächter-Konfiguration (`allow_degraded_start`) — legt beim ersten Aufruf die Default-Zeile an (P5b-S6) |
 | `PUT` | `/guard-config` | Aktualisiert `allow_degraded_start` — wirkt erst beim **nächsten** Start, nicht auf die laufende Instanz |

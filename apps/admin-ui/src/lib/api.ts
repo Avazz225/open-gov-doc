@@ -844,3 +844,156 @@ export async function liftMaintenanceMode(
   );
   return response.json();
 }
+
+// Standardberichte (5.4a, seit P7-S2b) - vier Berichtstypen, jeweils eine
+// JSON-Ansicht + ein Export-Endpunkt (CSV/PDF), plus planbarer Versand.
+export interface DocumentVolumeEntry {
+  period: string;
+  folder_id: string | null;
+  count: number;
+}
+
+export interface OpenWorkflowTaskEntry {
+  instance_id: string;
+  process_definition_id: string;
+  business_key: string | null;
+  task_id: string;
+  task_name: string;
+  lane: string | null;
+}
+
+export interface StorageUsageReportEntry {
+  backend: string;
+  object_count: number;
+  total_size_bytes: number;
+}
+
+export interface UserActivityEntry {
+  actor: string;
+  event_type: string;
+  count: number;
+}
+
+export type ReportFormat = "csv" | "pdf";
+export type ReportFrequency = "daily" | "weekly" | "monthly";
+export type ReportType =
+  | "document_volume"
+  | "open_workflow_tasks"
+  | "storage_usage"
+  | "user_activity";
+
+export async function getDocumentVolumeReport(
+  token: string,
+  params: { since?: string; until?: string; folderId?: string; groupBy?: "day" | "week" | "month" }
+): Promise<DocumentVolumeEntry[]> {
+  const query = new URLSearchParams();
+  if (params.since) query.set("since", params.since);
+  if (params.until) query.set("until", params.until);
+  if (params.folderId) query.set("folder_id", params.folderId);
+  if (params.groupBy) query.set("group_by", params.groupBy);
+  const response = await request(
+    "reporting-service",
+    `reports/document-volume?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function getOpenWorkflowTasksReport(token: string): Promise<OpenWorkflowTaskEntry[]> {
+  const response = await request("reporting-service", "reports/open-workflow-tasks", {}, token);
+  return response.json();
+}
+
+export async function getStorageUsageReport(token: string): Promise<StorageUsageReportEntry[]> {
+  const response = await request("reporting-service", "reports/storage-usage", {}, token);
+  return response.json();
+}
+
+export async function getUserActivityReport(
+  token: string,
+  params: { actor?: string; since?: string; until?: string }
+): Promise<UserActivityEntry[]> {
+  const query = new URLSearchParams();
+  if (params.actor) query.set("actor", params.actor);
+  if (params.since) query.set("since", params.since);
+  if (params.until) query.set("until", params.until);
+  const response = await request(
+    "reporting-service",
+    `reports/user-activity?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function exportReport(
+  token: string,
+  reportType: ReportType,
+  format: ReportFormat,
+  extraParams: Record<string, string | undefined> = {}
+): Promise<Blob> {
+  const path = reportType.replace(/_/g, "-");
+  const query = new URLSearchParams({ format });
+  for (const [key, value] of Object.entries(extraParams)) {
+    if (value) query.set(key, value);
+  }
+  const response = await request(
+    "reporting-service",
+    `reports/${path}/export?${query.toString()}`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
+export interface ReportSchedule {
+  id: string;
+  report_type: ReportType;
+  format: ReportFormat;
+  frequency: ReportFrequency;
+  recipient_email: string;
+  filters: Record<string, unknown>;
+  next_run_at: string;
+  last_run_at: string | null;
+  created_at: string;
+}
+
+export async function listReportSchedules(token: string): Promise<ReportSchedule[]> {
+  const response = await request("reporting-service", "report-schedules", {}, token);
+  return response.json();
+}
+
+export async function createReportSchedule(
+  token: string,
+  payload: {
+    reportType: ReportType;
+    format: ReportFormat;
+    frequency: ReportFrequency;
+    recipientEmail: string;
+    filters?: Record<string, unknown>;
+  }
+): Promise<ReportSchedule> {
+  const response = await request(
+    "reporting-service",
+    "report-schedules",
+    jsonInit({
+      report_type: payload.reportType,
+      format: payload.format,
+      frequency: payload.frequency,
+      recipient_email: payload.recipientEmail,
+      filters: payload.filters ?? {},
+    }),
+    token
+  );
+  return response.json();
+}
+
+export async function deleteReportSchedule(token: string, scheduleId: string): Promise<void> {
+  await request(
+    "reporting-service",
+    `report-schedules/${encodeURIComponent(scheduleId)}`,
+    { method: "DELETE" },
+    token
+  );
+}

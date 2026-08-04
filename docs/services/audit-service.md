@@ -9,7 +9,7 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/events?limit=100&actor=&subject=&event_type=&since=&until=` | Aufgezeichnete Ereignisse, chronologisch (aufsteigend). Alle Filter optional/kombinierbar (5.4b, seit P7-S2) — `actor`/`subject` exakter Treffer, `event_type` exakt oder NATS-Wildcard (`"document.>"`), `since`/`until` filtert auf `occurred_at` |
+| `GET` | `/events?limit=100&actor=&subject=&event_type=&since=&until=` | Aufgezeichnete Ereignisse, chronologisch **absteigend** (neueste zuerst, seit P7-S2b — vorher aufsteigend, siehe unten). Alle Filter optional/kombinierbar (5.4b, seit P7-S2) — `actor`/`subject` exakter Treffer, `event_type` exakt oder NATS-Wildcard (`"document.>"`), `since`/`until` filtert auf `occurred_at` |
 | `GET` | `/events/verify` | Prüft Hash-Kette vollständig, meldet `broken_at_id` bei Manipulation |
 | `GET` | `/healthz` | Eigener Health-Check |
 
@@ -38,6 +38,8 @@ Konsument ohne eigenen Stream (`NatsEventBusClient(ensure_stream=False)`) — si
 **Cutover-Versionierung statt Neuberechnung der Historie**: das bloße Hinzufügen eines neuen Feldes zum kanonischen Hash-JSON hätte **jede** historische Verkettungsprüfung rückwirkend gebrochen (das kanonische JSON unterscheidet sich bereits durch den zusätzlichen Schlüssel, selbst bei `actor: None`). Deshalb hält `audit_meta.actor_field_cutover_id` (einmalig beim ersten Start nach der Migration auf `MAX(id)` der zu diesem Zeitpunkt bestehenden Zeilen gesetzt, `0` bei leerer Kette) fest, ab welcher `id` das Feld gilt — `_hashable_fields()` schließt `actor` nur für `id > cutover_id` ein, sowohl beim Anhängen neuer Zeilen als auch beim Nachrechnen in `verify_chain`. Alte Zeilen bleiben dadurch mit exakt demselben Feldsatz verifizierbar, mit dem sie ursprünglich gehasht wurden — `GET /events/verify` blieb nach der Migration nachweislich `ok: true` mit identischer Zeilenzahl (Live-Smoke-Test).
 
 **Filter-API** (`GET /events`): `actor`/`subject` exakter Treffer, `event_type` exakt oder NATS-Wildcard-Konvention (`"document.>"` → SQL `LIKE 'document.%'`, dieselbe Notation wie `Settings.subjects`), `since`/`until` auf `occurred_at`. Rein additive Query-Parameter am bestehenden Endpunkt, kein neuer Endpunkt nötig — es gab bislang keinen Frontend-Konsumenten, der hätte brechen können.
+
+**Sortierreihenfolge korrigiert (seit P7-S2b)**: `list_events` sortierte ursprünglich nach `id` aufsteigend vor dem `LIMIT` — bei einer breiten, kaum gefilterten Abfrage lieferte das die **ältesten** Treffer statt der jüngsten. Erst der `reporting-service`s Nutzeraktivitäts-Bericht (erster Aufrufer ohne enges `since`/`until`-Zeitfenster) deckte das auf: eine gerade erst durchgeführte Aktion fehlte im Ergebnis, obwohl sie mit einem `actor`-Filter auffindbar war. Fix: `order_by(id.desc())` — liefert seither die neuesten Treffer zuerst, kein bestehender Test/Konsument pinnte die alte Reihenfolge fest.
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 

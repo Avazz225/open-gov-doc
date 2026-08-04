@@ -147,7 +147,7 @@ Drittes, unabhängiges Aufbewahrungs-Szenario neben der regulären Frist und der
 
 | event_type | payload |
 |---|---|
-| `document.created` | `{title, created_by}`, zusätzlich `{derived_from_document_id}` bei einer Bearbeitungskopie (seit P6-S3, s. u.) |
+| `document.created` | `{title, created_by, folder_id}` (seit P7-S2b: `folder_id` zusätzlich im Payload, Grundlage für die Ordner-Gruppierung des `reporting-service`-Dokumentenaufkommen-Berichts, siehe `docs/services/reporting-service.md`), zusätzlich `{derived_from_document_id}` bei einer Bearbeitungskopie (seit P6-S3, s. u.) |
 | `document.version.created` | `{version_number, is_conflict, created_by}` |
 | `document.lock.force_released` | `{original_locked_by, released_by, reason}` |
 | `document.metadata.updated` | `{title}` (seit P4-S4) |

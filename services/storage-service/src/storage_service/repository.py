@@ -194,6 +194,20 @@ async def count_pending_copies_by_backend(session: AsyncSession) -> dict[str, in
     return dict(result.all())
 
 
+async def get_storage_usage(session: AsyncSession) -> list[tuple[str, int, int]]:
+    """Speicherverbrauch je Backend (5.4a, seit P7-S2b) - `object_metadata.
+    backend` ist die Primärziel-`id` zum Zeitpunkt der letzten Schreibung
+    (siehe models.py), keine Aussage über Redundanz-Kopien (`ObjectCopy`)."""
+    result = await session.execute(
+        select(
+            ObjectMetadata.backend,
+            func.count(),
+            func.coalesce(func.sum(ObjectMetadata.size_bytes), 0),
+        ).group_by(ObjectMetadata.backend)
+    )
+    return list(result.all())
+
+
 async def get_backend_identity(session: AsyncSession, target_id: str) -> BackendIdentity | None:
     return await session.get(BackendIdentity, target_id)
 

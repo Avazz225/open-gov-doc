@@ -588,6 +588,43 @@ services:
     networks:
       - dms-net
 
+  reporting-service:
+    build:
+      context: ..
+      dockerfile: services/reporting-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://reporting-service:8000
+      DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
+      DMS_AUDIT_SERVICE_BASE_URL: http://audit-service:8000
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      DMS_NOTIFICATION_SERVICE_BASE_URL: http://notification-service:8000
+      # Extern erreichbare Gateway-Adresse fuer Downloadlinks in geplanten
+      # Berichts-E-Mails (5.4a, seit P7-S2b) - bewusst nicht die interne
+      # Docker-DNS-Adresse, siehe settings.py.
+      DMS_GATEWAY_BASE_URL: ${REPORTING_SERVICE_GATEWAY_BASE_URL:-http://localhost:8009}
+      DMS_REPORT_POLL_INTERVAL_SECONDS: ${REPORTING_SERVICE_POLL_INTERVAL_SECONDS:-3600}
+    ports:
+      - "${REPORTING_SERVICE_PORT:-8020}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      workflow-service:
+        condition: service_started
+      audit-service:
+        condition: service_started
+      storage-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   object-type-service:
     build:
       context: ..

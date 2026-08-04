@@ -567,7 +567,7 @@ async def create_document(
         retention_until=retention_until,
     )
     await session.commit()
-    event_payload = {"title": title, "created_by": created_by}
+    event_payload = {"title": title, "created_by": created_by, "folder_id": folder_id}
     if derived_from_document_id is not None:
         event_payload["derived_from_document_id"] = derived_from_document_id
     await publish_event(

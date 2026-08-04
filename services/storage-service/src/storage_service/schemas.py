@@ -60,6 +60,15 @@ class GuardConfigOut(GuardConfigIn):
     updated_at: datetime
 
 
+class StorageUsageEntry(BaseModel):
+    """Speicherverbrauch je Backend (5.4a, seit P7-S2b) - Grundlage für den
+    entsprechenden Standardbericht im Reporting Service."""
+
+    backend: str
+    object_count: int
+    total_size_bytes: int
+
+
 class GuardStatusEntry(BaseModel):
     target_id: str
     device_id: str | None
