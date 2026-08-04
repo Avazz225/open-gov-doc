@@ -32,7 +32,12 @@ class Settings(BaseServiceSettings):
     # kryptografisch an eine konkrete Dokumentversion gebunden und damit
     # ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung. "favorite.>"
     # kam in P7-S1d dazu - Favoriten-Änderungen sollen wie jede andere
-    # Nutzeraktion im Audit-Trail nachvollziehbar bleiben.
+    # Nutzeraktion im Audit-Trail nachvollziehbar bleiben. "folder.>" fehlte
+    # bislang komplett (echter, beim P7-S2-Live-Smoke-Test entdeckter
+    # Bestandsfehler - folder-service hat seit P7-S1b einen eigenen
+    # Event-Stream, wurde aber nie in diese Liste aufgenommen) - ohne dieses
+    # Subject wäre die Forensik-Trace (5.4b) für sämtliche Ordner-Aktionen
+    # blind, direkt im Widerspruch zum Zweck dieser Session.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -46,4 +51,5 @@ class Settings(BaseServiceSettings):
         "auth.>",
         "signature.>",
         "favorite.>",
+        "folder.>",
     ]

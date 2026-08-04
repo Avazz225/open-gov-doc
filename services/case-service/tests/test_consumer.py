@@ -39,7 +39,7 @@ async def test_completed_event_closes_matching_case_and_fixes_snapshot(engine):
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     document_client = FakeDocumentClient({"doc-1": {"current_version_number": 5}})
@@ -66,7 +66,7 @@ async def test_completed_event_without_matching_case_is_ignored(engine):
     session_factory = _session_factory(engine)
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, FakeDocumentClient({}), fake_publish)
@@ -100,7 +100,7 @@ async def test_completed_event_for_already_closed_case_is_ignored(engine):
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, FakeDocumentClient({}), fake_publish)
@@ -120,7 +120,7 @@ async def test_completed_event_without_business_key_is_ignored(engine):
     session_factory = _session_factory(engine)
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, FakeDocumentClient({}), fake_publish)

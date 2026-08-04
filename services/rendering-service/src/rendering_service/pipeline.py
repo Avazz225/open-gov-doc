@@ -109,6 +109,7 @@ async def process_version(
                     "status": rendition.status,
                     "error": rendition.error_message,
                 },
+                actor="system:rendering-service",
             )
     return results
 
@@ -161,5 +162,6 @@ async def process_ocr_text(
             "status": "ready",
             "error": None,
         },
+        actor="system:rendering-service",
     )
     return rendition

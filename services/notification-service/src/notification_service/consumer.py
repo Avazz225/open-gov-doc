@@ -259,11 +259,14 @@ async def _handle_maintenance_mode_activated(
 async def publish_notification_result(
     publish_event: Callable[[str, str, dict], Awaitable[None]], notification
 ) -> None:
+    # Systemseitig ausgeloester Zustellversuch, kein menschlicher Akteur
+    # (siehe P7-S2-Konvention "system:<komponente>").
     if notification.status == "sent":
         await publish_event(
             "notification.sent",
             str(notification.id),
             {"channel": notification.channel, "recipient": notification.recipient},
+            actor="system:notification-service",
         )
     else:
         await publish_event(
@@ -274,6 +277,7 @@ async def publish_notification_result(
                 "recipient": notification.recipient,
                 "error": notification.error,
             },
+            actor="system:notification-service",
         )
 
 

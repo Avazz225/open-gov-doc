@@ -10,7 +10,7 @@ def _session_factory(engine):
 async def test_escalated_event_creates_in_app_and_email_notification(engine, settings):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -44,7 +44,7 @@ async def test_escalated_event_creates_in_app_and_email_notification(engine, set
 async def test_escalated_event_without_email_creates_only_in_app_notification(engine, settings):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -75,7 +75,7 @@ async def test_escalated_event_without_email_creates_only_in_app_notification(en
 async def test_superuser_activated_event_creates_security_officer_email(engine, settings):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -101,7 +101,7 @@ async def test_federation_inbound_received_with_notify_email_creates_in_app_and_
 ):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -136,7 +136,7 @@ async def test_federation_inbound_received_without_notify_email_creates_only_in_
 ):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -169,7 +169,7 @@ async def test_folder_deletion_reminder_with_notify_email_creates_in_app_and_ema
     `folder.deletion.reminder` (5.2a, P7-S1b)."""
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -200,7 +200,7 @@ async def test_folder_deletion_reminder_with_notify_email_creates_in_app_and_ema
 async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(engine, settings):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -231,7 +231,7 @@ async def test_deletion_reminder_with_notify_email_creates_in_app_and_email(engi
 async def test_deletion_reminder_without_notify_email_creates_only_in_app(engine, settings):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
@@ -260,7 +260,7 @@ async def test_deletion_reminder_without_notify_email_creates_only_in_app(engine
 async def test_maintenance_mode_activated_event_creates_security_officer_email(engine, settings):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)

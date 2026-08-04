@@ -73,6 +73,8 @@ Publiziert (Stream `folder`, `ensure_stream=True`) exakt den Vertrag, den der Pe
 
 **Konsumiert** (seit P7-S1b, erster Konsument dieses Service überhaupt): `permission.approval.approved` — relevant für `action_type == "folder.force_delete"` (führt eine zuvor per Vier-Augen-Prinzip aufgeschobene Zwangslöschung aus); alle anderen Aktionstypen werden ignoriert.
 
+**Audit-Anbindung (seit P7-S2, echter Nachtrag)**: `audit-service` fehlte `"folder.>"` in seiner konsumierten Subject-Liste seit Einführung dieses Streams in P7-S1b — ein beim P7-S2-Live-Smoke-Test entdeckter Bestandsfehler, nachgeholt inkl. rückwirkendem Backfill der kompletten bisherigen Ordner-Ereignishistorie (siehe `docs/services/audit-service.md`).
+
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
 Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.

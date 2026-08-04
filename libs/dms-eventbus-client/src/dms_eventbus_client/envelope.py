@@ -18,6 +18,12 @@ class Event(BaseModel):
     service_name: str
     subject: str | None = None
     payload: dict = Field(default_factory=dict)
+    # Handelnde Person (first-class statt ad-hoc-payload-Konvention, seit
+    # P7-S2, Voraussetzung fuer die Forensik-Trace 5.4b) - Nutzername, wo ein
+    # Mensch die Aktion ausgeloest hat, sonst "system:<komponente>" (gleiche
+    # Konvention wie bereits document-service/folder-services
+    # "system:retention-poll"). None nur fuer Alt-Events vor diesem Feld.
+    actor: str | None = None
 
     def to_bytes(self) -> bytes:
         return self.model_dump_json().encode("utf-8")

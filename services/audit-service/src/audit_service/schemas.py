@@ -11,6 +11,7 @@ class AuditEventOut(BaseModel):
     service_name: str
     subject: str | None
     payload: dict
+    actor: str | None
     recorded_at: datetime
     prev_hash: str
     hash: str

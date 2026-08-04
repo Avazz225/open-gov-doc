@@ -16,7 +16,7 @@ async def test_approved_scope_lock_create_executes_and_publishes(engine):
 
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(session_factory, fake_publish)
@@ -77,7 +77,7 @@ async def test_approved_scope_lock_release_executes_and_publishes(engine):
 
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(session_factory, fake_publish)
@@ -109,7 +109,7 @@ async def test_approved_scope_lock_release_executes_and_publishes(engine):
 async def test_unrelated_action_type_is_ignored(engine):
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
@@ -136,7 +136,7 @@ async def test_scope_lock_create_with_missing_keys_is_logged_not_raised(engine):
     /approval-requests angelegt), darf den Konsumenten nicht crashen."""
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
@@ -160,7 +160,7 @@ async def test_scope_lock_create_with_missing_keys_is_logged_not_raised(engine):
 async def test_missing_resource_at_execution_time_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
@@ -195,7 +195,7 @@ async def test_approved_not_shutdown_trigger_activates_and_publishes(engine):
 
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(session_factory, fake_publish)
@@ -225,7 +225,7 @@ async def test_approved_not_shutdown_trigger_activates_and_publishes(engine):
 async def test_not_shutdown_trigger_with_missing_keys_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)

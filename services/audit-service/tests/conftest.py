@@ -26,7 +26,14 @@ async def _clean_audit_table():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text("ALTER TABLE audit.audit_event ADD COLUMN IF NOT EXISTS actor VARCHAR(255)")
+        )
         await conn.execute(text("DELETE FROM audit.audit_event"))
+        # Cutover-Zeile ebenfalls zuruecksetzen (P7-S2) - sonst leckt der
+        # Cutover-Wert eines Tests in den naechsten, dessen Erwartungen an
+        # get_actor_field_cutover_id() dann falsch waeren.
+        await conn.execute(text("DELETE FROM audit.audit_meta"))
     await eng.dispose()
     yield
 
@@ -37,6 +44,9 @@ async def engine():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text("ALTER TABLE audit.audit_event ADD COLUMN IF NOT EXISTS actor VARCHAR(255)")
+        )
     yield eng
     await eng.dispose()
 

@@ -22,7 +22,7 @@ async def test_approved_activation_enables_superuser_and_publishes(keycloak_admi
     try:
         published = []
 
-        async def fake_publish(event_type, payload):
+        async def fake_publish(event_type, payload, actor=None):
             published.append((event_type, payload))
 
         handler = consumer.make_handler(
@@ -43,7 +43,7 @@ async def test_approved_activation_enables_superuser_and_publishes(keycloak_admi
 async def test_unrelated_action_type_is_ignored(keycloak_admin):
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
@@ -67,7 +67,7 @@ async def test_missing_superuser_account_is_logged_not_raised(keycloak_admin):
 
     published = []
 
-    async def fake_publish(event_type, payload):
+    async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(

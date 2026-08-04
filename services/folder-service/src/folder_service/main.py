@@ -106,6 +106,7 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, folder: Folde
         "folder.force_deleted",
         folder_id,
         {"reason": reason, "triggered_by": "system:retention-poll"},
+        actor="system:retention-poll",
     )
 
 
@@ -135,6 +136,7 @@ async def _retention_poll_loop(session_factory) -> None:
                                 "full_deletion": folder.full_deletion,
                                 "notify_email": folder.reminder_notify_email,
                             },
+                            actor="system:retention-poll",
                         )
 
             async with session_factory() as session:
@@ -151,7 +153,10 @@ async def _retention_poll_loop(session_factory) -> None:
                     )
                     await session.commit()
                     await publish_event(
-                        "folder.trashed", folder_id, {"deleted_by": "system:retention-poll"}
+                        "folder.trashed",
+                        folder_id,
+                        {"deleted_by": "system:retention-poll"},
+                        actor="system:retention-poll",
                     )
 
             async with session_factory() as session:
@@ -163,7 +168,10 @@ async def _retention_poll_loop(session_factory) -> None:
                     await retention_actions.purge_expired_trash_entry(session, folder_id)
                     await session.commit()
                     await publish_event(
-                        "folder.trash_purged", folder_id, {"trigger": "trash_expiry"}
+                        "folder.trash_purged",
+                        folder_id,
+                        {"trigger": "trash_expiry"},
+                        actor="system:retention-poll",
                     )
         except Exception:
             logger.exception(
@@ -293,9 +301,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
     event = Event(
-        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -374,6 +388,7 @@ async def create_folder(
             "parent_id": folder.parent_id,
             "resource_type": "folder",
         },
+        actor=payload.created_by,
     )
     return folder
 
@@ -444,6 +459,9 @@ async def update_folder(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     if moved:
+        # Kein Akteur bekannt - FolderUpdate verfolgt bislang nicht, wer die
+        # Verschiebung/Umbenennung ausgeloest hat (P7-S2: nur bereits
+        # vorhandene Angaben first-class gemacht, keine neuen Felder ergaenzt).
         await publish_event(
             "folder.resource.moved",
             subject=folder.id,
@@ -464,6 +482,7 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
     except repository.FolderNotEmptyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
+    # Kein Akteur bekannt - der Endpunkt nimmt keinen deleted_by entgegen.
     await publish_event(
         "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
     )
@@ -501,7 +520,10 @@ async def trash_folder(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     await publish_event(
-        "folder.trashed", subject=folder_id, payload={"deleted_by": payload.deleted_by}
+        "folder.trashed",
+        subject=folder_id,
+        payload={"deleted_by": payload.deleted_by},
+        actor=payload.deleted_by,
     )
     return TrashResult(status="trashed", folder=folder)
 
@@ -522,6 +544,7 @@ async def restore_folder(folder_id: str, session: AsyncSession = Depends(get_ses
     except repository.RestorePeriodExpiredError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
+    # Kein Akteur bekannt - der Endpunkt nimmt keinen restored_by entgegen.
     await publish_event("folder.restored", subject=folder_id, payload={})
     return folder
 
@@ -554,6 +577,8 @@ async def put_retention(
         notify_email=payload.notify_email,
     )
     await session.commit()
+    # Kein Akteur bekannt - RetentionUpdate verfolgt bislang nicht, wer die
+    # Frist geaendert hat.
     await publish_event(
         "folder.retention.updated",
         subject=folder_id,
@@ -586,6 +611,7 @@ async def create_legal_hold(
         "folder.legal_hold.set",
         subject=payload.folder_id,
         payload={"set_by": payload.set_by, "reason": payload.reason},
+        actor=payload.set_by,
     )
     return hold
 
@@ -607,6 +633,7 @@ async def release_legal_hold(
         "folder.legal_hold.released",
         subject=hold.folder_id,
         payload={"released_by": payload.released_by},
+        actor=payload.released_by,
     )
     return hold
 

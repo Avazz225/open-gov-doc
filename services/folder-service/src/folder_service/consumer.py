@@ -67,6 +67,7 @@ def make_handler(
                     "reason": action_payload.get("reason"),
                     "triggered_by": action_payload.get("triggered_by"),
                 },
+                actor=action_payload.get("triggered_by"),
             )
 
     return handle
@@ -113,7 +114,9 @@ async def _handle_delete_approved(
             )
             return
         await session.commit()
-        await publish_event("folder.trashed", folder_id, {"deleted_by": deleted_by})
+        await publish_event(
+            "folder.trashed", folder_id, {"deleted_by": deleted_by}, actor=deleted_by
+        )
 
 
 async def start_consuming(

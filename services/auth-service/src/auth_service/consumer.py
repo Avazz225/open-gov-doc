@@ -34,9 +34,13 @@ def make_handler(
                 request_id,
             )
             return
+        # Reicht den Akteur des genehmigenden permission.approval.approved-
+        # Events weiter (seit P7-S2) - das ist die Person, die die
+        # Aktivierung tatsaechlich freigegeben hat.
         await publish_event(
             "auth.superuser.activated",
             {"request_id": request_id, "expires_at": expires_at.isoformat()},
+            actor=event.actor,
         )
 
     return handle

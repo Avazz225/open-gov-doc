@@ -99,9 +99,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
     event = Event(
-        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
     )
     await app.state.producer.publish(event_type, event.to_bytes())
 
@@ -170,6 +176,7 @@ async def create_case(payload: CaseCreate, session: AsyncSession = Depends(get_s
         "case.created",
         subject=case_id,
         payload={"name": payload.name, "created_by": payload.created_by},
+        actor=payload.created_by,
     )
     return case
 
@@ -218,6 +225,7 @@ async def add_case_document(
         "case.document.added",
         subject=case_id,
         payload={"document_id": payload.document_id, "added_by": payload.added_by},
+        actor=payload.added_by,
     )
     return await _resolve_reference(session, case, reference)
 
@@ -243,6 +251,7 @@ async def remove_case_document(
         "case.document.removed",
         subject=case_id,
         payload={"document_id": document_id, "removed_by": payload.removed_by},
+        actor=payload.removed_by,
     )
     return await _resolve_reference(session, case, reference)
 

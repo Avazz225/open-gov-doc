@@ -60,7 +60,9 @@ class EventRecorder:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict]] = []
 
-    async def __call__(self, event_type: str, subject: str, payload: dict) -> None:
+    async def __call__(
+        self, event_type: str, subject: str, payload: dict, actor: str | None = None
+    ) -> None:
         self.events.append((event_type, subject, payload))
 
 

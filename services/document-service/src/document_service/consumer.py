@@ -70,6 +70,7 @@ def make_handler(
                     "released_by": action_payload.get("released_by"),
                     "reason": action_payload.get("reason"),
                 },
+                actor=action_payload.get("released_by"),
             )
 
     return handle
@@ -118,6 +119,7 @@ async def _handle_force_delete_approved(
                 "reason": action_payload.get("reason"),
                 "triggered_by": action_payload.get("triggered_by"),
             },
+            actor=action_payload.get("triggered_by"),
         )
 
 
@@ -153,7 +155,9 @@ async def _handle_delete_approved(
             )
             return
         await session.commit()
-        await publish_event("document.deleted", document_id, {"deleted_by": deleted_by})
+        await publish_event(
+            "document.deleted", document_id, {"deleted_by": deleted_by}, actor=deleted_by
+        )
 
 
 async def start_consuming(

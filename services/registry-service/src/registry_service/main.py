@@ -74,12 +74,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
     event = Event(
         event_type=event_type,
         service_name=settings.service_name,
         subject=subject,
         payload=payload,
+        actor=actor,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -99,6 +102,7 @@ async def register_instance(
         "registry.instance.registered",
         subject=payload.instance_id,
         payload={"service_type": payload.service_type, "version": payload.version},
+        actor=f"system:{payload.service_type}",
     )
     return result
 
@@ -128,6 +132,7 @@ async def deregister_instance(
         "registry.instance.deregistered",
         subject=instance_id,
         payload={"service_type": deregistered.service_type},
+        actor=f"system:{deregistered.service_type}",
     )
 
 

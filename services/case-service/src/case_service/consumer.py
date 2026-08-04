@@ -42,7 +42,16 @@ def make_handler(
 
             await repository.close_case(session, case, snapshots=snapshots)
             await session.commit()
-            await publish_event("case.closed", case.id, {"process_instance_id": event.subject})
+            # Reicht den Akteur des ausloesenden workflow.instance.completed
+            # weiter (seit P7-S2) statt eines generischen "system:"-Labels -
+            # derselbe kausale Vorgang, dieselbe handelnde Person (falls der
+            # Abschluss durch einen echten Task-Abschluss ausgeloest wurde).
+            await publish_event(
+                "case.closed",
+                case.id,
+                {"process_instance_id": event.subject},
+                actor=event.actor,
+            )
 
     return handle
 

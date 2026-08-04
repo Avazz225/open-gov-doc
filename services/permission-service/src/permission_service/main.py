@@ -153,8 +153,10 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, payload: dict) -> None:
-    event = Event(event_type=event_type, service_name=settings.service_name, payload=payload)
+async def publish_event(event_type: str, payload: dict, actor: str | None = None) -> None:
+    event = Event(
+        event_type=event_type, service_name=settings.service_name, payload=payload, actor=actor
+    )
     await app.state.publisher.publish(event_type, event.to_bytes())
 
 
@@ -327,6 +329,7 @@ async def _request_approval(
             "action_type": request.action_type,
             "initiated_by": request.initiated_by,
         },
+        actor=request.initiated_by,
     )
     return request
 
@@ -418,6 +421,7 @@ async def approve_approval_request(
             "approved_by": request.approved_by,
             "payload": request.payload,
         },
+        actor=request.approved_by,
     )
     return request
 
@@ -444,6 +448,7 @@ async def reject_approval_request(
             "rejected_by": request.rejected_by,
             "reason": request.reason,
         },
+        actor=request.rejected_by,
     )
     return request
 
@@ -489,6 +494,7 @@ async def create_scope_lock(
             "reason": lock.reason,
             "blocks_read": lock.blocks_read,
         },
+        actor=lock.locked_by,
     )
     return ScopeLockActionResult(status="created", scope_lock=lock)
 
@@ -519,6 +525,7 @@ async def release_scope_lock(
             "resource_id": lock.resource_id,
             "released_by": lock.released_by,
         },
+        actor=lock.released_by,
     )
     return ScopeLockActionResult(status="released", scope_lock=lock)
 
@@ -579,6 +586,7 @@ async def trigger_maintenance_mode(
     await publish_event(
         "permission.maintenance_mode.activated",
         {"triggered_by": mode.triggered_by, "reason": mode.reason},
+        actor=mode.triggered_by,
     )
     return MaintenanceModeActionResult(status="activated", maintenance_mode=mode)
 
@@ -602,5 +610,6 @@ async def lift_maintenance_mode(
     await publish_event(
         "permission.maintenance_mode.lifted",
         {"lifted_by": mode.lifted_by},
+        actor=mode.lifted_by,
     )
     return mode

@@ -62,9 +62,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
     event = Event(
-        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -91,6 +97,7 @@ async def create_favorite(
             "object_type": favorite.object_type,
             "object_id": favorite.object_id,
         },
+        actor=favorite.user_id,
     )
     return favorite
 
@@ -120,4 +127,5 @@ async def delete_favorite(
         "favorite.removed",
         subject=object_id,
         payload={"user_id": user_id, "object_type": object_type, "object_id": object_id},
+        actor=user_id,
     )

@@ -136,6 +136,7 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, document: Doc
         "document.force_deleted",
         document_id,
         {"reason": reason, "triggered_by": "system:retention-poll"},
+        actor="system:retention-poll",
     )
 
 
@@ -172,6 +173,7 @@ async def _retention_poll_loop(session_factory) -> None:
                                 "full_deletion": document.full_deletion,
                                 "notify_email": document.reminder_notify_email,
                             },
+                            actor="system:retention-poll",
                         )
 
             async with session_factory() as session:
@@ -185,7 +187,10 @@ async def _retention_poll_loop(session_factory) -> None:
                     )
                     await session.commit()
                     await publish_event(
-                        "document.deleted", document_id, {"deleted_by": "system:retention-poll"}
+                        "document.deleted",
+                        document_id,
+                        {"deleted_by": "system:retention-poll"},
+                        actor="system:retention-poll",
                     )
 
             async with session_factory() as session:
@@ -200,7 +205,10 @@ async def _retention_poll_loop(session_factory) -> None:
                     if purged:
                         await session.commit()
                         await publish_event(
-                            "document.trash_purged", document_id, {"trigger": "trash_expiry"}
+                            "document.trash_purged",
+                            document_id,
+                            {"trigger": "trash_expiry"},
+                            actor="system:retention-poll",
                         )
                     else:
                         await session.rollback()
@@ -377,9 +385,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
     event = Event(
-        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -556,7 +570,9 @@ async def create_document(
     event_payload = {"title": title, "created_by": created_by}
     if derived_from_document_id is not None:
         event_payload["derived_from_document_id"] = derived_from_document_id
-    await publish_event("document.created", subject=document_id, payload=event_payload)
+    await publish_event(
+        "document.created", subject=document_id, payload=event_payload, actor=created_by
+    )
     return document
 
 
@@ -597,7 +613,10 @@ async def cascade_trash(
     await session.commit()
     for document_id in document_ids:
         await publish_event(
-            "document.deleted", subject=document_id, payload={"deleted_by": payload.deleted_by}
+            "document.deleted",
+            subject=document_id,
+            payload={"deleted_by": payload.deleted_by},
+            actor=payload.deleted_by,
         )
     return CascadeResult(document_ids=document_ids)
 
@@ -610,6 +629,10 @@ async def cascade_restore(
     Ordners nur die dadurch kaskadiert gelöschten Dokumente wieder her."""
     document_ids = await repository.cascade_restore_by_via_folder_id(session, payload.via_folder_id)
     await session.commit()
+    # Kein Akteur bekannt - CascadeRestoreRequest verfolgt bislang nicht, wer
+    # die zugrunde liegende Ordner-Wiederherstellung ausgelöst hat (P7-S2:
+    # nur bereits vorhandene Angaben first-class gemacht, keine neuen
+    # Felder ergänzt).
     for document_id in document_ids:
         await publish_event("document.restored", subject=document_id, payload={})
     return CascadeResult(document_ids=document_ids)
@@ -673,6 +696,8 @@ async def update_document(
         session, document_id, title=payload.title, attributes=payload.attributes
     )
     await session.commit()
+    # Kein Akteur bekannt - DocumentUpdate verfolgt bislang nicht, wer die
+    # Metadaten geaendert hat (siehe cascade_restore-Kommentar oben).
     await publish_event(
         "document.metadata.updated", subject=document_id, payload={"title": updated.title}
     )
@@ -688,7 +713,12 @@ async def delete_document(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
-    await publish_event("document.deleted", subject=document_id, payload={"deleted_by": deleted_by})
+    await publish_event(
+        "document.deleted",
+        subject=document_id,
+        payload={"deleted_by": deleted_by},
+        actor=deleted_by,
+    )
     return document
 
 
@@ -724,7 +754,10 @@ async def trash_document(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     await publish_event(
-        "document.deleted", subject=document_id, payload={"deleted_by": payload.deleted_by}
+        "document.deleted",
+        subject=document_id,
+        payload={"deleted_by": payload.deleted_by},
+        actor=payload.deleted_by,
     )
     return TrashResult(status="trashed", document=document)
 
@@ -744,6 +777,8 @@ async def restore_document(
     except repository.RestorePeriodExpiredError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
+    # Kein Akteur bekannt - der Endpunkt nimmt bislang keinen restored_by
+    # entgegen (siehe cascade_restore-Kommentar oben).
     await publish_event("document.restored", subject=document_id, payload={})
     return document
 
@@ -777,6 +812,8 @@ async def put_retention(
         notify_email=payload.notify_email,
     )
     await session.commit()
+    # Kein Akteur bekannt - RetentionUpdate verfolgt bislang nicht, wer die
+    # Frist geaendert hat (siehe cascade_restore-Kommentar oben).
     await publish_event(
         "document.retention.updated",
         subject=document_id,
@@ -808,6 +845,7 @@ async def create_legal_hold(
         "document.legal_hold.set",
         subject=payload.document_id,
         payload={"set_by": payload.set_by, "reason": payload.reason},
+        actor=payload.set_by,
     )
     return hold
 
@@ -829,6 +867,7 @@ async def release_legal_hold(
         "document.legal_hold.released",
         subject=hold.document_id,
         payload={"released_by": payload.released_by},
+        actor=payload.released_by,
     )
     return hold
 
@@ -1013,6 +1052,7 @@ async def checkin_version(
             "is_conflict": is_conflict,
             "created_by": created_by,
         },
+        actor=created_by,
     )
     return CheckinResult(version=version, is_conflict=is_conflict)
 
@@ -1092,5 +1132,6 @@ async def force_release_lock(
             "released_by": payload.released_by,
             "reason": payload.reason,
         },
+        actor=payload.released_by,
     )
     return ForceReleaseResult(status="released", lock=original_lock)

@@ -45,6 +45,7 @@ def make_handler(
                     await publish_event(
                         "permission.maintenance_mode.activated",
                         {"triggered_by": mode.triggered_by, "reason": mode.reason},
+                        actor=mode.triggered_by,
                     )
                 elif action_type == "permission.scope_lock.create":
                     expires_at_raw = action_payload.get("expires_at")
@@ -68,6 +69,7 @@ def make_handler(
                             "reason": lock.reason,
                             "blocks_read": lock.blocks_read,
                         },
+                        actor=lock.locked_by,
                     )
                 else:
                     lock = await repository.release_scope_lock(
@@ -81,6 +83,7 @@ def make_handler(
                             "resource_id": lock.resource_id,
                             "released_by": lock.released_by,
                         },
+                        actor=lock.released_by,
                     )
             except (repository.NotFoundError, KeyError):
                 # KeyError deckt Fremd-/Fehlform-Payloads ab (z. B. ein zu

@@ -163,6 +163,7 @@ async def process_version(
             "engine": result.engine,
             "average_confidence": result.average_confidence,
         },
+        actor="system:ocr-service",
     )
     return result
 
@@ -191,7 +192,10 @@ async def _persist_failure(
         )
         await session.commit()
     await publish_event(
-        "ocr.failed", document_id, {"version_number": version_number, "error": error}
+        "ocr.failed",
+        document_id,
+        {"version_number": version_number, "error": error},
+        actor="system:ocr-service",
     )
     return result
 
@@ -231,6 +235,7 @@ async def _persist_skip(
         "ocr.skipped",
         document_id,
         {"version_number": version_number, "estimated_words": estimated_words},
+        actor="system:ocr-service",
     )
     return result
 
@@ -269,6 +274,7 @@ async def _persist_content_type_skip(
         "ocr.skipped",
         document_id,
         {"version_number": version_number, "content_type": content_type},
+        actor="system:ocr-service",
     )
     return result
 

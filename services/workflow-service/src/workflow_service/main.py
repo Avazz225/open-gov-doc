@@ -69,12 +69,14 @@ async def _sla_poll_loop(
                             "lane": fired.lane,
                             "escalation_email": fired.data.get("escalation_email"),
                         },
+                        actor="system:sla-poll",
                     )
                 if result.newly_completed:
                     await publish_event(
                         "workflow.instance.completed",
                         subject=result.instance.id,
                         payload={"business_key": result.instance.business_key},
+                        actor="system:sla-poll",
                     )
         except Exception:
             logger.exception(
@@ -253,9 +255,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def publish_event(event_type: str, subject: str, payload: dict) -> None:
+async def publish_event(
+    event_type: str, subject: str, payload: dict, actor: str | None = None
+) -> None:
     event = Event(
-        event_type=event_type, service_name=settings.service_name, subject=subject, payload=payload
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -537,12 +545,14 @@ async def start_instance(
         "workflow.instance.started",
         subject=instance.id,
         payload={"process_definition_id": process_definition_id, "created_by": payload.created_by},
+        actor=payload.created_by,
     )
     if instance.status == "completed":
         await publish_event(
             "workflow.instance.completed",
             subject=instance.id,
             payload={"business_key": instance.business_key},
+            actor=payload.created_by,
         )
     await _dispatch_pending_federation_tasks(session, instance.id)
     await session.commit()
@@ -681,12 +691,14 @@ async def complete_task(
         "workflow.task.completed",
         subject=instance_id,
         payload={"task_id": task_id, "completed_by": payload.completed_by},
+        actor=payload.completed_by,
     )
     if instance.status == "completed":
         await publish_event(
             "workflow.instance.completed",
             subject=instance_id,
             payload={"business_key": instance.business_key},
+            actor=payload.completed_by,
         )
     await _dispatch_pending_federation_tasks(session, instance_id)
     await session.commit()
@@ -774,6 +786,7 @@ async def federation_inbound(
         "workflow.instance.started",
         subject=instance.id,
         payload={"process_definition_id": definitions[0].id, "created_by": "federation-hub"},
+        actor="system:federation-hub",
     )
     await publish_event(
         "workflow.federation.inbound_received",
@@ -784,12 +797,14 @@ async def federation_inbound(
             "process_type": process_type,
             "notify_email": decrypted_payload.get("notify_email"),
         },
+        actor="system:federation-hub",
     )
     if instance.status == "completed":
         await publish_event(
             "workflow.instance.completed",
             subject=instance.id,
             payload={"business_key": instance.business_key},
+            actor="system:federation-hub",
         )
     await _dispatch_pending_federation_tasks(session, instance.id)
     await session.commit()
@@ -845,12 +860,14 @@ async def federation_inbound_result(
         "workflow.task.completed",
         subject=federation_task.process_instance_id,
         payload={"task_id": federation_task.task_id, "completed_by": "federation-hub"},
+        actor="system:federation-hub",
     )
     if instance.status == "completed":
         await publish_event(
             "workflow.instance.completed",
             subject=instance.id,
             payload={"business_key": instance.business_key},
+            actor="system:federation-hub",
         )
     await _dispatch_pending_federation_tasks(session, instance.id)
     await session.commit()

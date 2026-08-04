@@ -39,7 +39,11 @@ async def _superuser_poll_loop() -> None:
     while True:
         try:
             if superuser.deactivate_if_expired(app.state.keycloak_admin):
-                await publish_event("auth.superuser.deactivated", {"reason": "expired"})
+                await publish_event(
+                    "auth.superuser.deactivated",
+                    {"reason": "expired"},
+                    actor="system:superuser-poll",
+                )
         except Exception:
             logger.exception(
                 "Superuser-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
@@ -128,8 +132,10 @@ _validator = TokenValidator(
 get_current_user = make_current_user_dependency(_validator)
 
 
-async def publish_event(event_type: str, payload: dict) -> None:
-    event = Event(event_type=event_type, service_name=settings.service_name, payload=payload)
+async def publish_event(event_type: str, payload: dict, actor: str | None = None) -> None:
+    event = Event(
+        event_type=event_type, service_name=settings.service_name, payload=payload, actor=actor
+    )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
 
@@ -274,4 +280,11 @@ async def deactivate_superuser() -> None:
         superuser.deactivate(app.state.keycloak_admin)
     except superuser.SuperuserNotConfiguredError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    await publish_event("auth.superuser.deactivated", {"reason": "manual"})
+    # Kein authentifizierter Aufrufer-Kontext an diesem Endpunkt - das
+    # deaktivierte Superuser-Konto selbst ist die naechstbeste Angabe (es
+    # gibt nur eines, siehe get_superuser_status).
+    await publish_event(
+        "auth.superuser.deactivated",
+        {"reason": "manual"},
+        actor=superuser.get_principal_id(app.state.keycloak_admin),
+    )

@@ -25,6 +25,26 @@ class AuditEvent(Base):
     service_name: Mapped[str] = mapped_column(String(128))
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
+    # Handelnde Person (first-class statt ad-hoc-payload-Konvention, seit
+    # P7-S2) - siehe AuditMeta.actor_field_cutover_id fuer die
+    # Cutover-Versionierung, die verhindert, dass dieses neue Feld die
+    # bestehende Hash-Kette fuer bereits vorhandene Zeilen bricht.
+    actor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+class AuditMeta(Base):
+    """Singleton-Konfigurationszeile (``id=1``, gleiches Muster wie
+    ``KennzeichenConfig``/``RetentionConfig`` anderer Services) - haelt den
+    Cutover-Punkt fuer das seit P7-S2 neue ``actor``-Feld: Zeilen mit
+    ``id <= actor_field_cutover_id`` wurden VOR der Einfuehrung des Feldes
+    gehasht und muessen beim Nachrechnen (``verify_chain``) weiterhin ohne
+    ``actor`` im kanonischen JSON behandelt werden, sonst bricht die
+    Hash-Kette fuer die komplette Alt-Historie rueckwirkend."""
+
+    __tablename__ = "audit_meta"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_field_cutover_id: Mapped[int] = mapped_column()

@@ -1,4 +1,5 @@
 import pytest
+from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
 from permission_service.main import app
 from permission_service.settings import ROOT_RESOURCE_ID
@@ -376,6 +377,32 @@ def test_approval_config_defaults_to_false_and_is_settable(client):
         c["action_type"] == "document.force_unlock" and c["requires_approval"] is True
         for c in listed
     )
+
+
+def test_approval_request_lifecycle_publishes_events_with_actor(client, monkeypatch):
+    """First-class Actor-Feld (5.4b-Voraussetzung, seit P7-S2) - Antrag und
+    Genehmigung tragen die jeweils handelnde Person als `actor`, nicht nur
+    ad-hoc unter payload-Schlüsseln wie `initiated_by`/`approved_by`."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    created = client.post(
+        "/approval-requests",
+        json={"action_type": "document.force_unlock", "initiated_by": "alice", "payload": {"x": 1}},
+    )
+    assert created.status_code == 201
+    request_id = created.json()["id"]
+
+    client.post(f"/approval-requests/{request_id}/approve", json={"approved_by": "bob"})
+
+    requested = [e for e in published if e.event_type == "permission.approval.requested"]
+    approved = [e for e in published if e.event_type == "permission.approval.approved"]
+    assert requested[0].actor == "alice"
+    assert approved[0].actor == "bob"
 
 
 def test_approval_request_lifecycle_via_api(client):

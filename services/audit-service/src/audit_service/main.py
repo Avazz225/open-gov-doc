@@ -2,6 +2,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -29,8 +30,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Schema-Erweiterung (kein Alembic, siehe CONTRIBUTING.md) -
+        # first-class Actor-Feld seit P7-S2.
+        await conn.execute(
+            text("ALTER TABLE audit.audit_event ADD COLUMN IF NOT EXISTS actor VARCHAR(255)")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
+
+    # Cutover-Punkt fuer das actor-Feld einmalig festlegen (P7-S2) - muss vor
+    # dem ersten konsumierten Event geschehen, sonst koennte ein frisches
+    # Event faelschlich als "vor dem Cutover" behandelt werden.
+    async with app.state.session_factory() as session:
+        await repository.get_actor_field_cutover_id(session)
+        await session.commit()
 
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
@@ -71,9 +84,23 @@ def healthz() -> dict:
 
 @app.get("/events", response_model=list[AuditEventOut])
 async def list_events(
-    limit: int = 100, session: AsyncSession = Depends(get_session)
+    limit: int = 100,
+    actor: str | None = None,
+    subject: str | None = None,
+    event_type: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    session: AsyncSession = Depends(get_session),
 ) -> list[AuditEventOut]:
-    return await repository.list_events(session, limit=limit)
+    return await repository.list_events(
+        session,
+        limit=limit,
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        since=since,
+        until=until,
+    )
 
 
 @app.get("/events/verify", response_model=ChainVerificationOut)

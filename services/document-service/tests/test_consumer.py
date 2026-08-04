@@ -41,7 +41,7 @@ async def test_approved_force_unlock_releases_lock_and_publishes(engine):
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
@@ -74,7 +74,7 @@ async def test_approved_force_unlock_releases_lock_and_publishes(engine):
 async def test_unrelated_action_type_is_ignored(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
@@ -116,7 +116,7 @@ async def test_approved_force_unlock_for_already_unlocked_document_is_logged_not
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
@@ -145,7 +145,7 @@ async def test_approved_event_without_document_id_is_logged_not_raised(engine):
     zugestellt."""
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
@@ -196,7 +196,7 @@ async def test_approved_force_delete_executes_physical_deletion(engine):
 
         published = []
 
-        async def fake_publish(event_type, subject, payload):
+        async def fake_publish(event_type, subject, payload, actor=None):
             published.append((event_type, subject, payload))
 
         handler = consumer.make_handler(session_factory, storage, "dms-admin", fake_publish)
@@ -241,7 +241,7 @@ async def test_approved_force_delete_executes_physical_deletion(engine):
 async def test_approved_force_delete_for_already_removed_document_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(
@@ -289,7 +289,7 @@ async def test_approved_delete_soft_deletes_document(engine):
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, None, "dms-admin", fake_publish)
@@ -316,7 +316,7 @@ async def test_approved_delete_soft_deletes_document(engine):
 async def test_approved_delete_for_already_removed_document_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)
@@ -340,7 +340,7 @@ async def test_approved_delete_for_already_removed_document_is_logged_not_raised
 async def test_approved_delete_without_document_id_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), None, "dms-admin", fake_publish)

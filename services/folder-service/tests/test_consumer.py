@@ -30,7 +30,7 @@ async def test_approved_force_delete_executes_physical_deletion(engine):
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(session_factory, fake_publish)
@@ -73,7 +73,7 @@ async def test_approved_force_delete_executes_physical_deletion(engine):
 async def test_approved_force_delete_for_already_removed_folder_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), fake_publish)
@@ -97,7 +97,7 @@ async def test_approved_force_delete_for_already_removed_folder_is_logged_not_ra
 async def test_approved_event_without_folder_id_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), fake_publish)
@@ -138,7 +138,7 @@ async def test_approved_delete_soft_deletes_folder(engine):
 
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     fake_document_client = AsyncMock()
@@ -170,7 +170,7 @@ async def test_approved_delete_soft_deletes_folder(engine):
 async def test_approved_delete_for_already_removed_folder_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), fake_publish, AsyncMock())
@@ -194,7 +194,7 @@ async def test_approved_delete_for_already_removed_folder_is_logged_not_raised(e
 async def test_approved_delete_without_folder_id_is_logged_not_raised(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), fake_publish, AsyncMock())
@@ -218,7 +218,7 @@ async def test_approved_delete_without_folder_id_is_logged_not_raised(engine):
 async def test_unrelated_action_type_is_ignored(engine):
     published = []
 
-    async def fake_publish(event_type, subject, payload):
+    async def fake_publish(event_type, subject, payload, actor=None):
         published.append((event_type, subject, payload))
 
     handler = consumer.make_handler(_session_factory(engine), fake_publish)

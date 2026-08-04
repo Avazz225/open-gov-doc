@@ -2,6 +2,7 @@ import os
 
 import httpx
 import pytest
+from dms_eventbus_client import Event
 from document_service.main import app
 from fastapi.testclient import TestClient
 
@@ -44,6 +45,25 @@ def test_create_and_get_document(client):
     get_response = client.get(f"/documents/{body['id']}")
     assert get_response.status_code == 200
     assert get_response.json()["id"] == body["id"]
+
+
+def test_create_document_publishes_event_with_actor(client, monkeypatch):
+    """First-class Actor-Feld (5.4b-Voraussetzung, seit P7-S2) - der
+    publizierte `document.created`-Event trägt den Hochlader als `actor`,
+    nicht nur ad-hoc unter `payload["created_by"]`."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    response = upload(client, created_by="alice")
+    assert response.status_code == 201
+
+    created_events = [e for e in published if e.event_type == "document.created"]
+    assert len(created_events) == 1
+    assert created_events[0].actor == "alice"
 
 
 def test_download_current_content_roundtrips_bytes(client):
