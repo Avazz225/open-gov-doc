@@ -667,3 +667,69 @@ async def test_count_active_by_folder_ids_excludes_deleted(session):
     count = await repository.count_active_by_folder_ids(session, ["folder-a"])
 
     assert count == 1
+
+
+# --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
+
+
+async def test_list_due_for_archival_only_returns_fällige_undeleted_documents(session):
+    past = datetime.now(UTC) - timedelta(days=1)
+    future = datetime.now(UTC) + timedelta(days=1)
+    due = await _make_document(session, archive_after=past)
+    not_due_yet = await _make_document(session, archive_after=future)
+    already_archived = await _make_document(session, archive_after=past)
+    already_archived.archived_at = datetime.now(UTC)
+    deleted_but_due = await _make_document(session, archive_after=past)
+    await repository.delete_document(session, deleted_but_due.id, deleted_by="alice")
+    await _make_document(session)  # kein archive_after gesetzt
+
+    due_documents = await repository.list_due_for_archival(session)
+
+    due_ids = {d.id for d in due_documents}
+    assert due_ids == {due.id}
+    assert not_due_yet.id not in due_ids
+    assert already_archived.id not in due_ids
+    assert deleted_but_due.id not in due_ids
+
+
+async def test_request_archive_sets_archive_after_to_now_when_unset(session):
+    document = await _make_document(session)
+    assert document.archive_after is None
+
+    updated = await repository.request_archive(session, document.id)
+
+    assert updated.archive_after is not None
+    assert updated.archive_after <= datetime.now(UTC)
+
+
+async def test_request_archive_does_not_rewind_already_due_date(session):
+    past = datetime.now(UTC) - timedelta(days=5)
+    document = await _make_document(session, archive_after=past)
+
+    updated = await repository.request_archive(session, document.id)
+
+    assert updated.archive_after == past
+
+
+async def test_mark_archived_sets_fields_and_keeps_document_row(session):
+    document = await _make_document(session)
+
+    updated = await repository.mark_archived(session, document.id, archive_format="pdf_a")
+
+    assert updated.archived_at is not None
+    assert updated.archive_format == "pdf_a"
+    # Wörtliche Konzeptvorgabe: die Document-Zeile bleibt vollständig
+    # erhalten, keine physische Löschung.
+    reloaded = await repository.get_document(session, document.id)
+    assert reloaded.id == document.id
+
+
+async def test_mark_dehydrated_and_rehydrated_roundtrip(session):
+    document = await _make_document(session)
+    await repository.mark_archived(session, document.id, archive_format="pdf_a")
+
+    dehydrated = await repository.mark_dehydrated(session, document.id)
+    assert dehydrated.dehydrated_at is not None
+
+    rehydrated = await repository.mark_rehydrated(session, document.id)
+    assert rehydrated.dehydrated_at is None

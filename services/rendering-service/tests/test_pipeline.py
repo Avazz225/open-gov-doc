@@ -89,22 +89,25 @@ async def test_process_version_generates_thumbnail_for_image():
 
     results = await _run_pipeline(document_id, 1, recorder)
 
-    assert len(results) == 1
+    # Seit P7-S3 (5.6) matcht PdfArchiveRenderer zusaetzlich Rasterbilder
+    # (direkt ueber Pillow zu PDF) - thumbnail bleibt an Index 0
+    # (ThumbnailRenderer steht in der RENDERERS-Regeltabelle zuerst).
+    assert len(results) == 2
     assert results[0].rendition_type == "thumbnail"
     assert results[0].status == "ready"
-    assert recorder.events == [
-        (
-            "rendering.completed",
-            document_id,
-            {
-                "version_number": 1,
-                "rendition_type": "thumbnail",
-                "target_filename": results[0].target_filename,
-                "status": "ready",
-                "error": None,
-            },
-        )
-    ]
+    assert results[1].rendition_type == "pdf_archive"
+    assert results[1].status == "ready"
+    assert recorder.events[0] == (
+        "rendering.completed",
+        document_id,
+        {
+            "version_number": 1,
+            "rendition_type": "thumbnail",
+            "target_filename": results[0].target_filename,
+            "status": "ready",
+            "error": None,
+        },
+    )
 
     storage = StorageClient(STORAGE_SERVICE_URL)
     try:
@@ -125,9 +128,14 @@ async def test_process_version_extracts_docx_text():
 
     results = await _run_pipeline(document_id, 1, recorder)
 
-    assert len(results) == 1
+    # Seit P7-S3 (5.6) matcht PdfArchiveRenderer zusaetzlich .docx (LibreOffice-
+    # Konvertierung) - substitute_text bleibt an Index 0 (DocxTextExtractionRenderer
+    # steht in der RENDERERS-Regeltabelle vor PdfArchiveRenderer).
+    assert len(results) == 2
     assert results[0].rendition_type == "substitute_text"
     assert results[0].status == "ready"
+    assert results[1].rendition_type == "pdf_archive"
+    assert results[1].status == "ready"
 
     storage = StorageClient(STORAGE_SERVICE_URL)
     try:
@@ -139,9 +147,9 @@ async def test_process_version_extracts_docx_text():
 
 async def test_process_version_skips_unsupported_format():
     document_id = _upload_document(
-        filename=f"daten-{uuid.uuid4().hex[:8]}.csv",
-        content=b"a,b,c\n1,2,3",
-        content_type="text/csv",
+        filename=f"daten-{uuid.uuid4().hex[:8]}.bin",
+        content=b"\x00\x01\x02binaergarbage",
+        content_type="application/octet-stream",
     )
     recorder = EventRecorder()
 

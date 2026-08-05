@@ -923,3 +923,80 @@ def test_trash_config_get_and_put(client):
     assert put_response.json()["restore_period_days"] == 10
     # Aufräumen.
     client.put("/trash-config", json={"restore_period_days": 30})
+
+
+def test_archive_request_and_status_roundtrip(client):
+    body = upload(client).json()
+    document_id = body["id"]
+
+    status_response = client.get(f"/documents/{document_id}/archive-status")
+    assert status_response.status_code == 200
+    assert status_response.json()["archive_after"] is None
+
+    request_response = client.post(f"/documents/{document_id}/archive-request")
+    assert request_response.status_code == 200
+    assert request_response.json()["archive_after"] is not None
+
+    status_after = client.get(f"/documents/{document_id}/archive-status")
+    assert status_after.json()["archive_after"] is not None
+    assert status_after.json()["archived_at"] is None
+
+
+def test_documents_due_for_archival_lists_fällige_documents(client):
+    body = upload(client).json()
+    document_id = body["id"]
+    client.post(f"/documents/{document_id}/archive-request")
+
+    response = client.get("/documents/due-for-archival")
+
+    assert response.status_code == 200
+    assert document_id in [d["id"] for d in response.json()]
+
+
+def test_mark_archived_dehydrated_rehydrated_lifecycle(client):
+    body = upload(client).json()
+    document_id = body["id"]
+
+    archived = client.put(f"/documents/{document_id}/archived", json={"archive_format": "pdf_a"})
+    assert archived.status_code == 200
+    assert archived.json()["archive_format"] == "pdf_a"
+    assert archived.json()["archived_at"] is not None
+
+    dehydrated = client.put(f"/documents/{document_id}/dehydrated")
+    assert dehydrated.status_code == 200
+    assert dehydrated.json()["dehydrated_at"] is not None
+
+    rehydrated = client.put(f"/documents/{document_id}/rehydrated")
+    assert rehydrated.status_code == 200
+    assert rehydrated.json()["dehydrated_at"] is None
+
+
+def test_archive_endpoints_return_404_for_unknown_document(client):
+    assert client.post("/documents/does-not-exist/archive-request").status_code == 404
+    assert client.get("/documents/does-not-exist/archive-status").status_code == 404
+    assert (
+        client.put(
+            "/documents/does-not-exist/archived", json={"archive_format": "pdf_a"}
+        ).status_code
+        == 404
+    )
+    assert client.put("/documents/does-not-exist/dehydrated").status_code == 404
+    assert client.put("/documents/does-not-exist/rehydrated").status_code == 404
+
+
+def test_has_active_hold_reflects_legal_hold_state(client):
+    body = upload(client).json()
+    document_id = body["id"]
+
+    assert client.get(f"/documents/{document_id}/has-active-hold").json() == {
+        "has_active_hold": False
+    }
+
+    hold_response = client.post(
+        "/legal-holds", json={"document_id": document_id, "set_by": "alice"}
+    )
+    assert hold_response.status_code == 201
+
+    assert client.get(f"/documents/{document_id}/has-active-hold").json() == {
+        "has_active_hold": True
+    }

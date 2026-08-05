@@ -27,6 +27,10 @@ class DocumentOut(BaseModel):
     full_deletion: bool
     pending_deletion_reason: str | None
     reminder_notify_email: str | None
+    archive_after: datetime | None
+    archived_at: datetime | None
+    archive_format: str | None
+    dehydrated_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -42,6 +46,10 @@ class DocumentVersionOut(BaseModel):
     comment: str | None
     created_by: str
     created_at: datetime
+    # Interner Storage-Schlüssel (5.6, seit P7-S3) - `archival-service` braucht
+    # ihn, um beim Dehydrieren/Zurückholen exakt dieselbe Live-Objekt-Identität
+    # anzusprechen wie der reguläre Upload-/Download-Pfad.
+    storage_object_key: str
 
     model_config = {"from_attributes": True}
 
@@ -226,3 +234,23 @@ class CountActiveRequest(BaseModel):
 
 class CountActiveResult(BaseModel):
     count: int
+
+
+class MarkArchivedRequest(BaseModel):
+    """Rückruf von `archival-service`, sobald die Archivkopie verifiziert
+    ist (5.6, seit P7-S3) - `archive_format` ist `"pdf_a"` (LibreOffice-
+    PDF/A-Export-Filter oder bestehende `pypdf`-Tagging-Logik)."""
+
+    archive_format: str
+
+
+class ArchiveStatusOut(BaseModel):
+    document_id: str
+    archive_after: datetime | None
+    archived_at: datetime | None
+    archive_format: str | None
+    dehydrated_at: datetime | None
+
+
+class HasActiveHoldOut(BaseModel):
+    has_active_hold: bool

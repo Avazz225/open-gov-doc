@@ -37,16 +37,28 @@ Ein einziges breites Subject-Abo (`document.>`, nicht zwei Einzel-Subscriptions)
 | `.docx` | `.txt`-Textextraktion | `DocxTextExtractionRenderer` (python-docx) | `substitute_text` |
 | `.pptx` | `.txt`-Textextraktion je Folie | `PptxTextExtractionRenderer` (python-pptx) | `substitute_text` |
 | `.ods` | `.txt`-Textextraktion je Tabellenblatt | `OdsTextExtractionRenderer` (odfpy, nachgezogen per Bugfix nach Nutzer-Feedback — `.ods` hatte zuvor überhaupt keinen Renderer) | `substitute_text` |
-| `.pdf` | PDF-Archivkopie (Best-Effort-Metadaten-Tagging) | `PdfArchiveRenderer` (pypdf) | `pdf_archive` |
+| `.pdf`/Rasterbilder/Office-Formate (`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp`/`.rtf`/`.txt`) | Universelle PDF/A-Archivkopie | `PdfArchiveRenderer` (s. u.) | `pdf_archive` |
 
 Neue Regeln werden ergänzt, indem eine weitere `Renderer`-Klasse in `renderers/__init__.py` registriert wird, ohne bestehenden Code zu ändern (`RENDERERS`-Liste, `select_renderers()`).
 
 **Bewusste Abweichungen vom Konzept-Beispieltext, dieselbe Abwägung wie ClamdEngine vs. EicarSignatureEngine in P5-S1/ADR 0010** — echte, ohne externe Systemabhängigkeit erreichbare Funktionalität statt eines Platzhalters:
 
-- **`.pptx -> .txt` statt `.pptx -> .pdf`**: eine echte Office-zu-PDF-Konvertierung bräuchte eine externe Rendering-Komponente (z. B. LibreOffice headless), die in dieser Umgebung nicht verlässlich/schnell verfügbar ist. Textextraktion ist trotzdem eine vollwertige Ersatzdarstellung im Sinne von 2.4.
-- **PDF/A-Konvertierung ist Best-Effort-Tagging, nicht ISO-19005-validiert**: `PdfArchiveRenderer` kopiert den PDF-Strukturbaum neu und setzt Info-Metadaten, prüft aber keine Font-Einbettung/Farbräume — echte PDF/A-Konformität bräuchte Ghostscript/veraPDF.
 - **Bildbasierte/gescannte Dokumente wurden in P5-S2 bewusst nicht bedient** (sie hätten einen OCR-Textlayer als Grundlage gebraucht, 3.9) — der Nachzieheffekt aus P5-S3 (siehe Abschnitt unten) schließt diese Lücke nachträglich.
 - **Kein Video-Transkriptions-Plugin**: laut 2.4 selbst optional ("sofern ein Transkriptions-Plugin verfügbar ist") — es existiert noch keine Transkriptions-Engine, daher keine Regel für Video-Formate in dieser Session.
+
+## Universelle PDF/A-Konvertierung (5.6, seit P7-S3)
+
+`PdfArchiveRenderer` erzeugte bis P5-S2 nur für bereits-PDF-Dokumente eine Archivkopie (reines `pypdf`-Metadaten-Tagging) — Begründung damals: "LibreOffice headless nicht verlässlich verfügbar". Diese Annahme wurde in P7-S3 explizit **korrigiert**: LibreOffice ist auf dem Zielhost tatsächlich installiert (nur nicht auf `PATH`) und wurde live gegen echte Konvertierungen verifiziert. Nutzervorgabe aus P7-S3 (Aussonderung, 5.6): **alle gängigen Dokumenttypen müssen archivierbar sein**, PDF/A bevorzugt, reines PDF als Fallback akzeptabel — kein stiller "Original-Format"-Fallback für nicht konvertierte Dokumente.
+
+`PdfArchiveRenderer.render()` dispatcht nach Quellformat in drei Pfade:
+
+1. **Bereits PDF** — unverändert die bestehende `pypdf`-Tagging-Logik (Info-Metadaten, PDF-Strukturbaum neu geschrieben).
+2. **Rasterbilder** (`.png`/`.jpg`/`.bmp`/`.tiff`/...) — direkt über **Pillow** (`Image.save(buffer, format="PDF")`), keine neue Bibliothek, schneller als ein LibreOffice-Subprozess für den einfachsten Fall.
+3. **Office-/Textformate** (`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp`/`.rtf`/`.txt`) — `renderers/_libreoffice.py` ruft `soffice --headless --convert-to pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":1}}` per Subprozess auf (PDF/A-1b-Export-Filter, eingebettete Fonts/XMP-Metadaten). Jeder Aufruf bekommt ein isoliertes `-env:UserInstallation=file://<tmp-profil>`, um "another instance running"-Lock-Konflikte bei Parallelaufrufen zu vermeiden. Binärpfad-Auflösung zuerst über `PATH` (`soffice`/`libreoffice`), sonst bekannte Absolutpfade (`/opt/libreoffice*/program/soffice`) — deckt sowohl das schlanke Docker-Image (`apt-get install libreoffice-writer libreoffice-calc libreoffice-impress`) als auch diese Dev-Umgebung ab.
+
+Scheitert eine Konvertierung technisch (fehlender Binärpfad, Timeout), wirft `_libreoffice.ConversionError` — die Rendition bekommt `status="failed"` mit `error_message`, kein stiller Fallback. LibreOffice selbst ist überraschend permissiv beim Parsen beschädigter Eingaben (versucht auch Datenmüll mit falscher Endung als Text zu importieren, statt zuverlässig fehlzuschlagen) — der einzige zuverlässig testbare Fehlerfall ist ein fehlender/falscher Binärpfad.
+
+**Weiterhin nicht unabhängig veraPDF-validiert**: LibreOffices eigener PDF/A-Export-Filter ist technisch konformer als die vorherige reine `pypdf`-Nachbearbeitung, bleibt aber eine unveränderte, nur jetzt transparent kommunizierte Einschränkung.
 
 ## Nachzieheffekt: OCR-Volltext als `substitute_text`-Rendition (P5-S3, 2.4/3.9)
 
@@ -91,12 +103,14 @@ Noch keine — folgt in Phase 11.
 ## Tests
 
 - `uv run pytest services/rendering-service/tests`: Renderer-Verhalten gegen echte, in-memory erzeugte Dateien (echtes PNG/`.docx`/`.pptx`/PDF, keine Fixture-Dateien, keine Mocks), Repository (Upsert/Überschreiben/Filter), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. Fehler-Isolation bei korruptem PDF; seit P5-S3 zusätzlich `process_ocr_text` für den Nachzieheffekt), API (`/renditions`-Endpunkte, Wasserzeichen inkl. Ablehnung bei ungültigem PDF), Consumer-Integration (echtes NATS-Event `document.created`/`document.version.created` löst echtes Rendering aus; seit P5-S3 zusätzlich `test_ocr_consumer.py` für den `ocr.completed`-Dispatch inkl. Duplikatsprüfung, mit einem Fake-`OcrServiceClient` statt eines echten OCR-Service-Aufrufs; seit P5b-S5 zusätzlich ein Regressionstest mit einem `OcrServiceClient`, der einen Verbindungsfehler simuliert — der Handler darf dabei nicht crashen).
-- Live gegen den echten Stack über das API-Gateway verifiziert: Upload → automatische Thumbnail-Erzeugung → Download der Ersatzdarstellung (korrekt herunterskaliertes echtes PNG) → `rendering.completed` im Audit-Trail sichtbar, Hash-Kette weiterhin intakt. Seit P5-S3 zusätzlich: PDF mit Textlayer hochgeladen → OCR Service erzeugt `native_text_layer`-Ergebnis → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Volltext.
+- Live gegen den echten Stack über das API-Gateway verifiziert: Upload → automatische Thumbnail-Erzeugung → Download der Ersatzdarstellung (korrekt herunterskaliertes echtes PNG) → `rendering.completed` im Audit-Trail sichtbar, Hash-Kette weiterhin intakt. Seit P5-S3 zusätzlich: PDF mit Textlayer hochgeladen → OCR Service erzeugt `native_text_layer`-Ergebnis → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Volltext. Seit P7-S3 zusätzlich: `.txt`- und echte `.docx`-Datei (via `python-docx` erzeugt) live über `soffice --headless` zu validem PDF/A-getaggtem PDF konvertiert.
+- Seit P7-S3 zusätzlich `_libreoffice.py`-Tests (Binärpfad-Auflösung inkl. Fehlerfall bei fehlendem Binary via `monkeypatch` auf `_BINARY_CANDIDATES`) sowie erweiterte `PdfArchiveRenderer`-Tests für Bild-/Office-Formate.
 
 ## Offene Punkte
 
 - **Bildbasierte/gescannte Dokumente**: seit P5-S3 über den Nachzieheffekt (Text) bedient — eine echte Bild-Ersatzdarstellung (Thumbnail) für gescannte/bildbasierte PDFs entsteht weiterhin nicht in rendering-service selbst, sondern nur als OCR-eigenes Seitenbild (siehe `docs/services/ocr-service.md`).
-- **`.pptx -> .txt` statt `.pptx -> .pdf`, PDF/A nicht ISO-19005-validiert**: siehe Begründung oben — echte Office-/PDF-A-Konvertierung bräuchte externe Systemkomponenten (LibreOffice/Ghostscript), die hier nicht verfügbar sind.
+- **PDF/A weiterhin nicht ISO-19005-validiert** (s. o., seit P7-S3 zumindest über LibreOffices eigenen Export-Filter statt reinem `pypdf`-Tagging) — eine unabhängige veraPDF-Prüfung ist nicht Teil dieses Service.
+- **Größeres Docker-Image** durch die LibreOffice-Installation (seit P7-S3) — bewusster Trade-off für die geforderte Formatabdeckung (5.6), kein Weg daran vorbei ohne proprietäre Cloud-APIs.
 - **Kein Video-Transkriptions-Plugin**: laut Konzept selbst optional, keine Engine vorhanden.
 - **Keine Bereinigung fehlgeschlagener Renditions**: eine dauerhaft `status="failed"` bleibende Zeile wird nicht automatisch erneut versucht (kein Retry-Mechanismus).
 - **Keine Autorisierung** (wie bei allen bisherigen Services): Gateway prüft nur Token-Gültigkeit, keine Rollenprüfung; Ersatzdarstellungen erben laut 2.4 dieselben Berechtigungen wie das Original, was hier (mangels durchgängiger Autorisierung im Gesamtsystem, siehe `PROGRESS.md`) noch nicht technisch durchgesetzt wird.

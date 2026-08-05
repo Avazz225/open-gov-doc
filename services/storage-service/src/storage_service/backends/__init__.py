@@ -30,8 +30,17 @@ def build_backend(target: BackendTargetConfig) -> StorageBackend:
 
 def resolve_targets(settings: Settings) -> list[str]:
     """Liste der konfigurierten Ziel-`id`s, Primärziel zuerst (bestimmt auch
-    die Lesepriorität, siehe ``replication.read_with_fallback``)."""
-    return [target.id for target in settings.targets]
+    die Lesepriorität, siehe ``replication.read_with_fallback``). Schließt
+    seit P7-S3 (5.6) Ziele mit ``role="archive"`` aus - diese sind nicht
+    Teil der regulären Upload-Replikation, siehe ``resolve_archive_targets``."""
+    return [target.id for target in settings.targets if target.role != "archive"]
+
+
+def resolve_archive_targets(settings: Settings) -> list[str]:
+    """Liste der konfigurierten Archiv-Ziel-`id`s (5.6, seit P7-S3) - erhalten
+    Inhalte ausschließlich über die `.../archive-copy`-Endpunkte, nicht über
+    die reguläre Upload-Replikation."""
+    return [target.id for target in settings.targets if target.role == "archive"]
 
 
 def build_backends(settings: Settings) -> dict[str, StorageBackend]:
@@ -49,5 +58,6 @@ __all__ = [
     "StorageBackend",
     "build_backend",
     "build_backends",
+    "resolve_archive_targets",
     "resolve_targets",
 ]

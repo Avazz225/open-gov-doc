@@ -87,6 +87,7 @@ async def create_document(
     derived_from_version_number: int | None = None,
     originating_case_id: str | None = None,
     retention_until: datetime | None = None,
+    archive_after: datetime | None = None,
 ) -> Document:
     now = datetime.now(UTC)
     document = Document(
@@ -107,6 +108,10 @@ async def create_document(
         # kein manuelles Datum gesetzt wurde (siehe main.py create_document) -
         # spätere Änderungen am Typ-Default wirken sich nicht rückwirkend aus.
         retention_until=retention_until,
+        # Aussonderung (5.6, seit P7-S3): analog aus
+        # `ObjectType.default_archive_after_days` übernommen, unabhängig von
+        # retention_until (siehe models.py Document.archive_after).
+        archive_after=archive_after,
     )
     session.add(document)
     session.add(
@@ -742,3 +747,72 @@ def resolve_should_log(
     if any(values):
         return True
     return False
+
+
+# --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
+
+
+async def list_due_for_archival(session: AsyncSession) -> list[Document]:
+    """Dokumente mit fälliger Aussonderung (5.6) - unabhängig von
+    `retention_until`/`full_deletion` (5.2), da Aussonderung laut Konzept
+    ergänzend zur regulären Aufbewahrungsfrist ist. `archival-service` ruft
+    dies periodisch ab (interner Aufruf, `GET /documents/due-for-archival`)."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Document).where(
+            Document.archive_after.isnot(None),
+            Document.archive_after <= now,
+            Document.archived_at.is_(None),
+            Document.deleted_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def request_archive(session: AsyncSession, document_id: str) -> Document:
+    """Manueller Aussonderungs-Trigger (5.6, `POST /documents/{id}/archive-
+    request`) - setzt `archive_after` auf jetzt, falls noch nicht gesetzt
+    oder noch nicht fällig. Ein bereits fälliges/vergangenes Datum bleibt
+    unverändert (kein Zurückdrehen einer bereits laufenden Aussonderung)."""
+    document = await get_document(session, document_id)
+    now = datetime.now(UTC)
+    if document.archive_after is None or document.archive_after > now:
+        document.archive_after = now
+        document.updated_at = now
+        await session.flush()
+    return document
+
+
+async def mark_archived(
+    session: AsyncSession, document_id: str, *, archive_format: str
+) -> Document:
+    """Rückruf von `archival-service`, sobald die Archivkopie verifiziert
+    ist (`PUT /documents/{id}/archived`) - die `Document`-Zeile selbst
+    bleibt vollständig erhalten (wörtliche Konzeptvorgabe, s. models.py)."""
+    document = await get_document(session, document_id)
+    document.archived_at = datetime.now(UTC)
+    document.archive_format = archive_format
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
+async def mark_dehydrated(session: AsyncSession, document_id: str) -> Document:
+    """Rückruf von `archival-service`, nachdem die Live-Speicherkopie nach
+    Ablauf der Übergangsfrist entfernt wurde (`PUT /documents/{id}/
+    dehydrated`)."""
+    document = await get_document(session, document_id)
+    document.dehydrated_at = datetime.now(UTC)
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
+async def mark_rehydrated(session: AsyncSession, document_id: str) -> Document:
+    """Rückruf von `archival-service` nach erfolgreicher Rückholung (`PUT
+    /documents/{id}/rehydrated`) - die Live-Kopie ist wiederhergestellt."""
+    document = await get_document(session, document_id)
+    document.dehydrated_at = None
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document

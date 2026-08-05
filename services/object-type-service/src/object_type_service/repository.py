@@ -119,6 +119,13 @@ def _validate_default_retention_days(value: int | None) -> None:
         raise InvalidFieldError("default_retention_days darf nicht negativ sein")
 
 
+def _validate_default_archive_after_days(value: int | None) -> None:
+    """Aussonderung (5.6, seit P7-S3) - gleiches Muster wie
+    default_retention_days, ebenfalls für Dokument- und Ordnerklassen gültig."""
+    if value is not None and value < 0:
+        raise InvalidFieldError("default_archive_after_days darf nicht negativ sein")
+
+
 async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -> ObjectType:
     existing = await session.execute(select(ObjectType).where(ObjectType.name == payload.name))
     if existing.scalar_one_or_none() is not None:
@@ -129,6 +136,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_kennzeichen_display_override(payload.applies_to, payload.kennzeichen_display_override)
     _validate_required_signature_level(payload.applies_to, payload.required_signature_level)
     _validate_default_retention_days(payload.default_retention_days)
+    _validate_default_archive_after_days(payload.default_archive_after_days)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -144,6 +152,8 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         required_signature_level=payload.required_signature_level,
         default_retention_days=payload.default_retention_days,
         deletion_reason_required_override=payload.deletion_reason_required_override,
+        default_archive_after_days=payload.default_archive_after_days,
+        archive_encryption_enabled=payload.archive_encryption_enabled,
         created_at=now,
         updated_at=now,
     )
@@ -181,6 +191,7 @@ async def update_object_type(
     )
     _validate_required_signature_level(object_type.applies_to, payload.required_signature_level)
     _validate_default_retention_days(payload.default_retention_days)
+    _validate_default_archive_after_days(payload.default_archive_after_days)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
@@ -191,6 +202,8 @@ async def update_object_type(
     object_type.required_signature_level = payload.required_signature_level
     object_type.default_retention_days = payload.default_retention_days
     object_type.deletion_reason_required_override = payload.deletion_reason_required_override
+    object_type.default_archive_after_days = payload.default_archive_after_days
+    object_type.archive_encryption_enabled = payload.archive_encryption_enabled
     object_type.updated_at = datetime.now(UTC)
     await session.flush()
     return object_type

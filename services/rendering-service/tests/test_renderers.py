@@ -8,7 +8,8 @@ from odf.text import P
 from PIL import Image
 from pptx import Presentation
 from pypdf import PdfReader
-from rendering_service.renderers import select_renderers
+from rendering_service.renderers import _libreoffice, select_renderers
+from rendering_service.renderers._libreoffice import ConversionError
 from rendering_service.renderers.docx_text import DocxTextExtractionRenderer
 from rendering_service.renderers.ods_text import OdsTextExtractionRenderer
 from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
@@ -134,14 +135,73 @@ async def test_pdf_archive_renderer_preserves_pages():
     assert len(reader.pages) == 3
 
 
+@pytest.mark.asyncio
+async def test_pdf_archive_renderer_converts_raster_image_via_pillow():
+    """5.6 (seit P7-S3): Rasterbilder werden direkt ueber Pillow zu PDF
+    gerendert, ohne den LibreOffice-Subprozess zu benoetigen."""
+    renderer = PdfArchiveRenderer()
+    assert renderer.supports(content_type="image/png", filename="foto.png")
+    assert renderer.supports(content_type=None, filename="foto.jpg")
+
+    output = await renderer.render(_real_png(), filename="foto.png", content_type="image/png")
+    assert output.target_filename == "foto_archiv.pdf"
+    assert output.target_content_type == "application/pdf"
+    assert output.data.startswith(b"%PDF")
+    reader = PdfReader(BytesIO(output.data))
+    assert len(reader.pages) == 1
+
+
+@pytest.mark.asyncio
+async def test_pdf_archive_renderer_converts_docx_via_libreoffice():
+    """5.6 (seit P7-S3): alle gaengigen Office-/Textformate muessen
+    aussonderungsfaehig sein (Nutzervorgabe), nicht nur bereits-PDF-
+    Dokumente - Konvertierung ueber LibreOffice headless."""
+    renderer = PdfArchiveRenderer()
+    assert renderer.supports(content_type=None, filename="brief.docx")
+
+    data = _real_docx("Hallo Aussonderung, dies ist ein Test.")
+    output = await renderer.render(data, filename="brief.docx", content_type=None)
+    assert output.target_filename == "brief_archiv.pdf"
+    assert output.target_content_type == "application/pdf"
+    assert output.data.startswith(b"%PDF")
+
+
+@pytest.mark.asyncio
+async def test_pdf_archive_renderer_converts_plain_text_via_libreoffice():
+    renderer = PdfArchiveRenderer()
+    assert renderer.supports(content_type=None, filename="notiz.txt")
+
+    output = await renderer.render(
+        b"Einfacher Text zur Aussonderung.", filename="notiz.txt", content_type="text/plain"
+    )
+    assert output.data.startswith(b"%PDF")
+
+
+@pytest.mark.asyncio
+async def test_pdf_archive_renderer_raises_when_libreoffice_binary_missing(monkeypatch):
+    """LibreOffice ist bemerkenswert nachsichtig beim Parsen (auch nicht
+    valide .docx-Bytes werden meist noch als Text importiert) - der
+    realistische Fehlerfall ist ein fehlendes Binary, nicht ein
+    "unparsbares" Dokument."""
+    monkeypatch.setattr(_libreoffice, "_BINARY_CANDIDATES", ("does-not-exist-binary",))
+    renderer = PdfArchiveRenderer()
+    with pytest.raises(ConversionError):
+        await renderer.render(b"beliebiger Inhalt", filename="brief.docx", content_type=None)
+
+
 def test_select_renderers_matches_expected_rules():
+    # Seit P7-S3 (5.6) deckt PdfArchiveRenderer zusaetzlich Rasterbilder und
+    # LibreOffice-konvertierbare Office-/Textformate ab (nicht mehr nur
+    # bereits-PDF-Dokumente) - jede dieser Regeln liefert daher zusaetzlich
+    # "pdf_archive" neben der jeweiligen formatspezifischen Regel.
     image_renderers = select_renderers(content_type="image/jpeg", filename="a.jpg")
-    assert {r.rendition_type for r in image_renderers} == {"thumbnail"}
+    assert {r.rendition_type for r in image_renderers} == {"thumbnail", "pdf_archive"}
 
     docx_renderers = select_renderers(content_type=None, filename="a.docx")
-    assert {r.rendition_type for r in docx_renderers} == {"substitute_text"}
+    assert {r.rendition_type for r in docx_renderers} == {"substitute_text", "pdf_archive"}
 
     ods_renderers = select_renderers(content_type=None, filename="a.ods")
-    assert {r.rendition_type for r in ods_renderers} == {"substitute_text"}
+    assert {r.rendition_type for r in ods_renderers} == {"substitute_text", "pdf_archive"}
 
-    assert select_renderers(content_type="text/csv", filename="a.csv") == []
+    csv_renderers = select_renderers(content_type="text/csv", filename="a.csv")
+    assert {r.rendition_type for r in csv_renderers} == {"pdf_archive"}

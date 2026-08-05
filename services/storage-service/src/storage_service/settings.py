@@ -25,6 +25,12 @@ class BackendTargetConfig(BaseModel):
     # S3Backend.ensure_bucket/write) - der Anwendungsschicht-Guard
     # (retention_guard.py) greift unabhängig vom Backend-Typ.
     object_lock_mode: Literal["governance"] | None = None
+    # Aussonderung (5.6, seit P7-S3): "archive"-Ziele sind NICHT Teil der
+    # regulären Upload-Replikation (`resolve_targets` schließt sie aus) -
+    # sie empfangen Inhalte ausschließlich über die neuen `.../archive-copy`-
+    # Endpunkte, die `archival-service` explizit aufruft. `None` (Default)
+    # = normales Replikationsziel, unverändertes bestehendes Verhalten.
+    role: Literal["archive"] | None = None
 
     @model_validator(mode="after")
     def _check_required_fields_for_type(self) -> "BackendTargetConfig":

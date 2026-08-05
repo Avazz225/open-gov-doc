@@ -76,6 +76,20 @@ class Document(Base):
     force_delete_approval_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Aussonderung (5.6, seit P7-S3): einmalig aus `ObjectType.
+    # default_archive_after_days` übernommen (analog `retention_until`),
+    # unabhängig von der regulären Aufbewahrungsfrist - Aussonderung ist laut
+    # Konzept ergänzend, kein dritter Zweig derselben Entscheidung. `None` =
+    # kein Typ-Standard, nur manueller Trigger (`POST .../archive-request`)
+    # möglich. `archived_at`/`archive_format` werden von `archival-service`
+    # per Rückruf gesetzt, sobald die Archivkopie verifiziert ist;
+    # `dehydrated_at`, sobald die Live-Kopie nach der Übergangsfrist entfernt
+    # wurde - die `Document`-Zeile selbst bleibt dabei erhalten (Metadaten
+    # weiterhin auffindbar, wörtliche Konzeptvorgabe).
+    archive_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archive_format: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    dehydrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

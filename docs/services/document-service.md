@@ -2,7 +2,7 @@
 
 **Verantwortung:** Dokumente als Kernentität (Konzept 2.1) — CRUD, dauerhafte Versionierung (2.1a, kein Überschreiben/Verwerfen), Bearbeitungssperre bei externer Bearbeitung inkl. Force-Unlock und Konfliktkopie (4.2). Hält selbst nie Dateiinhalte — jeder Byte-Zugriff läuft über die HTTP-API des Storage Service (3.6).
 
-**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)/5.4b (Audit-Tiefe für Forensik-Trace, seit P7-S2c)
+**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)/5.4b (Audit-Tiefe für Forensik-Trace, seit P7-S2c)/5.6 (Aussonderungs-Lebenszyklusfelder, seit P7-S3)
 **Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`)
 
 ## API
@@ -41,12 +41,19 @@
 | `GET`/`PUT` | `/audit-trace-config` | Basis-Protokollierungstiefe für den Forensik-Trace (`log_viewed`/`log_downloaded`, Default beide `true`, 5.4b, seit P7-S2c) — siehe "Audit-Tiefe" unten |
 | `GET` | `/audit-trace-role-overrides` | Alle Rollen-Overrides der Audit-Tiefe (5.4b, seit P7-S2c) |
 | `PUT`/`DELETE` | `/audit-trace-role-overrides/{role}` | Override für eine Rolle anlegen/ändern bzw. entfernen (5.4b, seit P7-S2c) — `404` bei `DELETE` einer unbekannten Rolle |
+| `GET` | `/documents/due-for-archival` | Interner Aufruf von `archival-service` (5.6, seit P7-S3) — Dokumente mit `archive_after <= now AND archived_at IS NULL` |
+| `POST` | `/documents/{id}/archive-request` | Manueller Aussonderungs-Trigger (5.6, seit P7-S3) — setzt `archive_after` auf jetzt, falls noch nicht fällig |
+| `GET` | `/documents/{id}/archive-status` | Aussonderungsstatus lesen (`archive_after`/`archived_at`/`archive_format`/`dehydrated_at`, seit P7-S3) |
+| `GET` | `/documents/{id}/has-active-hold` | Interner Aufruf von `archival-service` (5.6, seit P7-S3) — ein aktiver Legal Hold blockiert das Dehydrieren, nicht das Archivieren selbst |
+| `PUT` | `/documents/{id}/archived` | Interner Rückruf von `archival-service`, sobald die Archivkopie verifiziert ist (`archive_format`, seit P7-S3) — publiziert `document.archived` |
+| `PUT` | `/documents/{id}/dehydrated` | Interner Rückruf von `archival-service`, nachdem die Live-Speicherkopie entfernt wurde (seit P7-S3) — publiziert `document.dehydrated` |
+| `PUT` | `/documents/{id}/rehydrated` | Interner Rückruf von `archival-service` nach erfolgreicher Rückholung (seit P7-S3) — publiziert `document.rehydrated` |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
 
-- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, seit P7-S1, s. u.), `deleted_via_folder_id` (5.2, seit P7-S1b) — gesetzt, wenn dieses Dokument nicht einzeln, sondern kaskadiert über `POST /documents/cascade-trash` gelöscht wurde (weil sein Ordner in den Papierkorb verschoben wurde); `POST /documents/cascade-restore` stellt darüber gezielt nur die dadurch kaskadierten Dokumente wieder her, kein unabhängig einzeln gelöschtes.
-- `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a).
+- `document`: `id`, `title`, `folder_id`/`object_type_id` (opake Referenzen, s. u.), `attributes` (JSON, Custom-Felder gemäß Objekttyp), `current_version_number` (Zeiger auf die Hauptversion), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (seit P6-S3, Bearbeitungskopien, s. u.), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, seit P7-S1, s. u.), `deleted_via_folder_id` (5.2, seit P7-S1b) — gesetzt, wenn dieses Dokument nicht einzeln, sondern kaskadiert über `POST /documents/cascade-trash` gelöscht wurde (weil sein Ordner in den Papierkorb verschoben wurde); `POST /documents/cascade-restore` stellt darüber gezielt nur die dadurch kaskadierten Dokumente wieder her, kein unabhängig einzeln gelöschtes. `archive_after`/`archived_at`/`archive_format`/`dehydrated_at` (5.6, seit P7-S3, s. u.).
+- `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Jede Zeile bleibt für immer abrufbar (2.1a). `storage_object_key` ist seit P7-S3 auch über `GET .../versions/{n}` nach außen sichtbar (`DocumentVersionOut`) — `archival-service` braucht den exakten Live-Schlüssel für Dehydrieren/Rückholung.
 - `document_lock`: genau eine aktive Zeile je gesperrtem Dokument (`document_id` als PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 - `upload_config`: einzelne Zeile (`id=1`, seit P5d-S1) — `allowed_content_types` (JSON-Liste, leer = keine Einschränkung), `updated_at`.
 - `legal_hold` (5.2, seit P7-S1): `id` (UUID PK), `document_id` (FK auf `document.id`), `reason` (nullable), `set_by`, `set_at`, `released_by` (nullable), `released_at` (nullable) — aktiv, solange `released_at IS NULL`.
@@ -155,6 +162,16 @@ Grundlage für die objektbezogene Nachverfolgung (Forensik-Trace, siehe `docs/se
 - **Lokal statt zentral konfiguriert**, bewusst wie jede andere Config in diesem System (`UploadConfig`, `RetentionConfig`, ...) — vermeidet einen synchronen Cross-Service-Konfig-Abruf auf dem heißen Lesepfad (jeder Dokumenten-Klick/Download).
 - **Admin-UI**: `/audit-trace-settings/` (`AuditTraceSettings`, siehe `docs/services/admin-ui.md`).
 
+## Aussonderung & Langzeitarchivierung (5.6, seit P7-S3)
+
+Dieser Service bleibt alleinige Autorität für die Dokument-Lebenszyklusfelder (bereits mit `retention_until`/`legal_hold`/Audit-Tiefe belastet), ein neuer `archival-service` übernimmt nur die eigentliche Transfer-Mechanik (PDF/A-Konvertierung, Archiv-Speicherung, Dehydrieren, Rückholung) — gleiche Aufgabenteilung wie `reporting-service` zu diesem Service.
+
+- **Auslösung wie bei `default_retention_days`**: `ObjectType.default_archive_after_days` (siehe `docs/services/object-type-service.md`) wird beim Anlegen eines Dokuments einmalig zu `Document.archive_after` aufgelöst. Zusätzlich manueller Trigger: `POST /documents/{id}/archive-request` setzt `archive_after=jetzt`, falls noch nicht gesetzt/fällig — unabhängig von der `retention_until`/`full_deletion`-Weiche (5.2), da Aussonderung laut Konzept ausdrücklich *ergänzend* zur regulären Aufbewahrungsfrist ist, kein dritter Zweig derselben Entscheidung.
+- **`archival-service` fragt/aktualisiert ausschließlich über die neuen Endpunkte** (`GET .../due-for-archival`, `PUT .../archived`, `.../dehydrated`, `.../rehydrated`, `GET .../has-active-hold`) — kein direkter DB-Zugriff, gleiches Prinzip wie jede andere Service-Grenze in diesem System (3.1).
+- **"Dehydrieren" statt physischer Löschung**: die `Document`-Zeile bleibt bei einer Aussonderung vollständig erhalten (`archived_at`/`archive_format`/`dehydrated_at` gesetzt, Metadaten weiterhin über `GET /documents/{id}` auffindbar, wörtliche Konzeptvorgabe) — nur der Inhalt auf den Live-Speicherzielen wird von `archival-service` nach einer konfigurierbaren Übergangsfrist entfernt. `GET /documents/{id}/content` liefert danach `404` (das Objekt existiert schlicht nicht mehr im Storage Service) — ein freundlicherer 409-Hinweis mit Rückhol-Verweis ist ein offener Punkt (s. u.), kein Kern-Scope dieser Session.
+- **Legal Hold blockiert nur das Dehydrieren, nicht das Archivieren selbst**: `GET /documents/{id}/has-active-hold` (neu, wiederverwendet die bestehende `repository.has_active_hold`-Logik aus 5.2) wird von `archival-service` vor jedem Dehydrierungsschritt abgefragt — eine zusätzliche, sichere Archivkopie schadet nicht, das Entfernen der Live-Kopie dagegen schon.
+- **Drei neue Events** (s. u.) werden von diesem Service publiziert, nicht von `archival-service` selbst — konsistent mit der Regel, dass nur der Domain-Owner (`document`-Stream) `document.*`-Events publiziert.
+
 ## Events
 
 **Publiziert** (Stream `document`, `ensure_stream=True`):
@@ -171,6 +188,9 @@ Grundlage für die objektbezogene Nachverfolgung (Forensik-Trace, siehe `docs/se
 | `document.trash_purged` | `{trigger: "trash_expiry"}` (5.2a, seit P7-S1) |
 | `document.viewed` | `{}` (Forensik-Trace, 5.4b, seit P7-S2c) — nur bei `GET /documents/{id}` (Einzelabruf), **nicht** bei der Listing-Route `GET /documents?folder_id=`, um nicht pro Ordnerinhalt Dutzende Events zu erzeugen. Abhängig von der Audit-Tiefe-Konfiguration, siehe unten |
 | `document.downloaded` | `{version_number}` (Forensik-Trace, 5.4b, seit P7-S2c) — beide Content-Endpunkte. Abhängig von der Audit-Tiefe-Konfiguration, siehe unten |
+| `document.archived` | `{archive_format}` (5.6, seit P7-S3) — Rückruf von `archival-service`, sobald die Archivkopie verifiziert ist |
+| `document.dehydrated` | `{}` (5.6, seit P7-S3) — Rückruf von `archival-service`, nachdem die Live-Speicherkopie entfernt wurde |
+| `document.rehydrated` | `{}` (5.6, seit P7-S3) — Rückruf von `archival-service` nach erfolgreicher Rückholung |
 
 **Konsumiert** (seit P6-S4, erster Konsument dieses Service überhaupt): `permission.approval.approved` — relevant für `action_type == "document.force_unlock"` (Force-Unlock, seit P6-S4) und seit P7-S1 zusätzlich `action_type == "document.force_delete"` (führt die zuvor aufgeschobene Zwangslöschung aus, siehe "Zwangslöschung & Löschregister" oben); alle anderen Aktionstypen werden ignoriert.
 
@@ -202,3 +222,5 @@ Noch keine — folgt in Phase 11.
 - **Keine Existenzprüfung für `originating_case_id`**: opake Referenz auf eine Umlaufmappe im `case-service`, analog zu `folder_id`/`object_type_id` — ein unbekannter Wert wird nicht abgelehnt.
 - Virenscan-Gating erhöht die Upload-Latenz um die Scan-Zeit und scannt auch dann, wenn ein Check-in wegen veralteter `expected_base_version_number`/Lock-Konflikt ohnehin abgelehnt würde (unnötige, aber nicht falsche Arbeit) — siehe ADR 0010 "Konsequenzen".
 - Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowedParentTypes` (siehe ADR 0013) — dieselbe Einschränkung wie beim Object-Type/Folder Service.
+- **`GET /documents/{id}/content` liefert nach dem Dehydrieren ein einfaches `404`** (5.6, seit P7-S3) statt eines spezifischeren 409 mit Rückhol-Verweis — siehe "Aussonderung & Langzeitarchivierung" oben, bewusst kein Kern-Scope von P7-S3.
+- **Keine Existenzprüfung, dass `archival-service` die aufrufende Instanz der internen Aussonderungs-Endpunkte ist** (5.6, seit P7-S3) — `PUT .../archived`/`.../dehydrated`/`.../rehydrated` sind wie die meisten Endpunkte dieses Systems ungegated, siehe "Autorisierung" in `PROGRESS.md`.

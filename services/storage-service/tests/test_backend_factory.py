@@ -1,6 +1,11 @@
 import pytest
 from pydantic import ValidationError
-from storage_service.backends import LocalFilesystemBackend, build_backends, resolve_targets
+from storage_service.backends import (
+    LocalFilesystemBackend,
+    build_backends,
+    resolve_archive_targets,
+    resolve_targets,
+)
 from storage_service.settings import BackendTargetConfig, Settings
 
 
@@ -13,6 +18,30 @@ def test_resolve_targets_preserves_order(tmp_path):
     )
 
     assert resolve_targets(settings) == ["primary", "secondary"]
+
+
+def test_resolve_targets_excludes_archive_role(tmp_path):
+    """Aussonderung (5.6, seit P7-S3): Archiv-Ziele sind nicht Teil der
+    regulären Upload-Replikation."""
+    settings = Settings(
+        targets=[
+            BackendTargetConfig(id="primary", type="local", base_path=str(tmp_path / "a")),
+            BackendTargetConfig(
+                id="archive", type="local", base_path=str(tmp_path / "b"), role="archive"
+            ),
+        ]
+    )
+
+    assert resolve_targets(settings) == ["primary"]
+    assert resolve_archive_targets(settings) == ["archive"]
+
+
+def test_resolve_archive_targets_empty_without_archive_role(tmp_path):
+    settings = Settings(
+        targets=[BackendTargetConfig(id="primary", type="local", base_path=str(tmp_path / "a"))]
+    )
+
+    assert resolve_archive_targets(settings) == []
 
 
 def test_build_backends_supports_multiple_instances_of_the_same_type(tmp_path):

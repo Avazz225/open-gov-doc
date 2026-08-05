@@ -2,7 +2,7 @@
 
 **Verantwortung:** Storage-Abstraktionsschicht über austauschbare Backend-Plugins — Dateiinhalte liegen in einem oder mehreren konfigurierten Backends (Redundanz, seit P3-S4; beliebig viele, auch gleichartige Instanzen, seit P5b-S6), die Shared DB hält nur Metadaten (Referenz, Prüfsumme, Größe, Kopien-Status, Datenträger-Identität) (Konzept 3.6).
 
-**Konzept-Referenz:** 3.6, 5.1/5.2a (Object-Lock/WORM, seit P7-S1)
+**Konzept-Referenz:** 3.6, 5.1/5.2a (Object-Lock/WORM, seit P7-S1), 5.6 (Archiv-Zielrolle, seit P7-S3)
 **Eigenes Postgres-Schema:** `storage` (Tabellen `object_metadata`, `object_copy`, `backend_identity`, `guard_config`)
 
 ## API
@@ -22,6 +22,10 @@
 | `PUT` | `/guard-config` | Aktualisiert `allow_degraded_start` — wirkt erst beim **nächsten** Start, nicht auf die laufende Instanz |
 | `GET` | `/guard-status` | Je konfiguriertem Ziel: zuletzt bestätigte Geräte-ID, Zeitpunkt, Anzahl noch nicht replizierter Kopien (Admin-UI-Statusblock) |
 | `POST` | `/guard-status/{target_id}/reidentify` | Akzeptiert einen beabsichtigten Datenträger-Wechsel zur Laufzeit (kein Neustart nötig), P5c-S2 |
+| `PUT` | `/objects/{key:path}/archive-copy` | Schreibt **nur** auf die konfigurierten Archiv-Ziele (`role="archive"`, 5.6, seit P7-S3) — `503` ohne konfiguriertes Archiv-Ziel |
+| `GET` | `/objects/{key:path}/archive-copy` | Liest ausschließlich von Archiv-Zielen (Rückholung, seit P7-S3) — unabhängig vom Live-Zustand desselben Schlüssels |
+| `GET` | `/objects/{key:path}/archive-copy/verify` | Fixity-Check der Archiv-Kopie, gefiltert auf Archiv-Ziele (seit P7-S3) |
+| `DELETE` | `/objects/{key:path}/live-copies` | "Dehydrieren" (5.6, seit P7-S3) — entfernt Kopien nur von den regulären Live-Zielen, Archiv-Kopie bleibt unberührt. Gleiches Governance-Lock-Gate wie die reguläre Löschung |
 | `GET` | `/healthz` | Health-Check inkl. aktiven Zielen und Schreibstrategie |
 
 ## Backend-Plugin-Interface (3.6)
@@ -72,6 +76,21 @@ Schützt gegen einen versehentlich getauschten/zurückgesetzten Datenträger, de
 - `GET /guard-status` zeigt je Ziel die zuletzt bestätigte Geräte-ID/Zeitpunkt sowie die Anzahl noch offener Kopien — ein Ziel mit `pending_copies > 0` befindet sich noch in der Wiederherstellung.
 - **Korrekturmechanismus für beabsichtigte Datenträger-Wechsel** (seit **P5c-S2**): `POST /guard-status/{target_id}/reidentify` übernimmt eine bereits vorhandene Marker-Datei des neuen Geräts oder prägt (wie beim Erststart-Bootstrap) eine neue, aktualisiert `backend_identity` und setzt alle bisherigen Kopien des Ziels über `reset_copies_for_backend` auf `pending` zurück — funktional dieselbe Wiederherstellung wie beim automatischen degradierten Start, aber explizit vom Admin angestoßen und **ohne Neustart** (Admin-UI: Button "Datenträger-Wechsel akzeptieren" je Zeile in `/storage-guard/`). Ersetzt die zuvor nötige direkte Korrektur in der `backend_identity`-Tabelle.
 
+## Archiv-Zielrolle (5.6, seit P7-S3)
+
+Aussonderung/Langzeitarchivierung (siehe `docs/services/archival-service.md`) braucht ein eigenes, ggf. günstigeres/anders redundantes Speicherziel getrennt von den Live-Zielen — statt eines separaten Speichersystems bekommt `BackendTargetConfig` ein neues optionales Feld `role: "archive" | null` (Default `null` = bestehendes Verhalten, normales Replikationsziel):
+
+```
+DMS_TARGETS='[{"id":"local","type":"local","base_path":"/data/storage"},
+  {"id":"archive","type":"local","base_path":"/data/archive","role":"archive"}]'
+```
+
+- **`resolve_targets()`** (reguläre Upload-Replikation) **filtert Archiv-Ziele heraus** — sie sind kein Teil des normalen Schreib-/Lesepfads (`PUT`/`GET /objects/{key}`). **`resolve_archive_targets()`** liefert stattdessen genau die Ziele mit `role="archive"`.
+- **Neue, dedizierte Endpunkte** (s. o.) statt einer Sonderfall-Verzweigung in den bestehenden `/objects/{key}`-Routen: `PUT`/`GET .../archive-copy` schreiben/lesen ausschließlich über `app.state.archive_targets`, `.../archive-copy/verify` wiederverwendet dieselbe Fixity-Logik wie `GET /object-verify/{key}/all`, gefiltert auf Archiv-Ziele.
+- **`replication.write_to_targets()`/`delete_from_targets()`** (neu, `replication.py`) statt der bestehenden `write_with_redundancy()`/`delete_from_all()`: Archiv-Schreibvorgänge sind bewusst synchrone Einzelvorgänge ohne Primär-/Sekundär-Unterschied oder Schreibstrategie/Quorum-Semantik (kein Teil des Upload-Hot-Path). `delete_from_targets()` entfernt gezielt nur die `object_copy`-Zeilen der angegebenen (Live-)Ziele — anders als `delete_from_all()`, das über `repository.delete_copies_for_key` **alle** Kopien-Zeilen eines Schlüssels entfernen würde und damit beim Dehydrieren versehentlich auch die Archiv-Kopien-Tracking-Zeile gelöscht hätte.
+- **Routenreihenfolge-Falle** (beim Bauen dieser Endpunkte tatsächlich aufgetreten, s. u.): Starlette matched Pfad-Routen in Registrierungsreihenfolge, und `{key:path}` ist ein greedy-Converter — `PUT /objects/{key:path}` (generischer Upload) muss **nach** `PUT /objects/{key:path}/archive-copy` registriert sein, sonst fängt die generische Route jeden Aufruf inkl. `.../archive-copy` als Teil des Schlüssels ab. Alle spezifischeren Suffix-Routen (`.../copies`, `.../archive-copy`, `.../archive-copy/verify`, `.../live-copies`) stehen deshalb im Quellcode vor den generischen `PUT`/`GET`/`DELETE /objects/{key:path}`-Routen.
+- **Kein Admin-UI-Editor für die Ziel-Rolle** — wie beim übrigen Ziel-Set (s. o.) ist dies Deployment-Konfiguration (`DMS_TARGETS`), nicht Admin-UI-Formular.
+
 ## Object-Lock/WORM (5.1/5.2a, seit P7-S1, [ADR 0030](../adr/0030-storage-object-lock-governance-mode.md))
 
 Zweistufiger Schutz gegen vorzeitige Löschung während einer laufenden Aufbewahrungsfrist:
@@ -95,7 +114,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**100 Tests**, davon 14 neu seit P7-S1): Backend-Plugins, Fabrikfunktionen, Replikation, Datenträger-Wechsel-Wächter unverändert. Neu: `retention_guard`-Unit-Tests (blockiert/nicht blockiert/Bypass mit/ohne Rolle), `S3Backend`-Object-Lock-Tests gegen echtes MinIO (inkl. des Delete-Marker-vs-echte-Versionslöschung-Falls, siehe oben), `LocalFilesystemBackend` ignoriert die neuen Parameter klaglos, API-Tests für `403` ohne Bypass/`200` mit gültigem Bypass.
+- `uv run pytest services/storage-service/tests` (**110 Tests**, davon 10 neu seit P7-S3): Backend-Plugins, Fabrikfunktionen, Replikation, Datenträger-Wechsel-Wächter, Object-Lock/WORM unverändert. Neu seit P7-S1: `retention_guard`-Unit-Tests (blockiert/nicht blockiert/Bypass mit/ohne Rolle), `S3Backend`-Object-Lock-Tests gegen echtes MinIO (inkl. des Delete-Marker-vs-echte-Versionslöschung-Falls, siehe oben), `LocalFilesystemBackend` ignoriert die neuen Parameter klaglos, API-Tests für `403` ohne Bypass/`200` mit gültigem Bypass. Neu seit P7-S3: `resolve_targets()` schließt `role="archive"` aus/`resolve_archive_targets()` findet sie (`test_backend_factory.py`), `write_to_targets()`/`delete_from_targets()` gegen echte `LocalFilesystemBackend`-Instanzen (`test_replication.py`), API-Roundtrip Archiv-Kopie hochladen/verifizieren/herunterladen sowie Dehydrieren-lässt-Archiv-Kopie-unberührt über einen neuen `archive_client`-Fixture (mutiert `app.state.backends`/`app.state.archive_targets` nach dem Start, gleiches Muster wie `governance_client`).
 - **Live-Verifikation ohne Mocking**: ein echter Datenträger-Wechsel wurde gegen den laufenden Container simuliert (Identitätsdatei manuell verändert, Neustart erzwungen) — Startverweigerung, Admin-Override + degradierter Start, automatische Nachreplikations-Vormerkung und `POST /replication/process-pending` alle 1:1 wie vorgesehen; siehe `PROGRESS.md` für den Ablauf. **Seit P5c-S2 zusätzlich verifiziert**: ein zur Laufzeit hinzugefügtes zweites Ziel bekam beim Neustart automatisch `pending`-Kopien für ein zuvor hochgeladenes Objekt (Rebalancing), und `POST /guard-status/{target_id}/reidentify` hat einen simulierten Datenträger-Wechsel ohne Neustart korrigiert. **Seit P7-S1 zusätzlich verifiziert**: ein rein testweises Zweit-Ziel (frischer MinIO-Bucket, `object_lock_mode=governance`) hat eine Löschung ohne Bypass mit `403` abgelehnt und mit gültigem Bypass tatsächlich (nicht nur per Delete-Marker) gelöscht — der echte, produktiv genutzte Bucket blieb unangetastet.
 
 ## Offene Punkte

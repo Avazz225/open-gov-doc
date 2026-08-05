@@ -311,6 +311,41 @@ async def test_create_with_negative_default_retention_days_raises(session):
         )
 
 
+async def test_create_with_default_archive_after_days_on_folder_type_succeeds(session):
+    """Aussonderung (5.6, seit P7-S3) gilt wie die Aufbewahrungsfrist fuer
+    BEIDE applies_to-Werte, ist aber ein unabhaengiges Feld."""
+    created = await repository.create_object_type(
+        session,
+        ObjectTypeCreate(
+            name="OrdnerMitAussonderung", applies_to="folder", default_archive_after_days=365
+        ),
+    )
+    assert created.default_archive_after_days == 365
+    assert created.archive_encryption_enabled is False
+
+
+async def test_create_with_negative_default_archive_after_days_raises(session):
+    with pytest.raises(repository.InvalidFieldError):
+        await repository.create_object_type(
+            session,
+            ObjectTypeCreate(
+                name="DokMitUngueltigerAussonderung",
+                applies_to="document",
+                default_archive_after_days=-1,
+            ),
+        )
+
+
+async def test_update_archive_encryption_enabled_persists(session):
+    created = await repository.create_object_type(
+        session, ObjectTypeCreate(name="DokMitVerschluesselterAussonderung", applies_to="document")
+    )
+    updated = await repository.update_object_type(
+        session, created.id, ObjectTypeUpdate(archive_encryption_enabled=True)
+    )
+    assert updated.archive_encryption_enabled is True
+
+
 async def test_update_deletion_reason_required_override_persists(session):
     created = await repository.create_object_type(
         session, ObjectTypeCreate(name="DokMitLoeschgrund", applies_to="document")

@@ -57,6 +57,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/retention-settings/", labelKey: "nav.retentionSettings" },
       { href: "/deletion-register/", labelKey: "nav.deletionRegister" },
+      { href: "/archival-transfers/", labelKey: "nav.archivalTransfers" },
     ],
   },
   {

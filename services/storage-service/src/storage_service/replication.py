@@ -128,6 +128,47 @@ async def read_with_fallback(
     raise ObjectNotFoundError(key) from last_error
 
 
+async def write_to_targets(
+    session: AsyncSession,
+    *,
+    backends: dict[str, StorageBackend],
+    targets: list[str],
+    key: str,
+    data: bytes,
+    checksum: str,
+) -> dict[str, str]:
+    """Schreibt synchron auf ALLE angegebenen Ziele (5.6, seit P7-S3) - anders
+    als `write_with_redundancy` kein Primär-/Sekundär-Unterschied und keine
+    Schreibstrategie/Quorum-Semantik, da Archiv-Schreibvorgänge bewusst
+    synchrone Einzelvorgänge sind (kein Teil des Upload-Hot-Path). Ein
+    fehlschlagendes Ziel wirft die Exception des Backends unverändert weiter -
+    alle angegebenen Ziele müssen erfolgreich sein."""
+    statuses: dict[str, str] = {}
+    for target in targets:
+        await backends[target].write(key, data)
+        statuses[target] = "ok"
+        await repository.record_copy(session, key, target, status="ok", checksum=checksum)
+    return statuses
+
+
+async def delete_from_targets(
+    session: AsyncSession,
+    *,
+    backends: dict[str, StorageBackend],
+    targets: list[str],
+    key: str,
+    bypass_governance: bool = False,
+) -> None:
+    """Entfernt Kopien NUR von den angegebenen Zielen (5.6, seit P7-S3,
+    "Dehydrieren") - anders als `delete_from_all` werden nur die
+    `object_copy`-Zeilen der genannten Ziele entfernt, Kopien auf anderen
+    Zielen (z. B. Archiv-Zielen) bleiben unberührt."""
+    for target in targets:
+        with contextlib.suppress(ObjectNotFoundError):
+            await backends[target].delete(key, bypass_governance=bypass_governance)
+        await repository.delete_copy(session, key, target)
+
+
 async def delete_from_all(
     session: AsyncSession,
     *,

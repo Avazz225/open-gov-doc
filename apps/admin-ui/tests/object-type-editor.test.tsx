@@ -61,6 +61,8 @@ const RECHNUNG = {
   kennzeichen_display_override: null,
   default_retention_days: null,
   deletion_reason_required_override: null,
+  default_archive_after_days: null,
+  archive_encryption_enabled: false,
 };
 
 const PROJEKTORDNER = {
@@ -76,6 +78,8 @@ const PROJEKTORDNER = {
   kennzeichen_display_override: null,
   default_retention_days: null,
   deletion_reason_required_override: null,
+  default_archive_after_days: null,
+  archive_encryption_enabled: false,
 };
 
 describe("ObjectTypeEditor", () => {
@@ -118,6 +122,8 @@ describe("ObjectTypeEditor", () => {
         requiredSignatureLevel: null,
         defaultRetentionDays: null,
         deletionReasonRequiredOverride: null,
+        defaultArchiveAfterDays: null,
+        archiveEncryptionEnabled: false,
       })
     );
     // Kein abweichender Anzeigename vergeben -> kein Layout-Override nötig.
@@ -186,6 +192,8 @@ describe("ObjectTypeEditor", () => {
         requiredSignatureLevel: null,
         defaultRetentionDays: null,
         deletionReasonRequiredOverride: null,
+        defaultArchiveAfterDays: null,
+        archiveEncryptionEnabled: false,
       })
     );
   });
@@ -312,5 +320,56 @@ describe("ObjectTypeEditor", () => {
 
     expect(await screen.findByLabelText("Standard-Aufbewahrungsfrist (Tage)")).toHaveValue(30);
     expect(screen.getByLabelText("Löschgrund-Pflicht")).toHaveValue("true");
+  });
+
+  it("shows archival fields for both document and folder types (5.6, P7-S3)", async () => {
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+    expect(screen.getByLabelText("Aussonderung nach (Tage)")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
+    // Wie die Aufbewahrungsfelder gelten die Aussonderungsfelder auch für
+    // Ordnerklassen.
+    expect(screen.getByLabelText("Aussonderung nach (Tage)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Archiv-Kopie verschlüsseln")).toBeInTheDocument();
+  });
+
+  it("submits default_archive_after_days and archive_encryption_enabled when creating a type", async () => {
+    createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
+    fireEvent.change(screen.getByLabelText("Aussonderung nach (Tage)"), {
+      target: { value: "365" },
+    });
+    fireEvent.click(screen.getByLabelText("Archiv-Kopie verschlüsseln"));
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+
+    await waitFor(() =>
+      expect(createObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({
+          defaultArchiveAfterDays: 365,
+          archiveEncryptionEnabled: true,
+        })
+      )
+    );
+  });
+
+  it("loads an existing archival default/encryption flag into the form for editing", async () => {
+    listObjectTypesMock.mockResolvedValue([
+      { ...RECHNUNG, default_archive_after_days: 400, archive_encryption_enabled: true },
+      PROJEKTORDNER,
+    ]);
+    renderObjectTypeEditor();
+    await screen.findByText("Rechnung");
+
+    const row = screen.getByText("Rechnung").closest("tr")!;
+    fireEvent.click(within(row).getByText("Bearbeiten"));
+
+    expect(await screen.findByLabelText("Aussonderung nach (Tage)")).toHaveValue(400);
+    expect(screen.getByLabelText("Archiv-Kopie verschlüsseln")).toBeChecked();
   });
 });

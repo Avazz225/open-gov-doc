@@ -88,6 +88,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS deletion_reason_required_override BOOLEAN"
             )
         )
+        # Aussonderung (5.6, P7-S3) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS default_archive_after_days INTEGER"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS archive_encryption_enabled BOOLEAN NOT NULL DEFAULT false"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

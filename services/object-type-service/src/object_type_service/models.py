@@ -49,6 +49,18 @@ class ObjectType(Base):
     # aus RetentionConfig) - ob ein Löschgrund bei Zwangslöschung Pflicht ist
     # (5.2a), gleiches Muster wie kennzeichen_display_override.
     deletion_reason_required_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Aussonderung (5.6, seit P7-S3): Standard-Frist in Tagen ab Anlage, nach
+    # deren Ablauf ein Dokument aussonderungsfaehig wird (archival-service
+    # loest daraus einmalig Document.archive_after auf) - exakt gleiches
+    # Muster wie default_retention_days, aber unabhaengig davon (Aussonderung
+    # ist laut Konzept ergaenzend zur regulaeren Aufbewahrungsfrist, kein
+    # dritter Zweig derselben Entscheidung). None = kein Typ-Standard, nur
+    # manueller Trigger moeglich.
+    default_archive_after_days: Mapped[int | None] = mapped_column(nullable=True)
+    # Ob die Archivkopie vor der Ablage im Archiv-Ziel verschluesselt wird
+    # (5.6) - ueber archival-service's KeyStore-Plugin-Schnittstelle (ADR
+    # 0029), Default aus false (unverschluesselt).
+    archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

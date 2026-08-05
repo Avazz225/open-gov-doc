@@ -30,6 +30,8 @@ class ObjectTypeCreate(BaseModel):
     required_signature_level: SignatureLevel | None = None
     default_retention_days: int | None = None
     deletion_reason_required_override: bool | None = None
+    default_archive_after_days: int | None = None
+    archive_encryption_enabled: bool = False
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -43,6 +45,8 @@ class ObjectTypeUpdate(BaseModel):
     required_signature_level: SignatureLevel | None = None
     default_retention_days: int | None = None
     deletion_reason_required_override: bool | None = None
+    default_archive_after_days: int | None = None
+    archive_encryption_enabled: bool = False
 
 
 class ObjectTypeOut(BaseModel):
@@ -59,6 +63,8 @@ class ObjectTypeOut(BaseModel):
     required_signature_level: str | None
     default_retention_days: int | None
     deletion_reason_required_override: bool | None
+    default_archive_after_days: int | None
+    archive_encryption_enabled: bool
     created_at: datetime
     updated_at: datetime
 

@@ -19,6 +19,11 @@ volumes:
   # Steht für den PVC-Mountpunkt in einer echten Installation (Konzept 3.6) -
   # ob dahinter NFS oder ein Block-Volume liegt, ist für storage-service unsichtbar.
   storage-local-data:
+  # Separates Archiv-Ziel (5.6, seit P7-S3) - eigenes Volume, da ein
+  # `role="archive"`-Ziel laut Konzept typischerweise ein anderes/günstigeres
+  # Backend als die Live-Ziele ist, hier als zweites lokales Verzeichnis
+  # stellvertretend simuliert.
+  storage-archive-data:
 
 services:
   postgres:
@@ -237,8 +242,12 @@ services:
       # Env-Var-Werte werden nicht weiter expandiert - MinIO-Zugangsdaten in
       # einer eigenen STORAGE_SERVICE_TARGETS-Überschreibung müssen deshalb
       # wörtlich eingetragen werden, nicht als ${MINIO_ROOT_USER}-Referenz.
+      # Zweites Ziel mit `role: archive` (5.6, seit P7-S3) - nicht Teil der
+      # regulären Upload-Replikation (`resolve_targets` filtert es heraus),
+      # nur über die dedizierten `.../archive-copy`-Endpunkte erreichbar.
       DMS_TARGETS: >-
-        ${STORAGE_SERVICE_TARGETS:-[{"id":"local","type":"local","base_path":"/data/storage"}]}
+        ${STORAGE_SERVICE_TARGETS:-[{"id":"local","type":"local","base_path":"/data/storage"},
+        {"id":"archive","type":"local","base_path":"/data/archive","role":"archive"}]}
       DMS_WRITE_STRATEGY: ${STORAGE_SERVICE_WRITE_STRATEGY:-primary_async}
       DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-1}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -249,6 +258,7 @@ services:
       DMS_GOVERNANCE_BYPASS_ROLE: ${STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE:-dms-admin}
     volumes:
       - storage-local-data:/data/storage
+      - storage-archive-data:/data/archive
     ports:
       - "${STORAGE_SERVICE_PORT:-8005}:8000"
     depends_on:
@@ -621,6 +631,42 @@ services:
       storage-service:
         condition: service_started
       notification-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  archival-service:
+    build:
+      context: ..
+      dockerfile: services/archival-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://archival-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_RENDERING_SERVICE_BASE_URL: http://rendering-service:8000
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_ARCHIVAL_POLL_INTERVAL_SECONDS: ${ARCHIVAL_SERVICE_POLL_INTERVAL_SECONDS:-3600}
+      DMS_DEHYDRATION_DELAY_DAYS: ${ARCHIVAL_SERVICE_DEHYDRATION_DELAY_DAYS:-30}
+      DMS_ARCHIVE_RETRIEVAL_ROLE: ${ARCHIVAL_SERVICE_RETRIEVAL_ROLE:-dms-admin}
+      # Dev-/Testschluessel fuer `EnvKeyStore` (ADR 0029) - base64-kodierte
+      # 32 Byte, NUR fuer lokale Entwicklung. Eine echte Installation setzt
+      # dies über ein Secret oder betreibt ein eigenes `KeyStore`-Plugin.
+      DMS_ARCHIVE_ENCRYPTION_KEY: ${ARCHIVAL_SERVICE_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    ports:
+      - "${ARCHIVAL_SERVICE_PORT:-8021}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      document-service:
+        condition: service_started
+      rendering-service:
+        condition: service_started
+      storage-service:
+        condition: service_started
+      object-type-service:
         condition: service_started
     networks:
       - dms-net

@@ -399,6 +399,36 @@ def test_create_with_negative_default_retention_days_returns_422(client):
     assert response.status_code == 422
 
 
+def test_create_with_archive_fields_on_folder_type_succeeds(client):
+    """Aussonderung (5.6, seit P7-S3) gilt wie die Aufbewahrungsfrist für
+    beide applies_to-Werte."""
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "OrdnerMitAussonderungAPI",
+            "applies_to": "folder",
+            "default_archive_after_days": 730,
+            "archive_encryption_enabled": True,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["default_archive_after_days"] == 730
+    assert body["archive_encryption_enabled"] is True
+
+
+def test_create_with_negative_default_archive_after_days_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "DokMitUngueltigerAussonderungAPI",
+            "applies_to": "document",
+            "default_archive_after_days": -5,
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_next_kennzeichen_returns_incrementing_formatted_values(client):
     object_type_id = client.post(
         "/object-types",

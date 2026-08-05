@@ -33,6 +33,7 @@ from document_service.folder_client import FolderClient
 from document_service.models import Base, Document
 from document_service.object_type_client import ObjectTypeClient
 from document_service.schemas import (
+    ArchiveStatusOut,
     AuditTraceConfigIn,
     AuditTraceConfigOut,
     AuditTraceRoleOverrideIn,
@@ -48,6 +49,7 @@ from document_service.schemas import (
     DocumentUpdate,
     DocumentVersionOut,
     ForceReleaseResult,
+    HasActiveHoldOut,
     LegalHoldCreate,
     LegalHoldOut,
     LegalHoldReleaseRequest,
@@ -55,6 +57,7 @@ from document_service.schemas import (
     LockForceReleaseRequest,
     LockOut,
     LockReleaseRequest,
+    MarkArchivedRequest,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
@@ -320,6 +323,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS deleted_via_folder_id VARCHAR(128)"
             )
         )
+        # Aussonderung (5.6, seit P7-S3) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS archive_after TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document ADD COLUMN IF NOT EXISTS archive_format VARCHAR(16)"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS dehydrated_at TIMESTAMPTZ")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -522,6 +540,107 @@ async def delete_audit_trace_role_override(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/documents/due-for-archival", response_model=list[DocumentOut])
+async def list_documents_due_for_archival(
+    session: AsyncSession = Depends(get_session),
+) -> list[DocumentOut]:
+    """Interner Aufruf von `archival-service` (5.6, seit P7-S3) - Kandidaten
+    für den nächsten Poll-Tick."""
+    return await repository.list_due_for_archival(session)
+
+
+@app.post("/documents/{document_id}/archive-request", response_model=DocumentOut)
+async def request_document_archive(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> DocumentOut:
+    """Manueller Aussonderungs-Trigger (5.6) - setzt `archive_after` auf
+    jetzt, falls noch nicht fällig."""
+    try:
+        document = await repository.request_archive(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return document
+
+
+@app.get("/documents/{document_id}/archive-status", response_model=ArchiveStatusOut)
+async def get_document_archive_status(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> ArchiveStatusOut:
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ArchiveStatusOut(
+        document_id=document.id,
+        archive_after=document.archive_after,
+        archived_at=document.archived_at,
+        archive_format=document.archive_format,
+        dehydrated_at=document.dehydrated_at,
+    )
+
+
+@app.get("/documents/{document_id}/has-active-hold", response_model=HasActiveHoldOut)
+async def get_document_has_active_hold(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> HasActiveHoldOut:
+    """Interner Aufruf von `archival-service` (5.6) - ein aktiver Legal Hold
+    (5.2) blockiert den Dehydrierungs-Schritt, nicht das Anlegen der
+    Archivkopie selbst."""
+    return HasActiveHoldOut(has_active_hold=await repository.has_active_hold(session, document_id))
+
+
+@app.put("/documents/{document_id}/archived", response_model=DocumentOut)
+async def mark_document_archived(
+    document_id: str, payload: MarkArchivedRequest, session: AsyncSession = Depends(get_session)
+) -> DocumentOut:
+    """Rückruf von `archival-service`, sobald die Archivkopie verifiziert
+    ist (5.6)."""
+    try:
+        document = await repository.mark_archived(
+            session, document_id, archive_format=payload.archive_format
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.archived",
+        document_id,
+        {"archive_format": payload.archive_format},
+        actor="system:archival-service",
+    )
+    return document
+
+
+@app.put("/documents/{document_id}/dehydrated", response_model=DocumentOut)
+async def mark_document_dehydrated(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> DocumentOut:
+    """Rückruf von `archival-service`, nachdem die Live-Speicherkopie nach
+    Ablauf der Übergangsfrist entfernt wurde (5.6)."""
+    try:
+        document = await repository.mark_dehydrated(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event("document.dehydrated", document_id, {}, actor="system:archival-service")
+    return document
+
+
+@app.put("/documents/{document_id}/rehydrated", response_model=DocumentOut)
+async def mark_document_rehydrated(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> DocumentOut:
+    """Rückruf von `archival-service` nach erfolgreicher Rückholung (5.6)."""
+    try:
+        document = await repository.mark_rehydrated(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event("document.rehydrated", document_id, {}, actor="system:archival-service")
+    return document
+
+
 @app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def create_document(
     file: UploadFile = File(...),
@@ -567,6 +686,7 @@ async def create_document(
             raise HTTPException(status_code=400, detail=f"folder_id {folder_id!r} unbekannt")
 
     retention_until: datetime | None = None
+    archive_after: datetime | None = None
     if object_type_id is not None:
         errors = await app.state.object_type_client.validate(
             object_type_id,
@@ -589,6 +709,12 @@ async def create_document(
         if object_type and object_type.get("default_retention_days") is not None:
             retention_until = datetime.now(UTC) + timedelta(
                 days=object_type["default_retention_days"]
+            )
+        # Aussonderung (5.6, seit P7-S3): unabhaengig von retention_until,
+        # ergaenzend zur regulaeren Aufbewahrungsfrist (siehe Docstring oben).
+        if object_type and object_type.get("default_archive_after_days") is not None:
+            archive_after = datetime.now(UTC) + timedelta(
+                days=object_type["default_archive_after_days"]
             )
 
     data = await file.read()
@@ -633,6 +759,7 @@ async def create_document(
         derived_from_version_number=derived_from_version_number,
         originating_case_id=originating_case_id,
         retention_until=retention_until,
+        archive_after=archive_after,
     )
     await session.commit()
     event_payload = {"title": title, "created_by": created_by, "folder_id": folder_id}

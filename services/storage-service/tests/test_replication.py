@@ -340,3 +340,63 @@ async def test_process_pending_without_ok_source_is_reported_failed(session):
     copy_b = await repository.get_copy(session, key, "b")
     assert copy_b.status == "failed"
     assert copy_b.attempts == 1
+
+
+# --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
+
+
+async def test_write_to_targets_writes_all_and_records_copies(session, backend_a, backend_b):
+    key = _key()
+    data = b"archiv-inhalt"
+    checksum = hashlib.sha256(data).hexdigest()
+    await _make_metadata(session, key, checksum)
+    backends = {"a": backend_a, "b": backend_b}
+
+    statuses = await replication.write_to_targets(
+        session, backends=backends, targets=["a", "b"], key=key, data=data, checksum=checksum
+    )
+
+    assert statuses == {"a": "ok", "b": "ok"}
+    assert await backend_a.read(key) == data
+    assert await backend_b.read(key) == data
+    copies = {c.backend_id: c.status for c in await repository.list_copies(session, key)}
+    assert copies == {"a": "ok", "b": "ok"}
+
+
+async def test_write_to_targets_raises_on_failing_target(session, backend_a):
+    key = _key()
+    await _make_metadata(session, key, "x")
+    backends = {"a": backend_a, "broken": _AlwaysFailingBackend()}
+
+    with pytest.raises(ConnectionError):
+        await replication.write_to_targets(
+            session, backends=backends, targets=["a", "broken"], key=key, data=b"x", checksum="x"
+        )
+
+
+async def test_delete_from_targets_only_removes_specified_targets(session, backend_a, backend_b):
+    """Dehydrieren (5.6): anders als delete_from_all bleibt die Kopie auf
+    NICHT angegebenen Zielen (hier "b", stellvertretend für ein Archiv-Ziel)
+    unberührt - sowohl im Backend als auch in der object_copy-Zeile."""
+    key = _key()
+    data = b"hello"
+    checksum = hashlib.sha256(data).hexdigest()
+    await _make_metadata(session, key, checksum)
+    backends = {"a": backend_a, "b": backend_b}
+    await replication.write_with_redundancy(
+        session,
+        backends=backends,
+        targets=["a", "b"],
+        strategy="quorum",
+        quorum_count=2,
+        key=key,
+        data=data,
+        checksum=checksum,
+    )
+
+    await replication.delete_from_targets(session, backends=backends, targets=["a"], key=key)
+
+    assert await backend_a.exists(key) is False
+    assert await backend_b.exists(key) is True
+    remaining = {c.backend_id for c in await repository.list_copies(session, key)}
+    assert remaining == {"b"}

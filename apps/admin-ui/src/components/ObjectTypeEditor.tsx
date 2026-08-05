@@ -120,6 +120,10 @@ export function ObjectTypeEditor() {
   const [deletionReasonRequiredOverride, setDeletionReasonRequiredOverride] = useState<
     "default" | "true" | "false"
   >("default");
+  // Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - gilt wie
+  // defaultRetentionDays für beide appliesTo-Werte.
+  const [defaultArchiveAfterDays, setDefaultArchiveAfterDays] = useState("");
+  const [archiveEncryptionEnabled, setArchiveEncryptionEnabled] = useState(false);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -158,6 +162,8 @@ export function ObjectTypeEditor() {
     setRequiredSignatureLevel("none");
     setDefaultRetentionDays("");
     setDeletionReasonRequiredOverride("default");
+    setDefaultArchiveAfterDays("");
+    setArchiveEncryptionEnabled(false);
   }
 
   function startEdit(ot: ObjectType) {
@@ -196,6 +202,10 @@ export function ObjectTypeEditor() {
           ? "true"
           : "false"
     );
+    setDefaultArchiveAfterDays(
+      ot.default_archive_after_days === null ? "" : String(ot.default_archive_after_days)
+    );
+    setArchiveEncryptionEnabled(ot.archive_encryption_enabled);
     setError(null);
   }
 
@@ -255,6 +265,10 @@ export function ObjectTypeEditor() {
       deletionReasonRequiredOverride !== "default"
         ? deletionReasonRequiredOverride === "true"
         : null;
+    // Aussonderung (5.6, P7-S3) - gilt wie defaultRetentionDaysValue für
+    // beide appliesTo-Werte.
+    const defaultArchiveAfterDaysValue =
+      defaultArchiveAfterDays.trim() === "" ? null : Number(defaultArchiveAfterDays);
 
     try {
       if (editingId === null) {
@@ -269,6 +283,8 @@ export function ObjectTypeEditor() {
           requiredSignatureLevel: requiredSignatureLevelValue,
           defaultRetentionDays: defaultRetentionDaysValue,
           deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
+          defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
+          archiveEncryptionEnabled,
         });
 
         // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
@@ -302,6 +318,8 @@ export function ObjectTypeEditor() {
           requiredSignatureLevel: requiredSignatureLevelValue,
           defaultRetentionDays: defaultRetentionDaysValue,
           deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
+          defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
+          archiveEncryptionEnabled,
         });
       }
       resetForm();
@@ -441,6 +459,24 @@ export function ObjectTypeEditor() {
                 <option value="true">{t("objectTypes.deletionReasonRequiredOverrideRequired")}</option>
                 <option value="false">{t("objectTypes.deletionReasonRequiredOverrideOptional")}</option>
               </select>
+            </label>
+            <label>
+              {t("objectTypes.defaultArchiveAfterDaysLabel")}
+              <input
+                type="number"
+                min="0"
+                value={defaultArchiveAfterDays}
+                onChange={(e) => setDefaultArchiveAfterDays(e.target.value)}
+                placeholder={t("objectTypes.defaultArchiveAfterDaysPlaceholder")}
+              />
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={archiveEncryptionEnabled}
+                onChange={(e) => setArchiveEncryptionEnabled(e.target.checked)}
+              />
+              {t("objectTypes.archiveEncryptionEnabledLabel")}
             </label>
           </div>
 

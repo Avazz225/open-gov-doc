@@ -263,6 +263,11 @@ export interface ObjectType {
   // null = installationsweiter Standard (RetentionConfig) gilt.
   default_retention_days: number | null;
   deletion_reason_required_override: boolean | null;
+  // Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - gilt wie
+  // default_retention_days für beide appliesTo-Werte. null = kein
+  // Typ-Default (kein automatischer Aussonderungs-Zeitpunkt).
+  default_archive_after_days: number | null;
+  archive_encryption_enabled: boolean;
 }
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -283,6 +288,8 @@ export async function createObjectType(
     requiredSignatureLevel: "ses" | "aes" | "qes" | null;
     defaultRetentionDays: number | null;
     deletionReasonRequiredOverride: boolean | null;
+    defaultArchiveAfterDays: number | null;
+    archiveEncryptionEnabled: boolean;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -299,6 +306,8 @@ export async function createObjectType(
       required_signature_level: params.requiredSignatureLevel,
       default_retention_days: params.defaultRetentionDays,
       deletion_reason_required_override: params.deletionReasonRequiredOverride,
+      default_archive_after_days: params.defaultArchiveAfterDays,
+      archive_encryption_enabled: params.archiveEncryptionEnabled,
     }),
     token
   );
@@ -325,6 +334,8 @@ export async function updateObjectType(
     requiredSignatureLevel: "ses" | "aes" | "qes" | null;
     defaultRetentionDays: number | null;
     deletionReasonRequiredOverride: boolean | null;
+    defaultArchiveAfterDays: number | null;
+    archiveEncryptionEnabled: boolean;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -344,6 +355,8 @@ export async function updateObjectType(
         required_signature_level: params.requiredSignatureLevel,
         default_retention_days: params.defaultRetentionDays,
         deletion_reason_required_override: params.deletionReasonRequiredOverride,
+        default_archive_after_days: params.defaultArchiveAfterDays,
+        archive_encryption_enabled: params.archiveEncryptionEnabled,
       }),
     },
     token
@@ -1146,4 +1159,52 @@ export async function deleteAuditTraceRoleOverride(token: string, role: string):
     { method: "DELETE" },
     token
   );
+}
+
+// Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - reine
+// Status-/Rückhol-Ansicht auf die vom archival-service geführte
+// Transfer-Zustandsmaschine (pending -> locked -> copied -> verified ->
+// released -> dehydrated, + failed).
+export interface ArchivalTransfer {
+  id: string;
+  document_id: string;
+  status: string;
+  archive_format: string | null;
+  encrypted: boolean;
+  storage_object_key: string | null;
+  checksum_sha256: string | null;
+  error_message: string | null;
+  locked_at: string | null;
+  copied_at: string | null;
+  verified_at: string | null;
+  released_at: string | null;
+  dehydrated_at: string | null;
+  rehydrated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listArchivalTransfers(
+  token: string,
+  status?: string
+): Promise<ArchivalTransfer[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await request("archival-service", `archival-transfers${query}`, {}, token);
+  return response.json();
+}
+
+// Rückholung (5.6) - erfordert `archive_retrieval_role` (Default
+// "dms-admin") im X-DMS-Roles-Header, den das Gateway aus dem Access Token
+// setzt, nicht diese Funktion selbst.
+export async function retrieveArchivalTransfer(
+  token: string,
+  transferId: string
+): Promise<ArchivalTransfer> {
+  const response = await request(
+    "archival-service",
+    `archival-transfers/${transferId}/retrieve`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
 }

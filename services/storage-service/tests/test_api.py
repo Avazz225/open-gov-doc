@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from storage_service.backends.local_backend import LocalFilesystemBackend
 from storage_service.main import app
 from storage_service.settings import BackendTargetConfig
 
@@ -36,6 +37,23 @@ def governance_client(client):
 
 def _key() -> str:
     return f"test-{uuid.uuid4().hex[:8]}/file.txt"
+
+
+@pytest.fixture
+def archive_client(client, tmp_path):
+    """Aussonderung (5.6, seit P7-S3): ergänzt nachträglich ein echtes
+    zweites, mit `role="archive"` markiertes Ziel um den vollen API-Pfad zu
+    testen - gleiches Nachträglich-Mutieren-Muster wie `governance_client`
+    oben, da `DMS_TARGETS` global über die gesamte Testsuite fest via
+    conftest.py gesetzt ist (nur ein `local`-Ziel)."""
+    original_backends = app.state.backends
+    original_archive_targets = app.state.archive_targets
+    archive_backend = LocalFilesystemBackend(str(tmp_path / "archive"))
+    app.state.backends = {**original_backends, "archive": archive_backend}
+    app.state.archive_targets = ["archive"]
+    yield client
+    app.state.backends = original_backends
+    app.state.archive_targets = original_archive_targets
 
 
 def test_healthz(client):
@@ -320,3 +338,64 @@ def test_reidentify_resets_existing_copies_to_pending(client):
 
     copies = client.get(f"/objects/{key}/copies").json()
     assert copies[0]["status"] == "pending"
+
+
+# --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
+
+
+def test_upload_archive_copy_returns_503_without_archive_target(client):
+    """Der Standard-Testaufbau (`conftest.py DMS_TARGETS`) hat kein Ziel mit
+    `role="archive"` - der Endpunkt muss das klar melden statt still
+    nichts zu tun."""
+    response = client.put(f"/objects/{_key()}/archive-copy", content=b"archiv-inhalt")
+    assert response.status_code == 503
+
+
+def test_archive_copy_upload_download_verify_roundtrip(archive_client):
+    key = _key()
+    content = b"archivierter Inhalt"
+
+    upload = archive_client.put(
+        f"/objects/{key}/archive-copy", content=content, headers={"content-type": "application/pdf"}
+    )
+    assert upload.status_code == 201
+    assert upload.json()["checksum_sha256"] == hashlib.sha256(content).hexdigest()
+
+    download = archive_client.get(f"/objects/{key}/archive-copy")
+    assert download.status_code == 200
+    assert download.content == content
+
+    verify = archive_client.get(f"/objects/{key}/archive-copy/verify")
+    assert verify.status_code == 200
+    entries = verify.json()
+    assert len(entries) == 1
+    assert entries[0]["backend_id"] == "archive"
+    assert entries[0]["ok"] is True
+
+
+def test_live_copies_dehydration_preserves_archive_copy(archive_client):
+    """Kernverhalten des "Dehydrierens": die Live-Kopie verschwindet, die
+    Archiv-Kopie bleibt unberührt erhalten und weiterhin abrufbar."""
+    key = _key()
+    content = b"payload"
+
+    archive_client.put(f"/objects/{key}", content=content)
+    archive_client.put(f"/objects/{key}/archive-copy", content=content)
+
+    dehydrate = archive_client.delete(f"/objects/{key}/live-copies")
+    assert dehydrate.status_code == 204
+
+    live_download = archive_client.get(f"/objects/{key}")
+    assert live_download.status_code == 404
+
+    archive_download = archive_client.get(f"/objects/{key}/archive-copy")
+    assert archive_download.status_code == 200
+    assert archive_download.content == content
+
+    copies = {c["backend_id"] for c in archive_client.get(f"/objects/{key}/copies").json()}
+    assert copies == {"archive"}
+
+
+def test_live_copies_dehydration_returns_404_for_unknown_key(archive_client):
+    response = archive_client.delete(f"/objects/{_key()}/live-copies")
+    assert response.status_code == 404

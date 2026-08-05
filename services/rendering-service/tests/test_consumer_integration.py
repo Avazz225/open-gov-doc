@@ -60,17 +60,19 @@ def test_document_created_event_triggers_thumbnail_rendering(client):
         filename=f"foto-{uuid.uuid4().hex[:8]}.png", content=_real_png(), content_type="image/png"
     )
 
+    # Seit P7-S3 (5.6) matcht PdfArchiveRenderer zusaetzlich Rasterbilder -
+    # ein .png erzeugt seither zwei Renditionen (thumbnail + pdf_archive),
+    # daher auf beide warten statt auf die erste beliebige.
     def _ready() -> bool:
         body = client.get("/renditions", params={"document_id": document_id}).json()
-        return any(r["status"] == "ready" for r in body)
+        return len(body) >= 2 and all(r["status"] == "ready" for r in body)
 
     found = asyncio.run(_poll_until(_ready))
     assert found, "Rendering-Event wurde nicht rechtzeitig verarbeitet"
 
     renditions = client.get("/renditions", params={"document_id": document_id}).json()
-    assert len(renditions) == 1
-    assert renditions[0]["rendition_type"] == "thumbnail"
-    assert renditions[0]["version_number"] == 1
+    assert {r["rendition_type"] for r in renditions} == {"thumbnail", "pdf_archive"}
+    assert all(r["version_number"] == 1 for r in renditions)
 
 
 def test_document_version_created_event_triggers_rendering_for_new_version(client):

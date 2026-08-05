@@ -13,7 +13,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from storage_service import identity_guard, replication, repository, retention_guard
-from storage_service.backends import ObjectNotFoundError, S3Backend, build_backends, resolve_targets
+from storage_service.backends import (
+    ObjectNotFoundError,
+    S3Backend,
+    build_backends,
+    resolve_archive_targets,
+    resolve_targets,
+)
 from storage_service.models import Base
 from storage_service.schemas import (
     FixityEntry,
@@ -119,6 +125,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = make_session_factory(engine)
 
     app.state.targets = resolve_targets(settings)
+    # Aussonderung (5.6, seit P7-S3) - Archiv-Ziele sind NICHT Teil von
+    # `app.state.targets` (reguläre Upload-Replikation), sondern nur über die
+    # neuen `.../archive-copy`-Endpunkte erreichbar.
+    app.state.archive_targets = resolve_archive_targets(settings)
     app.state.backends = build_backends(settings)
     app.state.target_configs = settings.targets
     # Ziele mit aktivem Governance-Mode (5.1/5.2a) - bekommen beim Schreiben
@@ -169,6 +179,148 @@ def healthz() -> dict:
     }
 
 
+@app.get("/objects/{key:path}/copies", response_model=list[ObjectCopyOut])
+async def list_object_copies(
+    key: str, session: AsyncSession = Depends(get_session)
+) -> list[ObjectCopyOut]:
+    return await repository.list_copies(session, key)
+
+
+@app.put("/objects/{key:path}/archive-copy", response_model=ObjectMetadataOut, status_code=201)
+async def upload_archive_copy(
+    key: str, request: Request, session: AsyncSession = Depends(get_session)
+) -> ObjectMetadataOut:
+    """Aussonderung (5.6, seit P7-S3): schreibt NUR auf die konfigurierten
+    Archiv-Ziele (`role="archive"`), nicht auf die reguläre Live-Ziel-Menge -
+    aufgerufen von `archival-service`, nicht Teil des normalen Upload-Pfads.
+    `key` ist bewusst unabhängig vom Live-Objektschlüssel des Dokuments (die
+    Archivkopie ist inhaltlich ein anderes Objekt, i. d. R. die PDF/A-
+    Rendition statt des Originals)."""
+    if not app.state.archive_targets:
+        raise HTTPException(
+            status_code=503,
+            detail="Kein Archiv-Ziel konfiguriert (BackendTargetConfig.role=archive)",
+        )
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="Leerer Request-Body")
+
+    checksum = hashlib.sha256(data).hexdigest()
+    metadata = await repository.upsert_metadata(
+        session,
+        object_key=key,
+        backend=app.state.archive_targets[0],
+        checksum_sha256=checksum,
+        size_bytes=len(data),
+        content_type=request.headers.get("content-type"),
+    )
+    try:
+        await replication.write_to_targets(
+            session,
+            backends=app.state.backends,
+            targets=app.state.archive_targets,
+            key=key,
+            data=data,
+            checksum=checksum,
+        )
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=502, detail=f"Schreiben auf Archiv-Ziel fehlgeschlagen: {exc}"
+        ) from exc
+
+    await session.commit()
+    return metadata
+
+
+@app.get("/objects/{key:path}/archive-copy")
+async def download_archive_copy(key: str, session: AsyncSession = Depends(get_session)) -> Response:
+    """Rückholung (5.6, seit P7-S3) - liest ausschließlich von Archiv-
+    Zielen, unabhängig vom Live-Zustand desselben Objektschlüssels."""
+    try:
+        metadata = await repository.get_metadata(session, key)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
+
+    try:
+        data = await replication.read_with_fallback(
+            session, backends=app.state.backends, targets=app.state.archive_targets, key=key
+        )
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Objekt in keinem konfigurierten Archiv-Ziel (mehr) vorhanden"
+        ) from exc
+
+    return Response(content=data, media_type=metadata.content_type or "application/octet-stream")
+
+
+@app.get("/objects/{key:path}/archive-copy/verify", response_model=list[FixityEntry])
+async def verify_archive_copy(
+    key: str, session: AsyncSession = Depends(get_session)
+) -> list[FixityEntry]:
+    """Fixity-Check der Archiv-Kopie (5.6, seit P7-S3) - wiederverwendet
+    dieselbe Verifikationslogik wie `GET /object-verify/{key}/all`, gefiltert
+    auf Archiv-Ziele."""
+    try:
+        metadata = await repository.get_metadata(session, key)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
+
+    results = await replication.verify_all_copies(
+        session, backends=app.state.backends, key=key, expected_checksum=metadata.checksum_sha256
+    )
+    await session.commit()
+    return [r for r in results if r["backend_id"] in app.state.archive_targets]
+
+
+@app.delete("/objects/{key:path}/live-copies", status_code=204)
+async def delete_live_copies(
+    key: str,
+    bypass_governance: bool = False,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """ "Dehydrieren" (5.6, seit P7-S3): entfernt die Kopie(n) auf den
+    regulären Live-Zielen, NICHT auf Archiv-Zielen - das unterscheidet dies
+    bewusst von `DELETE /objects/{key}`, das wirklich alle Kopien entfernt.
+    Gleiches Governance-Lock-Gate wie die reguläre Löschung."""
+    try:
+        await repository.get_metadata(session, key)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
+
+    locked_targets = await retention_guard.find_locked_targets(
+        session, key, targets=app.state.target_configs
+    )
+    if locked_targets:
+        if not bypass_governance:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Objekt ist unter Governance-Mode-Aufbewahrung gesperrt "
+                    f"(Ziele: {locked_targets}) - Dehydrieren erfordert "
+                    "?bypass_governance=true mit passender Rolle"
+                ),
+            )
+        if not retention_guard.has_governance_bypass_role(x_dms_roles, settings):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Rolle {settings.governance_bypass_role!r} erforderlich, um eine "
+                    f"Governance-Mode-Sperre zu umgehen (Ziele: {locked_targets})"
+                ),
+            )
+
+    await replication.delete_from_targets(
+        session,
+        backends=app.state.backends,
+        targets=app.state.targets,
+        key=key,
+        bypass_governance=bool(locked_targets) and bypass_governance,
+    )
+    await session.commit()
+
+
 @app.put("/objects/{key:path}", response_model=ObjectMetadataOut, status_code=201)
 async def upload_object(
     key: str,
@@ -213,13 +365,6 @@ async def upload_object(
 
     await session.commit()
     return metadata
-
-
-@app.get("/objects/{key:path}/copies", response_model=list[ObjectCopyOut])
-async def list_object_copies(
-    key: str, session: AsyncSession = Depends(get_session)
-) -> list[ObjectCopyOut]:
-    return await repository.list_copies(session, key)
 
 
 @app.get("/objects/{key:path}")
