@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -8,24 +9,27 @@ from datetime import UTC, datetime
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
-from dms_eventbus_client import NatsEventBusClient
+from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from reporting_service import reports, repository
+from reporting_service import forensic, reports, repository
 from reporting_service.clients import AuditClient, NotificationClient, StorageClient, WorkflowClient
 from reporting_service.consumer import start_consuming
 from reporting_service.models import Base
 from reporting_service.schemas import (
     DocumentVolumeEntry,
+    ForensicTraceEntry,
+    ForensicTraceResult,
     GroupBy,
     OpenWorkflowTaskEntry,
     ReportFormat,
     ReportScheduleCreate,
     ReportScheduleOut,
     StorageUsageEntry,
+    TraceCategory,
     UserActivityEntry,
 )
 from reporting_service.settings import Settings
@@ -158,6 +162,92 @@ def _parse_dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+async def publish_event(
+    event_type: str, subject: str | None, payload: dict, actor: str | None = None
+) -> None:
+    event = Event(
+        event_type=event_type,
+        service_name=settings.service_name,
+        subject=subject,
+        payload=payload,
+        actor=actor,
+    )
+    await app.state.event_bus.publish(event_type, event.to_bytes())
+
+
+async def _fetch_forensic_trace(
+    *,
+    actor: str | None,
+    subject: str | None,
+    event_type: str | None,
+    category: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    limit: int,
+) -> tuple[list[ForensicTraceEntry], list[str]]:
+    """Forensik-Trace (5.4b, seit P7-S2c): ruft die rohe Ereignisliste ueber
+    die P7-S2-Filter-API von audit-service ab, kategorisiert client-seitig
+    (audit-service kennt selbst keine "category") und berechnet Anomalien
+    ausschliesslich ueber die tatsaechlich zurueckgegebenen Treffer."""
+    raw_events = await app.state.audit_client.list_events(
+        actor=actor, subject=subject, event_type=event_type, since=since, until=until, limit=limit
+    )
+    entries: list[ForensicTraceEntry] = []
+    for raw in raw_events:
+        entry_category = forensic.categorize_event_type(raw["event_type"])
+        if category is not None and entry_category != category:
+            continue
+        entries.append(
+            ForensicTraceEntry(
+                id=raw["id"],
+                event_type=raw["event_type"],
+                category=entry_category,
+                occurred_at=datetime.fromisoformat(raw["occurred_at"]),
+                service_name=raw["service_name"],
+                subject=raw.get("subject"),
+                actor=raw.get("actor"),
+                payload=raw.get("payload") or {},
+            )
+        )
+    anomalies = forensic.detect_download_anomalies(
+        [
+            {"event_type": e.event_type, "actor": e.actor, "occurred_at": e.occurred_at}
+            for e in entries
+        ],
+        threshold_count=settings.anomaly_download_threshold_count,
+        threshold_minutes=settings.anomaly_download_threshold_minutes,
+    )
+    return entries, anomalies
+
+
+async def _record_trace_query(
+    *,
+    queried_by: str,
+    actor: str | None,
+    subject: str | None,
+    event_type: str | None,
+    category: str | None,
+    since: datetime | None,
+    until: datetime | None,
+) -> None:
+    """Selbst-Auditierung des Trace-Zugriffs (5.4b, wörtliche Konzeptvorgabe:
+    "selbst wieder als Zugriff auditiert") - unconditional, kein Abschalten
+    möglich, da dies selbst der Kontrollmechanismus ist."""
+    await publish_event(
+        "reporting.forensic_trace.queried",
+        subject,
+        {
+            "actor": actor,
+            "subject": subject,
+            "event_type": event_type,
+            "category": category,
+            "since": since.isoformat() if since else None,
+            "until": until.isoformat() if until else None,
+        },
+        actor=queried_by,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -172,6 +262,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.audit_client = AuditClient(settings.audit_service_base_url)
     app.state.storage_client = StorageClient(settings.storage_service_base_url)
     app.state.notification_client = NotificationClient(settings.notification_service_base_url)
+
+    # Eigener Producer-Bus (5.4b, seit P7-S2c) - fuer die Selbst-Auditierung
+    # des Forensik-Trace-Zugriffs ("wer hat wann welchen Trace abgefragt").
+    # Gleiches Dual-Bus-Muster wie document-service: consumer_bus (unten)
+    # bleibt fuer document.> bestehen, event_bus ist neu und eigenstaendig.
+    event_bus = NatsEventBusClient(settings.nats_url, stream="reporting")
+    await event_bus.connect()
+    app.state.event_bus = event_bus
 
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
@@ -199,6 +297,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if registration:
         await registration.stop()
     await consumer_bus.close()
+    await event_bus.close()
     await app.state.workflow_client.close()
     await app.state.audit_client.close()
     await app.state.storage_client.close()
@@ -349,3 +448,93 @@ async def download_report_run(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     data = await app.state.storage_client.download(run.storage_object_key)
     return Response(content=data, media_type=run.content_type)
+
+
+@app.get("/forensic-trace", response_model=ForensicTraceResult)
+async def get_forensic_trace(
+    queried_by: str,
+    actor: str | None = None,
+    subject: str | None = None,
+    event_type: str | None = None,
+    category: TraceCategory | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int = 5000,
+) -> ForensicTraceResult:
+    entries, anomalies = await _fetch_forensic_trace(
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        category=category,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+    await _record_trace_query(
+        queried_by=queried_by,
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        category=category,
+        since=since,
+        until=until,
+    )
+    return ForensicTraceResult(entries=entries, anomalies=anomalies)
+
+
+@app.get("/forensic-trace/export")
+async def export_forensic_trace(
+    format: ReportFormat,
+    queried_by: str,
+    actor: str | None = None,
+    subject: str | None = None,
+    event_type: str | None = None,
+    category: TraceCategory | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int = 5000,
+) -> Response:
+    entries, _ = await _fetch_forensic_trace(
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        category=category,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+    await _record_trace_query(
+        queried_by=queried_by,
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        category=category,
+        since=since,
+        until=until,
+    )
+    headers = [
+        "occurred_at",
+        "event_type",
+        "category",
+        "service_name",
+        "subject",
+        "actor",
+        "payload",
+    ]
+    rows = [
+        [
+            e.occurred_at.isoformat(),
+            e.event_type,
+            e.category,
+            e.service_name,
+            e.subject or "",
+            e.actor or "",
+            json.dumps(e.payload, ensure_ascii=False),
+        ]
+        for e in entries
+    ]
+    if format == "csv":
+        return Response(content=reports.to_csv(headers, rows), media_type="text/csv")
+    return Response(
+        content=reports.to_pdf("forensic_trace", headers, rows), media_type="application/pdf"
+    )

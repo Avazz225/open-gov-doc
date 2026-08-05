@@ -280,6 +280,106 @@ async def test_update_upload_config_persists_values(session):
     assert fetched.allowed_content_types == ["application/pdf", "text/plain"]
 
 
+# --- Forensik-Trace: Audit-Tiefe (5.4b, seit P7-S2c) -----------------------
+
+
+async def test_get_audit_trace_config_defaults_to_logging_everything(session):
+    config = await repository.get_audit_trace_config(session)
+
+    assert config.log_viewed is True
+    assert config.log_downloaded is True
+
+
+async def test_update_audit_trace_config_persists_values(session):
+    updated = await repository.update_audit_trace_config(
+        session, log_viewed=False, log_downloaded=True
+    )
+    await session.commit()
+
+    assert updated.log_viewed is False
+    assert updated.log_downloaded is True
+
+    fetched = await repository.get_audit_trace_config(session)
+    assert fetched.log_viewed is False
+
+
+async def test_upsert_role_override_creates_and_updates(session):
+    created = await repository.upsert_role_override(
+        session, "auditor", log_viewed=True, log_downloaded=None
+    )
+    await session.commit()
+    assert created.role == "auditor"
+    assert created.log_viewed is True
+    assert created.log_downloaded is None
+
+    updated = await repository.upsert_role_override(
+        session, "auditor", log_viewed=False, log_downloaded=False
+    )
+    await session.commit()
+    assert updated.log_viewed is False
+    assert updated.log_downloaded is False
+
+    overrides = await repository.list_role_overrides(session)
+    assert [o.role for o in overrides] == ["auditor"]
+
+
+async def test_delete_role_override_removes_row(session):
+    await repository.upsert_role_override(
+        session, "service-account", log_viewed=False, log_downloaded=False
+    )
+    await session.commit()
+
+    await repository.delete_role_override(session, "service-account")
+    await session.commit()
+
+    assert await repository.list_role_overrides(session) == []
+
+
+async def test_delete_role_override_raises_not_found_for_unknown_role(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.delete_role_override(session, "does-not-exist")
+
+
+async def test_resolve_should_log_falls_back_to_base_without_matching_role(session):
+    config = await repository.get_audit_trace_config(session)
+
+    assert repository.resolve_should_log("viewed", {"user"}, config, []) is True
+
+
+async def test_resolve_should_log_applies_single_role_override(session):
+    config = await repository.update_audit_trace_config(
+        session, log_viewed=True, log_downloaded=True
+    )
+    override = await repository.upsert_role_override(
+        session, "quiet-role", log_viewed=False, log_downloaded=None
+    )
+
+    assert repository.resolve_should_log("viewed", {"quiet-role"}, config, [override]) is False
+    # log_downloaded has no override on this role -> falls back to base (True).
+    assert repository.resolve_should_log("downloaded", {"quiet-role"}, config, [override]) is True
+
+
+async def test_resolve_should_log_logging_wins_on_role_conflict(session):
+    """Sicherheits-first-Konfliktregel: hat der Aufrufer mehrere Rollen mit
+    widersprüchlichen Overrides, gewinnt "protokollieren" - eine Rolle, die
+    mehr Protokollierung verlangt, darf nicht durch eine andere Rolle
+    desselben Nutzers stillschweigend unterlaufen werden."""
+    config = await repository.update_audit_trace_config(
+        session, log_viewed=False, log_downloaded=False
+    )
+    quiet = await repository.upsert_role_override(
+        session, "quiet-role", log_viewed=False, log_downloaded=None
+    )
+    loud = await repository.upsert_role_override(
+        session, "loud-role", log_viewed=True, log_downloaded=None
+    )
+
+    resolved = repository.resolve_should_log(
+        "viewed", {"quiet-role", "loud-role"}, config, [quiet, loud]
+    )
+    assert resolved is True
+
+
 # --- Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) ---------
 
 

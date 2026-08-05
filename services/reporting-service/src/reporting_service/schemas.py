@@ -66,3 +66,26 @@ class ReportRunOut(BaseModel):
     generated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+TraceCategory = Literal["view", "download", "change", "delete"]
+
+
+class ForensicTraceEntry(BaseModel):
+    """Ein Ereignis im Forensik-Trace (5.4b, seit P7-S2c) - Rohform aus
+    audit-service, angereichert um die aus dem `event_type`-Suffix
+    abgeleitete `category` (siehe `forensic.categorize_event_type`)."""
+
+    id: int
+    event_type: str
+    category: TraceCategory
+    occurred_at: datetime
+    service_name: str
+    subject: str | None
+    actor: str | None
+    payload: dict
+
+
+class ForensicTraceResult(BaseModel):
+    entries: list[ForensicTraceEntry]
+    anomalies: list[str]

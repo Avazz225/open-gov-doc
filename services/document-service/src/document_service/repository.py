@@ -5,6 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service.models import (
+    AuditTraceConfig,
+    AuditTraceRoleOverride,
     DeletionRegisterEntry,
     Document,
     DocumentLock,
@@ -18,6 +20,7 @@ from document_service.models import (
 _UPLOAD_CONFIG_ID = 1
 _RETENTION_CONFIG_ID = 1
 _TRASH_CONFIG_ID = 1
+_AUDIT_TRACE_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -658,3 +661,84 @@ async def list_expired_trash(session: AsyncSession, *, restore_period_days: int)
     )
     candidates = list(result.scalars().all())
     return [d for d in candidates if not await has_active_hold(session, d.id)]
+
+
+# --- Forensik-Trace: Audit-Tiefe (5.4b, seit P7-S2c) -----------------------
+
+
+async def get_audit_trace_config(session: AsyncSession) -> AuditTraceConfig:
+    """Liest die (einzige) Basis-Protokollierungstiefe-Zeile, legt sie mit
+    Defaults an, falls sie noch nie gespeichert wurde (gleiches Muster wie
+    `get_upload_config`) - Default laut Nutzervorgabe: beide Kategorien an."""
+    config = await session.get(AuditTraceConfig, _AUDIT_TRACE_CONFIG_ID)
+    if config is None:
+        config = AuditTraceConfig(
+            id=_AUDIT_TRACE_CONFIG_ID,
+            log_viewed=True,
+            log_downloaded=True,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_audit_trace_config(
+    session: AsyncSession, *, log_viewed: bool, log_downloaded: bool
+) -> AuditTraceConfig:
+    config = await get_audit_trace_config(session)
+    config.log_viewed = log_viewed
+    config.log_downloaded = log_downloaded
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def list_role_overrides(session: AsyncSession) -> list[AuditTraceRoleOverride]:
+    result = await session.execute(
+        select(AuditTraceRoleOverride).order_by(AuditTraceRoleOverride.role)
+    )
+    return list(result.scalars().all())
+
+
+async def upsert_role_override(
+    session: AsyncSession, role: str, *, log_viewed: bool | None, log_downloaded: bool | None
+) -> AuditTraceRoleOverride:
+    override = await session.get(AuditTraceRoleOverride, role)
+    if override is None:
+        override = AuditTraceRoleOverride(role=role, updated_at=datetime.now(UTC))
+        session.add(override)
+    override.log_viewed = log_viewed
+    override.log_downloaded = log_downloaded
+    override.updated_at = datetime.now(UTC)
+    await session.flush()
+    return override
+
+
+async def delete_role_override(session: AsyncSession, role: str) -> None:
+    override = await session.get(AuditTraceRoleOverride, role)
+    if override is None:
+        raise NotFoundError(f"Kein Rollen-Override für {role!r}")
+    await session.delete(override)
+    await session.flush()
+
+
+def resolve_should_log(
+    category: str,
+    roles: set[str],
+    config: AuditTraceConfig,
+    overrides: list[AuditTraceRoleOverride],
+) -> bool:
+    """Löst auf, ob eine `document.viewed`/`document.downloaded`-Aktion für
+    einen Aufrufer mit `roles` protokolliert werden soll. `category` ist
+    `"viewed"` oder `"downloaded"`. Konfliktregel bei mehreren Rollen mit
+    widersprüchlichen Overrides: protokollieren gewinnt (Sicherheits-first) -
+    siehe Architekturentscheidung in PROGRESS.md/docs."""
+    field = "log_viewed" if category == "viewed" else "log_downloaded"
+    matching = [o for o in overrides if o.role in roles and getattr(o, field) is not None]
+    if not matching:
+        return bool(getattr(config, field))
+    values = [getattr(o, field) for o in matching]
+    if any(values):
+        return True
+    return False

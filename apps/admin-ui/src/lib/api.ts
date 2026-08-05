@@ -997,3 +997,153 @@ export async function deleteReportSchedule(token: string, scheduleId: string): P
     token
   );
 }
+
+// Forensik-Trace (5.4b, seit P7-S2c) - objektbezogene Nachverfolgung
+// ("alle Aktionen von Nutzer X"/"alle Nutzer auf Dokument Y") auf Basis der
+// P7-S2-Audit-Filter-API, zweite Funktion des reporting-service (5.4).
+export type ForensicTraceCategory = "view" | "download" | "change" | "delete";
+
+export interface ForensicTraceEntry {
+  id: number;
+  event_type: string;
+  category: ForensicTraceCategory;
+  occurred_at: string;
+  service_name: string;
+  subject: string | null;
+  actor: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface ForensicTraceResult {
+  entries: ForensicTraceEntry[];
+  anomalies: string[];
+}
+
+export interface ForensicTraceFilters {
+  actor?: string;
+  subject?: string;
+  eventType?: string;
+  category?: ForensicTraceCategory;
+  since?: string;
+  until?: string;
+}
+
+function forensicTraceQuery(
+  queriedBy: string,
+  filters: ForensicTraceFilters
+): URLSearchParams {
+  const query = new URLSearchParams({ queried_by: queriedBy });
+  if (filters.actor) query.set("actor", filters.actor);
+  if (filters.subject) query.set("subject", filters.subject);
+  if (filters.eventType) query.set("event_type", filters.eventType);
+  if (filters.category) query.set("category", filters.category);
+  if (filters.since) query.set("since", filters.since);
+  if (filters.until) query.set("until", filters.until);
+  return query;
+}
+
+export async function getForensicTrace(
+  token: string,
+  queriedBy: string,
+  filters: ForensicTraceFilters = {}
+): Promise<ForensicTraceResult> {
+  const query = forensicTraceQuery(queriedBy, filters);
+  const response = await request(
+    "reporting-service",
+    `forensic-trace?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function exportForensicTrace(
+  token: string,
+  queriedBy: string,
+  format: ReportFormat,
+  filters: ForensicTraceFilters = {}
+): Promise<Blob> {
+  const query = forensicTraceQuery(queriedBy, filters);
+  query.set("format", format);
+  const response = await request(
+    "reporting-service",
+    `forensic-trace/export?${query.toString()}`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
+// Audit-Tiefe fuer den Forensik-Trace (5.4b, seit P7-S2c) - Basis-
+// Konfiguration + Rollen-Overrides in document-service, steuert ob
+// document.viewed/document.downloaded ueberhaupt publiziert werden.
+export interface AuditTraceConfig {
+  log_viewed: boolean;
+  log_downloaded: boolean;
+  updated_at: string;
+}
+
+export interface AuditTraceRoleOverride {
+  role: string;
+  log_viewed: boolean | null;
+  log_downloaded: boolean | null;
+  updated_at: string;
+}
+
+export async function getAuditTraceConfig(token: string): Promise<AuditTraceConfig> {
+  const response = await request("document-service", "audit-trace-config", {}, token);
+  return response.json();
+}
+
+export async function updateAuditTraceConfig(
+  token: string,
+  logViewed: boolean,
+  logDownloaded: boolean
+): Promise<AuditTraceConfig> {
+  const response = await request(
+    "document-service",
+    "audit-trace-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ log_viewed: logViewed, log_downloaded: logDownloaded }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function listAuditTraceRoleOverrides(
+  token: string
+): Promise<AuditTraceRoleOverride[]> {
+  const response = await request("document-service", "audit-trace-role-overrides", {}, token);
+  return response.json();
+}
+
+export async function putAuditTraceRoleOverride(
+  token: string,
+  role: string,
+  logViewed: boolean | null,
+  logDownloaded: boolean | null
+): Promise<AuditTraceRoleOverride> {
+  const response = await request(
+    "document-service",
+    `audit-trace-role-overrides/${encodeURIComponent(role)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ log_viewed: logViewed, log_downloaded: logDownloaded }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteAuditTraceRoleOverride(token: string, role: string): Promise<void> {
+  await request(
+    "document-service",
+    `audit-trace-role-overrides/${encodeURIComponent(role)}`,
+    { method: "DELETE" },
+    token
+  );
+}

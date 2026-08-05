@@ -114,6 +114,30 @@ class UploadConfigOut(UploadConfigIn):
     updated_at: datetime
 
 
+class AuditTraceConfigIn(BaseModel):
+    log_viewed: bool = True
+    log_downloaded: bool = True
+
+
+class AuditTraceConfigOut(AuditTraceConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class AuditTraceRoleOverrideIn(BaseModel):
+    # None = Basis gilt für diese Kategorie, sonst expliziter Override.
+    log_viewed: bool | None = None
+    log_downloaded: bool | None = None
+
+
+class AuditTraceRoleOverrideOut(AuditTraceRoleOverrideIn):
+    model_config = {"from_attributes": True}
+
+    role: str
+    updated_at: datetime
+
+
 class RetentionUpdate(BaseModel):
     """Aufbewahrung/Zwangslöschung setzen (5.2/5.2a, seit P7-S1). `reason`
     wird serverseitig gegen `RetentionConfig`/`ObjectType`-Override geprüft

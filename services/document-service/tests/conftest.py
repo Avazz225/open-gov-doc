@@ -28,7 +28,8 @@ async def _clean_tables():
                 "TRUNCATE document.document_lock, document.document_version, "
                 "document.legal_hold, document.deletion_register_entry, "
                 "document.document, document.upload_config, document.retention_config, "
-                "document.trash_config CASCADE"
+                "document.trash_config, document.audit_trace_config, "
+                "document.audit_trace_role_override CASCADE"
             )
         )
     await eng.dispose()

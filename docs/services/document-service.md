@@ -2,8 +2,8 @@
 
 **Verantwortung:** Dokumente als Kernentität (Konzept 2.1) — CRUD, dauerhafte Versionierung (2.1a, kein Überschreiben/Verwerfen), Bearbeitungssperre bei externer Bearbeitung inkl. Force-Unlock und Konfliktkopie (4.2). Hält selbst nie Dateiinhalte — jeder Byte-Zugriff läuft über die HTTP-API des Storage Service (3.6).
 
-**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)
-**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`)
+**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)/5.4b (Audit-Tiefe für Forensik-Trace, seit P7-S2c)
+**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`)
 
 ## API
 
@@ -11,7 +11,7 @@
 |---|---|---|
 | `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` als JSON-String, optional `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` für Bearbeitungskopien, siehe unten) — erzeugt Dokument + Version 1. Seit P5-S1: `422` bei einem Virenfund, `503` wenn der Virus-Scan Service nicht erreichbar ist (siehe unten). Seit **P5e-S2**: bei konfiguriertem Kennzeichengenerator wird `attributes["Kennzeichen"]` serverseitig vergeben, ein vom Client mitgesendeter Wert für diesen Schlüssel wird verworfen (siehe "Kennzeichengenerator" unten) |
 | `GET` | `/documents?folder_id=...` | Nicht gelöschte Dokumente eines Ordners (seit P4-S2, Grundlage der User-UI-Navigation) — unbekannter `folder_id` liefert `[]`, kein 404 |
-| `GET` | `/documents/{id}` | Metadaten |
+| `GET` | `/documents/{id}` | Metadaten. Seit **P7-S2c**: publiziert bei Erfolg optional `document.viewed` (Forensik-Trace, 5.4b) — abhängig von der Audit-Tiefe-Konfiguration, siehe unten |
 | `PATCH` | `/documents/{id}` | Metadaten nachträglich ändern (`title`/`attributes`, beide optional — seit P4-S4, Grundlage des Metadaten-Panels der User-UI) — bei gesetztem `object_type_id` erneute Validierung gegen den Object-Type Service, sonst 400. Seit **P5e-S2**: eine Änderung an `attributes["Kennzeichen"]` wird mit `403` abgelehnt, außer der `X-DMS-Roles`-Header enthält `dms-admin` (siehe unten) |
 | `DELETE` | `/documents/{id}?deleted_by=...` | Weiche Löschung (`deleted_at` gesetzt, Metadaten bleiben) — ungegateter Weg, unverändert seit P7-S1; kein Frontend ruft ihn aktuell auf (siehe `POST .../trash` unten) |
 | `POST` | `/documents/{id}/trash` | Löschantrag-Workflow für reguläre Nutzer (`deleted_by`, 5.2, seit P7-S1c) — optional per Vier-Augen-Prinzip gegated (Aktionstyp `document.delete`, unabhängig von `document.force_delete`); Response `TrashResult{status: "trashed"\|"pending_approval", document, approval_request_id}`, exaktes Muster wie `force_release_lock` |
@@ -27,10 +27,10 @@
 | `POST` | `/documents/cascade-trash` | Interner Service-zu-Service-Aufruf von `folder-service` (`folder_ids`, `via_folder_id`, `deleted_by`, 5.2, seit P7-S1b) — soft-löscht alle aktiven Dokumente in den angegebenen Ordnern, wenn deren Ordner in den Papierkorb verschoben wird |
 | `POST` | `/documents/cascade-restore` | Gegenstück zu `cascade-trash` (`via_folder_id`) — stellt nur die dadurch kaskadiert gelöschten Dokumente wieder her |
 | `POST` | `/documents/count-active` | Interner Aufruf von `folder-service` (`folder_ids`) — Nicht-leer-Prüfung vor einer Ordner-Zwangslöschung |
-| `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion |
+| `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (5.4b), siehe unten |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
 | `GET` | `/documents/{id}/versions/{n}` | Metadaten einer konkreten Version |
-| `GET` | `/documents/{id}/versions/{n}/content` | Inhalt einer konkreten Version |
+| `GET` | `/documents/{id}/versions/{n}/content` | Inhalt einer konkreten Version. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (`version_number` im Payload) |
 | `POST` | `/documents/{id}/versions` | Check-in (multipart: `file`, `expected_base_version_number`, `created_by`, optional `comment`) — siehe Konflikterkennung unten. Gleiches Virenscan-Gating wie beim Anlegen |
 | `GET` | `/documents/{id}/lock` | Aktuelle Sperre oder `null` |
 | `POST` | `/documents/{id}/lock` | Sperre setzen (`locked_by`, `session_id`, optional `timeout_seconds`) — 409 bei Fremdsperre |
@@ -38,6 +38,9 @@
 | `POST` | `/documents/{id}/lock/force-release` | Administrativer Force-Unlock (`released_by`, optional `reason`) |
 | `GET` | `/upload-config` | Format-Whitelist lesen (`allowed_content_types`, seit P5d-S1) |
 | `PUT` | `/upload-config` | Format-Whitelist ändern - wirkt sofort auf den nächsten Upload |
+| `GET`/`PUT` | `/audit-trace-config` | Basis-Protokollierungstiefe für den Forensik-Trace (`log_viewed`/`log_downloaded`, Default beide `true`, 5.4b, seit P7-S2c) — siehe "Audit-Tiefe" unten |
+| `GET` | `/audit-trace-role-overrides` | Alle Rollen-Overrides der Audit-Tiefe (5.4b, seit P7-S2c) |
+| `PUT`/`DELETE` | `/audit-trace-role-overrides/{role}` | Override für eine Rolle anlegen/ändern bzw. entfernen (5.4b, seit P7-S2c) — `404` bei `DELETE` einer unbekannten Rolle |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -141,6 +144,17 @@ Drittes, unabhängiges Aufbewahrungs-Szenario neben der regulären Frist und der
 - **Consumer-Handler** (`consumer.py`, `_handle_delete_approved`) führt nach `permission.approval.approved` mit `action_type == "document.delete"` die zuvor zurückgestellte `repository.delete_document` aus — Copy-Paste-Muster des bestehenden `document.force_unlock`-Zweigs.
 - **Genehmigungs-Inbox**: neue, minimale `ApprovalsPane` in der User-UI (nicht Admin-UI, da sich reguläre Nutzer hier gegenseitig genehmigen) — siehe `docs/services/user-ui.md`. Bewusst nur für `document.delete`/`folder.delete` gefiltert, keine generische Alle-Aktionstypen-Inbox (das ist als späterer "Administrativer Papierkorb" vorgemerkt, siehe `PROGRESS.md`).
 
+## Audit-Tiefe für den Forensik-Trace (5.4b, seit P7-S2c)
+
+Grundlage für die objektbezogene Nachverfolgung (Forensik-Trace, siehe `docs/services/reporting-service.md`) ist u. a. lückenlose Sichtbarkeit lesender Zugriffe — bis P7-S2c publizierte dieser Service dafür kein einziges Event (`GET /documents/{id}` und die Content-Downloads liefen komplett unauditiert). Seit dieser Session konfigurierbar protokollierbar:
+
+- **Zwei neue Event-Typen**: `document.viewed` (nur beim Einzelabruf `GET /documents/{id}`, nicht beim Listing) und `document.downloaded` (beide Content-Endpunkte) — beide fallen unter das bereits bestehende `document.>`-Wildcard, `audit-service` brauchte dafür keine Code-Änderung.
+- **Basis-Konfiguration + Rollen-Overrides**: `AuditTraceConfig` (Singleton, `log_viewed`/`log_downloaded`, **Default beide `true`** — maximale Nachvollziehbarkeit als Werkseinstellung) legt fest, ob überhaupt protokolliert wird. `AuditTraceRoleOverride` (PK `role`, freier Text ohne Existenzprüfung gegen `permission-service`/Keycloak — gleiche bestehende Lücke wie bei jedem anderen Rollennamen in diesem System) erlaubt pro Rolle einen Override je Kategorie (`null` = Basis gilt).
+- **Auflösung** (`repository.resolve_should_log`, aufgerufen über `main._should_log_document_access`): die Rollen des Aufrufers kommen aus dem bereits vom Gateway injizierten `X-DMS-Roles`-Header (gleiches Muster wie `_has_kennzeichen_admin_role` beim Kennzeichengenerator). **Konfliktregel bei mehreren zugewiesenen Rollen mit widersprüchlichen Overrides**: hat irgendeine Rolle einen expliziten `true`-Override, wird protokolliert ("protokollieren" gewinnt) — nur wenn *alle* mit einem Override versehenen Rollen `false` sagen, wird nicht protokolliert, sonst gilt die Basis. Sicherheits-first: eine Rolle, die mehr Protokollierung verlangt, kann nicht durch eine andere Rolle desselben Nutzers stillschweigend unterlaufen werden.
+- **Der Akteur** (`actor` im publizierten Event) kommt aus dem gateway-injizierten `X-DMS-Username`-Header — fehlt er (z. B. direkter, nicht über das Gateway laufender Aufruf), bleibt `actor` `null`, das Event wird aber trotzdem publiziert (Basis-Default bleibt maßgeblich).
+- **Lokal statt zentral konfiguriert**, bewusst wie jede andere Config in diesem System (`UploadConfig`, `RetentionConfig`, ...) — vermeidet einen synchronen Cross-Service-Konfig-Abruf auf dem heißen Lesepfad (jeder Dokumenten-Klick/Download).
+- **Admin-UI**: `/audit-trace-settings/` (`AuditTraceSettings`, siehe `docs/services/admin-ui.md`).
+
 ## Events
 
 **Publiziert** (Stream `document`, `ensure_stream=True`):
@@ -155,6 +169,8 @@ Drittes, unabhängiges Aufbewahrungs-Szenario neben der regulären Frist und der
 | `document.deletion.reminder` | `{retention_until, full_deletion}` (5.2a, seit P7-S1, konsumiert von `notification-service`) |
 | `document.force_deleted` | `{trigger: "forced_deletion", reason, triggered_by}` (5.2a, seit P7-S1) |
 | `document.trash_purged` | `{trigger: "trash_expiry"}` (5.2a, seit P7-S1) |
+| `document.viewed` | `{}` (Forensik-Trace, 5.4b, seit P7-S2c) — nur bei `GET /documents/{id}` (Einzelabruf), **nicht** bei der Listing-Route `GET /documents?folder_id=`, um nicht pro Ordnerinhalt Dutzende Events zu erzeugen. Abhängig von der Audit-Tiefe-Konfiguration, siehe unten |
+| `document.downloaded` | `{version_number}` (Forensik-Trace, 5.4b, seit P7-S2c) — beide Content-Endpunkte. Abhängig von der Audit-Tiefe-Konfiguration, siehe unten |
 
 **Konsumiert** (seit P6-S4, erster Konsument dieses Service überhaupt): `permission.approval.approved` — relevant für `action_type == "document.force_unlock"` (Force-Unlock, seit P6-S4) und seit P7-S1 zusätzlich `action_type == "document.force_delete"` (führt die zuvor aufgeschobene Zwangslöschung aus, siehe "Zwangslöschung & Löschregister" oben); alle anderen Aktionstypen werden ignoriert.
 
@@ -173,6 +189,7 @@ Noch keine — folgt in Phase 11.
 ## Offene Punkte
 
 - **Kennzeichen-Anzeige im Frontend** (vor dem Dateinamen, global oder je Objekttyp überschreibbar) noch nicht angebunden — folgt mit P5e-S3.
+- **`document.viewed`/`document.downloaded` decken nur Dokumente ab** (5.4b, seit P7-S2c) — Ordner-Lesezugriffe (`folder-service`) bleiben weiterhin unauditiert, war nicht Teil des Konzepttexts ("gelesene ... Dokumente"). Ebenso keine Existenzprüfung der Rollennamen in `AuditTraceRoleOverride` gegen `permission-service`/Keycloak — gleiche bestehende Lücke wie bei jedem anderen Rollennamen im System.
 - **Keine Rollenzuweisungs-API/-UI**: `dms-admin` muss aktuell direkt über die Keycloak Admin Console zugewiesen werden (siehe oben, "Kennzeichengenerator").
 - Vier-Augen-Prinzip für Force-Unlock seit P6-S4 optional verfügbar (siehe oben) — Default bleibt ungated, ebenso kein Rückkanal, der `permission-service` einen fehlgeschlagenen (z. B. inzwischen anderweitig aufgelösten) Vollzug meldet.
 - **Ordner haben seit P7-S1b ihr eigenes, paralleles Aufbewahrungs-/Legal-Hold-/Zwangslöschungs-Muster** (`folder-service`, eigene Tabellen statt Wiederverwendung dieser hier) — dieser Service ist über die neuen `cascade-trash`/`cascade-restore`/`count-active`-Endpunkte (s. o.) synchron eingebunden, wenn ein Ordner in den Papierkorb verschoben/wiederhergestellt bzw. auf Nicht-Leerheit vor Zwangslöschung geprüft wird. Siehe `docs/services/folder-service.md`.

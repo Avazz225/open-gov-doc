@@ -33,6 +33,10 @@ from document_service.folder_client import FolderClient
 from document_service.models import Base, Document
 from document_service.object_type_client import ObjectTypeClient
 from document_service.schemas import (
+    AuditTraceConfigIn,
+    AuditTraceConfigOut,
+    AuditTraceRoleOverrideIn,
+    AuditTraceRoleOverrideOut,
     CascadeRestoreRequest,
     CascadeResult,
     CascadeTrashRequest,
@@ -87,6 +91,19 @@ KENNZEICHEN_ATTRIBUTE = "Kennzeichen"
 def _has_kennzeichen_admin_role(x_dms_roles: str) -> bool:
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     return settings.kennzeichen_admin_role in roles
+
+
+async def _should_log_document_access(
+    session: AsyncSession, category: str, x_dms_roles: str
+) -> bool:
+    """Forensik-Trace (5.4b, seit P7-S2c): entscheidet, ob eine `document.
+    viewed`/`document.downloaded`-Aktion für den aktuellen Aufrufer
+    protokolliert werden soll - Basis-Konfiguration + Rollen-Overrides aus
+    dem gateway-injizierten `X-DMS-Roles`-Header, siehe repository.resolve_should_log."""
+    config = await repository.get_audit_trace_config(session)
+    overrides = await repository.list_role_overrides(session)
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    return repository.resolve_should_log(category, roles, config, overrides)
 
 
 def _object_key(document_id: str, checksum_sha256: str) -> str:
@@ -454,6 +471,57 @@ async def put_upload_config(
     return config
 
 
+@app.get("/audit-trace-config", response_model=AuditTraceConfigOut)
+async def get_audit_trace_config(
+    session: AsyncSession = Depends(get_session),
+) -> AuditTraceConfigOut:
+    config = await repository.get_audit_trace_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/audit-trace-config", response_model=AuditTraceConfigOut)
+async def put_audit_trace_config(
+    body: AuditTraceConfigIn, session: AsyncSession = Depends(get_session)
+) -> AuditTraceConfigOut:
+    config = await repository.update_audit_trace_config(
+        session, log_viewed=body.log_viewed, log_downloaded=body.log_downloaded
+    )
+    await session.commit()
+    return config
+
+
+@app.get("/audit-trace-role-overrides", response_model=list[AuditTraceRoleOverrideOut])
+async def list_audit_trace_role_overrides(
+    session: AsyncSession = Depends(get_session),
+) -> list[AuditTraceRoleOverrideOut]:
+    overrides = await repository.list_role_overrides(session)
+    await session.commit()
+    return overrides
+
+
+@app.put("/audit-trace-role-overrides/{role}", response_model=AuditTraceRoleOverrideOut)
+async def put_audit_trace_role_override(
+    role: str, body: AuditTraceRoleOverrideIn, session: AsyncSession = Depends(get_session)
+) -> AuditTraceRoleOverrideOut:
+    override = await repository.upsert_role_override(
+        session, role, log_viewed=body.log_viewed, log_downloaded=body.log_downloaded
+    )
+    await session.commit()
+    return override
+
+
+@app.delete("/audit-trace-role-overrides/{role}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_audit_trace_role_override(
+    role: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    try:
+        await repository.delete_role_override(session, role)
+        await session.commit()
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def create_document(
     file: UploadFile = File(...),
@@ -651,12 +719,19 @@ async def count_active(
 
 @app.get("/documents/{document_id}", response_model=DocumentOut)
 async def get_document(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_roles: str = Header(default=""),
+    x_dms_username: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     try:
-        return await repository.get_document(session, document_id)
+        document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if await _should_log_document_access(session, "viewed", x_dms_roles):
+        await publish_event("document.viewed", document_id, {}, actor=x_dms_username or None)
+    await session.commit()
+    return document
 
 
 @app.patch("/documents/{document_id}", response_model=DocumentOut)
@@ -950,7 +1025,10 @@ async def get_version(
 
 @app.get("/documents/{document_id}/content")
 async def download_current_content(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_roles: str = Header(default=""),
+    x_dms_username: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
     try:
         version = await repository.get_current_version(session, document_id)
@@ -962,12 +1040,24 @@ async def download_current_content(
         raise HTTPException(
             status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
         ) from exc
+    if await _should_log_document_access(session, "downloaded", x_dms_roles):
+        await publish_event(
+            "document.downloaded",
+            document_id,
+            {"version_number": version.version_number},
+            actor=x_dms_username or None,
+        )
+    await session.commit()
     return Response(content=data, media_type=version.content_type or "application/octet-stream")
 
 
 @app.get("/documents/{document_id}/versions/{version_number}/content")
 async def download_version_content(
-    document_id: str, version_number: int, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    version_number: int,
+    x_dms_roles: str = Header(default=""),
+    x_dms_username: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
     try:
         version = await repository.get_version(session, document_id, version_number)
@@ -979,6 +1069,14 @@ async def download_version_content(
         raise HTTPException(
             status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
         ) from exc
+    if await _should_log_document_access(session, "downloaded", x_dms_roles):
+        await publish_event(
+            "document.downloaded",
+            document_id,
+            {"version_number": version_number},
+            actor=x_dms_username or None,
+        )
+    await session.commit()
     return Response(content=data, media_type=version.content_type or "application/octet-stream")
 
 

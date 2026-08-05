@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from dms_db_base import make_session_factory
+from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
 from reporting_service import repository
 from reporting_service.main import _run_due_schedules, app
@@ -144,6 +145,145 @@ async def test_download_report_run_proxies_storage_client(client):
     assert response.status_code == 200
     assert response.content == b"csv,content"
     app.state.storage_client.download.assert_called_once_with("reports/x/y.csv")
+
+
+def test_forensic_trace_requires_queried_by(client):
+    response = client.get("/forensic-trace")
+    assert response.status_code == 422
+
+
+def test_forensic_trace_returns_categorized_entries(client):
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "document.downloaded",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {"version_number": 1},
+        },
+        {
+            "id": 2,
+            "event_type": "document.created",
+            "occurred_at": "2026-08-01T09:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        },
+    ]
+
+    response = client.get("/forensic-trace", params={"queried_by": "security-officer"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["entries"]) == 2
+    categories = {e["event_type"]: e["category"] for e in body["entries"]}
+    assert categories["document.downloaded"] == "download"
+    assert categories["document.created"] == "change"
+
+
+def test_forensic_trace_filters_by_category(client):
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "document.downloaded",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        },
+        {
+            "id": 2,
+            "event_type": "document.created",
+            "occurred_at": "2026-08-01T09:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        },
+    ]
+
+    response = client.get(
+        "/forensic-trace", params={"queried_by": "security-officer", "category": "download"}
+    )
+
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert len(entries) == 1
+    assert entries[0]["event_type"] == "document.downloaded"
+
+
+def test_forensic_trace_reports_download_anomaly(client):
+    from reporting_service.main import settings as reporting_settings
+
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": i,
+            "event_type": "document.downloaded",
+            "occurred_at": f"2026-08-01T10:00:0{i}+00:00",
+            "service_name": "document-service",
+            "subject": f"doc-{i}",
+            "actor": "alice",
+            "payload": {},
+        }
+        for i in range(1, 3)
+    ]
+    # Wenige echte Events reichen fuer den Test - Schwellwert temporaer senken.
+    reporting_settings.anomaly_download_threshold_count = 2
+    try:
+        response = client.get("/forensic-trace", params={"queried_by": "security-officer"})
+    finally:
+        reporting_settings.anomaly_download_threshold_count = 20
+
+    assert response.status_code == 200
+    assert response.json()["anomalies"] != []
+    assert "alice" in response.json()["anomalies"][0]
+
+
+def test_forensic_trace_export_csv(client):
+    app.state.audit_client.list_events.return_value = []
+
+    response = client.get(
+        "/forensic-trace/export", params={"format": "csv", "queried_by": "security-officer"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+
+
+def test_forensic_trace_export_pdf(client):
+    app.state.audit_client.list_events.return_value = []
+
+    response = client.get(
+        "/forensic-trace/export", params={"format": "pdf", "queried_by": "security-officer"}
+    )
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+
+
+def test_forensic_trace_query_is_self_audited(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+    app.state.audit_client.list_events.return_value = []
+
+    client.get(
+        "/forensic-trace",
+        params={"queried_by": "security-officer", "actor": "alice", "subject": "doc-1"},
+    )
+
+    trace_events = [e for e in published if e.event_type == "reporting.forensic_trace.queried"]
+    assert len(trace_events) == 1
+    assert trace_events[0].actor == "security-officer"
+    assert trace_events[0].payload["actor"] == "alice"
+    assert trace_events[0].payload["subject"] == "doc-1"
 
 
 @pytest.fixture

@@ -211,3 +211,38 @@ class TrashConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     restore_period_days: Mapped[int] = mapped_column(Integer, default=30)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuditTraceConfig(Base):
+    """Basis-Protokollierungstiefe für den Forensik-Trace (5.4b, seit
+    P7-S2c) - gleiches Einzelzeilen-Muster wie ``UploadConfig``. Steuert, ob
+    `GET /documents/{id}` (`document.viewed`) bzw. die Content-Download-
+    Endpunkte (`document.downloaded`) überhaupt ein Event publizieren.
+    Per-Rolle über ``AuditTraceRoleOverride`` überschreibbar. Default laut
+    Nutzervorgabe: beide an (maximale Nachvollziehbarkeit als Werkseinstellung)."""
+
+    __tablename__ = "audit_trace_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    log_viewed: Mapped[bool] = mapped_column(Boolean, default=True)
+    log_downloaded: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuditTraceRoleOverride(Base):
+    """Rollenspezifischer Override der Basis-Protokollierungstiefe (5.4b,
+    seit P7-S2c) - ``role`` ist freier Text (keine Existenzprüfung gegen
+    permission-service/Keycloak, gleiche bestehende Lücke wie überall sonst
+    im System). ``None`` je Feld bedeutet "Basis gilt", ein gesetzter Wert
+    überschreibt die Basis für Aufrufer mit dieser Rolle. Bei mehreren
+    zugewiesenen Rollen mit widersprüchlichen Overrides gewinnt "protokollieren"
+    (siehe main._resolve_should_log) - Sicherheits-first, eine Rolle, die mehr
+    Protokollierung verlangt, kann nicht durch eine andere Rolle desselben
+    Nutzers stillschweigend unterlaufen werden."""
+
+    __tablename__ = "audit_trace_role_override"
+
+    role: Mapped[str] = mapped_column(String(128), primary_key=True)
+    log_viewed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    log_downloaded: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

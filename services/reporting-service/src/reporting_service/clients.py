@@ -40,6 +40,8 @@ class AuditClient:
         self,
         *,
         actor: str | None = None,
+        subject: str | None = None,
+        event_type: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 5000,
@@ -47,6 +49,10 @@ class AuditClient:
         params: dict[str, str | int] = {"limit": limit}
         if actor is not None:
             params["actor"] = actor
+        if subject is not None:
+            params["subject"] = subject
+        if event_type is not None:
+            params["event_type"] = event_type
         if since is not None:
             params["since"] = since.isoformat()
         if until is not None:

@@ -52,4 +52,5 @@ class Settings(BaseServiceSettings):
         "signature.>",
         "favorite.>",
         "folder.>",
+        "reporting.>",
     ]

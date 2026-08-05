@@ -452,6 +452,154 @@ def test_put_upload_config_persists(client):
     assert get_response.json()["allowed_content_types"] == ["application/pdf", "text/plain"]
 
 
+def test_audit_trace_config_defaults_to_logging_everything(client):
+    response = client.get("/audit-trace-config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["log_viewed"] is True
+    assert body["log_downloaded"] is True
+
+
+def test_put_audit_trace_config_persists(client):
+    put_response = client.put(
+        "/audit-trace-config", json={"log_viewed": False, "log_downloaded": True}
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["log_viewed"] is False
+
+    get_response = client.get("/audit-trace-config")
+    assert get_response.json()["log_viewed"] is False
+    assert get_response.json()["log_downloaded"] is True
+
+
+def test_audit_trace_role_override_create_list_delete(client):
+    create_response = client.put(
+        "/audit-trace-role-overrides/auditor",
+        json={"log_viewed": True, "log_downloaded": None},
+    )
+    assert create_response.status_code == 200
+    assert create_response.json()["role"] == "auditor"
+
+    list_response = client.get("/audit-trace-role-overrides")
+    assert [o["role"] for o in list_response.json()] == ["auditor"]
+
+    delete_response = client.delete("/audit-trace-role-overrides/auditor")
+    assert delete_response.status_code == 204
+    assert client.get("/audit-trace-role-overrides").json() == []
+
+
+def test_delete_unknown_audit_trace_role_override_returns_404(client):
+    response = client.delete("/audit-trace-role-overrides/does-not-exist")
+    assert response.status_code == 404
+
+
+def _published_event_types(published: list[Event]) -> list[str]:
+    return [e.event_type for e in published]
+
+
+def test_get_document_publishes_viewed_event_by_default(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    body = upload(client).json()
+    published.clear()  # nur den Read-Zugriff selbst betrachten
+
+    response = client.get(f"/documents/{body['id']}", headers={"X-DMS-Username": "bob"})
+    assert response.status_code == 200
+
+    viewed = [e for e in published if e.event_type == "document.viewed"]
+    assert len(viewed) == 1
+    assert viewed[0].subject == body["id"]
+    assert viewed[0].actor == "bob"
+
+
+def test_download_content_publishes_downloaded_event_by_default(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    body = upload(client).json()
+    published.clear()
+
+    response = client.get(f"/documents/{body['id']}/content", headers={"X-DMS-Username": "bob"})
+    assert response.status_code == 200
+
+    downloaded = [e for e in published if e.event_type == "document.downloaded"]
+    assert len(downloaded) == 1
+    assert downloaded[0].actor == "bob"
+
+
+def test_get_document_does_not_publish_when_base_config_disables_viewed(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    client.put("/audit-trace-config", json={"log_viewed": False, "log_downloaded": True})
+    body = upload(client).json()
+    published.clear()
+
+    client.get(f"/documents/{body['id']}")
+
+    assert "document.viewed" not in _published_event_types(published)
+
+
+def test_role_override_can_disable_viewed_for_specific_role(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    client.put(
+        "/audit-trace-role-overrides/quiet-role",
+        json={"log_viewed": False, "log_downloaded": None},
+    )
+    body = upload(client).json()
+    published.clear()
+
+    client.get(f"/documents/{body['id']}", headers={"X-DMS-Roles": "quiet-role"})
+
+    assert "document.viewed" not in _published_event_types(published)
+
+
+def test_role_override_conflict_logging_wins(client, monkeypatch):
+    """Sicherheits-first-Konfliktregel: Basis aus, aber eine der zugewiesenen
+    Rollen verlangt explizit Protokollierung -> Event wird trotzdem publiziert."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    client.put("/audit-trace-config", json={"log_viewed": False, "log_downloaded": False})
+    client.put(
+        "/audit-trace-role-overrides/quiet-role",
+        json={"log_viewed": False, "log_downloaded": None},
+    )
+    client.put(
+        "/audit-trace-role-overrides/loud-role",
+        json={"log_viewed": True, "log_downloaded": None},
+    )
+    body = upload(client).json()
+    published.clear()
+
+    client.get(f"/documents/{body['id']}", headers={"X-DMS-Roles": "quiet-role,loud-role"})
+
+    assert "document.viewed" in _published_event_types(published)
+
+
 def test_delete_document(client):
     body = upload(client).json()
     document_id = body["id"]

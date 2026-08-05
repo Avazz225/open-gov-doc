@@ -26,3 +26,11 @@ class Settings(BaseServiceSettings):
     # _sla_poll_loop. Bewusst niedrig genug fuer Tests/Smoke-Verifikation,
     # per Env in Produktion hochstellbar.
     report_poll_interval_seconds: int = 3600
+
+    # Forensik-Trace Anomalie-Hinweis (5.4b, seit P7-S2c) - einziger
+    # Regeltyp laut Konzept ("zunaechst ausschliesslich ueber konfigurierbare
+    # statische Schwellwerte"): mehr als `anomaly_download_threshold_count`
+    # Downloads durch denselben Akteur innerhalb von
+    # `anomaly_download_threshold_minutes` Minuten.
+    anomaly_download_threshold_count: int = 20
+    anomaly_download_threshold_minutes: int = 5

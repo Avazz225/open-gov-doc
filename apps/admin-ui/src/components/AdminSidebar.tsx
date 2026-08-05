@@ -62,7 +62,11 @@ const GROUPS: NavGroup[] = [
   {
     id: "security",
     labelKey: "nav.groupSecurity",
-    items: [{ href: "/superuser/", labelKey: "nav.superuser" }],
+    items: [
+      { href: "/superuser/", labelKey: "nav.superuser" },
+      { href: "/forensic-trace/", labelKey: "nav.forensicTrace" },
+      { href: "/audit-trace-settings/", labelKey: "nav.auditTraceSettings" },
+    ],
   },
   {
     id: "reports",
