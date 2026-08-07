@@ -765,6 +765,7 @@ export interface ApprovalRequest {
   id: string;
   action_type: string;
   initiated_by: string;
+  payload: Record<string, unknown>;
   status: string;
   approved_by: string | null;
   created_at: string;
@@ -1330,4 +1331,103 @@ export async function listQueryEvents(
   if (filters.until) query.set("until", filters.until);
   const response = await request("query-service", `query/events?${query.toString()}`, {}, token);
   return response.json();
+}
+
+// Manipulationsmodus (6.1, seit P8-S2/P8-S2b) - die drei bekannten
+// Aktionstypen sind hartkodierter Spiegel von query_service/manipulation.py's
+// Katalog (kein generisches Backend-Schema dafuer, siehe docs/services/
+// query-service.md).
+export const MANIPULATION_ACTION_TYPES = [
+  "document.attribute_reset",
+  "permission.role_assignment.delete",
+  "object_type.update",
+] as const;
+
+export type ManipulationActionType = (typeof MANIPULATION_ACTION_TYPES)[number];
+
+export interface ManipulationModeStatus {
+  active: boolean;
+  activated_by: string | null;
+  expires_at: string | null;
+}
+
+export async function getManipulationModeStatus(token: string): Promise<ManipulationModeStatus> {
+  const response = await request("query-service", "manipulation-mode/status", {}, token);
+  return response.json();
+}
+
+export async function activateManipulationMode(
+  token: string,
+  durationMinutes: number
+): Promise<ManipulationModeStatus> {
+  const response = await request(
+    "query-service",
+    "manipulation-mode/activate",
+    jsonInit({ duration_minutes: durationMinutes }),
+    token
+  );
+  return response.json();
+}
+
+export async function deactivateManipulationMode(token: string): Promise<ManipulationModeStatus> {
+  const response = await request(
+    "query-service",
+    "manipulation-mode/deactivate",
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export interface DryRunResult {
+  action_type: string;
+  preview: string;
+  is_critical: boolean;
+  dry_run_token: string;
+}
+
+export async function dryRunManipulation(
+  token: string,
+  actionType: ManipulationActionType,
+  params: Record<string, unknown>
+): Promise<DryRunResult> {
+  const response = await request(
+    "query-service",
+    "manipulate/dry-run",
+    jsonInit({ action_type: actionType, params }),
+    token
+  );
+  return response.json();
+}
+
+export interface ManipulateExecuteResult {
+  status: "executed" | "pending_approval";
+  result: Record<string, unknown> | null;
+  approval_request_id: string | null;
+}
+
+export async function executeManipulation(
+  token: string,
+  dryRunToken: string
+): Promise<ManipulateExecuteResult> {
+  const response = await request(
+    "query-service",
+    "manipulate/execute",
+    jsonInit({ dry_run_token: dryRunToken }),
+    token
+  );
+  return response.json();
+}
+
+export async function listPendingManipulationApprovals(token: string): Promise<ApprovalRequest[]> {
+  const response = await request(
+    "permission-service",
+    "approval-requests?status=pending",
+    {},
+    token
+  );
+  const all: ApprovalRequest[] = await response.json();
+  return all.filter((approvalRequest) =>
+    (MANIPULATION_ACTION_TYPES as readonly string[]).includes(approvalRequest.action_type)
+  );
 }

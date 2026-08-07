@@ -1,6 +1,6 @@
 # query-service
 
-**Verantwortung:** Zentrale Query- & Trace-Konsole (6.1) — eine föderierte, RBAC-gefilterte Lesezugriffsschicht auf die Read-Modelle anderer Services (P8-S1), seit P8-S2 zusätzlich die Manipulationsseite: Schutzschalter, Dry-Run, optionales/zwingendes Vier-Augen-Prinzip für einen kuratierten Katalog struktureller Manipulations-Aktionen. Das CLI-Tool (6.2) folgt in P8-S3, die Admin-UI-Anbindung der Manipulationsseite in P8-S2b.
+**Verantwortung:** Zentrale Query- & Trace-Konsole (6.1) — eine föderierte, RBAC-gefilterte Lesezugriffsschicht auf die Read-Modelle anderer Services (P8-S1), seit P8-S2 zusätzlich die Manipulationsseite: Schutzschalter, Dry-Run, optionales/zwingendes Vier-Augen-Prinzip für einen kuratierten Katalog struktureller Manipulations-Aktionen, seit **P8-S2b** vollständig an die Admin-UI angebunden. Das CLI-Tool (6.2) folgt in P8-S3.
 
 **Konzept-Referenz:** 6.1
 **Eigenes Postgres-Schema:** `query` (seit P8-S2, Tabelle `manipulation_mode_status` — Schutzschalter-Zustand, genuin eigener Zustand, keine Duplikation fremder Read-Modelle). Die Leseseite (P8-S1) bleibt zustandslos.
@@ -84,5 +84,6 @@ Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`)
 - **RBAC-Filterung deckt nur Dokument-/Ordner-Ereignisse ab** (s. o.) — alle anderen Kategorien sind für Nicht-Superuser fail-closed unsichtbar, kein generischer Mechanismus für beliebige Domänen.
 - **`reporting-service`s Forensik-Trace hat dieselbe RBAC-Lücke, wurde aber in dieser Session nicht retrofittet** — zu großer Nebenschauplatz, ggf. spätere Session (`reporting-service` könnte künftig dieselbe `filtering.py`-Logik übernehmen).
 - **Kein Freitext-SQL-Manipulationstext** — nur der kuratierte, hartkodierte Aktionskatalog (s. o.); ein echtes filterbasiertes SQL-Manipulationssystem bräuchte neue Bulk-Endpunkte in mehreren Owner-Services, kein Teil dieser Session.
-- **Admin-UI-Anbindung der Manipulationsseite folgt in P8-S2b** (eigene, direkt eingeschobene Session) — Schutzschalter-Umschalter, Dry-Run-Vorschau, Bestätigen-Fluss, Genehmigungs-Anzeige. Das CLI-Tool (6.2) folgt in P8-S3.
+- **Admin-UI-Anbindung der Manipulationsseite seit P8-S2b erledigt** — `ManipulationSection` in `apps/admin-ui`, siehe `docs/services/admin-ui.md` "Query-Konsole". Das CLI-Tool (6.2) folgt in P8-S3.
+- **Kein Ablehnen-Button in der Admin-UI** (seit P8-S2b) — nur Genehmigen ist angebunden; Ablehnen ist bereits generisch über `permission-service`s `POST /approval-requests/{id}/reject` möglich, aber ohne UI-Anbindung in dieser Session.
 - **`object_type.update` nur für zwei Felder** (`naming_constraints`/`conditions`) — bewusste Whitelist, keine beliebige `ObjectType`-Feld-Manipulation über diese Aktion.
