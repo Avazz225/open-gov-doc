@@ -5,7 +5,7 @@ description = "Workspace-Root des DMS-Monorepos (kein eigenständiges Paket)"
 requires-python = ">=3.12"
 
 [tool.uv.workspace]
-members = ["libs/*", "services/*"]
+members = ["libs/*", "services/*", "tools/*"]
 
 [tool.uv]
 package = false
