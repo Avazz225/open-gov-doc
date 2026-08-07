@@ -1208,3 +1208,82 @@ export async function retrieveArchivalTransfer(
   );
   return response.json();
 }
+
+// XDOMEA-Aussonderung für Umlaufmappen (5.6, seit P7-S3b) - erzeugt eine
+// Aussonderungsnachricht (XDOMEA 4.0.0) + packt die referenzierten
+// Dokumentinhalte in ein ZIP, kein "dehydrated"-Status (Case besitzt keinen
+// eigenen Live-Inhalt) und keine Rückschreib-Rückholung, nur ein Download.
+export interface CaseArchivalTransfer {
+  id: string;
+  case_id: string;
+  status: string;
+  encrypted: boolean;
+  storage_object_key: string | null;
+  checksum_sha256: string | null;
+  error_message: string | null;
+  locked_at: string | null;
+  packaged_at: string | null;
+  verified_at: string | null;
+  released_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listCaseArchivalTransfers(
+  token: string,
+  status?: string
+): Promise<CaseArchivalTransfer[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await request(
+    "archival-service",
+    `case-archival-transfers${query}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function downloadCaseArchivalPackage(
+  token: string,
+  transferId: string
+): Promise<Blob> {
+  const response = await request(
+    "archival-service",
+    `case-archival-transfers/${transferId}/package`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
+export interface CaseArchivalConfig {
+  default_archive_after_days_closed: number | null;
+  archive_encryption_enabled: boolean;
+  updated_at: string;
+}
+
+export async function getCaseArchivalConfig(token: string): Promise<CaseArchivalConfig> {
+  const response = await request("case-service", "case-archival-config", {}, token);
+  return response.json();
+}
+
+export async function updateCaseArchivalConfig(
+  token: string,
+  defaultArchiveAfterDaysClosed: number | null,
+  archiveEncryptionEnabled: boolean
+): Promise<CaseArchivalConfig> {
+  const response = await request(
+    "case-service",
+    "case-archival-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        default_archive_after_days_closed: defaultArchiveAfterDaysClosed,
+        archive_encryption_enabled: archiveEncryptionEnabled,
+      }),
+    },
+    token
+  );
+  return response.json();
+}

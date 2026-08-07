@@ -18,6 +18,9 @@ from case_service.document_client import DocumentClient
 from case_service.models import Base
 from case_service.object_type_client import ObjectTypeClient
 from case_service.schemas import (
+    CaseArchivalConfigIn,
+    CaseArchivalConfigOut,
+    CaseArchiveStatusOut,
     CaseCreate,
     CaseDocumentAdd,
     CaseDocumentReferenceOut,
@@ -42,6 +45,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # IdentifierPreparer) muss dieser rohe SQL-String selbst quoten.
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS "case"'))
         await conn.run_sync(Base.metadata.create_all)
+        # Aussonderung (5.6, seit P7-S3b) - Ad-hoc-Migration wie ueberall in
+        # diesem System (kein Alembic), "case" muss weiterhin gequotet werden.
+        await conn.execute(
+            text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS archive_after TIMESTAMPTZ')
+        )
+        await conn.execute(
+            text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -190,6 +201,17 @@ async def list_cases(
     return await repository.list_cases(session, status=status, object_type_id=object_type_id)
 
 
+@app.get("/cases/due-for-archival", response_model=list[CaseOut])
+async def list_cases_due_for_archival(
+    session: AsyncSession = Depends(get_session),
+) -> list[CaseOut]:
+    """Interner Aufruf von `archival-service` (5.6, seit P7-S3b) - vor
+    `/cases/{case_id}` registriert, damit `"due-for-archival"` nicht als
+    `{case_id}` interpretiert wird (gleiche Route-Reihenfolge-Regel wie
+    `/documents/deleted` in document-service)."""
+    return await repository.list_due_for_archival(session)
+
+
 @app.get("/cases/{case_id}", response_model=CaseOut)
 async def get_case(case_id: str, session: AsyncSession = Depends(get_session)) -> CaseOut:
     try:
@@ -266,3 +288,67 @@ async def list_case_documents(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return [await _resolve_reference(session, case, reference) for reference in references]
+
+
+@app.post("/cases/{case_id}/archive-request", response_model=CaseOut)
+async def request_case_archive(
+    case_id: str, session: AsyncSession = Depends(get_session)
+) -> CaseOut:
+    """Manueller Aussonderungs-Trigger (5.6, seit P7-S3b) - `409`, wenn die
+    Umlaufmappe noch nicht abgeschlossen ist."""
+    try:
+        case = await repository.request_archive(session, case_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.CaseNotClosedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return case
+
+
+@app.get("/cases/{case_id}/archive-status", response_model=CaseArchiveStatusOut)
+async def get_case_archive_status(
+    case_id: str, session: AsyncSession = Depends(get_session)
+) -> CaseArchiveStatusOut:
+    try:
+        case = await repository.get_case(session, case_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return CaseArchiveStatusOut(
+        case_id=case.id, archive_after=case.archive_after, archived_at=case.archived_at
+    )
+
+
+@app.put("/cases/{case_id}/archived", response_model=CaseOut)
+async def mark_case_archived(case_id: str, session: AsyncSession = Depends(get_session)) -> CaseOut:
+    """Interner Rueckruf von `archival-service`, sobald das XDOMEA-Paket
+    verifiziert ist (5.6, seit P7-S3b)."""
+    try:
+        case = await repository.mark_archived(session, case_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "case.archived", subject=case_id, payload={}, actor="system:archival-service"
+    )
+    return case
+
+
+@app.get("/case-archival-config", response_model=CaseArchivalConfigOut)
+async def get_case_archival_config(
+    session: AsyncSession = Depends(get_session),
+) -> CaseArchivalConfigOut:
+    return await repository.get_archival_config(session)
+
+
+@app.put("/case-archival-config", response_model=CaseArchivalConfigOut)
+async def update_case_archival_config(
+    payload: CaseArchivalConfigIn, session: AsyncSession = Depends(get_session)
+) -> CaseArchivalConfigOut:
+    config = await repository.update_archival_config(
+        session,
+        default_archive_after_days_closed=payload.default_archive_after_days_closed,
+        archive_encryption_enabled=payload.archive_encryption_enabled,
+    )
+    await session.commit()
+    return config

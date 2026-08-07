@@ -38,3 +38,31 @@ class ArchivalTransfer(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CaseArchivalTransfer(Base):
+    """Resumable Zustandsmaschine fuer die XDOMEA-Aussonderung einer
+    geschlossenen Umlaufmappe (5.6, seit P7-S3b): `pending -> locked ->
+    packaged -> verified -> released` (+ `failed`) - kein `dehydrated`-Status
+    wie bei `ArchivalTransfer`, da ein Case keinen eigenen Live-Inhalt
+    besitzt, der entfernt werden koennte (nur Referenzen auf Dokumente mit
+    eigenem, unabhaengigem Lebenszyklus). Gleiches Poll-Loop-Idiom wie
+    `ArchivalTransfer` oben, siehe docs/services/archival-service.md."""
+
+    __tablename__ = "case_archival_transfer"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    encrypted: Mapped[bool] = mapped_column(Boolean, default=False)
+    storage_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    packaged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

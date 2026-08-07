@@ -24,6 +24,13 @@ class DocumentClient:
         response.raise_for_status()
         return response.json()
 
+    async def download_version_content(self, document_id: str, version_number: int) -> bytes:
+        response = await self._client.get(
+            f"/documents/{document_id}/versions/{version_number}/content"
+        )
+        response.raise_for_status()
+        return response.content
+
     async def has_active_hold(self, document_id: str) -> bool:
         response = await self._client.get(f"/documents/{document_id}/has-active-hold")
         response.raise_for_status()
@@ -125,6 +132,44 @@ class ObjectTypeClient:
 
     async def get_object_type(self, object_type_id: int) -> dict:
         response = await self._client.get(f"/object-types/{object_type_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
+class CaseClient:
+    """Duenner HTTP-Client gegen case-service (5.6, seit P7-S3b) - fuer die
+    XDOMEA-Aussonderung von Umlaufmappen. case-service bleibt alleinige
+    Autoritaet fuer Case-Lebenszyklusfelder, gleiches Prinzip wie
+    `DocumentClient` gegenueber document-service."""
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+
+    async def list_due_for_archival(self) -> list[dict]:
+        response = await self._client.get("/cases/due-for-archival")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_case(self, case_id: str) -> dict:
+        response = await self._client.get(f"/cases/{case_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def list_document_references(self, case_id: str) -> list[dict]:
+        response = await self._client.get(f"/cases/{case_id}/documents")
+        response.raise_for_status()
+        return response.json()
+
+    async def mark_archived(self, case_id: str) -> dict:
+        response = await self._client.put(f"/cases/{case_id}/archived")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_archival_config(self) -> dict:
+        response = await self._client.get("/case-archival-config")
         response.raise_for_status()
         return response.json()
 

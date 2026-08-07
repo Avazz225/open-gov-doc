@@ -3,6 +3,7 @@ import uuid
 
 import httpx
 import pytest
+from case_service import repository
 from case_service.main import app
 from fastapi.testclient import TestClient
 
@@ -194,3 +195,77 @@ def test_remove_unknown_reference_returns_404(client, process_definition_id):
         json={"removed_by": "bob"},
     )
     assert response.status_code == 404
+
+
+def test_list_cases_due_for_archival_empty(client):
+    response = client.get("/cases/due-for-archival")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_case_archival_config_get_put_roundtrip(client):
+    default = client.get("/case-archival-config")
+    assert default.status_code == 200
+    assert default.json()["default_archive_after_days_closed"] is None
+    assert default.json()["archive_encryption_enabled"] is False
+
+    updated = client.put(
+        "/case-archival-config",
+        json={"default_archive_after_days_closed": 90, "archive_encryption_enabled": True},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["default_archive_after_days_closed"] == 90
+    assert updated.json()["archive_encryption_enabled"] is True
+
+
+def test_request_archive_returns_409_for_open_case(client, process_definition_id):
+    case = client.post(
+        "/cases",
+        json={
+            "name": "Akte",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+    ).json()
+
+    response = client.post(f"/cases/{case['id']}/archive-request")
+
+    assert response.status_code == 409
+
+
+def test_get_case_archive_status_returns_404_for_unknown_case(client):
+    response = client.get("/cases/does-not-exist/archive-status")
+    assert response.status_code == 404
+
+
+async def test_archive_request_and_mark_archived_roundtrip_for_closed_case(client, session):
+    case = await repository.create_case(
+        session,
+        case_id=f"case-{uuid.uuid4()}",
+        name="Geschlossene Akte",
+        object_type_id=None,
+        attributes={},
+        process_definition_id=1,
+        process_instance_id=None,
+        created_by="alice",
+    )
+    await repository.close_case(session, case, snapshots={})
+    await session.commit()
+
+    request_response = client.post(f"/cases/{case.id}/archive-request")
+    assert request_response.status_code == 200
+    assert request_response.json()["archive_after"] is not None
+
+    status_response = client.get(f"/cases/{case.id}/archive-status")
+    assert status_response.status_code == 200
+    assert status_response.json()["archived_at"] is None
+
+    due = client.get("/cases/due-for-archival").json()
+    assert case.id in [c["id"] for c in due]
+
+    archived_response = client.put(f"/cases/{case.id}/archived")
+    assert archived_response.status_code == 200
+    assert archived_response.json()["archived_at"] is not None
+
+    due_after = client.get("/cases/due-for-archival").json()
+    assert case.id not in [c["id"] for c in due_after]

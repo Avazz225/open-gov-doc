@@ -1,9 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from case_service.models import Case, CaseDocumentReference
+from case_service.models import Case, CaseArchivalConfig, CaseDocumentReference
+
+_ARCHIVAL_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -13,6 +15,11 @@ class NotFoundError(Exception):
 class CaseClosedError(Exception):
     """Eine bereits abgeschlossene Umlaufmappe akzeptiert keine
     Referenzaenderungen mehr (2.3: Referenzstruktur ist ab Abschluss fixiert)."""
+
+
+class CaseNotClosedError(Exception):
+    """Aussonderung (5.6, seit P7-S3b) ist nur fuer bereits abgeschlossene
+    Umlaufmappen moeglich."""
 
 
 async def create_case(
@@ -133,12 +140,92 @@ async def close_case(session: AsyncSession, case: Case, *, snapshots: dict[str, 
     Umlaufmappe aus. `snapshots` fehlende `document_id`s (z. B. weil das
     Dokument beim Abschluss nicht mehr erreichbar war) bleiben ohne
     `snapshot_version_number` - dieselbe "bleibt nachvollziehbar bestehen"-
-    Behandlung wie beim regulaeren Lesezugriff einer offenen Umlaufmappe."""
+    Behandlung wie beim regulaeren Lesezugriff einer offenen Umlaufmappe.
+
+    Loest zugleich `archive_after` auf (5.6, seit P7-S3b) - anders als bei
+    `Document.archive_after` (bei Anlage aufgeloest) erst hier, da nur
+    geschlossene Umlaufmappen aussonderungsfaehig sind."""
     case.status = "closed"
     case.closed_at = datetime.now(UTC)
     active = await get_active_references(session, case.id)
     for reference in active:
         if reference.document_id in snapshots:
             reference.snapshot_version_number = snapshots[reference.document_id]
+
+    config = await get_archival_config(session)
+    if config.default_archive_after_days_closed is not None:
+        case.archive_after = case.closed_at + timedelta(
+            days=config.default_archive_after_days_closed
+        )
+
+    await session.flush()
+    return case
+
+
+async def get_archival_config(session: AsyncSession) -> CaseArchivalConfig:
+    config = await session.get(CaseArchivalConfig, _ARCHIVAL_CONFIG_ID)
+    if config is None:
+        config = CaseArchivalConfig(
+            id=_ARCHIVAL_CONFIG_ID,
+            default_archive_after_days_closed=None,
+            archive_encryption_enabled=False,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_archival_config(
+    session: AsyncSession,
+    *,
+    default_archive_after_days_closed: int | None,
+    archive_encryption_enabled: bool,
+) -> CaseArchivalConfig:
+    config = await get_archival_config(session)
+    config.default_archive_after_days_closed = default_archive_after_days_closed
+    config.archive_encryption_enabled = archive_encryption_enabled
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def list_due_for_archival(session: AsyncSession) -> list[Case]:
+    """Geschlossene Umlaufmappen mit faelliger Aussonderung (5.6, seit
+    P7-S3b) - `archival-service` ruft dies periodisch ab (`GET /cases/due-
+    for-archival`)."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Case).where(
+            Case.status == "closed",
+            Case.archive_after.isnot(None),
+            Case.archive_after <= now,
+            Case.archived_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def request_archive(session: AsyncSession, case_id: str) -> Case:
+    """Manueller Aussonderungs-Trigger (5.6, `POST /cases/{id}/archive-
+    request`) - nur fuer bereits geschlossene Umlaufmappen, setzt
+    `archive_after` auf jetzt, falls noch nicht gesetzt oder noch nicht
+    faellig."""
+    case = await get_case(session, case_id)
+    if case.status != "closed":
+        raise CaseNotClosedError(f"Umlaufmappe {case_id!r} ist noch nicht abgeschlossen")
+    now = datetime.now(UTC)
+    if case.archive_after is None or case.archive_after > now:
+        case.archive_after = now
+        await session.flush()
+    return case
+
+
+async def mark_archived(session: AsyncSession, case_id: str) -> Case:
+    """Rueckruf von `archival-service`, sobald das XDOMEA-Paket verifiziert
+    ist (`PUT /cases/{id}/archived`) - die `Case`-Zeile selbst bleibt
+    vollstaendig erhalten (wörtliche Konzeptvorgabe, s. models.py)."""
+    case = await get_case(session, case_id)
+    case.archived_at = datetime.now(UTC)
     await session.flush()
     return case

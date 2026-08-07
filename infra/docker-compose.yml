@@ -648,6 +648,8 @@ services:
       DMS_RENDERING_SERVICE_BASE_URL: http://rendering-service:8000
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      # XDOMEA-Aussonderung fuer Umlaufmappen (5.6, seit P7-S3b)
+      DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
       DMS_ARCHIVAL_POLL_INTERVAL_SECONDS: ${ARCHIVAL_SERVICE_POLL_INTERVAL_SECONDS:-3600}
       DMS_DEHYDRATION_DELAY_DAYS: ${ARCHIVAL_SERVICE_DEHYDRATION_DELAY_DAYS:-30}
       DMS_ARCHIVE_RETRIEVAL_ROLE: ${ARCHIVAL_SERVICE_RETRIEVAL_ROLE:-dms-admin}
@@ -667,6 +669,8 @@ services:
       storage-service:
         condition: service_started
       object-type-service:
+        condition: service_started
+      case-service:
         condition: service_started
     networks:
       - dms-net

@@ -21,6 +21,7 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS archival"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE archival.archival_transfer"))
+        await conn.execute(text("TRUNCATE archival.case_archival_transfer"))
     await eng.dispose()
     yield
 

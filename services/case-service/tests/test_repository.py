@@ -133,3 +133,81 @@ async def test_close_case_leaves_snapshot_none_for_documents_missing_from_snapsh
     closed = await repository.close_case(session, case, snapshots={})
     references = await repository.list_document_references(session, closed.id)
     assert references[0].snapshot_version_number is None
+
+
+async def test_close_case_resolves_archive_after_from_config(session):
+    await repository.update_archival_config(
+        session, default_archive_after_days_closed=30, archive_encryption_enabled=False
+    )
+    case = await _make_case(session)
+
+    closed = await repository.close_case(session, case, snapshots={})
+
+    assert closed.archive_after is not None
+    assert closed.archive_after > closed.closed_at
+
+
+async def test_close_case_leaves_archive_after_none_without_config(session):
+    case = await _make_case(session)
+
+    closed = await repository.close_case(session, case, snapshots={})
+
+    assert closed.archive_after is None
+
+
+async def test_get_archival_config_creates_default_row(session):
+    config = await repository.get_archival_config(session)
+
+    assert config.default_archive_after_days_closed is None
+    assert config.archive_encryption_enabled is False
+
+
+async def test_update_archival_config(session):
+    await repository.update_archival_config(
+        session, default_archive_after_days_closed=90, archive_encryption_enabled=True
+    )
+
+    config = await repository.get_archival_config(session)
+    assert config.default_archive_after_days_closed == 90
+    assert config.archive_encryption_enabled is True
+
+
+async def test_list_due_for_archival_only_returns_closed_and_due_cases(session):
+    open_case = await _make_case(session, case_id="case-open")
+    open_case.archive_after = None
+
+    closed_not_due = await _make_case(session, case_id="case-closed-not-due")
+    await repository.close_case(session, closed_not_due, snapshots={})
+
+    closed_due = await _make_case(session, case_id="case-closed-due")
+    await repository.close_case(session, closed_due, snapshots={})
+    closed_due.archive_after = closed_due.closed_at
+
+    due = await repository.list_due_for_archival(session)
+
+    assert [c.id for c in due] == ["case-closed-due"]
+
+
+async def test_request_archive_requires_closed_case(session):
+    case = await _make_case(session)
+
+    with pytest.raises(repository.CaseNotClosedError):
+        await repository.request_archive(session, case.id)
+
+
+async def test_request_archive_sets_archive_after_for_closed_case(session):
+    case = await _make_case(session)
+    closed = await repository.close_case(session, case, snapshots={})
+
+    archived_request = await repository.request_archive(session, closed.id)
+
+    assert archived_request.archive_after is not None
+
+
+async def test_mark_archived_sets_archived_at(session):
+    case = await _make_case(session)
+    closed = await repository.close_case(session, case, snapshots={})
+
+    archived = await repository.mark_archived(session, closed.id)
+
+    assert archived.archived_at is not None

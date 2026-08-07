@@ -22,3 +22,21 @@ class ArchivalTransferOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CaseArchivalTransferOut(BaseModel):
+    id: str
+    case_id: str
+    status: str
+    encrypted: bool
+    storage_object_key: str | None
+    checksum_sha256: str | None
+    error_message: str | None
+    locked_at: datetime | None
+    packaged_at: datetime | None
+    verified_at: datetime | None
+    released_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

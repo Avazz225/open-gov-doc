@@ -22,3 +22,16 @@
 - Wer die optionale KDBX-Verschlüsselung nutzen will, muss das Plugin-Paket in der eigenen Umgebung selbst hinzufügen — entsprechend zu dokumentieren (`docs/services/<aussonderungsservice>.md`, Betriebsdoku).
 - Größere Installationen, die stattdessen ein vollwertiges externes KMS/HSM anbinden (laut Konzept bereits als Alternative vorgesehen), sind von dieser Lizenzfrage ohnehin nicht betroffen — das bleibt der bevorzugte Weg für Installationen, die kein GPL-Plugin einbinden wollen.
 - XDOMEA-Export/-Import (P7-S3) wird über `lxml` gegen die XDOMEA-3.0.0-XSD-Schemata selbst implementiert; keine weitere Fremdbibliothek für das Format vorgesehen.
+
+## Nachtrag P7-S3b: XDOMEA-Version auf 4.0.0 aktualisiert
+
+**Kontext:** Bei der tatsächlichen Umsetzung der XDOMEA-Aussonderung für Umlaufmappen (P7-S3b, `archival-service`/`case-service`) wurde die reale Schema-Beschaffung geprüft (siehe `docs/services/archival-service.md` "XDOMEA-Aussonderung für Umlaufmappen"). Dabei zeigte sich: die oben benannte Version 3.0.0 lief laut offizieller KoSIT-Registrierung zum Zeitpunkt der Umsetzung in wenigen Wochen aus (`datumGueltigkeitBis` nur noch kurz in der Zukunft) und war zu diesem Zeitpunkt nur noch über einen GPL-3.0-lizenzierten Drittanbieter-Mirror (GitHub, Landesarchiv Thüringen) vollständig auffindbar, nicht mehr über eine offizielle, lizenzunbedenkliche Quelle für alle benötigten Schemadateien. **4.0.0 ist der aktuelle Standard** und war zum selben Zeitpunkt vollständig sauber über die offizielle KoSIT-Infrastruktur beziehbar (`https://schema.kdo.de/schema/urn/xoev-de/xdomea/schema/4.0.0/` für die eigentlichen `xdomea-*.xsd`-Dateien, `xoev.de` direkt für die drei benötigten gemeinsamen XÖV-Basismodule).
+
+**Entscheidung:** P7-S3b implementiert gegen **XDOMEA 4.0.0** statt 3.0.0 — bei Sessionstart per `AskUserQuestion` mit dem Nutzer bestätigt, mit genau dieser Begründung vorgelegt.
+
+**Begründung:**
+- Das Kernargument dieses ADRs ("XDOMEA als offener Standard ohne Lizenzfrage") bleibt unverändert gültig — nur die konkrete Versionsnummer ändert sich, keine neue Lizenzabwägung nötig.
+- Eine bereits ablaufende Version für eine neue Implementierung zu wählen wäre technisch unnötig riskant gewesen, insbesondere da die aktuelle Version sauberer (ohne GPL-Mirror-Umweg) beziehbar war als die im ADR ursprünglich benannte.
+- Die komplette Schema-Abhängigkeitskette für die tatsächlich benötigte Nachricht (`Aussonderung.Aussonderung.0503`) wurde vor der Implementierung real heruntergeladen und erfolgreich gegen `lxml.etree.XMLSchema` kompiliert (7 Dateien) — kein spekulativer Versionswechsel, sondern ein am echten Schema verifizierter.
+
+**Konsequenz:** Die vendorten Schemadateien in `services/archival-service/src/archival_service/xdomea_schema/` sind 4.0.0, nicht 3.0.0. Die übrige Entscheidung dieses ADRs (Eigenserialisierung über `lxml`, keine Fremdbibliothek für das Format) bleibt vollständig gültig — nur die Versionsnummer der Zielschemata hat sich geändert. Die KDBX-Entscheidung (Plugin-Ansatz) ist von diesem Nachtrag nicht betroffen.

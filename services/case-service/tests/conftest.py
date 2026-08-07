@@ -73,6 +73,7 @@ async def _clean_tables():
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS "case"'))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text('TRUNCATE "case".case_document_reference, "case".cases CASCADE'))
+        await conn.execute(text('TRUNCATE "case".case_archival_config'))
     await eng.dispose()
     yield
 

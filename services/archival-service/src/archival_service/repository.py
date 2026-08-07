@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from archival_service.models import ArchivalTransfer
+from archival_service.models import ArchivalTransfer, CaseArchivalTransfer
 
 _ACTIVE_STATUSES = ("pending", "locked", "copied", "verified")
+_ACTIVE_CASE_STATUSES = ("pending", "locked", "packaged", "verified")
 
 
 class NotFoundError(Exception):
@@ -91,3 +92,49 @@ async def mark_failed(
     transfer.error_message = error_message
     transfer.updated_at = datetime.now(UTC)
     await session.flush()
+
+
+async def get_case_transfer(session: AsyncSession, transfer_id: str) -> CaseArchivalTransfer:
+    transfer = await session.get(CaseArchivalTransfer, transfer_id)
+    if transfer is None:
+        raise NotFoundError(transfer_id)
+    return transfer
+
+
+async def list_case_transfers(
+    session: AsyncSession, *, status: str | None = None
+) -> list[CaseArchivalTransfer]:
+    query = select(CaseArchivalTransfer)
+    if status is not None:
+        query = query.where(CaseArchivalTransfer.status == status)
+    result = await session.execute(query.order_by(CaseArchivalTransfer.created_at.desc()))
+    return list(result.scalars().all())
+
+
+async def get_active_case_transfer_for_case(
+    session: AsyncSession, case_id: str
+) -> CaseArchivalTransfer | None:
+    result = await session.execute(
+        select(CaseArchivalTransfer).where(
+            CaseArchivalTransfer.case_id == case_id,
+            CaseArchivalTransfer.status.in_(_ACTIVE_CASE_STATUSES),
+        )
+    )
+    return result.scalars().first()
+
+
+async def create_case_transfer(session: AsyncSession, case_id: str) -> CaseArchivalTransfer:
+    now = datetime.now(UTC)
+    transfer = CaseArchivalTransfer(
+        case_id=case_id, status="pending", created_at=now, updated_at=now
+    )
+    session.add(transfer)
+    await session.flush()
+    return transfer
+
+
+async def list_active_case_transfers(session: AsyncSession) -> list[CaseArchivalTransfer]:
+    result = await session.execute(
+        select(CaseArchivalTransfer).where(CaseArchivalTransfer.status.in_(_ACTIVE_CASE_STATUSES))
+    )
+    return list(result.scalars().all())

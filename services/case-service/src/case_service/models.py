@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 # Schema-Name "case" ist ein reserviertes SQL-Schlüsselwort (CASE WHEN) -
@@ -33,6 +33,12 @@ class Case(Base):
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Aussonderung (5.6, seit P7-S3b) - `archive_after` wird erst bei
+    # Abschluss aufgeloest (siehe repository.close_case), nicht bei Anlage
+    # wie `Document.archive_after`, da nur geschlossene Umlaufmappen
+    # aussonderungsfaehig sind.
+    archive_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CaseDocumentReference(Base):
@@ -53,3 +59,19 @@ class CaseDocumentReference(Base):
     removed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     snapshot_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class CaseArchivalConfig(Base):
+    """Installationsweite Aussonderungs-Konfiguration (5.6, seit P7-S3b) -
+    einzelne Zeile (`id=1`, gleiches Muster wie document-services
+    `RetentionConfig`). Kein Pendant zu `ObjectType.default_archive_after_
+    days`/`archive_encryption_enabled`: `ObjectType.applies_to` kennt nur
+    `"document"`/`"folder"`, keine eigene Kategorie fuer Umlaufmappen - siehe
+    docs/services/archival-service.md."""
+
+    __tablename__ = "case_archival_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    default_archive_after_days_closed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

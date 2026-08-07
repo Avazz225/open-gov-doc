@@ -8,12 +8,13 @@ from datetime import UTC, datetime
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from archival_service import crypto, pipeline, repository
+from archival_service import case_pipeline, crypto, pipeline, repository
 from archival_service.clients import (
+    CaseClient,
     DocumentClient,
     ObjectTypeClient,
     RenderingClient,
@@ -21,7 +22,7 @@ from archival_service.clients import (
 )
 from archival_service.keystore import EnvKeyStore, KeyNotFoundError
 from archival_service.models import Base
-from archival_service.schemas import ArchivalTransferOut
+from archival_service.schemas import ArchivalTransferOut, CaseArchivalTransferOut
 from archival_service.settings import Settings
 
 settings = Settings()
@@ -61,6 +62,22 @@ async def _archival_poll_loop(session_factory) -> None:
                 "Dehydrierungs-Poll-Tick fehlgeschlagen - wird beim naechsten Tick erneut versucht."
             )
 
+        try:
+            case_config = await app.state.case_client.get_archival_config()
+            await case_pipeline.run_case_transfers_tick(
+                session_factory,
+                case_client=app.state.case_client,
+                document_client=app.state.document_client,
+                storage_client=app.state.storage_client,
+                keystore=app.state.keystore,
+                encryption_enabled=case_config.get("archive_encryption_enabled", False),
+            )
+        except Exception:
+            logger.exception(
+                "Umlaufmappen-Aussonderungs-Poll-Tick fehlgeschlagen (5.6, seit P7-S3b) - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+
         await asyncio.sleep(settings.archival_poll_interval_seconds)
 
 
@@ -78,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.rendering_client = RenderingClient(settings.rendering_service_base_url)
     app.state.storage_client = StorageClient(settings.storage_service_base_url)
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
+    app.state.case_client = CaseClient(settings.case_service_base_url)
     app.state.keystore = EnvKeyStore(settings.archive_encryption_key)
 
     registration = await maybe_start_registration(
@@ -104,6 +122,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.rendering_client.close()
     await app.state.storage_client.close()
     await app.state.object_type_client.close()
+    await app.state.case_client.close()
     await engine.dispose()
 
 
@@ -196,3 +215,60 @@ async def retrieve_archival_transfer(
     )
     await session.commit()
     return transfer
+
+
+@app.get("/case-archival-transfers", response_model=list[CaseArchivalTransferOut])
+async def list_case_archival_transfers(
+    status: str | None = None, session: AsyncSession = Depends(get_session)
+) -> list[CaseArchivalTransferOut]:
+    return await repository.list_case_transfers(session, status=status)
+
+
+@app.get("/case-archival-transfers/{transfer_id}", response_model=CaseArchivalTransferOut)
+async def get_case_archival_transfer(
+    transfer_id: str, session: AsyncSession = Depends(get_session)
+) -> CaseArchivalTransferOut:
+    try:
+        return await repository.get_case_transfer(session, transfer_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/case-archival-transfers/{transfer_id}/package")
+async def download_case_archival_package(
+    transfer_id: str,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Liefert das XDOMEA-Aussonderungspaket (ZIP: `aussonderung.xml` +
+    referenzierte Dokumentinhalte, 5.6, seit P7-S3b) direkt als Download -
+    anders als bei Dokumenten (`.../retrieve`) kein Zurueckschreiben auf ein
+    Live-Ziel, da eine Umlaufmappe keinen eigenen Live-Speicherplatz besitzt."""
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    if settings.archive_retrieval_role not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Rolle {settings.archive_retrieval_role!r} erforderlich für die Rückholung",
+        )
+    try:
+        transfer = await repository.get_case_transfer(session, transfer_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if transfer.status != "released":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Transfer hat Status {transfer.status!r} - kein Paket zum Herunterladen",
+        )
+
+    data = await app.state.storage_client.download_archive_copy(transfer.storage_object_key)
+    if transfer.encrypted:
+        try:
+            key = app.state.keystore.get_key("default")
+        except KeyNotFoundError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        try:
+            data = crypto.decrypt(data, key)
+        except crypto.DecryptionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return Response(content=data, media_type="application/zip")

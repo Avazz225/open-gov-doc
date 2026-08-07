@@ -10,6 +10,7 @@ class Settings(BaseServiceSettings):
     rendering_service_base_url: str = "http://localhost:8011"
     storage_service_base_url: str = "http://localhost:8005"
     object_type_service_base_url: str = "http://localhost:8007"
+    case_service_base_url: str = "http://localhost:8016"
 
     # Poll-Intervall fuer faellige Aussonderungs-/Dehydrierungs-Ticks (5.6) -
     # gleiches Idiom wie document-service's `_retention_poll_loop`/reporting-

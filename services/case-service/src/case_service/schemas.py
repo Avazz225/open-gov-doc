@@ -23,6 +23,8 @@ class CaseOut(BaseModel):
     created_by: str
     created_at: datetime
     closed_at: datetime | None
+    archive_after: datetime | None
+    archived_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -52,3 +54,22 @@ class CaseDocumentReferenceOut(BaseModel):
     snapshot_version_number: int | None
     current_version_number: int | None = None
     document_deleted_at: datetime | None = None
+
+
+class CaseArchiveStatusOut(BaseModel):
+    case_id: str
+    archive_after: datetime | None
+    archived_at: datetime | None
+
+
+class CaseArchivalConfigIn(BaseModel):
+    default_archive_after_days_closed: int | None
+    archive_encryption_enabled: bool
+
+
+class CaseArchivalConfigOut(BaseModel):
+    default_archive_after_days_closed: int | None
+    archive_encryption_enabled: bool
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
