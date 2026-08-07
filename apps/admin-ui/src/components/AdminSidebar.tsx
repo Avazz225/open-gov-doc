@@ -74,6 +74,17 @@ const GROUPS: NavGroup[] = [
     labelKey: "nav.groupReports",
     items: [{ href: "/reports/", labelKey: "nav.reports" }],
   },
+  {
+    id: "diagnostics",
+    labelKey: "nav.groupDiagnostics",
+    items: [
+      {
+        href: "/query-console/",
+        labelKey: "nav.queryConsole",
+        requiresCapability: "admin.query_console",
+      },
+    ],
+  },
 ];
 
 const COLLAPSED_GROUPS_KEY = "dms.admin.collapsedGroups";

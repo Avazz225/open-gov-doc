@@ -37,7 +37,11 @@ class Settings(BaseServiceSettings):
     # Bestandsfehler - folder-service hat seit P7-S1b einen eigenen
     # Event-Stream, wurde aber nie in diese Liste aufgenommen) - ohne dieses
     # Subject wäre die Forensik-Trace (5.4b) für sämtliche Ordner-Aktionen
-    # blind, direkt im Widerspruch zum Zweck dieser Session.
+    # blind, direkt im Widerspruch zum Zweck dieser Session. "query.>" kam
+    # in P8-S1 dazu - die Query- & Trace-Konsole (6.1) auditiert jede
+    # ausgeführte Abfrage selbst (`query.executed`, Konzept-Punkt 5
+    # "Vollständige Protokollierung"), proaktiv gleich mit ergänzt statt den
+    # "folder.>"-Fehler ein zweites Mal zu wiederholen.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -53,4 +57,5 @@ class Settings(BaseServiceSettings):
         "favorite.>",
         "folder.>",
         "reporting.>",
+        "query.>",
     ]

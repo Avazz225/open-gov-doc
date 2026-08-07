@@ -37,6 +37,7 @@
     "groupSecurity": "Sicherheit",
     "groupCompliance": "Compliance",
     "groupReports": "Berichte",
+    "groupDiagnostics": "Diagnose-Werkzeuge",
     "users": "Nutzer & Rollen",
     "objectTypes": "Objekttypen",
     "kennzeichenSettings": "Kennzeichen-Einstellungen",
@@ -51,7 +52,8 @@
     "retentionSettings": "Aufbewahrung & Papierkorb",
     "deletionRegister": "Löschregister",
     "archivalTransfers": "Aussonderung & Archivierung",
-    "reports": "Standardberichte"
+    "reports": "Standardberichte",
+    "queryConsole": "Query-Konsole"
   },
   "home": {
     "title": "DMS Admin",
@@ -367,6 +369,26 @@
     "occurredAt": "Zeitpunkt",
     "eventType": "Ereignistyp",
     "category": "Kategorie",
+    "actor": "Akteur",
+    "subject": "Objekt",
+    "serviceName": "Service"
+  },
+  "queryConsole": {
+    "pageTitle": "Query-Konsole",
+    "hint": "Zentrale Query- & Trace-Konsole (6.1) — föderierte Lesezugriffe auf den Audit-Trail. Jede Abfrage läuft im Sicherheitskontext der ausführenden Person: Ergebniszeilen, für die keine Leseberechtigung auf den zugehörigen Ordner besteht, werden automatisch ausgeblendet. Jede Abfrage wird selbst wieder auditiert.",
+    "loadError": "Abfrage fehlgeschlagen",
+    "notYetQueried": "Noch keine Abfrage gestartet.",
+    "empty": "Keine (sichtbaren) Treffer für die gewählten Filter.",
+    "filterActor": "Nach Nutzer filtern (Akteur)",
+    "filterSubject": "Nach Objekt-ID filtern",
+    "filterEventType": "Nach Ereignistyp filtern",
+    "since": "Von",
+    "until": "Bis",
+    "query": "Abfragen",
+    "filteredHint": "{visible} von {total} Ereignissen sichtbar (Rest durch Ihre Berechtigungen ausgeblendet).",
+    "superuserHint": "Superuser-Ansicht — ungefiltert.",
+    "occurredAt": "Zeitpunkt",
+    "eventType": "Ereignistyp",
     "actor": "Akteur",
     "subject": "Objekt",
     "serviceName": "Service"

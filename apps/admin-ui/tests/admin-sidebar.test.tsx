@@ -69,4 +69,20 @@ describe("AdminSidebar", () => {
     expect(screen.queryByText("Nutzer & Rollen")).not.toBeInTheDocument();
     expect(screen.getByText("Objekttypen")).toBeInTheDocument();
   });
+
+  it("hides the query console entry without the admin.query_console capability (6.1, P8-S1)", () => {
+    mockPermissions = [];
+
+    renderSidebar();
+
+    expect(screen.queryByText("Query-Konsole")).not.toBeInTheDocument();
+  });
+
+  it("shows the query console entry with the admin.query_console capability", () => {
+    mockPermissions = ["admin.query_console"];
+
+    renderSidebar();
+
+    expect(screen.getByText("Query-Konsole")).toBeInTheDocument();
+  });
 });

@@ -675,6 +675,40 @@ services:
     networks:
       - dms-net
 
+  query-service:
+    build:
+      context: ..
+      dockerfile: services/query-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_NATS_URL: nats://nats:4222
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://query-service:8000
+      DMS_AUDIT_SERVICE_BASE_URL: http://audit-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      # ADR 0031: `pglast` (GPL-3.0-or-later) wird nicht mitgeliefert - leer
+      # gelassen liefert `POST /query` 501, `GET /query/events` bleibt
+      # unberuehrt nutzbar. Ein Betreiber traegt hier den Modulpfad seines
+      # eigenen, separat installierten Plugins ein.
+      DMS_QUERY_PARSER_PLUGIN_MODULE: ${QUERY_SERVICE_PARSER_PLUGIN_MODULE:-}
+    ports:
+      - "${QUERY_SERVICE_PORT:-8022}:8000"
+    depends_on:
+      nats:
+        condition: service_healthy
+      audit-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      permission-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   object-type-service:
     build:
       context: ..

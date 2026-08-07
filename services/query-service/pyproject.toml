@@ -1,0 +1,25 @@
+[project]
+name = "query-service"
+version = "0.1.0"
+description = "Zentrale Query- & Trace-Konsole: foederierte, RBAC-gefilterte Lesezugriffe auf die Read-Modelle anderer Services (Konzept 6.1)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "dms-common",
+    "dms-eventbus-client",
+    "dms-registry-client",
+]
+
+[tool.uv.sources]
+dms-common = { workspace = true }
+dms-eventbus-client = { workspace = true }
+dms-registry-client = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/query_service"]

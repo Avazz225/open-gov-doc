@@ -1287,3 +1287,47 @@ export async function updateCaseArchivalConfig(
   );
   return response.json();
 }
+
+// Query- & Trace-Konsole (6.1, seit P8-S1) - `X-DMS-Principal` wird vom
+// Gateway aus dem Bearer-Token injiziert, nicht hier gesetzt (siehe
+// `request()` oben). Nur die strukturierte Filter-API ist an die UI
+// angebunden - der freie SQL-Pfad (`POST /query`) bleibt ohne installiertes
+// Parser-Plugin (ADR 0031) ohnehin ungenutzt, siehe docs/services/admin-ui.md.
+export interface QueryEvent {
+  id: number;
+  event_type: string;
+  occurred_at: string;
+  service_name: string;
+  subject: string | null;
+  actor: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface QueryResult {
+  events: QueryEvent[];
+  total_before_filter: number;
+  total_after_filter: number;
+  superuser: boolean;
+}
+
+export interface QueryEventFilters {
+  actor?: string;
+  subject?: string;
+  eventType?: string;
+  since?: string;
+  until?: string;
+}
+
+export async function listQueryEvents(
+  token: string,
+  filters: QueryEventFilters = {}
+): Promise<QueryResult> {
+  const query = new URLSearchParams();
+  if (filters.actor) query.set("actor", filters.actor);
+  if (filters.subject) query.set("subject", filters.subject);
+  if (filters.eventType) query.set("event_type", filters.eventType);
+  if (filters.since) query.set("since", filters.since);
+  if (filters.until) query.set("until", filters.until);
+  const response = await request("query-service", `query/events?${query.toString()}`, {}, token);
+  return response.json();
+}
