@@ -2,27 +2,50 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 
 from dms_common import configure_logging
+from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from query_service import consumer, dry_run_tokens, manipulation, manipulation_mode
 from query_service.clients import (
     AuditClient,
     AuthServiceClient,
     DocumentClient,
+    ObjectTypeClient,
     PermissionServiceClient,
 )
 from query_service.filtering import filter_events_by_permission
+from query_service.models import Base
 from query_service.parser import ParserPluginError, load_parser_plugin
-from query_service.schemas import QueryResult, QueryTextRequest
+from query_service.schemas import (
+    DryRunRequest,
+    DryRunResult,
+    ManipulateExecuteRequest,
+    ManipulateExecuteResult,
+    ManipulationModeActivateRequest,
+    ManipulationModeStatusOut,
+    QueryResult,
+    QueryTextRequest,
+)
 from query_service.settings import Settings
 
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _ManipulationClients:
+    document_client: DocumentClient
+    object_type_client: ObjectTypeClient
+    permission_client: PermissionServiceClient
 
 
 async def publish_event(
@@ -59,6 +82,44 @@ async def _require_query_console(x_dms_principal: str, is_superuser: bool) -> No
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fehlende Domain-Admin-Rolle 'Query-Konsole'",
         )
+
+
+async def _require_manipulate_permission(x_dms_principal: str, is_superuser: bool) -> None:
+    """Konzept 6.1 nennt "keine Manipulation" explizit als separat vergebbare
+    Einschraenkung - eigene, feingranulare Berechtigung getrennt von der
+    Lese-Berechtigung `admin.query_console` oben."""
+    if is_superuser:
+        return
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, settings.query_console_manipulate_permission
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Domain-Admin-Rolle 'Query-Konsole (Manipulation)'",
+        )
+
+
+async def _require_manipulation_mode_active(session: AsyncSession, is_superuser: bool) -> None:
+    """Schutzschalter (Konzept 6.1 Punkt 1) - der aktivierte Superuser (4.6)
+    "kann uneingeschraenkt lesen und schreiben" und muss ihn nicht separat
+    aktivieren."""
+    if is_superuser:
+        return
+    mode = await manipulation_mode.get_status(session)
+    if not manipulation_mode.is_active(mode):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Manipulationsmodus nicht aktiv - siehe POST /manipulation-mode/activate",
+        )
+
+
+def _manipulation_clients() -> _ManipulationClients:
+    return _ManipulationClients(
+        document_client=app.state.document_client,
+        object_type_client=app.state.object_type_client,
+        permission_client=app.state.permission_client,
+    )
 
 
 async def _record_query(
@@ -128,17 +189,40 @@ async def _run_query(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
 
+    # Genuin eigener Zustand (Schutzschalter, seit P8-S2) - kein Read-Modell
+    # eines fremden Service, reversiert die P8-S1-Entscheidung "keine eigene
+    # Datenhaltung" nicht (die sich nur gegen das Duplizieren fremder
+    # Read-Modelle richtete), siehe models.py.
+    engine = build_engine(settings.postgres_dsn)
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS query"))
+        await conn.run_sync(Base.metadata.create_all)
+    app.state.engine = engine
+    app.state.session_factory = make_session_factory(engine)
+
     app.state.audit_client = AuditClient(settings.audit_service_base_url)
     app.state.document_client = DocumentClient(settings.document_service_base_url)
+    app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
-    # Reiner Producer-Bus fuer die Selbst-Auditierung (Punkt 5, 6.1) - kein
-    # Consumer, query-service haelt kein eigenes Read-Modell (siehe ADR 0031
-    # Folgeentscheidung "keine eigene Datenhaltung").
+    # Producer-Bus fuer die Selbst-Auditierung (Punkt 5, 6.1).
     event_bus = NatsEventBusClient(settings.nats_url, stream="query")
     await event_bus.connect()
     app.state.event_bus = event_bus
+
+    # Neuer Consumer-Bus seit P8-S2 (P8-S1 hatte nur den Producer oben) -
+    # fuehrt zuvor per Vier-Augen zurueckgestellte Manipulations-Aktionen
+    # nach Genehmigung aus, identisches Dual-Bus-Muster wie document-service.
+    consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await consumer_bus.connect()
+    app.state.consumer_bus = consumer_bus
+    await consumer.start_consuming(
+        consumer_bus,
+        ["permission.approval.approved"],
+        _manipulation_clients(),
+        publish_event,
+    )
 
     app.state.parser_plugin = load_parser_plugin(settings.query_parser_plugin_module)
 
@@ -157,14 +241,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if registration:
         await registration.stop()
+    await consumer_bus.close()
     await event_bus.close()
     await app.state.audit_client.close()
     await app.state.document_client.close()
+    await app.state.object_type_client.close()
     await app.state.permission_client.close()
     await app.state.auth_client.close()
+    await engine.dispose()
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with app.state.session_factory() as session:
+        yield session
 
 
 @app.get("/healthz")
@@ -238,3 +330,137 @@ async def query_text(
         until=datetime.fromisoformat(until_raw) if until_raw else None,
         limit=parsed.limit or 100,
     )
+
+
+@app.post("/manipulation-mode/activate", response_model=ManipulationModeStatusOut)
+async def activate_manipulation_mode(
+    payload: ManipulationModeActivateRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ManipulationModeStatusOut:
+    """Schutzschalter (Konzept 6.1 Punkt 1) - "vergleichbar einem
+    Break-Glass-Zugang", aber ein eigener, leichterer Mechanismus (siehe
+    docs/services/query-service.md fuer die Abgrenzung zu 4.6)."""
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    await _require_manipulate_permission(x_dms_principal, is_superuser)
+    mode = await manipulation_mode.activate(
+        session, activated_by=x_dms_principal, duration_minutes=payload.duration_minutes
+    )
+    await session.commit()
+    return ManipulationModeStatusOut(
+        active=mode.active, activated_by=mode.activated_by, expires_at=mode.expires_at
+    )
+
+
+@app.post("/manipulation-mode/deactivate", response_model=ManipulationModeStatusOut)
+async def deactivate_manipulation_mode(
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ManipulationModeStatusOut:
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    await _require_manipulate_permission(x_dms_principal, is_superuser)
+    mode = await manipulation_mode.deactivate(session)
+    await session.commit()
+    return ManipulationModeStatusOut(
+        active=mode.active, activated_by=mode.activated_by, expires_at=mode.expires_at
+    )
+
+
+@app.get("/manipulation-mode/status", response_model=ManipulationModeStatusOut)
+async def manipulation_mode_status(
+    session: AsyncSession = Depends(get_session),
+) -> ManipulationModeStatusOut:
+    mode = await manipulation_mode.get_status(session)
+    return ManipulationModeStatusOut(
+        active=manipulation_mode.is_active(mode),
+        activated_by=mode.activated_by,
+        expires_at=mode.expires_at,
+    )
+
+
+@app.post("/manipulate/dry-run", response_model=DryRunResult)
+async def manipulate_dry_run(
+    payload: DryRunRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DryRunResult:
+    """Konzept 6.1 Punkt 2: "Jede schreibende Abfrage wird zunaechst nur
+    simuliert" - fuer ALLE Aufrufer verpflichtend, auch den aktivierten
+    Superuser (das Konzept nennt hier keine Ausnahme, nur fuer
+    Schutzschalter/RBAC)."""
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    await _require_manipulate_permission(x_dms_principal, is_superuser)
+    await _require_manipulation_mode_active(session, is_superuser)
+
+    try:
+        action = manipulation.get_action(payload.action_type)
+    except manipulation.UnknownActionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        preview = await action.dry_run(payload.params, _manipulation_clients())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    token = dry_run_tokens.issue_token(
+        action_type=payload.action_type,
+        params=payload.params,
+        principal_id=x_dms_principal,
+        secret=settings.dry_run_secret,
+        ttl_seconds=settings.dry_run_token_ttl_seconds,
+    )
+    return DryRunResult(
+        action_type=payload.action_type,
+        preview=preview,
+        is_critical=action.is_critical,
+        dry_run_token=token,
+    )
+
+
+@app.post("/manipulate/execute", response_model=ManipulateExecuteResult)
+async def manipulate_execute(
+    payload: ManipulateExecuteRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ManipulateExecuteResult:
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    await _require_manipulate_permission(x_dms_principal, is_superuser)
+    await _require_manipulation_mode_active(session, is_superuser)
+
+    try:
+        claims = dry_run_tokens.decode(payload.dry_run_token, secret=settings.dry_run_secret)
+    except dry_run_tokens.InvalidDryRunTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    action_type = claims["action_type"]
+    params = claims["params"]
+    action = manipulation.get_action(action_type)
+
+    # Konzept 6.1 Punkt 4: kritische Aktionen erzwingen Vier-Augen immer,
+    # unabhaengig von der installationsweiten Konfiguration - auch fuer den
+    # aktivierten Superuser (die einzige Stelle, an der der Superuser nicht
+    # "uneingeschraenkt" agieren darf).
+    requires_approval = action.is_critical
+    if not requires_approval:
+        requires_approval = await app.state.permission_client.requires_approval(action_type)
+
+    if requires_approval:
+        request = await app.state.permission_client.create_approval_request(
+            action_type=action_type,
+            initiated_by=x_dms_principal,
+            payload={"params": params, "principal_id": x_dms_principal},
+        )
+        return ManipulateExecuteResult(status="pending_approval", approval_request_id=request["id"])
+
+    try:
+        result = await action.execute(params, _manipulation_clients())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await publish_event(
+        "query.manipulation.executed",
+        None,
+        {"action_type": action_type, "params": params, "result": result},
+        actor=x_dms_principal,
+    )
+    return ManipulateExecuteResult(status="executed", result=result)

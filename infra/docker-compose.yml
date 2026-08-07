@@ -681,11 +681,13 @@ services:
       dockerfile: services/query-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://query-service:8000
       DMS_AUDIT_SERVICE_BASE_URL: http://audit-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       # ADR 0031: `pglast` (GPL-3.0-or-later) wird nicht mitgeliefert - leer
@@ -693,14 +695,22 @@ services:
       # unberuehrt nutzbar. Ein Betreiber traegt hier den Modulpfad seines
       # eigenen, separat installierten Plugins ein.
       DMS_QUERY_PARSER_PLUGIN_MODULE: ${QUERY_SERVICE_PARSER_PLUGIN_MODULE:-}
+      # HMAC-Schluessel fuer Dry-Run-Tokens (6.1, seit P8-S2) - NUR fuer
+      # lokale Entwicklung, gleiches Muster wie archival-service's
+      # DMS_ARCHIVE_ENCRYPTION_KEY.
+      DMS_DRY_RUN_SECRET: ${QUERY_SERVICE_DRY_RUN_SECRET:-dev-only-dry-run-secret-do-not-use-in-production}
     ports:
       - "${QUERY_SERVICE_PORT:-8022}:8000"
     depends_on:
+      postgres:
+        condition: service_healthy
       nats:
         condition: service_healthy
       audit-service:
         condition: service_started
       document-service:
+        condition: service_started
+      object-type-service:
         condition: service_started
       permission-service:
         condition: service_started

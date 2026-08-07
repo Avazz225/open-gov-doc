@@ -33,7 +33,7 @@ TEST_DB="dms_test"
 # Services mit eigenem NATS-Konsumenten (durable=<service-name>) - siehe
 # `grep -rl "durable=" services/*/src/*/*.py`. Nur diese müssen vor ihrem
 # eigenen Testlauf als Container gestoppt werden.
-CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service rendering-service reporting-service search-service)
+CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service rendering-service reporting-service search-service)
 
 BUILD=0
 RUN_RUFF=1

@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -18,3 +21,35 @@ class QueryResult(BaseModel):
 
 class QueryTextRequest(BaseModel):
     query_text: str
+
+
+class ManipulationModeActivateRequest(BaseModel):
+    duration_minutes: int
+
+
+class ManipulationModeStatusOut(BaseModel):
+    active: bool
+    activated_by: str | None
+    expires_at: datetime | None
+
+
+class DryRunRequest(BaseModel):
+    action_type: str
+    params: dict
+
+
+class DryRunResult(BaseModel):
+    action_type: str
+    preview: str
+    is_critical: bool
+    dry_run_token: str
+
+
+class ManipulateExecuteRequest(BaseModel):
+    dry_run_token: str
+
+
+class ManipulateExecuteResult(BaseModel):
+    status: Literal["executed", "pending_approval"]
+    result: dict | None = None
+    approval_request_id: str | None = None

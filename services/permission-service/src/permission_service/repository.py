@@ -73,19 +73,26 @@ async def get_role_by_name(session: AsyncSession, name: str) -> Role | None:
 
 # Domänengetrennte Admin-Rollen (4.6) - systemeigen (in diesem Service, NICHT
 # als Keycloak-Realm-Rollen), damit sie unabhängig vom Identity Provider
-# funktionieren. Nur "domain-admin-users" bekommt diese Session ein
-# zugeordnetes technisches Keycloak-Konto + tatsächliche Durchsetzung (siehe
-# auth-service); die übrigen sechs Domänen sind laut 4.6 "standardmäßig
-# mitgeliefert", aber bewusst noch ohne Konto/Enforcement (deren fachliche
-# Funktionen existieren teils noch gar nicht, z. B. Lizenzverwaltung/
-# Query-Konsole). "breakglass-approver" ist keine Domäne aus 4.6, sondern die
-# Gruppen-Rolle für die Vier-Augen-Freigabe der Superuser-Aktivierung.
+# funktionieren. "domain-admin-users" bekam als erste ein zugeordnetes
+# technisches Keycloak-Konto + tatsächliche Durchsetzung (siehe auth-service).
+# "domain-admin-query-console"/"-manipulate" bekamen ihre tatsächliche
+# Durchsetzung in query-service (P8-S1/P8-S2, kein eigenes technisches Konto
+# nötig - reine Rollenzuweisung reicht). Die übrigen Domänen sind laut 4.6
+# "standardmäßig mitgeliefert", aber bewusst noch ohne Enforcement (deren
+# fachliche Funktionen existieren teils noch gar nicht, z. B.
+# Lizenzverwaltung). "breakglass-approver" ist keine Domäne aus 4.6, sondern
+# die Gruppen-Rolle für die Vier-Augen-Freigabe der Superuser-Aktivierung.
 DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     ("domain-admin-users", "Nutzer-/Rechteverwaltung", ["admin.user_management"]),
     ("domain-admin-config", "Objekttyp-/Workflow-Konfiguration", ["admin.object_config"]),
     ("domain-admin-storage", "Storage-/Backend-Verwaltung", ["admin.storage"]),
     ("domain-admin-license", "Lizenzverwaltung", ["admin.license"]),
     ("domain-admin-query-console", "Query-Konsole", ["admin.query_console"]),
+    (
+        "domain-admin-query-console-manipulate",
+        "Query-Konsole (Manipulation)",
+        ["admin.query_console.manipulate"],
+    ),
     ("domain-admin-deletion", "Löschadministration", ["admin.deletion"]),
     (
         "domain-admin-deletion-vs",
