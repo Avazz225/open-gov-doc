@@ -30,6 +30,7 @@ from document_service.approval_client import ApprovalClient
 from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
+from document_service.license_client import LicenseLimitClient
 from document_service.models import Base, Document
 from document_service.object_type_client import ObjectTypeClient
 from document_service.schemas import (
@@ -359,6 +360,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
+    app.state.license_limit_client = LicenseLimitClient(
+        settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
+    )
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="document")
     await event_bus.connect()
@@ -409,6 +413,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.object_type_client.close()
     await app.state.virus_scan_client.close()
     await app.state.approval_client.close()
+    await app.state.license_limit_client.close()
     await engine.dispose()
 
 
@@ -654,6 +659,11 @@ async def create_document(
     originating_case_id: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
+    # Lizenz-Limit-Blockade (Konzept 9.3, P9-S2): nur echte Neuanlagen, nicht
+    # Versionierung/Wiederherstellung bestehender Dokumente - "blockiert nicht
+    # rückwirkend bestehende Daten, verhindert aber neue Anlagen".
+    if await app.state.license_limit_client.is_exceeded("documents"):
+        raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
     try:
         parsed_attributes = json.loads(attributes) if attributes else {}
     except json.JSONDecodeError as exc:
@@ -841,6 +851,14 @@ async def count_active(
     `folder-service` fragt vor der physischen Entfernung eines Ordners ab,
     ob dessen Teilbaum noch aktive Dokumente enthält."""
     count = await repository.count_active_by_folder_ids(session, payload.folder_ids)
+    return CountActiveResult(count=count)
+
+
+@app.get("/documents/count-active-total", response_model=CountActiveResult)
+async def count_active_total(session: AsyncSession = Depends(get_session)) -> CountActiveResult:
+    """Installationsweite Dokumentenzahl (9.1, seit P9-S1) - ungegatet fuer
+    `license-service`s interne Nutzungspruefung, kein Ordnerfilter."""
+    count = await repository.count_active_total(session)
     return CountActiveResult(count=count)
 
 

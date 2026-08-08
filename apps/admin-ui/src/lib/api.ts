@@ -1431,3 +1431,42 @@ export async function listPendingManipulationApprovals(token: string): Promise<A
     (MANIPULATION_ACTION_TYPES as readonly string[]).includes(approvalRequest.action_type)
   );
 }
+
+// Lizenzsystem (Konzept 9, P9-S1/S2) - `license-service` selbst gategatet
+// den Upload (`admin.license`), der Statusendpunkt bleibt ungegated (auch
+// von registry-service/Admin-UI ohne Principal-Header abgefragt).
+export interface LicenseDimensionUsage {
+  limit: number | null;
+  current: number | null;
+  exceeded: boolean;
+}
+
+export interface LicenseStatus {
+  installed: boolean;
+  valid: boolean;
+  invalid_reason: string | null;
+  issued_at: string | null;
+  expires_at: string | null;
+  days_remaining: number | null;
+  user_model: string | null;
+  users: LicenseDimensionUsage | null;
+  storage_gb: LicenseDimensionUsage | null;
+  documents: LicenseDimensionUsage | null;
+  licensed_components: string[] | null;
+  limits_exceeded: string[];
+}
+
+export async function getLicenseStatus(token: string): Promise<LicenseStatus> {
+  const response = await request("license-service", "license/status", {}, token);
+  return response.json();
+}
+
+export async function uploadLicense(token: string, licenseToken: string): Promise<LicenseStatus> {
+  const response = await request(
+    "license-service",
+    "license",
+    jsonInit({ license_token: licenseToken }),
+    token
+  );
+  return response.json();
+}

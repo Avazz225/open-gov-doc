@@ -27,6 +27,7 @@
 | `POST` | `/documents/cascade-trash` | Interner Service-zu-Service-Aufruf von `folder-service` (`folder_ids`, `via_folder_id`, `deleted_by`, 5.2, seit P7-S1b) — soft-löscht alle aktiven Dokumente in den angegebenen Ordnern, wenn deren Ordner in den Papierkorb verschoben wird |
 | `POST` | `/documents/cascade-restore` | Gegenstück zu `cascade-trash` (`via_folder_id`) — stellt nur die dadurch kaskadiert gelöschten Dokumente wieder her |
 | `POST` | `/documents/count-active` | Interner Aufruf von `folder-service` (`folder_ids`) — Nicht-leer-Prüfung vor einer Ordner-Zwangslöschung |
+| `GET` | `/documents/count-active-total` | Interner Aufruf von `license-service` (9.1, seit P9-S1) — installationsweite Dokumentenzahl ohne Ordnerfilter, für die Nutzungsprüfung |
 | `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (5.4b), siehe unten |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
 | `GET` | `/documents/{id}/versions/{n}` | Metadaten einer konkreten Version |
@@ -171,6 +172,10 @@ Dieser Service bleibt alleinige Autorität für die Dokument-Lebenszyklusfelder 
 - **"Dehydrieren" statt physischer Löschung**: die `Document`-Zeile bleibt bei einer Aussonderung vollständig erhalten (`archived_at`/`archive_format`/`dehydrated_at` gesetzt, Metadaten weiterhin über `GET /documents/{id}` auffindbar, wörtliche Konzeptvorgabe) — nur der Inhalt auf den Live-Speicherzielen wird von `archival-service` nach einer konfigurierbaren Übergangsfrist entfernt. `GET /documents/{id}/content` liefert danach `404` (das Objekt existiert schlicht nicht mehr im Storage Service) — ein freundlicherer 409-Hinweis mit Rückhol-Verweis ist ein offener Punkt (s. u.), kein Kern-Scope dieser Session.
 - **Legal Hold blockiert nur das Dehydrieren, nicht das Archivieren selbst**: `GET /documents/{id}/has-active-hold` (neu, wiederverwendet die bestehende `repository.has_active_hold`-Logik aus 5.2) wird von `archival-service` vor jedem Dehydrierungsschritt abgefragt — eine zusätzliche, sichere Archivkopie schadet nicht, das Entfernen der Live-Kopie dagegen schon.
 - **Drei neue Events** (s. u.) werden von diesem Service publiziert, nicht von `archival-service` selbst — konsistent mit der Regel, dass nur der Domain-Owner (`document`-Stream) `document.*`-Events publiziert.
+
+## Lizenz-Limit-Blockade bei Neuanlagen (Konzept 9.3, seit P9-S2)
+
+`POST /documents` prüft als erste Aktion (vor jeder Attribut-/Constraint-Validierung) über einen neuen, dünnen `license_client.py` (`LicenseLimitClient`, TTL-Cache 30s, fail-open "nicht überschritten"), ob `license-service`s `GET /license/status` die Dimension `"documents"` in `limits_exceeded` meldet — falls ja, `403`. Bestehende Dokumente, neue Versionen (`POST .../versions`) und Wiederherstellung aus dem Papierkorb bleiben unberührt ("blockiert nicht rückwirkend bestehende Daten, verhindert aber neue Anlagen", Konzept 9.3 wörtlich). Direkter Aufruf an `license-service`, nicht über die Registry-Vermittlung — die betrifft nur Komponenten-Lizenzstatus (`licensed`/`demo`/`unlicensed`), nicht Nutzungslimits.
 
 ## Events
 

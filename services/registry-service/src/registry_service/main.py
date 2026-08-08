@@ -11,9 +11,11 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from registry_service import repository
+from registry_service import consumer, repository
+from registry_service.license_client import LicenseServiceClient
+from registry_service.licensing import ComponentLicenseCache
 from registry_service.models import Base
-from registry_service.schemas import InstanceOut, RegisterRequest
+from registry_service.schemas import InstanceOut, LicenseStatusForServiceOut, RegisterRequest
 from registry_service.settings import Settings
 
 settings = Settings()
@@ -37,6 +39,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_bus = NatsEventBusClient(settings.nats_url, stream="registry")
     await event_bus.connect()
     app.state.event_bus = event_bus
+
+    # Lizenzvermittlung (Konzept 3.2b/9.3, P9-S2): erster eigener NATS-
+    # Konsument der Registry - reagiert auf Statusaenderungen des
+    # license-service (P9-S1) durch Invalidierung des TTL-Caches, statt
+    # ausschliesslich zeitbasiert neu abzufragen.
+    app.state.license_cache = ComponentLicenseCache(
+        LicenseServiceClient(settings.license_service_base_url),
+        licensable_components=settings.licensable_components,
+        cache_ttl_seconds=settings.license_status_cache_ttl_seconds,
+    )
+    consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await consumer_bus.connect()
+    app.state.consumer_bus = consumer_bus
+    await consumer.start_consuming(consumer_bus, ["license.>"], app.state.license_cache)
 
     # Die Registry meldet sich seit P4-S3 bei sich selbst an (registry_service_base_url
     # zeigt auf die eigene Adresse) - Grundlage dafür, dass das Gateway auch
@@ -62,7 +78,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if registration:
         await registration.stop()
+    await consumer_bus.close()
     await event_bus.close()
+    await app.state.license_cache.close()
     await engine.dispose()
 
 
@@ -98,6 +116,7 @@ async def register_instance(
 ) -> InstanceOut:
     result = await repository.register(session, payload)
     await session.commit()
+    result.license_status = await app.state.license_cache.status_for(result.service_type)
     await publish_event(
         "registry.instance.registered",
         subject=payload.instance_id,
@@ -116,6 +135,7 @@ async def send_heartbeat(
     except repository.InstanceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Instance not registered") from exc
     await session.commit()
+    result.license_status = await app.state.license_cache.status_for(result.service_type)
     return result
 
 
@@ -136,17 +156,31 @@ async def deregister_instance(
     )
 
 
+async def _with_license_status(instances: list[InstanceOut]) -> list[InstanceOut]:
+    for instance in instances:
+        instance.license_status = await app.state.license_cache.status_for(instance.service_type)
+    return instances
+
+
 @app.get("/instances", response_model=list[InstanceOut])
 async def list_instances(session: AsyncSession = Depends(get_session)) -> list[InstanceOut]:
-    return await repository.list_all(
+    instances = await repository.list_all(
         session, heartbeat_timeout_seconds=settings.heartbeat_timeout_seconds
     )
+    return await _with_license_status(instances)
 
 
 @app.get("/instances/{service_type}", response_model=list[InstanceOut])
 async def list_active_instances(
     service_type: str, session: AsyncSession = Depends(get_session)
 ) -> list[InstanceOut]:
-    return await repository.list_active_by_type(
+    instances = await repository.list_active_by_type(
         session, service_type, heartbeat_timeout_seconds=settings.heartbeat_timeout_seconds
     )
+    return await _with_license_status(instances)
+
+
+@app.get("/license-status/{service_type}", response_model=LicenseStatusForServiceOut)
+async def get_license_status(service_type: str) -> LicenseStatusForServiceOut:
+    status_value = await app.state.license_cache.status_for(service_type)
+    return LicenseStatusForServiceOut(service_type=service_type, status=status_value)

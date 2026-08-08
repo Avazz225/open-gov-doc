@@ -669,6 +669,19 @@ async def test_count_active_by_folder_ids_excludes_deleted(session):
     assert count == 1
 
 
+async def test_count_active_total_counts_across_all_folders_excluding_deleted(session):
+    """Installationsweite Dokumentenzahl (9.1, seit P9-S1) - `license-service`s
+    Nutzungspruefung, kein Ordnerfilter (anders als `count_active_by_folder_ids`)."""
+    await _make_document(session, folder_id="folder-a")
+    await _make_document(session, folder_id="folder-b")
+    deleted = await _make_document(session, folder_id="folder-a")
+    await repository.delete_document(session, deleted.id, deleted_by="alice")
+
+    count = await repository.count_active_total(session)
+
+    assert count == 2
+
+
 # --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
 
 

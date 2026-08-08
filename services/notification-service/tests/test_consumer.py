@@ -280,3 +280,76 @@ async def test_maintenance_mode_activated_event_creates_security_officer_email(e
     assert notifications[0].recipient == settings.security_officer_email
     assert "alice" in notifications[0].body
     assert len(published) == 1
+
+
+async def test_license_limit_exceeded_event_creates_license_admin_email(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="license.limit_exceeded",
+        service_name="license-service",
+        payload={"dimension": "documents", "current": 1200, "limit": 1000},
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "email"
+    assert notifications[0].recipient == settings.license_admin_email
+    assert "documents" in notifications[0].body
+    assert len(published) == 1
+
+
+async def test_license_expiring_soon_event_creates_license_admin_email(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="license.expiring_soon",
+        service_name="license-service",
+        payload={"days_remaining": 12},
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].recipient == settings.license_admin_email
+    assert "12" in notifications[0].body
+    assert len(published) == 1
+
+
+async def test_license_invalid_event_creates_license_admin_email(engine, settings):
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="license.invalid",
+        service_name="license-service",
+        payload={"reason": "Lizenz abgelaufen"},
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].recipient == settings.license_admin_email
+    assert "abgelaufen" in notifications[0].body
+    assert len(published) == 1

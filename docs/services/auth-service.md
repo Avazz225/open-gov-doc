@@ -19,6 +19,8 @@
 | `PUT` | `/me/preferences` | Theme-Präferenz setzen (`{theme}` ∈ `light`/`dark`/`high-contrast`/`auto`, sonst 422) — seit P4-S6 |
 | `GET` | `/superuser/status` | Break-Glass-Status (4.6, seit P6-S5): `{active, expires_at}`, seit **P6-S6** zusätzlich `principal_id` (Keycloak-`id` des Superuser-Kontos, für den Not-Shutdown-Aufheben-Check des Permission Service, 4.8) — 404, falls das Superuser-Konto noch nicht angelegt wurde |
 | `POST` | `/superuser/deactivate` | Vorzeitige, freiwillige Deaktivierung (seit P6-S5) — ergänzt die automatische Ablauf-Erzwingung über den Poll-Loop |
+| `GET` | `/users/count` | Interner Aufruf von `license-service` (9.1 "benannte Accounts"-Modell, seit P9-S1) — ungegatet, da kein Service einen echten Keycloak-Bearer-Token für `Depends(get_current_user)` besitzt |
+| `GET` | `/sessions/count` | Interner Aufruf von `license-service` (9.1 "gleichzeitige Nutzer"-Modell, seit P9-S1) — `KeycloakAdmin.get_client_sessions_stats()`, ungegatet |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Realm-/Client-Bootstrap

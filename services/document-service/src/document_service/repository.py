@@ -239,6 +239,20 @@ async def count_active_by_folder_ids(session: AsyncSession, folder_ids: list[str
     return result.scalar_one()
 
 
+async def count_active_total(session: AsyncSession) -> int:
+    """Installationsweite Dokumentenzahl (9.1, seit P9-S1) - fuer
+    `license-service`s Nutzungspruefung. Bewusst eine eigene Funktion statt
+    `count_active_by_folder_ids([])` zu missbrauchen: die leere Liste hat
+    dort die Sicherheitsbedeutung "keine Ordner geprueft, also 0", nicht
+    "kein Filter, also alle" - beide Semantiken in einer Funktion zu
+    vermischen waere fehleranfaellig fuer den bestehenden Aufrufer
+    (Ordner-Zwangslöschungspruefung, P7-S1b)."""
+    result = await session.execute(
+        select(func.count()).select_from(Document).where(Document.deleted_at.is_(None))
+    )
+    return result.scalar_one()
+
+
 async def list_deleted_documents(session: AsyncSession, folder_id: str) -> list[Document]:
     """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1) - Gegenstück zu
     `list_documents_by_folder` (dort werden gelöschte Dokumente ausgeschlossen)."""

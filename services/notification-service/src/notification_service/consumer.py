@@ -9,6 +9,16 @@ from notification_service.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+# Siehe start_consuming(): ein Durable-Name ist pro Stream eindeutig, nicht
+# pro Subject. Jeder Eintrag hier teilt sich seinen Stream mit mindestens
+# einem weiteren Subject und braucht deshalb einen eigenen Durable-Namen.
+_SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
+    "workflow.federation.inbound_received": "notification-service-federation",
+    "license.limit_exceeded": "notification-service-license-limit-exceeded",
+    "license.expiring_soon": "notification-service-license-expiring-soon",
+    "license.invalid": "notification-service-license-invalid",
+}
+
 
 def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
@@ -41,6 +51,15 @@ def make_handler(
             return
         if event.event_type == "folder.deletion.reminder":
             await _handle_folder_deletion_reminder(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "license.limit_exceeded":
+            await _handle_license_limit_exceeded(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "license.expiring_soon":
+            await _handle_license_expiring_soon(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "license.invalid":
+            await _handle_license_invalid(session_factory, settings, publish_event, event)
             return
         await _handle_task_escalated(session_factory, settings, publish_event, event)
 
@@ -256,6 +275,71 @@ async def _handle_maintenance_mode_activated(
         await publish_notification_result(publish_event, notification)
 
 
+async def _handle_license_limit_exceeded(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Lizenz-Statusbenachrichtigung (9.2, seit P9-S1) - gleiches Muster wie
+    `_handle_maintenance_mode_activated`, nur einmal je Flankenwechsel
+    publiziert (siehe `license_service.poll_loop`)."""
+    dimension = event.payload.get("dimension", "?")
+    current = event.payload.get("current")
+    limit = event.payload.get("limit")
+    async with session_factory() as session:
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.license_admin_email,
+            subject="Lizenz-Nutzungsgrenze überschritten",
+            body=f"Dimension {dimension!r} liegt bei {current}, Lizenzgrenze ist {limit}.",
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_license_expiring_soon(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    days_remaining = event.payload.get("days_remaining", "?")
+    async with session_factory() as session:
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.license_admin_email,
+            subject="Lizenz läuft bald ab",
+            body=f"Die installierte Lizenz läuft in {days_remaining} Tagen ab.",
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_license_invalid(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    reason = event.payload.get("reason") or "kein Grund angegeben"
+    async with session_factory() as session:
+        notification = await repository.create_and_send(
+            session,
+            settings,
+            channel="email",
+            recipient=settings.license_admin_email,
+            subject="Lizenz ungültig",
+            body=f"Die installierte Lizenz ist ungültig: {reason}.",
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
 async def publish_notification_result(
     publish_event: Callable[[str, str, dict], Awaitable[None]], notification
 ) -> None:
@@ -296,14 +380,14 @@ async def start_consuming(
         # (P6-S2). Ein zweiter `subscribe()`-Aufruf mit demselben Durable-Namen
         # "notification-service" für ein anderes Filter-Subject auf demselben
         # Stream schlägt mit "consumer is already bound to a subscription" fehl -
-        # daher ein eigener, zweiter Durable-Name nur für das neue Subject. Die
-        # drei bereits bestehenden Subjects behalten ihren ursprünglichen
-        # Durable-Namen (keine Neuzustellung ihres bisherigen Verlaufs).
-        durable = (
-            "notification-service-federation"
-            if subject == "workflow.federation.inbound_received"
-            else "notification-service"
-        )
+        # daher ein eigener Durable-Name je zusätzlichem Subject, das sich einen
+        # Stream mit Geschwister-Subjects teilt. Die drei ursprünglichen Subjects
+        # behalten ihren Durable-Namen (keine Neuzustellung ihres bisherigen
+        # Verlaufs). Die drei "license.>"-Subjects (P9-S1) teilen sich alle den
+        # neuen "license"-Stream miteinander - bekommen deshalb je einen eigenen
+        # Durable-Namen statt nur eines default+zwei Ausnahmen (Symmetrie/
+        # Lesbarkeit, kein technischer Zwang fuer das erste der drei).
+        durable = _SHARED_STREAM_DURABLE_OVERRIDES.get(subject, "notification-service")
         try:
             await bus.subscribe(subject, handler, durable=durable)
         except SubjectNotFoundError:

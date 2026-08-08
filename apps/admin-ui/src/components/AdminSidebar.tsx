@@ -85,6 +85,13 @@ const GROUPS: NavGroup[] = [
       },
     ],
   },
+  {
+    id: "license",
+    labelKey: "nav.groupLicense",
+    items: [
+      { href: "/license/", labelKey: "nav.license", requiresCapability: "admin.license" },
+    ],
+  },
 ];
 
 const COLLAPSED_GROUPS_KEY = "dms.admin.collapsedGroups";

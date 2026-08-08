@@ -38,3 +38,10 @@ class Settings(BaseServiceSettings):
     # Rein konfigurationsbasiert, kein automatischer Prozesskatalog-Abgleich
     # zwischen Installationen (siehe docs/services/workflow-service.md).
     federation_process_type_map: dict[str, str] = {}
+
+    # Lizenzvermittlung (Konzept 9.3, P9-S2): workflow-service ist die einzige
+    # heute real existierende "Applikationskomponente" (9.1) und fragt ihren
+    # eigenen Lizenzstatus beim registry-service ab (nicht direkt beim
+    # license-service - Service-Isolation, die Registry bleibt einzige
+    # Vermittlungsstelle). TTL-Cache-Client, Vorbild `permission_client.py`.
+    license_status_cache_ttl_seconds: float = 15.0

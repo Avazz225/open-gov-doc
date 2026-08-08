@@ -2,6 +2,7 @@ import os
 
 import pytest
 from dms_db_base import build_engine, make_session_factory
+from document_service.license_client import LicenseLimitClient
 from document_service.models import Base
 from sqlalchemy import text
 
@@ -15,6 +16,21 @@ DSN = os.environ.get(
 os.environ["DMS_POSTGRES_DSN"] = DSN
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
+
+
+@pytest.fixture(autouse=True)
+def _default_no_license_limit_exceeded(monkeypatch):
+    """Lizenz-Limit-Blockade (Konzept 9.3, P9-S2) greift real gegen den
+    laufenden license-service - in dieser Testumgebung ist häufig gar keine
+    oder eine abgelaufene Testlizenz installiert, was `POST /documents` ohne
+    diesen Patch standardmäßig mit `403` brechen könnte. Einzelne Tests für
+    die Blockade selbst überschreiben `is_exceeded` gezielt wieder (siehe
+    test_license_limit.py)."""
+
+    async def _never_exceeded(self, dimension: str) -> bool:
+        return False
+
+    monkeypatch.setattr(LicenseLimitClient, "is_exceeded", _never_exceeded)
 
 
 @pytest.fixture(autouse=True)

@@ -53,7 +53,9 @@
     "deletionRegister": "Löschregister",
     "archivalTransfers": "Aussonderung & Archivierung",
     "reports": "Standardberichte",
-    "queryConsole": "Query-Konsole"
+    "queryConsole": "Query-Konsole",
+    "groupLicense": "Lizenz",
+    "license": "Lizenzstatus"
   },
   "home": {
     "title": "DMS Admin",
@@ -518,6 +520,31 @@
     "healthy": "healthy",
     "down": "down",
     "empty": "Keine Instanzen registriert."
+  },
+  "license": {
+    "pageTitle": "Lizenzstatus",
+    "hint": "Signierte Lizenzdatei installieren und laufende Nutzung je Dimension einsehen (9.1-9.3). Eine überschrittene Grenze blockiert keine Bestandsdaten, verhindert aber neue Anlagen.",
+    "notInstalled": "Keine Lizenz installiert.",
+    "status": "Status",
+    "valid": "gültig",
+    "invalid": "ungültig",
+    "expiresAt": "Läuft ab",
+    "daysRemaining": "noch {count} Tage",
+    "userModel": "Nutzermodell",
+    "users": "Nutzer",
+    "storage": "Speicher (GB)",
+    "documents": "Dokumente",
+    "licensedComponents": "Lizenzierte Komponenten",
+    "allComponents": "alle",
+    "limitsExceeded": "Überschrittene Grenzen",
+    "uploadLabel": "Neue Lizenzdatei (signiertes JWT) installieren",
+    "uploadPlaceholder": "eyJhbGciOi...",
+    "uploadButton": "Installieren",
+    "uploaded": "Lizenz installiert.",
+    "bannerNotInstalled": "Keine Lizenz installiert - eingeschränkter Betrieb (Demo-Modus/Sperre je Komponente).",
+    "bannerInvalid": "Installierte Lizenz ungültig oder abgelaufen.",
+    "bannerLimitExceeded": "Lizenz-Nutzungsgrenze überschritten: {dimensions}.",
+    "bannerExpiringSoon": "Lizenz läuft in {count} Tagen ab."
   },
   "installations": {
     "pageTitle": "Installationsverwaltung",

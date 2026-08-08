@@ -139,6 +139,19 @@ services:
       # "registry-service" als service_type auflösen kann (z. B. Admin-UI).
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://registry-service:8000
+      # Lizenzvermittlung (Konzept 3.2b/9.3, P9-S2) - license-service
+      # hängt selbst NICHT von registry-service ab (nur env-var, kein
+      # depends_on), ein Zyklus entsteht hier also nicht.
+      DMS_LICENSE_SERVICE_BASE_URL: http://license-service:8000
+      # Bewusst leer in diesem gebündelten Dev-/Test-Stack (Code-Default ist
+      # {"workflow-service": "demo"}): ohne Lizenzausstellungswerkzeug (ADR
+      # 0032) ist in dieser Umgebung nie eine gültige Lizenz installiert -
+      # der Produktions-Default würde workflow-service dauerhaft in den
+      # Demo-Modus versetzen und andere Services' Integrationstests brechen,
+      # die real gegen den laufenden workflow-service-Container schreiben
+      # (siehe case-service). Eine echte Installation überschreibt diese
+      # Variable nicht (nutzt den Code-Default).
+      DMS_LICENSABLE_COMPONENTS: ${REGISTRY_SERVICE_LICENSABLE_COMPONENTS:-{}}
     ports:
       - "${REGISTRY_SERVICE_PORT:-8001}:8000"
     depends_on:
@@ -146,6 +159,8 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      license-service:
+        condition: service_started
     networks:
       - dms-net
 
@@ -284,6 +299,12 @@ services:
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://document-service:8000
+      # Lizenz-Limit-Blockade bei Neuanlagen (Konzept 9.3, P9-S2). Bewusst
+      # ohne depends_on: license-service haengt selbst von document-service
+      # ab (Dokumentenzaehler, P9-S1) - ein umgekehrtes depends_on waere ein
+      # Zyklus. Der Check ist ohnehin fail-open (TTL-Cache), kein Hard-
+      # Dependency beim Start.
+      DMS_LICENSE_SERVICE_BASE_URL: http://license-service:8000
       # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1): wie oft
       # der Poll-Loop fällige Fristen prüft, sowie die Rolle für den
       # Governance-Bypass bei Zwangslöschung (muss zu storage-services
@@ -715,6 +736,46 @@ services:
       permission-service:
         condition: service_started
       auth-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  license-service:
+    build:
+      context: ..
+      dockerfile: services/license-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://license-service:8000
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # ADR 0032: statisch eingebetteter oeffentlicher RS256-Schluessel, kein
+      # JWKS. Der Python-Default in settings.py ist bereits derselbe
+      # Entwicklungsschluessel (kein separater Eintrag hier noetig, anders
+      # als einzeilige Secrets wie DMS_DRY_RUN_SECRET) - eine echte
+      # Installation ueberschreibt DMS_LICENSE_PUBLIC_KEY_PEM als mehrzeiligen
+      # YAML-Block-Skalar in einer eigenen compose-Override-Datei, da die
+      # kompakte "${VAR:-default}"-Syntax kein mehrzeiliges PEM als Default
+      # transportieren kann.
+    ports:
+      - "${LICENSE_SERVICE_PORT:-8023}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      storage-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net

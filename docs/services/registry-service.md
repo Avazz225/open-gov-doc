@@ -1,8 +1,8 @@
 # registry-service
 
-**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Lizenzvermittlung (3.2b) ist bewusst noch nicht implementiert, folgt mit dem License Service (Phase 9).
+**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Seit P9-S2 zusätzlich Lizenzvermittlung (3.2b/9.3): fragt `license-service` ab und reicht einen berechneten Lizenzstatus (`licensed`/`demo`/`unlicensed`) je `service_type` an registrierende/heartbeatende Services weiter, ohne selbst eine Lizenzprüfung durchzuführen.
 
-**Konzept-Referenz:** 3.2a
+**Konzept-Referenz:** 3.2a, 3.2b, 9.3
 **Eigenes Postgres-Schema:** `registry` (Tabelle `service_instance`)
 
 ## API
@@ -14,11 +14,19 @@
 | `DELETE` | `/instances/{instance_id}` | Deregistrieren |
 | `GET` | `/instances/{service_type}` | Nur aktuell erreichbare Instanzen dieses Typs |
 | `GET` | `/instances` | Alle Instanzen inkl. berechnetem `healthy`-Flag |
+| `GET` | `/license-status/{service_type}` | Berechneter Lizenzstatus (`licensed`/`demo`/`unlicensed`) für diesen Servicetyp — ungegatet, für interne Poll-Clients (z. B. `workflow-service`, siehe unten). |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Datenmodell
 
-`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`. `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet.
+`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`. `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
+
+## Lizenzvermittlung (3.2b/9.3, P9-S2)
+
+- **Nur konfigurierte Komponenten sind überhaupt lizenzpflichtig**: `settings.licensable_components` (Default `{"workflow-service": "demo"}`) ordnet jedem separat lizenzierbaren `service_type` eine Policy zu (`"demo"` oder `"lock"`), die greift, wenn keine gültige Lizenz installiert ist oder die Komponente nicht in `licensed_components` der Lizenz enthalten ist. Jeder nicht gelistete `service_type` ist "core" und bekommt immer `"licensed"` — Konzept 9.1 nennt CMIS-Connector/Migration-Service/Workflow-Automatisierung nur als Beispiele, nicht "jeder Service ist lizenzpflichtig".
+- **`ComponentLicenseCache`** (`licensing.py`): TTL-Cache (`license_status_cache_ttl_seconds`, Default 60s) um den rohen `license-service`-Status, plus Invalidierung durch den neuen `license.>`-NATS-Konsumenten (`consumer.py`, erster eigener Konsument dieses Service, durable `registry-service`) — reagiert damit sowohl ereignisgetrieben als auch mit einer harten Obergrenze auf Statusänderungen.
+- `InstanceOut` (Register-/Heartbeat-/Listing-Antworten) trägt zusätzlich `license_status`. Ein dedizierter `GET /license-status/{service_type}` erlaubt bereits laufenden Services, ihren eigenen Status ohne Neustart erneut abzufragen (z. B. `workflow-service`s `license_client.LicenseStatusClient`, siehe `docs/services/workflow-service.md`).
+- Fail-open bei nicht erreichbarem `license-service` (`"licensed"` für core, konfigurierte Policy für licensierbare Komponenten bleibt zuletzt bekannter Wert) — ein Lizenzdienst-Ausfall soll die Registry nicht lahmlegen.
 
 ## Events
 
@@ -27,7 +35,7 @@ Publiziert (Stream `registry`, `dms-eventbus-client`, nach Commit):
 - `registry.instance.registered` — `subject`=`instance_id`, `payload`={`service_type`, `version`}
 - `registry.instance.deregistered` — `subject`=`instance_id`, `payload`={`service_type`}
 
-Kein Event pro Heartbeat. Konsumiert wird dieser Strom aktuell vom Audit Service (`docs/services/audit-service.md`).
+Kein Event pro Heartbeat. Konsumiert wird dieser Strom vom Audit Service (`docs/services/audit-service.md`). Seit P9-S2 konsumiert `registry-service` selbst `license.>` (siehe oben) — reiner Cache-Invalidierungs-Trigger, kein Payload-Parsing.
 
 ## Nutzung (seit P4-S1)
 
@@ -47,5 +55,4 @@ Noch keine — Monitoring/Sensor-Konzept folgt in Phase 11.
 ## Offene Punkte
 
 - Aktives Anpingen des gemeldeten `health_endpoint` (statt reinem Heartbeat-Push) als mögliche spätere Ergänzung, nicht Teil dieser Session.
-- Lizenzvermittlung (3.2b) folgt mit dem License Service.
 - **Kein Aufräumen dauerhaft unerreichbarer Instanzen** (seit P4-S1 beobachtet: Container-Neustarts ohne sauberes `DELETE /instances/{id}`, z. B. bei `docker compose down` ohne vorheriges Deregistrieren, hinterlassen dauerhaft `healthy=false`-Zeilen). Unkritisch für das Routing (`GET /instances/{service_type}` filtert sie bereits heraus), sammelt sich aber unbegrenzt in der Tabelle an — eine periodische Bereinigung (z. B. Löschen nach X Tagen ohne Heartbeat) ist nicht Teil dieser Session.

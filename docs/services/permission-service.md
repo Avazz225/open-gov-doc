@@ -77,7 +77,7 @@ Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründu
 | `domain-admin-users` | `admin.user_management` | `users-admin` (seit P6-S5 angelegt, `auth-service`) |
 | `domain-admin-config` | `admin.object_config` | `config-admin` (seit **P6-S6** angelegt, `auth-service`) |
 | `domain-admin-storage` | `admin.storage` | noch keins |
-| `domain-admin-license` | `admin.license` | noch keins |
+| `domain-admin-license` | `admin.license` | keins (Durchsetzung direkt in `license-service`, seit **P9-S1**, siehe unten) |
 | `domain-admin-query-console` | `admin.query_console` | keins (Durchsetzung direkt in `query-service`, seit **P8-S1**, siehe unten) |
 | `domain-admin-query-console-manipulate` | `admin.query_console.manipulate` | keins (Durchsetzung direkt in `query-service`, seit **P8-S2**) |
 | `domain-admin-deletion` | `admin.deletion` | noch keins |
@@ -85,7 +85,7 @@ Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründu
 | `breakglass-approver` | `breakglass.approve` | keins (echte Menschen, manuell zugewiesen) |
 | `domain-admin-emergency` | `system.not_shutdown.trigger` | keins (seit **P6-S6**, echte Menschen, manuell zugewiesen — siehe "Not-Shutdown" unten) |
 
-`domain-admin-users` und (seit **P6-S6**) `domain-admin-config` haben ein eigenes technisches Keycloak-Konto (`auth-service`s `/users` bzw. `workflow-service`s Prozessdefinitions-Endpunkte, Admin-UI-Gating). `domain-admin-query-console`/`-manipulate` (seit **P8-S1**/**P8-S2**) sind ebenfalls tatsächlich durchgesetzt, aber **ohne** eigenes technisches Konto — `query-service` prüft die Rollenzuweisung direkt über `GET /effective-permissions/{principal}/root`, kein dediziertes Konto nötig (siehe `docs/services/query-service.md`). Die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement, da die zugehörigen fachlichen Funktionen teils noch nicht existieren (Lizenzverwaltung). `breakglass-approver` und (seit P6-S6) `domain-admin-emergency` bekommen bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 bzw. die Auslöse-Berechtigung aus 4.8 verlangt eine echte, individuell zurechenbare Person, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
+`domain-admin-users` und (seit **P6-S6**) `domain-admin-config` haben ein eigenes technisches Keycloak-Konto (`auth-service`s `/users` bzw. `workflow-service`s Prozessdefinitions-Endpunkte, Admin-UI-Gating). `domain-admin-query-console`/`-manipulate` (seit **P8-S1**/**P8-S2**) sowie **seit P9-S1** `domain-admin-license` sind ebenfalls tatsächlich durchgesetzt, aber **ohne** eigenes technisches Konto — der jeweilige Service prüft die Rollenzuweisung direkt über `GET /effective-permissions/{principal}/root`, kein dediziertes Konto nötig (siehe `docs/services/query-service.md`/`docs/services/license-service.md`). Die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement. `breakglass-approver` und (seit P6-S6) `domain-admin-emergency` bekommen bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 bzw. die Auslöse-Berechtigung aus 4.8 verlangt eine echte, individuell zurechenbare Person, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
 
 ## Not-Shutdown (4.8, seit P6-S6)
 

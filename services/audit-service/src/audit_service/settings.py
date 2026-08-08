@@ -41,7 +41,9 @@ class Settings(BaseServiceSettings):
     # in P8-S1 dazu - die Query- & Trace-Konsole (6.1) auditiert jede
     # ausgeführte Abfrage selbst (`query.executed`, Konzept-Punkt 5
     # "Vollständige Protokollierung"), proaktiv gleich mit ergänzt statt den
-    # "folder.>"-Fehler ein zweites Mal zu wiederholen.
+    # "folder.>"-Fehler ein zweites Mal zu wiederholen. "license.>" kam in
+    # P9-S1 dazu - `license-service`s Installations-/Statusänderungs-
+    # Ereignisse (9.2) sollen ebenfalls im Audit-Trail landen.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -58,4 +60,5 @@ class Settings(BaseServiceSettings):
         "folder.>",
         "reporting.>",
         "query.>",
+        "license.>",
     ]

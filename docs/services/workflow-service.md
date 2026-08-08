@@ -59,6 +59,18 @@ Bewusst begrenzter Retrofit (Nutzerentscheidung: "Admin-Aktionen gaten, Alltagsn
 - **`created_by`/`completed_by` bleiben weiterhin reine, ungeprüfte Strings** — die Gating-Entscheidung betrifft nur, *ob* eine Aktion ausgeführt werden darf, nicht, ob der angegebene Name stimmt (unverändert seit P6-S1).
 - **Seit P6-S9**: `POST /federation/inbound`/`.../inbound-result` sind öffentliche Routen (`gateway-service`s `public_routes`, kein `X-DMS-Principal` — der Federation Hub ist kein eingeloggter Nutzer), respektieren aber weiterhin den Wartungsmodus (503-Verhalten müsste ein aufrufender Hub selbst als Zustellungsfehlschlag interpretieren) — bewusst *nicht* in `maintenance_mode_allowed_routes` aufgenommen, da ein föderierter Schritt fachlich Alltagsverarbeitung ist, kein Admin-Vorgang (kein Sonderfall wie bei ADR 0025). Authentisiert wird stattdessen über `X-Federation-Hub-Signature` (ADR 0028).
 
+## Lizenz-Demo-Modus/Sperrverhalten (Konzept 9.3, seit P9-S2)
+
+`workflow-service` ist die einzige heute real existierende, separat lizenzierbare "Applikationskomponente" aus Konzept 9.1 (CMIS-Connector/Migration-Service existieren erst ab Phase 12). Ein neuer, dünner `license_client.py` (`LicenseStatusClient`, Vorbild `permission_client.py`) fragt den eigenen Lizenzstatus beim `registry-service` ab (`GET /license-status/workflow-service`, TTL-Cache 15s, fail-open `"licensed"`) — **nicht** direkt beim `license-service`, die Registry bleibt einzige Vermittlungsstelle (3.2b).
+
+Eine neue `_license_gate(action)`-Dependency (`Depends(...)` statt wie beim Wartungsmodus manuell im Funktionskörper, da hier ein async Cross-Service-Aufruf statt eines simplen Header-Reads nötig ist):
+
+- `"unlicensed"` sperrt vollständig, auch Lesezugriffe (`403`).
+- `"demo"` erlaubt nur Lesezugriff (Konzept-Beispiel wörtlich) — schreibende Endpunkte (`POST`/`DELETE /process-definitions*`, `POST .../instances`, `POST .../tasks/{id}/complete`) antworten mit `403`.
+- `"licensed"` lässt alles durch.
+
+`/federation/*`-Endpunkte bleiben bewusst ungegatet — Föderation ist ein eigenständiges, in Phase 13 verankertes Thema, keine Vorentscheidung hier.
+
 ## Signature Task (3.10, seit P6-S7)
 
 Ein `<bpmn:manualTask>` mit `bpmn:extensionElements/camunda:properties` `taskType=signature`/`requiredLevel=ses|aes|qes` wird als Signature Task erkannt — technisch bleibt es ein gewöhnlicher Manual Task (`.manual is True`, `ready_manual_tasks`/`find_ready_task` unverändert), fachlich verlangt der Abschluss aber eine echte Signatur:

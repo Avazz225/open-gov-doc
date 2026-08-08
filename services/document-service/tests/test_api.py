@@ -845,6 +845,19 @@ def test_count_active_excludes_deleted(client):
     assert response.json()["count"] == 1
 
 
+def test_count_active_total_counts_across_all_folders(client):
+    """Installationsweite Dokumentenzahl (9.1, seit P9-S1) - `license-service`s
+    Nutzungspruefung."""
+    upload(client, folder_id="root")
+    deleted_id = upload(client, folder_id="root").json()["id"]
+    client.request("DELETE", f"/documents/{deleted_id}?deleted_by=admin")
+
+    response = client.get("/documents/count-active-total")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+
+
 def test_legal_hold_lifecycle(client):
     document_id = upload(client).json()["id"]
 

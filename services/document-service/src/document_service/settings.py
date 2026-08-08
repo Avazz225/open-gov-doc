@@ -55,3 +55,12 @@ class Settings(BaseServiceSettings):
     # auf beiden Seiten `dms-admin`, unabhängig konfigurierbar wie
     # `kennzeichen_admin_role`).
     governance_bypass_role: str = "dms-admin"
+
+    # Lizenz-Limit-Blockade bei Neuanlagen (Konzept 9.3, P9-S2): "verhindert
+    # aber neue Anlagen, bis das Limit wieder eingehalten oder die Lizenz
+    # erweitert wird" - bestehende Dokumente/Versionen/Wiederherstellung
+    # bleiben unberührt (Check nur in `POST /documents`). Fail-open (TTL-
+    # Cache) bei nicht erreichbarem license-service, gleiche Konvention wie
+    # jeder andere Cross-Service-Cache im Projekt.
+    license_service_base_url: str = "http://localhost:8023"
+    license_limit_cache_ttl_seconds: float = 30.0

@@ -38,11 +38,22 @@ class Settings(BaseServiceSettings):
         # dieses Service auf dem "folder"-Stream, daher kein zweiter Durable-
         # Name nötig (anders als `workflow.federation.inbound_received`).
         "folder.deletion.reminder",
+        # Lizenz-Statusaenderungen (9.2, seit P9-S1) - die drei konkreten,
+        # namentlich benannten Flanken-Ereignisse aus `license-service`s
+        # Poll-Loop, siehe consumer.py.
+        "license.limit_exceeded",
+        "license.expiring_soon",
+        "license.invalid",
     ]
 
     # Empfänger der optionalen Sicherheitsbenachrichtigung bei Break-Glass-
     # Aktivierung (4.6, P6-S5) und Not-Shutdown (4.8, P6-S6).
     security_officer_email: str = "security@dms.local"
+
+    # Empfänger der Lizenz-Statusbenachrichtigungen (9.2, seit P9-S1) - fest
+    # hinterlegt, gleiche Begruendung wie `security_officer_email` (kein
+    # Empfänger-Auflösungsmechanismus nötig).
+    license_admin_email: str = "license-admin@dms.local"
 
     # Retrofit P6-S6 (Aufrufautorisierung): Empfänger-Existenzprüfung für
     # `POST /notifications` gegen echte auth-service-Konten. `GET /users` ist

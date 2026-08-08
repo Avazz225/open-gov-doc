@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from typing import Literal
 
 import httpx
 from dms_common import configure_logging
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from workflow_service import federation_crypto, repository, spiff_adapter
 from workflow_service.federation_client import FederationHubClient
+from workflow_service.license_client import LicenseStatusClient
 from workflow_service.models import Base, FederationIdentity
 from workflow_service.permission_client import PermissionServiceClient
 from workflow_service.schemas import (
@@ -210,6 +212,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
     app.state.federation_client = await _ensure_federation_identity(app.state.session_factory)
+    app.state.license_client = LicenseStatusClient(
+        settings.registry_service_base_url or "",
+        settings.service_name,
+        settings.license_status_cache_ttl_seconds,
+    )
 
     # Reiner Producer (kein Consumer, siehe docs/services/workflow-service.md
     # "Events") - eigener Stream, ein Producer muss ihn selbst anlegen (ADR 0001).
@@ -242,6 +249,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.close()
     await app.state.permission_client.close()
     await app.state.signature_client.close()
+    await app.state.license_client.close()
     if app.state.federation_client is not None:
         await app.state.federation_client.close()
     await engine.dispose()
@@ -454,8 +462,36 @@ async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
         )
 
 
+def _license_gate(action: Literal["read", "write"]):
+    """Demo-Modus/Sperrverhalten (Konzept 9.3, P9-S2): workflow-service ist
+    die einzige heute real existierende licensierbare "Applikationskomponente"
+    (9.1). `"unlicensed"` sperrt vollstaendig (auch Lesen), `"demo"` erlaubt
+    nur Lesezugriff (Konzept-Beispiel woertlich). Als `Depends()` statt wie
+    beim Wartungsmodus manuell im Funktionskoerper, da hier ein async
+    Cross-Service-Aufruf noetig ist, kein simpler Header-Read. Federation-
+    Endpunkte bleiben bewusst aussen vor (eigenstaendiges Thema, Phase 13)."""
+
+    async def _check() -> None:
+        license_status = await app.state.license_client.get_status()
+        if license_status == "unlicensed":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Lizenz erforderlich - Komponente 'workflow-service' nicht lizenziert.",
+            )
+        if license_status == "demo" and action == "write":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo-Modus aktiv - nur Lesezugriff verfügbar.",
+            )
+
+    return _check
+
+
 @app.post(
-    "/process-definitions", response_model=ProcessDefinitionOut, status_code=status.HTTP_201_CREATED
+    "/process-definitions",
+    response_model=ProcessDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_license_gate("write"))],
 )
 async def create_process_definition(
     bpmn_xml: UploadFile = File(...),
@@ -481,7 +517,11 @@ async def create_process_definition(
     return definition
 
 
-@app.get("/process-definitions", response_model=list[ProcessDefinitionOut])
+@app.get(
+    "/process-definitions",
+    response_model=list[ProcessDefinitionOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
 async def list_process_definitions(
     name: str | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[ProcessDefinitionOut]:
@@ -490,7 +530,11 @@ async def list_process_definitions(
     return await repository.list_process_definitions(session, name=name)
 
 
-@app.get("/process-definitions/{process_definition_id}", response_model=ProcessDefinitionDetailOut)
+@app.get(
+    "/process-definitions/{process_definition_id}",
+    response_model=ProcessDefinitionDetailOut,
+    dependencies=[Depends(_license_gate("read"))],
+)
 async def get_process_definition(
     process_definition_id: int, session: AsyncSession = Depends(get_session)
 ) -> ProcessDefinitionDetailOut:
@@ -500,7 +544,11 @@ async def get_process_definition(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.delete("/process-definitions/{process_definition_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/process-definitions/{process_definition_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_license_gate("write"))],
+)
 async def delete_process_definition(
     process_definition_id: int,
     x_dms_principal: str = Header(default=""),
@@ -520,6 +568,7 @@ async def delete_process_definition(
     "/process-definitions/{process_definition_id}/instances",
     response_model=ProcessInstanceOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_license_gate("write"))],
 )
 async def start_instance(
     process_definition_id: int,
@@ -559,7 +608,11 @@ async def start_instance(
     return instance
 
 
-@app.get("/instances/{instance_id}", response_model=ProcessInstanceOut)
+@app.get(
+    "/instances/{instance_id}",
+    response_model=ProcessInstanceOut,
+    dependencies=[Depends(_license_gate("read"))],
+)
 async def get_instance(
     instance_id: str, session: AsyncSession = Depends(get_session)
 ) -> ProcessInstanceOut:
@@ -569,7 +622,11 @@ async def get_instance(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get("/instances", response_model=list[ProcessInstanceOut])
+@app.get(
+    "/instances",
+    response_model=list[ProcessInstanceOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
 async def list_instances(
     process_definition_id: int | None = None,
     status: str | None = None,
@@ -584,7 +641,11 @@ async def list_instances(
     )
 
 
-@app.get("/instances/{instance_id}/tasks", response_model=list[ReadyTaskOut])
+@app.get(
+    "/instances/{instance_id}/tasks",
+    response_model=list[ReadyTaskOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
 async def get_ready_tasks(
     instance_id: str, session: AsyncSession = Depends(get_session)
 ) -> list[ReadyTaskOut]:
@@ -667,7 +728,11 @@ async def _reject_manual_federated_completion(
         )
 
 
-@app.post("/instances/{instance_id}/tasks/{task_id}/complete", response_model=ProcessInstanceOut)
+@app.post(
+    "/instances/{instance_id}/tasks/{task_id}/complete",
+    response_model=ProcessInstanceOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
 async def complete_task(
     instance_id: str,
     task_id: str,

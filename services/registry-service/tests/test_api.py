@@ -75,3 +75,37 @@ def test_deregister_removes_instance(client):
 def test_deregister_unknown_instance_returns_404(client):
     response = client.delete("/instances/does-not-exist")
     assert response.status_code == 404
+
+
+def test_register_response_includes_license_status_for_core_service(client):
+    response = client.post("/instances", json=make_payload())
+    assert response.status_code == 201
+    # "document-service" ist keine licensierbare Komponente (default
+    # licensable_components nur "workflow-service") - immer "licensed".
+    assert response.json()["license_status"] == "licensed"
+
+
+def test_license_status_endpoint_for_licensable_component_uses_configured_policy(client):
+    class FakeCache:
+        async def status_for(self, service_type: str) -> str:
+            assert service_type == "workflow-service"
+            return "demo"
+
+        async def close(self) -> None:
+            pass
+
+    app.state.license_cache = FakeCache()
+
+    response = client.get("/license-status/workflow-service")
+
+    assert response.status_code == 200
+    assert response.json() == {"service_type": "workflow-service", "status": "demo"}
+
+
+def test_heartbeat_response_includes_license_status(client):
+    payload = make_payload()
+    client.post("/instances", json=payload)
+
+    response = client.post(f"/instances/{payload['instance_id']}/heartbeat")
+
+    assert response.json()["license_status"] == "licensed"

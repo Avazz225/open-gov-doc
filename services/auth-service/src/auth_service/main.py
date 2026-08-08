@@ -230,6 +230,28 @@ async def list_users(user: dict = Depends(get_current_user)) -> list[dict]:
     return admin_users.list_users(app.state.keycloak_admin)
 
 
+@app.get("/users/count")
+def count_users() -> dict:
+    """Installationsweite Nutzerzahl (9.1 "benannte Accounts"-Modell, seit
+    P9-S1) - ungegatet fuer `license-service`s internen Aufruf (kein
+    Service hat einen echten Keycloak-Bearer-Token fuer `Depends(get_current_
+    user)`, siehe PROGRESS.md-Recherche)."""
+    return {"count": len(admin_users.list_users(app.state.keycloak_admin))}
+
+
+@app.get("/sessions/count")
+def count_sessions() -> dict:
+    """Installationsweite Anzahl gleichzeitiger Sessions (9.1 "gleichzeitige
+    Nutzer"-Modell, seit P9-S1) - fertige Keycloak-Admin-API-Methode, kein
+    neues Session-Tracking noetig. Ungegatet, gleiche Begruendung wie
+    `/users/count`."""
+    stats = app.state.keycloak_admin.get_client_sessions_stats()
+    for entry in stats:
+        if entry.get("clientId") == settings.keycloak_client_id:
+            return {"count": int(entry.get("active", 0))}
+    return {"count": 0}
+
+
 @app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def create_user(payload: UserCreate, user: dict = Depends(get_current_user)) -> dict:
     await _require_user_management(user)

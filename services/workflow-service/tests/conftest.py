@@ -5,6 +5,7 @@ import httpx
 import pytest
 from dms_db_base import build_engine, make_session_factory
 from sqlalchemy import text
+from workflow_service.license_client import LicenseStatusClient
 from workflow_service.models import Base
 
 DSN = os.environ.get(
@@ -66,6 +67,23 @@ async def _grant_config_admin_permission():
             },
         )
         response.raise_for_status()
+
+
+@pytest.fixture(autouse=True)
+def _default_licensed(monkeypatch):
+    """Demo-Modus/Sperrverhalten (Konzept 9.3, P9-S2) greift real gegen den
+    laufenden registry-service/license-service - in dieser Testumgebung ist
+    i. d. R. keine gueltige Lizenz installiert (kein Ausstellungswerkzeug im
+    Repo, ADR 0032), was workflow-service ohne diesen Patch standardmaessig
+    in den Demo-Modus versetzen und praktisch jeden bestehenden
+    Schreib-Endpunkt-Test mit `403` brechen wuerde. Einzelne Tests fuer das
+    Gate selbst ueberschreiben `get_status` gezielt wieder (siehe
+    test_license_gate.py)."""
+
+    async def _always_licensed(self) -> str:
+        return "licensed"
+
+    monkeypatch.setattr(LicenseStatusClient, "get_status", _always_licensed)
 
 
 @pytest.fixture(autouse=True)
