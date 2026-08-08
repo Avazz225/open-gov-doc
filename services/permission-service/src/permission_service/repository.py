@@ -110,6 +110,11 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # tatsächlichen Feature (Plugin Orchestration Service, 3.8, P10-S1) -
     # Konzept 4.6 nennt seine Domänen-Liste ausdrücklich nur beispielhaft.
     ("domain-admin-orchestration", "Plugin-Orchestrierung", ["admin.orchestration"]),
+    # Wie "domain-admin-orchestration" (P10-S1) entsteht diese Domäne erst mit
+    # dem tatsächlichen Feature (Sensor-Konzept/monitoring-service, 10.1,
+    # P11-S1) - Deaktivieren sicherheitsrelevanter Sensoren ist laut Konzept
+    # selbst ein sicherheitsrelevanter, auditierter Vorgang.
+    ("domain-admin-monitoring", "Monitoring-/Sensor-Konfiguration", ["admin.monitoring"]),
 ]
 
 

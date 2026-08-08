@@ -64,3 +64,9 @@ class Settings(BaseServiceSettings):
     # jeder andere Cross-Service-Cache im Projekt.
     license_service_base_url: str = "http://localhost:8023"
     license_limit_cache_ttl_seconds: float = 30.0
+
+    # Sensor-Konzept (10.1, P11-S1): document-service ist einer der zwei
+    # Piloten (kein Vollretrofit, siehe P11-S0-Befund). Aktivierungsstatus
+    # kommt vom `monitoring-service`.
+    monitoring_service_base_url: str = "http://localhost:8026"
+    sensor_sample_interval_seconds: float = 15.0

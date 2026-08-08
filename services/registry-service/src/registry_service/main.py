@@ -1,17 +1,19 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_metrics_client import SensorConfigClient, metrics_payload, run_gauge_sampler_loop
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from registry_service import consumer, repository
+from registry_service import consumer, metrics, repository
 from registry_service.license_client import LicenseServiceClient
 from registry_service.licensing import ComponentLicenseCache
 from registry_service.models import Base
@@ -41,6 +43,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE registry.service_instance "
                 "ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active' NOT NULL"
+            )
+        )
+        # Sensor-Katalog (10.1, P11-S1) - gleiches additive Muster.
+        await conn.execute(
+            text(
+                "ALTER TABLE registry.service_instance "
+                "ADD COLUMN IF NOT EXISTS sensors JSON DEFAULT '[]'::json NOT NULL"
             )
         )
     app.state.engine = engine
@@ -78,6 +87,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
+        sensors=metrics.sensor_declarations(),
+    )
+
+    # Sensor-Konzept (10.1, P11-S1): registry-service ist einer der zwei
+    # Piloten (siehe P11-S0-Befund). Aktivierungsstatus kommt vom
+    # `monitoring-service`, nicht aus der eigenen DB - symmetrisches Muster
+    # zu jedem anderen Sensor-emittierenden Service (kein Sonderfall, obwohl
+    # dieser Service zufaellig auch die Registry selbst ist).
+    app.state.sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+    await app.state.sensor_config_client.start()
+    sensor_registry, active_gauge, heartbeat_miss_gauge = metrics.build_sensor_registry(
+        app.state.sensor_config_client
+    )
+    app.state.sensor_registry = sensor_registry
+    samplers = metrics.build_samplers(
+        active_gauge,
+        heartbeat_miss_gauge,
+        app.state.session_factory,
+        heartbeat_timeout_seconds=settings.heartbeat_timeout_seconds,
+    )
+    sensor_sampler_task = asyncio.create_task(
+        run_gauge_sampler_loop(samplers, interval_seconds=settings.sensor_sample_interval_seconds)
     )
 
     startup_end = time.time()
@@ -86,6 +117,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    sensor_sampler_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await sensor_sampler_task
+    await app.state.sensor_config_client.stop()
     if registration:
         await registration.stop()
     await consumer_bus.close()
@@ -118,6 +153,14 @@ async def publish_event(
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def get_metrics() -> Response:
+    """Prometheus-Exposition der zwei eigenen Sensoren (10.1, P11-S1) - wird
+    vom `monitoring-service` gescraped, nicht direkt von Prometheus."""
+    body, content_type = metrics_payload(app.state.sensor_registry)
+    return Response(content=body, media_type=content_type)
 
 
 @app.post("/instances", response_model=InstanceOut, status_code=status.HTTP_201_CREATED)

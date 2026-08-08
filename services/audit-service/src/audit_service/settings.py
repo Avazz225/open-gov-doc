@@ -65,4 +65,9 @@ class Settings(BaseServiceSettings):
         # Service (3.8) auditiert seine eigenen Platzierungsentscheidungen
         # ("orchestration.placement.decided") ueber denselben Event-Trail.
         "orchestration.>",
+        # "monitoring.>" kam in P11-S1 dazu - der monitoring-service auditiert
+        # jede Sensor-Konfigurationsaenderung ("monitoring.sensor.config_changed",
+        # 10.1: Deaktivieren sicherheitsrelevanter Sensoren ist selbst ein
+        # sicherheitsrelevanter Vorgang).
+        "monitoring.>",
     ]

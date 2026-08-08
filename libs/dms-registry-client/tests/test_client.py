@@ -111,6 +111,27 @@ async def test_stop_deregisters_instance():
     assert instance is None
 
 
+async def test_start_registers_sensor_declarations():
+    service_type = _service_type()
+    registration = RegistryRegistration(
+        registry_base_url=REGISTRY_URL,
+        service_type=service_type,
+        version="0.1.0",
+        address="http://localhost:9999",
+        heartbeat_interval_seconds=60,
+        sensors=[{"name": "test.sensor", "group": "test", "cost": "cheap", "description": "x"}],
+    )
+    await registration.start()
+    try:
+        instance = await _get_instance(service_type, registration.instance_id)
+        assert instance is not None
+        assert instance["sensors"] == [
+            {"name": "test.sensor", "group": "test", "cost": "cheap", "description": "x"}
+        ]
+    finally:
+        await registration.stop()
+
+
 async def test_maybe_start_registration_returns_none_without_config():
     registration = await maybe_start_registration(
         registry_service_base_url=None,

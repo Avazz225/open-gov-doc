@@ -20,3 +20,9 @@ class Settings(BaseServiceSettings):
     license_service_base_url: str = "http://localhost:8023"
     license_status_cache_ttl_seconds: float = 60.0
     licensable_components: dict[str, str] = {"workflow-service": "demo"}
+
+    # Sensor-Konzept (10.1, P11-S1): registry-service ist selbst einer der
+    # zwei Piloten (kein Vollretrofit, siehe P11-S0-Befund). Aktivierungs-
+    # status kommt von `monitoring-service`, nicht von hier selbst.
+    monitoring_service_base_url: str = "http://localhost:8026"
+    sensor_sample_interval_seconds: float = 15.0

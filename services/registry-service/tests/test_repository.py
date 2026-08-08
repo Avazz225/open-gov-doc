@@ -27,6 +27,24 @@ async def test_register_creates_instance(session):
     assert result.instance_id == req.instance_id
     assert result.healthy is True
     assert result.capabilities == ["read", "write"]
+    assert result.sensors == []
+
+
+async def test_register_persists_sensor_declarations(session):
+    req = make_request(
+        sensors=[
+            {
+                "name": "document.upload.duration",
+                "group": "performance",
+                "cost": "expensive",
+                "description": "Dauer eines Uploads",
+            }
+        ]
+    )
+    result = await repository.register(session, req)
+
+    assert len(result.sensors) == 1
+    assert result.sensors[0].name == "document.upload.duration"
 
 
 async def test_register_is_idempotent_upsert(session):

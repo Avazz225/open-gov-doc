@@ -1,12 +1,13 @@
 [project]
-name = "registry-service"
+name = "monitoring-service"
 version = "0.1.0"
-description = "Service Discovery: Registrierung, Heartbeat, aktive Routingtabelle (Konzept 3.2a)"
+description = "Sensor-Registry, Sensor-Konfiguration und Prometheus-Scrape-Proxy fuer die Fach-Services (Konzept 10.1)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
+    "prometheus-client>=0.20",
     "dms-common",
     "dms-db-base",
     "dms-eventbus-client",
@@ -26,4 +27,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/registry_service"]
+packages = ["src/monitoring_service"]

@@ -30,6 +30,7 @@ class RegistryRegistration:
         address: str,
         health_endpoint: str = "/healthz",
         capabilities: list[str] | None = None,
+        sensors: list[dict] | None = None,
         heartbeat_interval_seconds: float = 10.0,
         instance_id: str | None = None,
         client: httpx.AsyncClient | None = None,
@@ -40,6 +41,11 @@ class RegistryRegistration:
             "service_type": service_type,
             "version": version,
             "capabilities": capabilities or [],
+            # Sensor-Katalog (10.1, P11-S1): welche Sensoren bietet diese
+            # Instanz an - `monitoring-service` liest das ueber die bereits
+            # vorhandene `GET /instances`-Abfrage bei der Registry mit, kein
+            # zweiter Discovery-Kanal.
+            "sensors": sensors or [],
             "health_endpoint": health_endpoint,
             "address": address,
         }
@@ -99,6 +105,7 @@ async def maybe_start_registration(
     version: str,
     health_endpoint: str = "/healthz",
     capabilities: list[str] | None = None,
+    sensors: list[dict] | None = None,
     heartbeat_interval_seconds: float = 10.0,
 ) -> RegistryRegistration | None:
     """Baut und startet eine `RegistryRegistration`, sofern sowohl die
@@ -115,6 +122,7 @@ async def maybe_start_registration(
         address=self_address,
         health_endpoint=health_endpoint,
         capabilities=capabilities,
+        sensors=sensors,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
     )
     await registration.start()

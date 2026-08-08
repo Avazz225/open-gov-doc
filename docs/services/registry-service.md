@@ -17,11 +17,12 @@
 | `GET` | `/instances/{service_type}` | Nur aktuell erreichbare Instanzen dieses Typs |
 | `GET` | `/instances` | Alle Instanzen inkl. berechnetem `healthy`-Flag |
 | `GET` | `/license-status/{service_type}` | Berechneter Lizenzstatus (`licensed`/`demo`/`unlicensed`) für diesen Servicetyp — ungegatet, für interne Poll-Clients (z. B. `workflow-service`, siehe unten). |
+| `GET` | `/metrics` | Eigene Sensoren im Prometheus-Format (10.1, P11-S1) — wird von `monitoring-service` gescraped, nicht direkt von Prometheus. |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Datenmodell
 
-`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, Default `"active"`, seit P10-S2 — additiv per `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` nachgerüstet, kein Alembic in dieser Phase). `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
+`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `sensors` (JSON-Liste, seit P11-S1 — rein durchgereichte Sensor-Selbstdeklaration, siehe unten), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, Default `"active"`, seit P10-S2 — additiv per `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` nachgerüstet, kein Alembic in dieser Phase). `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
 
 ## Drain-Mechanismus (10.5/3.8, P10-S2/S3)
 
@@ -58,9 +59,9 @@ statt Backend-Adressen statisch zu konfigurieren.
 
 **Registriert sich seit P4-S3 auch bei sich selbst** (`DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS` zeigen beide auf die eigene Adresse): Ohne das gäbe es für `service_type=registry-service` keine auflösbare Instanz, und das Gateway könnte `/api/registry-service/...` (z. B. für die Admin-UI-Registry-Übersicht) nie auflösen. Die allererste Registrierung schlägt dabei unvermeidlich fehl (der eigene Uvicorn-Server nimmt erst nach Abschluss des Lifespan-Startups Verbindungen an) — der Selbstheilungs-Fix aus `dms-registry-client` (Re-Registrierung bei `404` im nächsten Heartbeat, siehe P4-S1) greift hier für den denkbar häufigsten Anwendungsfall dieses Mechanismus.
 
-## Sensoren (Konzept 10.1)
+## Sensoren (Konzept 10.1, P11-S1)
 
-Noch keine — Monitoring/Sensor-Konzept folgt in Phase 11.
+`registry-service` ist selbst einer der zwei Sensor-Piloten (kein Vollretrofit aller Services, siehe P11-S0-Befund): meldet bei der eigenen Selbstregistrierung zwei Sensoren an (`registry.instances.active_total`, `registry.service.heartbeat.miss` — beide Namen wörtlich aus Konzept 10.1s Beispielliste) und exponiert sie über einen eigenen `GET /metrics` (Prometheus-Format, `libs/dms-metrics-client`). **Die eigentliche Sensor-Registry (Katalog-Aggregation + Aktivierungskonfiguration) lebt bewusst NICHT hier**, sondern im neuen `monitoring-service` (P11-S1-Architekturentscheidung nach Rückfrage bei Sessionstart — Prometheus scraped ausschließlich `monitoring-service`, das seinerseits `GET /instances` hier abfragt, um die deklarierten `sensors` jeder Instanz zu lesen und deren `/metrics`-Endpunkte selbst zu scrapen). `registry-service`s Footprint bleibt entsprechend minimal: ein durchgereichtes `sensors`-Feld, keine neue Businesslogik, kein neues Gate. Details siehe `docs/services/monitoring-service.md` und `docs/operations/monitoring.md`.
 
 ## Offene Punkte
 

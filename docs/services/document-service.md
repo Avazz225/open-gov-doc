@@ -49,6 +49,7 @@
 | `PUT` | `/documents/{id}/archived` | Interner Rückruf von `archival-service`, sobald die Archivkopie verifiziert ist (`archive_format`, seit P7-S3) — publiziert `document.archived` |
 | `PUT` | `/documents/{id}/dehydrated` | Interner Rückruf von `archival-service`, nachdem die Live-Speicherkopie entfernt wurde (seit P7-S3) — publiziert `document.dehydrated` |
 | `PUT` | `/documents/{id}/rehydrated` | Interner Rückruf von `archival-service` nach erfolgreicher Rückholung (seit P7-S3) — publiziert `document.rehydrated` |
+| `GET` | `/metrics` | Eigene Sensoren im Prometheus-Format (10.1, P11-S1) — wird von `monitoring-service` gescraped, nicht direkt von Prometheus. |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -207,9 +208,9 @@ Dieser Service bleibt alleinige Autorität für die Dokument-Lebenszyklusfelder 
 
 Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
 
-## Sensoren (Konzept 10.1)
+## Sensoren (Konzept 10.1, P11-S1)
 
-Noch keine — folgt in Phase 11.
+`document-service` ist einer der zwei Sensor-Piloten (kein Vollretrofit, siehe P11-S0-Befund): meldet bei der Selbstregistrierung zwei Sensoren an — `document.upload.duration` (Histogram, Gruppe `performance`, Kosten `expensive`, wörtlich Konzept-10.1-Beispielname; gemessen um `POST /documents`, Timer wird nur bei aktivem Sensor überhaupt gestartet) und `document.count.active_total` (Gauge, Gruppe `capacity`, Kosten `cheap`, nutzt dieselbe `repository.count_active_total`-Query wie `GET /documents/count-active-total`, periodisch gesampelt). Beide exponiert über einen eigenen `GET /metrics`. Aktivierungsstatus kommt per TTL-Poll vom `monitoring-service` (`libs/dms-metrics-client.SensorConfigClient`), das auch die eigentliche Sensor-Registry (Katalog + Ein-/Ausschaltkonfiguration) betreibt und diesen Endpunkt scraped — Details siehe `docs/services/monitoring-service.md`/`docs/operations/monitoring.md`.
 
 ## Offene Punkte
 

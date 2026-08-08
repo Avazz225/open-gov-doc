@@ -1,0 +1,16 @@
+[project]
+name = "dms-metrics-client"
+version = "0.1.0"
+description = "Sensor-Konzept (10.1): konfigurierbare, kostenbewusste Prometheus-Sensoren, die bei Deaktivierung gar nicht erst erfasst werden"
+requires-python = ">=3.12"
+dependencies = [
+    "prometheus-client>=0.20",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dms_metrics_client"]

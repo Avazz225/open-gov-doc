@@ -5,6 +5,18 @@ from pydantic import BaseModel
 
 LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
 InstanceStatus = Literal["active", "draining"]
+SensorCost = Literal["cheap", "expensive"]
+
+
+class SensorDeclaration(BaseModel):
+    """Selbstdeklaration eines von einer Instanz angebotenen Sensors (10.1,
+    P11-S1) - registry-service reicht das nur durch, `monitoring-service`
+    aggregiert/loest die Aktivierung auf."""
+
+    name: str
+    group: str
+    cost: SensorCost
+    description: str
 
 
 class RegisterRequest(BaseModel):
@@ -12,6 +24,7 @@ class RegisterRequest(BaseModel):
     service_type: str
     version: str
     capabilities: list[str] = []
+    sensors: list[SensorDeclaration] = []
     health_endpoint: str
     address: str
 
@@ -21,6 +34,7 @@ class InstanceOut(BaseModel):
     service_type: str
     version: str
     capabilities: list[str]
+    sensors: list[SensorDeclaration] = []
     health_endpoint: str
     address: str
     registered_at: datetime

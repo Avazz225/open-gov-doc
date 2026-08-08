@@ -35,6 +35,32 @@ def test_healthz(client):
     assert response.json()["service"] == "document-service"
 
 
+def test_metrics_endpoint_exposes_own_pilot_sensors(client):
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "document_upload_duration" in response.text
+    assert "document_count_active_total" in response.text
+
+
+def test_upload_sensor_records_duration_when_active(client, monkeypatch):
+    monkeypatch.setattr(app.state.upload_duration_sensor, "_is_active", lambda name: True)
+    upload(client)
+    response = client.get("/metrics")
+    assert "document_upload_duration_count 1.0" in response.text
+
+
+def test_upload_sensor_skips_recording_when_inactive(client, monkeypatch):
+    """Keine Erfassung bei Deaktivierung (10.1) - nicht nur unsichtbar: der
+    Timer wird nie gestartet, `observe()` nie aufgerufen, der Zähler bleibt
+    bei 0 statt auf 1 zu steigen (das Histogramm selbst bleibt im Export
+    sichtbar, das ist normales `prometheus_client`-Verhalten für einmal
+    registrierte Metriken - entscheidend ist der unveränderte Wert)."""
+    monkeypatch.setattr(app.state.upload_duration_sensor, "_is_active", lambda name: False)
+    upload(client)
+    response = client.get("/metrics")
+    assert "document_upload_duration_count 0.0" in response.text
+
+
 def test_create_and_get_document(client):
     response = upload(client)
     assert response.status_code == 201

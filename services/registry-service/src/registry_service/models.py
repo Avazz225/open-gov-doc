@@ -34,3 +34,8 @@ class ServiceInstance(Base):
     # gesetzt - weder Registrierung (ausser bei einer echten neuen Zeile)
     # noch Heartbeat aendern ihn.
     status: Mapped[str] = mapped_column(String(16), default="active")
+    # Sensor-Katalog (10.1, P11-S1): rein durchgereichte Selbstdeklaration
+    # ("welche Sensoren biete ich an") - registry-service betreibt selbst
+    # keine Sensor-Konfiguration/-Aggregation, das macht `monitoring-service`
+    # anhand von GET /instances (liest dieses Feld einfach mit).
+    sensors: Mapped[list[dict]] = mapped_column(JSON, default=list)

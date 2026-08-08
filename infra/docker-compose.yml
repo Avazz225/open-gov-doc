@@ -152,6 +152,10 @@ services:
       # (siehe case-service). Eine echte Installation überschreibt diese
       # Variable nicht (nutzt den Code-Default).
       DMS_LICENSABLE_COMPONENTS: ${REGISTRY_SERVICE_LICENSABLE_COMPONENTS:-{}}
+      # Sensor-Konzept (10.1, P11-S1) - monitoring-service haengt selbst NICHT
+      # von registry-service ab (kein depends_on hier), ein Zyklus entsteht
+      # also nicht, gleiches Muster wie beim license-service oben.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${REGISTRY_SERVICE_PORT:-8001}:8000"
     depends_on:
@@ -311,6 +315,9 @@ services:
       # `STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE` passen, siehe ADR 0030).
       DMS_RETENTION_POLL_INTERVAL_SECONDS: ${DOCUMENT_SERVICE_RETENTION_POLL_INTERVAL_SECONDS:-3600}
       DMS_GOVERNANCE_BYPASS_ROLE: ${DOCUMENT_SERVICE_GOVERNANCE_BYPASS_ROLE:-dms-admin}
+      # Sensor-Konzept (10.1, P11-S1) - kein depends_on, gleiches fail-open
+      # Muster wie beim Lizenz-Client oben.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${DOCUMENT_SERVICE_PORT:-8006}:8000"
     depends_on:
@@ -804,6 +811,50 @@ services:
       auth-service:
         condition: service_started
       permission-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  monitoring-service:
+    build:
+      context: ..
+      dockerfile: services/monitoring-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      # Scrape-Proxy (10.1, P11-S1): fragt registry-service nach allen
+      # aktuell aktiven Instanzen und ruft deren eigene /metrics-Endpunkte
+      # selbst ab - Prometheus scraped ausschliesslich diesen Service.
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://monitoring-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+    ports:
+      - "${MONITORING_SERVICE_PORT:-8026}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      registry-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      permission-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      monitoring-service:
         condition: service_started
     networks:
       - dms-net

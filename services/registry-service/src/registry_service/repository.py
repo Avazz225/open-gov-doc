@@ -22,6 +22,7 @@ def _to_out(instance: ServiceInstance, timeout_seconds: float, now: datetime) ->
         service_type=instance.service_type,
         version=instance.version,
         capabilities=instance.capabilities,
+        sensors=instance.sensors,
         health_endpoint=instance.health_endpoint,
         address=instance.address,
         registered_at=instance.registered_at,
@@ -51,6 +52,7 @@ async def register(session: AsyncSession, payload: RegisterRequest) -> InstanceO
     instance.service_type = payload.service_type
     instance.version = payload.version
     instance.capabilities = payload.capabilities
+    instance.sensors = [sensor.model_dump() for sensor in payload.sensors]
     instance.health_endpoint = payload.health_endpoint
     instance.address = payload.address
     instance.last_heartbeat_at = now

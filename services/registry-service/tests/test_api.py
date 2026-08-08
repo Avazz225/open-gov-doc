@@ -44,6 +44,29 @@ def test_register_and_list_active(client):
     assert payload["instance_id"] in ids
 
 
+def test_register_with_sensor_declarations_roundtrips(client):
+    payload = make_payload(
+        sensors=[
+            {
+                "name": "document.count.active_total",
+                "group": "capacity",
+                "cost": "cheap",
+                "description": "Anzahl aktiver Dokumente",
+            }
+        ]
+    )
+    response = client.post("/instances", json=payload)
+    assert response.status_code == 201
+    assert response.json()["sensors"] == payload["sensors"]
+
+
+def test_metrics_endpoint_exposes_own_pilot_sensors(client):
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "registry_instances_active_total" in response.text
+    assert "registry_service_heartbeat_miss" in response.text
+
+
 def test_heartbeat_unknown_instance_returns_404(client):
     response = client.post("/instances/does-not-exist/heartbeat")
     assert response.status_code == 404

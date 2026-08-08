@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_metrics_client import SensorConfigClient, metrics_payload, run_gauge_sampler_loop
 from dms_registry_client import maybe_start_registration
 from fastapi import (
     Depends,
@@ -25,7 +26,7 @@ from fastapi import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from document_service import repository, retention_actions
+from document_service import metrics, repository, retention_actions
 from document_service.approval_client import ApprovalClient
 from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
@@ -364,6 +365,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
     )
 
+    # Sensor-Konzept (10.1, P11-S1): document-service ist einer der zwei
+    # Piloten (siehe P11-S0-Befund). Aktivierungsstatus kommt vom
+    # `monitoring-service`, TTL-Poll statt NATS-Invalidierung (bewusste
+    # Scope-Entscheidung, gleiches Muster wie `registry-service`).
+    app.state.sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+    await app.state.sensor_config_client.start()
+    sensor_registry, upload_duration_sensor, active_documents_gauge = metrics.build_sensor_registry(
+        app.state.sensor_config_client
+    )
+    app.state.sensor_registry = sensor_registry
+    app.state.upload_duration_sensor = upload_duration_sensor
+    samplers = metrics.build_samplers(active_documents_gauge, app.state.session_factory)
+    sensor_sampler_task = asyncio.create_task(
+        run_gauge_sampler_loop(samplers, interval_seconds=settings.sensor_sample_interval_seconds)
+    )
+
     event_bus = NatsEventBusClient(settings.nats_url, stream="document")
     await event_bus.connect()
     app.state.event_bus = event_bus
@@ -389,6 +406,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
+        sensors=metrics.sensor_declarations(),
     )
 
     # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
@@ -404,6 +422,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     retention_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await retention_poll_task
+    sensor_sampler_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await sensor_sampler_task
+    await app.state.sensor_config_client.stop()
     if registration:
         await registration.stop()
     await consumer_bus.close()
@@ -474,6 +496,14 @@ async def _resolve_deletion_reason_required(
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def get_metrics() -> Response:
+    """Prometheus-Exposition der zwei eigenen Sensoren (10.1, P11-S1) - wird
+    vom `monitoring-service` gescraped, nicht direkt von Prometheus."""
+    body, content_type = metrics_payload(app.state.sensor_registry)
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/upload-config", response_model=UploadConfigOut)
@@ -659,6 +689,12 @@ async def create_document(
     originating_case_id: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
+    # Sensor "document.upload.duration" (10.1, P11-S1): Startzeit wird nur
+    # genommen, wenn der Sensor aktuell aktiv ist - bei Deaktivierung
+    # unterbleibt selbst dieser minimale Overhead vollständig.
+    upload_sensor = app.state.upload_duration_sensor
+    upload_started_at = time.monotonic() if upload_sensor.is_active() else None
+
     # Lizenz-Limit-Blockade (Konzept 9.3, P9-S2): nur echte Neuanlagen, nicht
     # Versionierung/Wiederherstellung bestehender Dokumente - "blockiert nicht
     # rückwirkend bestehende Daten, verhindert aber neue Anlagen".
@@ -778,6 +814,8 @@ async def create_document(
     await publish_event(
         "document.created", subject=document_id, payload=event_payload, actor=created_by
     )
+    if upload_started_at is not None:
+        upload_sensor.observe(time.monotonic() - upload_started_at)
     return document
 
 
