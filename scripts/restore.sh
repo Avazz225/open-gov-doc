@@ -8,18 +8,26 @@
 # trotzdem ein echter, funktionierender Point-in-Time-Recovery-Beweis, kein
 # Trockenlauf.
 #
-# Deckt aus der 10.4-Reihenfolge die Schritte 1-3 sowie sinngemäß 5/6 ab:
+# Deckt aus der 10.4-Reihenfolge die Schritte 1-4 sowie sinngemäß 5/6 ab:
 #   1. Konsistenzanker: aus manifest.json (WAL-LSN + Zeitstempel).
 #   2. Storage zuerst wiederherstellen (Tarball -> Scratch-Verzeichnis).
 #   3. Datenbank per Point-in-Time-Recovery auf denselben/einen gewählten
 #      Zeitpunkt wiederherstellen (Basebackup + WAL-Replay aus dem
 #      Archiv-Volume, `recovery_target_time`).
+#   4. Löschabgleich (P11-S4): liest das vom audit-service unabhängig vom
+#      DB-Restore gepflegte Löschregister-Ledger, filtert Einträge zwischen
+#      Backup-Zeitpunkt und jetzt, prüft je Eintrag gegen die wiederher-
+#      gestellte Scratch-DB, ob das Objekt dort "wiederauferstanden" ist -
+#      meldet Treffer inkl. des Aufrufs, den ein Betreiber nach der Cutover-
+#      Freigabe gegen das dann live angebundene System ausführen müsste
+#      (die tatsächliche erneute Löschung braucht einen laufenden document-/
+#      folder-service, den es in dieser isolierten Scratch-Umgebung bewusst
+#      nicht gibt, siehe docs/operations/backup-restore.md).
 #   5/6. Event-Bus-Reset und Registry/Service-Neustart sind für eine
 #      isolierte Scratch-Verifikation nicht anwendbar - nur dokumentiert.
 #
 # BEWUSST NICHT Teil dieser Session (siehe docs/operations/backup-restore.md
 # und PROGRESS.md "Monitoring & Backup/Restore"):
-#   4. Löschabgleich (braucht DeletionRegisterEntry-Sonderbehandlung) - P11-S4.
 #   7. Suchindex-Neuaufbau (braucht volle Wiederanbindung des App-Stacks an
 #      eine wiederhergestellte DB) - P11-S4 ("automatisierte Restore-Tests").
 #
@@ -34,8 +42,11 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POSTGRES_CONTAINER="dms-postgres-1"
+AUDIT_CONTAINER="dms-audit-service-1"
 POSTGRES_USER="${POSTGRES_USER:-dms}"
 POSTGRES_DB="${POSTGRES_DB:-dms}"
+DOCUMENT_SERVICE_URL="${DOCUMENT_SERVICE_URL:-http://localhost:${DOCUMENT_SERVICE_PORT:-8006}}"
+FOLDER_SERVICE_URL="${FOLDER_SERVICE_URL:-http://localhost:${FOLDER_SERVICE_PORT:-8008}}"
 
 SCRATCH_NAME="dms-postgres-restore-test"
 SCRATCH_VOLUME="dms-postgres-restore-test-data"
@@ -172,22 +183,94 @@ for object_key, expected_checksum, backend in rows:
 print(f"    {checked} von {len(rows)} Objekten geprüft, {mismatched} Abweichungen, {missing} im Storage-Backup fehlend.")
 PYEOF
 
+echo "==> Schritt 4 (10.4): Löschabgleich - prüfe das Löschregister-Ledger gegen die wiederhergestellte DB"
+BACKUP_CREATED_AT="$(python3 -c "import json; print(json.load(open('$BACKUP_DIR/manifest.json'))['created_at'])")"
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+LEDGER_FILE="$(mktemp)"
+docker exec "$AUDIT_CONTAINER" cat /deletion-ledger/deletion-register.jsonl > "$LEDGER_FILE" 2>/dev/null || true
+
+BACKUP_CREATED_AT="$BACKUP_CREATED_AT" NOW="$NOW" SCRATCH_NAME="$SCRATCH_NAME" \
+POSTGRES_USER="$POSTGRES_USER" POSTGRES_DB="$POSTGRES_DB" \
+DOCUMENT_SERVICE_URL="$DOCUMENT_SERVICE_URL" FOLDER_SERVICE_URL="$FOLDER_SERVICE_URL" \
+LEDGER_FILE="$LEDGER_FILE" \
+python3 <<'PYEOF'
+import json
+import os
+import subprocess
+import sys
+
+backup_created_at = os.environ["BACKUP_CREATED_AT"]
+now = os.environ["NOW"]
+container = os.environ["SCRATCH_NAME"]
+user = os.environ["POSTGRES_USER"]
+db = os.environ["POSTGRES_DB"]
+
+# Datei statt direkter Shell-Interpolation (vorherige Fassung reichte den
+# Ledger-Inhalt roh durch einen unquoted Heredoc - Reason-/Actor-Freitext
+# koennte $()/Backticks enthalten und wuere von der Shell interpretiert,
+# bevor Python ihn je sieht). Datei + quoted Heredoc umgehen das vollstaendig.
+with open(os.environ["LEDGER_FILE"], encoding="utf-8") as f:
+    ledger_content = f.read()
+os.remove(os.environ["LEDGER_FILE"])
+entries = [json.loads(line) for line in ledger_content.splitlines() if line.strip()]
+# Konzept 10.4 wörtlich: Einträge "nach dem Backup-Zeitpunkt, aber vor dem
+# Restore-Zeitpunkt" - hier: dem tatsächlichen, realen Moment dieses Laufs
+# (nicht recovery_target_time, das ist der Zeitpunkt IN der Vergangenheit,
+# auf den zurückgerollt wird - der Resurrection-Fall entsteht gerade daraus).
+candidates = [e for e in entries if backup_created_at < e["occurred_at"] < now]
+print(f"    {len(entries)} Ledger-Eintraege gesamt, {len(candidates)} im Zeitfenster ({backup_created_at} .. {now}).")
+
+needs_reconciliation = []
+table_by_type = {"document": "document.document", "folder": "folder.folder"}
+url_by_type = {
+    "document": f"{os.environ['DOCUMENT_SERVICE_URL']}/documents",
+    "folder": f"{os.environ['FOLDER_SERVICE_URL']}/folders",
+}
+for entry in candidates:
+    table = table_by_type.get(entry["object_type"])
+    if table is None:
+        continue
+    result = subprocess.run(
+        ["docker", "exec", container, "psql", "-U", user, "-d", db,
+         "-tAc", f"SELECT 1 FROM {table} WHERE id = '{entry['object_id']}'"],
+        capture_output=True, text=True,
+    )
+    if result.stdout.strip() == "1":
+        needs_reconciliation.append(entry)
+
+if needs_reconciliation:
+    print(f"    RECONCILIATION NOETIG fuer {len(needs_reconciliation)} Objekt(e):")
+    for entry in needs_reconciliation:
+        url = f"{url_by_type[entry['object_type']]}/{entry['object_id']}/reconcile-restore-deletion"
+        print(f"      - {entry['object_type']} {entry['object_id']} "
+              f"(urspruenglich geloescht {entry['occurred_at']}, entry_id={entry['entry_id']})")
+        print(f"        Nach Cutover auf das restaurierte Live-System auszufuehren:")
+        print(f"        curl -X POST {url} -H 'X-DMS-Roles: dms-admin' -H 'Content-Type: application/json' "
+              f"-d '{{\"original_entry_id\": \"{entry['entry_id']}\", \"reason\": \"Restore-Abgleich\"}}'")
+    print(f"RECONCILIATION_NEEDED_COUNT={len(needs_reconciliation)}")
+else:
+    print("    Keine Reconciliation noetig - keine der wiederhergestellten Objekte war laut Ledger zwischenzeitlich zwangsgeloescht.")
+    print("RECONCILIATION_NEEDED_COUNT=0")
+PYEOF
+
 cat <<'EOF'
 
 ==> Restore-Verifikation abgeschlossen.
 
 Abgedeckt (Konzept 10.4): Konsistenzanker (manifest.json), Storage-Restore,
-Datenbank-Point-in-Time-Recovery, Storage-Checksummen-Abgleich gegen die
-wiederhergestellte DB.
+Datenbank-Point-in-Time-Recovery, Storage-Checksummen-Abgleich, Löschabgleich
+gegen das unabhängig gepflegte Löschregister-Ledger.
 
 BEWUSST NICHT abgedeckt (siehe docs/operations/backup-restore.md, Zuständigkeit P11-S4):
-  - Löschabgleich (Schritt 4, Konzept 10.4) - würde eine Sonderprüfung gegen
-    DeletionRegisterEntry-Zeilen brauchen, die nach dem Backup-Zeitpunkt,
-    aber vor dem Restore-Zeitpunkt entstanden sind.
+  - Tatsächliche erneute Ausführung einer nötigen Reconciliation - braucht
+    ein laufendes document-/folder-service gegen die wiederhergestellte DB,
+    das es in dieser isolierten Scratch-Umgebung bewusst nicht gibt. Der
+    exakte Aufruf für das dann live angebundene System wird oben ausgegeben.
   - Suchindex-Neuaufbau (Schritt 7) - würde eine volle Wiederanbindung des
     App-Stacks an diese wiederhergestellte DB voraussetzen.
   - Automatisierte/wiederkehrende Restore-Tests - dies war ein einzelner,
-    manuell ausgelöster Verifikationslauf gegen eine Scratch-Umgebung.
+    manuell ausgelöster Verifikationslauf gegen eine Scratch-Umgebung
+    (siehe aber scripts/test-restore.sh für einen sich selbst prüfenden Lauf).
 
 Die Scratch-Umgebung wird jetzt aufgeräumt (siehe cleanup-Trap).
 EOF

@@ -71,3 +71,10 @@ class Settings(BaseServiceSettings):
         # sicherheitsrelevanter Vorgang).
         "monitoring.>",
     ]
+
+    # Loeschregister-Ledger (10.4, P11-S4): Append-only-Datei auf einem
+    # eigenen Docker-Volume (deletion-ledger-data), bewusst AUSSERHALB der
+    # gemeinsamen Postgres-Instanz - ein DB-Restore (scripts/restore.sh)
+    # rollt dieses Register damit nicht mit zurueck, siehe
+    # docs/operations/backup-restore.md.
+    deletion_ledger_path: str = "/deletion-ledger/deletion-register.jsonl"

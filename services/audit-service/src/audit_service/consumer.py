@@ -1,17 +1,19 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from audit_service import repository
+from audit_service import deletion_ledger, repository
 
 logger = logging.getLogger(__name__)
 
 
 def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
+    deletion_ledger_path: Path,
 ) -> Callable[[bytes], Awaitable[None]]:
     """Ein Handler wird über alle abonnierten Subjects hinweg geteilt (siehe
     ``start_consuming``) - NATS ruft je Subject-Subscription unabhängig auf,
@@ -30,6 +32,10 @@ def make_handler(
         async with append_lock, session_factory() as session:
             await repository.append_event(session, event)
             await session.commit()
+        # Loeschregister-Ledger (10.4, P11-S4): bewusst NACH dem Commit und
+        # AUSSERHALB des append_lock/der DB-Transaktion - eine eigene Datei,
+        # kein Teil der Hash-Kette, darf deren Serialisierung nicht blockieren.
+        deletion_ledger.append_if_force_deletion(event, deletion_ledger_path)
 
     return handle
 
@@ -38,6 +44,7 @@ async def start_consuming(
     bus: NatsEventBusClient,
     subjects: list[str],
     session_factory: async_sessionmaker[AsyncSession],
+    deletion_ledger_path: Path,
 ) -> None:
     """Ein durable Consumer je konfiguriertem Subject - `durable="audit-service"`
     sorgt dafür, dass ein Neustart des Audit Service dort weitermacht, wo er
@@ -49,7 +56,7 @@ async def start_consuming(
     **Bekannte Grenze**: taucht der Stream später auf, wird er ohne Neustart
     dieses Service nicht automatisch nachgeholt.
     """
-    handler = make_handler(session_factory)
+    handler = make_handler(session_factory, deletion_ledger_path)
     for subject in subjects:
         try:
             await bus.subscribe(subject, handler, durable="audit-service")

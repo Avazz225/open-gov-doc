@@ -29,3 +29,8 @@ class Settings(BaseServiceSettings):
     # Poll-Intervall des `_retention_poll_loop` (main.py) - gleiches Idiom
     # wie document-service's `retention_poll_interval_seconds` (P7-S1).
     retention_poll_interval_seconds: float = 3600.0
+
+    # Löschabgleich nach Restore (10.4, P11-S4) - gleiche Rolle wie
+    # document-service's `kennzeichen_admin_role`, hier für den neuen
+    # `POST /folders/{id}/reconcile-restore-deletion`-Endpunkt.
+    admin_role: str = "dms-admin"

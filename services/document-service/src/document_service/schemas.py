@@ -190,6 +190,16 @@ class DeletionRegisterEntryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ReconcileRestoreDeletionRequest(BaseModel):
+    """Löschabgleich nach Restore (10.4, P11-S4) - `original_entry_id`
+    verweist auf den Löschregister-Ledger-Eintrag (siehe audit-service),
+    dessen physische Zwangslöschung durch einen Restore rückgängig gemacht
+    wurde und jetzt erneut ausgeführt wird."""
+
+    original_entry_id: str
+    reason: str | None = None
+
+
 class RetentionConfigIn(BaseModel):
     deletion_reason_required: bool = False
     reminder_lead_days: int | None = None

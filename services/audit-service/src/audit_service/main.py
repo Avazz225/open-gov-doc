@@ -3,6 +3,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -48,7 +49,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
     app.state.event_bus = event_bus
-    await start_consuming(event_bus, settings.subjects, app.state.session_factory)
+    await start_consuming(
+        event_bus,
+        settings.subjects,
+        app.state.session_factory,
+        Path(settings.deletion_ledger_path),
+    )
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,

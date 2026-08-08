@@ -60,6 +60,7 @@ from document_service.schemas import (
     LockOut,
     LockReleaseRequest,
     MarkArchivedRequest,
+    ReconcileRestoreDeletionRequest,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
@@ -1146,6 +1147,60 @@ async def get_deletion_register(
     """Löschregister (5.2a, seit P7-S1) - siehe docs/services/document-service.md
     zur bewusst noch fehlenden separaten Backup-Politik (Phase 11)."""
     return await repository.list_deletion_register(session, document_id=document_id)
+
+
+@app.post(
+    "/documents/{document_id}/reconcile-restore-deletion",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reconcile_restore_deletion(
+    document_id: str,
+    payload: ReconcileRestoreDeletionRequest,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Löschabgleich nach Restore (10.4, P11-S4): ein Restore auf einen
+    Zeitpunkt VOR dieser bereits durchgeführten Zwangslöschung würde das
+    Dokument unbeabsichtigt wiederaufleben lassen - dieser Endpunkt führt
+    "denselben Mechanismus wie bei der ursprünglichen Zwangslöschung" (10.4
+    wörtlich) erneut aus, statt eine zweite, potenziell abweichende
+    Implementierung zu pflegen. Gate wie beim Kennzeichen-Feld (P5e-S2) -
+    kein neuer PermissionServiceClient für einen so seltenen, rein
+    operativen Endpunkt."""
+    if not _has_kennzeichen_admin_role(x_dms_roles):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Nur die Rolle {settings.kennzeichen_admin_role!r} darf einen "
+            "Löschabgleich nach Restore auslösen",
+        )
+    try:
+        # Existenz zuerst pruefen: execute_forced_deletion legt den
+        # DeletionRegisterEntry an, BEVOR es die Dokumentzeile entfernt -
+        # ohne diesen Vorab-Check wuerde ein unbekanntes document_id einen
+        # verwaisten Registereintrag hinterlassen, bevor der 404 greift.
+        await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    await retention_actions.execute_forced_deletion(
+        session,
+        app.state.storage,
+        document_id,
+        reason=payload.reason,
+        triggered_by="system:restore-reconciliation",
+        governance_bypass_role=settings.governance_bypass_role,
+    )
+    await session.commit()
+    await publish_event(
+        "document.force_deleted",
+        document_id,
+        {
+            "reason": payload.reason,
+            "triggered_by": "system:restore-reconciliation",
+            "reconciliation_of_entry_id": payload.original_entry_id,
+        },
+        actor="system:restore-reconciliation",
+    )
 
 
 @app.get("/retention-config", response_model=RetentionConfigOut)

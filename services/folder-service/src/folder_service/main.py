@@ -9,7 +9,7 @@ from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from folder_service.schemas import (
     LegalHoldCreate,
     LegalHoldOut,
     LegalHoldReleaseRequest,
+    ReconcileRestoreDeletionRequest,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
@@ -650,6 +651,57 @@ async def get_deletion_register(
     folder_id: str | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[DeletionRegisterEntryOut]:
     return await repository.list_deletion_register(session, folder_id=folder_id)
+
+
+def _has_admin_role(x_dms_roles: str) -> bool:
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    return settings.admin_role in roles
+
+
+@app.post(
+    "/folders/{folder_id}/reconcile-restore-deletion",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reconcile_restore_deletion(
+    folder_id: str,
+    payload: ReconcileRestoreDeletionRequest,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Löschabgleich nach Restore (10.4, P11-S4) - strukturgleich zu
+    `document_service.main.reconcile_restore_deletion`: "derselbe Mechanismus
+    wie bei der ursprünglichen Zwangslöschung" (10.4 wörtlich)."""
+    if not _has_admin_role(x_dms_roles):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Nur die Rolle {settings.admin_role!r} darf einen Löschabgleich "
+            "nach Restore auslösen",
+        )
+    try:
+        # Existenz zuerst pruefen (siehe document-service-Pendant) - sonst
+        # legt execute_forced_deletion einen verwaisten Registereintrag an,
+        # bevor der 404 greift.
+        await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    await retention_actions.execute_forced_deletion(
+        session,
+        folder_id,
+        reason=payload.reason,
+        triggered_by="system:restore-reconciliation",
+    )
+    await session.commit()
+    await publish_event(
+        "folder.force_deleted",
+        folder_id,
+        {
+            "reason": payload.reason,
+            "triggered_by": "system:restore-reconciliation",
+            "reconciliation_of_entry_id": payload.original_entry_id,
+        },
+        actor="system:restore-reconciliation",
+    )
 
 
 @app.get("/retention-config", response_model=RetentionConfigOut)

@@ -96,6 +96,14 @@ class DeletionRegisterEntryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ReconcileRestoreDeletionRequest(BaseModel):
+    """Löschabgleich nach Restore (10.4, P11-S4) - strukturgleich zu
+    `document_service.schemas.ReconcileRestoreDeletionRequest`."""
+
+    original_entry_id: str
+    reason: str | None = None
+
+
 class RetentionConfigIn(BaseModel):
     deletion_reason_required: bool = False
     reminder_lead_days: int | None = None

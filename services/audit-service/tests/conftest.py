@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import pytest
 from audit_service.models import Base
@@ -13,6 +14,12 @@ DSN = os.environ.get(
 # Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
 # siehe PROGRESS.md "Tooling & Testing" (P5-S2-Datenverlust, P5b-S6-Leck).
 os.environ["DMS_POSTGRES_DSN"] = DSN
+# Löschregister-Ledger (10.4, P11-S4): Code-Default ist ein Container-Pfad
+# (/deletion-ledger/...), auf dem Host beim Testlauf nicht anlegbar - eigenes
+# Temp-Verzeichnis statt dessen.
+os.environ["DMS_DELETION_LEDGER_PATH"] = os.path.join(
+    tempfile.mkdtemp(prefix="dms-deletion-ledger-test-"), "deletion-register.jsonl"
+)
 
 
 @pytest.fixture(autouse=True)

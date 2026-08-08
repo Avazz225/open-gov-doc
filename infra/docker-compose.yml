@@ -33,6 +33,8 @@ volumes:
   # kommen deklarativ aus infra/grafana/ (Provisioning), dieses Volume sichert
   # nur den sonstigen Grafana-internen Zustand über Neustarts hinweg.
   grafana-data:
+  # Löschregister-Ledger (10.4, P11-S4) - siehe audit-service-Kommentar oben.
+  deletion-ledger-data:
 
 services:
   # Ein frisch angelegtes Docker-Volume gehört zunächst root - der
@@ -225,6 +227,11 @@ services:
       # unter der andere Container diesen Service erreichen.
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://audit-service:8000
+    volumes:
+      # Löschregister-Ledger (10.4, P11-S4) - eigenes Volume, bewusst
+      # getrennt von der gemeinsamen Postgres-Instanz, damit ein DB-Restore
+      # (scripts/restore.sh) es nicht mit zurückrollt.
+      - deletion-ledger-data:/deletion-ledger
     ports:
       - "${AUDIT_SERVICE_PORT:-8002}:8000"
     depends_on:

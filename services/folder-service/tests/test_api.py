@@ -275,6 +275,45 @@ def test_deletion_register_lists_entries(client):
     assert response.json() == []
 
 
+def test_reconcile_restore_deletion_requires_admin_role(client):
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    response = client.post(
+        f"/folders/{created['id']}/reconcile-restore-deletion",
+        json={"original_entry_id": "led-1", "reason": None},
+    )
+    assert response.status_code == 403
+    assert client.get(f"/folders/{created['id']}").status_code == 200
+
+
+def test_reconcile_restore_deletion_performs_real_forced_deletion(client):
+    """10.4/P11-S4: derselbe Mechanismus wie die ursprüngliche Zwangslöschung
+    - Ordner ist danach wirklich weg, mit echtem DeletionRegisterEntry."""
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+
+    response = client.post(
+        f"/folders/{created['id']}/reconcile-restore-deletion",
+        json={"original_entry_id": "led-42", "reason": "Restore-Abgleich"},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 204
+    assert client.get(f"/folders/{created['id']}").status_code == 404
+
+    register = client.get("/deletion-register", params={"folder_id": created["id"]}).json()
+    assert len(register) == 1
+    assert register[0]["trigger"] == "forced_deletion"
+    assert register[0]["triggered_by"] == "system:restore-reconciliation"
+
+
+def test_reconcile_restore_deletion_unknown_folder_returns_404(client):
+    response = client.post(
+        "/folders/does-not-exist/reconcile-restore-deletion",
+        json={"original_entry_id": "led-1", "reason": None},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 404
+    assert client.get("/deletion-register").json() == []
+
+
 def test_retention_config_get_and_put(client):
     response = client.put(
         "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": 5}

@@ -25,6 +25,16 @@
 
 **Publiziert:** keine eigenen Events — der Audit Service ist reiner Konsument/Senke.
 
+## Löschregister-Ledger (10.4, P11-S4)
+
+Zusätzlich zur Hash-Kette hängt der Consumer bei `document.force_deleted`/
+`folder.force_deleted`-Events eine Zeile an eine Append-only-Datei
+(`/deletion-ledger/deletion-register.jsonl`, `deletion_ledger.py`) auf einem **eigenen
+Docker-Volume** (`deletion-ledger-data`) an — bewusst außerhalb der gemeinsamen
+Postgres-Instanz, damit ein DB-Restore (`scripts/restore.sh`) dieses Register nicht mit
+zurückrollt (Konzept 10.4: "bleibt auf dem aktuellsten Stand erhalten"). Siehe
+`docs/operations/backup-restore.md` für den vollständigen Löschabgleich-Mechanismus.
+
 ## Architektur-Entscheidung
 
 Konsument ohne eigenen Stream (`NatsEventBusClient(ensure_stream=False)`) — siehe [ADR 0001](../adr/0001-eventbus-consumer-without-stream-ownership.md). Durable Consumer-Name `audit-service`, kein `deliver_new`, damit nach einem Neustart lückenlos aufgeholt wird (keine Lücke in der Kette).

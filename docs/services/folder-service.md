@@ -22,6 +22,7 @@
 | `POST` | `/legal-holds/{id}/release` | Legal Hold aufheben |
 | `GET` | `/legal-holds?folder_id=&active_only=` | Legal Holds eines Ordners |
 | `GET` | `/deletion-register?folder_id=` | Löschregister (5.2a, seit P7-S1b) |
+| `POST` | `/folders/{id}/reconcile-restore-deletion` | Löschabgleich nach Restore (10.4, seit P11-S4) — `X-DMS-Roles: dms-admin`, 1:1 dasselbe Muster wie `document-service` |
 | `GET`/`PUT` | `/retention-config` | Installationsweite Aufbewahrungs-Grundeinstellungen für Ordner (eigenständig, nicht dieselbe Config wie `document-service`) |
 | `GET`/`PUT` | `/trash-config` | Papierkorb-Wiederherstellungsfrist für Ordner (eigenständig) |
 | `GET` | `/healthz` | Health-Check |
