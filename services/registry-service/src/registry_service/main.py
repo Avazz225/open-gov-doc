@@ -165,6 +165,21 @@ async def drain_instance(
     return result
 
 
+@app.post("/instances/{instance_id}/activate", response_model=InstanceOut)
+async def activate_instance(
+    instance_id: str, session: AsyncSession = Depends(get_session)
+) -> InstanceOut:
+    """Umkehrung von `/drain` (10.5, P10-S3) - ermoeglicht einen echten
+    Rollback-Pfad, solange die alte Instanz noch nicht gestoppt wurde."""
+    try:
+        result = await repository.activate(session, instance_id)
+    except repository.InstanceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Instance not registered") from exc
+    await session.commit()
+    result.license_status = await app.state.license_cache.status_for(result.service_type)
+    return result
+
+
 @app.delete("/instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deregister_instance(
     instance_id: str, session: AsyncSession = Depends(get_session)

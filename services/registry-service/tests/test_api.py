@@ -101,6 +101,22 @@ def test_reregistering_same_instance_does_not_reset_draining(client):
     assert response.json()["status"] == "draining"
 
 
+def test_activate_resets_draining_to_active(client):
+    payload = make_payload()
+    client.post("/instances", json=payload)
+    client.post(f"/instances/{payload['instance_id']}/drain")
+
+    response = client.post(f"/instances/{payload['instance_id']}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "active"
+
+
+def test_activate_unknown_instance_returns_404(client):
+    response = client.post("/instances/does-not-exist/activate")
+    assert response.status_code == 404
+
+
 def test_deregister_removes_instance(client):
     service_type = f"type-{uuid.uuid4().hex[:8]}"
     payload = make_payload(service_type=service_type)

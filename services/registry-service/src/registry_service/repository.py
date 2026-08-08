@@ -82,6 +82,21 @@ async def mark_draining(session: AsyncSession, instance_id: str) -> InstanceOut:
     return _to_out(instance, timeout_seconds=0, now=datetime.now(UTC))
 
 
+async def activate(session: AsyncSession, instance_id: str) -> InstanceOut:
+    """Umkehrung von `mark_draining` (10.5, P10-S3): ohne diesen Endpunkt
+    gaebe es keinen echten Rollback-Pfad - Konzept 10.5 verlangt
+    ausdruecklich, dass ein Rollback moeglich bleibt, "solange der Drain...
+    noch nicht vollstaendig abgeschlossen ist". Wird z. B. von
+    `scripts/rolling-update.sh` genutzt, wenn ein Rollout manuell
+    zurueckgerollt wird."""
+    instance = await session.get(ServiceInstance, instance_id)
+    if instance is None:
+        raise InstanceNotFoundError(instance_id)
+    instance.status = "active"
+    await session.flush()
+    return _to_out(instance, timeout_seconds=0, now=datetime.now(UTC))
+
+
 async def deregister(session: AsyncSession, instance_id: str) -> InstanceOut:
     instance = await session.get(ServiceInstance, instance_id)
     if instance is None:

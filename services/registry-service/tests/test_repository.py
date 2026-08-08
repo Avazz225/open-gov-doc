@@ -81,6 +81,23 @@ async def test_heartbeat_does_not_reset_draining(session):
     assert result.status == "draining"
 
 
+async def test_activate_resets_status_to_active(session):
+    req = make_request()
+    await repository.register(session, req)
+    await repository.mark_draining(session, req.instance_id)
+
+    result = await repository.activate(session, req.instance_id)
+
+    assert result.status == "active"
+    instance = await session.get(ServiceInstance, req.instance_id)
+    assert instance.status == "active"
+
+
+async def test_activate_unknown_instance_raises(session):
+    with pytest.raises(repository.InstanceNotFoundError):
+        await repository.activate(session, "does-not-exist")
+
+
 async def test_deregister_removes_instance(session):
     req = make_request()
     await repository.register(session, req)

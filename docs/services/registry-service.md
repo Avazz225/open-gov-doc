@@ -12,7 +12,8 @@
 | `POST` | `/instances` | Registrieren/Aktualisieren (Upsert nach `instance_id`) |
 | `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat, aktualisiert `last_heartbeat_at` |
 | `DELETE` | `/instances/{instance_id}` | Deregistrieren |
-| `POST` | `/instances/{instance_id}/drain` | Drain-Mechanismus (10.5/3.8, P10-S2): setzt `status="draining"` — ungegatet, WANN gedraint wird entscheidet ein externes Deploy-Werkzeug/P10-S3, nicht die Registry selbst. |
+| `POST` | `/instances/{instance_id}/drain` | Drain-Mechanismus (10.5/3.8, P10-S2): setzt `status="draining"` — ungegatet, WANN gedraint wird entscheidet ein externes Deploy-Werkzeug/`scripts/rolling-update.sh`, nicht die Registry selbst. |
+| `POST` | `/instances/{instance_id}/activate` | Umkehrung von `/drain` (10.5, P10-S3): setzt `status="active"` zurück — Grundlage für einen echten Rollback-Pfad, siehe `docs/operations/rolling-updates.md`. |
 | `GET` | `/instances/{service_type}` | Nur aktuell erreichbare Instanzen dieses Typs |
 | `GET` | `/instances` | Alle Instanzen inkl. berechnetem `healthy`-Flag |
 | `GET` | `/license-status/{service_type}` | Berechneter Lizenzstatus (`licensed`/`demo`/`unlicensed`) für diesen Servicetyp — ungegatet, für interne Poll-Clients (z. B. `workflow-service`, siehe unten). |
@@ -22,12 +23,13 @@
 
 `service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, Default `"active"`, seit P10-S2 — additiv per `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` nachgerüstet, kein Alembic in dieser Phase). `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
 
-## Drain-Mechanismus (10.5/3.8, P10-S2)
+## Drain-Mechanismus (10.5/3.8, P10-S2/S3)
 
-- **Zustand, keine automatische Auslösung**: `POST /instances/{instance_id}/drain` setzt `status="draining"` — die Registry entscheidet selbst nicht, *wann* gedraint wird. Das bleibt einem externen Deploy-Werkzeug oder einer künftigen Session (P10-S3, Rolling Updates) überlassen, die denselben Mechanismus für Update-Rollouts wiederverwendet, statt ihn neu zu bauen (Konzept 10.5: "denselben Drain-Mechanismus... nur zu einem anderen Anlass").
+- **Zustand, keine automatische Auslösung**: `POST /instances/{instance_id}/drain` setzt `status="draining"` — die Registry entscheidet selbst nicht, *wann* gedraint wird. Das übernimmt seit P10-S3 `scripts/rolling-update.sh`, das denselben Mechanismus für Update-Rollouts wiederverwendet, statt ihn neu zu bauen (Konzept 10.5: "denselben Drain-Mechanismus... nur zu einem anderen Anlass").
 - **Wirkung ausschließlich beim Routing**: eine `draining`-Instanz bleibt in `GET /instances/{type}` sichtbar (nicht deregistriert, kein Kill), verschwindet aber aus dem Auswahl-Pool des Gateways für **neue** Anfragen (`gateway_service.upstream.InstanceResolver.resolve()` filtert zusätzlich zu `healthy` auf `status == "active"`). Bereits laufende Anfragen sind nie betroffen — entspricht 10.5 wörtlich ("nimmt keine neuen Aufgaben mehr an, schließt aber laufende Vorgänge ab").
 - **Ungegatet**, wie jeder andere Registry-Endpunkt — die Registry hat nirgends ein Rollen-Gate, das wäre an dieser Stelle keine Konsistenzverbesserung.
-- Eine **neue** Registrierung (Zeile existiert noch nicht) startet immer mit `status="active"`; eine Re-Registrierung derselben `instance_id` (Selbstheilung nach `404`, kein echter Neustart, siehe `dms-registry-client`) lässt einen bestehenden `status` unverändert — nur Heartbeat/Register ändern ihn nie automatisch zurück, ausschließlich `/drain` selbst setzt ihn.
+- Eine **neue** Registrierung (Zeile existiert noch nicht) startet immer mit `status="active"`; eine Re-Registrierung derselben `instance_id` (Selbstheilung nach `404`, kein echter Neustart, siehe `dms-registry-client`) lässt einen bestehenden `status` unverändert — nur Heartbeat/Register ändern ihn nie automatisch zurück, ausschließlich `/drain`/`/activate` setzen ihn.
+- **Rollback (10.5, P10-S3)**: `POST /instances/{instance_id}/activate` setzt `status` zurück auf `"active"` — ohne diese Umkehrung gäbe es keinen Weg, eine bereits gedrainte Instanz wieder ansprechbar für neue Anfragen zu machen. Konzept 10.5 verlangt ausdrücklich, dass ein Rollback möglich bleibt, solange der Drain noch nicht vollständig abgeschlossen (die Instanz also noch nicht gestoppt) ist. Genutzt von `scripts/rolling-update.sh`s manuellem Rollback-Verfahren, siehe `docs/operations/rolling-updates.md`.
 
 ## Lizenzvermittlung (3.2b/9.3, P9-S2)
 
