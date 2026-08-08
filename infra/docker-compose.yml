@@ -13,6 +13,11 @@ networks:
 
 volumes:
   postgres-data:
+  # WAL-Archivierung für Point-in-Time-Recovery (10.4, P11-S3) - separates
+  # Volume statt Unterordner in postgres-data, damit ein Restore-Skript das
+  # Archiv unabhängig vom (ggf. verworfenen) Live-Datenverzeichnis mounten
+  # kann.
+  postgres-wal-archive:
   nats-data:
   keycloak-data:
   minio-data:
@@ -24,11 +29,46 @@ volumes:
   # Backend als die Live-Ziele ist, hier als zweites lokales Verzeichnis
   # stellvertretend simuliert.
   storage-archive-data:
+  # Grafana-eigene SQLite-DB (Sitzungen, Nutzer) - Dashboards/Datasource selbst
+  # kommen deklarativ aus infra/grafana/ (Provisioning), dieses Volume sichert
+  # nur den sonstigen Grafana-internen Zustand über Neustarts hinweg.
+  grafana-data:
 
 services:
+  # Ein frisch angelegtes Docker-Volume gehört zunächst root - der
+  # postgres-Prozess (Nutzer `postgres`) kann dann nicht in /wal-archive
+  # schreiben (echter, live entdeckter Fehlschlag beim ersten Start: "cp:
+  # can't create '/wal-archive/...': Permission denied"). Dieser einmalige
+  # Init-Dienst behebt das reproduzierbar bei jedem `docker compose up`,
+  # statt einen manuellen `chown`-Schritt vorauszusetzen.
+  postgres-wal-archive-init:
+    image: postgres:16-alpine
+    user: root
+    command: ["sh", "-c", "chown -R postgres:postgres /wal-archive"]
+    volumes:
+      - postgres-wal-archive:/wal-archive
+    networks:
+      - dms-net
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # WAL-Archivierung (10.4, P11-S3) - einfachstes offiziell dokumentiertes
+    # Muster (`cp`-Archive-Command, kein pgBackRest/Barman nötig): jedes
+    # fertige WAL-Segment landet zusätzlich zum laufenden pg_wal/ dauerhaft
+    # unter /wal-archive (eigenes Volume) - Grundlage für Point-in-Time-
+    # Recovery in scripts/backup.sh/restore.sh. `test ! -f ...` macht den
+    # Befehl idempotent (Postgres wiederholt archive_command bei Fehlern).
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f
+      - -c
+      - max_wal_senders=3
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dms}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dms_dev_only}
@@ -38,11 +78,15 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
+      - postgres-wal-archive:/wal-archive
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dms}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    depends_on:
+      postgres-wal-archive-init:
+        condition: service_completed_successfully
     networks:
       - dms-net
 
@@ -855,6 +899,31 @@ services:
       - "${PROMETHEUS_PORT:-9090}:9090"
     depends_on:
       monitoring-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    restart: unless-stopped
+    environment:
+      # Reine Dev-Bequemlichkeit (Default-Login) - kein Produktions-Ziel dieses
+      # Stacks, gleiche Vertrauensstellung wie POSTGRES_PASSWORD/dms_dev_only.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Konzept 10.1: "liefert sinnvolle Default-Dashboard-Definitionen als
+      # exportierbare JSON-Vorlagen" - Datasource + Dashboard werden deklarativ
+      # provisioniert (siehe infra/grafana/provisioning/), kein manuelles
+      # Klicken in der UI nötig.
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3003}:3000"
+    depends_on:
+      prometheus:
         condition: service_started
     networks:
       - dms-net

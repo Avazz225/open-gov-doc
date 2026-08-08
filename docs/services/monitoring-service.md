@@ -55,6 +55,11 @@ Weitere Services bekommen ihre Sensoren erst bei tatsächlichem Bedarf in späte
 - **TTL-Poll statt NATS-Invalidierung** für `SensorConfigClient` (Default 15s) — bewusst einfacher als das `ComponentLicenseCache`-Vorbild (P9-S2), da diese Session bereits Sensor-Konzept + neuer Service + Scrape-Proxy + zwei Piloten umfasst.
 - **Kein Admin-UI-Bedienfeld** für Sensor-Ein-/Ausschaltung — nur die Backend-API, gleiches Muster wie andere Sessionen, die Backend vor Frontend liefern.
 - **Keine Anbindung an 7.3** (Konfigurationsexport, existiert erst P12-S3).
+- **Kein CheckMK** — Konzept 10.1 nennt es als drittes Anbindungsziel, Nutzer entschied sich bei der P11-S2-Planfreigabe explizit dagegen (siehe `docs/operations/monitoring.md`).
+
+## Grafana (P11-S2)
+
+`GET /metrics` ist die einzige Quelle, die Grafana je erreicht — indirekt über Prometheus, das wiederum ausschließlich diesen Service scraped. Ein Default-Dashboard (`infra/grafana/dashboards/dms-sensor-overview.json`) visualisiert alle aktuell deklarierten Sensoren, deklarativ provisioniert (kein manuelles Einrichten). Details siehe `docs/operations/monitoring.md`.
 
 ## Tests
 

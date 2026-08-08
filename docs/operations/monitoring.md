@@ -1,4 +1,4 @@
-# Monitoring & Sensor-Konzept (Konzept 10.1, P11-S1)
+# Monitoring & Sensor-Konzept (Konzept 10.1, P11-S1/S2)
 
 Konzept 10.1 verlangt ein granular konfigurierbares Sensor-Konzept: jeder Service bringt
 benannte, gruppierte, kostenbewusste Messpunkte mit, die sich einzeln oder gruppenweise
@@ -66,6 +66,44 @@ sensor = registry.histogram(SPEC)  # oder .counter()/.gauge()
 - **Keine Admin-UI-Bedienoberfläche** für Sensor-Ein-/Ausschaltung — nur die Backend-API (`GET /sensors`, `PUT /sensor-config/...`).
 - **Kein OpenTelemetry-Tracing angebunden** — `libs/dms-common.configure_tracing()` existiert bereits (vorbereitet, aber von keinem Service aufgerufen), ist aber laut Konzept 10.1 ein eigenständiges, ergänzendes Thema ("Verteiltes Tracing... ergänzt die Sensor-Metriken") und nicht Teil dieser Session.
 - **Der Plugin Orchestration Service (P10-S1) wechselt nicht auf diese Sensor-Schicht um** — sein `psutil`-Sampler bleibt bestehen. In der real existierenden Docker-Compose-Umgebung gibt es ohnehin nur einen Host, ein Umstieg brächte vor echter Multi-Node-Infrastruktur keinen Mehrwert (siehe P11-S0-Befund).
+
+## Grafana (Konzept 10.1, P11-S2)
+
+Konzept 10.1: "das System selbst liefert keine eigene Grafana-Ersatz-UI, sondern stellt
+sinnvolle Default-Dashboard-Definitionen als exportierbare JSON-Vorlagen bereit (Startpunkt,
+keine Pflichtnutzung)." Umgesetzt als:
+
+- **`grafana`-Compose-Service** (`infra/docker-compose.yml`), Default-Login `admin`/`admin`
+  (reine Dev-Bequemlichkeit, wie andere Default-Credentials dieses Stacks).
+- **Deklarative Provisionierung** — kein manuelles Einrichten in der UI nötig:
+  `infra/grafana/provisioning/datasources/prometheus.yml` verdrahtet die bereits laufende
+  `prometheus`-Instanz mit fester `uid: prometheus`; `infra/grafana/provisioning/dashboards/dashboards.yml`
+  lädt jede JSON-Datei aus `infra/grafana/dashboards/` automatisch beim Start.
+- **`infra/grafana/dashboards/dms-sensor-overview.json`** — die vom Konzept geforderte
+  exportierbare Vorlage: ein Dashboard mit den vier aktuellen Piloten-Sensoren
+  (`registry.instances.active_total`, `registry.service.heartbeat.miss`,
+  `document.upload.duration`, `document.count.active_total`) plus dem immer-aktiven
+  `monitoring_scrape_failures_total`-Zähler und dem `up{job="monitoring-service"}`-Zielstatus.
+  Weitere Sensoren aus künftigen Services (kein Vollretrofit, siehe oben) erscheinen erst
+  hier, sobald sie über `monitoring-service` gescraped werden — die Datei selbst bleibt dabei
+  unverändert exportierbar/importierbar in jede andere Grafana-Instanz, unabhängig von diesem
+  Compose-Stack.
+
+## CheckMK — bewusst nicht Teil dieser Ausbaustufe (P11-S2)
+
+Konzept 10.1 nennt CheckMK als drittes mögliches Anbindungsziel (neben Prometheus/Grafana),
+über dessen Standard-Prometheus-Special-Agent oder ein eigenes Check-Plugin. **Rückfrage bei
+Sessionstart**: der Nutzer entschied sich explizit gegen eine CheckMK-Anbindung in dieser
+Session ("ich will grafana kein checkmk") — weder als laufender Container noch als reine
+Dokumentation. Das ist eine bewusste, vom Nutzer getroffene Scope-Entscheidung, keine
+technische Notwendigkeit: Recherche vor der Rückfrage ergab, dass ein echter
+`checkmk/check-mk-raw`-Container ohne größere manuelle Einrichtung lauffähig wäre (offizielles
+Docker-Image, automatische Site-Erstellung), die vollautomatische Konfiguration der
+Prometheus-Special-Agent-Regel über die REST-API aber mangels unabhängig dokumentiertem
+Rohformat für diesen Ruleset-Typ voraussichtlich einen einmaligen manuellen GUI-Schritt
+erfordert hätte. Bleibt als offener Punkt für eine mögliche spätere Session, falls tatsächlich
+Bedarf an einer klassischen IT-Monitoring-Landschaft (Alarmierung/Eskalation/SLA-Reporting)
+entsteht — nicht stillschweigend als erledigt markiert.
 
 ## Sensor-Konfiguration ändern
 

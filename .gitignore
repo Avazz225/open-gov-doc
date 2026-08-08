@@ -39,6 +39,10 @@ infra/**/data/
 # --- Testlauf-Logs (scripts/run-tests.sh) ---
 .test-results/
 
+# --- Backup-Artefakte (scripts/backup.sh, Konzept 10.4) - Basebackups/
+# Storage-Tarballs sind groß und enthalten echte Daten, gehören nicht ins Repo ---
+backups/
+
 # --- OS / Editor ---
 .DS_Store
 .vscode/

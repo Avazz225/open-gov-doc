@@ -1,0 +1,18 @@
+# Deklarative Dashboard-Provisionierung (Konzept 10.1, P11-S2) - lädt jede
+# JSON-Datei aus infra/grafana/dashboards/ automatisch beim Start. Die JSON-
+# Dateien selbst sind die vom Konzept geforderten "exportierbaren
+# Dashboard-Vorlagen" - ein Betreiber kann sie unverändert übernehmen,
+# anpassen oder in eine eigene Grafana-Instanz importieren (Startpunkt,
+# keine Pflichtnutzung).
+apiVersion: 1
+
+providers:
+  - name: dms-default-dashboards
+    orgId: 1
+    folder: DMS
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

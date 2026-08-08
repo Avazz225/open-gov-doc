@@ -1,0 +1,136 @@
+{
+  "uid": "dms-sensor-overview",
+  "title": "DMS – Sensor-Übersicht (10.1)",
+  "description": "Default-Dashboard-Vorlage (Konzept 10.1: \"exportierbare Dashboard-Vorlagen ... Startpunkt, keine Pflichtnutzung\"). Deckt die aktuellen Piloten-Sensoren ab (registry-service/document-service, P11-S1) sowie den Scrape-Proxy des monitoring-service selbst. Weitere Sensoren aus künftigen Services erscheinen erst hier, sobald sie über monitoring-service gescraped werden - kein Vollretrofit in dieser Ausbaustufe.",
+  "tags": ["dms", "monitoring", "10.1"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Aktive Instanzen (registry.instances.active_total)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(registry_instances_active_total)",
+          "legendFormat": "aktive Instanzen"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Verpasste Heartbeats (registry.service.heartbeat.miss)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(registry_service_heartbeat_miss)",
+          "legendFormat": "aktuell überfällig"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Ø Upload-Dauer (document.upload.duration)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(document_upload_duration_sum[5m])) / sum(rate(document_upload_duration_count[5m]))",
+          "legendFormat": "Ø Dauer"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Aktive Dokumente (document.count.active_total)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(document_count_active_total)",
+          "legendFormat": "aktive Dokumente"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Uploads gesamt (document.upload.duration_count)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(document_upload_duration_count)",
+          "legendFormat": "Uploads"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Scrape-Fehlversuche (monitoring.scrape.failures)",
+      "type": "stat",
+      "description": "Immer-aktiver, nicht konfigurierbarer Sensor des monitoring-service selbst (siehe docs/services/monitoring-service.md) - zählt fehlgeschlagene Scrape-Versuche gegen Fach-Service-/metrics-Endpunkte.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "monitoring_scrape_failures_total",
+          "legendFormat": "Fehlversuche gesamt"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Prometheus-Scrape-Ziel (monitoring-service)",
+      "type": "stat",
+      "description": "1 = monitoring-service gerade erreichbar (der einzige Scrape-Kandidat von Prometheus, siehe infra/prometheus.yml).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 16 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up{job=\"monitoring-service\"}",
+          "legendFormat": "up"
+        }
+      ]
+    }
+  ]
+}
