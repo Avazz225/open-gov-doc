@@ -131,6 +131,30 @@ async def test_valid_token_routes_via_registry_to_real_instance(client, make_tok
         await _deregister_instance(service_type, instance_id)
 
 
+async def _drain_instance(instance_id: str) -> None:
+    async with httpx.AsyncClient(base_url=REGISTRY_URL) as registry:
+        response = await registry.post(f"/instances/{instance_id}/drain")
+        response.raise_for_status()
+
+
+async def test_draining_instance_is_excluded_from_routing(client, make_token):
+    """Drain-Mechanismus (10.5/3.8, P10-S2): eine draining Instanz bleibt in
+    der Registry sichtbar, darf aber keine neuen Anfragen mehr bekommen -
+    einzige Instanz dieses service_type -> das Gateway muss `503` liefern,
+    genau wie bei gar keiner registrierten Instanz."""
+    service_type = f"gw-test-drain-{uuid.uuid4().hex[:8]}"
+    instance_id = await _register_instance(service_type, address=REAL_TARGET_URL)
+    try:
+        await _drain_instance(instance_id)
+        token = make_token()
+        response = client.get(
+            f"/api/{service_type}/healthz", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 503
+    finally:
+        await _deregister_instance(service_type, instance_id)
+
+
 class _StubMaintenanceState:
     """Ersetzt `app.state.maintenance_state` für kontrollierte Tests - genau
     wie `test_rate_limit_returns_429_after_threshold` unten `app.state.

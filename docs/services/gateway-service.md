@@ -15,10 +15,13 @@
 ## Routing
 
 Fragt `GET {registry-service}/instances/{service_type}` ab (Cache-TTL
-`instance_cache_ttl_seconds`, Default 5s), wählt zufällig eine gesunde
-Instanz und reicht Methode, Query-String, Body und Header (minus Hop-by-Hop-
-Header: `Connection`, `Keep-Alive`, `Transfer-Encoding`, `Host`, ...)
-unverändert an `{instance.address}/{path}` weiter. Kein registriertes/gesundes
+`instance_cache_ttl_seconds`, Default 5s), wählt zufällig eine gesunde,
+**nicht draining** Instanz (Drain-Mechanismus, 10.5/3.8, P10-S2 — eine
+`status="draining"`-Instanz bleibt erreichbar, bekommt aber keine neuen
+Anfragen mehr, siehe `docs/services/registry-service.md`) und reicht
+Methode, Query-String, Body und Header (minus Hop-by-Hop-Header:
+`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Host`, ...) unverändert an
+`{instance.address}/{path}` weiter. Kein registriertes/gesundes/aktives
 Ziel → `503`. Downstream nicht erreichbar → `502`.
 
 ## Auth-Validierung

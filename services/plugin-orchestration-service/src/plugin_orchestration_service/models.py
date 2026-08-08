@@ -56,12 +56,13 @@ class PluginResourceReport(Base):
 class ClusterNode(Base):
     """Ressourcen-Stichprobe eines Knotens (3.8: "eigener Mechanismus", da
     die vollwertige Sensor-Infrastruktur aus 10.1 erst Phase 11 existiert,
-    siehe P10-S0-Befund). In der real existierenden Docker-Compose-Umgebung
-    gibt es genau eine Zeile - den Host, auf dem dieser Service selbst
-    laeuft (`node_id = NODE_ID_SELF`) -, periodisch per `psutil` aktualisiert
-    (siehe `sampler.py`). Die Tabelle ist fuer P10-S2s Mehrknoten-FFD bereits
-    erweiterbar, ohne dass diese Session einen ungenutzten
-    Mehrknoten-Registrierungsmechanismus vorwegnimmt."""
+    siehe P10-S0-Befund). Der eigene Host (`node_id = NODE_ID_SELF`) wird
+    periodisch per `psutil` aktualisiert (siehe `sampler.py`); weitere Knoten
+    koennen sich seit P10-S2 ueber `POST /nodes/{node_id}` selbst melden
+    (kein echter zweiter Host in der real existierenden Docker-Compose-
+    Umgebung, aber dieselbe Selbstmelde-Logik, die ein kuenftiger zweiter
+    Host nutzen wuerde - Praezedenzfall `PluginResourceReport`). Die
+    First-Fit-Platzierung (`placement.py`) waehlt ueber alle Zeilen."""
 
     __tablename__ = "cluster_node"
 
@@ -92,4 +93,8 @@ class PlacementDecision(Base):
     placement_allowed: Mapped[bool] = mapped_column(default=False)
     reason: Mapped[str | None] = mapped_column(String(256), default=None)
     dependency_status: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Plattform-Scheduler-Erkennung (3.8, P10-S2): haelt fest, ob eine
+    # angeschlossene Plattform-Scheduler-Plattform die Entscheidung getroffen
+    # hat oder der FFD-Fallback - siehe `platform_scheduler.py`.
+    placement_method: Mapped[str] = mapped_column(String(32), default="ffd")
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

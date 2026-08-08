@@ -49,7 +49,13 @@ class InstanceResolver:
         try:
             response = await self._client.get(f"{self._registry_base_url}/instances/{service_type}")
             response.raise_for_status()
-            instances = [i for i in response.json() if i["healthy"]]
+            # Drain-Mechanismus (10.5/3.8, P10-S2): eine "draining" Instanz
+            # bleibt erreichbar (laufende Vorgaenge schliessen regulaer ab),
+            # bekommt aber keine NEUEN Anfragen mehr - sie faellt hier aus
+            # dem Auswahl-Pool, statt eigens abgefragt/gekillt zu werden.
+            instances = [
+                i for i in response.json() if i["healthy"] and i.get("status", "active") == "active"
+            ]
         except httpx.HTTPError:
             instances = cached[1] if cached is not None else []
 

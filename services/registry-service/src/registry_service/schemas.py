@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
+InstanceStatus = Literal["active", "draining"]
 
 
 class RegisterRequest(BaseModel):
@@ -29,6 +30,8 @@ class InstanceOut(BaseModel):
     # Aufbau aus `repository` per `ComponentLicenseCache` nachgetragen, nicht
     # persistiert - kein Feld auf `ServiceInstance`.
     license_status: LicenseComponentStatus = "licensed"
+    # Drain-Mechanismus (10.5/3.8, P10-S2) - siehe models.ServiceInstance.status.
+    status: InstanceStatus = "active"
 
     model_config = {"from_attributes": True}
 

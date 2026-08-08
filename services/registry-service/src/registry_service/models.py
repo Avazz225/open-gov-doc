@@ -27,3 +27,10 @@ class ServiceInstance(Base):
     address: Mapped[str] = mapped_column(String(512))
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Drain-Mechanismus (10.5/3.8, P10-S2): "active" nimmt neue Anfragen an,
+    # "draining" nicht mehr (siehe gateway_service.upstream.InstanceResolver),
+    # laeuft aber unangetastet weiter, bis die Instanz sich regulaer
+    # deregistriert. Wird ausschliesslich ueber POST /instances/{id}/drain
+    # gesetzt - weder Registrierung (ausser bei einer echten neuen Zeile)
+    # noch Heartbeat aendern ihn.
+    status: Mapped[str] = mapped_column(String(16), default="active")

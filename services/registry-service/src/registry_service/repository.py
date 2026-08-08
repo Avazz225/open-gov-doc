@@ -27,6 +27,7 @@ def _to_out(instance: ServiceInstance, timeout_seconds: float, now: datetime) ->
         registered_at=instance.registered_at,
         last_heartbeat_at=instance.last_heartbeat_at,
         healthy=_is_healthy(instance, timeout_seconds, now),
+        status=instance.status,
     )
 
 
@@ -38,7 +39,13 @@ async def register(session: AsyncSession, payload: RegisterRequest) -> InstanceO
     now = datetime.now(UTC)
     instance = await session.get(ServiceInstance, payload.instance_id)
     if instance is None:
-        instance = ServiceInstance(instance_id=payload.instance_id, registered_at=now)
+        # Nur eine echte Neuregistrierung startet "active" - eine erneute
+        # Registrierung derselben instance_id (Selbstheilung nach 404, siehe
+        # dms-registry-client) ist kein Neustart und darf einen zuvor
+        # gesetzten "draining"-Status nicht stillschweigend zuruecksetzen.
+        instance = ServiceInstance(
+            instance_id=payload.instance_id, registered_at=now, status="active"
+        )
         session.add(instance)
 
     instance.service_type = payload.service_type
@@ -60,6 +67,19 @@ async def heartbeat(session: AsyncSession, instance_id: str) -> InstanceOut:
     instance.last_heartbeat_at = now
     await session.flush()
     return _to_out(instance, timeout_seconds=0, now=now)
+
+
+async def mark_draining(session: AsyncSession, instance_id: str) -> InstanceOut:
+    """Drain-Mechanismus (10.5/3.8, P10-S2): setzt ausschliesslich den
+    Status, keine Kuendigung/kein Abbruch der Instanz - siehe
+    `gateway_service.upstream.InstanceResolver`, der draining-Instanzen aus
+    dem Pool fuer NEUE Anfragen ausschliesst."""
+    instance = await session.get(ServiceInstance, instance_id)
+    if instance is None:
+        raise InstanceNotFoundError(instance_id)
+    instance.status = "draining"
+    await session.flush()
+    return _to_out(instance, timeout_seconds=0, now=datetime.now(UTC))
 
 
 async def deregister(session: AsyncSession, instance_id: str) -> InstanceOut:

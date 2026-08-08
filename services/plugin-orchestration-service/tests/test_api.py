@@ -143,6 +143,7 @@ async def test_placement_decision_is_created_and_listed(client, session):
     assert body["source"] == "manifest"
     assert body["placement_allowed"] is True
     assert body["node_id"] == "self"
+    assert body["placement_method"] == "ffd"
 
     list_response = client.get("/placements?plugin_type=cmis-connector")
     assert list_response.status_code == 200
@@ -179,3 +180,39 @@ def test_nodes_endpoint_returns_list(client):
     response = client.get("/nodes")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_upsert_node_requires_principal_header(client):
+    response = client.post(
+        "/nodes/remote-node-1",
+        json={"cpu_cores": 8.0, "total_ram_mb": 16384.0},
+    )
+    assert response.status_code == 403
+
+
+def test_upsert_node_requires_orchestration_permission(client):
+    app.state.permission_client.has_permission.return_value = False
+    response = client.post(
+        "/nodes/remote-node-1",
+        json={"cpu_cores": 8.0, "total_ram_mb": 16384.0},
+        headers={"x-dms-principal": "alice"},
+    )
+    assert response.status_code == 403
+
+
+def test_upsert_node_succeeds_and_is_listed(client):
+    response = client.post(
+        "/nodes/remote-node-1",
+        json={"cpu_cores": 8.0, "total_ram_mb": 16384.0},
+        headers={"x-dms-principal": "alice"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["node_id"] == "remote-node-1"
+    assert body["cpu_cores"] == 8.0
+    # Kein `available_ram_mb` mitgeschickt -> Default ist "voll verfuegbar".
+    assert body["available_ram_mb"] == 16384.0
+
+    list_response = client.get("/nodes")
+    assert any(n["node_id"] == "remote-node-1" for n in list_response.json())

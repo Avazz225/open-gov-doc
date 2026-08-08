@@ -59,6 +59,48 @@ def test_heartbeat_known_instance(client):
     assert response.json()["instance_id"] == payload["instance_id"]
 
 
+def test_new_instance_registers_as_active(client):
+    response = client.post("/instances", json=make_payload())
+    assert response.json()["status"] == "active"
+
+
+def test_drain_sets_status_to_draining(client):
+    payload = make_payload()
+    client.post("/instances", json=payload)
+
+    response = client.post(f"/instances/{payload['instance_id']}/drain")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "draining"
+
+
+def test_drain_unknown_instance_returns_404(client):
+    response = client.post("/instances/does-not-exist/drain")
+    assert response.status_code == 404
+
+
+def test_draining_instance_still_listed(client):
+    service_type = f"type-{uuid.uuid4().hex[:8]}"
+    payload = make_payload(service_type=service_type)
+    client.post("/instances", json=payload)
+    client.post(f"/instances/{payload['instance_id']}/drain")
+
+    list_response = client.get(f"/instances/{service_type}")
+
+    ids_to_status = {i["instance_id"]: i["status"] for i in list_response.json()}
+    assert ids_to_status[payload["instance_id"]] == "draining"
+
+
+def test_reregistering_same_instance_does_not_reset_draining(client):
+    payload = make_payload()
+    client.post("/instances", json=payload)
+    client.post(f"/instances/{payload['instance_id']}/drain")
+
+    response = client.post("/instances", json=payload)
+
+    assert response.json()["status"] == "draining"
+
+
 def test_deregister_removes_instance(client):
     service_type = f"type-{uuid.uuid4().hex[:8]}"
     payload = make_payload(service_type=service_type)

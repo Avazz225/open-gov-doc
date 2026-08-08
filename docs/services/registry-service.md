@@ -1,8 +1,8 @@
 # registry-service
 
-**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Seit P9-S2 zusätzlich Lizenzvermittlung (3.2b/9.3): fragt `license-service` ab und reicht einen berechneten Lizenzstatus (`licensed`/`demo`/`unlicensed`) je `service_type` an registrierende/heartbeatende Services weiter, ohne selbst eine Lizenzprüfung durchzuführen.
+**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Seit P9-S2 zusätzlich Lizenzvermittlung (3.2b/9.3): fragt `license-service` ab und reicht einen berechneten Lizenzstatus (`licensed`/`demo`/`unlicensed`) je `service_type` an registrierende/heartbeatende Services weiter, ohne selbst eine Lizenzprüfung durchzuführen. Seit P10-S2 zusätzlich der **Drain-Mechanismus** (10.5/3.8): eine Instanz kann als `draining` markiert werden, bleibt dabei erreichbar, bekommt aber keine neuen Anfragen mehr über das Gateway.
 
-**Konzept-Referenz:** 3.2a, 3.2b, 9.3
+**Konzept-Referenz:** 3.2a, 3.2b, 9.3, 10.5
 **Eigenes Postgres-Schema:** `registry` (Tabelle `service_instance`)
 
 ## API
@@ -12,6 +12,7 @@
 | `POST` | `/instances` | Registrieren/Aktualisieren (Upsert nach `instance_id`) |
 | `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat, aktualisiert `last_heartbeat_at` |
 | `DELETE` | `/instances/{instance_id}` | Deregistrieren |
+| `POST` | `/instances/{instance_id}/drain` | Drain-Mechanismus (10.5/3.8, P10-S2): setzt `status="draining"` — ungegatet, WANN gedraint wird entscheidet ein externes Deploy-Werkzeug/P10-S3, nicht die Registry selbst. |
 | `GET` | `/instances/{service_type}` | Nur aktuell erreichbare Instanzen dieses Typs |
 | `GET` | `/instances` | Alle Instanzen inkl. berechnetem `healthy`-Flag |
 | `GET` | `/license-status/{service_type}` | Berechneter Lizenzstatus (`licensed`/`demo`/`unlicensed`) für diesen Servicetyp — ungegatet, für interne Poll-Clients (z. B. `workflow-service`, siehe unten). |
@@ -19,7 +20,14 @@
 
 ## Datenmodell
 
-`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`. `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
+`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, Default `"active"`, seit P10-S2 — additiv per `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` nachgerüstet, kein Alembic in dieser Phase). `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
+
+## Drain-Mechanismus (10.5/3.8, P10-S2)
+
+- **Zustand, keine automatische Auslösung**: `POST /instances/{instance_id}/drain` setzt `status="draining"` — die Registry entscheidet selbst nicht, *wann* gedraint wird. Das bleibt einem externen Deploy-Werkzeug oder einer künftigen Session (P10-S3, Rolling Updates) überlassen, die denselben Mechanismus für Update-Rollouts wiederverwendet, statt ihn neu zu bauen (Konzept 10.5: "denselben Drain-Mechanismus... nur zu einem anderen Anlass").
+- **Wirkung ausschließlich beim Routing**: eine `draining`-Instanz bleibt in `GET /instances/{type}` sichtbar (nicht deregistriert, kein Kill), verschwindet aber aus dem Auswahl-Pool des Gateways für **neue** Anfragen (`gateway_service.upstream.InstanceResolver.resolve()` filtert zusätzlich zu `healthy` auf `status == "active"`). Bereits laufende Anfragen sind nie betroffen — entspricht 10.5 wörtlich ("nimmt keine neuen Aufgaben mehr an, schließt aber laufende Vorgänge ab").
+- **Ungegatet**, wie jeder andere Registry-Endpunkt — die Registry hat nirgends ein Rollen-Gate, das wäre an dieser Stelle keine Konsistenzverbesserung.
+- Eine **neue** Registrierung (Zeile existiert noch nicht) startet immer mit `status="active"`; eine Re-Registrierung derselben `instance_id` (Selbstheilung nach `404`, kein echter Neustart, siehe `dms-registry-client`) lässt einen bestehenden `status` unverändert — nur Heartbeat/Register ändern ihn nie automatisch zurück, ausschließlich `/drain` selbst setzt ihn.
 
 ## Lizenzvermittlung (3.2b/9.3, P9-S2)
 

@@ -33,6 +33,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # das Modell in Produktion stabilisiert hat.
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS registry"))
         await conn.run_sync(Base.metadata.create_all)
+        # `create_all` legt fehlende TABELLEN an, aendert aber keine
+        # bestehenden - `status` (Drain-Mechanismus, 10.5/3.8, P10-S2) kam
+        # erst nachtraeglich dazu, gleiches additive Ad-hoc-Migrationsmuster
+        # wie z. B. document-service. Idempotent dank IF NOT EXISTS.
+        await conn.execute(
+            text(
+                "ALTER TABLE registry.service_instance "
+                "ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active' NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -132,6 +142,22 @@ async def send_heartbeat(
 ) -> InstanceOut:
     try:
         result = await repository.heartbeat(session, instance_id)
+    except repository.InstanceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Instance not registered") from exc
+    await session.commit()
+    result.license_status = await app.state.license_cache.status_for(result.service_type)
+    return result
+
+
+@app.post("/instances/{instance_id}/drain", response_model=InstanceOut)
+async def drain_instance(
+    instance_id: str, session: AsyncSession = Depends(get_session)
+) -> InstanceOut:
+    """Drain-Mechanismus (10.5/3.8, P10-S2) - ungegatet wie jeder andere
+    Registry-Endpunkt: WANN gedraint wird, entscheidet ein externes
+    Deploy-Werkzeug/P10-S3, nicht die Registry selbst."""
+    try:
+        result = await repository.mark_draining(session, instance_id)
     except repository.InstanceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Instance not registered") from exc
     await session.commit()

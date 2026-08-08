@@ -10,6 +10,9 @@ from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from plugin_orchestration_service import placement, sampler
 from plugin_orchestration_service.clients import (
     AuthServiceClient,
@@ -23,7 +26,12 @@ from plugin_orchestration_service.models import (
     PluginManifest,
     PluginResourceReport,
 )
+from plugin_orchestration_service.platform_scheduler import (
+    NullSchedulerAdapter,
+    detect_platform_scheduler,
+)
 from plugin_orchestration_service.schemas import (
+    ClusterNodeIn,
     ClusterNodeOut,
     PlacementDecisionOut,
     PlacementRequestIn,
@@ -32,8 +40,6 @@ from plugin_orchestration_service.schemas import (
     ResourceUsageReportIn,
 )
 from plugin_orchestration_service.settings import Settings
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 settings = Settings()
 configure_logging(settings)
@@ -80,6 +86,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS orchestration"))
         await conn.run_sync(Base.metadata.create_all)
+        # `create_all` legt fehlende TABELLEN an, aendert aber keine
+        # bestehenden - `placement_method` (Plattform-Scheduler-Erkennung,
+        # 3.8, P10-S2) kam erst nachtraeglich dazu, gleiches additive
+        # Ad-hoc-Migrationsmuster wie z. B. document-service. Idempotent
+        # dank IF NOT EXISTS.
+        await conn.execute(
+            text(
+                "ALTER TABLE orchestration.placement_decision "
+                "ADD COLUMN IF NOT EXISTS placement_method VARCHAR(32) DEFAULT 'ffd' NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -89,6 +106,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.registry_service_base_url or "",
         cache_ttl_seconds=settings.registry_dependency_cache_ttl_seconds,
     )
+    # Plattform-Scheduler-Erkennung (3.8, P10-S2): rein informativ, siehe
+    # platform_scheduler.py-Moduldocstring - kein Adapter fuer einen Treffer
+    # vorhanden, `NullSchedulerAdapter` ist der reale Zustand in diesem
+    # Docker-Compose-only-Projekt (P10-S0-Entscheidung).
+    app.state.scheduler_adapter = NullSchedulerAdapter()
+    detected_platform = detect_platform_scheduler()
+    if detected_platform is not None:
+        logger.warning(
+            "platform_scheduler_detected_without_adapter", extra={"platform": detected_platform}
+        )
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="orchestration")
     await event_bus.connect()
@@ -209,6 +236,37 @@ async def list_nodes(session: AsyncSession = Depends(get_session)) -> list[Clust
     return list(result.scalars().all())
 
 
+@app.post("/nodes/{node_id}", response_model=ClusterNodeOut, status_code=status.HTTP_201_CREATED)
+async def upsert_node(
+    node_id: str,
+    payload: ClusterNodeIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ClusterNode:
+    """Kapazitaets-Selbstmeldung eines Knotens (P10-S2) - symmetrisch zu
+    `POST /plugins/{type}/resource-usage`: kein echter zweiter Host in
+    dieser Docker-Compose-Umgebung ruft das heute auf, aber dieselbe
+    Selbstmelde-Logik, die ein kuenftiger zweiter Host nutzen wuerde. Der
+    eigene Knoten (`sampler.NODE_ID_SELF`) bleibt weiterhin per `psutil`
+    automatisch gesampelt, unabhaengig von diesem Endpunkt."""
+    await _require_orchestration_permission(x_dms_principal)
+
+    node = await session.get(ClusterNode, node_id)
+    if node is None:
+        node = ClusterNode(node_id=node_id)
+        session.add(node)
+    node.cpu_cores = payload.cpu_cores
+    node.total_ram_mb = payload.total_ram_mb
+    node.cpu_usage_percent = payload.cpu_usage_percent
+    node.available_ram_mb = (
+        payload.available_ram_mb if payload.available_ram_mb is not None else payload.total_ram_mb
+    )
+    node.sampled_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(node)
+    return node
+
+
 @app.post("/placements", response_model=PlacementDecisionOut, status_code=status.HTTP_201_CREATED)
 async def create_placement(
     payload: PlacementRequestIn,
@@ -219,7 +277,11 @@ async def create_placement(
 
     try:
         decision = await placement.decide_placement(
-            session, payload.plugin_type, settings, app.state.registry_client
+            session,
+            payload.plugin_type,
+            settings,
+            app.state.registry_client,
+            app.state.scheduler_adapter,
         )
     except placement.ManifestNotFoundError as exc:
         raise HTTPException(
@@ -240,6 +302,7 @@ async def create_placement(
             "node_id": decision.node_id,
             "placement_allowed": decision.placement_allowed,
             "source": decision.source,
+            "placement_method": decision.placement_method,
         },
     )
     return decision

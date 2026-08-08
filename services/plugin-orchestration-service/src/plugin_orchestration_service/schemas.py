@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 ScalingType = Literal["stateless_horizontal", "singleton"]
 PlacementSource = Literal["manifest", "observed_median", "default_fallback"]
+PlacementMethod = Literal["platform_scheduler", "ffd"]
 
 
 class PluginManifestIn(BaseModel):
@@ -36,6 +37,13 @@ class ResourceUsageReportIn(BaseModel):
     ram_mb: float
 
 
+class ClusterNodeIn(BaseModel):
+    cpu_cores: float
+    total_ram_mb: float
+    cpu_usage_percent: float = 0.0
+    available_ram_mb: float | None = None
+
+
 class ClusterNodeOut(BaseModel):
     node_id: str
     cpu_cores: float
@@ -58,6 +66,7 @@ class PlacementDecisionOut(BaseModel):
     estimated_cpu_cores: float
     estimated_ram_mb: float
     source: PlacementSource
+    placement_method: PlacementMethod
     placement_allowed: bool
     reason: str | None
     dependency_status: dict[str, bool]
