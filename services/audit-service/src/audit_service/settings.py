@@ -61,4 +61,8 @@ class Settings(BaseServiceSettings):
         "reporting.>",
         "query.>",
         "license.>",
+        # "orchestration.>" kam in P10-S1 dazu - der Plugin Orchestration
+        # Service (3.8) auditiert seine eigenen Platzierungsentscheidungen
+        # ("orchestration.placement.decided") ueber denselben Event-Trail.
+        "orchestration.>",
     ]

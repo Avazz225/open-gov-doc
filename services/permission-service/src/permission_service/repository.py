@@ -106,6 +106,10 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # eine Notfallsperre soll einer echten, individuell zurechenbaren Person
     # zugeordnet bleiben, kein geteiltes Konto.
     ("domain-admin-emergency", "Not-Shutdown-Auslösung (4.8)", ["system.not_shutdown.trigger"]),
+    # Wie "domain-admin-license" (P9-S1) entsteht diese Domäne erst mit dem
+    # tatsächlichen Feature (Plugin Orchestration Service, 3.8, P10-S1) -
+    # Konzept 4.6 nennt seine Domänen-Liste ausdrücklich nur beispielhaft.
+    ("domain-admin-orchestration", "Plugin-Orchestrierung", ["admin.orchestration"]),
 ]
 
 
