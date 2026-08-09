@@ -41,6 +41,11 @@ class TaskNotReadyError(Exception):
     ID, oder die Instanz ist bereits fertig."""
 
 
+class InstanceNotRunningError(Exception):
+    """`POST /instances/{id}/retry` (P12-S2) auf eine bereits `completed`-Instanz -
+    nichts zum Wiederholen."""
+
+
 async def create_process_definition(
     session: AsyncSession, *, name: str, bpmn_xml: str, process_id: str | None
 ) -> ProcessDefinition:
@@ -129,6 +134,7 @@ async def start_instance(
     created_by: str,
     business_key: str | None,
     initial_data: dict,
+    instance_id: str | None = None,
 ) -> ProcessInstance:
     definition = await get_process_definition(session, process_definition_id)
     try:
@@ -138,23 +144,40 @@ async def start_instance(
 
     wf = spiff_adapter.new_workflow(spec)
     spiff_adapter.set_initial_data(wf, initial_data)
-    spiff_adapter.run_ready_steps(wf)
 
     now = datetime.now(UTC)
-    completed = spiff_adapter.is_completed(wf)
     instance = ProcessInstance(
-        id=str(uuid.uuid4()),
+        id=instance_id or str(uuid.uuid4()),
         process_definition_id=process_definition_id,
         business_key=business_key,
-        status="completed" if completed else "running",
+        status="running",
         workflow_state=spiff_adapter.serialize(wf),
         created_by=created_by,
         created_at=now,
         updated_at=now,
-        completed_at=now if completed else None,
+        completed_at=None,
     )
     session.add(instance)
     await session.flush()
+
+    # `try`/`finally` statt eines einfachen sequenziellen Ablaufs (P12-S2,
+    # Resumability, 7.2): wirft `run_ready_steps()` (z. B. ein `connector_call`-
+    # Service-Task, dessen Ziel nicht erreichbar war), MUSS der dadurch entstandene
+    # `ERROR`-Zustand trotzdem persistiert werden - sonst gäbe es für
+    # `POST /instances/{id}/retry` gar keine Instanz-Zeile mit dem richtigen
+    # Zwischenstand zum Fortsetzen. Ohne dieses `finally` würde die Instanz bei
+    # einer Exception hier überhaupt nie in der DB landen (real gefunden beim
+    # Schreiben des zugehörigen API-Tests).
+    try:
+        spiff_adapter.run_ready_steps(wf)
+    finally:
+        completed = spiff_adapter.is_completed(wf)
+        instance.workflow_state = spiff_adapter.serialize(wf)
+        instance.status = "completed" if completed else "running"
+        instance.updated_at = datetime.now(UTC)
+        if completed:
+            instance.completed_at = instance.updated_at
+        await session.flush()
     return instance
 
 
@@ -204,16 +227,48 @@ async def complete_task(
     # eigenen BPMN-Prozessvariablen kollidieren können) - nur als Event-Payload
     # beim Publizieren in main.py verwendet, siehe dort.
     spiff_adapter.complete_task(task, data)
-    spiff_adapter.run_ready_steps(wf)
+    # `try`/`finally`: siehe `start_instance` - ein nachfolgender automatischer
+    # Schritt (z. B. `connector_call`) kann fehlschlagen, der bereits abgeschlossene
+    # Manual Task darf dabei nicht verloren gehen (P12-S2).
+    try:
+        spiff_adapter.run_ready_steps(wf)
+    finally:
+        completed = spiff_adapter.is_completed(wf)
+        now = datetime.now(UTC)
+        instance.workflow_state = spiff_adapter.serialize(wf)
+        instance.status = "completed" if completed else "running"
+        instance.updated_at = now
+        if completed:
+            instance.completed_at = now
+        await session.flush()
+    return instance
 
-    completed = spiff_adapter.is_completed(wf)
-    now = datetime.now(UTC)
-    instance.workflow_state = spiff_adapter.serialize(wf)
-    instance.status = "completed" if completed else "running"
-    instance.updated_at = now
-    if completed:
-        instance.completed_at = now
-    await session.flush()
+
+async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInstance:
+    """Resumability für einen fehlgeschlagenen automatischen Schritt (7.2, P12-S2) -
+    generisches Primitiv, nicht migrationsspezifisch: setzt `ERROR`-Tasks zurück
+    (`spiff_adapter.retry_errored_tasks`) und versucht danach erneut, den Workflow
+    voranzubringen. Persistiert den neuen Zwischenstand auch bei einem erneuten
+    Fehlschlag (`try`/`finally`, siehe `start_instance`) - sonst bliebe die Instanz
+    für einen dritten `retry`-Versuch am ursprünglichen Fehlerpunkt hängen, statt am
+    tatsächlich letzten (ggf. wieder fehlgeschlagenen) Stand."""
+    instance = await get_instance(session, instance_id)
+    if instance.status != "running":
+        raise InstanceNotRunningError(f"instance_id {instance_id!r} ist nicht 'running'")
+    wf = spiff_adapter.deserialize(instance.workflow_state)
+    spiff_adapter.retry_errored_tasks(wf)
+
+    try:
+        spiff_adapter.run_ready_steps(wf)
+    finally:
+        completed = spiff_adapter.is_completed(wf)
+        now = datetime.now(UTC)
+        instance.workflow_state = spiff_adapter.serialize(wf)
+        instance.status = "completed" if completed else "running"
+        instance.updated_at = now
+        if completed:
+            instance.completed_at = now
+        await session.flush()
     return instance
 
 

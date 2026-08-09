@@ -167,3 +167,117 @@ def test_check_timers_returns_empty_list_when_nothing_fired(manual_task_bpmn):
     wf = sa.new_workflow(spec)
     sa.run_ready_steps(wf)
     assert sa.check_timers(wf) == []
+
+
+def test_connector_service_task_calls_registered_handler_and_merges_result(
+    connector_service_task_bpmn,
+):
+    """Generische Connector-Service-Task-Plumbing (7.1 "Auslösen eines
+    Connector-Aufrufs", P12-S0-Fund, gebaut in P12-S2 für migration-service,
+    aber bewusst nicht migrationsspezifisch)."""
+    calls = []
+
+    def handler(extensions, data):
+        calls.append((dict(extensions), dict(data)))
+        return {"result": "ok"}
+
+    sa.register_connector_task_handler(handler)
+    try:
+        spec, _ = sa.parse_bpmn(connector_service_task_bpmn, None)
+        wf = sa.new_workflow(spec)
+        sa.set_initial_data(wf, {"input": 1})
+        sa.run_ready_steps(wf)
+
+        assert sa.is_completed(wf) is True
+        assert calls == [
+            (
+                {
+                    "taskType": "connector_call",
+                    "serviceUrl": "http://connector-stub.invalid/step",
+                },
+                {"input": 1},
+            )
+        ]
+    finally:
+        sa.register_connector_task_handler(None)
+
+
+def test_connector_service_task_without_handler_raises(connector_service_task_bpmn):
+    sa.register_connector_task_handler(None)
+    spec, _ = sa.parse_bpmn(connector_service_task_bpmn, None)
+    wf = sa.new_workflow(spec)
+    with pytest.raises(RuntimeError):
+        sa.run_ready_steps(wf)
+
+
+def test_serialize_deserialize_roundtrip_preserves_connector_task_result(
+    connector_service_task_bpmn,
+):
+    sa.register_connector_task_handler(lambda extensions, data: {"result": "ok"})
+    try:
+        spec, _ = sa.parse_bpmn(connector_service_task_bpmn, None)
+        wf = sa.new_workflow(spec)
+        sa.run_ready_steps(wf)
+        blob = sa.serialize(wf)
+        wf2 = sa.deserialize(blob)
+        assert sa.is_completed(wf2) is True
+    finally:
+        sa.register_connector_task_handler(None)
+
+
+def test_retry_errored_tasks_resumes_after_a_failed_connector_call(
+    connector_service_task_bpmn,
+):
+    """Resumability (7.2, P12-S2): ein fehlgeschlagener Connector-Aufruf lässt den
+    Task in `ERROR` zurück, `retry_errored_tasks()` versetzt ihn zurück auf
+    `READY` - ein anschliessendes `run_ready_steps()` versucht ihn erneut."""
+    attempts = {"count": 0}
+
+    def flaky_handler(extensions, data):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("Ziel nicht erreichbar")
+        return {"result": "ok"}
+
+    sa.register_connector_task_handler(flaky_handler)
+    try:
+        spec, _ = sa.parse_bpmn(connector_service_task_bpmn, None)
+        wf = sa.new_workflow(spec)
+
+        with pytest.raises(RuntimeError):
+            sa.run_ready_steps(wf)
+        assert sa.is_completed(wf) is False
+
+        resumed = sa.retry_errored_tasks(wf)
+        assert resumed == 1
+        sa.run_ready_steps(wf)
+
+        assert sa.is_completed(wf) is True
+        assert attempts["count"] == 2
+    finally:
+        sa.register_connector_task_handler(None)
+
+
+def test_timer_duration_can_reference_a_process_variable(variable_duration_timer_bpmn):
+    """`DurationTimerEventDefinition.has_fired()` evaluiert `timeDuration` über den
+    Script-Engine statt es als statisches Literal zu behandeln - ein Bare-Identifier
+    referenziert damit eine Prozessvariable (P12-S2, Grundlage für migration-service's
+    konfigurierbare Löschfrist: `retention_duration` wird erst beim Instanzstart aus
+    `retention_days` berechnet, ist also zur BPMN-Autorenzeit nicht bekannt)."""
+    spec, _ = sa.parse_bpmn(variable_duration_timer_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.set_initial_data(wf, {"retention_duration": "PT0.05S"})
+    sa.run_ready_steps(wf)
+    assert sa.is_completed(wf) is False
+
+    time.sleep(0.2)
+    sa.check_timers(wf)
+
+    assert sa.is_completed(wf) is True
+
+
+def test_retry_errored_tasks_returns_zero_when_nothing_is_errored(manual_task_bpmn):
+    spec, _ = sa.parse_bpmn(manual_task_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.run_ready_steps(wf)
+    assert sa.retry_errored_tasks(wf) == 0

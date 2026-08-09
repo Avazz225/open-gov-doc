@@ -44,24 +44,35 @@ nicht nur aus der Doku übernommen:
   Workflow ausschließlich in die Eskalationsverzweigung laufen - beides vollständig
   SpiffWorkflow-eigene Semantik, dieses Modul muss dafür keine eigene Cancel-/
   Routing-Logik schreiben, nur `refresh_waiting_tasks()`+`do_engine_steps()` aufrufen.
+- Connector-Service-Tasks (7.1 "Auslösen eines Connector-Aufrufs", P12-S2): ein
+  `bpmn:serviceTask` mit `camunda:properties` `taskType=connector_call`/`serviceUrl=...`
+  wird über `OVERRIDE_PARSER_CLASSES` (von `BpmnParser` selbst dokumentierter
+  Erweiterungspunkt, "provides a map from full BPMN tag to parser/spec classes") auf
+  eine eigene `ConnectorServiceTask`-Spec-Klasse statt SpiffWorkflows Default-`ServiceTask`
+  gemappt. `ServiceTask._execute()` ist selbst ein dokumentierter No-Op ("Please override
+  for specific Implementations") - `ConnectorServiceTask._execute()` ruft einen modul-weiten,
+  injizierbaren Handler auf (`register_connector_task_handler()`), der bei `do_engine_steps()`
+  synchron aufgerufen wird (SpiffWorkflow ist durchgehend synchron, kein async/await
+  irgendwo in der Engine) und die JSON-Antwort in `task.data` merged. Bewusst generisch
+  (nur `serviceUrl`, kein Wissen über den aufrufenden Service) - jeder künftige Service
+  kann einen automatischen BPMN-Schritt treiben, ohne dass workflow-service ihn kennen
+  muss. Ein `serviceTask` OHNE `taskType=connector_call` bleibt unverändert ein echtes
+  No-Op (Rückwärtskompatibilität).
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
+from SpiffWorkflow.bpmn.parser.util import full_tag
 from SpiffWorkflow.bpmn.serializer import BpmnWorkflowSerializer
+from SpiffWorkflow.bpmn.serializer.default.task_spec import BpmnTaskSpecConverter
+from SpiffWorkflow.bpmn.specs.defaults import ServiceTask
 from SpiffWorkflow.bpmn.specs.mixins.events.intermediate_event import BoundaryEvent
 from SpiffWorkflow.bpmn.workflow import BpmnWorkflow
 from SpiffWorkflow.camunda.parser import CamundaParser
+from SpiffWorkflow.camunda.parser.task_spec import CamundaTaskParser
 from SpiffWorkflow.camunda.serializer.config import CAMUNDA_CONFIG
 from SpiffWorkflow.task import Task, TaskState
-
-# `CAMUNDA_CONFIG` statt `BpmnWorkflowSerializer.configure()` - der Wechsel auf
-# `CamundaParser` (s. u.) mappt `userTask` auf Camundas eigene `UserTask`-
-# Spec-Klasse statt der BPMN-Default-Klasse; ohne den passenden Converter
-# schlägt die JSON-Serialisierung bereits bestehender Fixtures mit
-# `userTask`-Elementen (z. B. boundary_timer_on_task.bpmn) fehl.
-_SERIALIZER = BpmnWorkflowSerializer(BpmnWorkflowSerializer.configure(CAMUNDA_CONFIG))
 
 
 class BpmnParseError(Exception):
@@ -87,8 +98,79 @@ class FiredBoundaryEvent:
     data: dict[str, Any]
 
 
-def _new_parser(xml: str) -> CamundaParser:
-    parser = CamundaParser()
+class ConnectorTaskHandler(Protocol):
+    def __call__(self, extensions: dict[str, str], data: dict[str, Any]) -> dict[str, Any]: ...
+
+
+_connector_task_handler: ConnectorTaskHandler | None = None
+
+
+def register_connector_task_handler(handler: ConnectorTaskHandler | None) -> None:
+    """Registriert den Callback, den `ConnectorServiceTask._execute()` bei jedem
+    `taskType=connector_call`-Service-Task aufruft (P12-S2). Modul-weiter Callback statt
+    Konstruktor-Parameter, da SpiffWorkflows Parser die Spec-Klasse selbst instanziiert
+    (`OVERRIDE_PARSER_CLASSES`, kein Hook für zusätzliche Konstruktor-Argumente).
+    `None` deregistriert (Tests räumen so zwischen Fällen auf)."""
+    global _connector_task_handler
+    _connector_task_handler = handler
+
+
+class ConnectorServiceTask(ServiceTask):
+    """`bpmn:serviceTask` mit `camunda:properties` `taskType=connector_call` (P12-S2,
+    siehe Moduldocstring) - alle anderen Service-Tasks bleiben unverändert No-Ops."""
+
+    def _execute(self, task: Task) -> bool:
+        # `_run_hook()` (Basisklasse `TaskSpec`) wertet den Rückgabewert aus: ein
+        # falsy Ergebnis (z. B. `None`, SpiffWorkflows eigener `ServiceTask`-Default)
+        # lässt den Task dauerhaft in STARTED hängen statt COMPLETED zu werden - real
+        # aufgetreten, bevor dieses `return True` ergänzt wurde. `ScriptTask._execute()`
+        # folgt demselben Vertrag (`return task.workflow.script_engine.execute(...)`).
+        extensions = dict(getattr(self, "extensions", None) or {})
+        if extensions.get("taskType") != "connector_call":
+            return True
+        if _connector_task_handler is None:
+            raise RuntimeError(
+                "connector_call Service Task ohne registrierten Handler "
+                "(register_connector_task_handler() wurde nicht aufgerufen)"
+            )
+        result = _connector_task_handler(extensions, dict(task.data))
+        task.data.update(result)
+        return True
+
+
+class DmsBpmnParser(CamundaParser):
+    """`CamundaParser` + `serviceTask` -> `ConnectorServiceTask` (P12-S2) - alle übrigen
+    Overrides (`manualTask`/`userTask`/... für Signature/Federation, siehe ADR 0025/0028)
+    bleiben von `CamundaParser` unverändert übernommen."""
+
+    OVERRIDE_PARSER_CLASSES = {
+        **CamundaParser.OVERRIDE_PARSER_CLASSES,
+        # `CamundaTaskParser`, nicht die Basis-`TaskParser` (SpiffWorkflows eigener
+        # Default für `serviceTask`) - nur `CamundaTaskParser` liest
+        # `camunda:properties` in `task_spec.extensions` ein (real verifiziert: mit
+        # der Basis-`TaskParser` blieb `extensions` immer leer, `taskType` also nie
+        # erkennbar).
+        full_tag("serviceTask"): (CamundaTaskParser, ConnectorServiceTask),
+    }
+
+
+# `CAMUNDA_CONFIG` statt `BpmnWorkflowSerializer.configure()` - der Wechsel auf
+# `CamundaParser` mappt `userTask` auf Camundas eigene `UserTask`-Spec-Klasse statt
+# der BPMN-Default-Klasse; ohne den passenden Converter schlägt die JSON-Serialisierung
+# bereits bestehender Fixtures mit `userTask`-Elementen (z. B. boundary_timer_on_task.bpmn)
+# fehl. `ConnectorServiceTask` ist zusätzlich auf `BpmnTaskSpecConverter` gemappt - der
+# generische Converter, den auch `NoneTask`/`ManualTask`/`UserTask` nutzen (SpiffWorkflows
+# eigener `ServiceTask` ist in KEINER Default-Konfiguration registriert, "Object of type
+# ConnectorServiceTask is not JSON serializable" ohne diesen Eintrag - real aufgetreten).
+_SERIALIZER = BpmnWorkflowSerializer(
+    BpmnWorkflowSerializer.configure(
+        {**CAMUNDA_CONFIG, ConnectorServiceTask: BpmnTaskSpecConverter}
+    )
+)
+
+
+def _new_parser(xml: str) -> DmsBpmnParser:
+    parser = DmsBpmnParser()
     try:
         # lxml akzeptiert bei einer XML-Encoding-Deklaration (<?xml ... encoding="UTF-8"?>)
         # ausschließlich bytes, keine bereits dekodierten str - deshalb hier explizit
@@ -153,6 +235,22 @@ def run_ready_steps(wf: BpmnWorkflow) -> None:
     """Führt alle bereiten automatischen Tasks (Script Tasks etc.) aus und hält vor
     dem nächsten Manual/User Task bzw. beim Abschluss des Workflows an."""
     wf.do_engine_steps()
+
+
+def retry_errored_tasks(wf: BpmnWorkflow) -> int:
+    """Resumability für einen fehlgeschlagenen automatischen Schritt (7.2, P12-S2):
+    eine Exception in `TaskSpec._run()` (z. B. `ConnectorServiceTask._execute()`, wenn
+    die aufgerufene `serviceUrl` nicht erreichbar war) versetzt den Task nach `ERROR`
+    (real verifiziert) - ein einfaches erneutes `do_engine_steps()` reicht NICHT, um ihn
+    erneut zu versuchen (SpiffWorkflow verarbeitet dort nur `READY`-Tasks). `reset_branch()`
+    (offizielle SpiffWorkflow-API) versetzt einen `ERROR`-Task zurück auf `FUTURE`/`READY`,
+    unter Beibehaltung der bisherigen Task-Daten. Gibt die Anzahl zurückgesetzter Tasks
+    zurück (0 bedeutet: nichts zum Wiederholen, z. B. bei einer bereits laufenden/
+    abgeschlossenen Instanz ohne Fehler)."""
+    errored = wf.get_tasks(state=TaskState.ERROR)
+    for task in errored:
+        task.reset_branch(dict(task.data))
+    return len(errored)
 
 
 def ready_manual_tasks(wf: BpmnWorkflow) -> list[TaskInfo]:

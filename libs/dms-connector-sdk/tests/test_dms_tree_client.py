@@ -67,6 +67,31 @@ def test_list_children_separates_folders_and_documents(sdk_client):
     assert documents[0].title == "in-ordner.txt"
 
 
+def test_get_folder_returns_folder_by_id(sdk_client):
+    folder = _create_folder(name="direkt-per-id")
+    result = sdk_client.get_folder(folder["id"])
+    assert result.id == folder["id"]
+    assert result.name == "direkt-per-id"
+
+
+def test_get_folder_unknown_id_raises(sdk_client):
+    with pytest.raises(PathNotFoundError):
+        sdk_client.get_folder("does-not-exist")
+
+
+def test_get_document_returns_document_by_id(sdk_client):
+    document = _upload_document(title="direkt-per-id.txt", content=b"Inhalt")
+    result = sdk_client.get_document(document["id"])
+    assert result.id == document["id"]
+    assert result.title == "direkt-per-id.txt"
+    assert result.checksum_sha256
+
+
+def test_get_document_unknown_id_raises(sdk_client):
+    with pytest.raises(PathNotFoundError):
+        sdk_client.get_document("does-not-exist")
+
+
 def test_resolve_path_walks_nested_folders_to_a_document(sdk_client):
     top = _create_folder(name=f"top-{uuid.uuid4().hex[:8]}")
     nested = _create_folder(parent_id=top["id"], name="nested")

@@ -1,5 +1,7 @@
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from workflow_service import main
 from workflow_service.main import app
 
 
@@ -160,6 +162,24 @@ def test_start_instance_fully_automatic_completes_immediately(client, no_tasks_b
 def test_start_instance_unknown_definition_returns_404(client):
     response = client.post("/process-definitions/999999/instances", json={"created_by": "alice"})
     assert response.status_code == 404
+
+
+def test_start_instance_with_explicit_instance_id_uses_it(client, no_tasks_bpmn, admin_headers):
+    """Caller-bestimmte Instanz-ID (P12-S2, gleiches Muster wie
+    `federation-hub-service`s `handover_id`, ADR 0028) - wichtig für einen
+    Aufrufer, der die ID bereits VOR dem Start persistieren will, um eine bei
+    einem Fehlschlag trotzdem angelegte Instanz später wiederzufinden."""
+    definition_id = _upload_definition(
+        client, no_tasks_bpmn, name="NoTasksExplicitId", headers=admin_headers
+    ).json()["id"]
+    chosen_id = "caller-chosen-instance-id"
+    response = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "instance_id": chosen_id},
+    )
+    assert response.status_code == 201
+    assert response.json()["id"] == chosen_id
+    assert client.get(f"/instances/{chosen_id}").status_code == 200
 
 
 def test_start_instance_rejected_during_maintenance_mode(client, manual_task_bpmn, admin_headers):
@@ -372,3 +392,115 @@ def test_list_instances_filters_by_status(client, manual_task_bpmn, no_tasks_bpm
     completed = client.get("/instances", params={"status": "completed"}).json()
     assert len(running) == 1
     assert len(completed) == 1
+
+
+def test_instance_with_connector_service_task_completes_via_stub(
+    client, connector_service_task_bpmn, admin_headers, monkeypatch
+):
+    """Ende-zu-Ende (7.1, P12-S2): ein echter `POST /process-definitions/{id}/instances`
+    treibt einen `connector_call`-Service-Task, der synchron gegen einen In-Prozess-
+    HTTP-Stub aufgerufen wird (kein Mocking der eigenen Geschäftslogik, nur des
+    ausgehenden Netzwerktransports - gleiches Prinzip wie `federation-hub-service`s
+    Tests, dort mit `AsyncClient`/`ASGITransport`, hier synchron mit `MockTransport`)."""
+
+    def stub(request: httpx.Request) -> httpx.Response:
+        assert request.url == "http://connector-stub.invalid/step"
+        return httpx.Response(200, json={"result": "ok"})
+
+    monkeypatch.setattr(
+        main, "_connector_http_client", httpx.Client(transport=httpx.MockTransport(stub))
+    )
+
+    definition_id = _upload_definition(
+        client, connector_service_task_bpmn, name="ConnectorCall", headers=admin_headers
+    ).json()["id"]
+    response = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "completed"
+
+
+def test_connector_service_task_service_url_supports_process_data_templating(
+    client, connector_service_task_templated_bpmn, admin_headers, monkeypatch
+):
+    """`serviceUrl` kann `{platzhalter}` aus den aktuellen Prozessdaten referenzieren
+    (P12-S2, Grundlage für migration-service's pro-Transfer unterschiedliche
+    Schritt-Endpunkte) - hier `{transfer_id}`, gesetzt über `initial_data`."""
+    called_urls = []
+
+    def stub(request: httpx.Request) -> httpx.Response:
+        called_urls.append(str(request.url))
+        return httpx.Response(200, json={"result": "ok"})
+
+    monkeypatch.setattr(
+        main, "_connector_http_client", httpx.Client(transport=httpx.MockTransport(stub))
+    )
+
+    definition_id = _upload_definition(
+        client,
+        connector_service_task_templated_bpmn,
+        name="ConnectorCallTemplated",
+        headers=admin_headers,
+    ).json()["id"]
+    response = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"transfer_id": "abc-123"}},
+    )
+    assert response.status_code == 201
+    assert called_urls == ["http://connector-stub.invalid/transfers/abc-123/steps/lock"]
+
+
+def test_retry_instance_resumes_after_a_failed_connector_call(
+    connector_service_task_bpmn, admin_headers, monkeypatch
+):
+    # Eigener `TestClient` mit `raise_server_exceptions=False` statt der geteilten
+    # `client`-Fixture: Starlettes Default-Verhalten reicht eine unbehandelte
+    # Exception zu Debug-Zwecken direkt an den Aufrufer durch, statt sie (wie ein
+    # echter uvicorn-Prozess) als reguläre 500-Antwort zurückzugeben - genau diese
+    # reale 500-Antwort will dieser Test aber tatsächlich sehen und weiterverarbeiten.
+    with TestClient(app, raise_server_exceptions=False) as client:
+        attempts = {"count": 0}
+
+        def stub(request: httpx.Request) -> httpx.Response:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise httpx.ConnectError("Ziel nicht erreichbar", request=request)
+            return httpx.Response(200, json={"result": "ok"})
+
+        monkeypatch.setattr(
+            main, "_connector_http_client", httpx.Client(transport=httpx.MockTransport(stub))
+        )
+
+        definition_id = _upload_definition(
+            client, connector_service_task_bpmn, name="ConnectorCallRetry", headers=admin_headers
+        ).json()["id"]
+        start_response = client.post(
+            f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+        )
+        assert start_response.status_code == 500
+
+        instance_id = client.get("/instances").json()[0]["id"]
+        assert client.get(f"/instances/{instance_id}").json()["status"] == "running"
+
+        retry_response = client.post(f"/instances/{instance_id}/retry")
+    assert retry_response.status_code == 200
+    assert retry_response.json()["status"] == "completed"
+    assert attempts["count"] == 2
+
+
+def test_retry_instance_on_completed_instance_returns_409(client, no_tasks_bpmn, admin_headers):
+    definition_id = _upload_definition(
+        client, no_tasks_bpmn, name="NoTasksRetry", headers=admin_headers
+    ).json()["id"]
+    instance_id = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()["id"]
+
+    response = client.post(f"/instances/{instance_id}/retry")
+    assert response.status_code == 409
+
+
+def test_retry_unknown_instance_returns_404(client):
+    response = client.post("/instances/does-not-exist/retry")
+    assert response.status_code == 404

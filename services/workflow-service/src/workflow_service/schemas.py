@@ -22,6 +22,15 @@ class ProcessInstanceCreate(BaseModel):
     created_by: str
     business_key: str | None = None
     initial_data: dict = {}
+    # Optional: der Aufrufer bestimmt seine eigene Instanz-ID statt eine vom
+    # Server generierte entgegenzunehmen (P12-S2, gleiches Muster wie
+    # federation-hub-service's `handover_id`, ADR 0028) - wichtig, wenn der
+    # allererste automatische Schritt fehlschlagen kann: ohne eine im Voraus
+    # bekannte ID hätte der Aufrufer bei einem Fehlschlag von
+    # `POST .../instances` selbst keine Möglichkeit, die (dennoch bereits
+    # angelegte, siehe repository.start_instance) Instanz für einen späteren
+    # `/retry`-Aufruf wiederzufinden.
+    instance_id: str | None = None
 
 
 class ProcessInstanceOut(BaseModel):

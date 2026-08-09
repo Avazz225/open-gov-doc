@@ -45,3 +45,11 @@ class Settings(BaseServiceSettings):
     # license-service - Service-Isolation, die Registry bleibt einzige
     # Vermittlungsstelle). TTL-Cache-Client, Vorbild `permission_client.py`.
     license_status_cache_ttl_seconds: float = 15.0
+
+    # Connector-Service-Tasks (7.1 "Auslösen eines Connector-Aufrufs", P12-S2):
+    # Timeout für den synchronen HTTP-Aufruf einer `taskType=connector_call`-
+    # `serviceUrl`. Grosszügig bemessen (nicht wie ein normaler Web-Request), da
+    # ein einzelner Schritt (z. B. Migration-Service' "Kopieren"-Phase, siehe
+    # docs/services/migration-service.md) für eine Referenzimplementierung
+    # bewusst synchron und potenziell langlaufend ist.
+    connector_call_timeout_seconds: float = 300.0

@@ -18,16 +18,21 @@ kein Protokoll (WebDAV/CMIS bleibt Sache des jeweiligen Connector-Services selbs
   (kein `async def`) automatisch in seinem eigenen Threadpool aus.
 
   Bietet: Pfadauflösung (`resolve_path()`, segmentweise ab `root`, O(Tiefe) HTTP-Aufrufe —
-  bewusst einfach, kein Cache mit Invalidierungsproblemen), Ordner-/Dokument-CRUD, PUT-Semantik
-  (`write_document()` legt an oder checkt eine neue Version ein, je nachdem ob
-  `existing_document_id` gesetzt ist), Verschieben (`move_document()`/`move_folder()`, nutzt
-  `document-service`s seit P12-S1 neues `folder_id`-Feld bzw. `folder-service`s bestehendes
-  `parent_id`), Sperren (`acquire_lock()`/`release_lock()`/`get_lock()` — dünne Wrapper um
-  `document-service`s bestehende Lock-Endpunkte, **keine eigene Sperrlogik**: eine über einen
-  Connector gesperrte Version ist serverseitig dieselbe Sperre, die auch die User-UI sähe).
+  bewusst einfach, kein Cache mit Invalidierungsproblemen), Direktzugriff per ID
+  (`get_folder()`/`get_document()`, seit P12-S2 — für Aufrufer, die eine ID statt eines Pfads
+  kennen, z. B. `migration-service`), Ordner-/Dokument-CRUD, PUT-Semantik (`write_document()`
+  legt an oder checkt eine neue Version ein, je nachdem ob `existing_document_id` gesetzt ist),
+  Verschieben (`move_document()`/`move_folder()`, nutzt `document-service`s seit P12-S1 neues
+  `folder_id`-Feld bzw. `folder-service`s bestehendes `parent_id`), Sperren
+  (`acquire_lock()`/`release_lock()`/`get_lock()` — dünne Wrapper um `document-service`s
+  bestehende Lock-Endpunkte, **keine eigene Sperrlogik**: eine über einen Connector gesperrte
+  Version ist serverseitig dieselbe Sperre, die auch die User-UI sähe).
 
 Fehlerfälle sind absichtlich klein gehalten (`PathNotFoundError`, `LockConflictError`,
 `LockNotHeldError`) — die eigentliche Protokoll-Übersetzung (WebDAV-Statuscodes, CMIS-Fehlerobjekte)
 bleibt Sache des jeweiligen Connector-Services, nicht dieser Lib.
 
-Siehe `services/webdav-connector/` für die erste Referenzimplementierung.
+Siehe `services/webdav-connector/` für die erste Referenzimplementierung (P12-S1) und
+`services/migration-service/` für den zweiten Nutzer (P12-S2, liest die Quellinstallation über
+diese Lib und nutzt dieselbe Lib erneut auf der Zielinstallation, um Empfangenes tatsächlich
+anzulegen).

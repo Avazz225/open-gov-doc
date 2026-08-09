@@ -168,6 +168,20 @@ class DmsTreeClient:
         response.raise_for_status()
         return _to_tree_folder(response.json())
 
+    def get_folder(self, folder_id: str) -> TreeFolder:
+        response = self._folders.get(f"/folders/{folder_id}")
+        if response.status_code == 404:
+            raise PathNotFoundError(folder_id)
+        response.raise_for_status()
+        return _to_tree_folder(response.json())
+
+    def get_document(self, document_id: str) -> TreeDocument:
+        response = self._documents.get(f"/documents/{document_id}")
+        if response.status_code == 404:
+            raise PathNotFoundError(document_id)
+        response.raise_for_status()
+        return self._to_tree_document_enriched(response.json())
+
     def read_document_content(self, document_id: str) -> bytes:
         response = self._documents.get(f"/documents/{document_id}/content")
         if response.status_code == 404:

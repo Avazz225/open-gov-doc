@@ -157,6 +157,38 @@ def signature_task_bpmn() -> str:
         return f.read()
 
 
+@pytest.fixture
+def connector_service_task_bpmn() -> str:
+    """Ein einzelner `bpmn:serviceTask` mit `camunda:properties`-Extension
+    `taskType=connector_call`/`serviceUrl=...` (7.1, P12-S2) - siehe
+    spiff_adapter.py's `ConnectorServiceTask`/`DmsBpmnParser`."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "connector_service_task.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def variable_duration_timer_bpmn() -> str:
+    """Ein `intermediateCatchEvent`-Timer, dessen `timeDuration` eine
+    Prozessvariable referenziert statt eines statischen ISO-Literals (P12-S2,
+    Grundlage für migration-service's konfigurierbare Löschfrist, 7.2)."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "variable_duration_timer.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def connector_service_task_templated_bpmn() -> str:
+    """Wie `connector_service_task_bpmn`, aber `serviceUrl` referenziert
+    `{transfer_id}` - Grundlage für migration-service's pro-Instanz
+    unterschiedliche Schritt-Endpunkte (P12-S2)."""
+    path = os.path.join(
+        os.path.dirname(__file__), "fixtures", "connector_service_task_templated.bpmn"
+    )
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
 SIGNATURE_SERVICE_URL = os.environ.get("TEST_SIGNATURE_SERVICE_URL", "http://localhost:8017")
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")

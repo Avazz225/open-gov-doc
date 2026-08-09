@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="Definitions_migration" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="3.0.0-dev">
+  <bpmn:process id="Process_migration_transfer" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="lock" />
+
+    <bpmn:serviceTask id="lock" name="Quellordner sperren">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="taskType" value="connector_call" />
+          <camunda:property name="serviceUrl" value="__SELF_BASE_URL__/transfers/{transfer_id}/steps/lock" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="lock" targetRef="copy" />
+
+    <bpmn:serviceTask id="copy" name="Inhalte kopieren">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="taskType" value="connector_call" />
+          <camunda:property name="serviceUrl" value="__SELF_BASE_URL__/transfers/{transfer_id}/steps/copy" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="copy" targetRef="verify" />
+
+    <bpmn:serviceTask id="verify" name="Verifizieren">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="taskType" value="connector_call" />
+          <camunda:property name="serviceUrl" value="__SELF_BASE_URL__/transfers/{transfer_id}/steps/verify" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="verify" targetRef="release" />
+
+    <bpmn:serviceTask id="release" name="Freigabe im Zielsystem">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="taskType" value="connector_call" />
+          <camunda:property name="serviceUrl" value="__SELF_BASE_URL__/transfers/{transfer_id}/steps/release" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="release" targetRef="retention_wait" />
+
+    <bpmn:intermediateCatchEvent id="retention_wait" name="Übergangsfrist abwarten">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+      <bpmn:timerEventDefinition>
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">retention_duration</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="retention_wait" targetRef="delete_source" />
+
+    <bpmn:serviceTask id="delete_source" name="Löschung im Quellsystem">
+      <bpmn:extensionElements>
+        <camunda:properties>
+          <camunda:property name="taskType" value="connector_call" />
+          <camunda:property name="serviceUrl" value="__SELF_BASE_URL__/transfers/{transfer_id}/steps/delete-source" />
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="delete_source" targetRef="Event_1" />
+
+    <bpmn:endEvent id="Event_1">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+</bpmn:definitions>

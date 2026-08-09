@@ -17,12 +17,14 @@ class Settings(BaseServiceSettings):
     # "demo" (nur Lesezugriff) oder "lock" (vollstaendige Sperre).
     # `webdav-connector` (P12-S1) ist der erste Connector, der diesem Muster
     # folgt - Konzept 3.3 nennt Connectoren woertlich als Beispiel fuer
-    # lizenzierbare Komponenten.
+    # lizenzierbare Komponenten. `migration-service` (P12-S2) folgt demselben
+    # Muster - Konzept 9.1 nennt "Migration-Service" woertlich als Beispiel.
     license_service_base_url: str = "http://localhost:8023"
     license_status_cache_ttl_seconds: float = 60.0
     licensable_components: dict[str, str] = {
         "workflow-service": "demo",
         "webdav-connector": "demo",
+        "migration-service": "demo",
     }
 
     # Sensor-Konzept (10.1, P11-S1): registry-service ist selbst einer der

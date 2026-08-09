@@ -925,6 +925,40 @@ services:
     networks:
       - dms-net
 
+  migration-service:
+    build:
+      context: ..
+      dockerfile: services/migration-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://migration-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
+    ports:
+      - "${MIGRATION_SERVICE_PORT:-8028}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      document-service:
+        condition: service_started
+      folder-service:
+        condition: service_started
+      permission-service:
+        condition: service_started
+      workflow-service:
+        condition: service_started
+      registry-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   prometheus:
     image: prom/prometheus:v2.55.1
     restart: unless-stopped

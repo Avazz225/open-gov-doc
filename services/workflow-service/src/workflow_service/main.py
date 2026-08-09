@@ -42,6 +42,47 @@ _FEDERATION_IDENTITY_ID = 1
 _FEDERATED_TASK_TYPES = ("federated", "federated_return")
 
 
+# Eigener, austauschbarer synchroner Client (statt der freien `httpx.post()`-
+# Funktion) - Tests ersetzen ihn per `monkeypatch` durch einen `httpx.Client` mit
+# `httpx.MockTransport`, gleiches Stub-Prinzip wie `federation-hub-service`s
+# Tests (dort `httpx.AsyncClient`/`ASGITransport`, hier synchron, siehe unten).
+_connector_http_client = httpx.Client()
+
+
+def _handle_connector_task(extensions: dict[str, str], data: dict) -> dict:
+    """Registriert bei `spiff_adapter.ConnectorServiceTask` (7.1 "Auslösen eines
+    Connector-Aufrufs", P12-S2) - bewusst der einzige Ort in diesem Service, der
+    `httpx` synchron aufruft: SpiffWorkflows `do_engine_steps()` ist durchgehend
+    synchron (kein `async`/`await` irgendwo in der Engine), ein Aufruf hier blockiert
+    also ohnehin schon den umgebenden `async def`-Request-Handler - konsistent mit
+    jeder anderen SpiffWorkflow-Interaktion dieses Service (siehe `spiff_adapter.py`-
+    Moduldocstring), keine neue async/sync-Brücke nötig. `serviceUrl` kennt dieser
+    Service selbst nicht - komplett generisch, kein Wissen über den aufrufenden
+    Service (Migration-Service ist der erste, aber nicht einzig denkbare Nutzer).
+    `serviceUrl` unterstützt `{platzhalter}`-Substitution aus den aktuellen
+    Prozessdaten (`str.format(**data)`) - so kann z. B. eine pro Instanz
+    unterschiedliche `transfer_id` in die URL einfließen, ohne dass die BPMN-
+    Datei selbst pro Instanz individuell erzeugt werden müsste."""
+    service_url = extensions.get("serviceUrl")
+    if not service_url:
+        raise RuntimeError("connector_call Service Task ohne serviceUrl-Extension")
+    try:
+        service_url = service_url.format(**data)
+    except (KeyError, IndexError) as exc:
+        raise RuntimeError(
+            f"serviceUrl {service_url!r} referenziert eine unbekannte Prozessvariable: {exc}"
+        ) from exc
+    response = _connector_http_client.post(
+        service_url, json=data, timeout=settings.connector_call_timeout_seconds
+    )
+    response.raise_for_status()
+    body = response.json()
+    return body if isinstance(body, dict) else {}
+
+
+spiff_adapter.register_connector_task_handler(_handle_connector_task)
+
+
 async def _sla_poll_loop(
     session_factory: async_sessionmaker[AsyncSession], permission_client: PermissionServiceClient
 ) -> None:
@@ -584,11 +625,21 @@ async def start_instance(
             created_by=payload.created_by,
             business_key=payload.business_key,
             initial_data=payload.initial_data,
+            instance_id=payload.instance_id,
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.InvalidBpmnError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        # Ein automatischer Schritt (z. B. `connector_call`, P12-S2) kann fehlschlagen,
+        # NACHDEM `repository.start_instance()` die Instanz bereits mit dem aktuellen
+        # (ggf. `ERROR`-)Zwischenstand geflusht hat (siehe deren `try`/`finally`) - ohne
+        # dieses Commit hier würde `get_session()`s Context-Manager den Flush beim
+        # Schließen der Session zurückrollen (`AsyncSession.close()` ohne vorheriges
+        # `commit()`), und `POST /instances/{id}/retry` fände gar keine Instanz vor.
+        await session.commit()
+        raise
     await session.commit()
     await publish_event(
         "workflow.instance.started",
@@ -751,6 +802,12 @@ async def complete_task(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.TaskNotReadyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        # Siehe `start_instance` - ein nachfolgender automatischer Schritt kann
+        # fehlschlagen, der bereits geflushte Zwischenstand muss trotzdem committet
+        # werden (P12-S2 Resumability).
+        await session.commit()
+        raise
     await session.commit()
     await publish_event(
         "workflow.task.completed",
@@ -767,6 +824,49 @@ async def complete_task(
         )
     await _dispatch_pending_federation_tasks(session, instance_id)
     await session.commit()
+    return instance
+
+
+@app.post(
+    "/instances/{instance_id}/retry",
+    response_model=ProcessInstanceOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def retry_instance(
+    instance_id: str,
+    x_dms_maintenance_active: str = Header(default="false"),
+    session: AsyncSession = Depends(get_session),
+) -> ProcessInstanceOut:
+    """Resumability für einen fehlgeschlagenen automatischen Schritt (7.1/7.2, P12-S2) -
+    generisches Primitiv, kein migrationsspezifischer Endpunkt: ein `connector_call`-
+    Service-Task, dessen `serviceUrl` beim ersten Versuch nicht erreichbar war, lässt
+    die Instanz `running` mit dem betroffenen Task in `ERROR` zurück (siehe
+    `spiff_adapter.retry_errored_tasks`) - dieser Endpunkt versucht den Schritt erneut,
+    ohne den gesamten Prozess neu zu starten. Kein zusätzliches Rollen-Gate über die
+    normale Lizenzprüfung hinaus - bereits `POST .../tasks/.../complete` ist für jeden
+    authentifizierten Principal offen."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    try:
+        instance = await repository.retry_instance(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.InstanceNotRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        # Siehe `start_instance` - ein erneut fehlschlagender Versuch muss trotzdem
+        # committet werden, sonst bliebe die Instanz für einen dritten `retry`-Versuch
+        # am ursprünglichen statt am tatsächlich letzten Fehlerpunkt hängen.
+        await session.commit()
+        raise
+    await session.commit()
+    if instance.status == "completed":
+        await publish_event(
+            "workflow.instance.completed",
+            subject=instance_id,
+            payload={"business_key": instance.business_key},
+            actor="system:retry",
+        )
+        await session.commit()
     return instance
 
 
