@@ -19,12 +19,15 @@ class Settings(BaseServiceSettings):
     # folgt - Konzept 3.3 nennt Connectoren woertlich als Beispiel fuer
     # lizenzierbare Komponenten. `migration-service` (P12-S2) folgt demselben
     # Muster - Konzept 9.1 nennt "Migration-Service" woertlich als Beispiel.
+    # `cmis-connector` (P12-S4) ebenso - Konzept 9.1 nennt "CMIS-Connector"
+    # woertlich als Beispiel.
     license_service_base_url: str = "http://localhost:8023"
     license_status_cache_ttl_seconds: float = 60.0
     licensable_components: dict[str, str] = {
         "workflow-service": "demo",
         "webdav-connector": "demo",
         "migration-service": "demo",
+        "cmis-connector": "demo",
     }
 
     # Sensor-Konzept (10.1, P11-S1): registry-service ist selbst einer der

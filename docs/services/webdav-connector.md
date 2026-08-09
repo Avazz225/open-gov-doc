@@ -1,6 +1,6 @@
 # webdav-connector
 
-**Verantwortung:** Erster Referenz-Connector der Connector-Architektur (Konzept 3.3, P12-S1) — macht `folder-service`/`document-service` über das WebDAV-Protokoll (RFC 4918) als Netzlaufwerk ansprechbar (Windows-Explorer/macOS-Finder/Word). Das DMS ist dabei der WebDAV-**Server** (kein Client eines externen Repositories) — siehe "Richtungsentscheidung" unten. Zweiter Referenz-Connector (CMIS) folgt als eigene Session P12-S4.
+**Verantwortung:** Erster Referenz-Connector der Connector-Architektur (Konzept 3.3, P12-S1) — macht `folder-service`/`document-service` über das WebDAV-Protokoll (RFC 4918) als Netzlaufwerk ansprechbar (Windows-Explorer/macOS-Finder/Word). Das DMS ist dabei der WebDAV-**Server** (kein Client eines externen Repositories) — siehe "Richtungsentscheidung" unten. Zweiter Referenz-Connector: [`cmis-connector`](cmis-connector.md) (P12-S4).
 
 **Konzept-Referenz:** 3.3, 4.2
 **Kein eigenes Postgres-Schema** (stateless — jede Anfrage übersetzt sich live in HTTP-Aufrufe gegen `folder-service`/`document-service`, siehe `libs/dms-connector-sdk`)

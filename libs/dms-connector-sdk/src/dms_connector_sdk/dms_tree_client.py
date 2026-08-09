@@ -23,6 +23,14 @@ class TreeFolder:
     id: str
     name: str
     parent_id: str | None
+    # `str | None`/`datetime | None` statt verpflichtender Felder: die
+    # kostenlose lokale Root-Kurzschluss-Konstruktion in `resolve_path()`
+    # (unten) kennt beide Werte nicht, ohne dafür einen zusätzlichen
+    # HTTP-Aufruf im (bei jeder WebDAV-Anfrage durchlaufenen) Hot Path zu
+    # riskieren - `None` ist CMIS' eigener "value not set"-Zustand (5.2.7),
+    # kein erfundener Wert.
+    created_by: str | None
+    created_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -35,6 +43,8 @@ class TreeDocument:
     checksum_sha256: str | None
     updated_at: datetime
     current_version_number: int
+    created_by: str
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -65,11 +75,19 @@ def _to_tree_document(body: dict, version: dict | None = None) -> TreeDocument:
         checksum_sha256=version.get("checksum_sha256") or None,
         updated_at=datetime.fromisoformat(body["updated_at"]),
         current_version_number=body["current_version_number"],
+        created_by=body["created_by"],
+        created_at=datetime.fromisoformat(body["created_at"]),
     )
 
 
 def _to_tree_folder(body: dict) -> TreeFolder:
-    return TreeFolder(id=body["id"], name=body["name"], parent_id=body["parent_id"])
+    return TreeFolder(
+        id=body["id"],
+        name=body["name"],
+        parent_id=body["parent_id"],
+        created_by=body["created_by"],
+        created_at=datetime.fromisoformat(body["created_at"]),
+    )
 
 
 class DmsTreeClient:
@@ -140,7 +158,17 @@ class DmsTreeClient:
         Caches mit Invalidierungsproblemen."""
         segments = [s for s in path.strip("/").split("/") if s]
         if not segments:
-            return TreeFolder(id=self.root_folder_id, name="", parent_id=None)
+            # Bewusst lokal konstruiert, kein `get_folder()`-Aufruf: dieser
+            # Zweig wird bei JEDER WebDAV-Anfrage an die Wurzel durchlaufen
+            # (`get_resource_inst("/")`) - ein zusätzlicher Roundtrip hier
+            # erwies sich real als Hänger unter wsgidavs WSGI-zu-ASGI-Brücke
+            # (reproduzierbarer `ReadTimeout` bei PROPFIND auf `/webdav/`,
+            # siehe docs/services/cmis-connector.md). `created_by`/
+            # `created_at` bleiben `None` (CMIS' "value not set", 5.2.7)
+            # statt erfundener Werte oder eines teuren Aufrufs im Hot Path.
+            return TreeFolder(
+                id=self.root_folder_id, name="", parent_id=None, created_by=None, created_at=None
+            )
 
         current_folder_id = self.root_folder_id
         for index, segment in enumerate(segments):
@@ -199,18 +227,25 @@ class DmsTreeClient:
         created_by: str,
         existing_document_id: str | None = None,
         expected_base_version_number: int | None = None,
+        comment: str | None = None,
     ) -> TreeDocument:
         """PUT-Semantik (WebDAV/CMIS gleichermaßen): existiert am Zielpfad
         bereits ein Dokument, wird eine neue Version eingecheckt statt ein
-        zweites Dokument mit demselben Namen anzulegen."""
+        zweites Dokument mit demselben Namen anzulegen. `comment` (nur beim
+        Einchecken einer neuen Version relevant, `POST /documents` selbst
+        kennt kein Kommentarfeld) - seit P12-S4, Grundlage für CMIS'
+        `checkinComment` (5.4.4.3.28)."""
         media_type = content_type or "application/octet-stream"
         if existing_document_id is not None:
+            data = {
+                "expected_base_version_number": str(expected_base_version_number),
+                "created_by": created_by,
+            }
+            if comment is not None:
+                data["comment"] = comment
             response = self._documents.post(
                 f"/documents/{existing_document_id}/versions",
-                data={
-                    "expected_base_version_number": str(expected_base_version_number),
-                    "created_by": created_by,
-                },
+                data=data,
                 files={"file": (filename, content, media_type)},
             )
             if response.status_code == 404:

@@ -25,6 +25,27 @@ def test_create_role(client):
     assert response.json()["permissions"] == ["read"]
 
 
+def test_update_role_changes_description_and_permissions(client):
+    created = client.post(
+        "/roles", json={"name": "Editor", "description": "alt", "permissions": ["read"]}
+    ).json()
+
+    response = client.put(
+        f"/roles/{created['id']}", json={"description": "neu", "permissions": ["read", "write"]}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Editor"
+    assert body["description"] == "neu"
+    assert body["permissions"] == ["read", "write"]
+
+
+def test_update_unknown_role_returns_404(client):
+    response = client.put("/roles/999999", json={"description": "x", "permissions": []})
+    assert response.status_code == 404
+
+
 def test_assignment_with_unknown_role_returns_404(client):
     response = client.post(
         "/role-assignments",

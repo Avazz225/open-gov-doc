@@ -1,0 +1,25 @@
+[project]
+name = "cmis-connector"
+version = "0.1.0"
+description = "CMIS-Referenz-Connector (Konzept 3.3, P12-S4): macht folder-service/document-service über eine selbst implementierte CMIS 1.1 Browser Binding ansprechbar (kein Python-CMIS-Server verfügbar, siehe ADR 0036)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "dms-common",
+    "dms-registry-client",
+    "dms-connector-sdk",
+]
+
+[tool.uv.sources]
+dms-common = { workspace = true }
+dms-registry-client = { workspace = true }
+dms-connector-sdk = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cmis_connector"]

@@ -925,6 +925,35 @@ services:
     networks:
       - dms-net
 
+  cmis-connector:
+    build:
+      context: ..
+      dockerfile: services/cmis-connector/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Kein eigenes Postgres-/NATS-Schema (3.3, P12-S4), gleiches Muster
+      # wie webdav-connector: reiner Übersetzer zwischen der selbst gebauten
+      # CMIS-1.1-Browser-Binding und den bestehenden folder-service/
+      # document-service-HTTP-APIs.
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://cmis-connector:8000
+    ports:
+      - "${CMIS_CONNECTOR_PORT:-8030}:8000"
+    depends_on:
+      document-service:
+        condition: service_started
+      folder-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      registry-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   migration-service:
     build:
       context: ..
@@ -953,6 +982,36 @@ services:
       permission-service:
         condition: service_started
       workflow-service:
+        condition: service_started
+      registry-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  config-service:
+    build:
+      context: ..
+      dockerfile: services/config-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Kein eigenes Postgres-/NATS-Schema (7.3, P12-S3): reiner Übersetzer,
+      # liest/schreibt ausschließlich bei den jeweiligen Owner-Services.
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://config-service:8000
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+    ports:
+      - "${CONFIG_SERVICE_PORT:-8029}:8000"
+    depends_on:
+      object-type-service:
+        condition: service_started
+      workflow-service:
+        condition: service_started
+      permission-service:
+        condition: service_started
+      monitoring-service:
         condition: service_started
       registry-service:
         condition: service_started

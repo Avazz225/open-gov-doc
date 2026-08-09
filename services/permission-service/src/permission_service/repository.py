@@ -66,6 +66,18 @@ async def list_roles(session: AsyncSession) -> list[Role]:
     return list(result.scalars().all())
 
 
+async def update_role(
+    session: AsyncSession, role_id: int, *, description: str, permissions: list[str]
+) -> Role:
+    role = await session.get(Role, role_id)
+    if role is None:
+        raise NotFoundError(f"role_id {role_id!r} unbekannt")
+    role.description = description
+    role.permissions = permissions
+    await session.flush()
+    return role
+
+
 async def get_role_by_name(session: AsyncSession, name: str) -> Role | None:
     result = await session.execute(select(Role).where(Role.name == name))
     return result.scalars().first()

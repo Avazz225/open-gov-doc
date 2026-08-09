@@ -36,6 +36,7 @@ from permission_service.schemas import (
     RoleAssignmentOut,
     RoleCreate,
     RoleOut,
+    RoleUpdate,
     ScopeLockActionResult,
     ScopeLockCreate,
     ScopeLockOut,
@@ -177,6 +178,23 @@ async def create_role(payload: RoleCreate, session: AsyncSession = Depends(get_s
 @app.get("/roles", response_model=list[RoleOut])
 async def list_roles(session: AsyncSession = Depends(get_session)) -> list[RoleOut]:
     return await repository.list_roles(session)
+
+
+@app.put("/roles/{role_id}", response_model=RoleOut)
+async def update_role(
+    role_id: int, payload: RoleUpdate, session: AsyncSession = Depends(get_session)
+) -> RoleOut:
+    """Seit P12-S3 (7.3) - Grundlage für den Konfigurationsimport (`config-
+    service`), der eine bereits vorhandene Rolle (Abgleich per `name`)
+    aktualisieren statt sie zu duplizieren erwarten muss."""
+    try:
+        role = await repository.update_role(
+            session, role_id, description=payload.description, permissions=payload.permissions
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return role
 
 
 @app.post("/role-assignments", response_model=RoleAssignmentOut, status_code=201)

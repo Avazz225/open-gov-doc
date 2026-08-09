@@ -16,7 +16,7 @@
 
 - **Katalog**: `GET /sensors` aggregiert die Selbstdeklarationen aller aktuell aktiven Instanzen (`instance.sensors`, siehe `registry-service`) nach Sensor-Name, inkl. `service_types`-Liste und aufgelöstem `active`-Status. Bei widersprüchlichen Deklarationen (unwahrscheinlich, da ein Sensor i. d. R. vom selben Servicetyp kommt) gewinnt die zuletzt gesehene Deklaration — dokumentierte Vereinfachung.
 - **Konfiguration**: `sensor_config`-Tabelle mit einem Sonderschlüssel `__global__` (Grundeinstellung "alles"/"nichts überwachen", Default `true`) und beliebig vielen sensorspezifischen Overrides. Auflösung: Override vorhanden → dessen Wert, sonst globale Grundeinstellung.
-- **Bewusst NICHT an 7.3 (Konfigurationsexport) angebunden** — der existiert erst ab P12-S3 (siehe P11-S0-Befund). Die Konfiguration ist bis dahin eigenständig persistiert und auditiert; eine spätere Anbindung ist reine Folgearbeit, keine Umsortierung nötig.
+- **Seit P12-S3 an 7.3 (Konfigurationsexport) angebunden**: `config-service` exportiert/importiert `sensor_config` als reguläre Kategorie (`GET /sensor-config` bzw. `PUT /sensor-config/global`+`PUT /sensor-config/{sensor_name}`), siehe [`docs/services/config-service.md`](config-service.md). Löst den bei P11-S0/P11-S1 bewusst zurückgestellten Befund auf — bis dahin war die Konfiguration eigenständig persistiert und auditiert, ohne Anbindung an einen Export/Import-Mechanismus.
 - **Erste gegatete Schreiboperation außerhalb der bisherigen Registry-Domäne**: `PUT /sensor-config/global`/`PUT /sensor-config/{sensor_name}` verlangen `admin.monitoring` (neue Domain-Admin-Rolle `domain-admin-monitoring`, `permission-service`) oder den aktivierten Superuser — Konzept 10.1 nennt das Deaktivieren sicherheitsrelevanter Sensoren selbst ausdrücklich als sicherheitsrelevanten Vorgang.
 
 ## API
@@ -54,7 +54,6 @@ Weitere Services bekommen ihre Sensoren erst bei tatsächlichem Bedarf in späte
 - **Statisches Prometheus-Ziel** (`infra/prometheus.yml`, ein Eintrag: `monitoring-service:8000`) statt automatisch aus der Registry abgeleiteter Scrape-Konfiguration (10.1 nennt das als Option, keine Pflicht) — mit nur einem Ziel bringt die Automatisierung noch keinen Mehrwert.
 - **TTL-Poll statt NATS-Invalidierung** für `SensorConfigClient` (Default 15s) — bewusst einfacher als das `ComponentLicenseCache`-Vorbild (P9-S2), da diese Session bereits Sensor-Konzept + neuer Service + Scrape-Proxy + zwei Piloten umfasst.
 - **Kein Admin-UI-Bedienfeld** für Sensor-Ein-/Ausschaltung — nur die Backend-API, gleiches Muster wie andere Sessionen, die Backend vor Frontend liefern.
-- **Keine Anbindung an 7.3** (Konfigurationsexport, existiert erst P12-S3).
 - **Kein CheckMK** — Konzept 10.1 nennt es als drittes Anbindungsziel, Nutzer entschied sich bei der P11-S2-Planfreigabe explizit dagegen (siehe `docs/operations/monitoring.md`).
 
 ## Grafana (P11-S2)

@@ -10,6 +10,17 @@ class RoleCreate(BaseModel):
     permissions: list[str] = []
 
 
+class RoleUpdate(BaseModel):
+    """Seit P12-S3 (7.3, Konfigurationsimport) - bislang gab es keinen Weg,
+    eine bestehende Rolle zu aktualisieren (nur Anlegen/Auflisten), obwohl
+    `folder-service`/`document-service` u. ä. ihre Update-Pendants längst
+    haben. `name` bleibt unveränderlich (natürlicher Schlüssel für den
+    Konfigurationsimport-Abgleich per Name)."""
+
+    description: str
+    permissions: list[str]
+
+
 class RoleOut(BaseModel):
     id: int
     name: str
