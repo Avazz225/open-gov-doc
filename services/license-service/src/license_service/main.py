@@ -84,6 +84,7 @@ async def _status_out(claims: dict | None) -> LicenseStatusOut:
         storage_client=app.state.storage_client,
         document_client=app.state.document_client,
         auth_client=app.state.auth_client,
+        local_installation_id=settings.installation_id,
     )
     return LicenseStatusOut(
         installed=True,

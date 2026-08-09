@@ -155,6 +155,17 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+@app.get("/installation")
+def get_installation() -> dict:
+    """Installations-Identität (3a, P13-S1): ein Service, ein Werkzeug (CLI,
+    Admin-UI) oder die künftige Fleet-/Lizenz-Management-Ebene (P13-S2) kann
+    hier abfragen, welche Installation gerade antwortet - unauthentifiziert
+    und ohne DB-Zugriff wie `/healthz`, da `installation_id`/
+    `installation_display_name` reine Konfigurationswerte sind (siehe
+    `dms_common.BaseServiceSettings`), keine geheimen Daten."""
+    return {"id": settings.installation_id, "display_name": settings.installation_display_name}
+
+
 @app.get("/metrics")
 def get_metrics() -> Response:
     """Prometheus-Exposition der zwei eigenen Sensoren (10.1, P11-S1) - wird

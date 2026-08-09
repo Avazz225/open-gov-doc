@@ -1,8 +1,8 @@
 # registry-service
 
-**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Seit P9-S2 zusätzlich Lizenzvermittlung (3.2b/9.3): fragt `license-service` ab und reicht einen berechneten Lizenzstatus (`licensed`/`demo`/`unlicensed`) je `service_type` an registrierende/heartbeatende Services weiter, ohne selbst eine Lizenzprüfung durchzuführen. Seit P10-S2 zusätzlich der **Drain-Mechanismus** (10.5/3.8): eine Instanz kann als `draining` markiert werden, bleibt dabei erreichbar, bekommt aber keine neuen Anfragen mehr über das Gateway.
+**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Seit P9-S2 zusätzlich Lizenzvermittlung (3.2b/9.3): fragt `license-service` ab und reicht einen berechneten Lizenzstatus (`licensed`/`demo`/`unlicensed`) je `service_type` an registrierende/heartbeatende Services weiter, ohne selbst eine Lizenzprüfung durchzuführen. Seit P10-S2 zusätzlich der **Drain-Mechanismus** (10.5/3.8): eine Instanz kann als `draining` markiert werden, bleibt dabei erreichbar, bekommt aber keine neuen Anfragen mehr über das Gateway. Seit P13-S1 zusätzlich einziger HTTP-abfragbarer Auskunftspunkt für die **Installations-Identität** dieser Installation (3a).
 
-**Konzept-Referenz:** 3.2a, 3.2b, 9.3, 10.5
+**Konzept-Referenz:** 3.2a, 3.2b, 3a, 9.3, 10.5
 **Eigenes Postgres-Schema:** `registry` (Tabelle `service_instance`)
 
 ## API
@@ -18,6 +18,7 @@
 | `GET` | `/instances` | Alle Instanzen inkl. berechnetem `healthy`-Flag |
 | `GET` | `/license-status/{service_type}` | Berechneter Lizenzstatus (`licensed`/`demo`/`unlicensed`) für diesen Servicetyp — ungegatet, für interne Poll-Clients (z. B. `workflow-service`, siehe unten). |
 | `GET` | `/metrics` | Eigene Sensoren im Prometheus-Format (10.1, P11-S1) — wird von `monitoring-service` gescraped, nicht direkt von Prometheus. |
+| `GET` | `/installation` | Installations-Identität (3a, P13-S1): `{id, display_name}` aus `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME` (`dms_common.BaseServiceSettings`) — ungegatet, reine Konfigurationswerte, kein DB-Zugriff. |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Datenmodell
@@ -62,6 +63,13 @@ statt Backend-Adressen statisch zu konfigurieren.
 ## Sensoren (Konzept 10.1, P11-S1)
 
 `registry-service` ist selbst einer der zwei Sensor-Piloten (kein Vollretrofit aller Services, siehe P11-S0-Befund): meldet bei der eigenen Selbstregistrierung zwei Sensoren an (`registry.instances.active_total`, `registry.service.heartbeat.miss` — beide Namen wörtlich aus Konzept 10.1s Beispielliste) und exponiert sie über einen eigenen `GET /metrics` (Prometheus-Format, `libs/dms-metrics-client`). **Die eigentliche Sensor-Registry (Katalog-Aggregation + Aktivierungskonfiguration) lebt bewusst NICHT hier**, sondern im neuen `monitoring-service` (P11-S1-Architekturentscheidung nach Rückfrage bei Sessionstart — Prometheus scraped ausschließlich `monitoring-service`, das seinerseits `GET /instances` hier abfragt, um die deklarierten `sensors` jeder Instanz zu lesen und deren `/metrics`-Endpunkte selbst zu scrapen). `registry-service`s Footprint bleibt entsprechend minimal: ein durchgereichtes `sensors`-Feld, keine neue Businesslogik, kein neues Gate. Details siehe `docs/services/monitoring-service.md` und `docs/operations/monitoring.md`.
+
+## Installations-Identität (3a, P13-S1)
+
+- `GET /installation` liest ausschließlich `settings.installation_id`/`settings.installation_display_name` (`dms_common.BaseServiceSettings`, seit P13-S1 für jeden Service verfügbar über dieselben zwei Umgebungsvariablen `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME`) — kein eigenes Datenmodell, keine Persistenz hier, reine Konfigurationsauskunft.
+- Ersetzt die zuvor uneinheitliche Praxis, bei der nur `workflow-service` eine eigene, isoliert konfigurierte `installation_display_name` kannte (für die Föderations-Registrierung, 7.4) und jeder andere Service — insbesondere `license-service` — gar keine Installationskennung besaß, obwohl Konzept 3a das explizit für die Lizenzprüfung verlangt ("Jede Installation registriert sich beim License Service ... mit einer eigenen Installations-ID"). `license-service` bindet seit P13-S1 die Lizenzprüfung an dieses Feld, siehe `docs/services/license-service.md` und [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md) (Nachtrag).
+- Grundlage für die künftige Fleet-/Lizenz-Management-Ebene (P13-S2, 3a "optional, separater Baustein") — dieser Endpunkt ist der Ort, an dem ein zentraler Fleet-Service mehrere Installationen nach ihrer Identität abfragen kann, ohne eine eigene Discovery-Logik je Installation zu bauen.
+- **Bewusst getrennt von der Federation-Hub-Kennung** (7.4): `workflow-service` meldet sich beim Hub weiterhin mit einer eigenen, zufällig erzeugten, rein opt-in genutzten Installations-ID an (`federation_client.py`), nicht mit `installation_id` aus dieser Antwort — Föderationspartner sollen nicht automatisch die interne Fleet-Identität einer Installation erfahren.
 
 ## Offene Punkte
 

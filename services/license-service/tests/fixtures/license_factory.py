@@ -20,6 +20,7 @@ def make_license_token(
     storage_limit_gb: float | None = 100.0,
     document_limit: int | None = 1000,
     licensed_components: list[str] | None = None,
+    installation_id: str | None = None,
 ) -> str:
     now = datetime.now(UTC)
     claims = {
@@ -31,4 +32,9 @@ def make_license_token(
         "document_limit": document_limit,
         "licensed_components": licensed_components,
     }
+    # installation_id (3a, P13-S1) ist ein optionales Claim - standardmäßig
+    # weggelassen, damit bestehende Tests unveränderte, "ungebundene"
+    # Lizenzen weiter simulieren können (Rückwärtskompatibilität).
+    if installation_id is not None:
+        claims["installation_id"] = installation_id
     return jwt.encode(claims, _PRIVATE_KEY_PEM, algorithm="RS256")

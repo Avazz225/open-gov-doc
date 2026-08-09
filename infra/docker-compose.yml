@@ -179,6 +179,8 @@ services:
       dockerfile: services/registry-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Registriert sich seit P4-S3 bei sich selbst, damit das Gateway auch
@@ -220,6 +222,8 @@ services:
       dockerfile: services/audit-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Selbst-Registrierung bei der Registry (3.2a, seit P4-S1) - Grundlage
@@ -248,6 +252,8 @@ services:
       dockerfile: services/auth-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       DMS_KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       DMS_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
@@ -274,6 +280,8 @@ services:
       dockerfile: services/permission-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -299,6 +307,8 @@ services:
       dockerfile: services/storage-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       # Ziel-Set (3.6, seit P5b-S6 eine echte Liste statt fester backend/
       # secondary_backend-Slots - siehe ADR 0004/0017): Default ein einzelnes
@@ -345,6 +355,8 @@ services:
       dockerfile: services/document-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
@@ -395,6 +407,8 @@ services:
       dockerfile: services/virus-scan-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
@@ -419,6 +433,8 @@ services:
       dockerfile: services/rendering-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
@@ -456,6 +472,8 @@ services:
     restart: unless-stopped
     profiles: ["ocr"]
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
@@ -482,6 +500,8 @@ services:
       dockerfile: services/search-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -518,6 +538,8 @@ services:
       dockerfile: services/workflow-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -532,7 +554,6 @@ services:
       # leer lassen (opt-in, siehe docs/services/workflow-service.md).
       DMS_FEDERATION_HUB_BASE_URL: ${WORKFLOW_SERVICE_FEDERATION_HUB_BASE_URL:-http://federation-hub-service:8000}
       DMS_INSTALLATION_GATEWAY_BASE_URL: http://gateway-service:8000
-      DMS_INSTALLATION_DISPLAY_NAME: ${WORKFLOW_SERVICE_INSTALLATION_DISPLAY_NAME:-DMS-Dev-Installation}
       DMS_FEDERATION_PROCESS_TYPE_MAP: ${WORKFLOW_SERVICE_FEDERATION_PROCESS_TYPE_MAP:-{}}
     ports:
       - "${WORKFLOW_SERVICE_PORT:-8014}:8000"
@@ -556,6 +577,8 @@ services:
       dockerfile: services/notification-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -583,6 +606,8 @@ services:
       dockerfile: services/case-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
@@ -612,6 +637,8 @@ services:
       dockerfile: services/signature-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -648,6 +675,8 @@ services:
       dockerfile: services/federation-hub-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
     ports:
       - "${FEDERATION_HUB_SERVICE_PORT:-8018}:8000"
@@ -663,6 +692,8 @@ services:
       dockerfile: services/favorite-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -683,6 +714,8 @@ services:
       dockerfile: services/reporting-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -720,6 +753,8 @@ services:
       dockerfile: services/archival-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://archival-service:8000
@@ -760,6 +795,8 @@ services:
       dockerfile: services/query-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -804,6 +841,8 @@ services:
       dockerfile: services/license-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -844,6 +883,8 @@ services:
       dockerfile: services/plugin-orchestration-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -872,6 +913,8 @@ services:
       dockerfile: services/monitoring-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Scrape-Proxy (10.1, P11-S1): fragt registry-service nach allen
@@ -903,6 +946,8 @@ services:
       dockerfile: services/webdav-connector/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       # Kein eigenes Postgres-/NATS-Schema (3.3, P12-S1): reiner Übersetzer
       # zwischen WebDAV und den bestehenden folder-service/document-service-
       # HTTP-APIs, kein eigener Zustand.
@@ -931,6 +976,8 @@ services:
       dockerfile: services/cmis-connector/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       # Kein eigenes Postgres-/NATS-Schema (3.3, P12-S4), gleiches Muster
       # wie webdav-connector: reiner Übersetzer zwischen der selbst gebauten
       # CMIS-1.1-Browser-Binding und den bestehenden folder-service/
@@ -960,6 +1007,8 @@ services:
       dockerfile: services/migration-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -994,6 +1043,8 @@ services:
       dockerfile: services/config-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       # Kein eigenes Postgres-/NATS-Schema (7.3, P12-S3): reiner Übersetzer,
       # liest/schreibt ausschließlich bei den jeweiligen Owner-Services.
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -1062,6 +1113,8 @@ services:
       dockerfile: services/object-type-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://object-type-service:8000
@@ -1079,6 +1132,8 @@ services:
       dockerfile: services/folder-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
@@ -1114,6 +1169,8 @@ services:
       dockerfile: services/gateway-service/Dockerfile
     restart: unless-stopped
     environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       DMS_KEYCLOAK_CLIENT_ID: dms-api

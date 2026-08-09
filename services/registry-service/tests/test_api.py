@@ -30,6 +30,15 @@ def test_healthz(client):
     assert response.json()["service"] == "registry-service"
 
 
+def test_get_installation(client):
+    """3a/P13-S1: reine Konfigurationswerte, kein Auth-Gate nötig."""
+    response = client.get("/installation")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == "local-dev"
+    assert body["display_name"] == "DMS-Installation (Entwicklung)"
+
+
 def test_register_and_list_active(client):
     service_type = f"type-{uuid.uuid4().hex[:8]}"
     payload = make_payload(service_type=service_type)

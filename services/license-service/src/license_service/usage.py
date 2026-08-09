@@ -48,14 +48,30 @@ async def compute_usage(
     storage_client,
     document_client,
     auth_client,
+    local_installation_id: str | None = None,
 ) -> UsageSnapshot:
+    """``local_installation_id`` bindet die Prüfung an die Installations-ID
+    (3a, P13-S1): ``claims["installation_id"]`` ist ein optionales Claim -
+    fehlt es (ältere/Test-Lizenzdateien vor dieser Erweiterung), wird nichts
+    geprüft (rückwärtskompatibler Übergang, keine Migration bestehender
+    Lizenzdateien nötig). Ist es gesetzt, muss es exakt der eigenen,
+    lokal konfigurierten ``installation_id`` entsprechen - sonst wurde diese
+    Lizenzdatei für eine andere Installation ausgestellt und ist hier
+    ungültig, selbst bei gültiger Signatur/Gültigkeitsdauer."""
     now = datetime.now(UTC)
     issued_at = _to_datetime(claims.get("iat"))
     expires_at = _to_datetime(claims.get("exp"))
     nbf = _to_datetime(claims.get("nbf"))
 
     invalid_reason: str | None = None
-    if expires_at is not None and now > expires_at:
+    license_installation_id = claims.get("installation_id")
+    if (
+        license_installation_id is not None
+        and local_installation_id is not None
+        and license_installation_id != local_installation_id
+    ):
+        invalid_reason = "Lizenz wurde fuer eine andere Installation ausgestellt"
+    elif expires_at is not None and now > expires_at:
         invalid_reason = "Lizenz abgelaufen"
     elif nbf is not None and now < nbf:
         invalid_reason = "Lizenz noch nicht gueltig"

@@ -100,6 +100,7 @@ async def run_tick(
             storage_client=clients.storage_client,
             document_client=clients.document_client,
             auth_client=clients.auth_client,
+            local_installation_id=settings.installation_id,
         )
         await _diff_and_publish(
             license_row,

@@ -95,6 +95,35 @@ def test_upload_expired_license_is_accepted_but_reported_invalid(client):
     assert response.json()["invalid_reason"] == "Lizenz abgelaufen"
 
 
+def test_upload_license_for_other_installation_is_accepted_but_reported_invalid(client):
+    """3a/P13-S1: end-to-end gegen die echte, per `Settings()` geladene
+    `installation_id` dieses Testprozesses (Default `local-dev`, siehe
+    `dms_common.BaseServiceSettings`)."""
+    token = make_license_token(installation_id="eine-ganz-andere-installation")
+
+    response = client.post(
+        "/license", json={"license_token": token}, headers={"x-dms-principal": "alice"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["valid"] is False
+    assert (
+        response.json()["invalid_reason"]
+        == "Lizenz wurde fuer eine andere Installation ausgestellt"
+    )
+
+
+def test_upload_license_for_this_installation_is_valid(client):
+    token = make_license_token(installation_id="local-dev")
+
+    response = client.post(
+        "/license", json={"license_token": token}, headers={"x-dms-principal": "alice"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["valid"] is True
+
+
 def test_upload_allowed_for_active_superuser_without_permission(client):
     app.state.permission_client.has_permission.return_value = False
     app.state.auth_client.get_active_superuser.return_value = (True, "root-user")

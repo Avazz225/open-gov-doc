@@ -93,6 +93,20 @@ async def test_expired_license_publishes_invalid_event(engine, session):
     assert "license.invalid" in event_types
 
 
+async def test_license_for_other_installation_publishes_invalid_event(engine, session):
+    """3a/P13-S1: derselbe Flankenerkennungs-Mechanismus greift auch fuer
+    eine an eine andere Installation gebundene Lizenz."""
+    await _install(session, installation_id="eine-ganz-andere-installation")
+    settings = Settings()
+    publish_event = AsyncMock()
+    session_factory = make_session_factory(engine)
+
+    await run_tick(session_factory, _clients(), settings, publish_event)
+
+    event_types = [call[0][0] for call in publish_event.call_args_list]
+    assert "license.invalid" in event_types
+
+
 async def test_recovering_from_exceeded_allows_new_event_later(engine, session):
     await _install(session, max_users=1)
     settings = Settings()

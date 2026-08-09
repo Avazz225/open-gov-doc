@@ -30,7 +30,10 @@ class Settings(BaseServiceSettings):
     # der Hub liefert über `/api/workflow-service/...`, damit auch die
     # Gateway-JWT-/Wartungsmodus-Logik greift, siehe ADR 0028).
     installation_gateway_base_url: str = "http://gateway-service:8000"
-    installation_display_name: str = "DMS-Installation (workflow-service)"
+    # `installation_display_name` kommt seit P13-S1 aus `BaseServiceSettings`
+    # (3a) - ein gemeinsamer Wert für die ganze Installation statt eines nur
+    # hier bekannten Duplikats. `installation_id` bleibt bewusst eine davon
+    # unabhängige, eigene Kennung (siehe `federation_client.py`).
     installation_version: str = "1.0"
     installation_min_compatible_peer_version: str = "1.0"
     # Empfängerseitige Zuordnung `targetProcessType` (aus dem föderierten

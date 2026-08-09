@@ -128,3 +128,56 @@ async def test_exceeded_dimensions_are_listed():
     assert snapshot.users.exceeded
     assert snapshot.documents.exceeded
     assert not snapshot.storage_gb.exceeded
+
+
+async def test_license_without_installation_claim_is_unaffected():
+    """Rueckwaertskompatibilitaet (3a, P13-S1): aeltere/Test-Lizenzdateien
+    ohne das neue Claim werden unveraendert wie zuvor bewertet."""
+    storage_client, document_client, auth_client = _clients()
+
+    snapshot = await compute_usage(
+        _claims(),
+        storage_client=storage_client,
+        document_client=document_client,
+        auth_client=auth_client,
+        local_installation_id="installation-a",
+    )
+
+    assert snapshot.valid
+    assert snapshot.invalid_reason is None
+
+
+async def test_license_matching_installation_id_is_valid():
+    storage_client, document_client, auth_client = _clients()
+    claims = _claims(installation_id="installation-a")
+
+    snapshot = await compute_usage(
+        claims,
+        storage_client=storage_client,
+        document_client=document_client,
+        auth_client=auth_client,
+        local_installation_id="installation-a",
+    )
+
+    assert snapshot.valid
+    assert snapshot.invalid_reason is None
+
+
+async def test_license_issued_for_other_installation_is_invalid():
+    """3a: "Jede Installation registriert sich beim License Service ... mit
+    einer eigenen Installations-ID, gegen die ihre Lizenz geprueft wird" -
+    eine fuer Installation A ausgestellte Lizenz darf auf Installation B nicht
+    gueltig sein, selbst bei korrekter Signatur/Gueltigkeitsdauer."""
+    storage_client, document_client, auth_client = _clients()
+    claims = _claims(installation_id="installation-a")
+
+    snapshot = await compute_usage(
+        claims,
+        storage_client=storage_client,
+        document_client=document_client,
+        auth_client=auth_client,
+        local_installation_id="installation-b",
+    )
+
+    assert not snapshot.valid
+    assert snapshot.invalid_reason == "Lizenz wurde fuer eine andere Installation ausgestellt"
