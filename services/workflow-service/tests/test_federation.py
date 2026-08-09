@@ -10,6 +10,7 @@ Krypto-Rundreise, echte Selbstregistrierung, Signatur-Ablehnung, und das
 Dispatch-/Guard-Verhalten (inkl. eines echten, aber absichtlich
 unerreichbaren Ziels für einen deterministischen "delivery_failed"-Fall)."""
 
+import json
 import os
 import uuid
 
@@ -94,11 +95,15 @@ def client():
         yield c
 
 
-async def _register_throwaway_installation(**overrides) -> tuple[dict, str]:
+async def _register_throwaway_installation(**overrides) -> tuple[dict, bytes]:
     """Registriert eine eigene, frei erfundene Installation direkt am echten
     Hub (kein Mocking) - Grundlage für Dispatch-Tests, die ein echtes,
-    bekanntes Ziel im Adressbuch brauchen."""
-    _, public_pem = federation_crypto.generate_keypair()
+    bekanntes Ziel im Adressbuch brauchen. Seit P13-S4 (ADR 0039) signiert
+    statt mit einem vom Hub ausgegebenen API-Key - die Registrierung muss den
+    Besitz des zum eingereichten ``public_key_pem`` passenden privaten
+    Schlüssels nachweisen (Selbstkonsistenz-Prüfung, siehe
+    `federation_hub_service.repository.register_or_update_installation`)."""
+    private_pem, public_pem = federation_crypto.generate_keypair()
     payload = {
         "id": f"test-install-{uuid.uuid4().hex[:8]}",
         "display_name": "Test-Zielinstallation",
@@ -108,11 +113,18 @@ async def _register_throwaway_installation(**overrides) -> tuple[dict, str]:
         "min_compatible_peer_version": "1.0",
     }
     payload.update(overrides)
+    body = json.dumps(payload).encode("utf-8")
     async with httpx.AsyncClient(base_url=FEDERATION_HUB_SERVICE_URL) as hub:
-        response = await hub.post("/installations", json=payload)
+        response = await hub.post(
+            "/installations",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Installation-Signature": federation_crypto.sign_body(private_pem, body),
+            },
+        )
         response.raise_for_status()
-        api_key = response.json()["api_key"]
-    return payload, api_key
+    return payload, private_pem
 
 
 def test_encrypt_decrypt_round_trip():
@@ -413,3 +425,29 @@ def test_update_federation_config_round_trip(client, admin_headers):
         assert get_response.json()["version"] == new_version
     finally:
         client.put("/federation/config", json=previous, headers=admin_headers)
+
+
+# --- Schlüsselrotation (7.4, P13-S4, ADR 0039) -------------------------------
+
+
+def test_rotate_federation_key_requires_admin(client):
+    response = client.post("/federation/rotate-key")
+    assert response.status_code == 403
+
+
+async def test_rotate_federation_key_updates_hub_registration(client, admin_headers):
+    """Echter Rundlauf gegen den laufenden `federation-hub-service` (kein
+    Mocking, wie der Rest dieser Suite) - bestätigt, dass eine Rotation
+    tatsächlich ein neues Schlüsselpaar beim Hub hinterlegt, ohne andere
+    Installationen zu beeinflussen."""
+    before = {i["id"]: i["public_key_pem"] for i in client.get("/federation/installations").json()}
+
+    response = client.post("/federation/rotate-key", headers=admin_headers)
+    assert response.status_code == 200
+    own_id = response.json()["installation_id"]
+    assert own_id in before
+
+    after = {i["id"]: i["public_key_pem"] for i in client.get("/federation/installations").json()}
+    assert after[own_id] != before[own_id]
+    for other_id in set(before) & set(after) - {own_id}:
+        assert after[other_id] == before[other_id]

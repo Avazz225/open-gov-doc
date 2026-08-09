@@ -10,10 +10,12 @@
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `GET` | `/public-key` | Öffentlicher Signaturschlüssel des Hub (RSA-2048) — Installationen rufen dies einmalig beim ersten Registrieren ab (Trust-on-First-Use, siehe ADR 0028) |
-| `POST` | `/installations` | Registrieren (neue `id`, kein Auth nötig, generiert+gibt einmalig einen Klartext-API-Key zurück) oder Aktualisieren (bekannte `id`, verlangt `Authorization: Bearer <api_key>` — sonst `401`) |
-| `GET` | `/installations` | Adressbuch — ungegated, liefert nie `api_key_hash` |
-| `DELETE` | `/installations/{id}` | Deregistrieren — verlangt den zur Installation gehörenden API-Key |
-| `POST` | `/handovers` | Handover anlegen — **`handover_id` wird vom Aufrufer selbst mitgegeben**, nicht vom Hub generiert (siehe "Erst beim Live-Smoke-Test gefunden" unten). `Authorization: Bearer` bestimmt die Absenderinstallation, prüft Versionskompatibilität (`409` bei Inkompatibilität), committet die Handover-Zeile **vor** dem Zustellversuch, verschlüsselten Payload dann synchron an `to_installation`s `callback_base_url` + `/federation/inbound` zustellen, Ergebnis (`delivered`/`delivery_failed`) direkt zurückgeben |
+| `POST` | `/installations` | Registrieren (neue `id`) oder Aktualisieren (bekannte `id`) — seit P13-S4 (ADR 0039) signaturbasiert statt per API-Key: `X-Installation-Signature` muss bei Neuanlage zum eingereichten `public_key_pem` passen (Selbstkonsistenz), bei einer bekannten `id` zum bereits gespeicherten (`public_key_pem` selbst wird bei einem Update **nicht** übernommen, siehe `rotate-key`) |
+| `GET` | `/installations` | Adressbuch — ungegated |
+| `DELETE` | `/installations/{id}` | Deregistrieren — `X-Installation-Signature` über die UTF-8-Bytes von `installation_id` selbst |
+| `POST` | `/installations/{id}/rotate-key` | Schlüsselrotation (P13-S4/ADR 0039) — Body `{new_public_key_pem}`, signiert mit dem noch **aktuellen** privaten Schlüssel (Kontinuitätsnachweis) |
+| `POST` | `/installations/{id}/revoke` | Betreiber-Revocation (P13-S4/ADR 0039) — gegated über `Authorization: Bearer <DMS_HUB_OPERATOR_KEY>`, **nicht** über die Signatur der betroffenen Installation (die könnte kompromittiert sein) |
+| `POST` | `/handovers` | Handover anlegen — **`handover_id` wird vom Aufrufer selbst mitgegeben**, nicht vom Hub generiert (siehe "Erst beim Live-Smoke-Test gefunden" unten). `X-Installation-Id`/`X-Installation-Signature` bestimmen die Absenderinstallation, prüft Versionskompatibilität (`409` bei Inkompatibilität) sowie dass das Ziel nicht widerrufen ist (`409`), committet die Handover-Zeile **vor** dem Zustellversuch, verschlüsselten Payload dann synchron an `to_installation`s `callback_base_url` + `/federation/inbound` zustellen, Ergebnis (`delivered`/`delivery_failed`) direkt zurückgeben |
 | `POST` | `/handovers/{id}/result` | Ergebnis zurückmelden — nur durch die Zielinstallation des Handover (`403` sonst), leitet an `from_installation`s Callback + `/federation/inbound-result` weiter |
 | `GET` | `/handovers/{id}` | Status/Metadaten eines Handover |
 | `GET` | `/healthz` | Health-Check |
@@ -21,15 +23,16 @@
 ## Datenmodell
 
 - `hub_identity`: Singleton (`id=1`, gleiches Muster wie `signature-service`s `InternalCa`) — eigenes RSA-2048-Signaturschlüsselpaar, mit dem jede Zustellung an eine Installation signiert wird (`X-Federation-Hub-Signature`).
-- `installation`: Adressbucheintrag — `id` (von der Installation selbst gewählt), `display_name`, `callback_base_url`, `public_key_pem` (für Ende-zu-Ende-Verschlüsselung durch ANDERE Installationen, der Hub selbst besitzt nie den passenden privaten Schlüssel), `api_key_hash` (SHA-256, siehe ADR 0028 zur Begründung des schnellen statt langsamen Hash-Verfahrens), `version`/`min_compatible_peer_version`, `supported_process_types`/`supported_document_types` (JSON-Listen, aktuell nur gespeichert, keine erzwingende Prüfung).
+- `installation`: Adressbucheintrag — `id` (von der Installation selbst gewählt), `display_name`, `callback_base_url`, `public_key_pem` (dient seit P13-S4 zugleich als kryptografische Identität für eingehende Anfragen UND weiterhin für die Ende-zu-Ende-Verschlüsselung durch ANDERE Installationen — der Hub selbst besitzt nie den passenden privaten Schlüssel), `version`/`min_compatible_peer_version`, `supported_process_types`/`supported_document_types` (JSON-Listen, aktuell nur gespeichert, keine erzwingende Prüfung), `revoked_at`/`revoked_reason` (seit P13-S4, `NULL` solange nicht widerrufen).
 - `handover`: **nur Metadaten** (`from_installation_id`, `to_installation_id`, `process_type`, `status`, Zeitstempel) — kein Feld für den Chiffretext selbst, der wird synchron weitergeleitet, nie persistiert (wörtliche Umsetzung von Konzept 7.4: "protokolliert nur Metadaten des Vermittlungsvorgangs ... nicht die Dokumentinhalte selbst").
 
-## Vertrauensmodell (ADR 0028)
+## Vertrauensmodell (ADR 0028, seit P13-S4 ergänzt um ADR 0039)
 
-- **Installation → Hub**: Bearer-API-Key, beim Hub nur gehasht gespeichert (SHA-256).
-- **Hub → Installation**: der Hub signiert jede Zustellung mit seinem eigenen, einmalig generierten Schlüsselpaar (RSA-PSS/SHA-256, `X-Federation-Hub-Signature`) — die Zielinstallation verifiziert mit dem bei der eigenen Registrierung einmalig abgerufenen öffentlichen Hub-Schlüssel. Kein geteiltes Geheimnis, das der Hub im Klartext speichern müsste.
+- **Installation → Hub**: seit P13-S4 signaturbasiert (RSA-PSS/SHA-256, `X-Installation-Signature`) statt eines vom Hub ausgegebenen API-Keys — verifiziert gegen `Installation.public_key_pem`, denselben Schlüssel, der ohnehin schon für die Ende-zu-Ende-Verschlüsselung existiert. Bewusst **kein** echtes TLS-Client-Zertifikat (kein anderer Service dieses Projekts terminiert TLS selbst) - "mTLS-äquivalent auf Anwendungsebene", siehe [ADR 0039](../adr/0039-federation-trust-hardening-request-signing-over-mtls.md) für die vollständige Begründung.
+- **Hub → Installation**: unverändert — der Hub signiert jede Zustellung mit seinem eigenen, einmalig generierten Schlüsselpaar (RSA-PSS/SHA-256, `X-Federation-Hub-Signature`) — die Zielinstallation verifiziert mit dem bei der eigenen Registrierung einmalig abgerufenen öffentlichen Hub-Schlüssel. Kein geteiltes Geheimnis, das der Hub im Klartext speichern müsste.
 - **Ende-zu-Ende-Verschlüsselung der Nutzdaten**: liegt vollständig bei den Installationen (`workflow_service.federation_crypto`) — der Hub leitet `encrypted_payload`/`encrypted_result` nur als opaken String weiter.
 - **Versionskompatibilität**: `POST /handovers` prüft beidseitig `(major, minor)`-Zahlenpaare (`repository.is_version_compatible`), lehnt inkompatible Kombinationen mit `409` ab. Seit P13-S3 validiert `POST /installations` das Format von `version`/`min_compatible_peer_version` bereits bei der Registrierung (`version_utils.parse_version`, `422` bei nicht-numerischem Wert) - ein realer Bug fand vorher erst bei einer späteren, fremden `POST /handovers`-Vermittlung mit `500` auf, siehe ADR 0028 Nachtrag.
+- **Schlüsselrotation/-Revocation (P13-S4)**: Rotation ist installationsgetrieben und erfordert einen Kontinuitätsnachweis (Signatur mit dem alten Schlüssel); Revocation ist eine Betreiber-Aktion (`DMS_HUB_OPERATOR_KEY`, `None` per Default = vollständig deaktiviert), bewusst unabhängig von der Signatur der betroffenen Installation, da genau der Kompromittierungsfall der eigentliche Anwendungsfall ist.
 - Bewusste Grenzen dieses Grundgerüsts (siehe "Offene Punkte").
 
 ## Erst beim Live-Smoke-Test gefundene Bugs (Selbst-Loopback, siehe ADR 0028)

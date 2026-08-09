@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +21,9 @@ from federation_hub_service.schemas import (
     HandoverResultSubmit,
     InstallationOut,
     InstallationRegister,
-    InstallationRegisterOut,
     PublicKeyOut,
+    RevokeRequest,
+    RotateKeyRequest,
 )
 from federation_hub_service.settings import Settings
 
@@ -30,11 +32,18 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 
-def _extract_bearer(authorization: str) -> str | None:
-    if not authorization.lower().startswith("bearer "):
-        return None
-    token = authorization[len("bearer ") :].strip()
-    return token or None
+def _parse_body(model: type[BaseModel], body: bytes):
+    """`request.body()` + manuelles `model_validate_json()` (statt eines
+    typisierten FastAPI-Body-Parameters) ist nötig, damit die Endpunkte unten
+    exakt die rohen, signierten Bytes verifizieren können (P13-S4, ADR 0039) -
+    FastAPI wandelt einen so **manuell** ausgelösten `pydantic.ValidationError`
+    aber anders als bei einem automatischen Body-Parameter NICHT von selbst in
+    einen `422` um (nur seine eigene `RequestValidationError`), daher hier
+    explizit gefangen."""
+    try:
+        return model.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @asynccontextmanager
@@ -44,6 +53,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS federation"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
+        # CONTRIBUTING.md): `create_all` legt fehlende Tabellen an, ändert aber
+        # keine bestehenden - `revoked_at`/`revoked_reason` kamen erst in
+        # P13-S4 dazu (ADR 0039). `api_key_hash` wird im selben Schritt
+        # entfernt statt bewusst zurückgestellt (anders als sonst üblich) -
+        # das alte API-Key-Modell wird hier vollständig durch die
+        # signaturbasierte Authentisierung ersetzt, nicht schrittweise über
+        # mehrere Versionen hinweg abgelöst (kein Rolling-Update-Szenario
+        # zwischen alt/neu zu berücksichtigen), und eine verbliebene
+        # NOT-NULL-Spalte ohne Server-Default würde jeden neuen Insert
+        # brechen, der sie (zu Recht) nicht mehr befüllt.
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.installation "
+                "ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE federation.installation ADD COLUMN IF NOT EXISTS revoked_reason TEXT")
+        )
+        await conn.execute(
+            text("ALTER TABLE federation.installation DROP COLUMN IF EXISTS api_key_hash")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -91,22 +123,29 @@ def get_public_key() -> PublicKeyOut:
     return PublicKeyOut(public_key_pem=app.state.hub_public_key_pem.decode("utf-8"))
 
 
-@app.post(
-    "/installations", response_model=InstallationRegisterOut, status_code=status.HTTP_201_CREATED
-)
+@app.post("/installations", response_model=InstallationOut, status_code=status.HTTP_201_CREATED)
 async def register_installation(
-    payload: InstallationRegister,
-    authorization: str = Header(default="", alias="Authorization"),
+    request: Request,
+    x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
     session: AsyncSession = Depends(get_session),
-) -> InstallationRegisterOut:
+) -> Installation:
+    """Seit P13-S4 (ADR 0039) kryptografisch statt über ein geteiltes
+    API-Key-Geheimnis abgesichert - `payload.public_key_pem` dient zugleich
+    als Identität, `X-Installation-Signature` beweist den Besitz des
+    zugehörigen privaten Schlüssels. Liest den rohen Body statt eines
+    typisierten Parameters, damit exakt diese Bytes (nicht ein separat neu
+    serialisiertes Objekt) verifiziert werden - gleiches Prinzip wie
+    `workflow_service.main.federation_inbound`, nur in umgekehrter Richtung."""
+    body = await request.body()
+    payload = _parse_body(InstallationRegister, body)
     try:
-        installation, api_key = await repository.register_or_update_installation(
-            session, payload, presented_api_key=_extract_bearer(authorization)
+        installation = await repository.register_or_update_installation(
+            session, payload, raw_body=body, presented_signature=x_installation_signature
         )
     except repository.UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     await session.commit()
-    return InstallationRegisterOut(id=installation.id, api_key=api_key)
+    return installation
 
 
 @app.get("/installations", response_model=list[InstallationOut])
@@ -120,12 +159,12 @@ async def list_installations(session: AsyncSession = Depends(get_session)) -> li
 @app.delete("/installations/{installation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deregister_installation(
     installation_id: str,
-    authorization: str = Header(default="", alias="Authorization"),
+    x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     try:
         await repository.deregister_installation(
-            session, installation_id, presented_api_key=_extract_bearer(authorization)
+            session, installation_id, presented_signature=x_installation_signature
         )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -134,13 +173,58 @@ async def deregister_installation(
     await session.commit()
 
 
-async def _authenticate(session: AsyncSession, authorization: str):
-    api_key = _extract_bearer(authorization)
-    installation = api_key and await repository.get_installation_by_api_key(session, api_key)
-    if not installation:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültiger oder fehlender API-Key"
+@app.post("/installations/{installation_id}/rotate-key", response_model=InstallationOut)
+async def rotate_installation_key(
+    installation_id: str,
+    request: Request,
+    x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
+    session: AsyncSession = Depends(get_session),
+) -> Installation:
+    """Kontrollierte Schlüsselrotation (P13-S4, ADR 0039) - der Request-Body
+    (``{"new_public_key_pem": ...}``) muss mit dem noch **aktuellen**
+    privaten Schlüssel signiert sein, siehe `repository.rotate_installation_key`."""
+    body = await request.body()
+    payload = _parse_body(RotateKeyRequest, body)
+    try:
+        installation = await repository.rotate_installation_key(
+            session,
+            installation_id,
+            raw_body=body,
+            new_public_key_pem=payload.new_public_key_pem,
+            presented_signature=x_installation_signature,
         )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.UnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    await session.commit()
+    return installation
+
+
+@app.post("/installations/{installation_id}/revoke", response_model=InstallationOut)
+async def revoke_installation(
+    installation_id: str,
+    payload: RevokeRequest,
+    authorization: str = Header(default="", alias="Authorization"),
+    session: AsyncSession = Depends(get_session),
+) -> Installation:
+    """Betreiber-Aktion (P13-S4, ADR 0039 "Revocation") - gegated über
+    `settings.hub_operator_key`, nicht über die Signatur der betroffenen
+    Installation (die könnte kompromittiert sein, siehe `repository.
+    revoke_installation`). Ohne konfigurierten `hub_operator_key` vollständig
+    gesperrt (`403`) - ein Hub-Betreiber muss Revocation bewusst aktivieren."""
+    if not settings.hub_operator_key or authorization != f"Bearer {settings.hub_operator_key}":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlender oder ungültiger Hub-Operator-Schlüssel",
+        )
+    try:
+        installation = await repository.revoke_installation(
+            session, installation_id, reason=payload.reason
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
     return installation
 
 
@@ -168,17 +252,38 @@ async def _deliver(url: str, body: dict) -> bool:
         return False
 
 
+async def _authenticate(
+    session: AsyncSession, *, installation_id: str, body: bytes, signature: str
+) -> Installation:
+    try:
+        return await repository.authenticate_signed_request(
+            session, installation_id=installation_id, body=body, signature=signature
+        )
+    except repository.UnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
 @app.post("/handovers", response_model=HandoverOut, status_code=status.HTTP_201_CREATED)
 async def create_handover(
-    payload: HandoverCreate,
-    authorization: str = Header(default="", alias="Authorization"),
+    request: Request,
+    x_installation_id: str = Header(default="", alias="X-Installation-Id"),
+    x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> HandoverOut:
-    from_installation = await _authenticate(session, authorization)
+    body = await request.body()
+    from_installation = await _authenticate(
+        session, installation_id=x_installation_id, body=body, signature=x_installation_signature
+    )
+    payload = _parse_body(HandoverCreate, body)
     to_installation = await session.get(Installation, payload.to_installation_id)
     if to_installation is None:
         raise HTTPException(
             status_code=404, detail=f"to_installation_id {payload.to_installation_id!r} unbekannt"
+        )
+    if to_installation.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"to_installation_id {payload.to_installation_id!r} wurde widerrufen",
         )
     if not repository.is_version_compatible(from_installation, to_installation):
         raise HTTPException(
@@ -226,11 +331,16 @@ async def create_handover(
 @app.post("/handovers/{handover_id}/result", response_model=HandoverOut)
 async def submit_handover_result(
     handover_id: str,
-    payload: HandoverResultSubmit,
-    authorization: str = Header(default="", alias="Authorization"),
+    request: Request,
+    x_installation_id: str = Header(default="", alias="X-Installation-Id"),
+    x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> HandoverOut:
-    caller = await _authenticate(session, authorization)
+    body = await request.body()
+    caller = await _authenticate(
+        session, installation_id=x_installation_id, body=body, signature=x_installation_signature
+    )
+    payload = _parse_body(HandoverResultSubmit, body)
     try:
         handover = await repository.get_handover(session, handover_id)
     except repository.NotFoundError as exc:

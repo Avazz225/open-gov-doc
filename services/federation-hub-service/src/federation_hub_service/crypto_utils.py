@@ -1,15 +1,16 @@
-"""Krypto-Bausteine des Hub (ADR 0028): der Hub verschlüsselt/entschlüsselt
-selbst **nie** Nutzdaten (die Ende-zu-Ende-Verschlüsselung findet ausschließlich
-zwischen den Installationen statt, siehe `workflow_service.federation_crypto`
-in der jeweiligen Installation) - er braucht nur (a) ein eigenes Signatur-
-Schlüsselpaar, mit dem er jede Zustellung an eine Installation signiert, und
-(b) API-Key-Hashing zur Authentifizierung eingehender Installations-Aufrufe.
-Gleiche Bibliothek/Serialisierung wie `signature-service`s interne CA
-(RSA-2048, PEM/PKCS8, `cryptography`)."""
+"""Krypto-Bausteine des Hub (ADR 0028, seit P13-S4 auch ADR 0039): der Hub
+verschlüsselt/entschlüsselt selbst **nie** Nutzdaten (die Ende-zu-Ende-
+Verschlüsselung findet ausschließlich zwischen den Installationen statt,
+siehe `workflow_service.federation_crypto` in der jeweiligen Installation) -
+er braucht nur (a) ein eigenes Signaturschlüsselpaar, mit dem er jede
+Zustellung an eine Installation signiert, und (b) seit P13-S4 die Fähigkeit,
+eine von einer Installation mit ihrem eigenen privaten Schlüssel signierte
+Anfrage zu verifizieren (ersetzt das bis dahin verwendete API-Key-Hashing -
+siehe ADR 0039: "mTLS-äquivalent auf Anwendungsebene" statt eines geteilten
+Geheimnisses). Gleiche Bibliothek/Serialisierung wie `signature-service`s
+interne CA (RSA-2048, PEM/PKCS8, `cryptography`)."""
 
 import base64
-import hashlib
-import secrets
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -48,14 +49,21 @@ def sign_body(private_key_pem: bytes, body: bytes) -> str:
     return base64.b64encode(signature).decode("ascii")
 
 
-def generate_api_key() -> str:
-    return secrets.token_urlsafe(32)
-
-
-def hash_api_key(api_key: str) -> str:
-    """Schnelles SHA-256 statt eines langsamen Passwort-Hashes (bcrypt/argon2)
-    - der API-Key ist bereits ein hochentropischer Zufallswert (32 Bytes über
-    `secrets.token_urlsafe`), kein von Menschen gewähltes, erratbares
-    Passwort. Ein schneller Hash reicht hier aus, um einen reinen
-    DB-Auszugs-Diebstahl nicht direkt in nutzbare Klartext-Keys zu verwandeln."""
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+def verify_body(public_key_pem: str, body: bytes, signature_b64: str) -> bool:
+    """Verifiziert eine von einer Installation mit ihrem eigenen privaten
+    Schlüssel signierte eingehende Anfrage (P13-S4, ADR 0039) - Gegenstück zu
+    `sign_body` oben, gleiches Schema wie `workflow_service.federation_crypto.
+    verify_body`. Der Hub speichert dafür nur den öffentlichen Schlüssel jeder
+    Installation (``Installation.public_key_pem``, ohnehin bereits für die
+    Ende-zu-Ende-Verschlüsselung vorhanden) - kein zusätzliches Geheimnis."""
+    try:
+        public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+        public_key.verify(
+            base64.b64decode(signature_b64),
+            body,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256(),
+        )
+        return True
+    except Exception:
+        return False

@@ -75,11 +75,14 @@ class FederationIdentity(Base):
     RSA-2048-Schlüsselpaar, siehe `federation_crypto.py`) und danach
     idempotent wiederverwendet - andere Installationen verschlüsseln Payloads
     für uns mit `public_key_pem`, `private_key_pem` entschlüsselt sie wieder.
-    `api_key` ist der vom Hub bei der Registrierung einmalig ausgegebene
-    Klartext-Key (wird für jeden eigenen Aufruf gegen den Hub als Bearer-Token
-    mitgeschickt); `hub_public_key_pem` ist der einmalig abgerufene öffentliche
-    Schlüssel des Hub (Trust-on-First-Use, ADR 0028), mit dem eingehende, vom
-    Hub signierte Zustellungen verifiziert werden."""
+    Seit P13-S4 (ADR 0039) dient dasselbe Schlüsselpaar zusätzlich als
+    kryptografische Identität gegenüber dem Hub: jeder eigene Aufruf wird mit
+    `private_key_pem` signiert (`X-Installation-Signature`), statt - wie
+    zuvor - einen vom Hub ausgegebenen `api_key` als Bearer-Token
+    mitzuschicken (das Feld entfällt daher). `hub_public_key_pem` ist der
+    einmalig abgerufene öffentliche Schlüssel des Hub (Trust-on-First-Use,
+    ADR 0028), mit dem eingehende, vom Hub signierte Zustellungen verifiziert
+    werden."""
 
     __tablename__ = "federation_identity"
 
@@ -87,7 +90,6 @@ class FederationIdentity(Base):
     installation_id: Mapped[str] = mapped_column(String(128))
     private_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
     public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
-    api_key: Mapped[str] = mapped_column(String(128))
     hub_public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

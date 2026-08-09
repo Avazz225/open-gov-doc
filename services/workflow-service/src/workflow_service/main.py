@@ -173,9 +173,9 @@ async def _ensure_federation_identity(
             private_pem, public_pem = federation_crypto.generate_keypair()
             hub_public_key_pem = await client.get_hub_public_key()
             installation_id = str(uuid.uuid4())
-            registration = await client.register(
-                api_key=None,
+            await client.register(
                 installation_id=installation_id,
+                private_key_pem=private_pem,
                 display_name=settings.installation_display_name,
                 callback_base_url=callback_base_url,
                 public_key_pem=public_pem.decode("utf-8"),
@@ -187,7 +187,6 @@ async def _ensure_federation_identity(
                 installation_id=installation_id,
                 private_key_pem=private_pem,
                 public_key_pem=public_pem,
-                api_key=registration["api_key"],
                 hub_public_key_pem=hub_public_key_pem.encode("utf-8"),
                 created_at=datetime.now(UTC),
             )
@@ -202,8 +201,8 @@ async def _ensure_federation_identity(
             # Zusatznutzen, kein Hard-Dependency dieser Installation.
             try:
                 await client.register(
-                    api_key=identity.api_key,
                     installation_id=identity.installation_id,
+                    private_key_pem=identity.private_key_pem,
                     display_name=settings.installation_display_name,
                     callback_base_url=callback_base_url,
                     public_key_pem=identity.public_key_pem.decode("utf-8"),
@@ -270,6 +269,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "CREATE UNIQUE INDEX IF NOT EXISTS ux_federation_task_handover_direction "
                 "ON workflow.federation_task (handover_id, direction)"
             )
+        )
+        # Signaturbasierte Hub-Authentisierung statt API-Key (P13-S4,
+        # ADR 0039) - `api_key` wird im selben Schritt entfernt statt bewusst
+        # zurückgestellt: das alte Modell wird hier vollständig ersetzt, kein
+        # Rolling-Update-Szenario zwischen alt/neu zu berücksichtigen, siehe
+        # gleiche Begründung in `federation_hub_service.main`.
+        await conn.execute(
+            text("ALTER TABLE workflow.federation_identity DROP COLUMN IF EXISTS api_key")
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
@@ -396,7 +403,8 @@ async def _dispatch_outbound_federated_task(
 
     try:
         handover = await app.state.federation_client.create_handover(
-            identity.api_key,
+            installation_id=identity.installation_id,
+            private_key_pem=identity.private_key_pem,
             handover_id=handover_id,
             to_installation_id=target_installation_id,
             process_type=target_process_type,
@@ -448,8 +456,9 @@ async def _dispatch_federated_return_task(
     )
     try:
         result = await app.state.federation_client.send_result(
-            identity.api_key,
-            inbound.handover_id,
+            installation_id=identity.installation_id,
+            private_key_pem=identity.private_key_pem,
+            handover_id=inbound.handover_id,
             outcome="completed",
             encrypted_result=encrypted_result,
         )
@@ -941,8 +950,8 @@ async def update_federation_config(
             callback_base_url = f"{settings.installation_gateway_base_url}/api/workflow-service"
             try:
                 await app.state.federation_client.register(
-                    api_key=identity.api_key,
                     installation_id=identity.installation_id,
+                    private_key_pem=identity.private_key_pem,
                     display_name=settings.installation_display_name,
                     callback_base_url=callback_base_url,
                     public_key_pem=identity.public_key_pem.decode("utf-8"),
@@ -952,6 +961,45 @@ async def update_federation_config(
             except httpx.HTTPError:
                 logger.warning("federation_hub_reregistration_after_config_update_failed")
     return config
+
+
+@app.post("/federation/rotate-key")
+async def rotate_federation_key(
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Schlüsselrotation (7.4, P13-S4, ADR 0039) - gegated hinter derselben
+    `admin.object_config`-Capability wie `PUT /federation/config`. Generiert
+    lokal ein frisches RSA-Schlüsselpaar, signiert die Rotationsanfrage mit
+    dem noch aktuellen (alten) privaten Schlüssel (Kontinuitätsnachweis
+    gegenüber dem Hub, siehe `federation_hub_service.repository.
+    rotate_installation_key`) und übernimmt das neue Schlüsselpaar erst nach
+    einer erfolgreichen Antwort des Hub - schlägt die Rotation fehl, bleibt
+    das alte, weiterhin gültige Schlüsselpaar unverändert im Einsatz."""
+    await _require_object_config(x_dms_principal)
+    if app.state.federation_client is None:
+        raise HTTPException(status_code=503, detail="Federation Hub nicht konfiguriert")
+    identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+    if identity is None:
+        raise HTTPException(status_code=503, detail="Noch keine Federation-Identität vorhanden")
+
+    new_private_pem, new_public_pem = federation_crypto.generate_keypair()
+    try:
+        await app.state.federation_client.rotate_key(
+            installation_id=identity.installation_id,
+            old_private_key_pem=identity.private_key_pem,
+            new_public_key_pem=new_public_pem.decode("utf-8"),
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Schlüsselrotation beim Hub fehlgeschlagen: {exc}",
+        ) from exc
+
+    identity.private_key_pem = new_private_pem
+    identity.public_key_pem = new_public_pem
+    await session.commit()
+    return {"installation_id": identity.installation_id, "rotated_at": datetime.now(UTC)}
 
 
 async def _verify_hub_signature(

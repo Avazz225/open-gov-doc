@@ -28,14 +28,21 @@ class HubIdentity(Base):
 class Installation(Base):
     """Ein Eintrag im Adressbuch (7.4) - eine bei diesem Hub angemeldete,
     vollständig unabhängige Installation. ``id`` ist die von der Installation
-    selbst gewählte öffentliche Kennung (nicht vom Hub vergeben). ``api_key_hash``
-    ist ein SHA-256-Hash des bei der Registrierung einmalig ausgegebenen
-    Klartext-API-Keys (schnelles Hashing ist hier bewusst ausreichend - anders
-    als ein Nutzerpasswort ist der Key selbst bereits hochentropisch zufällig
-    erzeugt, kein Wörterbuch-/Brute-Force-Risiko wie bei einem Passwort-Hash).
+    selbst gewählte öffentliche Kennung (nicht vom Hub vergeben).
     ``public_key_pem`` ist der öffentliche Schlüssel, mit dem **andere**
     Installationen für diese hier bestimmte Payloads verschlüsseln (Ende-zu-
-    Ende, der Hub selbst besitzt nie den privaten Schlüssel dazu)."""
+    Ende, der Hub selbst besitzt nie den privaten Schlüssel dazu) - seit
+    P13-S4 (ADR 0039) dient derselbe Schlüssel zusätzlich als kryptografische
+    Identität dieser Installation: jede schreibende Anfrage an den Hub muss
+    mit dem passenden privaten Schlüssel signiert sein (ersetzt das zuvor
+    verwendete ``api_key_hash``-Feld, ein reines geteiltes Geheimnis). Ein
+    Schlüsselwechsel läuft ausschließlich über ``POST
+    /installations/{id}/rotate-key`` (signiert mit dem noch aktuellen
+    Schlüssel) - eine reguläre Re-Registrierung überschreibt ``public_key_pem``
+    nicht mehr stillschweigend. ``revoked_at``/``revoked_reason`` erlauben
+    einem Hub-Betreiber, eine kompromittierte Installation sofort zu sperren
+    (``POST /installations/{id}/revoke``), unabhängig davon, ob die
+    Installation selbst noch signieren kann."""
 
     __tablename__ = "installation"
 
@@ -43,13 +50,14 @@ class Installation(Base):
     display_name: Mapped[str] = mapped_column(String(256))
     callback_base_url: Mapped[str] = mapped_column(String(512))
     public_key_pem: Mapped[str] = mapped_column(Text)
-    api_key_hash: Mapped[str] = mapped_column(String(128))
     version: Mapped[str] = mapped_column(String(32))
     min_compatible_peer_version: Mapped[str] = mapped_column(String(32))
     supported_process_types: Mapped[list[str]] = mapped_column(JSON, default=list)
     supported_document_types: Mapped[list[str]] = mapped_column(JSON, default=list)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Handover(Base):

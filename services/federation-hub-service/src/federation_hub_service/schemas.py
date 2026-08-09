@@ -26,14 +26,6 @@ class InstallationRegister(BaseModel):
         return value
 
 
-class InstallationRegisterOut(BaseModel):
-    id: str
-    # Nur bei der allerersten Registrierung gesetzt - der Hub speichert den
-    # Klartext-Key nie, ein erneuter Aufruf (Update) kann ihn folglich nicht
-    # zurückgeben, siehe repository.register_or_update_installation.
-    api_key: str | None
-
-
 class InstallationOut(BaseModel):
     id: str
     display_name: str
@@ -45,8 +37,18 @@ class InstallationOut(BaseModel):
     supported_document_types: list[str]
     registered_at: datetime
     updated_at: datetime
+    revoked_at: datetime | None = None
+    revoked_reason: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class RotateKeyRequest(BaseModel):
+    new_public_key_pem: str
+
+
+class RevokeRequest(BaseModel):
+    reason: str | None = None
 
 
 class HandoverCreate(BaseModel):

@@ -12,8 +12,8 @@ _HUB_IDENTITY_ID = 1
 
 
 class UnauthorizedError(Exception):
-    """Fehlender/ungültiger API-Key, oder ein Update-Versuch einer bereits
-    bestehenden Installation mit dem falschen Key."""
+    """Fehlende/ungültige Installations-Signatur, ein Update-/Rotationsversuch
+    mit dem falschen Schlüssel, oder eine widerrufene Installation."""
 
 
 class NotFoundError(Exception):
@@ -46,25 +46,43 @@ async def get_or_create_hub_identity(session: AsyncSession) -> HubIdentity:
 
 
 async def register_or_update_installation(
-    session: AsyncSession, payload: InstallationRegister, *, presented_api_key: str | None
-) -> tuple[Installation, str | None]:
+    session: AsyncSession,
+    payload: InstallationRegister,
+    *,
+    raw_body: bytes,
+    presented_signature: str | None,
+) -> Installation:
     """Registrierung ist ein Upsert (analog `registry-service.register`),
-    aber - anders als dort - für eine bereits bekannte ``id`` nur mit einem
-    zum gespeicherten Hash passenden API-Key (verhindert, dass ein beliebiger
-    Aufrufer den Adressbucheintrag einer fremden Installation überschreibt).
-    Gibt bei einer Neuanlage den einmaligen Klartext-API-Key zurück, sonst
-    ``None`` (der Hub speichert ihn nie im Klartext, kann ihn also bei einem
-    Update nicht erneut ausgeben)."""
+    aber seit P13-S4 (ADR 0039) kryptografisch statt über ein geteiltes
+    Geheimnis abgesichert:
+
+    - **Neuanlage**: die Signatur muss zum im selben Request eingereichten
+      ``public_key_pem`` passen (Selbstkonsistenz-Nachweis - die Installation
+      muss den privaten Schlüssel zu dem Schlüssel besitzen, den sie gerade
+      registriert, sonst könnte jeder einen beliebigen fremden öffentlichen
+      Schlüssel im Namen einer neuen ``id`` hinterlegen).
+    - **Update**: die Signatur muss zum **bereits gespeicherten**
+      ``public_key_pem`` passen - verhindert, dass ein beliebiger Aufrufer den
+      Adressbucheintrag einer fremden Installation überschreibt.
+      ``public_key_pem`` selbst wird bei einem Update **nicht** übernommen
+      (ein abweichender Wert im Payload wird schlicht ignoriert) - ein
+      Schlüsselwechsel läuft ausschließlich über
+      ``POST /installations/{id}/rotate-key``, damit eine routinemäßige
+      Re-Registrierung (z. B. nach einer Versionsänderung) nicht versehentlich
+      auch die kryptografische Identität mitändert.
+    """
     now = datetime.now(UTC)
     existing = await session.get(Installation, payload.id)
     if existing is None:
-        api_key = crypto_utils.generate_api_key()
+        if not presented_signature or not crypto_utils.verify_body(
+            payload.public_key_pem, raw_body, presented_signature
+        ):
+            raise UnauthorizedError("Signatur passt nicht zum eingereichten öffentlichen Schlüssel")
         installation = Installation(
             id=payload.id,
             display_name=payload.display_name,
             callback_base_url=payload.callback_base_url,
             public_key_pem=payload.public_key_pem,
-            api_key_hash=crypto_utils.hash_api_key(api_key),
             version=payload.version,
             min_compatible_peer_version=payload.min_compatible_peer_version,
             supported_process_types=payload.supported_process_types,
@@ -74,37 +92,87 @@ async def register_or_update_installation(
         )
         session.add(installation)
         await session.flush()
-        return installation, api_key
+        return installation
 
-    presented_hash = presented_api_key and crypto_utils.hash_api_key(presented_api_key)
-    if not presented_hash or presented_hash != existing.api_key_hash:
-        raise UnauthorizedError("API-Key stimmt nicht mit der registrierten Installation überein")
+    if existing.revoked_at is not None:
+        raise UnauthorizedError("Installation wurde widerrufen")
+    if not presented_signature or not crypto_utils.verify_body(
+        existing.public_key_pem, raw_body, presented_signature
+    ):
+        raise UnauthorizedError("Signatur passt nicht zum registrierten öffentlichen Schlüssel")
 
     existing.display_name = payload.display_name
     existing.callback_base_url = payload.callback_base_url
-    existing.public_key_pem = payload.public_key_pem
     existing.version = payload.version
     existing.min_compatible_peer_version = payload.min_compatible_peer_version
     existing.supported_process_types = payload.supported_process_types
     existing.supported_document_types = payload.supported_document_types
     existing.updated_at = now
     await session.flush()
-    return existing, None
+    return existing
 
 
 async def deregister_installation(
-    session: AsyncSession, installation_id: str, *, presented_api_key: str | None
+    session: AsyncSession, installation_id: str, *, presented_signature: str | None
 ) -> None:
+    """Signatur über die UTF-8-Bytes von ``installation_id`` selbst (keine
+    andere natürliche "Body" für einen `DELETE` ohne Payload, gleiche
+    Konvention wie unten bei `rotate_installation_key`s Aufrufer)."""
     installation = await session.get(Installation, installation_id)
     if installation is None:
         raise NotFoundError(f"installation_id {installation_id!r} unbekannt")
-    if (
-        not presented_api_key
-        or crypto_utils.hash_api_key(presented_api_key) != installation.api_key_hash
+    if not presented_signature or not crypto_utils.verify_body(
+        installation.public_key_pem, installation_id.encode("utf-8"), presented_signature
     ):
-        raise UnauthorizedError("API-Key stimmt nicht mit der registrierten Installation überein")
+        raise UnauthorizedError("Signatur passt nicht zum registrierten öffentlichen Schlüssel")
     await session.delete(installation)
     await session.flush()
+
+
+async def rotate_installation_key(
+    session: AsyncSession,
+    installation_id: str,
+    *,
+    raw_body: bytes,
+    new_public_key_pem: str,
+    presented_signature: str | None,
+) -> Installation:
+    """Kontrollierter Schlüsselwechsel (P13-S4, ADR 0039 "Schlüsselrotation"):
+    ``raw_body`` (der `RotateKeyRequest`-Body, enthält ``new_public_key_pem``)
+    muss mit dem **aktuellen** (alten) privaten Schlüssel signiert sein - ein
+    Kontinuitätsnachweis, der beweist, dass der Rotationswunsch tatsächlich
+    von der Installation selbst kommt, nicht von einem Dritten, der zufällig
+    die ``id`` kennt."""
+    installation = await session.get(Installation, installation_id)
+    if installation is None:
+        raise NotFoundError(f"installation_id {installation_id!r} unbekannt")
+    if installation.revoked_at is not None:
+        raise UnauthorizedError("Installation wurde widerrufen")
+    if not presented_signature or not crypto_utils.verify_body(
+        installation.public_key_pem, raw_body, presented_signature
+    ):
+        raise UnauthorizedError("Signatur passt nicht zum aktuellen öffentlichen Schlüssel")
+    installation.public_key_pem = new_public_key_pem
+    installation.updated_at = datetime.now(UTC)
+    await session.flush()
+    return installation
+
+
+async def revoke_installation(
+    session: AsyncSession, installation_id: str, *, reason: str | None
+) -> Installation:
+    """Betreiber-Aktion (P13-S4, ADR 0039 "Revocation") - bewusst **ohne**
+    Signaturprüfung der betroffenen Installation: der ganze Sinn des
+    Widerrufs ist der Fall, in dem die Installation selbst nicht mehr
+    vertrauenswürdig signieren kann (kompromittierter privater Schlüssel).
+    Gegated stattdessen über `settings.hub_operator_key`, siehe `main.py`."""
+    installation = await session.get(Installation, installation_id)
+    if installation is None:
+        raise NotFoundError(f"installation_id {installation_id!r} unbekannt")
+    installation.revoked_at = datetime.now(UTC)
+    installation.revoked_reason = reason
+    await session.flush()
+    return installation
 
 
 async def list_installations(session: AsyncSession) -> list[Installation]:
@@ -112,11 +180,23 @@ async def list_installations(session: AsyncSession) -> list[Installation]:
     return list(result.scalars().all())
 
 
-async def get_installation_by_api_key(session: AsyncSession, api_key: str) -> Installation | None:
-    result = await session.execute(
-        select(Installation).where(Installation.api_key_hash == crypto_utils.hash_api_key(api_key))
-    )
-    return result.scalar_one_or_none()
+async def authenticate_signed_request(
+    session: AsyncSession, *, installation_id: str, body: bytes, signature: str
+) -> Installation:
+    """Zentrale Verifikation für jede signierte Installations-Anfrage
+    (`POST /handovers`, `.../result`) - Gegenstück zu `_verify_hub_signature`
+    auf der Installationsseite (`workflow_service.main`), nur in umgekehrter
+    Richtung."""
+    if not installation_id or not signature:
+        raise UnauthorizedError("Fehlende Installations-Signatur")
+    installation = await session.get(Installation, installation_id)
+    if installation is None:
+        raise UnauthorizedError("Unbekannte Installation")
+    if installation.revoked_at is not None:
+        raise UnauthorizedError("Installation wurde widerrufen")
+    if not crypto_utils.verify_body(installation.public_key_pem, body, signature):
+        raise UnauthorizedError("Ungültige Installations-Signatur")
+    return installation
 
 
 def is_version_compatible(a: Installation, b: Installation) -> bool:
