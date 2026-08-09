@@ -1,3 +1,5 @@
+import uuid
+
 import httpx
 import pytest
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -163,3 +165,253 @@ def test_license_and_provision_on_unknown_installation_return_404(client):
     assert response.status_code == 404
     response = client.post("/installations/does-not-exist/provision", json={"config_document": {}})
     assert response.status_code == 404
+
+
+# --- Flotten-Update-Orchestrierung (3a-Erweiterung, P13-S2b) ----------------
+
+
+def _simple_plan_steps() -> list[dict]:
+    return [
+        {"name": "Bereichssperre setzen (4.7)", "step_type": "gate", "requires_approval": False},
+        {"name": "Verifikation", "step_type": "verify", "requires_approval": False},
+        {"name": "Freigabe", "step_type": "gate", "requires_approval": True},
+    ]
+
+
+def _create_plan(client, **overrides) -> dict:
+    payload = {"name": "Standard-Update", "version": "1.0", "steps": _simple_plan_steps()}
+    payload.update(overrides)
+    response = client.post("/plans", json=payload)
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_create_plan_rejects_unknown_step_type(client):
+    response = client.post(
+        "/plans",
+        json={
+            "name": "Kaputter Plan",
+            "version": "1.0",
+            "steps": [{"name": "X", "step_type": "does-not-exist"}],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_plan_rejects_empty_steps(client):
+    response = client.post("/plans", json={"name": "Leer", "version": "1.0", "steps": []})
+    assert response.status_code == 422
+
+
+def test_group_create_and_membership(client):
+    group = client.post("/groups", json={"name": f"Welle-{uuid.uuid4().hex[:8]}"}).json()
+    assert group["installation_ids"] == []
+    installation = _register(client)
+
+    add_response = client.post(
+        f"/groups/{group['id']}/members", json={"installation_id": installation["id"]}
+    )
+    assert add_response.status_code == 200
+    assert installation["id"] in add_response.json()["installation_ids"]
+
+    remove_response = client.delete(f"/groups/{group['id']}/members/{installation['id']}")
+    assert installation["id"] not in remove_response.json()["installation_ids"]
+
+
+def test_create_rollout_from_group_resolves_members(client):
+    group = client.post("/groups", json={"name": f"Welle-{uuid.uuid4().hex[:8]}"}).json()
+    installation = _register(client)
+    client.post(f"/groups/{group['id']}/members", json={"installation_id": installation["id"]})
+    plan = _create_plan(client)
+
+    response = client.post(
+        "/rollouts",
+        json={"plan_id": plan["id"], "name": "Testwelle", "group_id": group["id"]},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "draft"
+    run_installation_ids = {r["installation_id"] for r in body["runs"]}
+    assert installation["id"] in run_installation_ids
+    assert body["runs"][0]["current_step_name"] == "Bereichssperre setzen (4.7)"
+
+
+def test_create_rollout_with_empty_target_set_returns_422(client):
+    plan = _create_plan(client)
+    response = client.post("/rollouts", json={"plan_id": plan["id"], "name": "Leer"})
+    assert response.status_code == 422
+
+
+def _start_rollout_for_one_installation(client) -> tuple[dict, dict]:
+    installation = _register(client)
+    plan = _create_plan(client)
+    rollout = client.post(
+        "/rollouts",
+        json={"plan_id": plan["id"], "name": "Testwelle", "include": [installation["id"]]},
+    ).json()
+    started = client.post(f"/rollouts/{rollout['id']}/start", json={"started_by": "alice"}).json()
+    return started, installation
+
+
+def test_start_rollout_requires_draft_status(client):
+    started, _installation = _start_rollout_for_one_installation(client)
+    response = client.post(f"/rollouts/{started['id']}/start", json={"started_by": "alice"})
+    assert response.status_code == 409
+
+
+def test_full_rollout_happy_path_through_all_step_types(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    rollout_id = started["id"]
+    installation_id = installation["id"]
+    run = started["runs"][0]
+    assert run["status"] == "wait_external"
+    assert run["current_step_index"] == 0
+
+    # Schritt 0: "gate", keine Freigabe noetig - direkt bestaetigt.
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "operator-a"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current_step_index"] == 1
+    assert body["status"] == "wait_external"
+
+    # Schritt 1: "verify" - automatischer Check ueber den Stub (reachable+valid).
+    response = client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/advance")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current_step_index"] == 2
+    assert body["status"] == "wait_external"
+
+    # Schritt 2: "gate" mit requires_approval - mark-done schlaegt nur vor.
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "operator-a"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "manual_required"
+    assert body["proposed_by"] == "operator-a"
+
+    # Dieselbe Person darf nicht freigeben (4.3).
+    same_actor = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/approve",
+        json={"actor": "operator-a"},
+    )
+    assert same_actor.status_code == 409
+
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/approve",
+        json={"actor": "operator-b"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["current_step_name"] is None
+
+
+def test_mark_done_rejects_verify_step(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    rollout_id, installation_id = started["id"], installation["id"]
+    client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "a"},
+    )
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "a"},
+    )
+    assert response.status_code == 400
+
+
+def test_advance_rejects_gate_step(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    response = client.post(f"/rollouts/{started['id']}/installations/{installation['id']}/advance")
+    assert response.status_code == 400
+
+
+def test_mark_done_recoverable_failed_then_retry(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    rollout_id, installation_id = started["id"], installation["id"]
+
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={
+            "actor": "a",
+            "outcome": "recoverable_failed",
+            "detail": "Rolling Update fehlgeschlagen",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "recoverable_failed"
+    assert body["current_step_index"] == 0
+
+    retry_response = client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/retry")
+    assert retry_response.status_code == 200
+    assert retry_response.json()["status"] == "wait_external"
+
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "a"},
+    )
+    assert response.status_code == 200
+    assert response.json()["current_step_index"] == 1
+
+
+def test_mark_done_fatal_contract_requires_acknowledge(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    rollout_id, installation_id = started["id"], installation["id"]
+
+    client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "a", "outcome": "fatal_contract"},
+    )
+    retry_response = client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/retry")
+    assert retry_response.status_code == 409
+
+    ack_response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/acknowledge-fatal"
+    )
+    assert ack_response.status_code == 200
+    assert ack_response.json()["status"] == "wait_external"
+
+
+def test_verify_step_unreachable_installation_returns_retry_later(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    rollout_id, installation_id = started["id"], installation["id"]
+    client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done",
+        json={"actor": "a"},
+    )
+
+    app.state.agent_transport = httpx.MockTransport(
+        lambda request: (_ for _ in ()).throw(httpx.ConnectError("no route", request=request))
+    )
+    response = client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/advance")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "retry_later"
+    assert body["current_step_index"] == 1
+
+
+def test_reject_approval_sets_recoverable_failed(client):
+    started, installation = _start_rollout_for_one_installation(client)
+    rollout_id, installation_id = started["id"], installation["id"]
+    client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done", json={"actor": "a"}
+    )
+    client.post(f"/rollouts/{rollout_id}/installations/{installation_id}/advance")
+    client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/mark-done", json={"actor": "a"}
+    )
+
+    response = client.post(
+        f"/rollouts/{rollout_id}/installations/{installation_id}/reject",
+        json={"actor": "b", "reason": "Verdacht auf Fehlkonfiguration"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "recoverable_failed"
+    assert "Verdacht auf Fehlkonfiguration" in body["error_message"]

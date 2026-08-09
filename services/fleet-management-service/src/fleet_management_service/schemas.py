@@ -60,3 +60,91 @@ class ProvisionRequest(BaseModel):
 
     config_document: dict
     categories: list[str] | None = None
+
+
+# --- Flotten-Update-Orchestrierung (3a-Erweiterung, P13-S2b) ----------------
+
+
+class GroupCreate(BaseModel):
+    name: str
+
+
+class GroupOut(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    installation_ids: list[str]
+
+
+class GroupMemberAdd(BaseModel):
+    installation_id: str
+
+
+class PlanStep(BaseModel):
+    name: str
+    step_type: str
+    requires_approval: bool = False
+
+
+class UpdatePlanCreate(BaseModel):
+    name: str
+    version: str
+    steps: list[PlanStep]
+
+
+class UpdatePlanOut(BaseModel):
+    id: str
+    name: str
+    version: str
+    steps: list[PlanStep]
+    created_at: datetime
+
+
+class RolloutCreate(BaseModel):
+    plan_id: str
+    name: str
+    group_id: str | None = None
+    include: list[str] = []
+    exclude: list[str] = []
+
+
+class RolloutStart(BaseModel):
+    started_by: str
+
+
+class InstallationRunOut(BaseModel):
+    id: str
+    installation_id: str
+    installation_display_name: str
+    current_step_index: int
+    current_step_name: str | None
+    status: str
+    last_outcome: str | None
+    error_message: str | None
+    proposed_by: str | None
+    started_at: datetime | None
+    updated_at: datetime
+    completed_at: datetime | None
+
+
+class RolloutOut(BaseModel):
+    id: str
+    plan_id: str
+    name: str
+    group_id: str | None
+    status: str
+    created_at: datetime
+    started_at: datetime | None
+    started_by: str | None
+    runs: list[InstallationRunOut]
+
+
+class MarkDoneRequest(BaseModel):
+    actor: str
+    outcome: str = "success"
+    detail: str | None = None
+
+
+class ApprovalDecision(BaseModel):
+    actor: str
+    reason: str | None = None

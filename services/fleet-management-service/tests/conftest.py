@@ -23,6 +23,13 @@ async def engine():
         await conn.run_sync(Base.metadata.create_all)
     yield eng
     async with eng.begin() as conn:
+        # Reihenfolge respektiert FKs (P13-S2b: Installation-Runs/Rollouts/
+        # Gruppen-Mitgliedschaften hängen an managed_installation).
+        await conn.execute(text("DELETE FROM fleet.installation_run"))
+        await conn.execute(text("DELETE FROM fleet.rollout"))
+        await conn.execute(text("DELETE FROM fleet.update_plan"))
+        await conn.execute(text("DELETE FROM fleet.installation_group_member"))
+        await conn.execute(text("DELETE FROM fleet.installation_group"))
         await conn.execute(text("DELETE FROM fleet.managed_installation"))
     await eng.dispose()
 
