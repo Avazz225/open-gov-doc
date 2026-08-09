@@ -79,7 +79,10 @@ async def get_config(session: AsyncSession) -> OcrConfig:
             id=_CONFIG_ID,
             max_word_count=None,
             batch_size=DEFAULT_BATCH_SIZE,
-            allowed_content_types=[],
+            # Standardmäßig nur PDFs (Nutzer-Feedback) - Rasterbilder erfordern
+            # eine bewusste Admin-Freigabe über PUT /config, kein automatischer
+            # OCR-Lauf auf jedes hochgeladene Bild.
+            allowed_content_types=["application/pdf"],
             updated_at=datetime.now(UTC),
         )
         session.add(config)

@@ -73,6 +73,26 @@ async def test_update_document_metadata_unknown_document_raises(session):
         )
 
 
+async def test_update_document_metadata_moves_folder_when_given(session):
+    document = await _make_document(session, folder_id="root")
+
+    updated = await repository.update_document_metadata(
+        session, document.id, title=None, attributes=None, folder_id="ziel-ordner"
+    )
+
+    assert updated.folder_id == "ziel-ordner"
+
+
+async def test_update_document_metadata_keeps_folder_when_not_given(session):
+    document = await _make_document(session, folder_id="root")
+
+    updated = await repository.update_document_metadata(
+        session, document.id, title="Neuer Titel", attributes=None
+    )
+
+    assert updated.folder_id == "root"
+
+
 async def test_checkin_normal_advances_current_version(session):
     document = await _make_document(session)
 

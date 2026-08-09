@@ -48,7 +48,16 @@ class Settings(BaseServiceSettings):
     ]
     maintenance_cache_ttl_seconds: float = 5.0
 
-    rate_limit_max_requests: int = 120
+    # Nutzer-Feedback: 120/60s löste bei ganz normaler interaktiver Nutzung
+    # sehr schnell 429 aus - ein einzelner Seitenaufruf des Drei-Spalten-
+    # Arbeitsbereichs feuert bereits ein Dutzend paralleler Aufrufe (Ordner,
+    # Dokumente, Favoriten, Genehmigungskonfiguration, Kennzeichen-Config,
+    # Objekttypen, Wartungsmodus-Poll alle 30s, ...), reales Klicken kam
+    # dadurch innerhalb einer Minute leicht über 120 - kein Bug in Client
+    # oder Auth, nur ein für dieses SPA zu knapp bemessener Default (siehe
+    # PROGRESS.md). Deutlich großzügiger bemessen, bleibt aber ein reales
+    # Sicherheitsnetz gegen tatsächlich außer Kontrolle geratene Clients.
+    rate_limit_max_requests: int = 600
     rate_limit_window_seconds: float = 60.0
 
     upstream_timeout_seconds: float = 30.0

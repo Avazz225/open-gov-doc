@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 class DocumentUpdate(BaseModel):
     title: str | None = None
     attributes: dict | None = None
+    # Verschieben in einen anderen Ordner (P12-S1, Nutzerwunsch WebDAV-Connector:
+    # WebDAV MOVE ist eine Pflichtmethode - ohne dieses Feld gab es dafür bei
+    # Dokumenten kein serverseitiges Gegenstück, obwohl folder-service dasselbe
+    # für Ordner seit P3-S3 bereits über `parent_id` unterstützt).
+    folder_id: str | None = None
 
 
 class DocumentOut(BaseModel):

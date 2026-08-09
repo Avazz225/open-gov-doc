@@ -302,41 +302,40 @@ describe("DocumentWorkspace", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the rendered thumbnail when a ready rendition exists", async () => {
+  it("shows an image document in full resolution via its raw bytes, not a thumbnail rendition (2.4, Nutzer-Feedback)", async () => {
+    const imageDocument = { ...document1, id: "d5", title: "foto.jpg" };
     listChildFoldersMock.mockResolvedValue([]);
-    listDocumentsInFolderMock.mockResolvedValue([document1]);
-    listRenditionsMock.mockResolvedValue([
+    listDocumentsInFolderMock.mockResolvedValue([imageDocument]);
+    listDocumentVersionsMock.mockResolvedValue([
       {
-        id: "d1:1:thumbnail",
-        document_id: "d1",
         version_number: 1,
-        rendition_type: "thumbnail",
-        source_filename: "Rechnung.pdf",
-        source_content_type: "application/pdf",
-        target_filename: "Rechnung_thumbnail.png",
-        target_content_type: "image/png",
+        filename: "foto.jpg",
+        content_type: "image/jpeg",
         size_bytes: 123,
-        status: "ready",
-        error_message: null,
+        checksum_sha256: "j",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
         created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
       },
     ]);
-    downloadRenditionContentMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["fake-jpeg"], { type: "image/jpeg" }));
     URL.createObjectURL = vi.fn(() => "blob:mock-url");
     URL.revokeObjectURL = vi.fn();
 
     const user = userEvent.setup();
     renderWorkspace();
 
-    await user.click(await screen.findByText(/Rechnung.pdf/));
+    await user.click(await screen.findByText(/foto.jpg/));
 
     await waitFor(() =>
-      expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "d1:1:thumbnail")
+      expect(downloadDocumentVersionMock).toHaveBeenCalledWith("token-123", "d5", 1)
     );
     const previewPane = screen.getByLabelText("Vorschau");
     const image = await within(previewPane).findByRole("img");
     expect(image).toHaveAttribute("src", "blob:mock-url");
+    expect(downloadRenditionContentMock).not.toHaveBeenCalled();
   });
 
   it("renders OCR word spans with percentage-based positioning when a ready OCR result exists", async () => {
@@ -366,7 +365,7 @@ describe("DocumentWorkspace", () => {
         document_id: "d1",
         version_number: 1,
         status: "ready",
-        engine: "native_text_layer",
+        engine: "tesseract",
         average_confidence: 100.0,
         full_text: "Hallo",
         pages: [
@@ -398,33 +397,31 @@ describe("DocumentWorkspace", () => {
   });
 
   it("does not render an OCR overlay when no ready OCR result exists", async () => {
+    const imageDocument = { ...document1, id: "d5", title: "foto.jpg" };
     listChildFoldersMock.mockResolvedValue([]);
-    listDocumentsInFolderMock.mockResolvedValue([document1]);
-    listRenditionsMock.mockResolvedValue([
+    listDocumentsInFolderMock.mockResolvedValue([imageDocument]);
+    listDocumentVersionsMock.mockResolvedValue([
       {
-        id: "d1:1:thumbnail",
-        document_id: "d1",
         version_number: 1,
-        rendition_type: "thumbnail",
-        source_filename: "Rechnung.pdf",
-        source_content_type: "application/pdf",
-        target_filename: "Rechnung_thumbnail.png",
-        target_content_type: "image/png",
+        filename: "foto.jpg",
+        content_type: "image/jpeg",
         size_bytes: 123,
-        status: "ready",
-        error_message: null,
+        checksum_sha256: "j",
+        is_conflict: false,
+        based_on_version_number: null,
+        comment: null,
+        created_by: "alice",
         created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
       },
     ]);
-    downloadRenditionContentMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["fake-jpeg"], { type: "image/jpeg" }));
     URL.createObjectURL = vi.fn(() => "blob:mock-url");
     URL.revokeObjectURL = vi.fn();
 
     const user = userEvent.setup();
     renderWorkspace();
 
-    await user.click(await screen.findByText(/Rechnung.pdf/));
+    await user.click(await screen.findByText(/foto.jpg/));
 
     const previewPane = screen.getByLabelText("Vorschau");
     await within(previewPane).findByRole("img");
@@ -492,7 +489,7 @@ describe("DocumentWorkspace", () => {
         document_id: "d1",
         version_number: 1,
         status: "ready",
-        engine: "native_text_layer",
+        engine: "tesseract",
         average_confidence: 100.0,
         full_text: "Seite 1 Seite 2",
         pages: [

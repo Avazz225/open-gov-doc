@@ -75,7 +75,9 @@ async def test_get_config_creates_default_row_on_first_access(session):
 
     assert config.max_word_count is None
     assert config.batch_size == repository.DEFAULT_BATCH_SIZE
-    assert config.allowed_content_types == []
+    # Standardmäßig nur PDFs (Nutzer-Feedback) - Bilder erfordern eine
+    # bewusste Admin-Freigabe über PUT /config.
+    assert config.allowed_content_types == ["application/pdf"]
 
 
 async def test_get_config_is_idempotent(session):

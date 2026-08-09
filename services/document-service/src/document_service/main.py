@@ -940,19 +940,45 @@ async def update_document(
                 f"Attribut {KENNZEICHEN_ATTRIBUTE!r} ändern",
             )
 
+    # Verschieben (P12-S1, WebDAV-Connector-Nutzerwunsch): nur wenn sich der
+    # Ordner tatsaechlich aendert - Existenz-/Platzierungs-Constraint-Pruefung
+    # analog zum bestehenden Anlege-Pfad (`app.state.folder_client.get(...)`,
+    # siehe `create_document` oben) statt einer neuen, zweiten Implementierung.
+    is_move = payload.folder_id is not None and payload.folder_id != document.folder_id
+    target_parent_folder = None
+    if is_move:
+        target_parent_folder = await app.state.folder_client.get(payload.folder_id)
+        if target_parent_folder is None:
+            raise HTTPException(
+                status_code=400, detail=f"folder_id {payload.folder_id!r} unbekannt"
+            )
+
     if document.object_type_id is not None:
+        placement_kwargs = (
+            {
+                "parent_object_type_id": target_parent_folder["object_type_id"],
+                "parent_is_root": payload.folder_id == "root",
+            }
+            if is_move
+            else {}
+        )
         errors = await app.state.object_type_client.validate(
             document.object_type_id,
             name=payload.title if payload.title is not None else document.title,
             attributes=payload.attributes
             if payload.attributes is not None
             else document.attributes,
+            **placement_kwargs,
         )
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
 
     updated = await repository.update_document_metadata(
-        session, document_id, title=payload.title, attributes=payload.attributes
+        session,
+        document_id,
+        title=payload.title,
+        attributes=payload.attributes,
+        folder_id=payload.folder_id if is_move else None,
     )
     await session.commit()
     # Kein Akteur bekannt - DocumentUpdate verfolgt bislang nicht, wer die

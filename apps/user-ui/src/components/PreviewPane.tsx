@@ -27,7 +27,7 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-type PreviewKind = "loading" | "image" | "text" | "none";
+type PreviewKind = "loading" | "image" | "text" | "html" | "pdf" | "none";
 
 // Clientseitige Direktanzeige (P5d-S2, Nutzer-Feedback: `.txt`/`.json` hatten
 // bislang keine funktionierende Vorschau) - kein neuer rendering-service-
@@ -82,6 +82,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   const [previewKind, setPreviewKind] = useState<PreviewKind>("none");
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [ocrResult, setOcrResult] = useState<OcrResultSummary | null>(null);
@@ -125,6 +127,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       setPreviewKind("none");
       setThumbnailUrl(null);
       setTextContent(null);
+      setPdfUrl(null);
+      setHtmlContent(null);
       setOcrResult(null);
       setRenditions([]);
       setSelectedPage(1);
@@ -140,12 +144,30 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     setPreviewKind("loading");
     setThumbnailUrl(null);
     setTextContent(null);
+    setPdfUrl(null);
+    setHtmlContent(null);
     setOcrResult(null);
     setRenditions([]);
     setSelectedPage(1);
 
     async function load() {
       if (!accessToken || !activeDocument || selectedVersion === null) return;
+
+      // HTML zuerst prüfen (2.4, Nutzer-Feedback) - `text/html` matcht sonst
+      // isTextPreviewable()s `text/*`-Prefix und würde im Plain-Text-Zweig
+      // landen (rohes, escaptes Markup statt gerenderter Seite).
+      if (contentType === "text/html") {
+        try {
+          const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
+          if (cancelled) return;
+          const text = await blob.text();
+          setHtmlContent(text);
+          setPreviewKind("html");
+        } catch {
+          if (!cancelled) setPreviewKind("none");
+        }
+        return;
+      }
 
       if (isTextPreviewable(contentType)) {
         try {
@@ -170,6 +192,31 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       }
       if (cancelled) return;
       setRenditions(fetchedRenditions);
+
+      // Word-ähnliche A4-Ansicht (2.4, Nutzer-Feedback): rendering-service
+      // konvertiert Office-/Textformate bereits automatisch per LibreOffice
+      // in ein echtes, paginiertes PDF (pdf_archive-Rendition, ursprünglich
+      // nur als Archivkopie gedacht) - das ist bereits die gewünschte
+      // formatierte Ansicht, hier nur erstmals als Vorschau konsumiert.
+      // Bild- und PDF-Quellen ausgenommen: PdfArchiveRenderer konvertiert
+      // auch Bilder zu PDF (hier soll aber "Bild als Bild" gezeigt werden),
+      // und ein bereits-PDF würde nur redundant zu sich selbst re-getaggt -
+      // beide haben unten ihren eigenen, direkteren Rohbyte-Zweig.
+      if (!contentType?.startsWith("image/") && contentType !== "application/pdf") {
+        const pdfArchive = findReadyRendition(fetchedRenditions, "pdf_archive");
+        if (pdfArchive) {
+          try {
+            const blob = await downloadRenditionContent(accessToken, pdfArchive.id);
+            if (cancelled) return;
+            objectUrl = URL.createObjectURL(blob);
+            setPdfUrl(objectUrl);
+            setPreviewKind("pdf");
+          } catch {
+            if (!cancelled) setPreviewKind("none");
+          }
+          return;
+        }
+      }
 
       // Ersatzdarstellung als Text (DOCX/PPTX/ODS, 2.4) - der
       // rendering-service erzeugt dafür eine "substitute_text"-Rendition
@@ -202,7 +249,15 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         ocr = null;
       }
       if (cancelled) return;
-      if (ocr) {
+      // PDFs: das Seitenbild-Overlay bleibt nur Fallback für echte Scans ohne
+      // Textlayer (engine "tesseract") - hat OCR bereits einen echten
+      // Textlayer eingebettet (engine "native_text_layer", siehe ocr-service
+      // text_layer.py) oder existiert noch kein Ergebnis, zeigt die native
+      // PDF-Ansicht unten den echten, durchsuchbaren Inhalt direkt aus dem
+      // Browser heraus - kein Overlay-Umweg mehr nötig. Für Bilder bleibt das
+      // bestehende Overlay-Verhalten unverändert (jede Engine, wie bisher).
+      const useOverlay = !!ocr && (contentType !== "application/pdf" || ocr.engine === "tesseract");
+      if (useOverlay && ocr) {
         // Das eigentliche Seitenbild lädt der separate Effekt unten (hängt
         // von `selectedPage` ab, oben bereits auf 1 zurückgesetzt) - so löst
         // ein späterer Seitenwechsel keinen kompletten Reload aus.
@@ -210,20 +265,44 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         return;
       }
 
-      const thumbnail = findReadyRendition(fetchedRenditions, "thumbnail");
-      if (!thumbnail) {
-        setPreviewKind("none");
+      // Natives PDF-Embed (2.4, Nutzer-Feedback) - primäre Ansicht für PDFs
+      // mit echtem Textlayer (immer schon vorhanden, oder von OCR eingebettet),
+      // Fallback ohne (fertiges) OCR-Ergebnis. Ohne diesen Zweig zeigte ein
+      // PDF ohne OCR-Ergebnis bisher gar keine Vorschau.
+      if (contentType === "application/pdf") {
+        try {
+          const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setPdfUrl(objectUrl);
+          setPreviewKind("pdf");
+        } catch {
+          if (!cancelled) setPreviewKind("none");
+        }
         return;
       }
-      try {
-        const blob = await downloadRenditionContent(accessToken, thumbnail.id);
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setThumbnailUrl(objectUrl);
-        setPreviewKind("image");
-      } catch {
-        if (!cancelled) setPreviewKind("none");
+
+      // Echte Bilddokumente in voller Auflösung zeigen (2.4, Nutzer-Feedback)
+      // statt nur der 256×256-Thumbnail-Rendition - dieser Zweig greift nur,
+      // wenn oben kein OCR-Ergebnis gefunden wurde (Scan-Overlay hat Vorrang).
+      if (contentType?.startsWith("image/")) {
+        try {
+          const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setThumbnailUrl(objectUrl);
+          setPreviewKind("image");
+        } catch {
+          if (!cancelled) setPreviewKind("none");
+        }
+        return;
       }
+
+      // Alle bekannten Ersatzdarstellungs-Pfade sind oben abgedeckt
+      // (thumbnail-Renditionen existieren nur für Bilder, die bereits ihren
+      // eigenen Rohbyte-Zweig oben hatten) - für alles andere bleibt es beim
+      // Hinweistext, der Download-Button bleibt in jedem Fall nutzbar.
+      setPreviewKind("none");
     }
 
     void load();
@@ -300,6 +379,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   }
 
   const ocrPage = ocrResult?.pages.find((p) => p.page_number === selectedPage);
+  const currentContentType =
+    versions.find((v) => v.version_number === selectedVersion)?.content_type ?? null;
 
   return (
     <section className="preview-pane" aria-label={t("preview.paneLabel")}>
@@ -376,6 +457,34 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
             </div>
           )}
         </div>
+      )}
+
+      {previewKind === "image" &&
+        currentContentType?.startsWith("image/") &&
+        ocrResult?.full_text && (
+          <details className="ocr-text-extract" open>
+            <summary>{t("preview.ocrTextExtractLabel")}</summary>
+            <pre className="preview-text">{ocrResult.full_text}</pre>
+          </details>
+        )}
+
+      {previewKind === "pdf" && pdfUrl && (
+        <embed
+          src={pdfUrl}
+          type="application/pdf"
+          className="preview-pdf-frame"
+          title={activeDocument.title}
+        />
+      )}
+
+      {previewKind === "html" && htmlContent !== null && (
+        <iframe
+          className="preview-html-frame"
+          sandbox=""
+          referrerPolicy="no-referrer"
+          srcDoc={htmlContent}
+          title={activeDocument.title}
+        />
       )}
 
       {previewKind === "none" && <p className="empty-state">{t("preview.noRendition")}</p>}

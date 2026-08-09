@@ -139,16 +139,22 @@ async def update_document_metadata(
     *,
     title: str | None,
     attributes: dict | None,
+    folder_id: str | None = None,
 ) -> Document:
     """Metadaten-Update (P4-S4, Nutzer-Feedback: Attribute waren bisher nur bei
-    der Erstellung setzbar). Ändert bewusst nicht `folder_id`/`object_type_id` -
-    das wären Verschiebe- bzw. Retypisierungs-Operationen mit eigenen
-    Konsistenzfragen, kein reines Metadaten-Update."""
+    der Erstellung setzbar). Ändert bewusst nicht `object_type_id` - das wäre
+    eine Retypisierung mit eigenen Konsistenzfragen, kein reines
+    Metadaten-Update. `folder_id` (Verschieben, P12-S1) ist dagegen seit dem
+    WebDAV-Connector-Nutzerwunsch first-class - Existenz-/Platzierungs-
+    Constraint-Prüfung erfolgt bereits im Aufrufer (`main.py`), hier nur die
+    reine Zuweisung."""
     document = await get_document(session, document_id)
     if title is not None:
         document.title = title
     if attributes is not None:
         document.attributes = attributes
+    if folder_id is not None:
+        document.folder_id = folder_id
     document.updated_at = datetime.now(UTC)
     await session.flush()
     return document

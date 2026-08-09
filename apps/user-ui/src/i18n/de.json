@@ -192,7 +192,8 @@
     "versionOption": "Version {number}",
     "pageSelectLabel": "Seite auswählen",
     "pageOption": "Seite {number}",
-    "ocrNeedsReview": "OCR-Text hat geringe Erkennungssicherheit – bitte prüfen"
+    "ocrNeedsReview": "OCR-Text hat geringe Erkennungssicherheit – bitte prüfen",
+    "ocrTextExtractLabel": "Erkannter Text (OCR)"
   },
   "search": {
     "paneLabel": "Suche",

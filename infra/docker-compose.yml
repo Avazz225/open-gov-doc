@@ -996,7 +996,7 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       DMS_KEYCLOAK_CLIENT_ID: dms-api
-      DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-120}
+      DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-600}
       DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
       # Vom Browser aus erreichbare Frontend-Origins (CORS) - bei geänderten
       # USER_UI_PORT/ADMIN_UI_PORT entsprechend mit anpassen.

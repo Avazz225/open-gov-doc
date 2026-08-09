@@ -48,9 +48,22 @@ Die Browser-Frontends (`user-ui`, `admin-ui`) laufen auf einer anderen Origin al
 
 In-Prozess-Sliding-Window je Client (`sub`-Claim bei authentifizierten,
 sonst Client-IP), `rate_limit_max_requests`/`rate_limit_window_seconds`
-(Default 120/60s). Gilt auch für öffentliche Routen (Login-Schutz). Bei
+(Default **600/60s**, siehe unten). Gilt auch für öffentliche Routen (Login-Schutz). Bei
 Überschreitung `429`. Rein lokaler Zähler, keine geteilte Zählung über
 mehrere Gateway-Instanzen hinweg — dokumentierte Grenze, siehe ADR 0005.
+
+**Default nach Nutzer-Feedback von 120 auf 600 angehoben**: der ursprüngliche Default (120
+Requests/60s) löste bei ganz normaler interaktiver Nutzung sehr schnell `429` aus — kein Bug in
+Client, Auth Service oder Keycloak (alle drei real geprüft und ausgeschlossen), sondern schlicht
+zu knapp für dieses SPA bemessen. Ein einzelner Seitenaufruf des Drei-Spalten-Arbeitsbereichs
+feuert bereits gut ein Dutzend paralleler Aufrufe (Ordner, Dokumente, Favoriten,
+Genehmigungskonfiguration, Kennzeichen-Config, Objekttypen, `auth-service:me`/`me/preferences`),
+dazu kommt `MaintenanceBanner`s 30-Sekunden-Poll in beiden Frontends — normales, aktives Klicken
+überschreitet 120 Aufrufe pro Minute für einen einzelnen eingeloggten Nutzer (eigener
+`sub`-Schlüssel, siehe oben) trivial. Live im laufenden Gateway-Log bestätigt: ein realer Burst
+zeigte `429` gleichzeitig auf `document-service`/`folder-service`/`object-type-service`/
+`permission-service`/`auth-service`-Routen. 600/60s lässt reale Nutzung deutlich mehr Luft,
+bleibt aber ein echtes Sicherheitsnetz gegen tatsächlich außer Kontrolle geratene Clients.
 
 ## Events
 

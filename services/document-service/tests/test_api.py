@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
 
 # Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
 # echten Antivirus-Produkten zu Integrationstestzwecken erkannt, hier zum
@@ -350,6 +351,44 @@ def test_update_document_metadata_partial_update_keeps_title(client):
 def test_update_document_metadata_unknown_document_returns_404(client):
     response = client.patch("/documents/does-not-exist", json={"title": "x"})
     assert response.status_code == 404
+
+
+def test_update_document_moves_to_new_folder(client):
+    """P12-S1 (WebDAV-Connector-Nutzerwunsch): Dokumente konnten bislang nicht
+    zwischen Ordnern verschoben werden, anders als folder-service seit P3-S3
+    für Ordner selbst (`PATCH /folders/{id}` mit `parent_id`)."""
+    new_folder = httpx.post(
+        f"{FOLDER_SERVICE_URL}/folders",
+        json={"name": "Zielordner", "parent_id": "root", "created_by": "alice"},
+    ).json()
+    document_id = upload(client, folder_id="root").json()["id"]
+
+    response = client.patch(f"/documents/{document_id}", json={"folder_id": new_folder["id"]})
+
+    assert response.status_code == 200
+    assert response.json()["folder_id"] == new_folder["id"]
+    get_response = client.get(f"/documents/{document_id}")
+    assert get_response.json()["folder_id"] == new_folder["id"]
+
+
+def test_update_document_move_to_unknown_folder_returns_400(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+
+    response = client.patch(f"/documents/{document_id}", json={"folder_id": "does-not-exist"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "folder_id 'does-not-exist' unbekannt"
+    # Unveraendert bei fehlgeschlagenem Move.
+    assert client.get(f"/documents/{document_id}").json()["folder_id"] == "root"
+
+
+def test_update_document_without_folder_id_keeps_current_folder(client):
+    document_id = upload(client, title="Bleibt im Ordner", folder_id="root").json()["id"]
+
+    response = client.patch(f"/documents/{document_id}", json={"title": "Umbenannt"})
+
+    assert response.status_code == 200
+    assert response.json()["folder_id"] == "root"
 
 
 def test_create_document_discards_client_supplied_kennzeichen(client):

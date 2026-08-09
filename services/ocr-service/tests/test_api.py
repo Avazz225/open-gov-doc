@@ -35,7 +35,9 @@ def test_get_config_returns_defaults_on_first_access():
     body = response.json()
     assert body["max_word_count"] is None
     assert body["batch_size"] == 4
-    assert body["allowed_content_types"] == []
+    # Standardmäßig nur PDFs (Nutzer-Feedback) - Bilder erfordern eine
+    # bewusste Admin-Freigabe über PUT /config.
+    assert body["allowed_content_types"] == ["application/pdf"]
 
 
 def test_put_config_updates_and_persists():

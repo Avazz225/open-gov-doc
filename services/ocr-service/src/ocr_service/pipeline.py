@@ -7,12 +7,18 @@ from ocr_service.engines import UnreadableDocumentError, estimate_word_count, se
 from ocr_service.models import OcrResult
 from ocr_service.settings import Settings
 from ocr_service.storage_client import StorageClient
+from ocr_service.text_layer import embed_text_layer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 _settings = Settings()
 
 PublishEvent = Callable[[str, str, dict], Awaitable[None]]
+
+# Actor-Kennung für vom OCR Service selbst erzeugte Versionen (Textlayer-
+# Einbettung, siehe unten) - auch die Erkennungsgrundlage dafür, eine solche
+# Version nicht ein zweites Mal einzubetten (siehe Kommentar dort).
+OCR_SERVICE_ACTOR = "system:ocr-service"
 
 
 async def process_version(
@@ -153,6 +159,55 @@ async def process_version(
             error_message=None,
         )
         await session.commit()
+
+    # Durchsuchbare PDF statt reinem Scan (Nutzer-Feedback): nur wenn Tesseract
+    # tatsächlich lief (die PDF hatte noch keinen nutzbaren Textlayer), die
+    # Quelle wirklich ein PDF ist (für Bilder gibt es kein PDF-Textlayer-
+    # Konzept, sie behalten stattdessen ihr Bildformat, siehe PreviewPane.tsx),
+    # Tesseract mindestens ein Wort erkannt hat (eine komplett leere Seite
+    # bekäme sonst eine sinnlose neue Version mit leerem Textlayer - real beim
+    # Testen entdeckt: eine leere Test-Fixture-PDF erzeugte unnötig neue
+    # Versionen und störte Versionsnummern-Annahmen in anderen Services'
+    # Tests) - UND diese Version nicht bereits selbst vom OCR Service erzeugt
+    # wurde. Der letzte Punkt ist zwingend, nicht nur eine Optimierung: ohne
+    # ihn würde die eigene neue Version erneut verarbeitet, erneut per
+    # Tesseract erkannt (die eingebetteten, unsichtbaren Wörter verändern die
+    # von Tesseract gesehenen Pixel nicht, `_native_text_available()`s grobe
+    # Zeichen-Schwelle greift bei kurzem erkanntem Text u. U. noch nicht) und
+    # erneut eingebettet - real beim Testen beobachtet: ein einzelnes kurzes
+    # Wort brauchte zwei Anläufe, bis genug Text für die Schwelle akkumuliert
+    # war, und hätte ohne diese Sperre unbegrenzt weiterversioniert.
+    # Nicht-blockierend: ein Fehlschlag hier darf den bereits erfolgreichen
+    # OCR-Befund für die Originalversion nicht zunichtemachen.
+    is_pdf_source = (
+        metadata.content_type == "application/pdf" or metadata.filename.lower().endswith(".pdf")
+    )
+    has_recognized_words = any(page.words for page in extraction.pages)
+    is_own_previous_version = metadata.created_by == OCR_SERVICE_ACTOR
+    if (
+        engine.engine_name == "tesseract"
+        and is_pdf_source
+        and has_recognized_words
+        and not is_own_previous_version
+    ):
+        try:
+            new_pdf_bytes = embed_text_layer(data, extraction.pages, _settings.raster_dpi)
+            await document_client.create_version(
+                document_id,
+                expected_base_version_number=version_number,
+                data=new_pdf_bytes,
+                filename=metadata.filename,
+                content_type="application/pdf",
+                created_by=OCR_SERVICE_ACTOR,
+                comment="OCR: durchsuchbarer Textlayer eingebettet",
+            )
+        except Exception:
+            logger.exception(
+                "Textlayer-Einbettung/Versionierung fehlgeschlagen für %r Version %s - "
+                "OCR-Ergebnis für die Originalversion bleibt trotzdem gültig",
+                document_id,
+                version_number,
+            )
 
     await publish_event(
         "ocr.completed",
