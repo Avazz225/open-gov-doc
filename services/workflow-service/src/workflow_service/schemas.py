@@ -64,3 +64,13 @@ class TaskCompleteRequest(BaseModel):
     # markiert ist (3.10) - verweist auf eine zuvor beim Signature Service
     # erzeugte Signatur, siehe main.py._require_valid_signature_if_needed.
     signature_id: str | None = None
+
+
+class FederationConfigOut(BaseModel):
+    version: str
+    min_compatible_peer_version: str
+
+
+class FederationConfigUpdate(BaseModel):
+    version: str
+    min_compatible_peer_version: str

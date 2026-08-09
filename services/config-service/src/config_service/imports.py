@@ -125,6 +125,18 @@ async def apply_sensor_config(client: MonitoringServiceClient, entry) -> Categor
     return result
 
 
+async def apply_federation_config(client: WorkflowServiceClient, entry) -> CategoryResult:
+    result = CategoryResult()
+    try:
+        await client.put_federation_config(
+            version=entry.version, min_compatible_peer_version=entry.min_compatible_peer_version
+        )
+        result.updated += 1
+    except Exception as exc:  # noqa: BLE001
+        result.errors.append(str(exc))
+    return result
+
+
 async def apply_import(
     doc: ConfigDocument,
     *,
@@ -147,4 +159,8 @@ async def apply_import(
         )
     if "sensor_config" in categories and doc.sensor_config is not None:
         results["sensor_config"] = await apply_sensor_config(monitoring_client, doc.sensor_config)
+    if "federation_config" in categories and doc.federation_config is not None:
+        results["federation_config"] = await apply_federation_config(
+            workflow_client, doc.federation_config
+        )
     return results

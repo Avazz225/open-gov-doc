@@ -364,3 +364,52 @@ async def test_get_federation_task_by_handover_disambiguates_by_direction(
     assert inbound is not None
     assert inbound.direction == "inbound"
     assert inbound.process_instance_id == instance_b.id
+
+
+# --- Versionskompatibilitäts-Konfiguration (7.4, P13-S3) --------------------
+
+
+def test_get_federation_config_returns_a_value_without_prior_update(client):
+    """Nicht auf einen bestimmten Wert geprüft (Settings-Default "1.0", aber
+    ein früherer Testlauf gegen dieselbe DB kann ihn bereits per PUT geändert
+    haben) - nur, dass der Seeding-Mechanismus überhaupt eine gültige
+    Antwort liefert."""
+    response = client.get("/federation/config")
+    assert response.status_code == 200
+    assert response.json()["version"]
+    assert response.json()["min_compatible_peer_version"]
+
+
+def test_update_federation_config_requires_admin(client):
+    response = client.put(
+        "/federation/config", json={"version": "2.0", "min_compatible_peer_version": "1.0"}
+    )
+    assert response.status_code == 403
+
+
+def test_update_federation_config_round_trip(client, admin_headers):
+    """7.4: "wird mit jedem Release explizit gepflegt, nicht implizit
+    angenommen" - ein eindeutiger, aber gültig geformter Wert je Testlauf
+    (rein numerisches (major, minor)-Schema, siehe `federation_hub_service.
+    version_utils`) - ein PUT hier löst eine echte Re-Registrierung beim
+    laufenden `federation-hub-service` aus (Singleton-Identität, geteilt mit
+    jedem anderen Test dieses Moduls), ein ungültiges Format würde dort jede
+    spätere `POST /handovers`-Vermittlung anderer Tests zum Absturz bringen
+    (P13-S3-Fund, siehe ADR/PROGRESS.md). Stellt den vorherigen Stand am Ende
+    wieder her, damit nachfolgende Tests denselben Ausgangszustand vorfinden."""
+    previous = client.get("/federation/config").json()
+    new_version = f"9.{uuid.uuid4().int % 900 + 100}"
+    try:
+        response = client.put(
+            "/federation/config",
+            json={"version": new_version, "min_compatible_peer_version": "1.0"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["version"] == new_version
+
+        get_response = client.get("/federation/config")
+        assert get_response.status_code == 200
+        assert get_response.json()["version"] == new_version
+    finally:
+        client.put("/federation/config", json=previous, headers=admin_headers)

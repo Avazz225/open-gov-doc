@@ -12,6 +12,7 @@ from config_service.clients import (
 from config_service.schemas import (
     ApprovalConfigExport,
     ConfigDocument,
+    FederationConfigExport,
     ObjectTypeExport,
     ObjectTypeLayoutExport,
     RoleExport,
@@ -101,6 +102,14 @@ async def export_sensor_config(client: MonitoringServiceClient) -> SensorConfigE
     )
 
 
+async def export_federation_config(client: WorkflowServiceClient) -> FederationConfigExport:
+    config = await client.get_federation_config()
+    return FederationConfigExport(
+        version=config["version"],
+        min_compatible_peer_version=config["min_compatible_peer_version"],
+    )
+
+
 async def build_export(
     *,
     categories: set[str],
@@ -120,4 +129,6 @@ async def build_export(
         doc.approval_config = await export_approval_config(permission_client)
     if "sensor_config" in categories:
         doc.sensor_config = await export_sensor_config(monitoring_client)
+    if "federation_config" in categories:
+        doc.federation_config = await export_federation_config(workflow_client)
     return doc

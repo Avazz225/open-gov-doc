@@ -16,6 +16,7 @@ import httpx
 # workflow-service/test_federation.py).
 CONFIG_SERVICE_URL = os.environ.get("TEST_CONFIG_SERVICE_URL", "http://localhost:8029")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 
 
 def _client() -> httpx.Client:
@@ -39,6 +40,8 @@ def test_export_returns_all_categories_by_default():
         assert body[category] is not None
     assert body["sensor_config"] is not None
     assert "global_default" in body["sensor_config"]
+    assert body["federation_config"] is not None
+    assert "min_compatible_peer_version" in body["federation_config"]
 
 
 def test_export_with_categories_filter_returns_only_requested():
@@ -51,6 +54,7 @@ def test_export_with_categories_filter_returns_only_requested():
     assert body["workflows"] is None
     assert body["approval_config"] is None
     assert body["sensor_config"] is None
+    assert body["federation_config"] is None
 
 
 def test_export_with_unknown_category_returns_422():
@@ -192,3 +196,29 @@ def test_export_import_roundtrip_preserves_role_count(authorized_principal):
     assert result["created"] == 0
     assert result["errors"] == []
     assert result["updated"] == len(exported["roles"])
+
+
+def test_import_federation_config_updates_workflow_service(authorized_principal):
+    """7.4/P13-S3: Versionskompatibilitätsspanne ist jetzt eine reguläre
+    7.3-Kategorie - Import wirkt tatsächlich auf `workflow-service`."""
+    new_version = f"9.{uuid.uuid4().hex[:6]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "federation_config": {"version": new_version, "min_compatible_peer_version": "1.0"},
+    }
+    with _client() as client:
+        response = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+    assert response.status_code == 200
+    assert response.json()["results"]["federation_config"] == {
+        "created": 0,
+        "updated": 1,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    with httpx.Client(base_url=WORKFLOW_SERVICE_URL) as workflow_client:
+        config = workflow_client.get("/federation/config").json()
+    assert config["version"] == new_version

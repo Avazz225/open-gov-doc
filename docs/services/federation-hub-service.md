@@ -29,7 +29,7 @@
 - **Installation → Hub**: Bearer-API-Key, beim Hub nur gehasht gespeichert (SHA-256).
 - **Hub → Installation**: der Hub signiert jede Zustellung mit seinem eigenen, einmalig generierten Schlüsselpaar (RSA-PSS/SHA-256, `X-Federation-Hub-Signature`) — die Zielinstallation verifiziert mit dem bei der eigenen Registrierung einmalig abgerufenen öffentlichen Hub-Schlüssel. Kein geteiltes Geheimnis, das der Hub im Klartext speichern müsste.
 - **Ende-zu-Ende-Verschlüsselung der Nutzdaten**: liegt vollständig bei den Installationen (`workflow_service.federation_crypto`) — der Hub leitet `encrypted_payload`/`encrypted_result` nur als opaken String weiter.
-- **Versionskompatibilität**: `POST /handovers` prüft beidseitig `(major, minor)`-Zahlenpaare (`repository.is_version_compatible`), lehnt inkompatible Kombinationen mit `409` ab.
+- **Versionskompatibilität**: `POST /handovers` prüft beidseitig `(major, minor)`-Zahlenpaare (`repository.is_version_compatible`), lehnt inkompatible Kombinationen mit `409` ab. Seit P13-S3 validiert `POST /installations` das Format von `version`/`min_compatible_peer_version` bereits bei der Registrierung (`version_utils.parse_version`, `422` bei nicht-numerischem Wert) - ein realer Bug fand vorher erst bei einer späteren, fremden `POST /handovers`-Vermittlung mit `500` auf, siehe ADR 0028 Nachtrag.
 - Bewusste Grenzen dieses Grundgerüsts (siehe "Offene Punkte").
 
 ## Erst beim Live-Smoke-Test gefundene Bugs (Selbst-Loopback, siehe ADR 0028)
@@ -51,7 +51,7 @@ Noch keine — Monitoring/Sensor-Konzept folgt in Phase 11 (wie bei jedem andere
 
 ## Tests
 
-`uv run pytest services/federation-hub-service/tests` (**21 Tests**): Registrierung/Update mit/ohne korrekten API-Key, Deregistrierung, Adressbuch-Lookup per API-Key, Versionskompatibilitäts-Matrix (parametrisiert), Hub-Identity-Singleton-Idempotenz, echte HTTP-Zustellung an einen In-Prozess-Stub-Empfänger (`httpx.ASGITransport`, verifiziert die Hub-Signatur tatsächlich mit dem öffentlichen Schlüssel aus `GET /public-key`), deterministischer `delivery_failed`-Fall bei einem unerreichbaren Ziel (`httpx.MockTransport`), Ergebnisrückmeldung nur durch die tatsächliche Zielinstallation. Kein Mocking der eigenen Geschäftslogik — nur die *ausgehende* HTTP-Zustellung wird pro Test gezielt gestubbt/simuliert, da ein echter zweiter Netzwerk-Teilnehmer für Unit-Tests nicht sinnvoll aufsetzbar ist.
+`uv run pytest services/federation-hub-service/tests` (**23 Tests**, seit P13-S3 vorher 21): Registrierung/Update mit/ohne korrekten API-Key, Deregistrierung, Adressbuch-Lookup per API-Key, Versionskompatibilitäts-Matrix (parametrisiert), Hub-Identity-Singleton-Idempotenz, echte HTTP-Zustellung an einen In-Prozess-Stub-Empfänger (`httpx.ASGITransport`, verifiziert die Hub-Signatur tatsächlich mit dem öffentlichen Schlüssel aus `GET /public-key`), deterministischer `delivery_failed`-Fall bei einem unerreichbaren Ziel (`httpx.MockTransport`), Ergebnisrückmeldung nur durch die tatsächliche Zielinstallation, sowie (P13-S3) `422` bei nicht-numerischem `version`/`min_compatible_peer_version`. Kein Mocking der eigenen Geschäftslogik — nur die *ausgehende* HTTP-Zustellung wird pro Test gezielt gestubbt/simuliert, da ein echter zweiter Netzwerk-Teilnehmer für Unit-Tests nicht sinnvoll aufsetzbar ist.
 
 ## Offene Punkte
 

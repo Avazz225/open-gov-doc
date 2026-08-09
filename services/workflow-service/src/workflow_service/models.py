@@ -92,6 +92,27 @@ class FederationIdentity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class FederationConfig(Base):
+    """Versionskompatibilitäts-Erklärung dieser Installation (7.4, P13-S3) -
+    bewusst eine eigene, per `config-service`/7.3 ex-/importierbare Zeile
+    statt eines reinen `Settings`-Felds: 7.4 verlangt wörtlich, dass diese
+    Spanne "Teil des ohnehin schon versionierten Konfigurationsschemas (7.3)"
+    ist und "mit jedem Release explizit gepflegt wird, nicht implizit
+    angenommen" - vor P13-S3 lebte sie ausschließlich in
+    `Settings.installation_version`/`installation_min_compatible_peer_version`
+    und war damit nur über einen Container-Neustart änderbar, nie über den
+    regulären Konfigurationsimport erreichbar. Singleton-Zeile (``id=1``,
+    gleiches Muster wie `FederationIdentity`), bei erstem Zugriff aus den
+    `Settings`-Defaults geseedet (rückwärtskompatibel)."""
+
+    __tablename__ = "federation_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version: Mapped[str] = mapped_column(String(32))
+    min_compatible_peer_version: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class FederationTask(Base):
     """Bindeglied zwischen einem lokalen Manual-Task/einer lokalen Instanz und
     einem beim Hub laufenden Handover (7.4, P6-S9) - verhindert doppeltes

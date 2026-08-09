@@ -41,6 +41,23 @@ def test_public_key_is_stable_across_requests(client):
     assert "BEGIN PUBLIC KEY" in first
 
 
+def test_register_with_non_numeric_version_returns_422(client):
+    """P13-S3-Fund: vor dieser Validierung wurde ein nicht-numerischer
+    `version`-String klaglos gespeichert und ließ erst eine spätere, völlig
+    andere `POST /handovers`-Vermittlung mit einem unbehandelten `ValueError`
+    (500) abstürzen, siehe `version_utils.py`."""
+    response = client.post("/installations", json=make_installation_payload(version="abc.def"))
+    assert response.status_code == 422
+
+
+def test_register_with_non_numeric_min_compatible_peer_version_returns_422(client):
+    response = client.post(
+        "/installations",
+        json=make_installation_payload(min_compatible_peer_version="not-a-version"),
+    )
+    assert response.status_code == 422
+
+
 def test_register_then_update_requires_api_key(client):
     payload = make_installation_payload()
 

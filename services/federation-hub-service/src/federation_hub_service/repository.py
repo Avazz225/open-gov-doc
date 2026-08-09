@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from federation_hub_service import crypto_utils
 from federation_hub_service.models import Handover, HubIdentity, Installation
 from federation_hub_service.schemas import InstallationRegister
+from federation_hub_service.version_utils import parse_version
 
 _HUB_IDENTITY_ID = 1
 
@@ -118,19 +119,14 @@ async def get_installation_by_api_key(session: AsyncSession, api_key: str) -> In
     return result.scalar_one_or_none()
 
 
-def _parse_version(value: str) -> tuple[int, int]:
-    parts = value.split(".")
-    major = int(parts[0]) if parts and parts[0] else 0
-    minor = int(parts[1]) if len(parts) > 1 and parts[1] else 0
-    return major, minor
-
-
 def is_version_compatible(a: Installation, b: Installation) -> bool:
     """Beidseitige Prüfung (7.4 "Versionskompatibilität"): ``b`` muss mindestens
     ``a``s erklärte Mindestanforderung erfüllen und umgekehrt. Bewusst ein
-    einfaches ``(major, minor)``-Zahlenschema statt einer SemVer-Bibliothek."""
-    return _parse_version(b.version) >= _parse_version(a.min_compatible_peer_version) and (
-        _parse_version(a.version) >= _parse_version(b.min_compatible_peer_version)
+    einfaches ``(major, minor)``-Zahlenschema statt einer SemVer-Bibliothek.
+    ``parse_version`` kann hier nicht mehr fehlschlagen (P13-S3: Format wird
+    bereits bei der Registrierung validiert, siehe `schemas.py`)."""
+    return parse_version(b.version) >= parse_version(a.min_compatible_peer_version) and (
+        parse_version(a.version) >= parse_version(b.min_compatible_peer_version)
     )
 
 

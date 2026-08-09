@@ -8,7 +8,14 @@ from pydantic import BaseModel
 # den vorgesehenen Erweiterungspunkt, sobald sich das Schema künftig ändert.
 SCHEMA_VERSION = "1.0"
 
-CATEGORIES = ("object_types", "workflows", "roles", "approval_config", "sensor_config")
+CATEGORIES = (
+    "object_types",
+    "workflows",
+    "roles",
+    "approval_config",
+    "sensor_config",
+    "federation_config",
+)
 
 
 class ObjectTypeLayoutExport(BaseModel):
@@ -56,6 +63,17 @@ class SensorConfigExport(BaseModel):
     overrides: dict[str, bool]
 
 
+class FederationConfigExport(BaseModel):
+    """Versionskompatibilitätsspanne für föderierte Workflows (7.4, P13-S3) -
+    7.4 wörtlich: "Diese Kompatibilitätsspanne ist Teil des ohnehin schon
+    versionierten Konfigurationsschemas (7.3)". Vor P13-S3 lebte sie nur in
+    `workflow-service`s `Settings` (nur per Container-Neustart änderbar) -
+    jetzt reguläre 7.3-Kategorie wie jede andere."""
+
+    version: str
+    min_compatible_peer_version: str
+
+
 class ConfigDocument(BaseModel):
     schema_version: str = SCHEMA_VERSION
     exported_at: datetime
@@ -64,6 +82,7 @@ class ConfigDocument(BaseModel):
     roles: list[RoleExport] | None = None
     approval_config: list[ApprovalConfigExport] | None = None
     sensor_config: SensorConfigExport | None = None
+    federation_config: FederationConfigExport | None = None
 
 
 class CategoryResult(BaseModel):

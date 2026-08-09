@@ -20,9 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from workflow_service import federation_crypto, repository, spiff_adapter
 from workflow_service.federation_client import FederationHubClient
 from workflow_service.license_client import LicenseStatusClient
-from workflow_service.models import Base, FederationIdentity
+from workflow_service.models import Base, FederationConfig, FederationIdentity
 from workflow_service.permission_client import PermissionServiceClient
 from workflow_service.schemas import (
+    FederationConfigOut,
+    FederationConfigUpdate,
     ProcessDefinitionDetailOut,
     ProcessDefinitionOut,
     ProcessInstanceCreate,
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _SIGNATURE_LEVEL_RANK = {"ses": 0, "aes": 1, "qes": 2}
 _FEDERATION_IDENTITY_ID = 1
+_FEDERATION_CONFIG_ID = 1
 _FEDERATED_TASK_TYPES = ("federated", "federated_return")
 
 
@@ -128,6 +131,25 @@ async def _sla_poll_loop(
         await asyncio.sleep(settings.sla_poll_interval_seconds)
 
 
+async def _get_or_seed_federation_config(session: AsyncSession) -> FederationConfig:
+    """7.4/P13-S3: die Versionskompatibilitäts-Erklärung lebt seit P13-S3 in
+    dieser DB-Zeile statt direkt in `Settings` - beim allerersten Zugriff aus
+    den (weiterhin gültigen) `Settings`-Defaults geseedet, rückwärtskompatibel
+    zu allen Installationen, die noch nie eine `PUT /federation/config`
+    ausgeführt haben."""
+    config = await session.get(FederationConfig, _FEDERATION_CONFIG_ID)
+    if config is None:
+        config = FederationConfig(
+            id=_FEDERATION_CONFIG_ID,
+            version=settings.installation_version,
+            min_compatible_peer_version=settings.installation_min_compatible_peer_version,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
 async def _ensure_federation_identity(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> FederationHubClient | None:
@@ -145,6 +167,7 @@ async def _ensure_federation_identity(
     client = FederationHubClient(settings.federation_hub_base_url)
     callback_base_url = f"{settings.installation_gateway_base_url}/api/workflow-service"
     async with session_factory() as session:
+        config = await _get_or_seed_federation_config(session)
         identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
         if identity is None:
             private_pem, public_pem = federation_crypto.generate_keypair()
@@ -156,8 +179,8 @@ async def _ensure_federation_identity(
                 display_name=settings.installation_display_name,
                 callback_base_url=callback_base_url,
                 public_key_pem=public_pem.decode("utf-8"),
-                version=settings.installation_version,
-                min_compatible_peer_version=settings.installation_min_compatible_peer_version,
+                version=config.version,
+                min_compatible_peer_version=config.min_compatible_peer_version,
             )
             identity = FederationIdentity(
                 id=_FEDERATION_IDENTITY_ID,
@@ -173,10 +196,10 @@ async def _ensure_federation_identity(
         else:
             # Re-Registrierung bei jedem Start (Upsert wie bei der internen
             # Registry) - hält z. B. `callback_base_url`/`version` aktuell,
-            # falls sich Settings zwischen Neustarts geändert haben. Ein
-            # Fehlschlag (Hub gerade nicht erreichbar) blockiert den eigenen
-            # Start nicht - Federation ist ein Zusatznutzen, kein Hard-
-            # Dependency dieser Installation.
+            # falls sich Settings/`FederationConfig` zwischen Neustarts
+            # geändert haben. Ein Fehlschlag (Hub gerade nicht erreichbar)
+            # blockiert den eigenen Start nicht - Federation ist ein
+            # Zusatznutzen, kein Hard-Dependency dieser Installation.
             try:
                 await client.register(
                     api_key=identity.api_key,
@@ -184,8 +207,8 @@ async def _ensure_federation_identity(
                     display_name=settings.installation_display_name,
                     callback_base_url=callback_base_url,
                     public_key_pem=identity.public_key_pem.decode("utf-8"),
-                    version=settings.installation_version,
-                    min_compatible_peer_version=settings.installation_min_compatible_peer_version,
+                    version=config.version,
+                    min_compatible_peer_version=config.min_compatible_peer_version,
                 )
             except httpx.HTTPError:
                 logger.warning("federation_hub_reregistration_failed")
@@ -879,6 +902,56 @@ async def list_federation_installations() -> list[dict]:
     if app.state.federation_client is None:
         return []
     return await app.state.federation_client.list_installations()
+
+
+@app.get("/federation/config", response_model=FederationConfigOut)
+async def get_federation_config(session: AsyncSession = Depends(get_session)) -> FederationConfig:
+    """7.4/P13-S3: aktuell erklärte Versionskompatibilitätsspanne - ungegated
+    wie die übrigen Federation-Lese-Endpunkte, reine Metadaten (keine
+    Dokumentinhalte, kein Geheimnis)."""
+    config = await _get_or_seed_federation_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/federation/config", response_model=FederationConfigOut)
+async def update_federation_config(
+    payload: FederationConfigUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FederationConfig:
+    """7.4/P13-S3: macht die Versionskompatibilitätsspanne über den regulären
+    Konfigurationsimport (7.3, `config-service`) änderbar, ohne einen
+    Container-Neustart zu benötigen - gegated hinter derselben
+    `admin.object_config`-Capability wie der BPMN-Upload (P6-S6-Retrofit),
+    da `config-service` sich diese Rolle bereits selbst zuweist. Stößt bei
+    aktiver Föderation sofort eine Re-Registrierung beim Hub mit den neuen
+    Werten an (Fehlschlag blockiert die Antwort nicht - Federation bleibt ein
+    Zusatznutzen, kein Hard-Dependency)."""
+    await _require_object_config(x_dms_principal)
+    config = await _get_or_seed_federation_config(session)
+    config.version = payload.version
+    config.min_compatible_peer_version = payload.min_compatible_peer_version
+    config.updated_at = datetime.now(UTC)
+    await session.commit()
+
+    if app.state.federation_client is not None:
+        identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+        if identity is not None:
+            callback_base_url = f"{settings.installation_gateway_base_url}/api/workflow-service"
+            try:
+                await app.state.federation_client.register(
+                    api_key=identity.api_key,
+                    installation_id=identity.installation_id,
+                    display_name=settings.installation_display_name,
+                    callback_base_url=callback_base_url,
+                    public_key_pem=identity.public_key_pem.decode("utf-8"),
+                    version=config.version,
+                    min_compatible_peer_version=config.min_compatible_peer_version,
+                )
+            except httpx.HTTPError:
+                logger.warning("federation_hub_reregistration_after_config_update_failed")
+    return config
 
 
 async def _verify_hub_signature(

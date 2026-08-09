@@ -22,7 +22,7 @@ jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-s
 | `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, oder seit P13-S2 einen gültigen `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, siehe [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422` |
 | `GET` | `/healthz` | Health-Check (ungegated) |
 
-## Die fünf Kategorien
+## Die sechs Kategorien
 
 | Kategorie | Owner-Service | Natürlicher Schlüssel (Upsert) | Besonderheit |
 |---|---|---|---|
@@ -31,6 +31,7 @@ jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-s
 | `roles` | permission-service | `name` | Rollen-Templates (`Role`), **nicht** ressourcengebundene `role_assignment`-Zeilen |
 | `approval_config` | permission-service | `action_type` | Vier-Augen-Konfiguration (4.3) — Ziel-Endpunkt ist bereits ein Upsert |
 | `sensor_config` | monitoring-service | — (Singleton + Overrides) | Globaler Default + Sensor-Overrides (10.1, P11-S1) |
+| `federation_config` | workflow-service | — (Singleton) | Versionskompatibilitätsspanne für föderierte Workflows (7.4, P13-S3) — `PUT` löst dort sofort eine Re-Registrierung beim Federation Hub aus, siehe `docs/services/workflow-service.md` "Federation" |
 
 Bewusst **nicht** enthalten: "UI-Anpassungen" (Branding/Theming) und AD-Gruppen-Mapping-Regeln —
 beide existieren an keiner Stelle im Code (siehe ADR 0035), wurden also nicht als leere,
@@ -73,6 +74,14 @@ oder ein Zyklus) wird mit `422` abgelehnt statt stillschweigend falsch interpret
 schließt diese Lücke: `sensor_config` ist jetzt eine reguläre Export-/Import-Kategorie wie jede
 andere.
 
+## Anbindung des P13-S3-Fundes (Versionskompatibilität)
+
+Konzept 7.4 verlangt wörtlich, dass die Versionskompatibilitätsspanne föderierter Installationen
+"Teil des ohnehin schon versionierten Konfigurationsschemas (7.3)" ist - vor P13-S3 lebte sie
+ausschließlich in `workflow-service`s `Settings`, nur per Container-Neustart änderbar. Neue
+Kategorie `federation_config` schließt diese Lücke nach demselben Muster wie `sensor_config`
+(P11-S0-Fund) - `WorkflowServiceClient.get_federation_config()`/`put_federation_config()`.
+
 ## Bewusste Grenzen
 
 - **Keine Selektion einzelner Einträge innerhalb einer Kategorie** — nur grobkörnige Kategorie-
@@ -100,5 +109,6 @@ In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) — `tests/conftest.
 `authorized_principal`-Fixture weist einem Testprinzipal vorübergehend `domain-admin-config` zu
 und entfernt die Zuweisung danach wieder. Deckt ab: Export mit/ohne Kategorie-Filter, unbekannte
 Kategorie (`422`), Import ohne/mit falschem Principal (`403`), nicht unterstützte
-`schema_version` (`422`), Rollen-Upsert (create→update per Name), Vier-Augen-Konfig-Upsert, sowie
-einen vollständigen Export→Reimport-Roundtrip.
+`schema_version` (`422`), Rollen-Upsert (create→update per Name), Vier-Augen-Konfig-Upsert, einen
+vollständigen Export→Reimport-Roundtrip, sowie (P13-S3) den Fleet-Agent-Key-Bypass und den
+`federation_config`-Import (wirkt tatsächlich auf den laufenden `workflow-service`-Container).

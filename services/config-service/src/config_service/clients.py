@@ -73,6 +73,23 @@ class WorkflowServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_federation_config(self) -> dict:
+        """7.4/P13-S3: Versionskompatibilitätsspanne - ungegatet auf der
+        Zielseite, siehe `docs/services/workflow-service.md` "Federation"."""
+        response = await self._client.get("/federation/config")
+        response.raise_for_status()
+        return response.json()
+
+    async def put_federation_config(
+        self, *, version: str, min_compatible_peer_version: str
+    ) -> dict:
+        response = await self._client.put(
+            "/federation/config",
+            json={"version": version, "min_compatible_peer_version": min_compatible_peer_version},
+        )
+        response.raise_for_status()
+        return response.json()
+
 
 class PermissionServiceClient:
     ROOT_RESOURCE_ID = "root"

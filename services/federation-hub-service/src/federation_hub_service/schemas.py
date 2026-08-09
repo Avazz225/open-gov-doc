@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from federation_hub_service.version_utils import parse_version
 
 
 class InstallationRegister(BaseModel):
@@ -12,6 +14,16 @@ class InstallationRegister(BaseModel):
     min_compatible_peer_version: str
     supported_process_types: list[str] = []
     supported_document_types: list[str] = []
+
+    @field_validator("version", "min_compatible_peer_version")
+    @classmethod
+    def _validate_version_format(cls, value: str) -> str:
+        """P13-S3-Fund: ohne diese Prüfung akzeptierte die Registrierung
+        jeden String anstandslos - ein ungültiges Format fiel erst bei einer
+        späteren, völlig anderen `POST /handovers`-Vermittlung mit einem
+        unbehandelten `ValueError` (500) auf, siehe `version_utils.py`."""
+        parse_version(value)
+        return value
 
 
 class InstallationRegisterOut(BaseModel):
