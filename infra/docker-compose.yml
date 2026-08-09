@@ -897,6 +897,34 @@ services:
     networks:
       - dms-net
 
+  webdav-connector:
+    build:
+      context: ..
+      dockerfile: services/webdav-connector/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Kein eigenes Postgres-/NATS-Schema (3.3, P12-S1): reiner Übersetzer
+      # zwischen WebDAV und den bestehenden folder-service/document-service-
+      # HTTP-APIs, kein eigener Zustand.
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://webdav-connector:8000
+    ports:
+      - "${WEBDAV_CONNECTOR_PORT:-8027}:8000"
+    depends_on:
+      document-service:
+        condition: service_started
+      folder-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      registry-service:
+        condition: service_started
+    networks:
+      - dms-net
+
   prometheus:
     image: prom/prometheus:v2.55.1
     restart: unless-stopped

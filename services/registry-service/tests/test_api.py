@@ -162,7 +162,8 @@ def test_register_response_includes_license_status_for_core_service(client):
     response = client.post("/instances", json=make_payload())
     assert response.status_code == 201
     # "document-service" ist keine licensierbare Komponente (default
-    # licensable_components nur "workflow-service") - immer "licensed".
+    # licensable_components nur "workflow-service"/"webdav-connector") -
+    # immer "licensed".
     assert response.json()["license_status"] == "licensed"
 
 

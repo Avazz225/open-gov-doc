@@ -32,7 +32,7 @@ class TreeDocument:
     folder_id: str | None
     size_bytes: int
     content_type: str | None
-    checksum_sha256: str
+    checksum_sha256: str | None
     updated_at: datetime
     current_version_number: int
 
@@ -45,14 +45,24 @@ class TreeLock:
     expires_at: datetime
 
 
-def _to_tree_document(body: dict) -> TreeDocument:
+def _to_tree_document(body: dict, version: dict | None = None) -> TreeDocument:
+    """`DocumentOut` (das `body`-Argument) traegt selbst keine Datei-Metadaten
+    (Groesse/Content-Type/Pruefsumme) - die leben ausschliesslich auf
+    `DocumentVersionOut` der jeweils aktuellen Version. `version` ist daher
+    ein separat abgerufener `DocumentVersionOut`-Body (siehe
+    `DmsTreeClient._fetch_current_version`); ohne ihn (z. B. wenn der
+    Aufrufer die Werte bewusst nicht braucht) bleiben die Felder auf
+    neutralen Defaults - WICHTIG: nicht `checksum_sha256=""`, das wsgidav
+    als ETag ablehnt (`checked_etag` erlaubt `None`, aber keinen leeren
+    String), siehe `DmsDavDocument.get_etag()`."""
+    version = version or {}
     return TreeDocument(
         id=body["id"],
         title=body["title"],
         folder_id=body["folder_id"],
-        size_bytes=body.get("size_bytes", 0),
-        content_type=body.get("content_type"),
-        checksum_sha256=body.get("checksum_sha256", ""),
+        size_bytes=version.get("size_bytes", 0),
+        content_type=version.get("content_type"),
+        checksum_sha256=version.get("checksum_sha256") or None,
         updated_at=datetime.fromisoformat(body["updated_at"]),
         current_version_number=body["current_version_number"],
     )
@@ -92,6 +102,15 @@ class DmsTreeClient:
         self._documents.close()
         self._folders.close()
 
+    def _fetch_current_version(self, document_id: str, version_number: int) -> dict:
+        response = self._documents.get(f"/documents/{document_id}/versions/{version_number}")
+        response.raise_for_status()
+        return response.json()
+
+    def _to_tree_document_enriched(self, body: dict) -> TreeDocument:
+        version = self._fetch_current_version(body["id"], body["current_version_number"])
+        return _to_tree_document(body, version)
+
     def list_children(self, folder_id: str) -> tuple[list[TreeFolder], list[TreeDocument]]:
         folders_response = self._folders.get(f"/folders/{folder_id}/children")
         if folders_response.status_code == 404:
@@ -100,8 +119,16 @@ class DmsTreeClient:
         documents_response = self._documents.get("/documents", params={"folder_id": folder_id})
         documents_response.raise_for_status()
         folders = [_to_tree_folder(f) for f in folders_response.json() if f["deleted_at"] is None]
+        # Ein zusaetzlicher HTTP-Aufruf je Dokument (Versions-Metadaten leben
+        # nicht auf `DocumentOut`, siehe `_to_tree_document`) - fuer eine
+        # Referenzimplementierung bewusst in Kauf genommen: WebDAV-Clients
+        # (Windows-Explorer/Finder) verlassen sich auf korrekte
+        # Content-Length/ETag-Werte in der Verzeichnisauflistung, ein falscher
+        # Defaultwert waere die schlechtere Alternative.
         documents = [
-            _to_tree_document(d) for d in documents_response.json() if d["deleted_at"] is None
+            self._to_tree_document_enriched(d)
+            for d in documents_response.json()
+            if d["deleted_at"] is None
         ]
         return folders, documents
 
@@ -177,7 +204,7 @@ class DmsTreeClient:
             response.raise_for_status()
             document_response = self._documents.get(f"/documents/{existing_document_id}")
             document_response.raise_for_status()
-            return _to_tree_document(document_response.json())
+            return self._to_tree_document_enriched(document_response.json())
 
         response = self._documents.post(
             "/documents",
@@ -187,7 +214,7 @@ class DmsTreeClient:
         if response.status_code == 400:
             raise PathNotFoundError(folder_id)
         response.raise_for_status()
-        return _to_tree_document(response.json())
+        return self._to_tree_document_enriched(response.json())
 
     def delete_document(self, document_id: str, *, deleted_by: str) -> None:
         response = self._documents.delete(
@@ -215,7 +242,7 @@ class DmsTreeClient:
         if response.status_code in (400, 404):
             raise PathNotFoundError(new_folder_id or document_id)
         response.raise_for_status()
-        return _to_tree_document(response.json())
+        return self._to_tree_document_enriched(response.json())
 
     def move_folder(
         self, folder_id: str, *, new_parent_id: str | None = None, new_name: str | None = None
