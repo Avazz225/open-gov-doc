@@ -851,6 +851,14 @@ services:
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # Fleet-Agent-Schluessel (3a, P13-S2) - erlaubt dem unabhaengig
+      # betriebenen fleet-management-service, eine Lizenz zu installieren,
+      # ohne einen Keycloak-Principal dieser Installation zu besitzen. Fixer
+      # Dev-/Test-Wert in diesem gebuendelten Stack (siehe config-service
+      # unten, denselben Wert), eine echte Installation setzt ein eigenes
+      # Geheimnis oder laesst die Variable leer (deaktiviert den Fleet-Zugriff
+      # vollstaendig, 3a: "optional, separater Baustein").
+      DMS_FLEET_AGENT_API_KEY: ${DMS_FLEET_AGENT_API_KEY:-dev-fleet-agent-key}
       # ADR 0032: statisch eingebetteter oeffentlicher RS256-Schluessel, kein
       # JWKS. Der Python-Default in settings.py ist bereits derselbe
       # Entwicklungsschluessel (kein separater Eintrag hier noetig, anders
@@ -1053,6 +1061,10 @@ services:
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # Fleet-Agent-Schluessel (3a, P13-S2) - siehe license-service oben,
+      # derselbe Wert (ein fleet-management-service provisioniert beide Wege
+      # ueber dieselbe Installation).
+      DMS_FLEET_AGENT_API_KEY: ${DMS_FLEET_AGENT_API_KEY:-dev-fleet-agent-key}
     ports:
       - "${CONFIG_SERVICE_PORT:-8029}:8000"
     depends_on:
@@ -1066,6 +1078,26 @@ services:
         condition: service_started
       registry-service:
         condition: service_started
+    networks:
+      - dms-net
+
+  fleet-management-service:
+    build:
+      context: ..
+      dockerfile: services/fleet-management-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Bewusst KEIN DMS_INSTALLATION_ID/DMS_REGISTRY_SERVICE_BASE_URL (3a,
+      # P13-S2) - dieser Service gehoert zu keiner einzelnen Installation,
+      # siehe settings.py. Nur der lokalen Entwicklung/dem Testen halber
+      # trotzdem in diesem Stack mitgeliefert (analog federation-hub-service,
+      # ADR 0028) - ein Betreiber wuerde ihn separat betreiben.
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+    ports:
+      - "${FLEET_MANAGEMENT_SERVICE_PORT:-8031}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - dms-net
 

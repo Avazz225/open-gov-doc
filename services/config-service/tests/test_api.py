@@ -78,6 +78,30 @@ def test_import_with_unauthorized_principal_returns_403():
     assert response.status_code == 403
 
 
+def test_import_with_fleet_agent_key_bypasses_rbac():
+    """3a/P13-S2: derselbe installationsweite Fleet-Agent-Schlüssel wie bei
+    license-service (`DMS_FLEET_AGENT_API_KEY`, hier per Compose-Default
+    `dev-fleet-agent-key` im gebündelten Dev-/Test-Stack) - kein
+    `X-DMS-Principal` nötig."""
+    with _client() as client:
+        response = client.post(
+            "/config/import",
+            json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
+            headers={"Authorization": "Bearer dev-fleet-agent-key"},
+        )
+    assert response.status_code == 200
+
+
+def test_import_with_wrong_fleet_agent_key_returns_403():
+    with _client() as client:
+        response = client.post(
+            "/config/import",
+            json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
+            headers={"Authorization": "Bearer not-the-right-key"},
+        )
+    assert response.status_code == 403
+
+
 def test_import_with_unsupported_schema_version_returns_422(authorized_principal):
     with _client() as client:
         response = client.post(

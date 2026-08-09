@@ -24,7 +24,7 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/license` `{license_token}` | Signierte Lizenzdatei installieren — `400` bei ungültiger Signatur, sonst `201` auch bei abgelaufener Lizenz. Verlangt `admin.license` oder aktivierten Superuser. |
+| `POST` | `/license` `{license_token}` | Signierte Lizenzdatei installieren — `400` bei ungültiger Signatur, sonst `201` auch bei abgelaufener Lizenz. Verlangt `admin.license`, aktivierten Superuser, oder seit P13-S2 einen gültigen `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, kein Principal dieser Installation, siehe [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)). |
 | `GET` | `/license/status` | Aktueller Lizenzstatus + Nutzung je Dimension (`installed`/`valid`/`invalid_reason`/`issued_at`/`expires_at`/`days_remaining`/`user_model`/`users`/`storage_gb`/`documents`/`licensed_components`/`limits_exceeded`). Ungegatet. |
 
 ## Datenmodell

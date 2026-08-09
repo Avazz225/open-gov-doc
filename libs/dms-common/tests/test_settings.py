@@ -14,6 +14,7 @@ def test_defaults():
     assert settings.postgres_dsn is None
     assert settings.installation_id == "local-dev"
     assert settings.installation_display_name == "DMS-Installation (Entwicklung)"
+    assert settings.fleet_agent_api_key is None
 
 
 def test_env_override(monkeypatch):
@@ -33,3 +34,9 @@ def test_installation_identity_shared_across_services(monkeypatch):
     settings = ExampleSettings(_env_file=None)
     assert settings.installation_id == "kunde-nord-001"
     assert settings.installation_display_name == "Kunde Nord GmbH"
+
+
+def test_fleet_agent_api_key_env_override(monkeypatch):
+    monkeypatch.setenv("DMS_FLEET_AGENT_API_KEY", "shared-secret-123")
+    settings = ExampleSettings(_env_file=None)
+    assert settings.fleet_agent_api_key == "shared-secret-123"

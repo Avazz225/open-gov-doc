@@ -25,11 +25,25 @@ class Settings(BaseServiceSettings):
     # der Hub ist kein eingeloggter Principal, authentisiert sich stattdessen
     # über eine eigene Signatur (`X-Federation-Hub-Signature`, siehe
     # `workflow_service.main._verify_hub_signature`).
+    # Seit P13-S2 zusätzlich vier Routen für den unabhängig betriebenen
+    # `fleet-management-service` (3a) - der hat ebenfalls keinen eingeloggten
+    # Principal dieser Installation. Die beiden Lese-Routen waren schon vor
+    # dem Gateway-Zugriff ungegatet (`registry-service`/`license-service`
+    # verlangen dort nie einen Principal); die beiden Schreib-Routen prüfen
+    # stattdessen serverseitig den installationsweiten
+    # `DMS_FLEET_AGENT_API_KEY` (siehe dortiges `_is_fleet_agent()`) - der
+    # Gateway selbst kennt diesen Schlüssel nicht, lässt den `Authorization`-
+    # Header nur unangetastet durch (kein Keycloak-Token-Zwang mehr auf
+    # diesen vier Pfaden).
     public_routes: list[str] = [
         "auth-service:login",
         "auth-service:refresh",
         "workflow-service:federation/inbound",
         "workflow-service:federation/inbound-result",
+        "registry-service:installation",
+        "license-service:license/status",
+        "license-service:license",
+        "config-service:config/import",
     ]
 
     # Not-Shutdown (4.8, P6-S6): während aktivem Wartungsmodus werden alle

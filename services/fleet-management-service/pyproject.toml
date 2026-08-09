@@ -1,0 +1,23 @@
+[project]
+name = "fleet-management-service"
+version = "0.1.0"
+description = "Fleet-/Lizenz-Management: uebergeordnete, installationsunabhaengige Verwaltungsebene fuer mehrere Installationen (Konzept 3a, P13-S2)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "dms-common",
+    "dms-db-base",
+]
+
+[tool.uv.sources]
+dms-common = { workspace = true }
+dms-db-base = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fleet_management_service"]

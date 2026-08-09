@@ -108,6 +108,21 @@ def test_public_route_bypasses_gateway_auth_check(client):
     assert response.json().get("detail") != "Fehlender Bearer-Token"
 
 
+def test_fleet_management_routes_bypass_gateway_auth_check(client):
+    """3a/P13-S2: fleet-management-service hat keinen Keycloak-Token dieser
+    Installation - die vier neuen Routen müssen ohne Bearer-Token durchgehen,
+    die eigentliche Absicherung übernehmen registry-service/license-service/
+    config-service selbst (ungegatete Reads bzw. `DMS_FLEET_AGENT_API_KEY`)."""
+    for method, path in (
+        ("GET", "/api/registry-service/installation"),
+        ("GET", "/api/license-service/license/status"),
+        ("POST", "/api/license-service/license"),
+        ("POST", "/api/config-service/config/import"),
+    ):
+        response = client.request(method, path, json={})
+        assert response.json().get("detail") != "Fehlender Bearer-Token"
+
+
 def test_no_healthy_instance_returns_503(client, make_token):
     token = make_token()
     response = client.get(

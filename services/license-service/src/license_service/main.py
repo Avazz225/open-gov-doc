@@ -49,10 +49,28 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
     return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
 
-async def _require_license_permission(x_dms_principal: str) -> None:
+def _is_fleet_agent(authorization: str | None) -> bool:
+    """3a/P13-S2: der unabhängig betriebene `fleet-management-service` hat
+    keinen Keycloak-Principal in dieser Installation - er authentisiert sich
+    stattdessen über das installationsweite, optionale
+    `settings.fleet_agent_api_key` (`DMS_FLEET_AGENT_API_KEY`,
+    `dms_common.BaseServiceSettings`). Ist der Schlüssel nicht konfiguriert
+    (Default), ist dieser Pfad vollständig deaktiviert - reines Opt-in (3a:
+    "optional, separater Baustein")."""
+    return bool(settings.fleet_agent_api_key) and authorization == (
+        f"Bearer {settings.fleet_agent_api_key}"
+    )
+
+
+async def _require_license_permission(
+    x_dms_principal: str, authorization: str | None = None
+) -> None:
     """Aktiviert erstmals die seit Langem vorgeseedete Domain-Admin-Rolle
     `domain-admin-license` (`admin.license`) - der aktivierte Superuser (4.6)
-    ist die einzige Ausnahme, gleiches Gate-Muster wie query-service."""
+    und der Fleet-Agent-Schlüssel sind die beiden Ausnahmen, gleiches
+    Gate-Muster wie query-service (Superuser-Bypass)."""
+    if _is_fleet_agent(authorization):
+        return
     is_superuser = await _is_active_superuser(x_dms_principal)
     if is_superuser:
         return
@@ -181,13 +199,14 @@ def healthz() -> dict:
 async def upload_license(
     payload: LicenseUploadRequest,
     x_dms_principal: str = Header(default=""),
+    authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> LicenseStatusOut:
     """9.2: signierte Lizenzdatei installieren. Nur eine ungueltige Signatur
     fuehrt zu `400` - eine signaturgueltige, aber bereits abgelaufene Lizenz
     wird trotzdem gespeichert und ueber den Status als ungueltig angezeigt
     (siehe PROGRESS.md Architekturentscheidung "Upload-Ablehnung")."""
-    await _require_license_permission(x_dms_principal)
+    await _require_license_permission(x_dms_principal, authorization)
 
     try:
         claims = decode(payload.license_token, public_key_pem=settings.license_public_key_pem)

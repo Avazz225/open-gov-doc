@@ -37,3 +37,13 @@ class BaseServiceSettings(BaseSettings):
     # dieser Installation erfahren.
     installation_id: str = "local-dev"
     installation_display_name: str = "DMS-Installation (Entwicklung)"
+
+    # Fleet-Agent-Schlüssel (3a, P13-S2): ein installationsweites, optionales
+    # gemeinsames Geheimnis (`DMS_FLEET_AGENT_API_KEY`), das dem neuen,
+    # unabhängig betriebenen `fleet-management-service` erlaubt, genau zwei
+    # eng begrenzte Aktionen über den eigenen Gateway auszulösen -
+    # Lizenzinstallation (`license-service`) und Konfigurationsimport
+    # (`config-service`), siehe deren jeweilige `_require_*_permission()`.
+    # `None` (Default) bedeutet: kein Fleet-Zugriff möglich, rein RBAC-basiert
+    # wie zuvor - komplett optionaler, separater Baustein (3a wörtlich).
+    fleet_agent_api_key: str | None = None

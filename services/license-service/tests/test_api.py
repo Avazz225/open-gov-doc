@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 from license_factory import make_license_token
-from license_service.main import app
+from license_service.main import app, settings
 
 
 @pytest.fixture
@@ -51,6 +51,37 @@ def test_upload_requires_license_permission(client):
     response = client.post(
         "/license", json={"license_token": token}, headers={"x-dms-principal": "alice"}
     )
+    assert response.status_code == 403
+
+
+def test_upload_with_fleet_agent_key_bypasses_rbac(client):
+    """3a/P13-S2: der fleet-management-service hat keinen Keycloak-Principal
+    in dieser Installation - der Bearer-Schlüssel allein reicht."""
+    app.state.permission_client.has_permission.return_value = False
+    settings.fleet_agent_api_key = "fleet-secret-123"
+    try:
+        token = make_license_token()
+        response = client.post(
+            "/license",
+            json={"license_token": token},
+            headers={"Authorization": "Bearer fleet-secret-123"},
+        )
+    finally:
+        settings.fleet_agent_api_key = None
+    assert response.status_code == 201
+
+
+def test_upload_with_wrong_fleet_agent_key_falls_back_to_rbac(client):
+    settings.fleet_agent_api_key = "fleet-secret-123"
+    try:
+        token = make_license_token()
+        response = client.post(
+            "/license",
+            json={"license_token": token},
+            headers={"Authorization": "Bearer wrong-key"},
+        )
+    finally:
+        settings.fleet_agent_api_key = None
     assert response.status_code == 403
 
 

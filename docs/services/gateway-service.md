@@ -29,10 +29,21 @@ Ziel → `503`. Downstream nicht erreichbar → `502`.
 JWT-Prüfung gegen Keycloak-JWKS (wie im Auth Service, 4.4), zentral für alle
 proxied Requests — mit Ausnahme der in `settings.public_routes` gelisteten
 Routen (Default: `auth-service:login`, `auth-service:refresh`, da man dafür
-erst einen Token braucht). Bei Erfolg werden die Identitäts-Claims als
+erst einen Token braucht; seit P6-S9 zusätzlich die beiden Federation-Hub-
+Inbound-Endpunkte; seit P13-S2 zusätzlich vier Routen für den unabhängig
+betriebenen `fleet-management-service` — `registry-service:installation`,
+`license-service:license/status`, `license-service:license`,
+`config-service:config/import`, siehe
+[ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)).
+Bei Erfolg werden die Identitäts-Claims als
 `X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`-Header an den Downstream
 weitergereicht (aktuell von keinem Backend-Service konsumiert, siehe
 [ADR 0005](../adr/0005-gateway-registry-routing-and-inprocess-rate-limiting.md)).
+Für eine öffentliche `public_routes`-Route lässt der Gateway einen im
+Original-Request bereits vorhandenen `Authorization`-Header unverändert an
+den Downstream durch (kein Überschreiben mit leeren Identitäts-Headern) -
+Grundlage für den Fleet-Agent-Schlüssel-Bypass oben, den nur der jeweilige
+Zielservice selbst prüft, nicht der Gateway.
 
 ## Not-Shutdown / Wartungsmodus (4.8, seit P6-S6)
 

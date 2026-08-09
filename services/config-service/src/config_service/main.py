@@ -72,7 +72,21 @@ async def _ensure_bootstrap_permissions() -> None:
             response.raise_for_status()
 
 
-async def _require_import_permission(x_dms_principal: str) -> None:
+def _is_fleet_agent(authorization: str | None) -> bool:
+    """3a/P13-S2: derselbe installationsweite, optionale
+    `settings.fleet_agent_api_key` wie bei `license-service` erlaubt dem
+    unabhängig betriebenen `fleet-management-service` (kein Keycloak-Principal
+    in dieser Installation), zentral ein Konfigurationspaket zu provisionieren."""
+    return bool(settings.fleet_agent_api_key) and authorization == (
+        f"Bearer {settings.fleet_agent_api_key}"
+    )
+
+
+async def _require_import_permission(
+    x_dms_principal: str, authorization: str | None = None
+) -> None:
+    if _is_fleet_agent(authorization):
+        return
     allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
         x_dms_principal, settings.import_required_capability
     )
@@ -135,6 +149,7 @@ async def import_config(
     payload: dict,
     categories: list[str] | None = Query(default=None),
     x_dms_principal: str = Header(default=""),
+    authorization: str | None = Header(default=None),
 ) -> ImportResult:
     """Gegated hinter `admin.object_config` (dieselbe Domain-Admin-Capability
     wie workflow-service's Prozessdefinition-Upload) - ein voller
@@ -143,7 +158,7 @@ async def import_config(
     (nicht direkt als `ConfigDocument`), damit `migrations.upgrade_to_current()`
     zuerst auf dem rohen Dict ansetzen kann, bevor die aktuelle Schema-Version
     validiert wird."""
-    await _require_import_permission(x_dms_principal)
+    await _require_import_permission(x_dms_principal, authorization)
     resolved = _resolve_categories(categories)
     try:
         upgraded = migrations.upgrade_to_current(payload)

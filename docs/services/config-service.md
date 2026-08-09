@@ -19,7 +19,7 @@ jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-s
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `GET` | `/config/export` | Exportiert ein `ConfigDocument` — optional `?categories=roles&categories=workflows` zur Einschränkung, sonst alle fünf Kategorien |
-| `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422` |
+| `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, oder seit P13-S2 einen gültigen `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, siehe [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422` |
 | `GET` | `/healthz` | Health-Check (ungegated) |
 
 ## Die fünf Kategorien
