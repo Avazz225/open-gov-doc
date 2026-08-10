@@ -233,6 +233,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS force_delete_approval_requested_at TIMESTAMPTZ"
             )
         )
+        # Persönlicher Papierkorb (2.5, P15-S1) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text("ALTER TABLE folder.folder ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(128)")
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -396,13 +400,102 @@ async def create_folder(
 
 @app.get("/folders/deleted", response_model=list[FolderOut])
 async def list_deleted_folders(
-    parent_id: str, session: AsyncSession = Depends(get_session)
+    parent_id: str | None = None,
+    scope: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[FolderOut]:
     """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1b) - Route MUSS vor
     `/folders/{folder_id}` registriert sein, sonst würde FastAPI "deleted"
     fälschlich als `folder_id` interpretieren (gleiche Falle wie bei
-    document-service, siehe main.py dort)."""
-    return await repository.list_deleted_folders(session, parent_id)
+    document-service, siehe main.py dort). Ohne `scope` unverändertes
+    Verhalten (kein Auth-Check, `parent_id` erforderlich) - alle bisherigen
+    Aufrufer/Tests bleiben unberührt. Seit P15-S1 (2.5) zusätzlich zwei
+    installationsweite, per `scope` explizit angeforderte Sichten: `personal`
+    (nur eigene Löschmarkierungen) und `admin` (vollständiger Papierkorb,
+    Löschadministration) - keine `admin_classified`-Variante wie bei
+    document-service, Konzept 2.5 kennzeichnet nur Dokumente als
+    Verschlusssache, keine Ordner."""
+    if scope is None:
+        if parent_id is None:
+            raise HTTPException(
+                status_code=422, detail="parent_id ist ohne scope-Parameter erforderlich"
+            )
+        return await repository.list_deleted_folders(session, parent_id=parent_id)
+
+    if scope == "personal":
+        if not x_dms_principal:
+            raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+        return await repository.list_deleted_folders(
+            session, parent_id=parent_id, deleted_by=x_dms_principal
+        )
+
+    if scope == "admin":
+        roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+        if settings.trash_hard_delete_admin_role not in roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf den "
+                "vollständigen Papierkorb einsehen",
+            )
+        return await repository.list_deleted_folders(session, parent_id=parent_id)
+
+    raise HTTPException(status_code=422, detail=f"Unbekannter scope {scope!r}")
+
+
+@app.post("/folders/{folder_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_folder(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Manuelle, sofortige endgültige Löschung aus dem Papierkorb (2.5,
+    P15-S1) - Löschadministration vorausgesetzt, unabhängig vom automatischen
+    `_retention_poll_loop` (der nach Ablauf von `TrashConfig.
+    restore_period_days` dieselbe `retention_actions.purge_expired_trash_
+    entry` mit `trigger="trash_expiry"` aufruft - hier `trigger="manual_
+    purge"` mit dem echten Principal als `triggered_by`). Gleiche
+    Sicherheitsprüfung wie die Zwangslöschung (`_execute_or_defer_forced_
+    deletion`): erst wenn der Teilbaum keine aktiven Unterordner/Dokumente
+    mehr enthält, wird tatsächlich gelöscht."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    if settings.trash_hard_delete_admin_role not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf Ordner "
+            "endgültig aus dem Papierkorb löschen",
+        )
+    try:
+        folder = await repository.get_folder_any_state(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if folder.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Ordner befindet sich nicht im Papierkorb")
+
+    subtree_ids = await repository.list_active_subtree_ids(session, folder_id)
+    if (
+        await repository.has_any_child_folder_row(session, folder_id)
+        or await app.state.document_client.count_active(subtree_ids) > 0
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Teilbaum enthält noch aktive Unterordner/Dokumente - erst leeren",
+        )
+
+    await retention_actions.purge_expired_trash_entry(
+        session, folder_id, trigger="manual_purge", triggered_by=x_dms_principal
+    )
+    await session.commit()
+    await publish_event(
+        "folder.trash_purged",
+        folder_id,
+        {"trigger": "manual_purge", "triggered_by": x_dms_principal},
+        actor=x_dms_principal,
+    )
 
 
 @app.get("/folders/{folder_id}", response_model=FolderOut)

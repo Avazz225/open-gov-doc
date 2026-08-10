@@ -41,6 +41,7 @@ const FOLDER: Folder = {
   object_type_id: null,
   attributes: {},
   deleted_at: null,
+  deleted_by: null,
   retention_until: null,
   full_deletion: false,
   pending_deletion_reason: null,

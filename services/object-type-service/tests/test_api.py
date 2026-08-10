@@ -429,6 +429,50 @@ def test_create_with_negative_default_archive_after_days_returns_422(client):
     assert response.status_code == 422
 
 
+def test_create_with_is_classified_on_document_type_succeeds(client):
+    """Verschlusssachen-Kennzeichnung (2.5, P15-S1)."""
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "VerschlusssacheAPI",
+            "applies_to": "document",
+            "is_classified": True,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["is_classified"] is True
+
+
+def test_create_with_is_classified_on_folder_type_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "OrdnerAlsVerschlusssacheAPI",
+            "applies_to": "folder",
+            "is_classified": True,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_update_with_is_classified_on_folder_type_returns_422(client):
+    object_type_id = client.post(
+        "/object-types", json={"name": "OrdnerFuerUpdateAPI", "applies_to": "folder"}
+    ).json()["id"]
+    response = client.put(
+        f"/object-types/{object_type_id}",
+        json={"is_classified": True},
+    )
+    assert response.status_code == 422
+
+
+def test_create_without_is_classified_defaults_to_false(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    response = client.get(f"/object-types/{object_type_id}")
+    assert response.json()["is_classified"] is False
+
+
 def test_next_kennzeichen_returns_incrementing_formatted_values(client):
     object_type_id = client.post(
         "/object-types",

@@ -126,6 +126,16 @@ def _validate_default_archive_after_days(value: int | None) -> None:
         raise InvalidFieldError("default_archive_after_days darf nicht negativ sein")
 
 
+def _validate_is_classified(applies_to: str, value: bool) -> None:
+    """Verschlusssachen-Kennzeichnung (2.5, P15-S1) ist laut Konzepttext nur
+    für Dokumentklassen vorgesehen - gleiche Einschränkung wie beim
+    Kennzeichengenerator/Signaturniveau."""
+    if value and applies_to != "document":
+        raise InvalidFieldError(
+            "is_classified ist nur für Dokumentklassen (applies_to='document') zulässig"
+        )
+
+
 async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -> ObjectType:
     existing = await session.execute(select(ObjectType).where(ObjectType.name == payload.name))
     if existing.scalar_one_or_none() is not None:
@@ -137,6 +147,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
     _validate_required_signature_level(payload.applies_to, payload.required_signature_level)
     _validate_default_retention_days(payload.default_retention_days)
     _validate_default_archive_after_days(payload.default_archive_after_days)
+    _validate_is_classified(payload.applies_to, payload.is_classified)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -154,6 +165,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         deletion_reason_required_override=payload.deletion_reason_required_override,
         default_archive_after_days=payload.default_archive_after_days,
         archive_encryption_enabled=payload.archive_encryption_enabled,
+        is_classified=payload.is_classified,
         created_at=now,
         updated_at=now,
     )
@@ -170,11 +182,13 @@ async def get_object_type(session: AsyncSession, object_type_id: int) -> ObjectT
 
 
 async def list_object_types(
-    session: AsyncSession, *, applies_to: str | None = None
+    session: AsyncSession, *, applies_to: str | None = None, is_classified: bool | None = None
 ) -> list[ObjectType]:
     query = select(ObjectType)
     if applies_to is not None:
         query = query.where(ObjectType.applies_to == applies_to)
+    if is_classified is not None:
+        query = query.where(ObjectType.is_classified == is_classified)
     result = await session.execute(query.order_by(ObjectType.name))
     return list(result.scalars().all())
 
@@ -192,6 +206,7 @@ async def update_object_type(
     _validate_required_signature_level(object_type.applies_to, payload.required_signature_level)
     _validate_default_retention_days(payload.default_retention_days)
     _validate_default_archive_after_days(payload.default_archive_after_days)
+    _validate_is_classified(object_type.applies_to, payload.is_classified)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
@@ -204,6 +219,7 @@ async def update_object_type(
     object_type.deletion_reason_required_override = payload.deletion_reason_required_override
     object_type.default_archive_after_days = payload.default_archive_after_days
     object_type.archive_encryption_enabled = payload.archive_encryption_enabled
+    object_type.is_classified = payload.is_classified
     object_type.updated_at = datetime.now(UTC)
     await session.flush()
     return object_type

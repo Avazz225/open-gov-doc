@@ -347,6 +347,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS dehydrated_at TIMESTAMPTZ")
         )
+        # Persönlicher Papierkorb (2.5, P15-S1) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(128)")
+        )
+        # Schema-Drift-Korrektur (P15-S1, live gefunden): in lange laufenden
+        # Installationen (dieses Dev-Environment eingeschlossen) trägt
+        # `object_type_id` aus einer sehr frühen Projektphase noch den
+        # damaligen VARCHAR-Typ, obwohl das Model schon lange `Integer`
+        # deklariert - `create_all` ändert nie den Typ bereits bestehender
+        # Spalten. Unauffällig bei einfachen Gleichheits-Vergleichen (impliziter
+        # Cast durch asyncpg), aber `object_type_id NOT IN (...)` (neu für den
+        # Verschlusssachen-Papierkorb-Filter) schlägt dann mit "operator does
+        # not exist: character varying <> integer" fehl. Nur ausgeführt, wenn
+        # der Spaltentyp tatsächlich noch abweicht (kein Lock/Rewrite bei jedem
+        # Start auf bereits korrigierten Installationen).
+        drift = await conn.execute(
+            text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = 'document' AND table_name = 'document' "
+                "AND column_name = 'object_type_id'"
+            )
+        )
+        if drift.scalar() == "character varying":
+            await conn.execute(
+                text(
+                    "ALTER TABLE document.document ALTER COLUMN object_type_id "
+                    "TYPE INTEGER USING object_type_id::integer"
+                )
+            )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -837,12 +866,125 @@ async def list_documents(
 
 @app.get("/documents/deleted", response_model=list[DocumentOut])
 async def list_deleted_documents(
-    folder_id: str, session: AsyncSession = Depends(get_session)
+    folder_id: str | None = None,
+    scope: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[DocumentOut]:
     """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1) - Route MUSS vor
     `/documents/{document_id}` registriert sein, sonst würde FastAPI
-    "deleted" fälschlich als `document_id` interpretieren."""
-    return await repository.list_deleted_documents(session, folder_id)
+    "deleted" fälschlich als `document_id` interpretieren. Ohne `scope`
+    unverändertes Verhalten (kein Auth-Check, `folder_id` erforderlich) - alle
+    bisherigen Aufrufer/Tests bleiben unberührt. Seit P15-S1 (2.5) zusätzlich
+    drei installationsweite, per `scope` explizit angeforderte Sichten:
+    `personal` (nur eigene Löschmarkierungen, persönlicher Papierkorb),
+    `admin` (vollständiger, aber nicht-klassifizierter Papierkorb, reguläre
+    Löschadministration) und `admin_classified` (strukturell getrennter
+    Verschlusssachen-Papierkorb) - `folder_id` bleibt in allen drei
+    zusätzlich als optionaler Filter nutzbar."""
+    if scope is None:
+        if folder_id is None:
+            raise HTTPException(
+                status_code=422, detail="folder_id ist ohne scope-Parameter erforderlich"
+            )
+        return await repository.list_deleted_documents(session, folder_id=folder_id)
+
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+
+    if scope == "personal":
+        if not x_dms_principal:
+            raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+        return await repository.list_deleted_documents(
+            session, folder_id=folder_id, deleted_by=x_dms_principal
+        )
+
+    if scope == "admin":
+        if settings.trash_hard_delete_admin_role not in roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf den "
+                "vollständigen Papierkorb einsehen",
+            )
+        classified_ids = await app.state.object_type_client.list_classified_document_type_ids()
+        return await repository.list_deleted_documents(
+            session, folder_id=folder_id, exclude_object_type_ids=classified_ids
+        )
+
+    if scope == "admin_classified":
+        if settings.classified_trash_hard_delete_admin_role not in roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Nur die Rolle {settings.classified_trash_hard_delete_admin_role!r} darf "
+                "den Verschlusssachen-Papierkorb einsehen",
+            )
+        classified_ids = await app.state.object_type_client.list_classified_document_type_ids()
+        return await repository.list_deleted_documents(
+            session, folder_id=folder_id, include_object_type_ids=classified_ids
+        )
+
+    raise HTTPException(status_code=422, detail=f"Unbekannter scope {scope!r}")
+
+
+@app.post("/documents/{document_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_document(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Manuelle, sofortige endgültige Löschung aus dem Papierkorb (2.5,
+    P15-S1) - Löschadministration vorausgesetzt (regulär oder
+    Verschlusssachen, je nach `ObjectType.is_classified`), unabhängig vom
+    automatischen `_retention_poll_loop` (der nach Ablauf von
+    `TrashConfig.restore_period_days` dieselbe `retention_actions.
+    purge_expired_trash_entry` mit `trigger="trash_expiry"` aufruft - hier
+    `trigger="manual_purge"` mit dem echten Principal als `triggered_by`)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if document.deleted_at is None:
+        raise HTTPException(status_code=409, detail="Dokument befindet sich nicht im Papierkorb")
+
+    is_classified = False
+    if document.object_type_id is not None:
+        object_type = await app.state.object_type_client.get(document.object_type_id)
+        is_classified = bool(object_type and object_type.get("is_classified"))
+    required_role = (
+        settings.classified_trash_hard_delete_admin_role
+        if is_classified
+        else settings.trash_hard_delete_admin_role
+    )
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    if required_role not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Nur die Rolle {required_role!r} darf Dokumente endgültig aus dem "
+            "Papierkorb löschen",
+        )
+
+    purged = await retention_actions.purge_expired_trash_entry(
+        session,
+        app.state.storage,
+        document_id,
+        trigger="manual_purge",
+        triggered_by=x_dms_principal,
+    )
+    if not purged:
+        raise HTTPException(
+            status_code=409,
+            detail="Löschung durch eine aktive Governance-Mode-Sperre blockiert",
+        )
+    await session.commit()
+    await publish_event(
+        "document.trash_purged",
+        document_id,
+        {"trigger": "manual_purge", "triggered_by": x_dms_principal},
+        actor=x_dms_principal,
+    )
 
 
 @app.post("/documents/cascade-trash", response_model=CascadeResult)

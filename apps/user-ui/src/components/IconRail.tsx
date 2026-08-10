@@ -10,7 +10,8 @@ export type WorkspaceView =
   | "approvals"
   | "favorites"
   | "teamspaces"
-  | "delegations";
+  | "delegations"
+  | "trash";
 
 // Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
 // Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
@@ -82,6 +83,15 @@ export function IconRail({
         onClick={() => onSelectView("delegations")}
       >
         <span aria-hidden="true">🧑‍🤝‍🧑</span>
+      </button>
+      <button
+        type="button"
+        className={`icon-rail-button${activeView === "trash" ? " icon-rail-active" : ""}`}
+        title={t("iconRail.trash")}
+        aria-current={activeView === "trash" ? "page" : undefined}
+        onClick={() => onSelectView("trash")}
+      >
+        <span aria-hidden="true">🗑️</span>
       </button>
       <div className="icon-rail-settings">
         <button

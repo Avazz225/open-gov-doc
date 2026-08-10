@@ -11,6 +11,24 @@ from fastapi.testclient import TestClient
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
+OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
+
+
+def _create_object_type(*, is_classified: bool = False) -> int:
+    """Papierkorb-Familie (2.5, P15-S1) - legt einen echten Dokument-Objekttyp
+    im laufenden object-type-service an, gleiches Cross-Service-Testmuster
+    wie `_grant_document_read` gegen permission-service."""
+    response = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"trash-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "is_classified": is_classified,
+        },
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
 
 
 def _grant_document_read(principal_id: str) -> None:
@@ -904,6 +922,184 @@ def test_list_deleted_documents_shows_only_trash(client):
     # Der reguläre Listing-Endpunkt zeigt weiterhin nur nicht-gelöschte Dokumente.
     regular = client.get("/documents", params={"folder_id": "root"}).json()
     assert deleted["id"] not in [d["id"] for d in regular]
+
+
+def test_list_deleted_documents_without_scope_requires_folder_id(client):
+    response = client.get("/documents/deleted")
+    assert response.status_code == 422
+
+
+def test_trash_document_persists_deleted_by(client):
+    """P15-S0-Fund: `deleted_by` wurde bislang entgegengenommen, aber nie
+    tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb."""
+    document_id = upload(client, folder_id="root").json()["id"]
+    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+
+    response = client.get(
+        "/documents/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
+    )
+    assert response.status_code == 200
+    ids = [d["id"] for d in response.json()]
+    assert document_id in ids
+    assert response.json()[0]["deleted_by"] == "alice"
+
+
+def test_list_deleted_documents_personal_scope_hides_other_users_items(client):
+    own_id = upload(client, folder_id="root").json()["id"]
+    other_id = upload(client, folder_id="root").json()["id"]
+    client.post(f"/documents/{own_id}/trash", json={"deleted_by": "alice"})
+    client.post(f"/documents/{other_id}/trash", json={"deleted_by": "bob"})
+
+    response = client.get(
+        "/documents/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
+    )
+
+    ids = [d["id"] for d in response.json()]
+    assert own_id in ids
+    assert other_id not in ids
+
+
+def test_list_deleted_documents_personal_scope_without_principal_returns_401(client):
+    response = client.get("/documents/deleted", params={"scope": "personal"})
+    assert response.status_code == 401
+
+
+def test_list_deleted_documents_admin_scope_requires_role(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+
+    response = client.get("/documents/deleted", params={"scope": "admin"})
+    assert response.status_code == 403
+
+    response = client.get(
+        "/documents/deleted",
+        params={"scope": "admin"},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 200
+    assert document_id in [d["id"] for d in response.json()]
+
+
+def test_list_deleted_documents_admin_scope_excludes_classified(client):
+    classified_type_id = _create_object_type(is_classified=True)
+    regular_id = upload(client, folder_id="root").json()["id"]
+    classified_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
+        "id"
+    ]
+    client.post(f"/documents/{regular_id}/trash", json={"deleted_by": "alice"})
+    client.post(f"/documents/{classified_id}/trash", json={"deleted_by": "alice"})
+
+    response = client.get(
+        "/documents/deleted",
+        params={"scope": "admin"},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+
+    ids = [d["id"] for d in response.json()]
+    assert regular_id in ids
+    assert classified_id not in ids
+
+
+def test_list_deleted_documents_admin_classified_scope_shows_only_classified(client):
+    classified_type_id = _create_object_type(is_classified=True)
+    regular_id = upload(client, folder_id="root").json()["id"]
+    classified_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
+        "id"
+    ]
+    client.post(f"/documents/{regular_id}/trash", json={"deleted_by": "alice"})
+    client.post(f"/documents/{classified_id}/trash", json={"deleted_by": "alice"})
+
+    forbidden = client.get(
+        "/documents/deleted",
+        params={"scope": "admin_classified"},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert forbidden.status_code == 403
+
+    response = client.get(
+        "/documents/deleted",
+        params={"scope": "admin_classified"},
+        headers={"X-DMS-Roles": "classified-trash-hard-delete-admin"},
+    )
+    ids = [d["id"] for d in response.json()]
+    assert classified_id in ids
+    assert regular_id not in ids
+
+
+def test_purge_document_not_in_trash_returns_409(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+    response = client.post(
+        f"/documents/{document_id}/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 409
+
+
+def test_purge_document_unknown_returns_404(client):
+    response = client.post(
+        "/documents/does-not-exist/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 404
+
+
+def test_purge_document_without_principal_returns_401(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    response = client.post(f"/documents/{document_id}/purge")
+    assert response.status_code == 401
+
+
+def test_purge_document_without_admin_role_returns_403(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+    response = client.post(f"/documents/{document_id}/purge", headers={"X-DMS-Principal": "alice"})
+    assert response.status_code == 403
+
+
+def test_purge_document_with_admin_role_hard_deletes(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+
+    response = client.post(
+        f"/documents/{document_id}/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 204
+
+    still_there = client.get(
+        "/documents/deleted",
+        params={"scope": "admin"},
+        headers={"X-DMS-Roles": "dms-admin"},
+    ).json()
+    assert document_id not in [d["id"] for d in still_there]
+    register = client.get("/deletion-register").json()
+    entry = next(e for e in register if e["document_id"] == document_id)
+    assert entry["trigger"] == "manual_purge"
+    assert entry["triggered_by"] == "admin"
+
+
+def test_purge_classified_document_requires_classified_role(client):
+    classified_type_id = _create_object_type(is_classified=True)
+    document_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
+        "id"
+    ]
+    client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
+
+    wrong_role = client.post(
+        f"/documents/{document_id}/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert wrong_role.status_code == 403
+
+    response = client.post(
+        f"/documents/{document_id}/purge",
+        headers={
+            "X-DMS-Principal": "admin",
+            "X-DMS-Roles": "classified-trash-hard-delete-admin",
+        },
+    )
+    assert response.status_code == 204
 
 
 def test_cascade_trash_and_restore_roundtrip(client):

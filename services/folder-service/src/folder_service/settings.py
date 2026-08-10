@@ -34,3 +34,11 @@ class Settings(BaseServiceSettings):
     # document-service's `kennzeichen_admin_role`, hier für den neuen
     # `POST /folders/{id}/reconcile-restore-deletion`-Endpunkt.
     admin_role: str = "dms-admin"
+
+    # Papierkorb-Familie (2.5, P15-S1): endgültiges Löschen aus dem Papierkorb
+    # ist einer eigenen, domänengetrennten Admin-Rolle vorbehalten (4.6) -
+    # bewusst eigenständig konfigurierbar statt `admin_role` wiederzuverwenden,
+    # gleiches Prinzip wie document-service's separate Rollen-Settings. Keine
+    # Verschlusssachen-Variante hier - Konzept 2.5 nennt die Klassifizierung
+    # ausdrücklich nur für Dokumente, nicht für Ordner.
+    trash_hard_delete_admin_role: str = "dms-admin"

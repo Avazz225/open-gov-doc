@@ -79,6 +79,15 @@ async def get_folder(session: AsyncSession, folder_id: str) -> Folder:
     return folder
 
 
+async def get_folder_any_state(session: AsyncSession, folder_id: str) -> Folder:
+    """Öffentliches Gegenstück zu `get_folder` OHNE Papierkorb-Filter (2.5,
+    P15-S1) - für die manuelle Löschadministrations-Löschung, die gerade
+    einen bereits im Papierkorb liegenden Ordner ansprechen muss. Reiner
+    Namens-Wrapper um `_get_folder_row`, damit `main.py` nicht auf eine als
+    privat markierte Funktion zugreift."""
+    return await _get_folder_row(session, folder_id)
+
+
 async def list_children(session: AsyncSession, folder_id: str) -> list[Folder]:
     await get_folder(session, folder_id)
     result = await session.execute(
@@ -210,6 +219,7 @@ async def soft_delete_folder(
     for subtree_id in subtree_ids:
         node = await session.get(Folder, subtree_id)
         node.deleted_at = now
+        node.deleted_by = deleted_by
         node.updated_at = now
         if subtree_id != folder_id:
             node.deleted_via_folder_id = folder_id
@@ -235,12 +245,14 @@ async def restore_folder(
         )
     now = datetime.now(UTC)
     folder.deleted_at = None
+    folder.deleted_by = None
     folder.deleted_via_folder_id = None
     folder.updated_at = now
 
     result = await session.execute(select(Folder).where(Folder.deleted_via_folder_id == folder_id))
     for cascaded in result.scalars().all():
         cascaded.deleted_at = None
+        cascaded.deleted_by = None
         cascaded.deleted_via_folder_id = None
         cascaded.updated_at = now
     await session.flush()
@@ -249,12 +261,19 @@ async def restore_folder(
     return folder
 
 
-async def list_deleted_folders(session: AsyncSession, parent_id: str) -> list[Folder]:
-    result = await session.execute(
-        select(Folder)
-        .where(Folder.parent_id == parent_id, Folder.deleted_at.isnot(None))
-        .order_by(Folder.name)
-    )
+async def list_deleted_folders(
+    session: AsyncSession, *, parent_id: str | None = None, deleted_by: str | None = None
+) -> list[Folder]:
+    """Papierkorb-Inhalt (5.2, seit P7-S1b; um `deleted_by`-Filter erweitert
+    seit P15-S1). Ohne `parent_id` liefert dies den installationsweiten
+    Papierkorb (persönlicher Papierkorb/Löschadministrations-Ansicht, 2.5)
+    statt nur den eines einzelnen Ordners."""
+    query = select(Folder).where(Folder.deleted_at.isnot(None))
+    if parent_id is not None:
+        query = query.where(Folder.parent_id == parent_id)
+    if deleted_by is not None:
+        query = query.where(Folder.deleted_by == deleted_by)
+    result = await session.execute(query.order_by(Folder.name))
     return list(result.scalars().all())
 
 

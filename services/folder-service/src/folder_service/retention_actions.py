@@ -15,10 +15,20 @@ async def execute_forced_deletion(
     await repository.hard_delete_folder(session, folder_id)
 
 
-async def purge_expired_trash_entry(session: AsyncSession, folder_id: str) -> None:
-    """Routinemäßige Papierkorb-Bereinigung nach Ablauf der
-    Wiederherstellungsfrist (5.2, seit P7-S1b)."""
+async def purge_expired_trash_entry(
+    session: AsyncSession,
+    folder_id: str,
+    *,
+    trigger: str = "trash_expiry",
+    triggered_by: str | None = None,
+) -> None:
+    """Papierkorb-Bereinigung (5.2, seit P7-S1b) - routinemäßig nach Ablauf
+    der Wiederherstellungsfrist (`trigger="trash_expiry"`, Default, vom
+    `_retention_poll_loop` aufgerufen) ODER manuell auf Abruf durch die
+    Löschadministration (2.5, P15-S1, `trigger="manual_purge"` mit echtem
+    `triggered_by`) - identische Ausführung, nur das Löschregister-Trigger-
+    Feld unterscheidet sich."""
     await repository.create_deletion_register_entry(
-        session, folder_id, trigger="trash_expiry", reason=None, triggered_by=None
+        session, folder_id, trigger=trigger, reason=None, triggered_by=triggered_by
     )
     await repository.hard_delete_folder(session, folder_id)

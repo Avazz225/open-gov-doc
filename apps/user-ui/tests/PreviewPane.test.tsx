@@ -58,6 +58,7 @@ function makeDocument(overrides: Partial<DocumentSummary> = {}): DocumentSummary
     attributes: {},
     current_version_number: 1,
     deleted_at: null,
+    deleted_by: null,
     created_by: "alice",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

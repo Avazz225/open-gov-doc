@@ -28,6 +28,11 @@ class Folder(Base):
     # P7-S1b) - 1:1 dasselbe Feldpaar-Muster wie `document_service.Document`
     # (siehe P7-S1), hier zusätzlich um die Kaskaden-Herkunft ergänzt.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Wer die Löschmarkierung gesetzt hat (2.5, P15-S1) - Voraussetzung für den
+    # persönlichen Papierkorb, gleiche, bei P15-S0 gefundene Nachrüst-Lücke
+    # wie bei document-service (`deleted_by` wurde entgegengenommen, aber nie
+    # persistiert).
+    deleted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Gesetzt, wenn dieser Ordner nicht einzeln, sondern weil ein
     # übergeordneter Ordner in den Papierkorb verschoben wurde, mitgelöscht
     # wurde - `restore_folder` stellt beim Wiederherstellen des Elternordners
@@ -75,7 +80,8 @@ class DeletionRegisterEntry(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     folder_id: Mapped[str] = mapped_column(String(128), index=True)
-    trigger: Mapped[str] = mapped_column(String(32))  # "forced_deletion" | "trash_expiry"
+    # "forced_deletion" | "trash_expiry" | "manual_purge" (letzteres seit P15-S1)
+    trigger: Mapped[str] = mapped_column(String(32))
     reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

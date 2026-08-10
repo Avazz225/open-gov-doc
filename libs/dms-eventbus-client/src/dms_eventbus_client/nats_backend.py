@@ -112,5 +112,17 @@ class NatsEventBusClient(EventBusClient):
             ) from exc
 
     async def close(self) -> None:
-        if self._nc is not None:
-            await self._nc.close()
+        """`drain()` statt `close()` - Letzteres trennt die Verbindung sofort,
+        ohne aktive Subscriptions serverseitig sauber abzumelden. Bei einem
+        durable JetStream-Consumer (siehe `subscribe()`) bleibt die Bindung
+        serverseitig dadurch kurzzeitig bestehen, selbst nachdem der Prozess
+        (z. B. per `docker compose stop`) bereits beendet ist - ein sofortiger
+        Neustart mit demselben `durable`-Namen (z. B. der nächste Testlauf
+        gegen denselben Service) kann dann mit "consumer is already bound to
+        a subscription" fehlschlagen (live bei P15-S1 in `scripts/run-tests.sh
+        --build` beobachtet). `drain()` meldet jede Subscription explizit ab,
+        bevor die Verbindung geschlossen wird, und behebt das Rennen an der
+        Wurzel - mit eingebautem Timeout (nats-py-Default 30s), kein Risiko
+        eines hängenden Shutdowns."""
+        if self._nc is not None and not self._nc.is_closed:
+            await self._nc.drain()

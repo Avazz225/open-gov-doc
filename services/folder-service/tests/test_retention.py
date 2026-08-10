@@ -102,6 +102,46 @@ async def test_restore_folder_after_period_expired_raises(session):
         await repository.restore_folder(session, folder.id, document_client=document_client)
 
 
+async def test_soft_delete_folder_persists_deleted_by(session):
+    """P15-S0-Fund: `deleted_by` wurde bislang entgegengenommen, aber nie
+    tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb
+    (2.5, P15-S1)."""
+    folder = await _make_folder(session, name="Weg")
+    document_client = _fake_document_client()
+    deleted = await repository.soft_delete_folder(
+        session, folder.id, deleted_by="alice", document_client=document_client
+    )
+    assert deleted.deleted_by == "alice"
+
+
+async def test_restore_folder_clears_deleted_by(session):
+    folder = await _make_folder(session, name="Weg")
+    document_client = _fake_document_client()
+    await repository.soft_delete_folder(
+        session, folder.id, deleted_by="alice", document_client=document_client
+    )
+    restored = await repository.restore_folder(session, folder.id, document_client=document_client)
+    assert restored.deleted_by is None
+
+
+async def test_list_deleted_folders_filters_by_deleted_by(session):
+    own = await _make_folder(session, name="Eigener")
+    other = await _make_folder(session, name="Fremder")
+    document_client = _fake_document_client()
+    await repository.soft_delete_folder(
+        session, own.id, deleted_by="alice", document_client=document_client
+    )
+    await repository.soft_delete_folder(
+        session, other.id, deleted_by="bob", document_client=document_client
+    )
+
+    result = await repository.list_deleted_folders(session, deleted_by="alice")
+
+    ids = {f.id for f in result}
+    assert own.id in ids
+    assert other.id not in ids
+
+
 async def test_list_deleted_folders_only_shows_soft_deleted(session):
     kept = await _make_folder(session, name="Bleibt")
     deleted = await _make_folder(session, name="Weg")
@@ -110,7 +150,7 @@ async def test_list_deleted_folders_only_shows_soft_deleted(session):
         session, deleted.id, deleted_by="alice", document_client=document_client
     )
 
-    result = await repository.list_deleted_folders(session, ROOT_FOLDER_ID)
+    result = await repository.list_deleted_folders(session, parent_id=ROOT_FOLDER_ID)
 
     ids = {f.id for f in result}
     assert deleted.id in ids

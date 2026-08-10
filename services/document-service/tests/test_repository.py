@@ -455,12 +455,41 @@ async def test_restore_document_after_period_expired_raises(session):
         await repository.restore_document(session, document.id)
 
 
+async def test_delete_document_persists_deleted_by(session):
+    """P15-S0-Fund: `deleted_by` wurde bislang entgegengenommen, aber nie
+    tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb
+    (2.5, P15-S1)."""
+    document = await _make_document(session)
+    deleted = await repository.delete_document(session, document.id, deleted_by="alice")
+    assert deleted.deleted_by == "alice"
+
+
+async def test_restore_document_clears_deleted_by(session):
+    document = await _make_document(session)
+    await repository.delete_document(session, document.id, deleted_by="alice")
+    restored = await repository.restore_document(session, document.id)
+    assert restored.deleted_by is None
+
+
+async def test_list_deleted_documents_filters_by_deleted_by(session):
+    own = await _make_document(session, folder_id="root")
+    other = await _make_document(session, folder_id="root")
+    await repository.delete_document(session, own.id, deleted_by="alice")
+    await repository.delete_document(session, other.id, deleted_by="bob")
+
+    result = await repository.list_deleted_documents(session, deleted_by="alice")
+
+    ids = [d.id for d in result]
+    assert own.id in ids
+    assert other.id not in ids
+
+
 async def test_list_deleted_documents_only_shows_soft_deleted(session):
     kept = await _make_document(session, folder_id="root")
     deleted = await _make_document(session, folder_id="root")
     await repository.delete_document(session, deleted.id, deleted_by="alice")
 
-    result = await repository.list_deleted_documents(session, "root")
+    result = await repository.list_deleted_documents(session, folder_id="root")
 
     ids = [d.id for d in result]
     assert deleted.id in ids

@@ -268,6 +268,10 @@ export interface ObjectType {
   // Typ-Default (kein automatischer Aussonderungs-Zeitpunkt).
   default_archive_after_days: number | null;
   archive_encryption_enabled: boolean;
+  // Verschlusssachen-Kennzeichnung (2.5, seit P15-S1) - nur für
+  // applies_to="document" zulässig, keine eigene Klassifizierungsstufen-
+  // Systematik (rein binär).
+  is_classified: boolean;
 }
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -290,6 +294,7 @@ export async function createObjectType(
     deletionReasonRequiredOverride: boolean | null;
     defaultArchiveAfterDays: number | null;
     archiveEncryptionEnabled: boolean;
+    isClassified: boolean;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -308,6 +313,7 @@ export async function createObjectType(
       deletion_reason_required_override: params.deletionReasonRequiredOverride,
       default_archive_after_days: params.defaultArchiveAfterDays,
       archive_encryption_enabled: params.archiveEncryptionEnabled,
+      is_classified: params.isClassified,
     }),
     token
   );
@@ -336,6 +342,7 @@ export async function updateObjectType(
     deletionReasonRequiredOverride: boolean | null;
     defaultArchiveAfterDays: number | null;
     archiveEncryptionEnabled: boolean;
+    isClassified: boolean;
   }
 ): Promise<ObjectType> {
   const response = await request(
@@ -357,6 +364,7 @@ export async function updateObjectType(
         deletion_reason_required_override: params.deletionReasonRequiredOverride,
         default_archive_after_days: params.defaultArchiveAfterDays,
         archive_encryption_enabled: params.archiveEncryptionEnabled,
+        is_classified: params.isClassified,
       }),
     },
     token

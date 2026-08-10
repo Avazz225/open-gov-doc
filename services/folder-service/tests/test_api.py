@@ -188,6 +188,129 @@ def test_list_deleted_folders_shows_only_trash(client):
     assert kept["id"] not in ids
 
 
+def test_list_deleted_folders_without_scope_requires_parent_id(client):
+    response = client.get("/folders/deleted")
+    assert response.status_code == 422
+
+
+def test_trash_folder_persists_deleted_by(client):
+    """P15-S0-Fund: `deleted_by` wurde bislang entgegengenommen, aber nie
+    tatsächlich gespeichert - Voraussetzung für den persönlichen Papierkorb
+    (2.5, P15-S1)."""
+    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+
+    response = client.get(
+        "/folders/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert created["id"] in [f["id"] for f in body]
+    assert next(f for f in body if f["id"] == created["id"])["deleted_by"] == "alice"
+
+
+def test_list_deleted_folders_personal_scope_hides_other_users_items(client):
+    own = client.post("/folders", json={"name": "Eigener", "created_by": "alice"}).json()
+    other = client.post("/folders", json={"name": "Fremder", "created_by": "bob"}).json()
+    client.post(f"/folders/{own['id']}/trash", json={"deleted_by": "alice"})
+    client.post(f"/folders/{other['id']}/trash", json={"deleted_by": "bob"})
+
+    response = client.get(
+        "/folders/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": "alice"}
+    )
+
+    ids = [f["id"] for f in response.json()]
+    assert own["id"] in ids
+    assert other["id"] not in ids
+
+
+def test_list_deleted_folders_personal_scope_without_principal_returns_401(client):
+    response = client.get("/folders/deleted", params={"scope": "personal"})
+    assert response.status_code == 401
+
+
+def test_list_deleted_folders_admin_scope_requires_role(client):
+    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+
+    response = client.get("/folders/deleted", params={"scope": "admin"})
+    assert response.status_code == 403
+
+    response = client.get(
+        "/folders/deleted", params={"scope": "admin"}, headers={"X-DMS-Roles": "dms-admin"}
+    )
+    assert response.status_code == 200
+    assert created["id"] in [f["id"] for f in response.json()]
+
+
+def test_purge_folder_not_in_trash_returns_409(client):
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    response = client.post(
+        f"/folders/{created['id']}/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 409
+
+
+def test_purge_folder_unknown_returns_404(client):
+    response = client.post(
+        "/folders/does-not-exist/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 404
+
+
+def test_purge_folder_without_principal_returns_401(client):
+    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    response = client.post(f"/folders/{created['id']}/purge")
+    assert response.status_code == 401
+
+
+def test_purge_folder_without_admin_role_returns_403(client):
+    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+    response = client.post(f"/folders/{created['id']}/purge", headers={"X-DMS-Principal": "alice"})
+    assert response.status_code == 403
+
+
+def test_purge_folder_with_admin_role_hard_deletes(client):
+    created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
+    client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
+
+    response = client.post(
+        f"/folders/{created['id']}/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 204
+
+    still_there = client.get(
+        "/folders/deleted", params={"scope": "admin"}, headers={"X-DMS-Roles": "dms-admin"}
+    ).json()
+    assert created["id"] not in [f["id"] for f in still_there]
+    register = client.get("/deletion-register").json()
+    entry = next(e for e in register if e["folder_id"] == created["id"])
+    assert entry["trigger"] == "manual_purge"
+    assert entry["triggered_by"] == "admin"
+
+
+def test_purge_folder_with_remaining_child_row_returns_409(client):
+    """Gleiche Sicherheitsprüfung wie die automatische Zwangslöschung
+    (`_execute_or_defer_forced_deletion`/`has_any_child_folder_row`) - der
+    Unterordner wird beim Trashen des Elternordners mitkaskadiert (bleibt
+    aber als Zeile bestehen), ein physisches Entfernen des Elternordners
+    würde sonst mit einer FK-Violation fehlschlagen."""
+    parent = client.post("/folders", json={"name": "Eltern", "created_by": "alice"}).json()
+    client.post("/folders", json={"name": "Kind", "parent_id": parent["id"], "created_by": "alice"})
+    client.post(f"/folders/{parent['id']}/trash", json={"deleted_by": "alice"})
+
+    response = client.post(
+        f"/folders/{parent['id']}/purge",
+        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert response.status_code == 409
+
+
 def test_put_retention_sets_fields(client):
     created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
 

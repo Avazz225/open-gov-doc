@@ -52,5 +52,16 @@ class ObjectTypeClient:
         response.raise_for_status()
         return response.json()["kennzeichen"]
 
+    async def list_classified_document_type_ids(self) -> set[int]:
+        """Verschlusssachen-Papierkorb (2.5, P15-S1) - liefert die IDs aller
+        als Verschlusssache eingestuften Dokument-Objekttypen, damit
+        document-service den Papierkorb strukturell trennen kann, ohne pro
+        gelöschtem Dokument einen einzelnen `get()`-Aufruf zu machen."""
+        response = await self._client.get(
+            "/object-types", params={"applies_to": "document", "is_classified": "true"}
+        )
+        response.raise_for_status()
+        return {row["id"] for row in response.json()}
+
     async def close(self) -> None:
         await self._client.aclose()

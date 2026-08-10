@@ -61,6 +61,10 @@ const getDocumentMock = vi.fn();
 const getFolderMock = vi.fn();
 const getShareLinkConfigMock = vi.fn();
 const updateFolderAttributesMock = vi.fn();
+const listDeletedDocumentsGlobalMock = vi.fn();
+const listDeletedFoldersGlobalMock = vi.fn();
+const purgeDocumentMock = vi.fn();
+const purgeFolderMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -89,6 +93,10 @@ vi.mock("@/lib/api", () => ({
   getFolder: (...args: unknown[]) => getFolderMock(...args),
   getShareLinkConfig: (...args: unknown[]) => getShareLinkConfigMock(...args),
   updateFolderAttributes: (...args: unknown[]) => updateFolderAttributesMock(...args),
+  listDeletedDocumentsGlobal: (...args: unknown[]) => listDeletedDocumentsGlobalMock(...args),
+  listDeletedFoldersGlobal: (...args: unknown[]) => listDeletedFoldersGlobalMock(...args),
+  purgeDocument: (...args: unknown[]) => purgeDocumentMock(...args),
+  purgeFolder: (...args: unknown[]) => purgeFolderMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
@@ -148,6 +156,7 @@ const document1 = {
   attributes: {},
   current_version_number: 1,
   deleted_at: null,
+  deleted_by: null,
   created_by: "alice",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
@@ -210,6 +219,12 @@ describe("DocumentWorkspace", () => {
     getDocumentMock.mockReset();
     getFolderMock.mockReset();
     updateFolderAttributesMock.mockReset();
+    listDeletedDocumentsGlobalMock.mockReset();
+    listDeletedDocumentsGlobalMock.mockResolvedValue([]);
+    listDeletedFoldersGlobalMock.mockReset();
+    listDeletedFoldersGlobalMock.mockResolvedValue([]);
+    purgeDocumentMock.mockReset();
+    purgeFolderMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {
@@ -863,6 +878,7 @@ describe("DocumentWorkspace", () => {
       object_type_id: null,
       attributes: {},
       deleted_at: "2026-01-05T00:00:00Z",
+      deleted_by: "alice",
       retention_until: null,
       full_deletion: false,
       pending_deletion_reason: null,
@@ -1579,6 +1595,70 @@ describe("DocumentWorkspace", () => {
       await user.click(screen.getByText("Papierkorb anzeigen"));
 
       expect(screen.queryByText("Sammelbearbeitung")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Papierkorb-Familie (persönlicher/Verschlusssachen-Papierkorb, P15-S1)", () => {
+    it("shows only the personal trash view for a regular user, without a purge button", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([]);
+      listDeletedDocumentsGlobalMock.mockResolvedValue([{ ...document1, deleted_at: "2026-01-05T00:00:00Z" }]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(screen.getByTitle("Papierkorb"));
+
+      expect(await screen.findByText(/Rechnung.pdf/)).toBeInTheDocument();
+      expect(listDeletedDocumentsGlobalMock).toHaveBeenCalledWith("token-123", "personal");
+      expect(screen.queryByText("Vollständiger Papierkorb")).not.toBeInTheDocument();
+      expect(screen.queryByText("Endgültig löschen")).not.toBeInTheDocument();
+    });
+
+    it("offers the admin trash scope only for a dms-admin user and purges a document", async () => {
+      authState.realmRoles = ["dms-admin"];
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([]);
+      listDeletedDocumentsGlobalMock.mockResolvedValue([{ ...document1, deleted_at: "2026-01-05T00:00:00Z" }]);
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(screen.getByTitle("Papierkorb"));
+      await user.click(await screen.findByText("Vollständiger Papierkorb"));
+
+      await waitFor(() => expect(listDeletedDocumentsGlobalMock).toHaveBeenCalledWith("token-123", "admin"));
+      await user.click(await screen.findByText("Endgültig löschen"));
+
+      expect(purgeDocumentMock).toHaveBeenCalledWith("token-123", "d1");
+    });
+
+    it("restores a deleted folder from the trash pane", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([]);
+      const deletedFolder: Folder = {
+        id: "f-trash",
+        name: "Alte Akte",
+        parent_id: "root",
+        object_type_id: null,
+        attributes: {},
+        deleted_at: "2026-01-05T00:00:00Z",
+        deleted_by: "alice",
+        retention_until: null,
+        full_deletion: false,
+        pending_deletion_reason: null,
+      };
+      listDeletedFoldersGlobalMock.mockResolvedValue([deletedFolder]);
+      restoreFolderMock.mockResolvedValue({ ...deletedFolder, deleted_at: null });
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(screen.getByTitle("Papierkorb"));
+      await user.click(await screen.findByText("Wiederherstellen"));
+
+      expect(restoreFolderMock).toHaveBeenCalledWith("token-123", "f-trash");
     });
   });
 });

@@ -25,6 +25,7 @@ import { SearchPane } from "./SearchPane";
 import { Splitter } from "./Splitter";
 import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
+import { TrashPane } from "./TrashPane";
 
 const MIN_LEFT_WIDTH = 260;
 const MIN_TOP_HEIGHT = 160;
@@ -345,8 +346,10 @@ export function DocumentWorkspace() {
                 currentPrincipalId={user?.sub ?? ""}
                 onOpenFolder={handleOpenTeamspaceFolder}
               />
-            ) : (
+            ) : view === "delegations" ? (
               <DelegationsPane token={accessToken ?? ""} currentPrincipalId={user?.sub ?? ""} />
+            ) : (
+              <TrashPane token={accessToken ?? ""} />
             )}
           </div>
           <Splitter

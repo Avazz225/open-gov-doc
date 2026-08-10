@@ -14,6 +14,12 @@ DSN = os.environ.get(
 # Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
 # siehe PROGRESS.md "Tooling & Testing" (P5-S2-Datenverlust, P5b-S6-Leck).
 os.environ["DMS_POSTGRES_DSN"] = DSN
+# Papierkorb-Familie (2.5, P15-S1): beide Rollen-Settings defaulten auf
+# "dms-admin" (gleiches Muster wie kennzeichen_admin_role) - für Tests, die
+# regulären und Verschlusssachen-Papierkorb tatsächlich unterscheiden müssen,
+# vor dem `Settings()`-Import auf einen eigenen Rollennamen gesetzt, sonst
+# wären beide Rollen in dieser Testumgebung ununterscheidbar identisch.
+os.environ["DMS_CLASSIFIED_TRASH_HARD_DELETE_ADMIN_ROLE"] = "classified-trash-hard-delete-admin"
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 

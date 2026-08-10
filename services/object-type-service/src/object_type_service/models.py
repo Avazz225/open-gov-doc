@@ -61,6 +61,14 @@ class ObjectType(Base):
     # (5.6) - ueber archival-service's KeyStore-Plugin-Schnittstelle (ADR
     # 0029), Default aus false (unverschluesselt).
     archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Verschlusssachen-Kennzeichnung (2.5, P15-S1) - nur für applies_to ==
+    # "document" gesetzt (der Konzepttext nennt ausdrücklich nur Dokumente,
+    # keine Ordner). Ein als Verschlusssache eingestuftes, gelöschtes
+    # Dokument landet im strukturell getrennten Verschlusssachen-Papierkorb
+    # statt im regulären, siehe document-service `settings.classified_trash_
+    # hard_delete_admin_role`. Keine eigene Klassifizierungsstufen-Systematik
+    # (nur binär), gleiches einfaches Muster wie archive_encryption_enabled.
+    is_classified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

@@ -33,6 +33,10 @@ await consumer.connect()
 await consumer.subscribe("registry.>", handler, durable="audit-service")
 ```
 
+## Sauberes Beenden (`close()`, seit P15-S1)
+
+`close()` ruft intern `drain()` statt `nc.close()` auf — Letzteres trennt die Verbindung sofort, ohne aktive Subscriptions serverseitig sauber abzumelden. Bei einem durable JetStream-Consumer (`subscribe(..., durable=...)`) blieb die Bindung dadurch kurzzeitig bestehen, selbst nachdem der Prozess bereits beendet war (z. B. per `docker compose stop`) — ein sofortiger Neustart mit demselben `durable`-Namen (z. B. der nächste Testlauf desselben Service, siehe `scripts/run-tests.sh`s `CONSUMER_SERVICES`) konnte dann intermittierend mit `nats: JetStream.Error consumer is already bound to a subscription` fehlschlagen (live bei P15-S1 in `scripts/run-tests.sh --build` beobachtet und reproduziert). `drain()` meldet jede Subscription explizit ab, bevor die Verbindung geschlossen wird, und behebt das Rennen an der Wurzel statt es nur unwahrscheinlicher zu machen — mit eingebautem Timeout (nats-py-Default 30s), kein Risiko eines hängenden Shutdowns.
+
 ## Tests
 
 Integrationstest gegen echtes NATS JetStream (nutzt `infra/docker-compose.yml`):

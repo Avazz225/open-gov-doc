@@ -101,6 +101,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS archive_encryption_enabled BOOLEAN NOT NULL DEFAULT false"
             )
         )
+        # Verschlusssachen-Kennzeichnung (2.5, P15-S1) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text(
+                "ALTER TABLE object_type.object_type "
+                "ADD COLUMN IF NOT EXISTS is_classified BOOLEAN NOT NULL DEFAULT false"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -151,9 +158,13 @@ async def create_object_type(
 
 @app.get("/object-types", response_model=list[ObjectTypeOut])
 async def list_object_types(
-    applies_to: str | None = None, session: AsyncSession = Depends(get_session)
+    applies_to: str | None = None,
+    is_classified: bool | None = None,
+    session: AsyncSession = Depends(get_session),
 ) -> list[ObjectTypeOut]:
-    return await repository.list_object_types(session, applies_to=applies_to)
+    return await repository.list_object_types(
+        session, applies_to=applies_to, is_classified=is_classified
+    )
 
 
 @app.get("/object-types/{object_type_id}", response_model=ObjectTypeOut)

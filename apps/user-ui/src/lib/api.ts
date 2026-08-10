@@ -107,6 +107,8 @@ export interface Folder {
   object_type_id: number | null;
   attributes: Record<string, unknown>;
   deleted_at: string | null;
+  // Persönlicher Papierkorb (2.5, P15-S1).
+  deleted_by: string | null;
   // Aufbewahrung/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b).
   retention_until: string | null;
   full_deletion: boolean;
@@ -264,6 +266,34 @@ export async function listDeletedFolders(token: string, parentId: string): Promi
   return response.json();
 }
 
+// Papierkorb-Familie (2.5, P15-S1) - installationsweite Sichten statt der
+// obigen ordnerbezogenen Auflistung. "personal" braucht keine Rolle (nur die
+// eigenen Löschmarkierungen), "admin" verlangt serverseitig die
+// Löschadministration-Rolle (403 sonst).
+export type TrashScope = "personal" | "admin";
+
+export async function listDeletedFoldersGlobal(
+  token: string,
+  scope: TrashScope
+): Promise<Folder[]> {
+  const response = await request(
+    "folder-service",
+    `folders/deleted?scope=${encodeURIComponent(scope)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function purgeFolder(token: string, folderId: string): Promise<void> {
+  await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/purge`,
+    { method: "POST" },
+    token
+  );
+}
+
 export async function putFolderRetention(
   token: string,
   folderId: string,
@@ -375,6 +405,8 @@ export interface ObjectType {
   // globaler Standard (KennzeichenConfig) gilt, siehe lib/kennzeichen.ts.
   kennzeichen_format?: string | null;
   kennzeichen_display_override?: boolean | null;
+  // Verschlusssachen-Kennzeichnung (2.5, P15-S1) - nur für applies_to="document".
+  is_classified?: boolean;
 }
 
 export interface KennzeichenConfig {
@@ -452,6 +484,8 @@ export interface DocumentSummary {
   attributes: Record<string, unknown>;
   current_version_number: number;
   deleted_at: string | null;
+  // Persönlicher Papierkorb (2.5, P15-S1).
+  deleted_by: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -572,6 +606,34 @@ export async function listDeletedDocuments(
     token
   );
   return response.json();
+}
+
+// Papierkorb-Familie (2.5, P15-S1) - installationsweite Sichten. "admin"
+// zeigt den regulären, nicht-klassifizierten Papierkorb, "admin_classified"
+// den strukturell getrennten Verschlusssachen-Papierkorb (je eigene,
+// serverseitig geprüfte Rolle, 403 ohne).
+export type DocumentTrashScope = "personal" | "admin" | "admin_classified";
+
+export async function listDeletedDocumentsGlobal(
+  token: string,
+  scope: DocumentTrashScope
+): Promise<DocumentSummary[]> {
+  const response = await request(
+    "document-service",
+    `documents/deleted?scope=${encodeURIComponent(scope)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function purgeDocument(token: string, documentId: string): Promise<void> {
+  await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/purge`,
+    { method: "POST" },
+    token
+  );
 }
 
 export interface LegalHold {

@@ -22,6 +22,7 @@ class DocumentOut(BaseModel):
     attributes: dict
     current_version_number: int
     deleted_at: datetime | None
+    deleted_by: str | None
     created_by: str
     created_at: datetime
     updated_at: datetime
@@ -187,7 +188,7 @@ class LegalHoldOut(BaseModel):
 class DeletionRegisterEntryOut(BaseModel):
     id: str
     document_id: str
-    trigger: Literal["forced_deletion", "trash_expiry"]
+    trigger: Literal["forced_deletion", "trash_expiry", "manual_purge"]
     reason: str | None
     triggered_by: str | None
     occurred_at: datetime

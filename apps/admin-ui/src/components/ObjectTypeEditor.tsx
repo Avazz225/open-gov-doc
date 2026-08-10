@@ -124,6 +124,10 @@ export function ObjectTypeEditor() {
   // defaultRetentionDays für beide appliesTo-Werte.
   const [defaultArchiveAfterDays, setDefaultArchiveAfterDays] = useState("");
   const [archiveEncryptionEnabled, setArchiveEncryptionEnabled] = useState(false);
+  // Verschlusssachen-Kennzeichnung (2.5, seit P15-S1) - nur für
+  // appliesTo="document" gültig, gleiches clientseitiges Erzwingungsmuster
+  // wie kennzeichenFormat/requiredSignatureLevel oben.
+  const [isClassified, setIsClassified] = useState(false);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -164,6 +168,7 @@ export function ObjectTypeEditor() {
     setDeletionReasonRequiredOverride("default");
     setDefaultArchiveAfterDays("");
     setArchiveEncryptionEnabled(false);
+    setIsClassified(false);
   }
 
   function startEdit(ot: ObjectType) {
@@ -206,6 +211,7 @@ export function ObjectTypeEditor() {
       ot.default_archive_after_days === null ? "" : String(ot.default_archive_after_days)
     );
     setArchiveEncryptionEnabled(ot.archive_encryption_enabled);
+    setIsClassified(ot.is_classified);
     setError(null);
   }
 
@@ -269,6 +275,9 @@ export function ObjectTypeEditor() {
     // beide appliesTo-Werte.
     const defaultArchiveAfterDaysValue =
       defaultArchiveAfterDays.trim() === "" ? null : Number(defaultArchiveAfterDays);
+    // Verschlusssachen-Kennzeichnung (2.5, P15-S1) ist wie Kennzeichen-Felder
+    // nur für Dokumentklassen gültig.
+    const isClassifiedValue = appliesTo === "document" && isClassified;
 
     try {
       if (editingId === null) {
@@ -285,6 +294,7 @@ export function ObjectTypeEditor() {
           deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
           defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
           archiveEncryptionEnabled,
+          isClassified: isClassifiedValue,
         });
 
         // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
@@ -320,6 +330,7 @@ export function ObjectTypeEditor() {
           deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
           defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
           archiveEncryptionEnabled,
+          isClassified: isClassifiedValue,
         });
       }
       resetForm();
@@ -478,7 +489,20 @@ export function ObjectTypeEditor() {
               />
               {t("objectTypes.archiveEncryptionEnabledLabel")}
             </label>
+            {appliesTo === "document" && (
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={isClassified}
+                  onChange={(e) => setIsClassified(e.target.checked)}
+                />
+                {t("objectTypes.isClassifiedLabel")}
+              </label>
+            )}
           </div>
+          {appliesTo === "document" && (
+            <p className="hint">{t("objectTypes.isClassifiedHint")}</p>
+          )}
 
           <h3>{t("objectTypes.attributesHeading")}</h3>
           {attributes.length === 0 && <p className="empty-state">{t("objectTypes.noAttributes")}</p>}

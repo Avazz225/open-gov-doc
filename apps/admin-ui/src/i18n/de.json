@@ -163,6 +163,8 @@
     "defaultArchiveAfterDaysLabel": "Aussonderung nach (Tage)",
     "defaultArchiveAfterDaysPlaceholder": "Kein Standard",
     "archiveEncryptionEnabledLabel": "Archiv-Kopie verschlüsseln",
+    "isClassifiedLabel": "Verschlusssache",
+    "isClassifiedHint": "Gelöschte Dokumente dieser Klasse landen im strukturell getrennten Verschlusssachen-Papierkorb (2.5) statt im regulären.",
     "allowedParentTypesLabel": "Erlaubte Elternordner-Klassen",
     "allowedParentTypesRootOption": "Direkt unter der Wurzel ($ROOT)",
     "allowedParentTypesHint": "Keine Auswahl = überall platzierbar (Standard).",

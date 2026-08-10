@@ -76,3 +76,11 @@ class Settings(BaseServiceSettings):
     # konfigurierbares Rollen-Setting-Muster wie `kennzeichen_admin_role`/
     # `governance_bypass_role`, auch wenn der Default identisch ist.
     share_link_revoke_admin_role: str = "dms-admin"
+
+    # Papierkorb-Familie (2.5, P15-S1): endgültiges Löschen aus dem Papierkorb
+    # ist zwei domänengetrennten Admin-Rollen vorbehalten (4.6, gleiches
+    # Setting-Muster wie oben) - eine reguläre und eine engere für als
+    # Verschlusssache eingestufte Dokumente (`ObjectType.is_classified`), die
+    # nicht zwingend personell identisch besetzt sind.
+    trash_hard_delete_admin_role: str = "dms-admin"
+    classified_trash_hard_delete_admin_role: str = "dms-admin"

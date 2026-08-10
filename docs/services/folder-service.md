@@ -10,11 +10,12 @@
 | Methode | Pfad | Beschreibung |
 |---|---|---|
 | `POST` | `/folders` | Anlegen (`name`, `parent_id` default `"root"`, optional `object_type_id`/`attributes`, `created_by`) |
-| `GET` | `/folders/deleted?parent_id=` | Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1b) |
+| `GET` | `/folders/deleted?parent_id=` | Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1b). Alternativ `?scope=personal\|admin` statt `parent_id` (installationsweiter Papierkorb, 2.5, seit P15-S1), siehe "Papierkorb-Familie" unten |
 | `GET` | `/folders/{id}` | Metadaten — behandelt einen soft-gelöschten Ordner wie nicht existent (404) |
 | `GET` | `/folders/{id}/children` | Direkte Unterordner (nicht gelöschte) |
 | `PATCH` | `/folders/{id}` | Umbenennen und/oder verschieben (`parent_id`) und/oder Attribute ändern |
 | `DELETE` | `/folders/{id}` | Sofortiger Hard-Delete — 409, falls noch Unterordner vorhanden. Fallback für bereits-leere, nie-retention-behaftete Fälle; der reguläre Weg ist seit P7-S1b `POST .../trash` |
+| `POST` | `/folders/{id}/purge` | Manuelle, sofortige endgültige Löschung eines bereits im Papierkorb liegenden Ordners (2.5, seit P15-S1) — `409` wenn nicht im Papierkorb oder Teilbaum nicht leer, `403` ohne Löschadministration-Rolle, siehe "Papierkorb-Familie" unten |
 | `POST` | `/folders/{id}/trash` | Papierkorb-Weg (5.2, seit P7-S1b) — kaskadiert über den gesamten aktiven Teilbaum. Seit **P7-S1c** optional per Vier-Augen-Prinzip gegated (Aktionstyp `folder.delete`, Löschantrag-Workflow für reguläre Nutzer) — Response `TrashResult{status: "trashed"\|"pending_approval", folder, approval_request_id}` |
 | `POST` | `/folders/{id}/restore` | Papierkorb-Wiederherstellung inkl. kaskadierter Unterordner/Dokumente (5.2, seit P7-S1b) |
 | `PUT` | `/folders/{id}/retention` | Aufbewahrungsfrist/Zwangslöschung terminieren (5.2/5.2a, seit P7-S1b) |
@@ -31,7 +32,7 @@ Ein Wurzelordner (`id: "root"`) wird beim Start idempotent angelegt — analog z
 
 ## Datenmodell
 
-`folder`: `id`, `name`, `parent_id` (self-FK, nullable nur für `root`), `object_type_id` (opake Referenz auf Object-Type Service, Integer), `attributes` (JSON), `created_by/at`, `updated_at`. Seit P7-S1b zusätzlich: `deleted_at`, `deleted_via_folder_id` (Kaskaden-Herkunft, s. u.), `retention_until`, `full_deletion`, `pending_deletion_reason`, `deletion_reminder_sent_at`, `reminder_notify_email`, `force_delete_approval_requested_at` — strukturell identisch zu `document_service.Document`s entsprechenden Feldern (P7-S1).
+`folder`: `id`, `name`, `parent_id` (self-FK, nullable nur für `root`), `object_type_id` (opake Referenz auf Object-Type Service, Integer), `attributes` (JSON), `created_by/at`, `updated_at`. Seit P7-S1b zusätzlich: `deleted_at`, `deleted_via_folder_id` (Kaskaden-Herkunft, s. u.), `retention_until`, `full_deletion`, `pending_deletion_reason`, `deletion_reminder_sent_at`, `reminder_notify_email`, `force_delete_approval_requested_at` — strukturell identisch zu `document_service.Document`s entsprechenden Feldern (P7-S1). Seit P15-S1 zusätzlich `deleted_by` (Voraussetzung für den persönlichen Papierkorb, 2.5).
 
 `legal_hold`/`deletion_register_entry`/`retention_config`/`trash_config`: strukturgleich zu den `document-service`-Pendants (siehe dort), aber eigenständige Tabellen mit `folder_id` statt `document_id` — **keine** Wiederverwendung der `document-service`-Tabellen über Service-Grenzen hinweg (kein Cross-Schema-FK, keine verfrühte Zentralisierung in einen Compliance-Service, dieselbe Begründung wie bei P7-S1). Ein Installationsbetreiber kann dadurch für Ordner andere Vorgaben (Wiederherstellungsfrist, Löschgrund-Pflicht) als für Dokumente konfigurieren.
 
@@ -56,6 +57,15 @@ Trägt ein Folder einen `object_type_id`, wird beim Anlegen `POST /object-types/
 ## Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c)
 
 Eigener Aktionstyp `folder.delete`, getrennt von `folder.force_delete` — Letzteres bleibt für die retentionsgetriggerte Zwangslöschung, `folder.delete` gatet die manuelle, nutzerausgelöste `POST /folders/{id}/trash` (Gate-Prüfung direkt im Endpunkt, `TrashResult`-Wrapper). Bei Genehmigung führt ein neuer `consumer.py`-Zweig (`_handle_delete_approved`) `repository.soft_delete_folder` aus — identische Kaskade auf Unterordner/Dokumente wie beim direkten Aufruf. Keine neue Selbstgenehmigungs-Logik nötig (`permission-service` verhindert bereits generisch Initiator == Genehmiger). Siehe `docs/services/document-service.md` für die ausführliche Architekturbegründung (identisches Muster) und `docs/services/user-ui.md` für die neue Genehmigungs-Inbox.
+
+## Papierkorb-Familie: persönlicher Papierkorb (2.5, seit P15-S1)
+
+Ordner-Pendant zu `document-service`s gleichnamigem Abschnitt — siehe dort für die vollständige Begründung und [ADR 0051](../adr/0051-papierkorb-familie-classification-via-object-type-scoped-global-endpoints.md). Keine Verschlusssachen-Variante: Konzept 2.5 kennzeichnet ausdrücklich nur Dokumente als Verschlusssache, keine Ordner.
+
+- **`deleted_by` nachgerüstet**: `repository.soft_delete_folder` nahm `deleted_by` bereits als Parameter entgegen, persistierte ihn aber nie (gleiche, bei P15-S0 gefundene Lücke wie bei `document-service`) — jetzt echte Spalte, bei `restore_folder` wieder zurückgesetzt.
+- **`scope`-Query-Parameter auf `GET /folders/deleted`** (`personal`/`admin`) — rein additiv, ohne `scope` unverändertes, ordnerbezogenes Verhalten. `scope=personal` filtert auf `deleted_by == X-DMS-Principal` (401 ohne Principal-Header), `scope=admin` verlangt `trash_hard_delete_admin_role` (Setting, Default `"dms-admin"`, 403 sonst).
+- **`POST /folders/{id}/purge`**: manuelle, sofortige endgültige Löschung eines bereits im Papierkorb liegenden, leeren Ordners — ruft dieselbe `retention_actions.purge_expired_trash_entry()` auf wie der Poll-Loop (jetzt um `trigger`/`triggered_by` erweitert, `trigger="manual_purge"`). Gleiche Sicherheitsprüfung wie die automatische Zwangslöschung: `has_any_child_folder_row`/`document_client.count_active` müssen leer sein (409 sonst), sonst würde die physische Entfernung an der FK-Constraint scheitern — ein verschachtelter Baum muss deshalb von den Blättern nach oben einzeln geleert werden, kein rekursives Bulk-Purge.
+- **`get_folder_any_state`** (neue, öffentliche Repository-Funktion) — Gegenstück zu `get_folder` OHNE Papierkorb-Filter, für den Purge-Endpunkt, der gerade einen bereits gelöschten Ordner ansprechen muss.
 
 ## Struktur-Events (Vertrag mit Permission Service)
 
@@ -88,7 +98,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-**79 Tests** (vorher 75, 4 neu seit **P14-S12**: `test_object_type_validation.py` bekam vier neue Fälle für den oben beschriebenen Bugfix — Attribut-PATCH ohne Verschiebung wird jetzt validiert (Ablehnung UND Erfolgsfall), eine PATCH mit nur `name` validiert weiterhin gegen die bestehenden Attribute, ein untypisierter Ordner bleibt unbeeinflusst) (`test_api.py`, `test_repository.py`, `test_object_type_validation.py`, `test_events.py`, `test_retention.py`, `test_retention_actions.py`, `test_consumer.py`) — die letzten drei Dateien neu seit P7-S1b (Kaskaden-Logik gegen einen Fake-`DocumentClient`, Poll-Loop-Zweige direkt aufgerufen wie bei `document-service`, Vier-Augen-Consumer-Integration, inkl. eines Regressionstests für einen beim Live-Smoke-Test gefundenen echten Bug — siehe `PROGRESS.md`: die Nicht-leer-Prüfung vor einer Zwangslöschung hielt einen Ordner mit nur einem bereits soft-gelöschten Unterordner fälschlich für leer und crashte an der Postgres-FK-Constraint; `has_any_child_folder_row` prüft seither zusätzlich ohne `deleted_at`-Filter).
+**93 Tests** (vorher 79, 14 neu seit **P15-S1**: `test_api.py` bekam Tests für `scope`-Sichtbarkeit auf `GET /folders/deleted` (401/403/personal/admin-Filterung), `POST /folders/{id}/purge` (401/403/404/409-nicht-im-Papierkorb/409-verbleibende-Kind-Zeile/204-Erfolg inkl. Löschregister-Eintrag), `test_retention.py` bekam Tests für `deleted_by`-Persistierung/-Rücksetzung/-Filterung) (`test_api.py`, `test_repository.py`, `test_object_type_validation.py`, `test_events.py`, `test_retention.py`, `test_retention_actions.py`, `test_consumer.py`) — die letzten drei Dateien neu seit P7-S1b (Kaskaden-Logik gegen einen Fake-`DocumentClient`, Poll-Loop-Zweige direkt aufgerufen wie bei `document-service`, Vier-Augen-Consumer-Integration, inkl. eines Regressionstests für einen beim Live-Smoke-Test gefundenen echten Bug — siehe `PROGRESS.md`: die Nicht-leer-Prüfung vor einer Zwangslöschung hielt einen Ordner mit nur einem bereits soft-gelöschten Unterordner fälschlich für leer und crashte an der Postgres-FK-Constraint; `has_any_child_folder_row` prüft seither zusätzlich ohne `deleted_at`-Filter).
 
 ## Offene Punkte
 

@@ -2,7 +2,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service.models import (
@@ -169,9 +169,13 @@ async def delete_document(session: AsyncSession, document_id: str, *, deleted_by
     die API ausgelöst. Seit P7-S1 wandert ein weich gelöschtes Dokument in
     den Papierkorb (`restore_document`/`list_deleted_documents`) und wird
     nach Ablauf von `TrashConfig.restore_period_days` automatisch physisch
-    bereinigt (siehe `list_expired_trash`/main.py `_retention_poll_loop`)."""
+    bereinigt (siehe `list_expired_trash`/main.py `_retention_poll_loop`).
+    `deleted_by` wurde bislang entgegengenommen, aber nie persistiert (echte,
+    bei P15-S0 gefundene Lücke) - jetzt Voraussetzung für den persönlichen
+    Papierkorb (2.5, P15-S1)."""
     document = await get_document(session, document_id)
     document.deleted_at = datetime.now(UTC)
+    document.deleted_by = deleted_by
     document.updated_at = document.deleted_at
     await session.flush()
     return document
@@ -190,6 +194,7 @@ async def restore_document(session: AsyncSession, document_id: str) -> Document:
             f"Wiederherstellungsfrist ({config.restore_period_days} Tage) ist abgelaufen"
         )
     document.deleted_at = None
+    document.deleted_by = None
     document.updated_at = datetime.now(UTC)
     await session.flush()
     return document
@@ -213,6 +218,7 @@ async def cascade_trash_by_folder_ids(
     now = datetime.now(UTC)
     for document in documents:
         document.deleted_at = now
+        document.deleted_by = deleted_by
         document.deleted_via_folder_id = via_folder_id
         document.updated_at = now
     await session.flush()
@@ -229,6 +235,7 @@ async def cascade_restore_by_via_folder_id(session: AsyncSession, via_folder_id:
     now = datetime.now(UTC)
     for document in documents:
         document.deleted_at = None
+        document.deleted_by = None
         document.deleted_via_folder_id = None
         document.updated_at = now
     await session.flush()
@@ -263,14 +270,38 @@ async def count_active_total(session: AsyncSession) -> int:
     return result.scalar_one()
 
 
-async def list_deleted_documents(session: AsyncSession, folder_id: str) -> list[Document]:
-    """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1) - Gegenstück zu
-    `list_documents_by_folder` (dort werden gelöschte Dokumente ausgeschlossen)."""
-    result = await session.execute(
-        select(Document)
-        .where(Document.folder_id == folder_id, Document.deleted_at.isnot(None))
-        .order_by(Document.title)
-    )
+async def list_deleted_documents(
+    session: AsyncSession,
+    *,
+    folder_id: str | None = None,
+    deleted_by: str | None = None,
+    include_object_type_ids: set[int] | None = None,
+    exclude_object_type_ids: set[int] | None = None,
+) -> list[Document]:
+    """Papierkorb-Inhalt (5.2, seit P7-S1; um `deleted_by`/Klassifizierungs-
+    Filter erweitert seit P15-S1, siehe main.py `list_deleted_documents` für
+    die Sichtbarkeitsregeln, die diese Filter zusammensetzen). Ohne
+    `folder_id` liefert dies den installationsweiten Papierkorb (persönlicher
+    Papierkorb/Löschadministrations-Ansichten, 2.5) statt nur den eines
+    einzelnen Ordners - Gegenstück zu `list_documents_by_folder`."""
+    query = select(Document).where(Document.deleted_at.isnot(None))
+    if folder_id is not None:
+        query = query.where(Document.folder_id == folder_id)
+    if deleted_by is not None:
+        query = query.where(Document.deleted_by == deleted_by)
+    if include_object_type_ids is not None:
+        query = query.where(Document.object_type_id.in_(include_object_type_ids))
+    if exclude_object_type_ids:
+        # NOT IN liefert NULL (nicht TRUE) fuer object_type_id IS NULL und
+        # wuerde solche Dokumente sonst faelschlich aus der regulaeren
+        # (nicht-klassifizierten) Ansicht verbannen - explizit mit einschliessen.
+        query = query.where(
+            or_(
+                Document.object_type_id.is_(None),
+                Document.object_type_id.notin_(exclude_object_type_ids),
+            )
+        )
+    result = await session.execute(query.order_by(Document.title))
     return list(result.scalars().all())
 
 

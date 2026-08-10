@@ -17,6 +17,7 @@ import httpx
 CONFIG_SERVICE_URL = os.environ.get("TEST_CONFIG_SERVICE_URL", "http://localhost:8029")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
+OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 
 
 def _client() -> httpx.Client:
@@ -283,6 +284,57 @@ def test_import_role_creates_then_updates_by_name(authorized_principal):
     role = next(r for r in roles if r["name"] == role_name)
     assert role["description"] == "zweite Version"
     assert role["permissions"] == ["read", "write"]
+
+
+def test_import_object_type_roundtrips_is_classified(authorized_principal):
+    """Verschlusssachen-Kennzeichnung (2.5, P15-S1) - `is_classified` muss den
+    Export/Import-Roundtrip überleben, sonst geht die Klassifizierung einer
+    Dokumentklasse beim Verteilen einer Konfiguration stillschweigend
+    verloren (echter, bei P15-S1 selbst gefundener Bug in `ObjectTypeExport`/
+    `_OBJECT_TYPE_MUTABLE_FIELDS`)."""
+    type_name = f"config-import-classified-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "object_types": [
+            {
+                "name": type_name,
+                "applies_to": "document",
+                "is_classified": True,
+            }
+        ],
+    }
+    with _client() as client:
+        first = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert first.status_code == 200
+        assert first.json()["results"]["object_types"]["created"] == 1
+
+    with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL) as object_type_client:
+        created = next(
+            t for t in object_type_client.get("/object-types").json() if t["name"] == type_name
+        )
+        assert created["is_classified"] is True
+
+    with _client() as client:
+        payload["object_types"][0]["is_classified"] = False
+        second = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert second.status_code == 200
+        assert second.json()["results"]["object_types"]["updated"] == 1
+
+    with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL) as object_type_client:
+        updated = next(
+            t for t in object_type_client.get("/object-types").json() if t["name"] == type_name
+        )
+        assert updated["is_classified"] is False
+
+    with _client() as client:
+        export = client.get("/config/export", params={"categories": "object_types"})
+    exported = next(t for t in export.json()["object_types"] if t["name"] == type_name)
+    assert exported["is_classified"] is False
 
 
 def _dmn_xml(decision_id: str) -> str:

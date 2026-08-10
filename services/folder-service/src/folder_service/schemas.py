@@ -25,6 +25,7 @@ class FolderOut(BaseModel):
     object_type_id: int | None
     attributes: dict
     deleted_at: datetime | None
+    deleted_by: str | None
     retention_until: datetime | None
     full_deletion: bool
     pending_deletion_reason: str | None
@@ -88,7 +89,7 @@ class LegalHoldOut(BaseModel):
 class DeletionRegisterEntryOut(BaseModel):
     id: str
     folder_id: str
-    trigger: Literal["forced_deletion", "trash_expiry"]
+    trigger: Literal["forced_deletion", "trash_expiry", "manual_purge"]
     reason: str | None
     triggered_by: str | None
     occurred_at: datetime

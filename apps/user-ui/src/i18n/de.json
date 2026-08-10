@@ -61,6 +61,7 @@
     "favorites": "Favoriten",
     "teamspaces": "Team-Arbeitsbereiche",
     "delegations": "Stellvertretung",
+    "trash": "Papierkorb",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -258,6 +259,24 @@
     "submitting": "Wird übernommen...",
     "success": "Erfolgreich",
     "failure": "Fehlgeschlagen"
+  },
+  "trash": {
+    "paneLabel": "Papierkorb",
+    "heading": "Papierkorb",
+    "hint": "Zur Löschung markierte Dokumente und Ordner (5.2) - erst nach endgültiger Löschung sind sie unwiederbringlich weg.",
+    "scopeLabel": "Papierkorb-Ansicht",
+    "scopePersonal": "Eigene Löschmarkierungen",
+    "scopeAdmin": "Vollständiger Papierkorb",
+    "scopeAdminClassified": "Verschlusssachen-Papierkorb",
+    "typeDocument": "Dokument:",
+    "typeFolder": "Ordner:",
+    "restore": "Wiederherstellen",
+    "purge": "Endgültig löschen",
+    "purgeConfirm": "{name} unwiderruflich endgültig löschen?",
+    "empty": "Papierkorb ist leer.",
+    "loadError": "Papierkorb konnte nicht geladen werden",
+    "restoreError": "Wiederherstellen fehlgeschlagen",
+    "purgeError": "Endgültiges Löschen fehlgeschlagen"
   },
   "delegations": {
     "paneLabel": "Stellvertretung",

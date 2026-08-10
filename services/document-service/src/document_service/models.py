@@ -39,6 +39,11 @@ class Document(Base):
     derived_from_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     originating_case_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Wer die Löschmarkierung gesetzt hat (2.5, P15-S1) - Voraussetzung für den
+    # persönlichen Papierkorb ("nur die von mir selbst markierten Elemente").
+    # Bislang wurde `deleted_by` zwar an mehreren Stellen entgegengenommen,
+    # aber nie tatsächlich persistiert (echte, bei P15-S1 gefundene Lücke).
+    deleted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Kaskaden-Herkunft (5.2, seit P7-S1b): gesetzt, wenn dieses Dokument nicht
     # einzeln, sondern weil sein übergeordneter Ordner in den Papierkorb
     # verschoben wurde (`POST /documents/cascade-trash`) gelöscht wurde -
@@ -194,7 +199,8 @@ class DeletionRegisterEntry(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id: Mapped[str] = mapped_column(String(128), index=True)
-    trigger: Mapped[str] = mapped_column(String(32))  # "forced_deletion" | "trash_expiry"
+    # "forced_deletion" | "trash_expiry" | "manual_purge" (letzteres seit P15-S1)
+    trigger: Mapped[str] = mapped_column(String(32))
     reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

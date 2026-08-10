@@ -53,14 +53,24 @@ async def execute_forced_deletion(
 
 
 async def purge_expired_trash_entry(
-    session: AsyncSession, storage: StorageClient, document_id: str
+    session: AsyncSession,
+    storage: StorageClient,
+    document_id: str,
+    *,
+    trigger: str = "trash_expiry",
+    triggered_by: str | None = None,
 ) -> bool:
-    """Routinemäßige Papierkorb-Bereinigung nach Ablauf der
-    Wiederherstellungsfrist (5.2) - im Unterschied zur Zwangslöschung KEIN
-    automatischer Governance-Bypass: ein unter Object-Lock stehendes
-    Dokument bleibt bis zum Fristablauf blockiert und wird beim nächsten
-    Durchlauf erneut versucht. Gibt zurück, ob die Bereinigung tatsächlich
-    stattgefunden hat."""
+    """Papierkorb-Bereinigung (5.2) - routinemäßig nach Ablauf der
+    Wiederherstellungsfrist (`trigger="trash_expiry"`, Default, vom
+    `_retention_poll_loop` aufgerufen) ODER manuell auf Abruf durch die
+    Löschadministration (2.5, P15-S1, `trigger="manual_purge"` mit echtem
+    `triggered_by`) - identische Ausführung, nur der Auslöser/das
+    Löschregister-Trigger-Feld unterscheiden sich. Im Unterschied zur
+    Zwangslöschung KEIN automatischer Governance-Bypass: ein unter
+    Object-Lock stehendes Dokument bleibt blockiert (beim automatischen Weg
+    bis zum nächsten Durchlauf, beim manuellen Weg meldet der Aufrufer das
+    dem Endpunkt-Aufrufer als 409). Gibt zurück, ob die Bereinigung
+    tatsächlich stattgefunden hat."""
     try:
         await _delete_all_versions_from_storage(
             session, storage, document_id, bypass_governance=False, x_dms_roles=""
@@ -73,7 +83,7 @@ async def purge_expired_trash_entry(
         )
         return False
     await repository.create_deletion_register_entry(
-        session, document_id, trigger="trash_expiry", reason=None, triggered_by=None
+        session, document_id, trigger=trigger, reason=None, triggered_by=triggered_by
     )
     await repository.hard_delete_document(session, document_id)
     return True
