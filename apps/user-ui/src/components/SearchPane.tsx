@@ -126,6 +126,7 @@ export function SearchPane({
           placeholder={t("search.placeholder")}
           aria-label={t("search.queryLabel")}
         />
+        <p className="hint search-syntax-hint">{t("search.syntaxHint")}</p>
         <label className="search-object-type">
           {t("search.objectTypeLabel")}
           <select value={objectTypeId} onChange={(event) => handleObjectTypeChange(event.target.value)}>

@@ -235,6 +235,7 @@
     "paneLabel": "Suche",
     "placeholder": "Suchbegriff eingeben...",
     "queryLabel": "Suchbegriff",
+    "syntaxHint": "wort1 wort2 = UND, OR = ODER, -wort = NICHT, \"genaue phrase\", \"wort1 wort2\"~5 = Näherungssuche, wort* = Präfix, wort~ = Tippfehlertolerant",
     "objectTypeLabel": "Objekttyp",
     "allObjectTypes": "Alle Objekttypen",
     "rangeFrom": "von",

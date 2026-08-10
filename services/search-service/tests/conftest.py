@@ -21,6 +21,7 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS search"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.execute(text("TRUNCATE search.search_document CASCADE"))
     await eng.dispose()
     yield
@@ -32,6 +33,7 @@ async def engine():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS search"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
     yield eng
     await eng.dispose()
 

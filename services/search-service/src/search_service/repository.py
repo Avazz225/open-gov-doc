@@ -3,6 +3,8 @@ from datetime import UTC, date, datetime
 from typing import Literal
 
 from search_service.models import SearchDocument
+from search_service.query_compiler import compile_query
+from search_service.query_language import parse_query
 from sqlalchemy import Date, Numeric, cast, delete, func, null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -140,12 +142,18 @@ async def search(
     angegeben ist. Ergebnisse werden VOR jeglicher Berechtigungsprüfung
     zurückgegeben - die Filterung nach `folder_id`-Zugriff passiert im
     Routen-Handler (main.py), da sie einen Aufruf an den Permission Service
-    braucht (3.1: kein direkter Cross-Service-Datenbankzugriff)."""
+    braucht (3.1: kein direkter Cross-Service-Datenbankzugriff).
+
+    `query` wird über `query_language.parse_query` in einen AST übersetzt
+    (Boolesche Verknüpfung/Klammerung/Phrasen/Wildcards/Fuzzy-/Näherungssuche,
+    Konzept 3.7a, P14-S7) - kann `query_language.QuerySyntaxError` werfen,
+    von `main.py` in eine `400`-Antwort übersetzt."""
     rank = None
-    if query:
-        ts_query = func.websearch_to_tsquery("german", query)
-        rank = func.ts_rank(SearchDocument.search_vector, ts_query)
-        stmt = select(SearchDocument, rank).where(SearchDocument.search_vector.op("@@")(ts_query))
+    node = parse_query(query)
+    if node is not None:
+        compiled = compile_query(node)
+        rank = compiled.rank
+        stmt = select(SearchDocument, rank).where(compiled.where)
     else:
         stmt = select(SearchDocument, null())
 
@@ -186,11 +194,12 @@ async def facet_counts(
     Treffermenge wie `search()` - bewusst einfach: keine "Facette ohne
     Selbstfilter"-Logik wie bei größeren Suchsystemen, das wäre Overengineering
     für den hier verlangten Umfang ("Volltextindex + Facettensuche")."""
+    node = parse_query(query)
+    where = compile_query(node).where if node is not None else None
+
     base = select(SearchDocument.folder_id, SearchDocument.folder_name, func.count())
-    if query:
-        base = base.where(
-            SearchDocument.search_vector.op("@@")(func.websearch_to_tsquery("german", query))
-        )
+    if where is not None:
+        base = base.where(where)
     base = _apply_common_filters(
         base,
         folder_id=folder_id,
@@ -203,10 +212,8 @@ async def facet_counts(
     folder_rows = (await session.execute(base)).all()
 
     base_ot = select(SearchDocument.object_type_id, func.count())
-    if query:
-        base_ot = base_ot.where(
-            SearchDocument.search_vector.op("@@")(func.websearch_to_tsquery("german", query))
-        )
+    if where is not None:
+        base_ot = base_ot.where(where)
     base_ot = _apply_common_filters(
         base_ot,
         folder_id=folder_id,

@@ -18,6 +18,7 @@ from search_service.models import Base
 from search_service.object_type_client import ObjectTypeServiceClient
 from search_service.ocr_client import OcrServiceClient
 from search_service.permission_client import PermissionServiceClient
+from search_service.query_language import QuerySyntaxError
 from search_service.rendering_client import RenderingServiceClient
 from search_service.repository import AttrFilter
 from search_service.settings import Settings
@@ -38,6 +39,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS search"))
         await conn.run_sync(Base.metadata.create_all)
+        # Fuzzy-Suche (Konzept 3.7a, P14-S7, siehe ADR 0044) - pg_trgm ist ein
+        # Standard-Contrib-Modul, im postgres:16-alpine-Image ohne weiteren
+        # Build-Schritt vorhanden (bereits bei ADR 0012 verifiziert). Eigene
+        # Trigram-Indizes zusätzlich zum bestehenden GIN-Index auf
+        # `search_vector` - `word_similarity()` nutzt sie sonst nicht.
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_search_document_title_trgm "
+                "ON search.search_document USING gin (title gin_trgm_ops)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_search_document_full_text_trgm "
+                "ON search.search_document USING gin (full_text gin_trgm_ops)"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -163,19 +182,22 @@ async def search(
         (limit + offset) * settings.search_result_overfetch_factor,
         settings.search_result_hard_limit,
     )
-    rows = await repository.search(
-        session,
-        query=q,
-        folder_id=folder_id,
-        object_type_id=object_type_id,
-        created_by=created_by,
-        created_after=created_after,
-        created_before=created_before,
-        attr_filters=attr_filters,
-        limit=internal_limit,
-        offset=0,
-        sort=sort,
-    )
+    try:
+        rows = await repository.search(
+            session,
+            query=q,
+            folder_id=folder_id,
+            object_type_id=object_type_id,
+            created_by=created_by,
+            created_after=created_after,
+            created_before=created_before,
+            attr_filters=attr_filters,
+            limit=internal_limit,
+            offset=0,
+            sort=sort,
+        )
+    except QuerySyntaxError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     resource_ids = {doc.folder_id or "root" for doc, _rank in rows}
     allowed = await app.state.permission_client.check_batch(

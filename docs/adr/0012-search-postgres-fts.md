@@ -17,6 +17,6 @@ Der neue `search-service` implementiert "Volltextindex + Facettensuche" (3.7) ü
 ## Konsequenzen
 
 - Relevanzsortierung ist solide, aber nicht auf dem Niveau von BM25/spezialisierten Ranking-Algorithmen dedizierter Suchmaschinen — für den Umfang dieser Session (Volltextindex + Facetten) ausreichend.
-- Keine Tippfehlertoleranz/Fuzzy-Matching in dieser Session (`pg_trgm` wäre der naheliegende Erweiterungspfad, siehe oben).
+- ~~Keine Tippfehlertoleranz/Fuzzy-Matching in dieser Session (`pg_trgm` wäre der naheliegende Erweiterungspfad, siehe oben).~~ Geschlossen in P14-S7: `pg_trgm` ist seither installiert, `query_language.py`/`query_compiler.py` bauen zusätzlich Fuzzy- und Näherungssuche sowie Wildcards obendrauf - siehe [ADR 0044](0044-search-query-language-fuzzy-proximity.md).
 - Attributfilter auf dem JSONB-`attributes`-Feld sind auf einfache Exakt-/Bereichsvergleiche beschränkt (`->>`-Textextraktion + Typ-Cast) — keine komplexen verschachtelten Attributstrukturen, was aber dem aktuellen, flachen Objekttyp-Attributschema entspricht (2.2).
 - Ein Wechsel zu einem dedizierten Suchindex bleibt möglich, falls Skalierungs- oder Relevanzanforderungen das später erfordern — die Indexierungs-Pipeline (`consumer.py`/`pipeline.py`) ist bereits vom Speichermechanismus (`repository.py`) getrennt.

@@ -80,6 +80,33 @@ def test_search_facets_returns_document_object_types():
     assert "object_types" in response.json()
 
 
+def test_search_with_malformed_query_returns_400():
+    with TestClient(app) as client:
+        response = client.get(
+            "/search",
+            params={"q": "a (b or c"},
+            headers={"X-DMS-Principal": "irrelevant"},
+        )
+    assert response.status_code == 400
+
+
+async def test_search_finds_fuzzy_match_over_http():
+    unique = uuid.uuid4().hex[:8]
+    document_id = await _index_at_root(f"Sonderbegriff {unique}")
+    principal_id = f"alice-{uuid.uuid4().hex[:8]}"
+    _grant_root_read(principal_id)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/search",
+            # Absichtlicher Tippfehler (fehlendes 'f')
+            params={"q": f"Sonderbegrif~ {unique}"},
+            headers={"X-DMS-Principal": principal_id},
+        )
+    assert response.status_code == 200
+    assert any(r["id"] == document_id for r in response.json()["results"])
+
+
 async def test_search_only_returns_documents_the_principal_may_read():
     title = f"Sondertitel-{uuid.uuid4().hex[:8]}"
     await _index_at_root(title)

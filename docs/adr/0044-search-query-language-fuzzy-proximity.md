@@ -1,0 +1,41 @@
+# 0044 — Erweiterte Suchsprache: eigener Parser statt websearch_to_tsquery, Fuzzy/Näherung über pg_trgm + tsquery-Distanzoperatoren
+
+**Status:** akzeptiert
+**Kontext:** Konzept 3.7a, Session P14-S7 (schließt den in [ADR 0012](0012-search-postgres-fts.md) bewusst offen gelassenen Punkt)
+
+## Entscheidung
+
+`search-service` ersetzt das bisherige direkte `websearch_to_tsquery(query)` durch einen eigenen, kleinen, testbaren Parser (`query_language.py`) für eine an marktübliche Referenzprodukte angelehnte Query-Syntax:
+
+```
+wort1 wort2        implizites AND
+wort1 OR wort2      Disjunktion
+-wort / NOT wort    Negation
+(...)               explizite Klammerung/Vorrang
+"genaue phrase"     Phrasensuche
+"wort1 wort2"~N     Näherungssuche (genau zwei Wörter, Distanz ≤ N, beide Reihenfolgen)
+wort*               Wildcard/Präfixsuche
+wort~ / wort~N      Fuzzy-Suche, Toleranzstufe N ∈ {1,2,3} (Default 2)
+```
+
+Ein `query_compiler.py` übersetzt den entstehenden AST in SQLAlchemy-Ausdrücke: der reine Boolesche/Phrasen/Wildcard/Näherungs-Anteil wird zu EINER `to_tsquery('german', ...)`-Zeichenkette zusammengesetzt (Postgres' eigene `&`/`|`/`!`/`<->`/`<N>`/`:*`-Algebra übernimmt Vorrang und Klammerung); Fuzzy-Blätter sind kein Bestandteil dieser Algebra und werden über `pg_trgm`s `word_similarity()` als eigene SQL-Bedingung kompiliert.
+
+## Begründung
+
+- **Warum ein eigener Parser statt weiterhin `websearch_to_tsquery`**: `websearch_to_tsquery` deckt AND/OR/NOT/Phrase bereits ab (ADR 0012), kennt aber weder Wildcards noch irgendeine Form von Fuzzy-/Näherungssuche - beides ist in seiner Grammatik nicht vorgesehen und lässt sich nicht nachträglich in denselben Funktionsaufruf einschmuggeln. Ein eigener, kleiner rekursiver Abstiegsparser (~250 Zeilen inkl. Tokenizer) ist die direktere, testbarere Lösung als der Versuch, Wildcard-/Fuzzy-Syntax irgendwie durch `websearch_to_tsquery` durchzuschleusen.
+- **Warum EINE zusammengesetzte `to_tsquery`-Zeichenkette statt SQLAlchemy-Operator-Komposition über mehrere `to_tsquery()`-Aufrufe**: Postgres' `to_tsquery(config, text)` parst Boolesche Operatoren/Klammern/Distanzoperatoren/Präfix-Flag selbst aus der übergebenen Zeichenkette und normalisiert dabei jedes bloße Wort durch das German-Dictionary (Stemming) - identisches Verhalten zu `websearch_to_tsquery`, nur mit vollem Operatorumfang. Der Compiler muss deshalb nur eine korrekt geklammerte Zeichenkette bauen (rekursiv, jeder Teilbaum wird in eigene Klammern gesetzt), keine SQLAlchemy-seitige Operator-Algebra (`&&`/`||`/`!!`) nachbilden. Da der Tokenizer Wort-Tokens auf alphanumerische Zeichen + Bindestrich/Unterstrich beschränkt (keine tsquery-Metazeichen `&|!<>():` möglich), ist kein Escaping/Injection-Risiko vorhanden, obwohl die Zeichenkette aus Nutzereingaben zusammengesetzt wird - sie wird ohnehin als EIN gebundener Parameter übergeben, nie in rohes SQL interpoliert.
+- **Näherungssuche über `<N>` statt einer Lucene-artigen Sloppy-Phrase-Funktion**: Postgres' `<N>`-Operator verlangt selbst eine EXAKTE Distanz UND eine feste Reihenfolge ("fat <2> rats" = genau 2 Lexeme dazwischen, in dieser Richtung). "Innerhalb von N Wörtern, beide Reihenfolgen" (Konzept-Wortlaut: "zwei Begriffe ... wenn sie innerhalb einer konfigurierbaren Wortdistanz zueinander vorkommen") wird deshalb als ODER-Kette über die Distanzen 1..N in beiden Richtungen gebaut (`a<1>b | a<2>b | ... | b<1>a | ...`) - mathematisch exakt das gewünschte Ergebnis, kein Kompromiss, nur strukturell eine Disjunktion statt eines einzelnen Operators. `MAX_PROXIMITY_DISTANCE = 20` begrenzt die Kettenlänge bewusst (dieselbe Art Grenze wie `search_result_hard_limit`), ein größeres `~N` wird stillschweigend geklemmt statt abgelehnt.
+- **Fuzzy-Suche über `pg_trgm`s `word_similarity()`, nicht `similarity()`**: `similarity(a, b)` vergleicht zwei Zeichenketten als Ganzes - für "enthält `full_text`/`title` ein zum Suchwort ähnliches Wort" ungeeignet (ein langer Volltext hat fast nie hohe Gesamt-Trigram-Ähnlichkeit zu einem einzelnen Wort). `word_similarity(word, text)` ist genau für diesen Fall vorgesehen: es findet die beste Teilzeichenketten-Übereinstimmung IM Text und bewertet die. Eigene, dokumentierte Zuordnung der drei Konzept-"Toleranzstufen" auf `pg_trgm`s 0..1-Fließkommaskala (`FUZZY_THRESHOLDS = {1: 0.5, 2: 0.35, 3: 0.2}`, 1 = streng, 3 = tolerant) - keine Postgres-Konvention, eine bewusste eigene Kalibrierung.
+- **Warum Fuzzy NICHT in dieselbe tsquery-Zeichenkette eingebettet werden kann**: `to_tsquery`s Mini-Sprache kennt nur Lexem-Matching (exakt/Präfix/Distanz), keine Ähnlichkeitsschwelle - fuzzy ist konzeptionell eine andere Art von Bedingung (Trigram-Ähnlichkeit statt Vorkommen eines normalisierten Lexems). Ein Suchbaum, der Fuzzy enthält, wird deshalb komplett blattweise zu SQL-Booleschen Ausdrücken kompiliert (`and_`/`or_`/`not_`), auch für seine Nicht-Fuzzy-Blätter - das ist **mathematisch exakt äquivalent** zur kombinierten-Zeichenkette-Variante (Postgres' `@@`-Operator verteilt sich beweisbar korrekt über `&`/`|`/`!`: `A @@ (q1 & q2) ≡ (A @@ q1) AND (A @@ q2)`, analog für `|`/`!`), nur strukturell in mehrere `@@`-Bedingungen aufgeteilt statt einer - keine Näherungslösung, nur ein anderer, für den fuzzy-Fall notwendiger Kompilationspfad.
+- **Ranking im Fuzzy-Pfad bewusst vereinfacht**: eine Summe unabhängiger Pro-Blatt-Bewertungen (`ts_rank` je Nicht-Fuzzy-Blatt + `word_similarity`-Score je Fuzzy-Blatt, `NOT`-Blätter tragen 0 bei) statt eines boolesche-Struktur-bewussten `ts_rank` über eine einzige kombinierte tsquery. Der reine, fuzzy-freie Pfad (der weit überwiegende Regelfall) bleibt dagegen exakt beim bisherigen Verhalten (ein einziges `ts_rank()` über die kombinierte tsquery) - keine Verhaltensänderung für bestehende einfache Anfragen. Die Vereinfachung im Fuzzy-Pfad ist konsistent mit ADR 0012s bereits akzeptierter Einschränkung ("nicht auf dem Niveau von BM25").
+- **Kein externes Suchmaschinen-Add-on**: `pg_trgm` ist wie in ADR 0012 vorhergesehen ein Standard-Contrib-Modul, im `postgres:16-alpine`-Image ohne weiteren Build-Schritt vorhanden (`CREATE EXTENSION IF NOT EXISTS pg_trgm`, idempotent im Lifespan wie jede andere Ad-hoc-Schema-Änderung in diesem Projekt) - bestätigt konsistent mit der Grundsatzentscheidung aus 3.1/ADR 0012, Postgres als alleinige Datenhaltung zu nutzen.
+- **Fehlerhafte Anfragen (nicht geschlossene Klammer/Anführungszeichen, ungültige Fuzzy-Stufe, Näherungssuche mit ≠2 Wörtern) werfen `QuerySyntaxError`**, von `main.py` in `400` mit Klartext-Fehlermeldung übersetzt - anders als `websearch_to_tsquery`, das nie einen SQL-Fehler wirft, sondern jede Eingabe permissiv interpretiert. Ein Parser mit expliziter Grammatik kann (und sollte) dem Nutzer sagen, wenn seine Anfrage nicht der dokumentierten Syntax entspricht, statt sie stillschweigend anders zu interpretieren als gemeint.
+
+## Konsequenzen
+
+- **Neue Abhängigkeit `pg_trgm`** für `search-service` (bereits als naheliegender Erweiterungspfad in ADR 0012 dokumentiert, jetzt umgesetzt) - zwei zusätzliche Trigram-GIN-Indizes (`title`, `full_text`) neben dem bestehenden `search_vector`-GIN-Index.
+- **Näherungssuche ist auf genau zwei Wörter beschränkt** (Konzept-Wortlaut "zwei Begriffe") - eine allgemeine N-Wort-Sloppy-Phrase (wie Elasticsearch/Lucenes `"a b c"~5`) ist bewusst nicht gebaut, eine `400`-Fehlermeldung erklärt die Einschränkung.
+- **Sehr kurze Wildcard-Präfixe (`a*`) können viele Lexeme treffen** und sind potenziell langsamer als ein längeres Präfix - keine Mindestlänge erzwungen (keine Konzeptvorgabe dafür, bewusst nicht künstlich eingeschränkt).
+- **Ranking bei gemischten Fuzzy-Anfragen ist eine einfache Summe**, keine boolesche-Struktur-bewusste Gewichtung - für den hier verlangten Umfang ausreichend, siehe Begründung oben.
+- **`OR`/`NOT` als reservierte Großschreibungs-unabhängige Schlüsselwörter** bedeutet: eine Suche nach den tatsächlichen Wörtern "or"/"not" (ohne sie als Operator zu meinen) ist nicht direkt möglich - dieselbe, in praktisch jeder Suchsprache mit Booleschen Schlüsselwörtern (Lucene, Google) übliche Einschränkung.
+- Ein Wechsel zu einem dedizierten Suchindex bleibt unverändert möglich (siehe ADR 0012) - `query_language.py`/`query_compiler.py` sind reine `search-service`-interne Module, keine Kopplung an andere Services.

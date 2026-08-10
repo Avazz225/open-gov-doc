@@ -1078,6 +1078,7 @@ describe("DocumentWorkspace", () => {
     renderWorkspace();
 
     await user.click(screen.getByTitle("Suche"));
+    expect(screen.getByText(/Näherungssuche/)).toBeInTheDocument();
     await user.type(screen.getByLabelText("Suchbegriff"), "Vertrag");
     await user.click(screen.getByText("Suchen"));
 

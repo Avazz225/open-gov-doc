@@ -1,23 +1,40 @@
 # search-service
 
-**Verantwortung:** Volltextindex + Facettensuche über Dokumentmetadaten und -inhalt (Konzept 3.7) — indexiert Dokumente aus Metadaten-Events, reichert sie nach mit OCR-/Rendering-Volltext an, sobald verfügbar, und filtert Ergebnisse nach den tatsächlichen Leserechten des suchenden Principals.
+**Verantwortung:** Volltextindex + Facettensuche über Dokumentmetadaten und -inhalt (Konzept 3.7) — indexiert Dokumente aus Metadaten-Events, reichert sie nach mit OCR-/Rendering-Volltext an, sobald verfügbar, und filtert Ergebnisse nach den tatsächlichen Leserechten des suchenden Principals. Seit P14-S7 (3.7a) mit einer erweiterten Query-Sprache (Boolesche Verknüpfung mit Vorrang/Klammerung, Phrasen, Wildcards, Fuzzy- und Näherungssuche).
 
-**Konzept-Referenz:** 3.7
+**Konzept-Referenz:** 3.7, 3.7a
 **Eigenes Postgres-Schema:** `search` (`search_document`).
 
 ## API
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/search?q=...&folder_id=...&object_type_id=...&created_by=...&created_after=...&created_before=...&attr.{name}[.gte\|.lte]=...&limit=&offset=&sort=` | Suche + Facettenfilter. `q` optional (leer = reine Facetten-Navigation). Erfordert den vom Gateway injizierten `X-DMS-Principal`-Header — fehlt er, `401`. |
+| `GET` | `/search?q=...&folder_id=...&object_type_id=...&created_by=...&created_after=...&created_before=...&attr.{name}[.gte\|.lte]=...&limit=&offset=&sort=` | Suche + Facettenfilter. `q` optional (leer = reine Facetten-Navigation), sonst über die erweiterte Query-Sprache geparst (siehe unten) — bei einem Syntaxfehler (z. B. fehlende schließende Klammer) `400` mit Klartext-Fehlermeldung. Erfordert den vom Gateway injizierten `X-DMS-Principal`-Header — fehlt er, `401`. |
 | `GET` | `/search/facets` | Verfügbare Objekttypen inkl. Attributschema (für die Filter-UI) |
 | `GET` | `/healthz` | Health-Check |
+
+## Query-Sprache (3.7a, seit P14-S7)
+
+`q` wird über einen eigenen, kleinen Parser (`query_language.py`, rekursiver Abstieg über einen handgeschriebenen Tokenizer) statt des bisherigen direkten `websearch_to_tsquery(query)` interpretiert:
+
+| Syntax | Bedeutung |
+|---|---|
+| `wort1 wort2` | Implizites AND |
+| `wort1 OR wort2` | Disjunktion (Groß-/Kleinschreibung beliebig) |
+| `-wort` / `NOT wort` | Negation |
+| `(...)` | Explizite Klammerung/Vorrang (Vorrang sonst: Klammer > NOT > AND > OR) |
+| `"genaue phrase"` | Phrasensuche (exakte Wortfolge) |
+| `"wort1 wort2"~N` | Näherungssuche — genau zwei Wörter, Treffer wenn sie in einer der beiden Reihenfolgen innerhalb von `N` Wörtern zueinander vorkommen (`N` auf maximal 20 geklemmt) |
+| `wort*` | Wildcard/Präfixsuche |
+| `wort~` / `wort~N` | Fuzzy-Suche (Tippfehlertoleranz über `pg_trgm`), Toleranzstufe `N` ∈ {1,2,3} (1 = streng, 3 = tolerant), Default 2 ohne Zahl |
+
+`query_compiler.py` übersetzt den entstehenden AST in SQLAlchemy-Ausdrücke: ohne Fuzzy-Blatt wird der gesamte Baum zu EINER `to_tsquery('german', ...)`-Zeichenkette zusammengesetzt (Postgres' eigene Operator-Algebra übernimmt Vorrang/Klammerung, Ranking bleibt ein einziges `ts_rank()` wie vor dieser Session); sobald irgendwo ein Fuzzy-Blatt vorkommt, wird stattdessen blattweise zu SQL-Booleschen Ausdrücken kompiliert (mathematisch exakt äquivalent, siehe [ADR 0044](../adr/0044-search-query-language-fuzzy-proximity.md) für die Begründung), Ranking ist dort eine einfache Summe unabhängiger Pro-Blatt-Bewertungen. Fuzzy-Matching nutzt `pg_trgm`s `word_similarity()` gegen `title`/`full_text`, mit eigenen Trigram-GIN-Indizes (`CREATE EXTENSION IF NOT EXISTS pg_trgm` + zwei `gin_trgm_ops`-Indizes, idempotent im Lifespan angelegt wie jede andere Ad-hoc-Schema-Änderung dieses Projekts).
 
 `attr.*`-Filter setzen `object_type_id` voraus (der Attributtyp ist nur über das Objekttyp-Schema bekannt) — ohne `object_type_id` liefert ein `attr.*`-Parameter `400`.
 
 ## Datenmodell
 
-`search_document`: ein Eintrag je **Dokument** (natürlicher Schlüssel `document_id`, nicht je Version — Suche bildet den aktuellen Stand ab, nicht die Historie). Felder: `title`, `folder_id`/`folder_name` (denormalisiert), `object_type_id`, `attributes` (`postgresql.JSONB` — bewusst nicht das generische `JSON`, das document-service/ocr-service nutzen, da JSONB die für Attributfilter nötigen `->>`-Operationen sauber unterstützt), `current_version_number`, `full_text`, `created_by`/`created_at`/`updated_at`, `indexed_at`, `search_vector` (`TSVECTOR`, GIN-indexiert). Soft-gelöschte Dokumente werden **hart aus dem Index entfernt** (`DELETE`), nicht nur markiert — es gibt keine UX-Anforderung, gelöschte Treffer anzuzeigen.
+`search_document`: ein Eintrag je **Dokument** (natürlicher Schlüssel `document_id`, nicht je Version — Suche bildet den aktuellen Stand ab, nicht die Historie). Felder: `title`, `folder_id`/`folder_name` (denormalisiert), `object_type_id`, `attributes` (`postgresql.JSONB` — bewusst nicht das generische `JSON`, das document-service/ocr-service nutzen, da JSONB die für Attributfilter nötigen `->>`-Operationen sauber unterstützt), `current_version_number`, `full_text`, `created_by`/`created_at`/`updated_at`, `indexed_at`, `search_vector` (`TSVECTOR`, GIN-indexiert). Soft-gelöschte Dokumente werden **hart aus dem Index entfernt** (`DELETE`), nicht nur markiert — es gibt keine UX-Anforderung, gelöschte Treffer anzuzeigen. Seit P14-S7 zusätzlich zwei Trigram-GIN-Indizes auf `title`/`full_text` (`gin_trgm_ops`, für die Fuzzy-Suche, siehe oben).
 
 `search_vector` wird in `repository.upsert_document()` per Roh-SQL-`UPDATE` nach jedem Flush berechnet (`setweight(to_tsvector('german', title), 'A') || setweight(to_tsvector('german', full_text), 'B')`, Titeltreffer werden höher gewichtet) — bewusst keine generierte Postgres-Spalte, damit die Gewichtungslogik hier sichtbar/testbar bleibt statt in der DDL versteckt zu sein.
 
@@ -63,13 +80,19 @@ Noch keine — folgt in Phase 11.
 ## Tests
 
 - `uv run pytest services/search-service/tests`: Repository (Upsert/Löschen, `search_vector`-Gewichtung Titel vs. Volltext, Attributfilter je Typ — String exakt, Decimal/Date-Bereich —, Facetten-Gruppierung), Pipeline (`reindex_document` gegen den echten laufenden Document-/Folder-Service inkl. Ordnernamens-Denormalisierung, Versionswechsel-Reset, gelöschtes/unbekanntes Dokument), Consumer-Integration (echtes NATS-Event löst echte Indizierung aus; expliziter Regressionstest für die Cross-Stream-Backfill-Race — ein `ocr.completed`-Event ohne vorher verarbeitetes `document.created` erzeugt trotzdem eine vollständige Indexzeile), API (`/search`/`/search/facets` inkl. echter Berechtigungsfilterung gegen den laufenden Permission Service, `401` ohne Principal-Header).
+- **Seit P14-S7: 56 Tests** (vorher 21, **+35**) — neue `test_query_language.py` (23 reine Parser-/Tokenizer-Tests ohne DB: AND/OR/NOT-Vorrang, Klammerung, Phrasen, Näherungssuche inkl. Wortanzahl-/Distanz-Validierung, Fuzzy-Stufen-Validierung, `E-Mail`-Bindestrich-Sonderfall, Syntaxfehler), zehn neue `test_repository.py`-Fälle gegen den echten Postgres (Boolesches AND/OR/NOT, Klammerung, Phrasen-Wortreihenfolge, Präfix-Wildcard, Fuzzy — sowohl ein tatsächlicher Tippfehler-Treffer als auch eine bewusst zu unähnliche Anfrage ohne Treffer selbst mit strenger Stufe —, Näherungssuche inkl. eines "zu weit entfernt"-Gegenbeispiels, `QuerySyntaxError` bei ungültiger Anfrage), zwei neue `test_api.py`-Fälle (`400` bei fehlender schließender Klammer über HTTP, Fuzzy-Treffer über den vollen `TestClient`-Pfad).
 - **Wichtiger Testbefund dieser Session**: `TestClient(app)`-basierte Tests (API-/Consumer-Integrationstests) verbinden sich über die vom Service selbst gelesene `DMS_POSTGRES_DSN`-Umgebungsvariable — **nicht** über `TEST_POSTGRES_DSN`, das nur die direkt in `conftest.py`/Repository-Tests aufgebauten Engines betrifft. Für eine isolierte Testdatenbank müssen deshalb **beide** Variablen gesetzt werden, sonst schreibt/liest die echte FastAPI-App weiterhin gegen die Live-Datenbank, während die übrigen Tests bereits korrekt isoliert sind (in dieser Session live beobachtet: ein erster Testlauf ohne `DMS_POSTGRES_DSN` erzeugte eine reale, harmlose aber ungewollte Testzeile in der Live-`dms`-Datenbank und ließ einen Assertion auf die isolierte Datenbank fehlschlagen — behoben, Zeile bereinigt, Testlauf mit beiden Variablen wiederholt: grün).
 - **Live-E2E über den echten Gateway-Stack**: echtes PDF mit Textlayer aus P5-S3 gefunden über `GET /search?q=Rechnung` inkl. korrektem Ranking/Snippet; Suche ohne `X-DMS-Principal`-Header → `401`; Suche mit einem Principal ohne Ordner-Leserecht liefert das Dokument nicht, nach Anlegen einer Rollenzuweisung auf `"root"` über den echten Permission Service erscheint es; Gateway-Routing erzwingt Auth wie bei allen anderen Services.
+- **Seit P14-S7 zusätzlich live verifiziert**: zwei echte Dokumente über den Gateway hochgeladen (`config-admin`, echte `document.read`-Rollenzuweisung auf `"root"`) — Präfix-Wildcard (`Rechnung*`) und Fuzzy (Tippfehler `Rechnugnswesen~`) treffen den Titel; Boolesches AND/gruppiertes OR/NOT über echte HTTP-Aufrufe; Phrasensuche respektiert die Wortreihenfolge (richtige Reihenfolge trifft, vertauschte nicht); Näherungssuche (`~2`) trifft; eine absichtlich kaputte Anfrage (fehlende Klammer) liefert `400`. Testdokumente anschließend wieder gelöscht, aus dem Index verschwunden bestätigt.
 
 ## Offene Punkte
 
 - **Deep-Paging unter starker Rechtefilterung ist nicht paginierungsstabil**: die Überfetch-Marge (fester Faktor + harte Obergrenze) kann bei einem Principal mit sehr eingeschränkten Ordnerrechten dazu führen, dass eine späte Seite leerer erscheint, als es tatsächlich verfügbare Treffer gäbe — ein SQL-seitiger Join mit dem Permission Service ist wegen 3.1 (kein Cross-Service-Datenbankzugriff) nicht möglich, eine vollständig stabile Lösung wäre für den aktuellen Umfang Overengineering.
-- **Kein `pg_trgm`-Fuzzy-Matching** (siehe ADR 0012) — nur exakte Volltextsuche über Postgres' Stemming-Logik.
+- ~~Kein `pg_trgm`-Fuzzy-Matching (siehe ADR 0012) — nur exakte Volltextsuche über Postgres' Stemming-Logik.~~ Geschlossen in P14-S7 — siehe "Query-Sprache" oben und [ADR 0044](../adr/0044-search-query-language-fuzzy-proximity.md).
 - **`attr.*`-Filter erfordern `object_type_id`** — ohne bekannten Objekttyp ist der Attributtyp (Exakt- vs. Bereichsfilter) nicht auflösbar.
 - **Ordner-Umbenennung aktualisiert `folder_name` nicht rückwirkend** — erst beim nächsten Re-Index des jeweiligen Dokuments (akzeptierte Inkonsistenz, gleiches Muster wie andere "eventually consistent, erneutes Anfassen aktualisiert"-Fälle in diesem System).
 - **Keine weitere Autorisierung außer der Ordner-Leserechtsprüfung** — Search Service ist der erste Service, der den vom Gateway injizierten `X-DMS-Principal`-Header überhaupt auswertet; alle übrigen bisherigen "Offene Punkte" zu fehlender Autorisierung im Gesamtsystem bleiben unverändert bestehen.
+- **Näherungssuche ist auf genau zwei Wörter beschränkt** (seit P14-S7, Konzept-Wortlaut "zwei Begriffe") — eine allgemeine N-Wort-Sloppy-Phrase (wie Elasticsearch/Lucenes `"a b c"~5`) ist bewusst nicht gebaut, siehe ADR 0044.
+- **Fuzzy-/gemischtes Ranking ist eine einfache Summe unabhängiger Pro-Blatt-Bewertungen** (seit P14-S7), kein boolesche-Struktur-bewusstes `ts_rank` wie im reinen Nicht-Fuzzy-Pfad — siehe ADR 0044 "Begründung".
+- **`OR`/`NOT` sind reservierte, Groß-/Kleinschreibungs-unabhängige Schlüsselwörter** (seit P14-S7) — die tatsächlichen Wörter "or"/"not" lassen sich nicht direkt als Suchbegriff eingeben, gleiche Einschränkung wie bei praktisch jeder Suchsprache mit Booleschen Schlüsselwörtern.
+- **Keine Mindestlänge für Wildcard-Präfixe** (seit P14-S7) — ein sehr kurzes Präfix (`a*`) kann viele Lexeme treffen und ist potenziell langsamer, bewusst nicht künstlich eingeschränkt (keine Konzeptvorgabe dafür).
