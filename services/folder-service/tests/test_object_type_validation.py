@@ -52,6 +52,76 @@ def test_create_folder_with_valid_attributes_succeeds(client, object_type_id):
     assert response.status_code == 201
 
 
+def test_update_folder_attributes_without_move_is_validated(client, object_type_id):
+    """Bugfix (P14-S12): eine reine Attributänderung ohne Verschiebung muss
+    exakt wie eine Neuanlage gegen den Objekttyp validiert werden - vorher
+    griff die Prüfung nur bei einer tatsächlichen Verschiebung (`is_move`)."""
+    folder = client.post(
+        "/folders",
+        json={
+            "name": "Projekt X",
+            "created_by": "alice",
+            "object_type_id": object_type_id,
+            "attributes": {"Projektnummer": "P-001"},
+        },
+    ).json()
+
+    response = client.patch(f"/folders/{folder['id']}", json={"attributes": {}})
+
+    assert response.status_code == 400
+    assert "Projektnummer" in str(response.json()["detail"])
+
+
+def test_update_folder_attributes_without_move_accepts_valid_attributes(client, object_type_id):
+    folder = client.post(
+        "/folders",
+        json={
+            "name": "Projekt X",
+            "created_by": "alice",
+            "object_type_id": object_type_id,
+            "attributes": {"Projektnummer": "P-001"},
+        },
+    ).json()
+
+    response = client.patch(
+        f"/folders/{folder['id']}", json={"attributes": {"Projektnummer": "P-002"}}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["attributes"] == {"Projektnummer": "P-002"}
+
+
+def test_update_folder_name_only_without_move_is_still_validated_against_existing_attributes(
+    client, object_type_id
+):
+    """Ein reines Umbenennen ohne mitgeschickte `attributes` darf die
+    bestehenden, bereits gespeicherten Attribute nicht unter den Tisch fallen
+    lassen - die Validierung muss gegen `current.attributes` laufen, wenn
+    `payload.attributes` nicht gesetzt ist (siehe document-service-Analogie)."""
+    folder = client.post(
+        "/folders",
+        json={
+            "name": "Projekt X",
+            "created_by": "alice",
+            "object_type_id": object_type_id,
+            "attributes": {"Projektnummer": "P-001"},
+        },
+    ).json()
+
+    response = client.patch(f"/folders/{folder['id']}", json={"name": "Projekt Y"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Projekt Y"
+
+
+def test_update_folder_without_object_type_is_unaffected(client):
+    folder = client.post("/folders", json={"name": "Untypisiert", "created_by": "alice"}).json()
+
+    response = client.patch(f"/folders/{folder['id']}", json={"attributes": {"anything": "goes"}})
+
+    assert response.status_code == 200
+
+
 @pytest.fixture
 def top_level_type_id():
     with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0) as oc:

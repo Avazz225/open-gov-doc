@@ -243,6 +243,22 @@
     "contactEmailPlaceholder": "E-Mail (optional)",
     "addContactButton": "Kontakt hinzufügen"
   },
+  "bulkEdit": {
+    "selectItem": "{name} auswählen",
+    "selectedCount": "{count} ausgewählt",
+    "openButton": "Sammelbearbeitung",
+    "clearSelection": "Auswahl aufheben",
+    "heading": "Sammelbearbeitung ({count} Objekte)",
+    "hint": "Nur ausgefüllte Felder werden übernommen - leer gelassene Felder bleiben je Objekt unverändert (8, 4.5).",
+    "leaveBlankPlaceholder": "unverändert lassen",
+    "notHomogeneous": "Nur Dokumente ODER nur Ordner desselben Objekttyps können gemeinsam bearbeitet werden.",
+    "noObjectType": "Die ausgewählten Objekte haben keinen Objekttyp - keine gemeinsamen Attribute zum Bearbeiten.",
+    "loadObjectTypeError": "Objekttyp konnte nicht geladen werden",
+    "submit": "Übernehmen",
+    "submitting": "Wird übernommen...",
+    "success": "Erfolgreich",
+    "failure": "Fehlgeschlagen"
+  },
   "delegations": {
     "paneLabel": "Stellvertretung",
     "heading": "Stellvertretung bei Abwesenheit",

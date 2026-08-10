@@ -60,6 +60,7 @@ const removeFavoriteMock = vi.fn();
 const getDocumentMock = vi.fn();
 const getFolderMock = vi.fn();
 const getShareLinkConfigMock = vi.fn();
+const updateFolderAttributesMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -87,6 +88,7 @@ vi.mock("@/lib/api", () => ({
   getDocument: (...args: unknown[]) => getDocumentMock(...args),
   getFolder: (...args: unknown[]) => getFolderMock(...args),
   getShareLinkConfig: (...args: unknown[]) => getShareLinkConfigMock(...args),
+  updateFolderAttributes: (...args: unknown[]) => updateFolderAttributesMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
@@ -207,6 +209,7 @@ describe("DocumentWorkspace", () => {
     removeFavoriteMock.mockReset();
     getDocumentMock.mockReset();
     getFolderMock.mockReset();
+    updateFolderAttributesMock.mockReset();
     listDocumentVersionsMock.mockReset();
     listDocumentVersionsMock.mockResolvedValue([
       {
@@ -1444,5 +1447,138 @@ describe("DocumentWorkspace", () => {
         attributes: { Kennzeichen: "2026-999" },
       })
     );
+  });
+
+  describe("Sammelbearbeitung (multi-select + bulk edit, P14-S12)", () => {
+    const doc2 = { ...document1, id: "d2", title: "Angebot.pdf" };
+
+    it("shows the bulk-edit toolbar only once at least one item is selected, and lets it be cleared again", async () => {
+      listChildFoldersMock.mockResolvedValue([
+        { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+      ]);
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await screen.findByText(/Rechnung.pdf/);
+      expect(screen.queryByText("Sammelbearbeitung")).not.toBeInTheDocument();
+
+      await user.click(screen.getByLabelText("Rechnung.pdf auswählen"));
+      expect(await screen.findByText("1 ausgewählt")).toBeInTheDocument();
+      expect(screen.getByText("Sammelbearbeitung")).toBeInTheDocument();
+
+      await user.click(screen.getByLabelText("Verträge auswählen"));
+      expect(await screen.findByText("2 ausgewählt")).toBeInTheDocument();
+
+      await user.click(screen.getByText("Auswahl aufheben"));
+      expect(screen.queryByText("Sammelbearbeitung")).not.toBeInTheDocument();
+    });
+
+    it("opens the bulk-edit modal with the selected documents and applies a shared field to all of them", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([
+        { ...document1, object_type_id: 5, attributes: { Betrag: "100" } },
+        { ...doc2, object_type_id: 5, attributes: { Betrag: "200" } },
+      ]);
+      getObjectTypeMock.mockResolvedValue({
+        id: 5,
+        name: "Vertrag",
+        applies_to: "document",
+        attributes: [{ name: "Betrag", type: "string" }],
+        icon: null,
+      });
+      getObjectTypeLayoutMock.mockResolvedValue({
+        rows: [{ columns: [{ attribute: "Betrag", label: "Betrag", required: false }] }],
+        responsive_breakpoint_px: 600,
+        is_custom: false,
+      });
+      updateDocumentMetadataMock.mockResolvedValue({});
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByLabelText("Rechnung.pdf auswählen"));
+      await user.click(screen.getByLabelText("Angebot.pdf auswählen"));
+      await user.click(screen.getByText("Sammelbearbeitung"));
+
+      const modal = await screen.findByRole("dialog", { name: "Sammelbearbeitung (2 Objekte)" });
+      const betragInput = await within(modal).findByLabelText("Betrag");
+      await user.type(betragInput, "999");
+      await user.click(within(modal).getByText("Übernehmen"));
+
+      await waitFor(() => expect(updateDocumentMetadataMock).toHaveBeenCalledTimes(2));
+      expect(updateDocumentMetadataMock).toHaveBeenCalledWith("token-123", "d1", {
+        attributes: { Betrag: "999" },
+      });
+      expect(updateDocumentMetadataMock).toHaveBeenCalledWith("token-123", "d2", {
+        attributes: { Betrag: "999" },
+      });
+      expect(within(modal).getAllByText("Erfolgreich")).toHaveLength(2);
+
+      await user.click(within(modal).getByText("Schließen"));
+      expect(screen.queryByText("Sammelbearbeitung")).not.toBeInTheDocument();
+    });
+
+    it("shows a blocking message for a heterogeneous document+folder selection instead of loading a form", async () => {
+      listChildFoldersMock.mockResolvedValue([
+        { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+      ]);
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByLabelText("Rechnung.pdf auswählen"));
+      await user.click(screen.getByLabelText("Verträge auswählen"));
+      await user.click(screen.getByText("Sammelbearbeitung"));
+
+      expect(
+        await screen.findByText(
+          "Nur Dokumente ODER nur Ordner desselben Objekttyps können gemeinsam bearbeitet werden."
+        )
+      ).toBeInTheDocument();
+      expect(getObjectTypeMock).not.toHaveBeenCalled();
+    });
+
+    it("clears the selection when navigating into a subfolder", async () => {
+      listChildFoldersMock.mockImplementation(async (_token: string, folderId: string) => {
+        if (folderId === "root") {
+          return [
+            { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+          ];
+        }
+        return [];
+      });
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByLabelText("Rechnung.pdf auswählen"));
+      expect(await screen.findByText("1 ausgewählt")).toBeInTheDocument();
+
+      await user.click(screen.getByText(/Verträge/));
+
+      await waitFor(() => expect(listChildFoldersMock).toHaveBeenCalledWith("token-123", "f1"));
+      expect(screen.queryByText("Sammelbearbeitung")).not.toBeInTheDocument();
+    });
+
+    it("clears the selection when toggling the trash view", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+      listDeletedDocumentsMock.mockResolvedValue([]);
+      listDeletedFoldersMock.mockResolvedValue([]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByLabelText("Rechnung.pdf auswählen"));
+      expect(await screen.findByText("1 ausgewählt")).toBeInTheDocument();
+
+      await user.click(screen.getByText("Papierkorb anzeigen"));
+
+      expect(screen.queryByText("Sammelbearbeitung")).not.toBeInTheDocument();
+    });
   });
 });

@@ -320,8 +320,8 @@ async def _validate_against_object_type(
     *,
     name: str,
     attributes: dict,
-    parent_object_type_id: int | None,
-    parent_is_root: bool,
+    parent_object_type_id: int | None = None,
+    parent_is_root: bool = False,
 ):
     if object_type_id is None:
         return
@@ -432,18 +432,32 @@ async def update_folder(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    # Bugfix (P14-S12, gefunden bei der Recherche zur Sammelbearbeitung von
+    # Metadaten, 8): Constraint-Prüfung (4.5) griff bislang NUR bei einer
+    # tatsächlichen Verschiebung (`is_move`) - eine reine Attribut-/Namens-
+    # änderung ohne Verschiebung überging die Objekttyp-Validierung
+    # vollständig, anders als document-services `update_document` (dort läuft
+    # `object_type_client.validate(...)` bei JEDER PATCH-Anfrage, sobald ein
+    # Objekttyp gesetzt ist - Platzierungs-Parameter nur bei einer
+    # Verschiebung befüllt, sonst leer). Jetzt symmetrisch zu documents:
+    # validiert bei jeder Änderung, nicht nur bei Verschiebung.
     is_move = payload.parent_id is not None and payload.parent_id != current.parent_id
-    if is_move and current.object_type_id is not None:
-        try:
-            new_parent = await repository.get_folder(session, payload.parent_id)
-        except repository.NotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if current.object_type_id is not None:
+        placement_kwargs: dict = {}
+        if is_move:
+            try:
+                new_parent = await repository.get_folder(session, payload.parent_id)
+            except repository.NotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            placement_kwargs = {
+                "parent_object_type_id": new_parent.object_type_id,
+                "parent_is_root": payload.parent_id == ROOT_FOLDER_ID,
+            }
         await _validate_against_object_type(
             current.object_type_id,
             name=payload.name if payload.name is not None else current.name,
             attributes=payload.attributes if payload.attributes is not None else current.attributes,
-            parent_object_type_id=new_parent.object_type_id,
-            parent_is_root=payload.parent_id == ROOT_FOLDER_ID,
+            **placement_kwargs,
         )
 
     try:

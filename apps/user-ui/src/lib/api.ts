@@ -159,6 +159,29 @@ export async function renameFolder(token: string, folderId: string, name: string
   return response.json();
 }
 
+// Sammelbearbeitung von Metadaten (8, P14-S12) - Ordner-Pendant zu
+// `updateDocumentMetadata`, bislang gab es dafür keine eigene Funktion (nur
+// `renameFolder`, das ausschließlich `name` setzt). Gleiche Full-Replace-
+// Semantik wie beim Dokument-Pendant - `attributes` ersetzt den gesamten
+// bestehenden Wert, kein Merge serverseitig.
+export async function updateFolderAttributes(
+  token: string,
+  folderId: string,
+  attributes: Record<string, unknown>
+): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attributes }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export async function deleteFolder(token: string, folderId: string): Promise<void> {
   await request(
     "folder-service",

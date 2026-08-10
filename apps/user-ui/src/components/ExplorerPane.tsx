@@ -20,6 +20,7 @@ import {
 } from "@/lib/api";
 import { folderIcon } from "@/lib/icons";
 import { formatDocumentTitle } from "@/lib/kennzeichen";
+import { BulkEditModal, type BulkEditItem } from "./BulkEditModal";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FolderRetentionModal } from "./FolderRetentionModal";
 import { FolderTree } from "./FolderTree";
@@ -120,6 +121,48 @@ export function ExplorerPane({
   const [shareLinkModalDocument, setShareLinkModalDocument] = useState<DocumentSummary | null>(
     null
   );
+  // Sammelbearbeitung von Metadaten (8, P14-S12) - "kind:id"-Set, gleiches
+  // Schlüsselformat wie `favoriteKeys` oben. Nur in der Listenansicht
+  // außerhalb des Papierkorbs sinnvoll (siehe Checkbox-Rendering unten) -
+  // wird bei Ordnerwechsel/Papierkorb-Umschalten geleert, damit sie nie auf
+  // gerade nicht mehr sichtbare Objekte verweist.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [currentFolderId, showTrash]);
+
+  function toggleSelected(kind: "folder" | "document", id: string) {
+    const key = `${kind}:${id}`;
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const selectedItems: BulkEditItem[] = [
+    ...folders
+      .filter((folder) => selectedKeys.has(`folder:${folder.id}`))
+      .map((folder) => ({
+        kind: "folder" as const,
+        id: folder.id,
+        name: folder.name,
+        object_type_id: folder.object_type_id,
+        attributes: folder.attributes,
+      })),
+    ...documents
+      .filter((doc) => selectedKeys.has(`document:${doc.id}`))
+      .map((doc) => ({
+        kind: "document" as const,
+        id: doc.id,
+        name: formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault),
+        object_type_id: doc.object_type_id,
+        attributes: doc.attributes,
+      })),
+  ];
 
   // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
   // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
@@ -493,6 +536,18 @@ export function ExplorerPane({
 
       {deleteMessage && <p className="hint">{deleteMessage}</p>}
 
+      {selectedKeys.size > 0 && (
+        <div className="explorer-toolbar">
+          <span className="hint">{t("bulkEdit.selectedCount", { count: selectedKeys.size })}</span>
+          <button type="button" onClick={() => setShowBulkEdit(true)}>
+            {t("bulkEdit.openButton")}
+          </button>
+          <button type="button" onClick={() => setSelectedKeys(new Set())}>
+            {t("bulkEdit.clearSelection")}
+          </button>
+        </div>
+      )}
+
       {favoriteError && (
         <p className="error-text" role="alert">
           {favoriteError}
@@ -566,6 +621,12 @@ export function ExplorerPane({
                 key={folder.id}
                 onContextMenu={(e) => openFolderContextMenu(e, folder)}
               >
+                <input
+                  type="checkbox"
+                  aria-label={t("bulkEdit.selectItem", { name: folder.name })}
+                  checked={selectedKeys.has(`folder:${folder.id}`)}
+                  onChange={() => toggleSelected("folder", folder.id)}
+                />
                 {renamingFolderId === folder.id ? (
                   <form
                     className="inline-form"
@@ -621,6 +682,14 @@ export function ExplorerPane({
                 key={doc.id}
                 onContextMenu={(e) => openDocumentContextMenu(e, doc)}
               >
+                <input
+                  type="checkbox"
+                  aria-label={t("bulkEdit.selectItem", {
+                    name: formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault),
+                  })}
+                  checked={selectedKeys.has(`document:${doc.id}`)}
+                  onChange={() => toggleSelected("document", doc.id)}
+                />
                 <button
                   type="button"
                   className="entry-name"
@@ -651,6 +720,18 @@ export function ExplorerPane({
             kennzeichenShowByDefault
           )}
           onClose={() => setShareLinkModalDocument(null)}
+        />
+      )}
+
+      {showBulkEdit && (
+        <BulkEditModal
+          token={token}
+          items={selectedItems}
+          onClose={() => setShowBulkEdit(false)}
+          onDone={() => {
+            setSelectedKeys(new Set());
+            onUploaded();
+          }}
         />
       )}
 
