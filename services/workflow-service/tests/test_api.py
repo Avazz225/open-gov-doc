@@ -223,6 +223,35 @@ def test_get_ready_tasks_and_complete_it(client, manual_task_bpmn, admin_headers
     assert client.get(f"/instances/{instance['id']}/tasks").json() == []
 
 
+def test_list_ready_tasks_spans_multiple_running_instances(client, manual_task_bpmn, admin_headers):
+    """`GET /tasks` (8, P14-S2 Reviewer/Approval-UI) - bislang gab es nur die
+    instanzgebundene `GET /instances/{id}/tasks`. Startet zwei Instanzen,
+    schließt eine davon vollständig ab, und prüft, dass nur die noch offene
+    Task der laufenden Instanz auftaucht, angereichert um `instance_id`."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="CrossInstanceTasks", headers=admin_headers
+    ).json()["id"]
+    running = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    to_complete = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    task_to_complete = client.get(f"/instances/{to_complete['id']}/tasks").json()[0]
+    client.post(
+        f"/instances/{to_complete['id']}/tasks/{task_to_complete['id']}/complete",
+        json={"completed_by": "bob"},
+    )
+
+    all_tasks = client.get("/tasks").json()
+    matching = [t for t in all_tasks if t["instance_id"] == running["id"]]
+    assert len(matching) == 1
+    assert matching[0]["name"] == "manual"
+    assert matching[0]["process_definition_id"] == definition_id
+    assert matching[0]["business_key"] == running["business_key"]
+    assert all(t["instance_id"] != to_complete["id"] for t in all_tasks)
+
+
 def test_complete_task_rejected_during_maintenance_mode(client, manual_task_bpmn, admin_headers):
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers

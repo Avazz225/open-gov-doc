@@ -272,6 +272,29 @@ async def test_dispatch_skips_unknown_target_and_leaves_task_ready(client, admin
     assert len(tasks) == 1 and tasks[0]["extensions"]["taskType"] == "federated"
 
 
+async def test_list_ready_tasks_excludes_federated_tasks(client, admin_headers):
+    """`GET /tasks` (8, P14-S2 Reviewer/Approval-UI) darf einen `federated`-Task
+    nicht als von einem Menschen abschließbare Aufgabe auflisten - er würde bei
+    einem `.../complete`-Versuch ohnehin mit `409` abgelehnt (siehe
+    `test_complete_task_rejects_federated_task_directly` oben)."""
+    bpmn = _federated_task_bpmn(
+        target_installation_id="does-not-exist", target_process_type="external-review"
+    )
+    definition_id = client.post(
+        "/process-definitions",
+        files={"bpmn_xml": ("federated.bpmn", bpmn, "application/xml")},
+        data={"name": f"federated-{uuid.uuid4().hex[:8]}"},
+        headers=admin_headers,
+    ).json()["id"]
+
+    instance_id = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "tester"}
+    ).json()["id"]
+
+    all_tasks = client.get("/tasks").json()
+    assert instance_id not in {t["instance_id"] for t in all_tasks}
+
+
 async def test_dispatch_records_delivery_failed_for_unreachable_target(
     client, admin_headers, session
 ):

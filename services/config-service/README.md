@@ -3,14 +3,17 @@
 Konfigurationsimport/-export (Konzept 7.3, P12-S3): vollständige Systemkonfiguration
 (Objekttypen inkl. Formular-Layouts, Workflows, Rollen-Templates, Vier-Augen-Konfiguration,
 Sensor-Konfiguration) als ein JSON-Dokument exportierbar und in ein anderes (oder dasselbe, z. B.
-Staging→Produktion) System re-importierbar. Reiner Orchestrator ohne eigenes Postgres-Schema —
-Details siehe [`docs/services/config-service.md`](../../docs/services/config-service.md).
+Staging→Produktion) System re-importierbar. Seit **P14-S1** zusätzlich eine Delta-/
+Vergleichsfunktion zwischen zwei Exporten (7.5, konfigurierbare Ignore-Regex für abweichende
+Namenskonventionen). Reiner Orchestrator ohne eigenes Postgres-Schema — Details siehe
+[`docs/services/config-service.md`](../../docs/services/config-service.md).
 
 ## Endpunkte
 
 | Methode | Pfad | Zweck |
 |---|---|---|
 | `GET` | `/config/export` | Konfigurationsdokument exportieren, optional `?categories=roles&categories=...` |
+| `POST` | `/config/compare` | Delta-/Vergleichsfunktion zwischen zwei Exporten (7.5, P14-S1) — ungegated, rein lesend |
 | `POST` | `/config/import` | Konfigurationsdokument importieren (Upsert je Kategorie) — gegated hinter `admin.object_config`, `X-DMS-Principal`-Header nötig |
 | `GET` | `/healthz` | Health-Check |
 

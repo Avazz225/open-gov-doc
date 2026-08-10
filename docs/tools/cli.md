@@ -31,13 +31,17 @@ ehrlich dokumentiert, was abgedeckt ist und was auf welche künftige Phase warte
 | Registry-Status (3.2) | ✅ `registry-service` | `dms registry status` |
 | Plugin-Orchestrierungsstatus (3.8) | ❌ existiert nicht (Phase 10) | — |
 | Migrations-/Transfer-Vorgänge (7.2) | ❌ generischer 7.2-Dienst existiert nicht (Phase 12, P12-S2) | `dms archival ...` deckt die **nächstliegende reale Entsprechung** ab: `archival-service`s Aussonderungs-Transfers (5.6) — thematisch verwandt (Sperren→Kopieren/Paketieren→Verifizieren→Freigabe), aber fachlich nicht dasselbe wie 7.2 |
-| Konfigurationsim-/-export (7.3) | ❌ existiert nicht (Phase 12, P12-S3) | — |
+| Konfigurationsim-/-export (7.3) | ✅ `config-service` (seit P14-S1 im CLI nachgezogen) | `dms config export [--category]... [--file]` |
 | Lizenzstatus (9.3) | ❌ existiert nicht (Phase 9) | — |
 | Backup/Restore (10.4) | ❌ existiert nicht (Phase 11) | — |
-| Delta-/Vergleichsläufe (7.5) | ❌ existiert nicht (Phase 14) | — |
+| Delta-/Vergleichsläufe (7.5) | ✅ `config-service` (P14-S1) | `dms config compare <compare.json> [--base] [--category]... [--ignore-regex]` |
 
 Gleiches Muster wie bei P7-S3s Umgang mit dem damals ebenfalls fehlenden 7.2-Vorbild: Umfang
 ehrlich auf echte Endpunkte begrenzt, Rest hier und in `PROGRESS.md` als offener Punkt benannt.
+**P14-S1-Nachtrag**: `config-service` selbst existiert bereits seit P12-S3 (7.3), war bis hierhin
+aber noch nicht im CLI angebunden — diese Lücke wurde direkt mitgeschlossen, da ohne
+`dms config export` keine Eingabedatei für den neuen `dms config compare`-Befehl (7.5) existiert
+hätte.
 
 ## Architekturentscheidungen
 
@@ -85,6 +89,7 @@ ehrlich auf echte Endpunkte begrenzt, Rest hier und in `PROGRESS.md` als offener
 |---|---|
 | Anmeldung | `dms login [--username] [--password] [--gateway-url]`, `dms logout`, `dms whoami` |
 | Konfiguration | `dms config show`, `dms config set-gateway-url <url>` |
+| Konfigurationsim-/-export & Vergleich (7.3/7.5) | `dms config export [--category]... [--file out.json]`, `dms config compare <compare.json> [--base base.json] [--category]... [--ignore-regex '{"*": "..."}']` |
 | Query & Trace (6.1) | `dms query events list [--actor] [--subject] [--event-type] [--since] [--until] [--limit]`, `dms query text "<...>"`, `dms query manipulation-mode status\|activate [--minutes]\|deactivate`, `dms query manipulate dry-run --action <type> --param k=v...`, `dms query manipulate execute --dry-run-token <token>`, `dms query approvals list\|approve <id> [--approved-by]` |
 | Objekttypen (2.2) | `dms object-type list\|get <id>\|create -f <file>\|update <id> -f <file>\|delete <id>` |
 | Nutzer (4.4) | `dms user list\|create --username --email --first-name --last-name [--password]\|delete <id>` |
@@ -103,15 +108,20 @@ Unterbefehl stehen (`dms -o json query events list`).
   CI/CD-Pipeline bräuchte eigene vertrauliche Keycloak-Clients (Client-Management-API) — ein
   eigenständiges, mehrsessiges Feature, keine Erweiterung dieser Session. Übergangsweise:
   `DMS_TOKEN`-Env-Var (s. o.).
-- Die 7.2/7.3/9.3/10.4/7.5-Bullets aus Konzept 6.2 haben noch kein Backend — siehe Tabelle oben,
-  jeweils mit Verweis auf die vorgesehene Phase. Kein CLI-Code für sie vorhanden.
+- Die 7.2/9.3/10.4-Bullets aus Konzept 6.2 haben noch kein Backend — siehe Tabelle oben, jeweils
+  mit Verweis auf die vorgesehene Phase. Kein CLI-Code für sie vorhanden. 7.3/7.5 sind seit
+  P14-S1 abgedeckt (`dms config export`/`dms config compare`).
+- **`dms config compare` liest beide Exporte aus lokalen Dateien**, kein automatisierter
+  Cross-Installation-Abruf — bewusste Grenze, siehe `docs/services/config-service.md`
+  "Delta-/Vergleichsfunktion" und [ADR 0040](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md).
 - Kein Ablehnen-Befehl für Vier-Augen-Anfragen (`dms query approvals`) — gleiche bewusste
   Lücke wie in der Admin-UI (P8-S2b): Ablehnen ist bereits generisch über `permission-service`
   möglich, kein konsolenspezifischer Mehrwert in dieser Session.
 
 ## Tests
 
-`tools/cli/tests/` — 70 Tests: `GatewayClient` (401-Refresh-Retry, Fehlerpfade), Credential-
+`tools/cli/tests/` — **77 Tests** (vorher 70, +7 seit P14-S1: `dms config export`/
+`dms config compare`, siehe unten): `GatewayClient` (401-Refresh-Retry, Fehlerpfade), Credential-
 Speicherung (Env-Override, Dateirechte), Ausgabeformatierung, sowie je Domänenmodul repräsentative
 Happy-Path-/Fehlerpfad-Tests über `typer.testing.CliRunner` + `httpx.MockTransport` (kein echtes
 Netzwerk). `uv run pytest tools/cli/tests`, `uv run ruff check tools/cli`.

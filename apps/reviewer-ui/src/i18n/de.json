@@ -1,0 +1,77 @@
+{
+  "meta": {
+    "title": "DMS Reviewer",
+    "description": "Freigabeaufgaben und Vier-Augen-Freigaben (Konzept 8)"
+  },
+  "common": {
+    "logout": "Abmelden",
+    "loading": "Lade...",
+    "cancel": "Abbrechen",
+    "loadError": "Laden fehlgeschlagen",
+    "actionError": "Aktion fehlgeschlagen"
+  },
+  "theme": {
+    "label": "Design",
+    "auto": "Automatisch",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "highContrast": "Hoher Kontrast"
+  },
+  "maintenanceBanner": {
+    "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
+  },
+  "login": {
+    "heading": "Anmelden",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "submitting": "Melde an...",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "nav": {
+    "tasks": "Aufgaben",
+    "approvals": "Freigaben"
+  },
+  "taskList": {
+    "heading": "Freigabeaufgaben",
+    "hint": "Bereite Manual-/Signatur-Tasks über alle laufenden Prozessinstanzen hinweg (7.1). Föderierte Schritte (7.4) werden hier nicht angezeigt - sie schließen sich automatisch über den Federation Hub ab.",
+    "nameColumn": "Aufgabe",
+    "processColumn": "Prozess",
+    "businessKeyColumn": "Bezugsobjekt",
+    "laneColumn": "Bahn",
+    "actionsColumn": "Aktion",
+    "empty": "Keine offenen Aufgaben.",
+    "completeButton": "Bearbeiten",
+    "signatureBadge": "Signatur erforderlich",
+    "completeHeading": "Aufgabe abschließen",
+    "completedByLabel": "Abgeschlossen von",
+    "signatureIdLabel": "Signatur-ID",
+    "signatureIdHint": "Pflicht bei einem Signatur-Task (3.10) - ID einer beim Signature Service bereits erzeugten, zum Dokument passenden Signatur.",
+    "dataLabel": "Zusätzliche Prozessdaten (JSON, optional)",
+    "dataInvalid": "Kein gültiges JSON",
+    "submit": "Abschließen",
+    "submitting": "Schließe ab...",
+    "success": "Aufgabe abgeschlossen."
+  },
+  "approvalList": {
+    "heading": "Vier-Augen-Freigaben (4.3)",
+    "hint": "Generische Freigabe-Inbox über alle Aktionstypen hinweg - wer eine Anfrage selbst gestellt hat, kann sie nicht auch freigeben.",
+    "statusFilterLabel": "Status",
+    "statusAll": "Alle",
+    "statusPending": "Offen",
+    "statusApproved": "Freigegeben",
+    "statusRejected": "Abgelehnt",
+    "actionTypeColumn": "Aktionstyp",
+    "initiatedByColumn": "Beantragt von",
+    "createdColumn": "Beantragt am",
+    "statusColumn": "Status",
+    "actionsColumn": "Aktion",
+    "empty": "Keine Freigabeanfragen.",
+    "detailsToggleShow": "Details anzeigen",
+    "detailsToggleHide": "Details ausblenden",
+    "approveButton": "Freigeben",
+    "rejectButton": "Ablehnen",
+    "approveConfirm": "Diese Anfrage wirklich freigeben?",
+    "rejectReasonPrompt": "Begründung (optional):"
+  }
+}

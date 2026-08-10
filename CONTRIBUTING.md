@@ -8,7 +8,7 @@ Dieses Projekt wird über viele einzelne Arbeitssessions hinweg gebaut (siehe [`
 2. `docs/services/<service>.md` existiert/ist aktuell (Verantwortung, Endpunkte, Schema, Events die er publiziert/konsumiert).
 3. Nicht-triviale Architekturentscheidungen sind als kurzes ADR in `docs/adr/` festgehalten (Template siehe [`docs/adr/README.md`](docs/adr/README.md)).
 4. `PROGRESS.md` ist aktualisiert: erledigte Session abgehakt, nächste Session benannt, offene Fragen notiert.
-5. Bei substantiellem Code-Zuwachs: `graphify dms/ --update` (spätestens am Ende jeder Phase verpflichtend).
+5. `graphify dms/ --update`: **nur am Ende einer ganzen Phase** ausführen (nach der letzten `PX-Sy`-Session dieser Phase laut `IMPLEMENTATION_PLAN.md`), nicht nach jeder Einzelsession — verallgemeinerte Standing-Regel (ursprünglich für Phase 13 eingeführt, seit P14-S1 als generelle Projektkonvention bestätigt).
 6. Tests laufen grün (`pytest` je Service, `docker compose up --build` startet fehlerfrei).
 
 **Falle beim Docker-Smoke-Test**: `docker compose up -d` baut ein bereits existierendes Image **nicht** automatisch neu, auch wenn sich der Code geändert hat. Nach Code-Änderungen an einem Service vor dem Smoke-Test immer explizit `docker compose build <service>` (oder `up -d --build`) ausführen, sonst testet man versehentlich den alten Stand.

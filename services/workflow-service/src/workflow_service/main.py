@@ -30,6 +30,7 @@ from workflow_service.schemas import (
     ProcessInstanceCreate,
     ProcessInstanceOut,
     ReadyTaskOut,
+    ReadyTaskWithInstanceOut,
     TaskCompleteRequest,
 )
 from workflow_service.settings import Settings
@@ -722,6 +723,45 @@ async def list_instances(
         status=status,
         business_key=business_key,
     )
+
+
+@app.get(
+    "/tasks",
+    response_model=list[ReadyTaskWithInstanceOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def list_ready_tasks(
+    session: AsyncSession = Depends(get_session),
+) -> list[ReadyTaskWithInstanceOut]:
+    """Cross-Instanz-Aufgabenliste (8, P14-S2 Reviewer/Approval-UI) - bislang
+    gab es nur `GET /instances/{id}/tasks` (verlangt eine bereits bekannte
+    Instanz-ID). Iteriert alle `running`-Instanzen (gleiches Muster wie der
+    SLA-Poll-Loop, `_sla_poll_loop`) und sammelt deren bereite Manual-/
+    Signature-Tasks ein. `federated`/`federated_return`-Tasks werden
+    herausgefiltert - die werden ausschließlich automatisch über den
+    Federation Hub abgeschlossen (`_reject_manual_federated_completion`),
+    ein Mensch könnte sie über diese Liste ohnehin nie erfolgreich
+    abschließen. Kein zusätzliches Rollen-Gate über die Lizenzprüfung
+    hinaus, wie bei Instanzstart/Task-Abschluss selbst."""
+    instances = await repository.list_instances(session, status="running")
+    tasks: list[ReadyTaskWithInstanceOut] = []
+    for instance in instances:
+        for task in await repository.get_ready_tasks(session, instance.id):
+            if task.extensions.get("taskType") in _FEDERATED_TASK_TYPES:
+                continue
+            tasks.append(
+                ReadyTaskWithInstanceOut(
+                    id=task.id,
+                    name=task.name,
+                    lane=task.lane,
+                    data=task.data,
+                    extensions=task.extensions,
+                    instance_id=instance.id,
+                    process_definition_id=instance.process_definition_id,
+                    business_key=instance.business_key,
+                )
+            )
+    return tasks
 
 
 @app.get(

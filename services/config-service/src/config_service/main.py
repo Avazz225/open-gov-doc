@@ -1,4 +1,5 @@
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -7,14 +8,20 @@ from dms_common import configure_logging
 from dms_registry_client import maybe_start_registration
 from fastapi import FastAPI, Header, HTTPException, Query, status
 
-from config_service import export, imports, migrations
+from config_service import compare, export, imports, migrations
 from config_service.clients import (
     MonitoringServiceClient,
     ObjectTypeServiceClient,
     PermissionServiceClient,
     WorkflowServiceClient,
 )
-from config_service.schemas import CATEGORIES, ConfigDocument, ImportResult
+from config_service.schemas import (
+    CATEGORIES,
+    CompareRequest,
+    CompareResult,
+    ConfigDocument,
+    ImportResult,
+)
 from config_service.settings import Settings
 
 settings = Settings()
@@ -141,6 +148,43 @@ async def export_config(categories: list[str] | None = Query(default=None)) -> C
         workflow_client=app.state.workflow_client,
         permission_client=app.state.permission_client,
         monitoring_client=app.state.monitoring_client,
+    )
+
+
+@app.post("/config/compare", response_model=CompareResult)
+async def compare_config(payload: CompareRequest) -> CompareResult:
+    """Delta-/Vergleichsfunktion (7.5, P14-S1) - rein lesend/diagnostisch,
+    ungegated wie `GET /config/export` (verändert nichts, deckt keine
+    installationsspezifischen Daten wie Lizenzstand/Registry-Erreichbarkeit
+    auf, die ohnehin kein Teil von `ConfigDocument` sind). Fehlt `base`, wird
+    der eigene aktuelle Live-Export als Basisinstanz verwendet - Anwendungsfall
+    "was würde sich ändern, wenn ich `compare` importiere"."""
+    resolved = _resolve_categories(payload.categories)
+    if payload.ignore_regex:
+        for pattern in payload.ignore_regex.values():
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"Ungültige Ignore-Regex: {exc}"
+                ) from exc
+    base_doc = payload.base
+    if base_doc is None:
+        base_doc = await export.build_export(
+            categories=resolved,
+            object_type_client=app.state.object_type_client,
+            workflow_client=app.state.workflow_client,
+            permission_client=app.state.permission_client,
+            monitoring_client=app.state.monitoring_client,
+        )
+    categories_result = compare.compare_documents(
+        base_doc, payload.compare, categories=resolved, ignore_regex=payload.ignore_regex
+    )
+    return CompareResult(
+        schema_version=payload.compare.schema_version,
+        base_exported_at=base_doc.exported_at,
+        compare_exported_at=payload.compare.exported_at,
+        categories=categories_result,
     )
 
 

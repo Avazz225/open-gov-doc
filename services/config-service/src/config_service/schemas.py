@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -95,3 +96,37 @@ class CategoryResult(BaseModel):
 class ImportResult(BaseModel):
     schema_version: str
     results: dict[str, CategoryResult]
+
+
+class CategoryDelta(BaseModel):
+    """Ergebnis des Vergleichs einer einzelnen Kategorie (7.5, P14-S1) - die
+    vier Kategorisierungen, die 7.5 wörtlich verlangt: nur in der Basisinstanz,
+    nur in der Vergleichsinstanz, in beiden aber inhaltlich abweichend (mit
+    Detailanzeige je abweichendem Attribut), identisch. `differing` ist nach
+    Anzeigenamen (Basisinstanz-Rohwert, siehe `compare.py`) geschlüsselt,
+    darunter je abweichendem Feld `{"base": ..., "compare": ...}`."""
+
+    only_in_base: list[str] = []
+    only_in_compare: list[str] = []
+    differing: dict[str, dict[str, dict[str, Any]]] = {}
+    identical: list[str] = []
+
+
+class CompareRequest(BaseModel):
+    """`base` fehlt -> der eigene aktuelle Live-Export wird als Basisinstanz
+    verwendet (Anwendungsfall "was würde sich ändern, wenn ich dieses Dokument
+    importiere", 7.5). `ignore_regex` ist je Kategorie-Name ein Muster, `"*"`
+    setzt das globale Default-Muster (7.5: "sowohl global als auch je
+    Kategorie konfigurierbar")."""
+
+    base: ConfigDocument | None = None
+    compare: ConfigDocument
+    categories: list[str] | None = None
+    ignore_regex: dict[str, str] | None = None
+
+
+class CompareResult(BaseModel):
+    schema_version: str
+    base_exported_at: datetime
+    compare_exported_at: datetime
+    categories: dict[str, CategoryDelta]

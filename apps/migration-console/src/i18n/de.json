@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "title": "DMS Migrations-Konsole",
+    "description": "Installations-Paarung und Transfer-Vorgänge (Konzept 7.2/8)"
+  },
+  "common": {
+    "logout": "Abmelden",
+    "loading": "Lade...",
+    "cancel": "Abbrechen",
+    "create": "Anlegen",
+    "delete": "Löschen",
+    "loadError": "Laden fehlgeschlagen",
+    "actionError": "Aktion fehlgeschlagen",
+    "back": "Zurück zur Liste"
+  },
+  "theme": {
+    "label": "Design",
+    "auto": "Automatisch",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "highContrast": "Hoher Kontrast"
+  },
+  "maintenanceBanner": {
+    "text": "Systemweite Notfallsperre aktiv - nur der aktivierte Superuser ist handlungsfähig."
+  },
+  "login": {
+    "heading": "Anmelden",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "submitting": "Melde an...",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "nav": {
+    "transfers": "Transfers",
+    "pairedInstallations": "Gepaarte Installationen"
+  },
+  "pairedInstallations": {
+    "heading": "Gepaarte Installationen (7.2)",
+    "hint": "Direkte Installations-Paarung statt Hub-Vermittlung (ADR 0034) - jede Zeile ist eine mögliche Ziel-Installation für einen Transfer.",
+    "newButton": "Installation paaren",
+    "nameColumn": "Name",
+    "baseUrlColumn": "Gateway-Adresse",
+    "createdColumn": "Angelegt am",
+    "actionsColumn": "Aktion",
+    "empty": "Noch keine Installation gepaart.",
+    "displayNameLabel": "Anzeigename",
+    "baseUrlLabel": "Gateway-Adresse der Ziel-Installation",
+    "apiKeyLabel": "API-Key (leer lassen, wenn diese Installation die Paarung initiiert)",
+    "submit": "Paaren",
+    "submitting": "Paare...",
+    "apiKeyNotice": "API-Key (nur jetzt sichtbar, nicht erneut abrufbar):",
+    "deleteConfirm": "Diese Paarung wirklich entfernen?"
+  },
+  "transfers": {
+    "heading": "Transfers (7.2)",
+    "hint": "Migrations-/Übergabevorgänge zwischen dieser und einer gepaarten Installation - läuft selbst als auditierbarer, resumable Workflow (workflow-service).",
+    "statusFilterLabel": "Status",
+    "statusAll": "Alle",
+    "newButton": "Neuer Transfer",
+    "idColumn": "ID",
+    "sourceColumn": "Quellordner",
+    "targetColumn": "Ziel",
+    "statusColumn": "Status",
+    "progressColumn": "Fortschritt",
+    "createdColumn": "Gestartet am",
+    "actionsColumn": "Aktion",
+    "empty": "Noch keine Transfers.",
+    "detailButton": "Details",
+    "sourceFolderIdLabel": "Quellordner-ID",
+    "targetInstallationLabel": "Ziel-Installation",
+    "targetInstallationEmpty": "Zuerst eine Installation paaren",
+    "createdByLabel": "Gestartet von",
+    "dryRunLabel": "Nur Testlauf (Dry-Run, keine Datenbewegung)",
+    "retentionDaysLabel": "Löschfrist in Tagen (leer = Standard)",
+    "submit": "Transfer starten",
+    "submitting": "Starte...",
+    "pendingApprovalNotice": "Vier-Augen-Freigabe erforderlich (4.3) - Anfrage {id} wurde erstellt, der Transfer startet nach Freigabe.",
+    "startError": "Transfer konnte nicht gestartet werden",
+    "detailHeading": "Transfer-Details",
+    "documentsProgress": "{copied}/{total} kopiert, {verified} verifiziert",
+    "dryRunBadge": "Dry-Run",
+    "errorLabel": "Fehler",
+    "phasesHeading": "Zeitverlauf",
+    "phaseCreated": "Angelegt",
+    "phaseLocked": "Gesperrt",
+    "phaseCopied": "Kopiert",
+    "phaseVerified": "Verifiziert",
+    "phaseReleased": "Freigegeben",
+    "phaseDeletionScheduled": "Löschung geplant",
+    "phaseDeleted": "Quelle gelöscht"
+  }
+}

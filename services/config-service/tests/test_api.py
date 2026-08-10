@@ -63,6 +63,127 @@ def test_export_with_unknown_category_returns_422():
     assert response.status_code == 422
 
 
+def test_compare_identical_document_against_itself_reports_no_differences():
+    with _client() as client:
+        exported = client.get("/config/export", params={"categories": "roles"}).json()
+        response = client.post(
+            "/config/compare",
+            json={"compare": exported, "base": exported, "categories": ["roles"]},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["categories"]["roles"]["differing"] == {}
+    assert body["categories"]["roles"]["only_in_base"] == []
+    assert body["categories"]["roles"]["only_in_compare"] == []
+
+
+def test_compare_without_base_uses_own_live_export():
+    """7.5-Anwendungsfall: "was würde sich ändern, wenn ich dieses Dokument
+    importiere" - `base` weglassen zieht den eigenen aktuellen Stand heran."""
+    role_name = f"config-compare-test-{uuid.uuid4().hex[:8]}"
+    with _client() as client:
+        response = client.post(
+            "/config/compare",
+            json={
+                "compare": {
+                    "schema_version": "1.0",
+                    "exported_at": "2026-01-01T00:00:00Z",
+                    "roles": [{"name": role_name, "description": "d", "permissions": ["read"]}],
+                },
+                "categories": ["roles"],
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    # Eigener Live-Export enthält bereits diverse Rollen aus dem laufenden
+    # Dev-Stack - nur prüfen, dass die neue Rolle als "nur in compare" auftaucht
+    # und nicht faelschlich unter "nur in base" erscheint.
+    assert body["categories"]["roles"]["only_in_compare"] == [role_name]
+    assert role_name not in body["categories"]["roles"]["only_in_base"]
+
+
+def test_compare_detects_differing_role_permissions():
+    role_name = f"config-compare-diff-{uuid.uuid4().hex[:8]}"
+    base = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": role_name, "description": "d", "permissions": ["read"]}],
+    }
+    compare_doc = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": role_name, "description": "d", "permissions": ["read", "write"]}],
+    }
+    with _client() as client:
+        response = client.post(
+            "/config/compare",
+            json={"base": base, "compare": compare_doc, "categories": ["roles"]},
+        )
+    assert response.status_code == 200
+    differing = response.json()["categories"]["roles"]["differing"]
+    assert differing[role_name]["permissions"] == {"base": ["read"], "compare": ["read", "write"]}
+
+
+def test_compare_matches_names_via_ignore_regex():
+    suffix = uuid.uuid4().hex[:8]
+    base_name = f"100_delta_test_{suffix}"
+    compare_name = f"101__delta_test_{suffix}"
+    base = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": base_name, "description": "d", "permissions": ["read"]}],
+    }
+    compare_doc = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": compare_name, "description": "d", "permissions": ["read"]}],
+    }
+    with _client() as client:
+        without_regex = client.post(
+            "/config/compare",
+            json={"base": base, "compare": compare_doc, "categories": ["roles"]},
+        )
+        with_regex = client.post(
+            "/config/compare",
+            json={
+                "base": base,
+                "compare": compare_doc,
+                "categories": ["roles"],
+                "ignore_regex": {"*": r"^\d+_+"},
+            },
+        )
+    assert without_regex.json()["categories"]["roles"]["only_in_base"] == [base_name]
+    assert without_regex.json()["categories"]["roles"]["only_in_compare"] == [compare_name]
+    with_regex_roles = with_regex.json()["categories"]["roles"]
+    assert with_regex_roles["only_in_base"] == []
+    assert with_regex_roles["only_in_compare"] == []
+    assert with_regex_roles["identical"] == [base_name]
+
+
+def test_compare_with_invalid_ignore_regex_returns_422():
+    with _client() as client:
+        response = client.post(
+            "/config/compare",
+            json={
+                "compare": {"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
+                "ignore_regex": {"*": "("},
+            },
+        )
+    assert response.status_code == 422
+
+
+def test_compare_with_unknown_category_returns_422():
+    with _client() as client:
+        response = client.post(
+            "/config/compare",
+            json={
+                "compare": {"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
+                "categories": ["does-not-exist"],
+            },
+        )
+    assert response.status_code == 422
+
+
 def test_import_without_principal_header_returns_403():
     with _client() as client:
         response = client.post(

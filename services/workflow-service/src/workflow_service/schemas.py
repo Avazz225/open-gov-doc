@@ -57,6 +57,18 @@ class ReadyTaskOut(BaseModel):
     extensions: dict[str, str] = {}
 
 
+class ReadyTaskWithInstanceOut(ReadyTaskOut):
+    """`GET /tasks` (8, P14-S2) - dieselbe Task-Information wie `ReadyTaskOut`,
+    zusätzlich um den instanzbezogenen Kontext ergänzt, der bei einer
+    Cross-Instanz-Liste erst sichtbar gemacht werden muss (bei
+    `GET /instances/{id}/tasks` ist die Instanz bereits durch die URL
+    bekannt)."""
+
+    instance_id: str
+    process_definition_id: int
+    business_key: str | None
+
+
 class TaskCompleteRequest(BaseModel):
     completed_by: str
     data: dict = {}
