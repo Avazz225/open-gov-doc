@@ -1,4 +1,5 @@
 import time
+from datetime import UTC, date, datetime
 
 import pytest
 from workflow_service import spiff_adapter as sa
@@ -343,3 +344,107 @@ def test_business_rule_task_unknown_decision_ref_raises(
         sa.parse_bpmn(
             business_rule_task_unknown_decision_bpmn, None, dmn_definitions=[approval_level_dmn]
         )
+
+
+def _reset_calendars():
+    sa.register_business_calendars({}, default_name=None)
+
+
+# Friday - reused across tests below for deterministic weekday-relative math.
+_FRIDAY = datetime(2026, 1, 9, 12, 0, tzinfo=UTC)
+
+
+def test_business_days_duration_zero_is_immediate():
+    _reset_calendars()
+    assert sa.business_days_duration(0, start=_FRIDAY) == "P0D"
+
+
+def test_business_days_duration_skips_weekend_only_without_calendar():
+    _reset_calendars()
+    # Fri -> Sat/Sun skipped -> Mon=1, Tue=2, Wed=3 => 5 calendar days.
+    assert sa.business_days_duration(3, start=_FRIDAY) == "P5D"
+
+
+def test_business_days_duration_skips_weekend_and_calendar_holiday():
+    _reset_calendars()
+    sa.register_business_calendars({"de-national": {date(2026, 1, 12)}}, default_name=None)
+    # Fri -> Sat/Sun skipped, Mon 12th (holiday) skipped -> Tue=1,Wed=2,Thu=3 => 6 calendar days.
+    assert sa.business_days_duration(3, "de-national", start=_FRIDAY) == "P6D"
+
+
+def test_business_days_duration_unknown_calendar_raises():
+    _reset_calendars()
+    with pytest.raises(sa.UnknownBusinessCalendarError):
+        sa.business_days_duration(1, "does-not-exist", start=_FRIDAY)
+
+
+def test_business_days_duration_negative_n_raises():
+    _reset_calendars()
+    with pytest.raises(ValueError):
+        sa.business_days_duration(-1, start=_FRIDAY)
+
+
+def test_business_days_duration_uses_default_calendar_when_no_name_given():
+    _reset_calendars()
+    sa.register_business_calendars({"de-national": {date(2026, 1, 12)}}, default_name="de-national")
+    assert sa.business_days_duration(3, start=_FRIDAY) == "P6D"
+
+
+def test_business_days_duration_named_calendar_overrides_default():
+    _reset_calendars()
+    sa.register_business_calendars(
+        {
+            "de-national": {date(2026, 1, 12)},
+            "empty-cal": set(),
+        },
+        default_name="de-national",
+    )
+    # Explicit calendar_name wins over the installation default.
+    assert sa.business_days_duration(3, "empty-cal", start=_FRIDAY) == "P5D"
+
+
+def test_business_days_duration_no_default_falls_back_to_weekend_only():
+    _reset_calendars()
+    assert sa.business_days_duration(3, start=_FRIDAY) == "P5D"
+
+
+def test_business_days_timer_fires_via_custom_script_engine(business_days_timer_bpmn):
+    """Ende-zu-Ende: `business_days(0)` als Timer-Dauerangabe in einer echten
+    BPMN-Datei wird über die eigene `PythonScriptEngine`-Instanz aufgelöst
+    (P14-S5, siehe Moduldocstring) - kein Mocking von SpiffWorkflow selbst."""
+    _reset_calendars()
+    spec, _ = sa.parse_bpmn(business_days_timer_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.run_ready_steps(wf)
+    time.sleep(0.05)
+    sa.check_timers(wf)
+    assert sa.is_completed(wf) is True
+
+
+def test_business_days_timer_survives_serialize_deserialize_roundtrip(
+    business_days_timer_after_manual_task_bpmn,
+):
+    """`wf.script_engine` ist kein Teil des serialisierten Zustands - `deserialize()`
+    muss die eigene Engine erneut zuweisen, sonst würde `business_days(...)` beim
+    nächsten Poll-Tick nicht mehr aufgelöst (P14-S5, siehe Moduldocstring). Der
+    Timer folgt hier erst auf einen Manual Task, damit `has_fired()` VOR dem
+    Serialisieren garantiert noch nie aufgerufen wurde (kein bereits gecachter
+    `event_value` im internen Task-Zustand) - `business_days(0)` muss also nach
+    dem Deserialisieren tatsächlich zum ersten Mal ausgewertet werden."""
+    _reset_calendars()
+    spec, _ = sa.parse_bpmn(business_days_timer_after_manual_task_bpmn, None)
+    wf = sa.new_workflow(spec)
+    sa.run_ready_steps(wf)
+    ready = sa.ready_manual_tasks(wf)
+    assert len(ready) == 1
+
+    blob = sa.serialize(wf)
+    wf2 = sa.deserialize(blob)
+
+    task = sa.find_ready_task(wf2, ready[0].id)
+    assert task is not None
+    sa.complete_task(task, {})
+    sa.run_ready_steps(wf2)
+    time.sleep(0.05)
+    sa.check_timers(wf2)
+    assert sa.is_completed(wf2) is True

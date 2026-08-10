@@ -1,7 +1,17 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("workflow")
@@ -62,6 +72,38 @@ class DmnDefinition(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     decision_id: Mapped[str] = mapped_column(String(256))
     dmn_xml: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BusinessCalendar(Base):
+    """Regionaler Geschäftskalender für die SLA-Fristberechnung (7.1, P14-S5) -
+    eine benannte, frei pflegbare Liste arbeitsfreier Tage (Feiertage), die eine
+    Timer-Dauerangabe in einer BPMN-Datei per neuer `business_days(n,
+    calendar_name)`-Funktion referenzieren kann (siehe `spiff_adapter.py`).
+    Wochenenden (Sa/So) gelten dabei IMMER als arbeitsfrei, unabhängig von
+    einem konkreten Kalender - `non_working_dates` enthält nur die
+    ZUSÄTZLICHEN, kalenderspezifischen Tage (Feiertage). Anders als
+    `ProcessDefinition`/`DmnDefinition` bewusst KEIN Versionierungsmuster:
+    ein Kalender ist fortlaufend zu pflegende Referenzdaten (z. B. jährlich
+    neue Feiertage nachtragen), keine unveränderliche, versionierte
+    Ausführungslogik - normales Update-in-Place wie bei `SensorConfig`/
+    `ApprovalConfig`.
+
+    `is_default`: höchstens EIN Kalender darf gleichzeitig `True` sein
+    (`repository.py` setzt beim Setzen eines neuen Default-Kalenders alle
+    anderen zurück) - wird von `business_days(n)` OHNE explizites
+    `calendar_name`-Argument verwendet (Installationsweiter Default, siehe
+    Konzept 7.1: "einem Prozess/einer Installation zuordenbar" - ein explizit
+    benannter Kalender in der BPMN-Datei selbst ist die Prozess-Zuordnung,
+    dieser Default die Installations-Zuordnung)."""
+
+    __tablename__ = "business_calendar"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), unique=True)
+    non_working_dates: Mapped[list[str]] = mapped_column(JSON, default=list)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

@@ -92,6 +92,36 @@ class WorkflowServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def list_business_calendars(self) -> list[dict]:
+        response = await self._client.get("/business-calendars")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_business_calendar(
+        self, *, name: str, non_working_dates: list[str], is_default: bool
+    ) -> dict:
+        response = await self._client.post(
+            "/business-calendars",
+            json={"name": name, "non_working_dates": non_working_dates, "is_default": is_default},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_business_calendar(
+        self,
+        business_calendar_id: int,
+        *,
+        name: str,
+        non_working_dates: list[str],
+        is_default: bool,
+    ) -> dict:
+        response = await self._client.put(
+            f"/business-calendars/{business_calendar_id}",
+            json={"name": name, "non_working_dates": non_working_dates, "is_default": is_default},
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_federation_config(self) -> dict:
         """7.4/P13-S3: Versionskompatibilitätsspanne - ungegatet auf der
         Zielseite, siehe `docs/services/workflow-service.md` "Federation"."""

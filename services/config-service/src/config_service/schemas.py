@@ -13,6 +13,7 @@ CATEGORIES = (
     "object_types",
     "workflows",
     "dmn_definitions",
+    "business_calendars",
     "roles",
     "approval_config",
     "sensor_config",
@@ -59,6 +60,17 @@ class DmnDefinitionExport(BaseModel):
     dmn_xml: str
 
 
+class BusinessCalendarExport(BaseModel):
+    """Regionaler Geschäftskalender für die SLA-Fristberechnung (7.1/7.3,
+    P14-S5) - anders als `workflows`/`dmn_definitions` KEIN
+    Versionierungsmuster (siehe `workflow_service.models.BusinessCalendar`):
+    Upsert per `name`, wie `roles`/`approval_config`."""
+
+    name: str
+    non_working_dates: list[str] = []
+    is_default: bool = False
+
+
 class RoleExport(BaseModel):
     name: str
     description: str
@@ -92,6 +104,7 @@ class ConfigDocument(BaseModel):
     object_types: list[ObjectTypeExport] | None = None
     workflows: list[WorkflowExport] | None = None
     dmn_definitions: list[DmnDefinitionExport] | None = None
+    business_calendars: list[BusinessCalendarExport] | None = None
     roles: list[RoleExport] | None = None
     approval_config: list[ApprovalConfigExport] | None = None
     sensor_config: SensorConfigExport | None = None

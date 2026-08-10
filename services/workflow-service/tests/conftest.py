@@ -95,10 +95,16 @@ async def _clean_tables():
         await conn.execute(
             text(
                 "TRUNCATE workflow.process_instance, workflow.process_definition, "
-                "workflow.dmn_definition CASCADE"
+                "workflow.dmn_definition, workflow.business_calendar CASCADE"
             )
         )
     await eng.dispose()
+    # Geschäftskalender-Cache (P14-S5) ist Modul-State in `spiff_adapter.py`,
+    # bleibt sonst über Tests hinweg bestehen - nach dem Truncate oben wieder
+    # leer, damit jeder Test mit einem sauberen Cache startet.
+    from workflow_service import spiff_adapter as _spiff_adapter
+
+    _spiff_adapter.register_business_calendars({}, default_name=None)
     yield
 
 
@@ -195,6 +201,32 @@ def multi_decision_dmn() -> str:
     """DMN-Datei mit zwei `<decision>`-Elementen - SpiffWorkflow unterstützt nur
     genau eine je Datei (P14-S4, siehe `spiff_adapter.parse_dmn`)."""
     path = os.path.join(os.path.dirname(__file__), "fixtures", "multi_decision.dmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def business_days_timer_bpmn() -> str:
+    """Ein `intermediateCatchEvent`-Timer, dessen `timeDuration` die neue
+    `business_days(0)`-Funktion aufruft (7.1, P14-S5) - `n=0` macht das
+    Fälligwerden deterministisch fast sofort testbar, analog zu
+    `variable_duration_timer_bpmn`s `PT0.05S`-Muster."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "business_days_timer.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def business_days_timer_after_manual_task_bpmn() -> str:
+    """Wie `business_days_timer_bpmn`, aber der Timer folgt erst auf einen
+    Manual Task (P14-S5) - Grundlage für den Serialisierungs-Rundreise-Test:
+    der Timer wird dadurch VOR dem ersten Serialisieren nie erreicht/geprüft
+    (`has_fired()` noch nie aufgerufen, kein `event_value` im internen
+    Task-Zustand gecacht), `business_days(...)` muss also nach dem
+    Deserialisieren tatsächlich neu auswertbar sein."""
+    path = os.path.join(
+        os.path.dirname(__file__), "fixtures", "business_days_timer_after_manual_task.bpmn"
+    )
     with open(path, encoding="utf-8") as f:
         return f.read()
 

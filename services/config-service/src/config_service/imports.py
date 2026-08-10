@@ -90,6 +90,36 @@ async def apply_dmn_definitions(client: WorkflowServiceClient, entries: list) ->
     return result
 
 
+async def apply_business_calendars(client: WorkflowServiceClient, entries: list) -> CategoryResult:
+    """Upsert per `name` (P14-S5) - anders als `apply_workflows`/
+    `apply_dmn_definitions` KEIN Versionierungsmuster (siehe
+    `workflow_service.models.BusinessCalendar`), ein wiederholter Import
+    aktualisiert denselben Kalender statt eine neue Version anzulegen."""
+    result = CategoryResult()
+    existing = {c["name"]: c for c in await client.list_business_calendars()}
+    for entry in entries:
+        try:
+            match = existing.get(entry.name)
+            if match is None:
+                await client.create_business_calendar(
+                    name=entry.name,
+                    non_working_dates=entry.non_working_dates,
+                    is_default=entry.is_default,
+                )
+                result.created += 1
+            else:
+                await client.update_business_calendar(
+                    match["id"],
+                    name=entry.name,
+                    non_working_dates=entry.non_working_dates,
+                    is_default=entry.is_default,
+                )
+                result.updated += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{entry.name}: {exc}")
+    return result
+
+
 async def apply_roles(client: PermissionServiceClient, entries: list) -> CategoryResult:
     result = CategoryResult()
     existing = {r["name"]: r for r in await client.list_roles()}
@@ -174,6 +204,10 @@ async def apply_import(
         )
     if "workflows" in categories and doc.workflows is not None:
         results["workflows"] = await apply_workflows(workflow_client, doc.workflows)
+    if "business_calendars" in categories and doc.business_calendars is not None:
+        results["business_calendars"] = await apply_business_calendars(
+            workflow_client, doc.business_calendars
+        )
     if "roles" in categories and doc.roles is not None:
         results["roles"] = await apply_roles(permission_client, doc.roles)
     if "approval_config" in categories and doc.approval_config is not None:

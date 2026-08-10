@@ -1,12 +1,13 @@
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from workflow_service import spiff_adapter
 from workflow_service.models import (
+    BusinessCalendar,
     DmnDefinition,
     FederationTask,
     ProcessDefinition,
@@ -52,6 +53,17 @@ class DuplicateDecisionIdError(Exception):
     SpiffWorkflow lädt für jeden BPMN-Parse immer nur die neueste Version jeder Familie
     in denselben Parser (`list_latest_dmn_xml`), zwei Familien mit kollidierender
     `decision_id` wären darin nicht mehr unterscheidbar."""
+
+
+class DuplicateBusinessCalendarNameError(Exception):
+    """`name` eines Geschäftskalenders (P14-S5) ist bereits vergeben - anders als
+    Prozess-/DMN-Definitionen KEIN Versionierungsmuster (siehe `models.BusinessCalendar`),
+    ein Name ist deshalb dauerhaft eindeutig statt automatisch neu zu versionieren."""
+
+
+class InvalidBusinessCalendarError(Exception):
+    """Ein Eintrag in `non_working_dates` ist kein gültiges ISO-Datum
+    (`YYYY-MM-DD`, P14-S5)."""
 
 
 class TaskNotReadyError(Exception):
@@ -242,6 +254,110 @@ async def list_latest_dmn_xml(session: AsyncSession) -> list[str]:
     ihr Laden kostet nur etwas Parse-Zeit)."""
     definitions = await list_latest_dmn_definitions(session)
     return [d.dmn_xml for d in definitions]
+
+
+def _parse_non_working_dates(non_working_dates: list[str]) -> None:
+    """Nur Validierung (P14-S5) - `spiff_adapter.register_business_calendars()`
+    erwartet `date`-Objekte, `non_working_dates` selbst bleibt als Liste von
+    ISO-Strings persistiert (JSON-Spalte, siehe `models.BusinessCalendar`)."""
+    for raw in non_working_dates:
+        try:
+            date.fromisoformat(raw)
+        except ValueError as exc:
+            raise InvalidBusinessCalendarError(
+                f"{raw!r} ist kein gültiges ISO-Datum (YYYY-MM-DD)"
+            ) from exc
+
+
+async def refresh_business_calendar_cache(session: AsyncSession) -> None:
+    """Lädt ALLE Geschäftskalender neu in `spiff_adapter`s In-Memory-Cache
+    (P14-S5) - nach jedem Schreibzugriff aufgerufen, damit `business_days()`
+    nie einen veralteten Stand sieht. Auch der Einstiegspunkt für `main.py`s
+    einmaligen Ladevorgang beim Service-Start."""
+    result = await session.execute(select(BusinessCalendar))
+    calendars = list(result.scalars().all())
+    cache = {c.name: {date.fromisoformat(d) for d in c.non_working_dates} for c in calendars}
+    default_name = next((c.name for c in calendars if c.is_default), None)
+    spiff_adapter.register_business_calendars(cache, default_name=default_name)
+
+
+async def create_business_calendar(
+    session: AsyncSession, *, name: str, non_working_dates: list[str], is_default: bool
+) -> BusinessCalendar:
+    _parse_non_working_dates(non_working_dates)
+    existing = await session.execute(select(BusinessCalendar).where(BusinessCalendar.name == name))
+    if existing.scalar_one_or_none() is not None:
+        raise DuplicateBusinessCalendarNameError(f"Kalendername {name!r} bereits vergeben")
+
+    if is_default:
+        await session.execute(
+            update(BusinessCalendar).where(BusinessCalendar.is_default).values(is_default=False)
+        )
+
+    now = datetime.now(UTC)
+    calendar = BusinessCalendar(
+        name=name,
+        non_working_dates=non_working_dates,
+        is_default=is_default,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(calendar)
+    await session.flush()
+    await refresh_business_calendar_cache(session)
+    return calendar
+
+
+async def get_business_calendar(
+    session: AsyncSession, business_calendar_id: int
+) -> BusinessCalendar:
+    calendar = await session.get(BusinessCalendar, business_calendar_id)
+    if calendar is None:
+        raise NotFoundError(f"business_calendar_id {business_calendar_id!r} unbekannt")
+    return calendar
+
+
+async def list_business_calendars(session: AsyncSession) -> list[BusinessCalendar]:
+    result = await session.execute(select(BusinessCalendar).order_by(BusinessCalendar.name))
+    return list(result.scalars().all())
+
+
+async def update_business_calendar(
+    session: AsyncSession,
+    business_calendar_id: int,
+    *,
+    name: str,
+    non_working_dates: list[str],
+    is_default: bool,
+) -> BusinessCalendar:
+    calendar = await get_business_calendar(session, business_calendar_id)
+    _parse_non_working_dates(non_working_dates)
+    if name != calendar.name:
+        existing = await session.execute(
+            select(BusinessCalendar).where(BusinessCalendar.name == name)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise DuplicateBusinessCalendarNameError(f"Kalendername {name!r} bereits vergeben")
+
+    if is_default and not calendar.is_default:
+        await session.execute(
+            update(BusinessCalendar).where(BusinessCalendar.is_default).values(is_default=False)
+        )
+
+    calendar.name = name
+    calendar.non_working_dates = non_working_dates
+    calendar.is_default = is_default
+    calendar.updated_at = datetime.now(UTC)
+    await session.flush()
+    await refresh_business_calendar_cache(session)
+    return calendar
+
+
+async def delete_business_calendar(session: AsyncSession, business_calendar_id: int) -> None:
+    calendar = await get_business_calendar(session, business_calendar_id)
+    await session.delete(calendar)
+    await session.flush()
+    await refresh_business_calendar_cache(session)
 
 
 async def start_instance(

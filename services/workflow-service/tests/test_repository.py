@@ -1,7 +1,8 @@
 import asyncio
+from datetime import UTC, datetime
 
 import pytest
-from workflow_service import repository
+from workflow_service import repository, spiff_adapter
 
 
 async def test_create_process_definition_auto_detects_process_id(session, manual_task_bpmn):
@@ -393,3 +394,123 @@ async def test_list_instances_filters_by_status(session, manual_task_bpmn, no_ta
     completed = await repository.list_instances(session, status="completed")
     assert len(running) == 1
     assert len(completed) == 1
+
+
+async def test_create_business_calendar_succeeds(session):
+    calendar = await repository.create_business_calendar(
+        session, name="de-national", non_working_dates=["2026-12-25"], is_default=False
+    )
+    assert calendar.name == "de-national"
+    assert calendar.non_working_dates == ["2026-12-25"]
+    assert calendar.is_default is False
+
+
+async def test_create_business_calendar_duplicate_name_raises(session):
+    await repository.create_business_calendar(
+        session, name="de-national", non_working_dates=[], is_default=False
+    )
+    with pytest.raises(repository.DuplicateBusinessCalendarNameError):
+        await repository.create_business_calendar(
+            session, name="de-national", non_working_dates=[], is_default=False
+        )
+
+
+async def test_create_business_calendar_invalid_date_raises(session):
+    with pytest.raises(repository.InvalidBusinessCalendarError):
+        await repository.create_business_calendar(
+            session, name="broken", non_working_dates=["not-a-date"], is_default=False
+        )
+
+
+async def test_create_business_calendar_as_default_unsets_previous_default(session):
+    first = await repository.create_business_calendar(
+        session, name="cal-a", non_working_dates=[], is_default=True
+    )
+    second = await repository.create_business_calendar(
+        session, name="cal-b", non_working_dates=[], is_default=True
+    )
+    refreshed_first = await repository.get_business_calendar(session, first.id)
+    assert refreshed_first.is_default is False
+    assert second.is_default is True
+
+
+async def test_get_business_calendar_unknown_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_business_calendar(session, 999999)
+
+
+async def test_list_business_calendars_ordered_by_name(session):
+    await repository.create_business_calendar(
+        session, name="zzz", non_working_dates=[], is_default=False
+    )
+    await repository.create_business_calendar(
+        session, name="aaa", non_working_dates=[], is_default=False
+    )
+    calendars = await repository.list_business_calendars(session)
+    assert [c.name for c in calendars] == ["aaa", "zzz"]
+
+
+async def test_update_business_calendar_changes_fields(session):
+    calendar = await repository.create_business_calendar(
+        session, name="de-national", non_working_dates=["2026-12-25"], is_default=False
+    )
+    updated = await repository.update_business_calendar(
+        session,
+        calendar.id,
+        name="de-national-v2",
+        non_working_dates=["2026-12-25", "2026-12-26"],
+        is_default=True,
+    )
+    assert updated.name == "de-national-v2"
+    assert updated.non_working_dates == ["2026-12-25", "2026-12-26"]
+    assert updated.is_default is True
+
+
+async def test_update_business_calendar_to_duplicate_name_raises(session):
+    await repository.create_business_calendar(
+        session, name="cal-a", non_working_dates=[], is_default=False
+    )
+    other = await repository.create_business_calendar(
+        session, name="cal-b", non_working_dates=[], is_default=False
+    )
+    with pytest.raises(repository.DuplicateBusinessCalendarNameError):
+        await repository.update_business_calendar(
+            session, other.id, name="cal-a", non_working_dates=[], is_default=False
+        )
+
+
+async def test_update_business_calendar_unknown_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.update_business_calendar(
+            session, 999999, name="x", non_working_dates=[], is_default=False
+        )
+
+
+async def test_delete_business_calendar_succeeds(session):
+    calendar = await repository.create_business_calendar(
+        session, name="de-national", non_working_dates=[], is_default=False
+    )
+    await repository.delete_business_calendar(session, calendar.id)
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_business_calendar(session, calendar.id)
+
+
+async def test_create_business_calendar_refreshes_spiff_adapter_cache(session):
+    """`business_days()` muss den neu angelegten Kalender sofort sehen, ohne
+    einen Service-Neustart (P14-S5) - `create_business_calendar` ruft
+    `refresh_business_calendar_cache` intern auf."""
+    await repository.create_business_calendar(
+        session, name="de-national", non_working_dates=["2026-01-12"], is_default=False
+    )
+    friday = datetime(2026, 1, 9, 12, 0, tzinfo=UTC)
+    assert spiff_adapter.business_days_duration(3, "de-national", start=friday) == "P6D"
+
+
+async def test_delete_business_calendar_removes_it_from_spiff_adapter_cache(session):
+    calendar = await repository.create_business_calendar(
+        session, name="de-national", non_working_dates=["2026-01-12"], is_default=False
+    )
+    await repository.delete_business_calendar(session, calendar.id)
+    friday = datetime(2026, 1, 9, 12, 0, tzinfo=UTC)
+    with pytest.raises(spiff_adapter.UnknownBusinessCalendarError):
+        spiff_adapter.business_days_duration(3, "de-national", start=friday)

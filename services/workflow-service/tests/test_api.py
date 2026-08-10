@@ -243,6 +243,127 @@ def test_business_rule_task_process_definition_evaluates_dmn_end_to_end(
     assert response.json()["status"] == "completed"
 
 
+def test_create_business_calendar_without_permission_is_forbidden(client):
+    response = client.post(
+        "/business-calendars", json={"name": "de-national", "non_working_dates": []}
+    )
+    assert response.status_code == 403
+
+
+def test_create_and_get_business_calendar(client, admin_headers):
+    create_response = client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": ["2026-12-25"], "is_default": False},
+        headers=admin_headers,
+    )
+    assert create_response.status_code == 201
+    calendar_id = create_response.json()["id"]
+    assert create_response.json()["non_working_dates"] == ["2026-12-25"]
+
+    get_response = client.get(f"/business-calendars/{calendar_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "de-national"
+
+
+def test_create_business_calendar_duplicate_name_returns_409(client, admin_headers):
+    client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    )
+    response = client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    )
+    assert response.status_code == 409
+
+
+def test_create_business_calendar_invalid_date_returns_422(client, admin_headers):
+    response = client.post(
+        "/business-calendars",
+        json={"name": "broken", "non_working_dates": ["not-a-date"]},
+        headers=admin_headers,
+    )
+    assert response.status_code == 422
+
+
+def test_get_unknown_business_calendar_returns_404(client):
+    response = client.get("/business-calendars/999999")
+    assert response.status_code == 404
+
+
+def test_list_business_calendars(client, admin_headers):
+    client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    )
+    response = client.get("/business-calendars")
+    assert response.status_code == 200
+    assert any(c["name"] == "de-national" for c in response.json())
+
+
+def test_update_business_calendar_without_permission_is_forbidden(client, admin_headers):
+    calendar_id = client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    ).json()["id"]
+    response = client.put(
+        f"/business-calendars/{calendar_id}",
+        json={"name": "de-national", "non_working_dates": []},
+    )
+    assert response.status_code == 403
+
+
+def test_update_business_calendar_changes_fields(client, admin_headers):
+    calendar_id = client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    ).json()["id"]
+    response = client.put(
+        f"/business-calendars/{calendar_id}",
+        json={"name": "de-national", "non_working_dates": ["2026-12-25"], "is_default": True},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["non_working_dates"] == ["2026-12-25"]
+    assert response.json()["is_default"] is True
+
+
+def test_delete_business_calendar_succeeds(client, admin_headers):
+    calendar_id = client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    ).json()["id"]
+    response = client.delete(f"/business-calendars/{calendar_id}", headers=admin_headers)
+    assert response.status_code == 204
+    assert client.get(f"/business-calendars/{calendar_id}").status_code == 404
+
+
+def test_business_days_timer_process_respects_calendar_end_to_end(
+    client, business_days_timer_bpmn, admin_headers
+):
+    """Ende-zu-Ende über die HTTP-API (P14-S5): ein hochgeladener Kalender wirkt
+    sich über `business_days()` tatsächlich auf eine gestartete Instanz aus -
+    hier mit `n=0` deterministisch fast sofort abschließend."""
+    client.post(
+        "/business-calendars",
+        json={"name": "de-national", "non_working_dates": []},
+        headers=admin_headers,
+    )
+    definition_id = _upload_definition(
+        client, business_days_timer_bpmn, name="Wartezeit-Workflow", headers=admin_headers
+    ).json()["id"]
+    response = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    )
+    assert response.status_code == 201
+
+
 def test_start_instance_with_manual_task_stays_running(client, manual_task_bpmn, admin_headers):
     definition_id = _upload_definition(
         client, manual_task_bpmn, name="Approval", headers=admin_headers

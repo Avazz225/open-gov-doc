@@ -36,7 +36,14 @@ def test_export_returns_all_categories_by_default():
     assert response.status_code == 200
     body = response.json()
     assert body["schema_version"] == "1.0"
-    for category in ("object_types", "workflows", "dmn_definitions", "roles", "approval_config"):
+    for category in (
+        "object_types",
+        "workflows",
+        "dmn_definitions",
+        "business_calendars",
+        "roles",
+        "approval_config",
+    ):
         assert body[category] is not None
     assert body["sensor_config"] is not None
     assert "global_default" in body["sensor_config"]
@@ -53,6 +60,7 @@ def test_export_with_categories_filter_returns_only_requested():
     assert body["object_types"] is None
     assert body["workflows"] is None
     assert body["dmn_definitions"] is None
+    assert body["business_calendars"] is None
     assert body["approval_config"] is None
     assert body["sensor_config"] is None
     assert body["federation_config"] is None
@@ -334,6 +342,48 @@ def test_import_dmn_definition_creates_new_version_at_workflow_service(authorize
         definitions = workflow_client.get("/dmn-definitions", params={"name": name}).json()
     assert [d["version"] for d in definitions] == [2, 1]
     assert definitions[0]["decision_id"] == decision_id
+
+
+def test_import_business_calendar_creates_then_updates_by_name(authorized_principal):
+    """7.1/7.3 (P14-S5): `business_calendars` ist - anders als `workflows`/
+    `dmn_definitions` - eine Upsert-Kategorie wie `roles` (siehe
+    `apply_business_calendars`), kein Versionierungsmuster."""
+    name = f"config-import-cal-test-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "business_calendars": [
+            {"name": name, "non_working_dates": ["2026-12-25"], "is_default": False}
+        ],
+    }
+    with _client() as client:
+        first = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert first.status_code == 200
+        assert first.json()["results"]["business_calendars"] == {
+            "created": 1,
+            "updated": 0,
+            "skipped": 0,
+            "errors": [],
+        }
+
+        payload["business_calendars"][0]["non_working_dates"] = ["2026-12-25", "2026-12-26"]
+        second = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert second.status_code == 200
+        assert second.json()["results"]["business_calendars"] == {
+            "created": 0,
+            "updated": 1,
+            "skipped": 0,
+            "errors": [],
+        }
+
+    with httpx.Client(base_url=WORKFLOW_SERVICE_URL) as workflow_client:
+        calendars = workflow_client.get("/business-calendars").json()
+    calendar = next(c for c in calendars if c["name"] == name)
+    assert calendar["non_working_dates"] == ["2026-12-25", "2026-12-26"]
 
 
 def test_import_approval_config_is_upsert(authorized_principal):

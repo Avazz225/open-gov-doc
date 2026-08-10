@@ -18,6 +18,7 @@ _LIST_IDENTITY_FIELD = {
     "object_types": "name",
     "workflows": "name",
     "dmn_definitions": "name",
+    "business_calendars": "name",
     "roles": "name",
     "approval_config": "action_type",
 }

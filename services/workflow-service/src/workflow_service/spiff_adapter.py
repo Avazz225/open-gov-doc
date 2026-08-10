@@ -80,12 +80,49 @@ nicht nur aus der Doku übernommen:
   SpiffWorkflow selbst abgelehnt ("Multiple decision tables are not currently
   supported") - `parse_dmn()` erzwingt das zusätzlich explizit beim Upload,
   damit die Fehlermeldung nicht erst beim nächsten BPMN-Parse-Versuch auftaucht.
+- Regionale Geschäftskalender für die SLA-Fristberechnung (7.1, P14-S5):
+  SpiffWorkflow bietet dafür kein eigenes Bordmittel (bei P14-S0 bereits
+  verifiziert). `DurationTimerEventDefinition.has_fired()` (installierte
+  Version, per `inspect` gelesen) wertet die Timer-Dauerangabe genau EINMAL
+  aus - beim allerersten `has_fired()`-Aufruf, sobald der zugehörige Timer-Task
+  `WAITING` wird - über `my_task.workflow.script_engine.evaluate(my_task,
+  self.expression)` und cacht das Ergebnis (`now + Dauer`) danach intern
+  (`_set_internal_data(event_value=...)`); jeder Timer-Typ (Boundary UND
+  Intermediate Catch Event) läuft über dieselbe Klasse. Dieser Auswertungs-
+  zeitpunkt ist bereits genau der richtige ("jetzt, wo dieser konkrete Task
+  tatsächlich bereit wird") - kein Vorausberechnen bei Instanzstart nötig.
+  Grundlage: `BpmnWorkflow(spec, script_engine=...)`/`wf.script_engine =
+  ...` (öffentliches, settbares Property, per `inspect` verifiziert) erlaubt
+  eine eigene `SpiffWorkflow.bpmn.script_engine.PythonScriptEngine`-Instanz,
+  deren `TaskDataEnvironment(environment_globals={...})` zusätzliche, in
+  JEDEM Skript/Ausdruck aufrufbare Python-Funktionen bereitstellt (Namens-
+  Kollision mit einer Prozessvariable löst dort selbst eine klare
+  `ValueError` aus, verifiziert). `_SCRIPT_ENGINE` (Modul-Singleton) stellt so
+  `business_days(n, calendar_name=None)` bereit - eine BPMN-Datei schreibt
+  `business_days(3, "de-national")` statt eines statischen `"P3D"`-Literals
+  in die Dauerangabe. Muss nach `BpmnWorkflow(...)` UND nach jedem
+  `deserialize()` neu gesetzt werden (`wf.script_engine` ist kein Teil des
+  serialisierten Zustands, `BpmnWorkflowConverter.from_dict()` erzeugt beim
+  Wiederherstellen immer eine neue, GENERISCHE `BpmnWorkflow`-Instanz ohne
+  `script_engine`-Argument, verifiziert per Quelltext-Lektüre). Wochenenden
+  (Sa/So) gelten dabei unabhängig von einem konkreten Kalender immer als
+  arbeitsfrei - ein Kalender selbst enthält nur die ZUSÄTZLICHEN Tage
+  (Feiertage). Ohne `calendar_name`-Argument greift der Installations-Default-
+  Kalender (`register_business_calendars()`), falls einer gepflegt ist, sonst
+  wird nur das Wochenende berücksichtigt. Kalender werden bewusst als
+  In-Memory-Cache in diesem Modul gehalten (kein synchroner DB-Zugriff aus der
+  synchronen `has_fired()`-Auswertung heraus möglich) - `repository.py` hält
+  den Cache nach jedem Schreibzugriff aktuell, `main.py`s Lifespan lädt ihn
+  einmalig beim Start.
 """
 
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
 from SpiffWorkflow.bpmn.parser.util import full_tag
+from SpiffWorkflow.bpmn.script_engine import PythonScriptEngine
+from SpiffWorkflow.bpmn.script_engine.python_environment import TaskDataEnvironment
 from SpiffWorkflow.bpmn.serializer import BpmnWorkflowSerializer
 from SpiffWorkflow.bpmn.serializer.default.task_spec import BpmnTaskSpecConverter
 from SpiffWorkflow.bpmn.specs.defaults import ServiceTask
@@ -198,6 +235,89 @@ _SERIALIZER = BpmnWorkflowSerializer(
 )
 
 
+class UnknownBusinessCalendarError(Exception):
+    """`business_days()` referenziert einen `calendar_name`, der nicht (mehr)
+    registriert ist (P14-S5)."""
+
+
+# In-Memory-Cache statt DB-Zugriff - `has_fired()` (siehe Moduldocstring) ruft
+# den Ausdruck synchron aus SpiffWorkflows Engine heraus auf, ein async-DB-Read
+# wäre dort nicht aufrufbar. `repository.py` hält diesen Cache nach jedem
+# Schreibzugriff aktuell, `main.py`s Lifespan lädt ihn einmalig beim Start.
+_business_calendars: dict[str, set[date]] = {}
+_default_calendar_name: str | None = None
+
+
+def register_business_calendars(
+    calendars: dict[str, set[date]], *, default_name: str | None
+) -> None:
+    """Ersetzt den kompletten In-Memory-Kalender-Cache atomar (P14-S5) - wird
+    nach jedem Anlegen/Ändern/Löschen eines Kalenders sowie einmalig beim
+    Service-Start aufgerufen (siehe `repository.py`/`main.py`)."""
+    global _business_calendars, _default_calendar_name
+    _business_calendars = calendars
+    _default_calendar_name = default_name
+
+
+def business_days_duration(
+    n: int, calendar_name: str | None = None, *, start: datetime | None = None
+) -> str:
+    """Berechnet, wie viele KALENDERtage ab `start` (Default: jetzt) vergehen
+    müssen, bis `n` WERKtage verstrichen sind, und liefert das Ergebnis als
+    ISO-8601-Dauer (`"P<x>D"`) - das Format, das SpiffWorkflows
+    `DurationTimerEventDefinition` selbst erwartet (siehe Moduldocstring).
+    Wochenenden (Sa/So) zählen dabei IMMER als arbeitsfrei; ist `calendar_name`
+    angegeben, zählen zusätzlich dessen hinterlegte Tage (Feiertage) als
+    arbeitsfrei - unbekannter Name löst `UnknownBusinessCalendarError` aus.
+    Ohne `calendar_name` greift der Installations-Default-Kalender
+    (`register_business_calendars(..., default_name=...)`), falls einer
+    gepflegt ist, sonst wird nur das Wochenende berücksichtigt (Konzept 7.1:
+    "Ohne hinterlegten Kalender bleibt das bisherige Verhalten ... Standard" -
+    hier zu lesen als "ohne KONKRETEN Kalender", `business_days()` selbst
+    bedeutet per Definition immer mindestens Werktage statt Kalendertage).
+    `start` ist bewusst keyword-only und wird BPMN-Autoren nicht exponiert
+    (siehe `business_days()` unten) - reiner Testbarkeits-Parameter, damit
+    Tests einen festen Wochentag statt der echten Uhrzeit vorgeben können."""
+    if n < 0:
+        raise ValueError(f"n muss >= 0 sein, war {n!r}")
+    if calendar_name is not None:
+        if calendar_name not in _business_calendars:
+            raise UnknownBusinessCalendarError(f"Unbekannter Geschäftskalender {calendar_name!r}")
+        non_working = _business_calendars[calendar_name]
+    elif _default_calendar_name is not None:
+        non_working = _business_calendars.get(_default_calendar_name, set())
+    else:
+        non_working = set()
+
+    current = start or datetime.now(UTC)
+    remaining = n
+    elapsed_days = 0
+    while remaining > 0:
+        elapsed_days += 1
+        candidate = (current + timedelta(days=elapsed_days)).date()
+        if candidate.weekday() < 5 and candidate not in non_working:
+            remaining -= 1
+    return f"P{elapsed_days}D"
+
+
+def business_days(n: int, calendar_name: str | None = None) -> str:
+    """Die tatsächlich im BPMN-Ausdruck aufgerufene Funktion (siehe
+    `_SCRIPT_ENGINE` unten) - dünner Wrapper ohne den testbezogenen `start`-
+    Parameter von `business_days_duration()`."""
+    return business_days_duration(n, calendar_name)
+
+
+# Eigene `PythonScriptEngine`-Instanz statt SpiffWorkflows Default (P14-S5,
+# siehe Moduldocstring) - `environment_globals` macht `business_days()` in
+# JEDEM BPMN-Ausdruck (Timer-Dauer, Skript-/Gateway-Bedingungen) aufrufbar.
+# Modul-Singleton statt Instanz-Attribut, da sowohl `new_workflow()` als auch
+# `deserialize()` (jeweils eine NEUE `BpmnWorkflow`, siehe Moduldocstring)
+# dieselbe Engine zuweisen müssen.
+_SCRIPT_ENGINE = PythonScriptEngine(
+    environment=TaskDataEnvironment(environment_globals={"business_days": business_days})
+)
+
+
 def _new_parser(xml: str, dmn_definitions: list[str] | None = None) -> DmsBpmnParser:
     parser = DmsBpmnParser()
     try:
@@ -283,7 +403,7 @@ def parse_bpmn(
 
 
 def new_workflow(spec: Any) -> BpmnWorkflow:
-    return BpmnWorkflow(spec)
+    return BpmnWorkflow(spec, script_engine=_SCRIPT_ENGINE)
 
 
 def serialize(wf: BpmnWorkflow) -> str:
@@ -291,7 +411,15 @@ def serialize(wf: BpmnWorkflow) -> str:
 
 
 def deserialize(blob: str) -> BpmnWorkflow:
-    return _SERIALIZER.deserialize_json(blob)
+    # `wf.script_engine` ist kein Teil des serialisierten Zustands - jeder
+    # `deserialize_json()`-Aufruf erzeugt intern eine neue, generische
+    # `BpmnWorkflow` ohne `script_engine`-Argument (P14-S5, siehe
+    # Moduldocstring) - muss danach explizit erneut gesetzt werden, sonst
+    # würde `business_days()` in einer bereits laufenden, aus der DB
+    # geladenen Instanz nicht mehr aufgelöst.
+    wf = _SERIALIZER.deserialize_json(blob)
+    wf.script_engine = _SCRIPT_ENGINE
+    return wf
 
 
 def set_initial_data(wf: BpmnWorkflow, data: dict[str, Any]) -> None:

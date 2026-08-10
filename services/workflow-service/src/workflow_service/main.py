@@ -23,6 +23,9 @@ from workflow_service.license_client import LicenseStatusClient
 from workflow_service.models import Base, FederationConfig, FederationIdentity
 from workflow_service.permission_client import PermissionServiceClient
 from workflow_service.schemas import (
+    BusinessCalendarCreate,
+    BusinessCalendarOut,
+    BusinessCalendarUpdate,
     DmnDefinitionDetailOut,
     DmnDefinitionOut,
     FederationConfigOut,
@@ -283,6 +286,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
+    # Geschäftskalender-Cache (P14-S5): `business_days()` liest ihn synchron
+    # aus `spiff_adapter.py` heraus (kein DB-Zugriff aus SpiffWorkflows
+    # synchroner `has_fired()`-Auswertung möglich) - beim Start einmalig
+    # geladen, danach hält `repository.py` ihn nach jedem Schreibzugriff
+    # aktuell. Muss vor dem SLA-Poll-Loop unten stehen, damit ein bereits
+    # laufender Timer nicht auf einen leeren Cache trifft.
+    async with app.state.session_factory() as session:
+        await repository.refresh_business_calendar_cache(session)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
     app.state.federation_client = await _ensure_federation_identity(app.state.session_factory)
@@ -712,6 +723,110 @@ async def delete_dmn_definition(
     await _require_object_config(x_dms_principal)
     try:
         await repository.delete_dmn_definition(session, dmn_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+
+
+@app.post(
+    "/business-calendars",
+    response_model=BusinessCalendarOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def create_business_calendar(
+    payload: BusinessCalendarCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> BusinessCalendarOut:
+    """Regionaler Geschäftskalender für die SLA-Fristberechnung (7.1, P14-S5) -
+    gegated wie Prozess-/DMN-Definitionen (`admin.object_config`), aber KEIN
+    Versionierungsmuster: `name` bleibt dauerhaft eindeutig (`409` bei
+    Duplikat), Bearbeiten läuft über `PUT`, nicht über einen erneuten `POST`."""
+    await _require_object_config(x_dms_principal)
+    try:
+        calendar = await repository.create_business_calendar(
+            session,
+            name=payload.name,
+            non_working_dates=payload.non_working_dates,
+            is_default=payload.is_default,
+        )
+    except repository.DuplicateBusinessCalendarNameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.InvalidBusinessCalendarError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return calendar
+
+
+@app.get(
+    "/business-calendars",
+    response_model=list[BusinessCalendarOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def list_business_calendars(
+    session: AsyncSession = Depends(get_session),
+) -> list[BusinessCalendarOut]:
+    return await repository.list_business_calendars(session)
+
+
+@app.get(
+    "/business-calendars/{business_calendar_id}",
+    response_model=BusinessCalendarOut,
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def get_business_calendar(
+    business_calendar_id: int, session: AsyncSession = Depends(get_session)
+) -> BusinessCalendarOut:
+    try:
+        return await repository.get_business_calendar(session, business_calendar_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.put(
+    "/business-calendars/{business_calendar_id}",
+    response_model=BusinessCalendarOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def update_business_calendar(
+    business_calendar_id: int,
+    payload: BusinessCalendarUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> BusinessCalendarOut:
+    await _require_object_config(x_dms_principal)
+    try:
+        calendar = await repository.update_business_calendar(
+            session,
+            business_calendar_id,
+            name=payload.name,
+            non_working_dates=payload.non_working_dates,
+            is_default=payload.is_default,
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.DuplicateBusinessCalendarNameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.InvalidBusinessCalendarError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return calendar
+
+
+@app.delete(
+    "/business-calendars/{business_calendar_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def delete_business_calendar(
+    business_calendar_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_object_config(x_dms_principal)
+    try:
+        await repository.delete_business_calendar(session, business_calendar_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()

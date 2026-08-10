@@ -11,6 +11,7 @@ from config_service.clients import (
 )
 from config_service.schemas import (
     ApprovalConfigExport,
+    BusinessCalendarExport,
     ConfigDocument,
     DmnDefinitionExport,
     FederationConfigExport,
@@ -91,6 +92,16 @@ async def export_dmn_definitions(client: WorkflowServiceClient) -> list[DmnDefin
     return result
 
 
+async def export_business_calendars(client: WorkflowServiceClient) -> list[BusinessCalendarExport]:
+    calendars = await client.list_business_calendars()
+    return [
+        BusinessCalendarExport(
+            name=c["name"], non_working_dates=c["non_working_dates"], is_default=c["is_default"]
+        )
+        for c in calendars
+    ]
+
+
 async def export_roles(client: PermissionServiceClient) -> list[RoleExport]:
     roles = await client.list_roles()
     return [
@@ -137,6 +148,8 @@ async def build_export(
         doc.workflows = await export_workflows(workflow_client)
     if "dmn_definitions" in categories:
         doc.dmn_definitions = await export_dmn_definitions(workflow_client)
+    if "business_calendars" in categories:
+        doc.business_calendars = await export_business_calendars(workflow_client)
     if "roles" in categories:
         doc.roles = await export_roles(permission_client)
     if "approval_config" in categories:

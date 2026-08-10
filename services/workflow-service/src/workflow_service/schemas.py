@@ -101,3 +101,26 @@ class FederationConfigOut(BaseModel):
 class FederationConfigUpdate(BaseModel):
     version: str
     min_compatible_peer_version: str
+
+
+class BusinessCalendarOut(BaseModel):
+    id: int
+    name: str
+    non_working_dates: list[str]
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BusinessCalendarCreate(BaseModel):
+    name: str
+    non_working_dates: list[str] = []
+    is_default: bool = False
+
+
+class BusinessCalendarUpdate(BaseModel):
+    name: str
+    non_working_dates: list[str] = []
+    is_default: bool = False
