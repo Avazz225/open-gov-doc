@@ -1327,3 +1327,19 @@ services:
         condition: service_started
     networks:
       - dms-net
+
+  office-addin:
+    build:
+      context: ..
+      dockerfile: apps/office-addin/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_BASE_URL: ${OFFICE_ADDIN_GATEWAY_BASE_URL:-http://localhost:8009}
+        NEXT_PUBLIC_TEMPLATE_LIBRARY_FOLDER_NAME: ${OFFICE_ADDIN_TEMPLATE_LIBRARY_FOLDER_NAME:-Vorlagen}
+    restart: unless-stopped
+    ports:
+      - "${OFFICE_ADDIN_PORT:-3006}:80"
+    depends_on:
+      gateway-service:
+        condition: service_started
+    networks:
+      - dms-net

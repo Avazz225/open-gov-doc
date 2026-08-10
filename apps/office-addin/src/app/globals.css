@@ -1,0 +1,185 @@
+/* Reduzierte Variante des Cross-App-Theming-Musters (8, ADR 0009) - nur
+   automatische Hell/Dunkel-Anpassung über `prefers-color-scheme`, kein
+   eigener Umschalter (siehe Shell.tsx-Kommentar: der Taskpane sollte sich
+   idealerweise an Office selbst orientieren statt einem eigenen Schalter). */
+:root {
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+
+  --dms-bg: #ffffff;
+  --dms-fg: #1a1a1a;
+  --dms-border: rgba(128, 128, 128, 0.25);
+  --dms-hover-bg: rgba(128, 128, 128, 0.12);
+  --dms-accent: #2563eb;
+  --dms-accent-bg: rgba(37, 99, 235, 0.15);
+  --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
+  --dms-success: #16a34a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dms-bg: #16181c;
+    --dms-fg: #e8e8e8;
+    --dms-border: rgba(200, 200, 200, 0.2);
+    --dms-hover-bg: rgba(200, 200, 200, 0.15);
+    --dms-accent: #60a5fa;
+    --dms-accent-bg: rgba(96, 165, 250, 0.2);
+    --dms-danger: #f87171;
+    --dms-danger-bg: #f8717133;
+    --dms-success: #4ade80;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--dms-bg);
+  color: var(--dms-fg);
+}
+
+.page {
+  padding: 0.75rem;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--dms-border);
+  font-size: 0.85rem;
+}
+
+.top-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-title {
+  font-weight: 600;
+}
+
+section + section,
+.section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--dms-border);
+}
+
+h2,
+h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem 0;
+}
+
+.hint {
+  opacity: 0.75;
+  font-size: 0.8rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.login-form {
+  max-width: 260px;
+  margin: 2rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.error-text {
+  color: var(--dms-danger);
+  font-size: 0.85rem;
+}
+
+.empty-state {
+  opacity: 0.7;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.entry-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0 0;
+}
+
+.entry-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--dms-border);
+}
+
+.entry-row:last-child {
+  border-bottom: none;
+}
+
+input,
+select,
+button,
+textarea {
+  font: inherit;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="search"],
+select,
+textarea {
+  padding: 0.35rem;
+  border: 1px solid var(--dms-border);
+  border-radius: 4px;
+  background: var(--dms-bg);
+  color: var(--dms-fg);
+  width: 100%;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--dms-border);
+  border-radius: 4px;
+  background: var(--dms-hover-bg);
+  color: var(--dms-fg);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--dms-accent-bg);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--dms-accent);
+  color: #ffffff;
+  border-color: var(--dms-accent);
+}

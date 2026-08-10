@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OG Doc Office-Add-in (Konzept 3.3a, P14-S8) - klassisches XML-Manifest
+  (breiter kompatibel als das neuere, Microsoft-365-gebundene JSON-Manifest,
+  läuft auch gegen ältere/On-Prem-Word-Versionen).
+
+  WICHTIG: Office lädt Add-in-Webinhalte grundsätzlich nur über HTTPS (außer
+  wenigen dokumentierten lokalen Entwicklungsausnahmen). Dieser Stack läuft
+  in der Entwicklungsumgebung durchgehend über HTTP (wie jeder andere Dienst
+  hier) - die untenstehenden `https://localhost:3006`-URLs sind Platzhalter,
+  die vor einem echten Sideload-Test durch einen TLS-Endpunkt ersetzt werden
+  müssen (siehe README.md "Lokales Sideload-Testen"). Diese Einschränkung ist
+  bewusst dokumentiert, nicht automatisch gelöst - siehe
+  docs/services/office-addin.md "Offene Punkte".
+-->
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+
+  <Id>0f979600-a757-4bbb-82d1-a01e3aecba18</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>OG Doc</ProviderName>
+  <DefaultLocale>de-DE</DefaultLocale>
+  <DisplayName DefaultValue="OG Doc" />
+  <Description DefaultValue="Öffnen/Speichern, Metadaten und Workflows von OG Doc direkt in Word (Konzept 3.3a)." />
+  <IconUrl DefaultValue="https://localhost:3006/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:3006/assets/icon-80.png" />
+  <SupportUrl DefaultValue="https://localhost:3006" />
+
+  <AppDomains>
+    <AppDomain>https://localhost:3006</AppDomain>
+  </AppDomains>
+
+  <!-- Nur Word (Host "Document") - Excel/PowerPoint haben keine
+       vergleichbare "gesamtes Dokument ersetzen"-API, siehe ADR 0045. -->
+  <Hosts>
+    <Host Name="Document" />
+  </Hosts>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3006/" />
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title" />
+            <Description resid="GetStarted.Description" />
+            <LearnMoreUrl resid="GetStarted.LearnMoreUrl" />
+          </GetStarted>
+          <FunctionFile resid="Taskpane.Url" />
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="OgDocGroup">
+                <Label resid="OgDocGroup.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="OgDocTaskpaneButton">
+                  <Label resid="OgDocTaskpaneButton.Label" />
+                  <Supertip>
+                    <Title resid="OgDocTaskpaneButton.Label" />
+                    <Description resid="OgDocTaskpaneButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <!-- Öffnet nur den Taskpane - keine eigene Function-File-
+                       Logik nötig, jede Interaktion (Öffnen/Speichern/
+                       Metadaten/Workflow/Vorlagen) läuft innerhalb des
+                       Taskpanes selbst. -->
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>OgDocTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3006/assets/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3006/assets/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3006/assets/icon-80.png" />
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3006/" />
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://localhost:3006/" />
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GetStarted.Title" DefaultValue="OG Doc ist startklar" />
+        <bt:String id="OgDocGroup.Label" DefaultValue="OG Doc" />
+        <bt:String id="OgDocTaskpaneButton.Label" DefaultValue="OG Doc öffnen" />
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="GetStarted.Description" DefaultValue="Öffnen/Speichern von OG-Doc-Dokumenten, inline Metadaten, Workflows und die Vorlagenbibliothek direkt in Word." />
+        <bt:String id="OgDocTaskpaneButton.Tooltip" DefaultValue="Öffnet den OG-Doc-Taskpane: Dokumente öffnen/speichern, Metadaten bearbeiten, Workflows starten/fortsetzen, aus einer Vorlage neu anlegen." />
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

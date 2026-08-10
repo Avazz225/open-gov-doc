@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "title": "OG Doc - Office-Add-in",
+    "description": "Word-Add-in für OG Doc: Öffnen/Speichern, Metadaten, Workflows, Vorlagenbibliothek (Konzept 3.3a)"
+  },
+  "common": {
+    "loading": "Lade...",
+    "logout": "Abmelden"
+  },
+  "login": {
+    "heading": "Anmelden",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "submitting": "Melde an...",
+    "error": "Anmeldung fehlgeschlagen"
+  },
+  "officeGate": {
+    "loading": "Add-in wird initialisiert...",
+    "error": "Office.js konnte nicht initialisiert werden - dieses Add-in muss innerhalb von Word ausgeführt werden."
+  },
+  "documentPicker": {
+    "heading": "Aus OG Doc öffnen",
+    "placeholder": "Dokument suchen...",
+    "searchButton": "Suchen",
+    "openButton": "Öffnen",
+    "searchError": "Suche fehlgeschlagen"
+  },
+  "templatePicker": {
+    "heading": "Neu aus Vorlage",
+    "hint": "Zeigt Dokumente aus dem Wurzelordner \"{folder}\" - Zugriff folgt den gewöhnlichen Ordner-Leserechten.",
+    "empty": "Keine Vorlagen verfügbar (kein Ordner \"Vorlagen\" gefunden oder keine Leserechte).",
+    "useButton": "Verwenden",
+    "loadError": "Vorlagen konnten nicht geladen werden"
+  },
+  "metadataForm": {
+    "titleLabel": "Titel",
+    "saveButton": "Metadaten speichern",
+    "saving": "Speichere...",
+    "saveError": "Speichern fehlgeschlagen"
+  },
+  "workflowPanel": {
+    "heading": "Workflow",
+    "empty": "Keine laufenden Workflows für dieses Dokument.",
+    "loadError": "Workflows konnten nicht geladen werden",
+    "startError": "Workflow konnte nicht gestartet werden",
+    "completeError": "Aufgabe konnte nicht abgeschlossen werden",
+    "completeButton": "Abschließen",
+    "startLabel": "Neuen Workflow starten",
+    "selectPlaceholder": "Prozess wählen...",
+    "startButton": "Starten",
+    "runningNoTask": "Läuft ({id}...) - keine Aufgabe bereit"
+  },
+  "taskPane": {
+    "loadError": "Dokument konnte nicht geladen werden",
+    "openError": "Öffnen fehlgeschlagen",
+    "templateError": "Vorlage konnte nicht geladen werden",
+    "lockConflict": "Achtung: Dokument ist gesperrt ({detail}) - nur lesend geöffnet.",
+    "lockConflictGeneric": "Achtung: Dokument konnte nicht gesperrt werden - nur lesend geöffnet.",
+    "metadataSaved": "Metadaten gespeichert.",
+    "saveError": "Speichern in OG Doc fehlgeschlagen",
+    "saved": "In OG Doc gespeichert.",
+    "savedAsConflictCopy": "Als Konfliktkopie gespeichert - die Hauptversion wurde zwischenzeitlich von jemand anderem geändert.",
+    "newFromTemplateHeading": "Neues Dokument aus Vorlage",
+    "saveNewDocumentButton": "Als neues Dokument in OG Doc speichern",
+    "readOnlyHint": "Dokument ist gerade von jemand anderem gesperrt - Speichern ist deaktiviert.",
+    "saveVersionButton": "In OG Doc speichern",
+    "unlinkButton": "Verknüpfung lösen"
+  }
+}
