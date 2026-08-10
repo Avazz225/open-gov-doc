@@ -12,6 +12,7 @@ SCHEMA_VERSION = "1.0"
 CATEGORIES = (
     "object_types",
     "workflows",
+    "dmn_definitions",
     "roles",
     "approval_config",
     "sensor_config",
@@ -48,6 +49,16 @@ class WorkflowExport(BaseModel):
     bpmn_xml: str
 
 
+class DmnDefinitionExport(BaseModel):
+    """DMN-1.3-Entscheidungstabellen (7.1/7.3, P14-S4) - eigene Kategorie statt
+    Teil von `WorkflowExport`: eine DMN-Familie ist unabhängig von jeder
+    einzelnen Prozessdefinition versioniert (siehe `models.DmnDefinition`) und
+    kann von mehreren `businessRuleTask`s referenziert werden."""
+
+    name: str
+    dmn_xml: str
+
+
 class RoleExport(BaseModel):
     name: str
     description: str
@@ -80,6 +91,7 @@ class ConfigDocument(BaseModel):
     exported_at: datetime
     object_types: list[ObjectTypeExport] | None = None
     workflows: list[WorkflowExport] | None = None
+    dmn_definitions: list[DmnDefinitionExport] | None = None
     roles: list[RoleExport] | None = None
     approval_config: list[ApprovalConfigExport] | None = None
     sensor_config: SensorConfigExport | None = None

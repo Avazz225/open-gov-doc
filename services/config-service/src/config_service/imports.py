@@ -76,6 +76,20 @@ async def apply_workflows(client: WorkflowServiceClient, entries: list) -> Categ
     return result
 
 
+async def apply_dmn_definitions(client: WorkflowServiceClient, entries: list) -> CategoryResult:
+    result = CategoryResult()
+    for entry in entries:
+        try:
+            # Wie `apply_workflows`: workflow-service versioniert beim Hochladen
+            # unter demselben Namen bereits automatisch neu - jeder Import zählt
+            # als "created" (eine neue Version).
+            await client.create_dmn_definition(name=entry.name, dmn_xml=entry.dmn_xml)
+            result.created += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{entry.name}: {exc}")
+    return result
+
+
 async def apply_roles(client: PermissionServiceClient, entries: list) -> CategoryResult:
     result = CategoryResult()
     existing = {r["name"]: r for r in await client.list_roles()}
@@ -149,6 +163,15 @@ async def apply_import(
     results: dict[str, CategoryResult] = {}
     if "object_types" in categories and doc.object_types is not None:
         results["object_types"] = await apply_object_types(object_type_client, doc.object_types)
+    # `dmn_definitions` bewusst VOR `workflows`: ein `businessRuleTask` mit
+    # `camunda:decisionRef` löst sich nur auf, wenn die referenzierte
+    # DMN-Familie bei workflow-service bereits existiert (P14-S4, siehe
+    # spiff_adapter.py-Moduldocstring dort - DMN muss vor dem referenzierenden
+    # BPMN geladen sein).
+    if "dmn_definitions" in categories and doc.dmn_definitions is not None:
+        results["dmn_definitions"] = await apply_dmn_definitions(
+            workflow_client, doc.dmn_definitions
+        )
     if "workflows" in categories and doc.workflows is not None:
         results["workflows"] = await apply_workflows(workflow_client, doc.workflows)
     if "roles" in categories and doc.roles is not None:

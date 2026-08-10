@@ -12,6 +12,7 @@ from config_service.clients import (
 from config_service.schemas import (
     ApprovalConfigExport,
     ConfigDocument,
+    DmnDefinitionExport,
     FederationConfigExport,
     ObjectTypeExport,
     ObjectTypeLayoutExport,
@@ -79,6 +80,17 @@ async def export_workflows(client: WorkflowServiceClient) -> list[WorkflowExport
     return result
 
 
+async def export_dmn_definitions(client: WorkflowServiceClient) -> list[DmnDefinitionExport]:
+    """Wie `export_workflows`: nur die jeweils neueste Version je DMN-Familie
+    (`GET /dmn-definitions` ohne `name`-Filter liefert bereits genau das)."""
+    definitions = await client.list_latest_dmn_definitions()
+    result = []
+    for definition in definitions:
+        detail = await client.get_dmn_definition(definition["id"])
+        result.append(DmnDefinitionExport(name=definition["name"], dmn_xml=detail["dmn_xml"]))
+    return result
+
+
 async def export_roles(client: PermissionServiceClient) -> list[RoleExport]:
     roles = await client.list_roles()
     return [
@@ -123,6 +135,8 @@ async def build_export(
         doc.object_types = await export_object_types(object_type_client)
     if "workflows" in categories:
         doc.workflows = await export_workflows(workflow_client)
+    if "dmn_definitions" in categories:
+        doc.dmn_definitions = await export_dmn_definitions(workflow_client)
     if "roles" in categories:
         doc.roles = await export_roles(permission_client)
     if "approval_config" in categories:

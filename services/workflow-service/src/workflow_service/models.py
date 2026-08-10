@@ -37,6 +37,35 @@ class ProcessDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DmnDefinition(Base):
+    """Eine importierte DMN-1.3-Entscheidungstabelle (7.1, P14-S4). Gleiches
+    Versionierungsmuster wie ``ProcessDefinition`` (ADR 0027): ``name`` ist der
+    Familienschlüssel, ein erneuter Upload unter demselben Namen legt
+    automatisch die nächste Version an.
+
+    ``decision_id`` ist die interne ``<decision id="...">`` aus der DMN-XML
+    selbst (per ``spiff_adapter.parse_dmn`` extrahiert) - das ist der
+    tatsächliche Schlüssel, über den ein ``bpmn:businessRuleTask``s
+    ``camunda:decisionRef`` sie referenziert, nicht ``name`` (siehe
+    `spiff_adapter.py`). Muss unter den jeweils NEUESTEN Versionen aller
+    Familien eindeutig sein (`repository.create_dmn_definition`) - SpiffWorkflow
+    lädt für jeden BPMN-Parse immer nur die neueste Version jeder Familie
+    in denselben Parser (siehe `repository.list_latest_dmn_xml`), zwei
+    Familien mit kollidierender ``decision_id`` wären darin nicht mehr
+    unterscheidbar."""
+
+    __tablename__ = "dmn_definition"
+    __table_args__ = (UniqueConstraint("name", "version", name="ux_dmn_definition_name_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    decision_id: Mapped[str] = mapped_column(String(256))
+    dmn_xml: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ProcessInstance(Base):
     """Eine laufende oder abgeschlossene Ausführung einer Prozessdefinition.
 

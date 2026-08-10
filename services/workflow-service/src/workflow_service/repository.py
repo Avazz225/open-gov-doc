@@ -6,7 +6,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from workflow_service import spiff_adapter
-from workflow_service.models import FederationTask, ProcessDefinition, ProcessInstance
+from workflow_service.models import (
+    DmnDefinition,
+    FederationTask,
+    ProcessDefinition,
+    ProcessInstance,
+)
 
 
 @dataclass
@@ -35,6 +40,20 @@ class ProcessDefinitionInUseError(Exception):
     """Löschung abgelehnt, weil noch Prozessinstanzen existieren."""
 
 
+class InvalidDmnError(Exception):
+    """Die hochgeladene DMN-Datei ist nicht parsbar oder enthält nicht genau eine
+    `<decision>` (P14-S4). Umhüllt `spiff_adapter.DmnParseError`, analog zu
+    `InvalidBpmnError`."""
+
+
+class DuplicateDecisionIdError(Exception):
+    """Die aus der DMN-Datei extrahierte `decision_id` kollidiert mit der jeweils
+    NEUESTEN Version einer anderen DMN-Familie (P14-S4, siehe `models.DmnDefinition`) -
+    SpiffWorkflow lädt für jeden BPMN-Parse immer nur die neueste Version jeder Familie
+    in denselben Parser (`list_latest_dmn_xml`), zwei Familien mit kollidierender
+    `decision_id` wären darin nicht mehr unterscheidbar."""
+
+
 class TaskNotReadyError(Exception):
     """Der angegebene Task ist unter den aktuell bereiten Manual/User Tasks
     dieser Instanz nicht (mehr) zu finden - bereits abgeschlossen, falsche
@@ -59,8 +78,11 @@ async def create_process_definition(
     )
     next_version = (max_version.scalar_one() or 0) + 1
 
+    dmn_xmls = await list_latest_dmn_xml(session)
     try:
-        _, resolved_process_id = spiff_adapter.parse_bpmn(bpmn_xml, process_id)
+        _, resolved_process_id = spiff_adapter.parse_bpmn(
+            bpmn_xml, process_id, dmn_definitions=dmn_xmls
+        )
     except spiff_adapter.BpmnParseError as exc:
         raise InvalidBpmnError(str(exc)) from exc
 
@@ -127,6 +149,101 @@ async def delete_process_definition(session: AsyncSession, process_definition_id
     await session.flush()
 
 
+async def create_dmn_definition(session: AsyncSession, *, name: str, dmn_xml: str) -> DmnDefinition:
+    """Gleiches Versionierungsmuster wie `create_process_definition` (`name` ist der
+    Familienschlüssel). Prüft zusätzlich, dass die extrahierte `decision_id` unter den
+    jeweils neuesten Versionen ALLER Familien eindeutig ist (siehe
+    `DuplicateDecisionIdError`) - eine ältere, nicht mehr aktuelle Version einer anderen
+    Familie darf dabei kollidieren, da `list_latest_dmn_xml` sie ohnehin nie lädt."""
+    max_version = await session.execute(
+        select(func.max(DmnDefinition.version)).where(DmnDefinition.name == name)
+    )
+    next_version = (max_version.scalar_one() or 0) + 1
+
+    try:
+        decision_id = spiff_adapter.parse_dmn(dmn_xml)
+    except spiff_adapter.DmnParseError as exc:
+        raise InvalidDmnError(str(exc)) from exc
+
+    latest_others = await list_latest_dmn_definitions(session)
+    for other in latest_others:
+        if other.name != name and other.decision_id == decision_id:
+            raise DuplicateDecisionIdError(
+                f"decision_id {decision_id!r} wird bereits von DMN-Familie {other.name!r} verwendet"
+            )
+
+    now = datetime.now(UTC)
+    definition = DmnDefinition(
+        name=name,
+        version=next_version,
+        decision_id=decision_id,
+        dmn_xml=dmn_xml,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(definition)
+    await session.flush()
+    return definition
+
+
+async def get_dmn_definition(session: AsyncSession, dmn_definition_id: int) -> DmnDefinition:
+    definition = await session.get(DmnDefinition, dmn_definition_id)
+    if definition is None:
+        raise NotFoundError(f"dmn_definition_id {dmn_definition_id!r} unbekannt")
+    return definition
+
+
+async def list_latest_dmn_definitions(session: AsyncSession) -> list[DmnDefinition]:
+    result = await session.execute(
+        select(DmnDefinition)
+        .distinct(DmnDefinition.name)
+        .order_by(DmnDefinition.name, DmnDefinition.version.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def list_dmn_definitions(
+    session: AsyncSession, *, name: str | None = None
+) -> list[DmnDefinition]:
+    """Analog zu `list_process_definitions`: ohne `name`-Filter nur die jeweils
+    neueste Version je Familie, mit Filter die vollständige Versionshistorie."""
+    if name is not None:
+        result = await session.execute(
+            select(DmnDefinition)
+            .where(DmnDefinition.name == name)
+            .order_by(DmnDefinition.version.desc())
+        )
+        return list(result.scalars().all())
+    return await list_latest_dmn_definitions(session)
+
+
+async def delete_dmn_definition(session: AsyncSession, dmn_definition_id: int) -> None:
+    """Bewusst KEINE "in use"-Prüfung (anders als `delete_process_definition`) -
+    das würde ein Durchsuchen aller BPMN-XML-Texte nach `camunda:decisionRef`
+    erfordern, um festzustellen, ob ein `businessRuleTask` diese Familie
+    referenziert. Dokumentierte, bewusste Grenze dieser Referenzimplementierung
+    (siehe docs/services/workflow-service.md) - eine Löschung kann eine
+    bestehende Prozessdefinition beim nächsten Instanzstart mit einer
+    SpiffWorkflow-`ValidationException` (übersetzt: `InvalidBpmnError`)
+    fehlschlagen lassen, bereits laufende Instanzen sind unberührt (ihr
+    `workflow_state` enthält die zum Startzeitpunkt geladene Decision bereits
+    vollständig)."""
+    definition = await get_dmn_definition(session, dmn_definition_id)
+    await session.delete(definition)
+    await session.flush()
+
+
+async def list_latest_dmn_xml(session: AsyncSession) -> list[str]:
+    """DMN-XML-Inhalte der jeweils neuesten Version jeder Familie - werden vor
+    jedem BPMN-Parse geladen (`create_process_definition`/`start_instance`), da
+    zum Parse-Zeitpunkt nicht bekannt ist, welche `decisionRef`s ein
+    `businessRuleTask` in der BPMN-Datei tatsächlich referenziert (siehe
+    `spiff_adapter`-Moduldocstring - unreferenzierte Decisions sind harmlos,
+    ihr Laden kostet nur etwas Parse-Zeit)."""
+    definitions = await list_latest_dmn_definitions(session)
+    return [d.dmn_xml for d in definitions]
+
+
 async def start_instance(
     session: AsyncSession,
     process_definition_id: int,
@@ -137,8 +254,11 @@ async def start_instance(
     instance_id: str | None = None,
 ) -> ProcessInstance:
     definition = await get_process_definition(session, process_definition_id)
+    dmn_xmls = await list_latest_dmn_xml(session)
     try:
-        spec, _ = spiff_adapter.parse_bpmn(definition.bpmn_xml, definition.bpmn_process_id)
+        spec, _ = spiff_adapter.parse_bpmn(
+            definition.bpmn_xml, definition.bpmn_process_id, dmn_definitions=dmn_xmls
+        )
     except spiff_adapter.BpmnParseError as exc:
         raise InvalidBpmnError(str(exc)) from exc
 

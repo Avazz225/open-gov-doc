@@ -33,6 +33,10 @@
     "submitting": "Melde an...",
     "error": "Anmeldung fehlgeschlagen"
   },
+  "nav": {
+    "processesTab": "Prozessdefinitionen",
+    "dmnTab": "Entscheidungstabellen (DMN)"
+  },
   "processList": {
     "heading": "Prozessdefinitionen",
     "newButton": "Neu erstellen",
@@ -61,6 +65,19 @@
     "saveError": "Speichern fehlgeschlagen",
     "importError": "Import fehlgeschlagen - BPMN-Datei nicht lesbar",
     "loadError": "Prozessdefinition konnte nicht geladen werden"
+  },
+  "dmnList": {
+    "heading": "DMN-Entscheidungstabellen",
+    "decisionIdColumn": "Decision-ID",
+    "empty": "Noch keine Entscheidungstabellen vorhanden.",
+    "deleteConfirm": "Diese Version wirklich löschen?"
+  },
+  "dmnDesigner": {
+    "nameHint": "Unveränderter Name speichert eine neue Version dieser Familie, ein anderer Name legt eine neue Familie an.",
+    "saveSuccess": "Gespeichert als Version {version}.",
+    "saveError": "Speichern fehlgeschlagen",
+    "importError": "Import fehlgeschlagen - DMN-Datei nicht lesbar",
+    "loadError": "Entscheidungstabelle konnte nicht geladen werden"
   },
   "signatureTask": {
     "groupLabel": "Signatur (3.10)",

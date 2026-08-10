@@ -36,7 +36,7 @@ def test_export_returns_all_categories_by_default():
     assert response.status_code == 200
     body = response.json()
     assert body["schema_version"] == "1.0"
-    for category in ("object_types", "workflows", "roles", "approval_config"):
+    for category in ("object_types", "workflows", "dmn_definitions", "roles", "approval_config"):
         assert body[category] is not None
     assert body["sensor_config"] is not None
     assert "global_default" in body["sensor_config"]
@@ -52,6 +52,7 @@ def test_export_with_categories_filter_returns_only_requested():
     assert body["roles"] is not None
     assert body["object_types"] is None
     assert body["workflows"] is None
+    assert body["dmn_definitions"] is None
     assert body["approval_config"] is None
     assert body["sensor_config"] is None
     assert body["federation_config"] is None
@@ -274,6 +275,65 @@ def test_import_role_creates_then_updates_by_name(authorized_principal):
     role = next(r for r in roles if r["name"] == role_name)
     assert role["description"] == "zweite Version"
     assert role["permissions"] == ["read", "write"]
+
+
+def _dmn_xml(decision_id: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             id="Definitions_1" name="definitions"
+             namespace="http://camunda.org/schema/1.0/dmn">
+  <decision id="{decision_id}" name="Testentscheidung">
+    <decisionTable id="DecisionTable_1" hitPolicy="UNIQUE">
+      <input id="Input_1" label="Betrag">
+        <inputExpression id="InputExpression_1" typeRef="number">
+          <text>amount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Stufe" name="level" typeRef="string" />
+      <rule id="Rule_1">
+        <inputEntry id="InputEntry_1"><text>&lt; 1000</text></inputEntry>
+        <outputEntry id="OutputEntry_1"><text>"sachbearbeiter"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>
+"""
+
+
+def test_import_dmn_definition_creates_new_version_at_workflow_service(authorized_principal):
+    """7.1/7.3 (P14-S4): `dmn_definitions` ist eine reguläre Kategorie wie
+    `workflows` - workflow-service versioniert beim Hochladen unter demselben
+    Namen automatisch neu (siehe `apply_dmn_definitions`), jeder Import zählt
+    also als "created"."""
+    name = f"config-import-dmn-test-{uuid.uuid4().hex[:8]}"
+    decision_id = f"decision-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "dmn_definitions": [{"name": name, "dmn_xml": _dmn_xml(decision_id)}],
+    }
+    with _client() as client:
+        first = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert first.status_code == 200
+        assert first.json()["results"]["dmn_definitions"] == {
+            "created": 1,
+            "updated": 0,
+            "skipped": 0,
+            "errors": [],
+        }
+
+        second = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+        assert second.status_code == 200
+        assert second.json()["results"]["dmn_definitions"]["created"] == 1
+
+    with httpx.Client(base_url=WORKFLOW_SERVICE_URL) as workflow_client:
+        definitions = workflow_client.get("/dmn-definitions", params={"name": name}).json()
+    assert [d["version"] for d in definitions] == [2, 1]
+    assert definitions[0]["decision_id"] == decision_id
 
 
 def test_import_approval_config_is_upsert(authorized_principal):

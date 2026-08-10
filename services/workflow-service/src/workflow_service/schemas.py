@@ -18,6 +18,21 @@ class ProcessDefinitionDetailOut(ProcessDefinitionOut):
     bpmn_xml: str
 
 
+class DmnDefinitionOut(BaseModel):
+    id: int
+    name: str
+    version: int
+    decision_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DmnDefinitionDetailOut(DmnDefinitionOut):
+    dmn_xml: str
+
+
 class ProcessInstanceCreate(BaseModel):
     created_by: str
     business_key: str | None = None

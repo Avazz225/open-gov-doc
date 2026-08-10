@@ -77,6 +77,152 @@ async def test_list_process_definitions_with_name_filter_returns_full_history(
     assert [d.version for d in versions] == [2, 1]
 
 
+async def test_create_dmn_definition_extracts_decision_id(session, approval_level_dmn):
+    definition = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    assert definition.decision_id == "approval-level"
+    assert definition.name == "Freigabestufe"
+    assert definition.version == 1
+
+
+async def test_create_dmn_definition_with_existing_name_creates_next_version(
+    session, approval_level_dmn
+):
+    first = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    second = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    assert first.version == 1
+    assert second.version == 2
+    assert first.id != second.id
+
+
+async def test_create_dmn_definition_invalid_dmn_raises(session):
+    with pytest.raises(repository.InvalidDmnError):
+        await repository.create_dmn_definition(session, name="Kaputt", dmn_xml="not valid xml")
+
+
+async def test_create_dmn_definition_multiple_decisions_raises(session, multi_decision_dmn):
+    with pytest.raises(repository.InvalidDmnError):
+        await repository.create_dmn_definition(session, name="Mehrfach", dmn_xml=multi_decision_dmn)
+
+
+async def test_create_dmn_definition_duplicate_decision_id_across_families_raises(
+    session, approval_level_dmn
+):
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    with pytest.raises(repository.DuplicateDecisionIdError):
+        await repository.create_dmn_definition(
+            session, name="Andere Familie", dmn_xml=approval_level_dmn
+        )
+
+
+async def test_create_dmn_definition_same_decision_id_replacing_own_family_succeeds(
+    session, approval_level_dmn
+):
+    """Eine neue Version DERSELBEN Familie darf natürlich weiterhin dieselbe
+    `decision_id` verwenden - nur eine ANDERE Familie darf sie nicht (siehe
+    `DuplicateDecisionIdError`-Docstring)."""
+    first = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    second = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    assert first.decision_id == second.decision_id == "approval-level"
+    assert second.version == 2
+
+
+async def test_get_dmn_definition_unknown_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_dmn_definition(session, 999999)
+
+
+async def test_list_dmn_definitions_without_name_filter_returns_latest_version_only(
+    session, approval_level_dmn
+):
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    definitions = await repository.list_dmn_definitions(session)
+    [freigabestufe] = [d for d in definitions if d.name == "Freigabestufe"]
+    assert freigabestufe.version == 2
+
+
+async def test_list_dmn_definitions_with_name_filter_returns_full_history(
+    session, approval_level_dmn
+):
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    versions = await repository.list_dmn_definitions(session, name="Freigabestufe")
+    assert [d.version for d in versions] == [2, 1]
+
+
+async def test_delete_dmn_definition_succeeds(session, approval_level_dmn):
+    definition = await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    await repository.delete_dmn_definition(session, definition.id)
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_dmn_definition(session, definition.id)
+
+
+async def test_create_process_definition_referencing_dmn_succeeds_when_dmn_exists(
+    session, business_rule_task_bpmn, approval_level_dmn
+):
+    """Kernverhalten von P14-S4: `create_process_definition` lädt selbst die
+    neueste Version jeder DMN-Familie (`list_latest_dmn_xml`) vor dem
+    BPMN-Parse - ein `businessRuleTask` mit `camunda:decisionRef` löst sich
+    also auf, sofern die referenzierte DMN-Familie bereits existiert."""
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    definition = await repository.create_process_definition(
+        session, name="Freigabe-Workflow", bpmn_xml=business_rule_task_bpmn, process_id=None
+    )
+    assert definition.bpmn_process_id == "Process_business_rule"
+
+
+async def test_create_process_definition_referencing_missing_dmn_raises(
+    session, business_rule_task_bpmn
+):
+    with pytest.raises(repository.InvalidBpmnError):
+        await repository.create_process_definition(
+            session, name="Freigabe-Workflow", bpmn_xml=business_rule_task_bpmn, process_id=None
+        )
+
+
+async def test_start_instance_evaluates_business_rule_task_and_completes(
+    session, business_rule_task_bpmn, approval_level_dmn
+):
+    await repository.create_dmn_definition(
+        session, name="Freigabestufe", dmn_xml=approval_level_dmn
+    )
+    definition = await repository.create_process_definition(
+        session, name="Freigabe-Workflow", bpmn_xml=business_rule_task_bpmn, process_id=None
+    )
+    instance = await repository.start_instance(
+        session,
+        definition.id,
+        created_by="alice",
+        business_key=None,
+        initial_data={"amount": 1500},
+    )
+    assert instance.status == "completed"
+
+
 async def test_delete_process_definition_without_instances_succeeds(session, manual_task_bpmn):
     definition = await repository.create_process_definition(
         session, name="Approval", bpmn_xml=manual_task_bpmn, process_id=None

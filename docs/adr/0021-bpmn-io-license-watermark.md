@@ -19,3 +19,7 @@
 - Jede Ansicht des Process Designer (P6-S8) zeigt sichtbar den bpmn.io-Schriftzug/Link — kein technischer Blocker für interne Verwaltungssoftware, aber vor einem etwaigen späteren Fremdvertrieb/White-Label-Bedarf gegenüber Stakeholdern zu kommunizieren.
 - Sollte künftig eine White-Label-Anforderung entstehen, wäre diese Entscheidung zu revisitieren (Alternative Bibliothek oder Eigenentwicklung) — aktuell kein Bedarf, daher nicht vorgezogen.
 - `bpmn-js-spiffworkflow`s eigene MIT-Lizenz wirft keine zusätzliche Einschränkung auf; sie nutzt `bpmn-js` lediglich als Peer-Dependency, ohne dessen Lizenzbedingungen zu verändern.
+
+## Addendum (P14-S4): `dmn-js` tatsächlich in Betrieb genommen
+
+Diese ADR nannte `dmn-js` bereits 2026 (P6-S2-Vorausplanung) vorsorglich als vom selben Lizenzentscheid abgedecktes bpmn.io-Toolkit - P14-S4 (DMN-1.3-Entscheidungstabellen im Process Designer, 7.1) hat es jetzt tatsächlich als Abhängigkeit ergänzt (`apps/process-designer`, `DmnDesigner.tsx`) und dabei per Spike **empirisch** bestätigt: `dmn-js` 17.10.1 nutzt dieselbe `diagram-js`-Major-Version (`^15.23.2`) wie die gepinnte `bpmn-js` 18.22.1-Stack, ein echter `next build`/Static-Export-Durchlauf sowie ein Live-Browser-Test (Decision-Table-Ansicht inkl. Hit-Policy-Dropdown, Regel-Zeilen, Im-/Export) liefen beide ohne Fehler. Kein Fallback auf einen rohen XML-Editor nötig, keine neue Lizenzentscheidung erforderlich - dieselbe Begründung/dasselbe Wasserzeichen wie oben gelten unverändert.

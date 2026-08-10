@@ -58,6 +58,28 @@ nicht nur aus der Doku übernommen:
   kann einen automatischen BPMN-Schritt treiben, ohne dass workflow-service ihn kennen
   muss. Ein `serviceTask` OHNE `taskType=connector_call` bleibt unverändert ein echtes
   No-Op (Rückwärtskompatibilität).
+- DMN-1.3-Entscheidungstabellen/Business Rule Task (7.1, P14-S4): `CamundaParser`
+  (seit P6-S7 Basisklasse, siehe oben) ist bereits selbst eine Unterklasse von
+  `SpiffWorkflow.dmn.parser.BpmnDmnParser` (empirisch per `CamundaParser.__mro__`
+  verifiziert) - `businessRuleTask` ist dort bereits über `OVERRIDE_PARSER_CLASSES`
+  auf `BusinessRuleTaskParser`/`BusinessRuleTask` gemappt, beide unverändert von
+  diesem Modul übernommen (kein eigener Override nötig, anders als bei Service-/
+  Connector-Tasks). `parser.add_dmn_str(xml)` lädt eine DMN-Datei in denselben
+  Parser, geschlüsselt über deren eigene `<decision id="...">` in
+  `parser.dmn_parsers` - `BusinessRuleTaskParser.create_task()` liest
+  `camunda:decisionRef` vom `<bpmn:businessRuleTask>`-Element und löst ihn exakt
+  gegen diesen Schlüssel auf (`ValidationException`, falls nicht gefunden). Beide
+  `add_dmn_str`/`add_bpmn_str` müssen VOR `parser.get_spec()` aufgerufen sein
+  (das baut den vollständigen Task-Spec-Baum inkl. aller referenzierten
+  Decisions), Reihenfolge zwischen beiden ist egal - `_new_parser()` lädt
+  deshalb hier alle übergebenen DMN-Definitionen vor der BPMN-Datei selbst.
+  `DMNEngine` (Auswertung zur Laufzeit) wird von SpiffWorkflow selbst
+  transparent aus `BusinessRuleTaskMixin._run_hook()` aufgerufen, genau wie bei
+  jedem anderen automatischen Task (`do_engine_steps()`) - dieses Modul instanziiert
+  es nie direkt. Eine DMN-Datei mit mehr als einer `<decision>` wird von
+  SpiffWorkflow selbst abgelehnt ("Multiple decision tables are not currently
+  supported") - `parse_dmn()` erzwingt das zusätzlich explizit beim Upload,
+  damit die Fehlermeldung nicht erst beim nächsten BPMN-Parse-Versuch auftaucht.
 """
 
 from dataclasses import dataclass, field
@@ -77,9 +99,16 @@ from SpiffWorkflow.task import Task, TaskState
 
 class BpmnParseError(Exception):
     """Die BPMN-XML ist nicht wohlgeformt, enthält keinen (eindeutigen) ausführbaren
-    Prozess, oder die gewählte `process_id` existiert nicht. Bewusst keine Exception aus
-    `repository.py` - dieses Modul kennt dessen Fehlerhierarchie nicht, `repository.py`
-    übersetzt beim Aufruf in seine eigene `InvalidBpmnError`."""
+    Prozess, referenziert eine unbekannte DMN-`decisionRef`, oder die gewählte
+    `process_id` existiert nicht. Bewusst keine Exception aus `repository.py` -
+    dieses Modul kennt dessen Fehlerhierarchie nicht, `repository.py` übersetzt
+    beim Aufruf in seine eigene `InvalidBpmnError`."""
+
+
+class DmnParseError(Exception):
+    """Die DMN-XML ist nicht wohlgeformt oder enthält nicht genau eine
+    `<decision>` (7.1, P14-S4 - SpiffWorkflow selbst unterstützt nur genau eine
+    Decision je DMN-Datei, siehe Moduldocstring)."""
 
 
 @dataclass
@@ -169,29 +198,75 @@ _SERIALIZER = BpmnWorkflowSerializer(
 )
 
 
-def _new_parser(xml: str) -> DmsBpmnParser:
+def _new_parser(xml: str, dmn_definitions: list[str] | None = None) -> DmsBpmnParser:
     parser = DmsBpmnParser()
     try:
-        # lxml akzeptiert bei einer XML-Encoding-Deklaration (<?xml ... encoding="UTF-8"?>)
-        # ausschließlich bytes, keine bereits dekodierten str - deshalb hier explizit
-        # kodieren, unabhängig davon, ob der Aufrufer str oder bytes übergibt.
+        # DMN vor der BPMN-Datei laden (Reihenfolge ist SpiffWorkflow-seitig egal,
+        # siehe Moduldocstring - hier trotzdem zuerst, damit ein fehlerhafter
+        # DMN-Eintrag nicht erst nach dem BPMN-Parse-Versuch auffällt). lxml
+        # akzeptiert bei einer XML-Encoding-Deklaration (<?xml ... encoding="UTF-8"?>)
+        # ausschließlich bytes, keine bereits dekodierten str - deshalb überall
+        # explizit kodieren, unabhängig davon, ob der Aufrufer str oder bytes übergibt.
+        for dmn_xml in dmn_definitions or []:
+            parser.add_dmn_str(dmn_xml.encode("utf-8"))
         parser.add_bpmn_str(xml.encode("utf-8"))
     except Exception as exc:  # SpiffWorkflow/lxml werfen diverse eigene Typen
         raise BpmnParseError(f"BPMN-Datei nicht parsbar: {exc}") from exc
     return parser
 
 
-def list_process_ids(xml: str) -> list[str]:
+def parse_dmn(xml: str) -> str:
+    """Validiert eine DMN-1.3-Datei (P14-S4) und liefert ihre interne
+    `decision_id` zurück (`<decision id="...">`) - der Schlüssel, über den ein
+    `businessRuleTask`s `camunda:decisionRef` sie später referenziert (siehe
+    `repository.create_dmn_definition`).
+
+    `BpmnDmnParser.add_dmn_xml()` legt pro Datei immer genau EINEN
+    `dmn_parsers`-Eintrag an, geschlüsselt über die ID der ERSTEN `<decision>`
+    im Dokument (`DMNParser.bpmn_id`, siehe SpiffWorkflow-Quelltext) - eine
+    zweite `<decision>` im selben Dokument bliebe darüber unsichtbar,
+    `len(parser.dmn_parsers)` wäre in JEDEM Fall 1 (empirisch verifiziert,
+    dieser Weg kann die Mehrfach-Decision-Grenze also NICHT prüfen). Die
+    eigentliche `SpiffWorkflow`-eigene Ablehnung ("Multiple decision tables
+    are not current supported") passiert erst innerhalb von
+    `DMNParser.parse()` - dort aber nur LAZY, ausgelöst durch
+    `BpmnDmnParser.get_decision()` beim Auflösen eines referenzierenden
+    `businessRuleTask`s (`camunda:decisionRef`), nicht beim Laden selbst.
+    Ein Upload OHNE begleitende BPMN-Referenz würde diesen Fehler also nie
+    auslösen. `parse_dmn()` ruft `dmn_parser.parse()` deshalb hier explizit
+    selbst auf, um die Prüfung schon beim Upload zu erzwingen. Die
+    installierte SpiffWorkflow-Version hat dabei einen eigenen Bug: die
+    `ValidationException` für den Mehrfach-Fall übergibt eine `list` als
+    `node`-Argument, `ValidationException.__init__` erwartet aber ein
+    lxml-Element (`node.tag`) und wirft stattdessen einen `AttributeError`
+    (empirisch verifiziert) - `except Exception` unten fängt beides ab."""
+    parser = DmsBpmnParser()
+    try:
+        parser.add_dmn_str(xml.encode("utf-8"))
+        [dmn_parser] = parser.dmn_parsers.values()
+        dmn_parser.parse()
+    except Exception as exc:
+        raise DmnParseError(f"DMN-Datei nicht parsbar: {exc}") from exc
+    return dmn_parser.decision.id
+
+
+def list_process_ids(xml: str, dmn_definitions: list[str] | None = None) -> list[str]:
     """Ausführbare Top-Level-Prozess-IDs in der BPMN-Datei (zur Auto-Erkennung, wenn
     der Aufrufer keine explizite `process_id` mitgibt)."""
-    return _new_parser(xml).get_process_ids()
+    return _new_parser(xml, dmn_definitions).get_process_ids()
 
 
-def parse_bpmn(xml: str, process_id: str | None) -> tuple[Any, str]:
+def parse_bpmn(
+    xml: str, process_id: str | None, dmn_definitions: list[str] | None = None
+) -> tuple[Any, str]:
     """Parst die BPMN-XML und löst die zu instanziierende Prozess-ID auf. Ohne
     `process_id` wird automatisch aufgelöst, aber nur wenn die Datei genau einen
-    ausführbaren Top-Level-Prozess enthält - sonst muss der Aufrufer explizit wählen."""
-    parser = _new_parser(xml)
+    ausführbaren Top-Level-Prozess enthält - sonst muss der Aufrufer explizit wählen.
+    `dmn_definitions` (P14-S4): DMN-XML-Inhalte, die vor der BPMN-Datei in denselben
+    Parser geladen werden - jeder von einem `businessRuleTask` referenzierte
+    `decisionRef` muss darunter sein, sonst schlägt `get_spec()` unten mit einer
+    SpiffWorkflow-eigenen `ValidationException` fehl (übersetzt in `BpmnParseError`)."""
+    parser = _new_parser(xml, dmn_definitions)
     available = parser.get_process_ids()
     if process_id is None:
         if len(available) != 1:

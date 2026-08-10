@@ -9,6 +9,7 @@ from config_service import compare
 from config_service.schemas import (
     ApprovalConfigExport,
     ConfigDocument,
+    DmnDefinitionExport,
     FederationConfigExport,
     ObjectTypeExport,
     RoleExport,
@@ -124,9 +125,10 @@ def test_diff_singleton_category_both_absent_is_fully_empty():
     assert delta.identical == []
 
 
-def test_compare_documents_covers_all_six_categories():
+def test_compare_documents_covers_all_seven_categories():
     base = _doc(
         object_types=[ObjectTypeExport(name="a", applies_to="document")],
+        dmn_definitions=[DmnDefinitionExport(name="d1", dmn_xml="<dmn1/>")],
         roles=[RoleExport(name="r1", description="d", permissions=["read"])],
         approval_config=[ApprovalConfigExport(action_type="x", requires_approval=False)],
         sensor_config=SensorConfigExport(global_default=True, overrides={}),
@@ -134,6 +136,7 @@ def test_compare_documents_covers_all_six_categories():
     )
     compare_doc = _doc(
         object_types=[ObjectTypeExport(name="a", applies_to="document")],
+        dmn_definitions=[DmnDefinitionExport(name="d1", dmn_xml="<dmn2/>")],
         roles=[RoleExport(name="r1", description="d", permissions=["read", "write"])],
         approval_config=[ApprovalConfigExport(action_type="x", requires_approval=True)],
         sensor_config=SensorConfigExport(global_default=False, overrides={}),
@@ -145,6 +148,7 @@ def test_compare_documents_covers_all_six_categories():
         categories={
             "object_types",
             "workflows",
+            "dmn_definitions",
             "roles",
             "approval_config",
             "sensor_config",
@@ -157,6 +161,7 @@ def test_compare_documents_covers_all_six_categories():
         "workflows", None, None, ignore_regex=None
     )
     assert result["object_types"].identical == ["a"]
+    assert "d1" in result["dmn_definitions"].differing
     assert "r1" in result["roles"].differing
     assert "x" in result["approval_config"].differing
     assert result["sensor_config"].differing["sensor_config"]["global_default"] == {

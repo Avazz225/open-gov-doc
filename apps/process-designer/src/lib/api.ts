@@ -200,6 +200,70 @@ export async function deleteProcessDefinition(token: string, id: number): Promis
   );
 }
 
+// DMN-1.3-Entscheidungstabellen (7.1, P14-S4) - gleiches Versionierungsmuster
+// wie Prozessdefinitionen (`name` ist der Familienschlüssel), siehe
+// `models.DmnDefinition`.
+export interface DmnDefinitionSummary {
+  id: number;
+  name: string;
+  version: number;
+  decision_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DmnDefinitionDetail extends DmnDefinitionSummary {
+  dmn_xml: string;
+}
+
+export async function listDmnDefinitions(token: string): Promise<DmnDefinitionSummary[]> {
+  const response = await request("workflow-service", "dmn-definitions", {}, token);
+  return response.json();
+}
+
+export async function listDmnDefinitionVersions(
+  token: string,
+  name: string
+): Promise<DmnDefinitionSummary[]> {
+  const query = new URLSearchParams({ name });
+  const response = await request(
+    "workflow-service",
+    `dmn-definitions?${query.toString()}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function getDmnDefinition(token: string, id: number): Promise<DmnDefinitionDetail> {
+  const response = await request("workflow-service", `dmn-definitions/${id}`, {}, token);
+  return response.json();
+}
+
+export async function createDmnDefinition(
+  token: string,
+  params: { name: string; dmnXml: string }
+): Promise<DmnDefinitionSummary> {
+  const formData = new FormData();
+  formData.set("name", params.name);
+  formData.set(
+    "dmn_xml",
+    new Blob([params.dmnXml], { type: "application/xml" }),
+    "decision.dmn"
+  );
+  const response = await request(
+    "workflow-service",
+    "dmn-definitions",
+    { method: "POST", body: formData },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteDmnDefinition(token: string, id: number): Promise<void> {
+  await request("workflow-service", `dmn-definitions/${id}`, { method: "DELETE" }, token);
+}
+
 // Federation Hub (7.4, P6-S9) - Proxy von workflow-service auf das
 // Hub-Adressbuch (`GET /federation/installations`, ungegated wie andere
 // GETs). Leere Liste ohne konfigurierten Hub - der Designer bietet

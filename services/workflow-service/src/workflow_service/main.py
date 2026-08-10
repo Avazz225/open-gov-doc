@@ -23,6 +23,8 @@ from workflow_service.license_client import LicenseStatusClient
 from workflow_service.models import Base, FederationConfig, FederationIdentity
 from workflow_service.permission_client import PermissionServiceClient
 from workflow_service.schemas import (
+    DmnDefinitionDetailOut,
+    DmnDefinitionOut,
     FederationConfigOut,
     FederationConfigUpdate,
     ProcessDefinitionDetailOut,
@@ -635,6 +637,83 @@ async def delete_process_definition(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.ProcessDefinitionInUseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+
+
+@app.post(
+    "/dmn-definitions",
+    response_model=DmnDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def create_dmn_definition(
+    dmn_xml: UploadFile = File(...),
+    name: str = Form(...),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DmnDefinitionOut:
+    """DMN-1.3-Entscheidungstabelle hochladen (7.1, P14-S4) - gleiches
+    Zugriffs-/Versionierungsmuster wie `create_process_definition`."""
+    await _require_object_config(x_dms_principal)
+    xml_bytes = await dmn_xml.read()
+    try:
+        xml_text = xml_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="dmn_xml ist kein gültiges UTF-8") from exc
+
+    try:
+        definition = await repository.create_dmn_definition(session, name=name, dmn_xml=xml_text)
+    except repository.InvalidDmnError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except repository.DuplicateDecisionIdError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return definition
+
+
+@app.get(
+    "/dmn-definitions",
+    response_model=list[DmnDefinitionOut],
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def list_dmn_definitions(
+    name: str | None = None, session: AsyncSession = Depends(get_session)
+) -> list[DmnDefinitionOut]:
+    """Ohne `name`: neueste Version je DMN-Familie. Mit `name`: vollständige
+    Versionshistorie dieser Familie, neueste zuerst (siehe
+    `repository.list_dmn_definitions`)."""
+    return await repository.list_dmn_definitions(session, name=name)
+
+
+@app.get(
+    "/dmn-definitions/{dmn_definition_id}",
+    response_model=DmnDefinitionDetailOut,
+    dependencies=[Depends(_license_gate("read"))],
+)
+async def get_dmn_definition(
+    dmn_definition_id: int, session: AsyncSession = Depends(get_session)
+) -> DmnDefinitionDetailOut:
+    try:
+        return await repository.get_dmn_definition(session, dmn_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete(
+    "/dmn-definitions/{dmn_definition_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def delete_dmn_definition(
+    dmn_definition_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_object_config(x_dms_principal)
+    try:
+        await repository.delete_dmn_definition(session, dmn_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
 
 

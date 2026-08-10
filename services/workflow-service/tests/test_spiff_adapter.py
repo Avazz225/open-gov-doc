@@ -281,3 +281,65 @@ def test_retry_errored_tasks_returns_zero_when_nothing_is_errored(manual_task_bp
     wf = sa.new_workflow(spec)
     sa.run_ready_steps(wf)
     assert sa.retry_errored_tasks(wf) == 0
+
+
+def test_parse_dmn_returns_decision_id(approval_level_dmn):
+    assert sa.parse_dmn(approval_level_dmn) == "approval-level"
+
+
+def test_parse_dmn_invalid_xml_raises():
+    with pytest.raises(sa.DmnParseError):
+        sa.parse_dmn("not valid xml")
+
+
+def test_parse_dmn_multiple_decisions_raises(multi_decision_dmn):
+    with pytest.raises(sa.DmnParseError):
+        sa.parse_dmn(multi_decision_dmn)
+
+
+def test_parse_bpmn_business_rule_task_without_dmn_definitions_raises(business_rule_task_bpmn):
+    """`camunda:decisionRef="approval-level"` referenziert eine Decision, die hier
+    nicht geladen wird - `get_spec()` muss dabei mit einer SpiffWorkflow-eigenen
+    `ValidationException` fehlschlagen (übersetzt in `BpmnParseError`), DMN muss vor
+    dem referenzierenden BPMN geladen sein (P14-S4, siehe Moduldocstring)."""
+    with pytest.raises(sa.BpmnParseError):
+        sa.parse_bpmn(business_rule_task_bpmn, None)
+
+
+def test_business_rule_task_evaluates_decision_and_writes_output(
+    business_rule_task_bpmn, approval_level_dmn
+):
+    """Ende-zu-Ende: ein `businessRuleTask` mit `camunda:decisionRef="approval-level"`
+    wertet die geladene DMN-Entscheidungstabelle transparent über
+    `do_engine_steps()` aus (P14-S4, kein eigener `DMNEngine`-Aufruf in diesem
+    Modul nötig)."""
+    spec, _ = sa.parse_bpmn(business_rule_task_bpmn, None, dmn_definitions=[approval_level_dmn])
+    wf = sa.new_workflow(spec)
+    sa.set_initial_data(wf, {"amount": 1500})
+    sa.run_ready_steps(wf)
+
+    assert sa.is_completed(wf) is True
+    [leaf] = [t for t in wf.get_tasks() if t.task_spec.name == "EndEvent_1"]
+    assert leaf.data["level"] == "abteilungsleiter"
+
+
+def test_business_rule_task_evaluates_lower_amount_rule(
+    business_rule_task_bpmn, approval_level_dmn
+):
+    spec, _ = sa.parse_bpmn(business_rule_task_bpmn, None, dmn_definitions=[approval_level_dmn])
+    wf = sa.new_workflow(spec)
+    sa.set_initial_data(wf, {"amount": 100})
+    sa.run_ready_steps(wf)
+
+    assert sa.is_completed(wf) is True
+    [leaf] = [t for t in wf.get_tasks() if t.task_spec.name == "EndEvent_1"]
+    assert leaf.data["level"] == "sachbearbeiter"
+
+
+def test_business_rule_task_unknown_decision_ref_raises(
+    business_rule_task_unknown_decision_bpmn, approval_level_dmn
+):
+    with pytest.raises(sa.BpmnParseError):
+        sa.parse_bpmn(
+            business_rule_task_unknown_decision_bpmn, None, dmn_definitions=[approval_level_dmn]
+        )

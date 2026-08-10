@@ -5,3 +5,9 @@
 // diese Deklaration nicht.
 declare module "bpmn-js-properties-panel";
 declare module "@bpmn-io/properties-panel";
+
+// `dmn-js` (P14-S4, DMN-1.3-Entscheidungstabellen) liefert wie `bpmn-js-
+// properties-panel` keine eigenen TypeScript-Deklarationen für seinen
+// Modeler-Einstiegspunkt (verifiziert per Spike-Build: "Could not find a
+// declaration file for module 'dmn-js/lib/Modeler'").
+declare module "dmn-js/lib/Modeler";

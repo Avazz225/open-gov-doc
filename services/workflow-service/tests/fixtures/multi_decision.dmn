@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             id="Definitions_multi_decision" name="definitions"
+             namespace="http://camunda.org/schema/1.0/dmn">
+  <decision id="decision-one" name="Erste Decision">
+    <decisionTable id="DecisionTable_1" hitPolicy="UNIQUE">
+      <input id="Input_1" label="Betrag">
+        <inputExpression id="InputExpression_1" typeRef="number">
+          <text>amount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" label="Stufe" name="level" typeRef="string" />
+      <rule id="Rule_1">
+        <inputEntry id="InputEntry_1"><text>&lt; 1000</text></inputEntry>
+        <outputEntry id="OutputEntry_1"><text>"sachbearbeiter"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <decision id="decision-two" name="Zweite Decision">
+    <decisionTable id="DecisionTable_2" hitPolicy="UNIQUE">
+      <input id="Input_2" label="Betrag">
+        <inputExpression id="InputExpression_2" typeRef="number">
+          <text>amount</text>
+        </inputExpression>
+      </input>
+      <output id="Output_2" label="Stufe" name="level" typeRef="string" />
+      <rule id="Rule_2">
+        <inputEntry id="InputEntry_2"><text>&lt; 1000</text></inputEntry>
+        <outputEntry id="OutputEntry_2"><text>"sachbearbeiter"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

@@ -1,8 +1,9 @@
 # config-service
 
 **Verantwortung:** Konfigurationsimport/-export (Konzept 7.3, P12-S3): vollständige
-Systemkonfiguration (Objekttypen inkl. Formular-Layouts, Workflows, Rollen-/Rechte-Templates,
-Vier-Augen-Einstellungen je Aktionstyp, Sensor-Konfiguration) als ein JSON-Dokument exportierbar
+Systemkonfiguration (Objekttypen inkl. Formular-Layouts, Workflows, seit P14-S4 zusätzlich
+DMN-1.3-Entscheidungstabellen, Rollen-/Rechte-Templates, Vier-Augen-Einstellungen je Aktionstyp,
+Sensor-Konfiguration) als ein JSON-Dokument exportierbar
 und in ein anderes (oder dasselbe, z. B. Staging→Produktion) System re-importierbar —
 Versionierung des Konfigurationsschemas selbst, damit Export aus einer älteren Version in eine
 neuere importiert werden kann.
@@ -19,17 +20,18 @@ jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-s
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/config/export` | Exportiert ein `ConfigDocument` — optional `?categories=roles&categories=workflows` zur Einschränkung, sonst alle sechs Kategorien |
+| `GET` | `/config/export` | Exportiert ein `ConfigDocument` — optional `?categories=roles&categories=workflows` zur Einschränkung, sonst alle sieben Kategorien |
 | `POST` | `/config/compare` | **Seit P14-S1**: Delta-/Vergleichsfunktion (7.5) — Body `{compare, base?, categories?, ignore_regex?}`; fehlt `base`, wird der eigene aktuelle Live-Export als Basisinstanz verwendet. Rein lesend/diagnostisch, ungegated wie `GET /config/export`. `422` bei unbekannter Kategorie oder ungültiger `ignore_regex` |
 | `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, oder seit P13-S2 einen gültigen `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, siehe [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422` |
 | `GET` | `/healthz` | Health-Check (ungegated) |
 
-## Die sechs Kategorien
+## Die sieben Kategorien
 
 | Kategorie | Owner-Service | Natürlicher Schlüssel (Upsert) | Besonderheit |
 |---|---|---|---|
 | `object_types` | object-type-service | `name` | Layouts nur, wenn `is_custom=true` (2.2b) — berechnete Smart-Layout-Defaults werden nie exportiert |
 | `workflows` | workflow-service | — (immer neue Version) | Nur die aktuellste Version je Prozessdefinitions-Familie; Ziel-`workflow-service` versioniert beim Import automatisch neu (ADR 0027) |
+| `dmn_definitions` | workflow-service | — (immer neue Version) | **Seit P14-S4**: DMN-1.3-Entscheidungstabellen (7.1) — gleiches Muster wie `workflows`, nur die aktuellste Version je Familie, Ziel versioniert beim Import automatisch neu. Beim Import bewusst **vor** `workflows` angewendet (`imports.py`), da ein `businessRuleTask`s `camunda:decisionRef` nur auflösbar ist, wenn die referenzierte DMN-Familie beim Ziel-`workflow-service` bereits existiert |
 | `roles` | permission-service | `name` | Rollen-Templates (`Role`), **nicht** ressourcengebundene `role_assignment`-Zeilen |
 | `approval_config` | permission-service | `action_type` | Vier-Augen-Konfiguration (4.3) — Ziel-Endpunkt ist bereits ein Upsert |
 | `sensor_config` | monitoring-service | — (Singleton + Overrides) | Globaler Default + Sensor-Overrides (10.1, P11-S1) |
@@ -153,7 +155,7 @@ lesend/diagnostisch, verändert nichts an einer der beiden Seiten (7.5). Details
 `normalize()`/`resolve_pattern()`, `diff_list_category()`/`diff_singleton_category()` je für
 nur-in-Basis/nur-in-Vergleich/identisch/abweichend, das Ignore-Regex-Beispiel aus 7.5 wörtlich
 nachgebaut (numerische Präfixe, inhaltlicher Vergleich bleibt trotzdem vollständig), sowie
-`compare_documents()` über alle sechs Kategorien hinweg.
+`compare_documents()` über alle sieben Kategorien hinweg.
 
 `test_api.py` — läuft wie `webdav-connector`/`migration-service` gegen den echten, laufenden
 Container (kein In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) —
@@ -166,7 +168,10 @@ Fleet-Agent-Key-Bypass und den `federation_config`-Import (wirkt tatsächlich au
 `workflow-service`-Container). Seit **P14-S1**: `POST /config/compare` gegen sich selbst (keine
 Abweichungen), ohne `base` (zieht den eigenen Live-Export heran), mit echten inhaltlichen
 Abweichungen, mit Ignore-Regex-Zuordnung (mit/ohne Regex derselbe Fall verglichen), ungültige
-Regex → `422`, unbekannte Kategorie → `422`.
+Regex → `422`, unbekannte Kategorie → `422`. Seit **P14-S4**: `dmn_definitions` in der
+Standard-Kategorienliste des Exports, `dmn_definitions`-Anlegen erzeugt beim Wiederholen unter
+demselben Namen automatisch eine neue Version (`created: 1` bei jedem Aufruf, gleiches Muster wie
+`workflows`), echt gegen den laufenden `workflow-service`-Container verifiziert.
 
 **`tools/cli`**: `test_config_commands.py` deckt `dms config export` (JSON-Ausgabe, Datei-Export,
 `--category`-Query-Parameter) und `dms config compare` (liest Datei(en), sendet korrekten

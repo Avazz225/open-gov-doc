@@ -1,6 +1,6 @@
 # process-designer
 
-**Verantwortung:** Eigenständige Frontend-Anwendung für grafische BPMN-2.0-Modellierung gegen die Workflow Engine (`workflow-service`, P6-S1) — Prozessdefinitionen anlegen/öffnen/bearbeiten, BPMN-XML importieren/exportieren, Signature Task (3.10) über ein eigenes Properties-Panel konfigurieren, Prozess-Versionierung (7.1/8, P6-S8), seit **P6-S9** föderierte Prozessschritte (7.4) über ein eigenes Properties-Panel konfigurieren.
+**Verantwortung:** Eigenständige Frontend-Anwendung für grafische BPMN-2.0-Modellierung gegen die Workflow Engine (`workflow-service`, P6-S1) — Prozessdefinitionen anlegen/öffnen/bearbeiten, BPMN-XML importieren/exportieren, Signature Task (3.10) über ein eigenes Properties-Panel konfigurieren, Prozess-Versionierung (7.1/8, P6-S8), seit **P6-S9** föderierte Prozessschritte (7.4) über ein eigenes Properties-Panel konfigurieren, seit **P14-S4** DMN-1.3-Entscheidungstabellen anlegen/bearbeiten (`dmn-js`) und Business-Rule-Task-`decisionRef` (bereits vorhandenes Properties-Panel-Modul).
 **Konzept-Referenz:** 7.1, 8, 3.10, 7.4
 **Kein eigenes Postgres-Schema** — reine clientseitig gerenderte SPA (statischer Export, gleiches Muster wie `apps/user-ui`, siehe [ADR 0006](../adr/0006-user-ui-static-export-spa.md)), kein eigener Backend-Prozess.
 
@@ -17,8 +17,9 @@ Anders als `apps/admin-ui` (`InstallationProvider`, Multi-Installation, ADR 0008
 | Route | Zweck |
 |---|---|
 | `/login/` | Anmeldung (identisch zu user-ui/admin-ui) |
-| `/` | `ProcessDefinitionList` — nur erreichbar mit gültiger Session |
+| `/` | Tab-Umschalter zwischen `ProcessDefinitionList` und `DmnDefinitionList` (seit P14-S4) — nur erreichbar mit gültiger Session |
 | `/designer/` | BPMN-Canvas + Properties Panel, optionaler `?id=`-Query-Parameter (kein dynamischer Next-Routen-Parameter, gleiches SPA-State-Muster wie die bestehenden Apps) |
+| `/dmn-designer/` | **Seit P14-S4**: `dmn-js`-Decision-Table-/DRD-Editor, gleiches `?id=`-Muster wie `/designer/` |
 
 `RequireAuth` rendert wie in user-ui/admin-ui zuerst ein `MaintenanceBanner` (Not-Shutdown, 4.8).
 
@@ -46,6 +47,16 @@ Gleiches Grundmuster wie der Signature Task: **kein eigenes BPMN-Element**, sond
 
 Die Installationsliste für das Dropdown wird **einmalig vor dem Erzeugen des Modelers** geladen (`designer/page.tsx`, `listFederationInstallations()`) und als statischer didi-Wert in `additionalModules` injiziert (`{ federationInstallations: ["value", ...] }`) — kein Live-Nachladen während einer Bearbeitungssitzung. **Die gesamte Gruppe bleibt ausgeblendet, wenn die Liste leer ist** (kein Hub konfiguriert oder keine Installationen im Adressbuch bekannt) — erfüllt Konzept 7.1 wörtlich: "bietet der Process Designer föderierte Prozessschritte gar nicht erst als Auswahlmöglichkeit an". Bewusst **keine echte Swimlane-Bearbeitung** in bpmn-js (kein etabliertes Provider-Muster dafür, deutlich höheres Risiko) — die Roadmap-Formulierung "externe Swimlanes" ist hier rein als UX-Rahmung zu verstehen, technisch bleibt das Ziel eine Eigenschaft des einzelnen Prozessschritts, nicht der Lane.
 
+## DMN-1.3-Entscheidungstabellen (7.1, seit P14-S4)
+
+**Business Rule Task `decisionRef`: kein neuer Properties-Panel-Code nötig.** Vor Beginn der Implementierung per echtem Playwright-Browser-Test empirisch verifiziert (nicht nur aus der `bpmn-js-properties-panel`-Dokumentation übernommen): der bereits registrierte `CamundaPlatformPropertiesProviderModule` (seit P6-S7/P6-S9 für Signature-/Federation-Tasks im Einsatz, `BpmnDesigner.tsx`) rendert für einen ausgewählten `bpmn:businessRuleTask` bereits eine vollständige "Implementation"-Gruppe (`Type: DMN`, `Decision reference`, `Binding`, `Tenant ID`, `Result variable`) — ein importierter Business Rule Task mit `camunda:decisionRef="approval-level"` zeigte das korrekt vorbelegte Feld ohne jede zusätzliche Provider-Registrierung.
+
+**`components/DmnDesigner.tsx`** — eigenständiger Editor für die Entscheidungstabellen selbst (nicht die BPMN-Referenz darauf): `dmn-js` (bpmn.io-Toolkit, [ADR 0021](../adr/0021-bpmn-io-license-watermark.md)-Addendum), identisches manuelles `useRef`/`useEffect`-Mounting + `next/dynamic`/`{ssr:false}`-Einbindung + `onReady(handle)`-Callback-Muster wie `BpmnDesigner.tsx`. Kompatibilität mit der gepinnten `bpmn-js` 18.22.1-Stack per Spike empirisch bestätigt: `dmn-js` 17.10.1 nutzt dieselbe `diagram-js`-Major-Version (`^15.23.2`), ein echter `next build`/Static-Export-Durchlauf sowie ein Live-Browser-Test (Decision-Table-Ansicht inkl. Hit-Policy-Dropdown, Regel-Zeilen, Im-/Export) liefen beide fehlerfrei — kein Fallback auf einen rohen XML-Editor nötig. `dmn-js/lib/Modeler` liefert wie `bpmn-js-properties-panel` keine eigenen TypeScript-Deklarationen (`src/types/untyped-modules.d.ts`).
+
+**`components/DmnDefinitionList.tsx`/`app/dmn-designer/page.tsx`** — exaktes Analogon zu `ProcessDefinitionList.tsx`/`designer/page.tsx` (gleiches Versionierungsmuster: `name` ist der Familienschlüssel, `decision_id`-Spalte zusätzlich zur Versionshistorie). `app/page.tsx` schaltet seit P14-S4 per einfachem Tab-Umschalter (`.tab-bar`) zwischen `ProcessDefinitionList` und `DmnDefinitionList` um, statt zwei getrennte Startseiten-Routen zu pflegen.
+
+**Real gefundener und behobener Fehler (P14-S4)**: `designer/page.tsx`s `loadedForId = useRef<string | null>(null)` verglich gegen `id = searchParams.get("id")` (ebenfalls `null` ohne `?id=`) — `null !== null` ist `false`, der Neuanlage-Zweig (`setInitialXml(STARTER_BPMN_XML)`) lief dadurch beim allerersten Aufruf von `/designer/` OHNE `?id=` nie, der Designer blieb dauerhaft leer ("no diagram to display"). Per echtem Browser-Test aufgefallen (nicht durch Vitest/jsdom sichtbar, da dort keine echte Navigation ohne Query-Parameter durchlaufen wird) — behoben durch einen `undefined`-Sentinel statt `null` (`useRef<string | null | undefined>(undefined)`), gleiche Korrektur in `dmn-designer/page.tsx` von Anfang an übernommen. Betraf jede Neuanlage eines Prozesses ohne vorherige `id`, nicht spezifisch DMN.
+
 ## Anbindung an das Backend
 
 Ausschließlich über das API-Gateway (3.5), keine direkten Aufrufe:
@@ -63,6 +74,11 @@ Ausschließlich über das API-Gateway (3.5), keine direkten Aufrufe:
 | Theme-Präferenz lesen/schreiben | `GET/PUT /api/auth-service/me/preferences` |
 | Not-Shutdown / Wartungsmodus-Status | `GET /api/permission-service/maintenance-mode` |
 | Federation-Hub-Adressbuch (seit P6-S9) | `GET /api/workflow-service/federation/installations` (Proxy, ungegated, leer ohne konfigurierten Hub) |
+| Neueste Version je DMN-Familie (seit P14-S4) | `GET /api/workflow-service/dmn-definitions` |
+| Vollständige Versionshistorie einer DMN-Familie (seit P14-S4) | `GET /api/workflow-service/dmn-definitions?name=X` |
+| Einzelne DMN-Definition inkl. `dmn_xml` (seit P14-S4) | `GET /api/workflow-service/dmn-definitions/{id}` |
+| DMN speichern (seit P14-S4) | `POST /api/workflow-service/dmn-definitions` (multipart, `admin.object_config`) |
+| DMN-Version löschen (seit P14-S4) | `DELETE /api/workflow-service/dmn-definitions/{id}` (`admin.object_config`) |
 
 ## Theming/i18n/Auth-Zustand
 
@@ -75,8 +91,8 @@ Zweistufiges Docker-Image (`apps/process-designer/Dockerfile`, `node:22-alpine` 
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript-Prüfung, ESLint (inkl. einer bewussten, begründeten `no-explicit-any`-Ausnahme in `SignatureTaskPropertiesProvider.tsx`: `bpmn-js` selbst typisiert `Moddle`/`ModdleElement` als `any`, die beiden Properties-Panel-Pakete liefern gar keine Typdeklarationen), produktionsfähiger statischer Export.
-- `npm test` (Vitest + Testing Library, **28 Tests**): `AuthProvider` (Login/Logout/Session-Wiederherstellung inkl. `permissions`), `ThemeProvider` (Default/Cache/Persistenz, Kopie des user-ui-Musters), `ProcessDefinitionList` (zeigt nur die neueste Version, Versionshistorie auf-/zuklappbar, Löschen nur mit `admin.object_config` inkl. Hinweistext ohne, Backend-Fehlermeldung bei `409`), `BpmnDesigner` (mit gemocktem `bpmn-js`: Modeler wird seit P6-S9 mit sechs statt vier erwarteten Modulen instanziiert, `initialXml` wird importiert, `onReady`/`onImportError`-Callbacks, Zerstören beim Unmount), `SignatureTaskPropertiesProvider` (reine `getSignatureLevel`/`isSignatureRequired`-Lesefunktionen gegen ein minimales moddle-Element-Double, ohne echtes `bpmn-moddle`-Modell oder DOM), seit **P6-S9** `FederatedStepPropertiesProvider` (analoge reine Lesefunktionen `isFederatedStepEnabled`/`getTargetInstallationId`/`getTargetProcessType`).
-- **Kein Browser in dieser Entwicklungsumgebung** (wie jede vorherige UI-Session) — Canvas-Interaktionen (Drag & Drop, Kontext-Pad, Properties-Panel-Bedienung) konnten nicht visuell verifiziert werden, nur über die genannten Vitest-Tests plus einen curl-bestätigten Datenrundlauf gegen den echten `workflow-service` (siehe `PROGRESS.md`, Smoke-Test-Protokoll dieser Session).
+- `npm test` (Vitest + Testing Library, **39 Tests seit P14-S4**, vorher 28): `AuthProvider` (Login/Logout/Session-Wiederherstellung inkl. `permissions`), `ThemeProvider` (Default/Cache/Persistenz, Kopie des user-ui-Musters), `ProcessDefinitionList` (zeigt nur die neueste Version, Versionshistorie auf-/zuklappbar, Löschen nur mit `admin.object_config` inkl. Hinweistext ohne, Backend-Fehlermeldung bei `409`), `BpmnDesigner` (mit gemocktem `bpmn-js`: Modeler wird seit P6-S9 mit sechs statt vier erwarteten Modulen instanziiert, `initialXml` wird importiert, `onReady`/`onImportError`-Callbacks, Zerstören beim Unmount), `SignatureTaskPropertiesProvider` (reine `getSignatureLevel`/`isSignatureRequired`-Lesefunktionen gegen ein minimales moddle-Element-Double, ohne echtes `bpmn-moddle`-Modell oder DOM), seit **P6-S9** `FederatedStepPropertiesProvider` (analoge reine Lesefunktionen), seit **P14-S4**: `DmnDesigner` (mit gemocktem `dmn-js`, gleiches Muster wie `BpmnDesigner`), `DmnDefinitionList` (gleiche Fälle wie `ProcessDefinitionList`, zusätzlich die `decision_id`-Spalte), `HomePage` (Tab-Umschalter zeigt/versteckt die jeweils andere Liste).
+- **Echter Browser-Test dieser Session** (ephemere, projektfremde Docker-Playwright-Instanz `mcr.microsoft.com/playwright:v1.48.0-jammy`, kein dauerhafter Eintrag in diesem Repo — siehe `PROGRESS.md`): kompletter Ende-zu-Ende-Durchlauf gegen den echten, per `docker compose up --build` neu gebauten Stack — Login, Tab-Umschalter, "Neu erstellen" im DMN-Designer, `dmn-js`-Canvas rendert korrekt (Decision Table inkl. beider Regelzeilen), Datei-Import einer echten DMN-1.3-Fixture, Speichern (Erfolgsmeldung inkl. Versionsnummer, Weiterleitung auf die neue `id`), Rückkehr zur Liste bestätigt den neuen Eintrag inkl. korrekter `decision_id` — keine Konsolenfehler in keinem Schritt. Testeintrag anschließend wieder gelöscht. Dabei zusätzlich den oben beschriebenen `loadedForId`-Fund gemacht und behoben, sowie ein reines Umgebungsproblem (nicht code-bedingt) diagnostiziert und repariert: dem Keycloak-Testkonto `config-admin` fehlten `email`/`firstName`/`lastName` (löste Keycloaks "Account is not fully set up" beim direkten Grant aus, `users-admin` war davon nicht betroffen) — bereits vor dieser Session so im laufenden Dev-Stack vorhanden, nicht durch P14-S4 verursacht, per Keycloak-Admin-API nachträglich korrigiert.
 
 ## Offene Punkte
 
@@ -85,4 +101,5 @@ Zweistufiges Docker-Image (`apps/process-designer/Dockerfile`, `node:22-alpine` 
 - **Kein Anschluss an Konfigurationsexport/-import** (7.3) — Prozessdefinitionen sind aktuell nicht Teil eines geräteübergreifenden Konfigurationsexports, ein möglicher späterer Ausbau.
 - **Kein Rollback-Endpunkt/keine Familien-Löschung** (siehe ADR 0027 "Konsequenzen") — eine ältere Version lässt sich öffnen/exportieren, aber nicht direkt "als neueste wiederherstellen"; Löschen bleibt pro Version.
 - **Keine Race-Condition-Sperre bei der Versionsvergabe** (siehe ADR 0027) — für ein Grundgerüst ohne hochfrequente parallele Speicherungen akzeptiert.
-- Kein automatisiertes Browser-E2E in dieser Umgebung möglich (kein Chrome/Chromium installiert) — nachzuholen, sobald eine Umgebung mit Browser verfügbar ist.
+- **Kein dauerhaft im Repo eingerichtetes Browser-E2E** — kein Chrome/Chromium fest installiert (Playwright-Installation vom Nutzer explizit abgelehnt, siehe frühere Sessions), Verifikation läuft stattdessen bei Bedarf über eine flüchtige, projektfremde Docker-Playwright-Instanz (kein Repo-/Environment-Eintrag), wie in P14-S2 und erneut in P14-S4 praktiziert.
+- **DMN (P14-S4)**: keine Validierung, ob ein im BPMN-Designer eingetragener `camunda:decisionRef` tatsächlich einer existierenden DMN-Familie entspricht — das erfährt der Designer nicht (workflow-service lehnt es erst beim tatsächlichen Speichern/Instanzstart serverseitig ab, siehe `docs/services/workflow-service.md`). Kein automatischer "diese BPMN-Datei referenziert diese DMN-Familien"-Querverweis in der Übersicht.

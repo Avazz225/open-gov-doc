@@ -25,6 +25,16 @@ def _delete_definition(client, definition_id: int, headers: dict[str, str]):
     return client.delete(f"/process-definitions/{definition_id}", headers=headers)
 
 
+def _upload_dmn(client, xml: str, *, name: str, headers: dict[str, str]):
+    data = {"name": name}
+    files = {"dmn_xml": ("decision.dmn", xml, "application/xml")}
+    return client.post("/dmn-definitions", data=data, files=files, headers=headers)
+
+
+def _delete_dmn(client, dmn_definition_id: int, headers: dict[str, str]):
+    return client.delete(f"/dmn-definitions/{dmn_definition_id}", headers=headers)
+
+
 def test_healthz(client):
     response = client.get("/healthz")
     assert response.status_code == 200
@@ -133,6 +143,104 @@ def test_delete_process_definition_without_instances_succeeds(
     response = _delete_definition(client, definition_id, headers=admin_headers)
     assert response.status_code == 204
     assert client.get(f"/process-definitions/{definition_id}").status_code == 404
+
+
+def test_create_dmn_definition_without_permission_is_forbidden(client, approval_level_dmn):
+    response = _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers={})
+    assert response.status_code == 403
+
+
+def test_create_and_get_dmn_definition(client, approval_level_dmn, admin_headers):
+    create_response = _upload_dmn(
+        client, approval_level_dmn, name="Freigabestufe", headers=admin_headers
+    )
+    assert create_response.status_code == 201
+    assert create_response.json()["decision_id"] == "approval-level"
+    dmn_definition_id = create_response.json()["id"]
+
+    get_response = client.get(f"/dmn-definitions/{dmn_definition_id}")
+    assert get_response.status_code == 200
+    assert "definitions" in get_response.json()["dmn_xml"]
+
+
+def test_create_dmn_definition_with_existing_name_creates_next_version(
+    client, approval_level_dmn, admin_headers
+):
+    first = _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers=admin_headers)
+    second = _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers=admin_headers)
+    assert first.json()["version"] == 1
+    assert second.json()["version"] == 2
+
+
+def test_create_dmn_definition_invalid_dmn_returns_422(client, admin_headers):
+    response = client.post(
+        "/dmn-definitions",
+        data={"name": "Kaputt"},
+        files={"dmn_xml": ("decision.dmn", "not valid xml", "application/xml")},
+        headers=admin_headers,
+    )
+    assert response.status_code == 422
+
+
+def test_create_dmn_definition_duplicate_decision_id_returns_409(
+    client, approval_level_dmn, admin_headers
+):
+    _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers=admin_headers)
+    response = _upload_dmn(client, approval_level_dmn, name="Andere Familie", headers=admin_headers)
+    assert response.status_code == 409
+
+
+def test_get_unknown_dmn_definition_returns_404(client):
+    response = client.get("/dmn-definitions/999999")
+    assert response.status_code == 404
+
+
+def test_list_dmn_definitions_returns_only_latest_version_by_default(
+    client, approval_level_dmn, admin_headers
+):
+    _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers=admin_headers)
+    _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers=admin_headers)
+    response = client.get("/dmn-definitions")
+    [freigabestufe] = [d for d in response.json() if d["name"] == "Freigabestufe"]
+    assert freigabestufe["version"] == 2
+
+
+def test_delete_dmn_definition_without_permission_is_forbidden(
+    client, approval_level_dmn, admin_headers
+):
+    dmn_definition_id = _upload_dmn(
+        client, approval_level_dmn, name="Freigabestufe", headers=admin_headers
+    ).json()["id"]
+    response = _delete_dmn(client, dmn_definition_id, headers={})
+    assert response.status_code == 403
+
+
+def test_delete_dmn_definition_succeeds(client, approval_level_dmn, admin_headers):
+    dmn_definition_id = _upload_dmn(
+        client, approval_level_dmn, name="Freigabestufe", headers=admin_headers
+    ).json()["id"]
+    response = _delete_dmn(client, dmn_definition_id, headers=admin_headers)
+    assert response.status_code == 204
+    assert client.get(f"/dmn-definitions/{dmn_definition_id}").status_code == 404
+
+
+def test_business_rule_task_process_definition_evaluates_dmn_end_to_end(
+    client, business_rule_task_bpmn, approval_level_dmn, admin_headers
+):
+    """Ende-zu-Ende über die HTTP-API (P14-S4): DMN hochladen, referenzierende
+    Prozessdefinition hochladen, Instanz starten - die Freigabestufe landet in
+    den Task-Daten des abgeschlossenen Business Rule Task."""
+    _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers=admin_headers)
+    definition_id = _upload_definition(
+        client, business_rule_task_bpmn, name="Freigabe-Workflow", headers=admin_headers
+    ).json()["id"]
+
+    response = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "initial_data": {"amount": 1500}},
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "completed"
 
 
 def test_start_instance_with_manual_task_stays_running(client, manual_task_bpmn, admin_headers):

@@ -73,6 +73,25 @@ class WorkflowServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def list_latest_dmn_definitions(self) -> list[dict]:
+        response = await self._client.get("/dmn-definitions")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_dmn_definition(self, dmn_definition_id: int) -> dict:
+        response = await self._client.get(f"/dmn-definitions/{dmn_definition_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def create_dmn_definition(self, *, name: str, dmn_xml: str) -> dict:
+        response = await self._client.post(
+            "/dmn-definitions",
+            data={"name": name},
+            files={"dmn_xml": ("decision.dmn", dmn_xml, "application/xml")},
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_federation_config(self) -> dict:
         """7.4/P13-S3: Versionskompatibilitätsspanne - ungegatet auf der
         Zielseite, siehe `docs/services/workflow-service.md` "Federation"."""

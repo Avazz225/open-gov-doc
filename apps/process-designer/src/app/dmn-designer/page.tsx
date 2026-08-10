@@ -3,49 +3,40 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useRef, useState } from "react";
 import { useI18n } from "@/i18n";
-import {
-  ApiError,
-  createProcessDefinition,
-  getProcessDefinition,
-  listFederationInstallations,
-} from "@/lib/api";
-import type { FederationInstallationSummary } from "@/lib/api";
+import { ApiError, createDmnDefinition, getDmnDefinition } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { RequireAuth } from "@/components/RequireAuth";
-import type { BpmnDesignerHandle } from "@/components/BpmnDesigner";
+import type { DmnDesignerHandle } from "@/components/DmnDesigner";
 
 const CAN_MANAGE_CAPABILITY = "admin.object_config";
 
-// Minimales Start-Event-Diagramm als Vorlage für "Neu erstellen" - `bpmn-js`
-// braucht immer ein gültiges, importierbares Ausgangsdiagramm.
-const STARTER_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
-  id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="Process_1" isExecutable="true">
-    <bpmn:startEvent id="StartEvent_1" />
-  </bpmn:process>
-  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
-    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
-      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
-        <dc:Bounds x="173" y="102" width="36" height="36" />
-      </bpmndi:BPMNShape>
-    </bpmndi:BPMNPlane>
-  </bpmndi:BPMNDiagram>
-</bpmn:definitions>`;
+// Minimale Start-Entscheidungstabelle als Vorlage für "Neu erstellen" -
+// dmn-js braucht wie bpmn-js immer ein gültiges, importierbares
+// Ausgangsdiagramm (7.1, P14-S4).
+const STARTER_DMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" id="Definitions_1" name="definitions" namespace="http://camunda.org/schema/1.0/dmn">
+  <decision id="Decision_1" name="Neue Entscheidungstabelle">
+    <decisionTable id="DecisionTable_1" hitPolicy="UNIQUE">
+      <input id="Input_1">
+        <inputExpression id="InputExpression_1" typeRef="string">
+          <text></text>
+        </inputExpression>
+      </input>
+      <output id="Output_1" typeRef="string" />
+    </decisionTable>
+  </decision>
+</definitions>`;
 
-// `next/dynamic`/`{ssr:false}`, da bpmn-js beim Modul-Import direkt das DOM
-// anfasst (eigenes SVG-Canvas) - unvereinbar mit Next.js' Build-Zeit-
-// Renderdurchlauf unter `output:"export"`.
-const BpmnDesigner = dynamic(
-  () => import("@/components/BpmnDesigner").then((m) => m.BpmnDesigner),
+// `next/dynamic`/`{ssr:false}` - siehe designer/page.tsx (dmn-js manipuliert
+// wie bpmn-js beim Modul-Import direkt das DOM).
+const DmnDesigner = dynamic(
+  () => import("@/components/DmnDesigner").then((m) => m.DmnDesigner),
   { ssr: false }
 );
 
-function DesignerPageInner() {
+function DmnDesignerPageInner() {
   const { accessToken, permissions } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
@@ -55,53 +46,34 @@ function DesignerPageInner() {
 
   const [name, setName] = useState("");
   const [initialXml, setInitialXml] = useState<string | null>(null);
-  // `null` = noch nicht geladen - Rendern von BpmnDesigner wartet darauf, damit
-  // die Föderations-Properties-Panel-Gruppe (7.4, P6-S9) beim allerersten
-  // Aufbau des Modelers bereits die richtige Installationsliste injiziert
-  // bekommt (siehe components/BpmnDesigner.tsx).
-  const [federationInstallations, setFederationInstallations] = useState<
-    FederationInstallationSummary[] | null
-  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const handleRef = useRef<BpmnDesignerHandle | null>(null);
+  const handleRef = useRef<DmnDesignerHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // `undefined` als Sentinel, NICHT `null` - `searchParams.get("id")` liefert
-  // bei fehlendem `?id=` (Neuanlage) ebenfalls `null`, ein `useRef<string |
-  // null>(null)` würde die Erstinitialisierung dann fälschlich als "bereits
-  // geladen" ansehen (`null !== null` ist `false`) und den Zweig unten nie
-  // ausführen - `initialXml` bliebe dauerhaft `null`, der Designer würde nie
-  // gerendert (real gefunden bei der P14-S4-Browser-Verifikation, betraf
-  // jede Neuanlage ohne `?id=`).
+  // `undefined`-Sentinel statt `null` - siehe designer/page.tsx (P14-S4-Fund):
+  // `searchParams.get("id")` liefert bei fehlendem `?id=` ebenfalls `null`,
+  // ein mit `null` initialisierter Ref würde die Erstinitialisierung sonst
+  // fälschlich überspringen.
   const loadedForId = useRef<string | null | undefined>(undefined);
 
   if (loadedForId.current !== id) {
     loadedForId.current = id;
     if (id && accessToken) {
-      getProcessDefinition(accessToken, Number(id))
+      getDmnDefinition(accessToken, Number(id))
         .then((definition) => {
           setName(definition.name);
-          setInitialXml(definition.bpmn_xml);
+          setInitialXml(definition.dmn_xml);
         })
-        .catch(() => setLoadError(t("designer.loadError")));
+        .catch(() => setLoadError(t("dmnDesigner.loadError")));
     } else {
       setName("");
-      setInitialXml(STARTER_BPMN_XML);
+      setInitialXml(STARTER_DMN_XML);
     }
   }
 
-  useEffect(() => {
-    if (!accessToken) return;
-    listFederationInstallations(accessToken)
-      .then(setFederationInstallations)
-      // Fail-open statt den ganzen Designer zu blockieren - ohne erreichbaren
-      // Hub bleibt die Föderations-Gruppe einfach ausgeblendet.
-      .catch(() => setFederationInstallations([]));
-  }, [accessToken]);
-
-  const handleReady = useCallback((handle: BpmnDesignerHandle) => {
+  const handleReady = useCallback((handle: DmnDesignerHandle) => {
     handleRef.current = handle;
   }, []);
 
@@ -113,7 +85,7 @@ function DesignerPageInner() {
       const text = await file.text();
       await handleRef.current.importXml(text);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : t("designer.importError"));
+      setLoadError(err instanceof Error ? err.message : t("dmnDesigner.importError"));
     }
   }
 
@@ -124,7 +96,7 @@ function DesignerPageInner() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${name || "process"}.bpmn`;
+    link.download = `${name || "decision"}.dmn`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -136,14 +108,11 @@ function DesignerPageInner() {
     setSaveSuccess(null);
     try {
       const xml = await handleRef.current.exportXml();
-      const saved = await createProcessDefinition(accessToken, {
-        name: name.trim(),
-        bpmnXml: xml,
-      });
-      setSaveSuccess(t("designer.saveSuccess", { version: saved.version }));
-      router.replace(`/designer/?id=${saved.id}`);
+      const saved = await createDmnDefinition(accessToken, { name: name.trim(), dmnXml: xml });
+      setSaveSuccess(t("dmnDesigner.saveSuccess", { version: saved.version }));
+      router.replace(`/dmn-designer/?id=${saved.id}`);
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : t("designer.saveError"));
+      setSaveError(err instanceof ApiError ? err.message : t("dmnDesigner.saveError"));
     } finally {
       setIsSaving(false);
     }
@@ -164,11 +133,11 @@ function DesignerPageInner() {
             disabled={!canManage}
           />
         </label>
-        <span className="hint">{t("designer.nameHint")}</span>
+        <span className="hint">{t("dmnDesigner.nameHint")}</span>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".bpmn,.xml"
+          accept=".dmn,.xml"
           hidden
           onChange={handleImportFile}
         />
@@ -195,10 +164,9 @@ function DesignerPageInner() {
           </span>
         )}
       </div>
-      {initialXml !== null && federationInstallations !== null && (
-        <BpmnDesigner
+      {initialXml !== null && (
+        <DmnDesigner
           initialXml={initialXml}
-          federationInstallations={federationInstallations}
           onReady={handleReady}
           onImportError={(message) => setLoadError(message)}
         />
@@ -208,12 +176,12 @@ function DesignerPageInner() {
 }
 
 // `useSearchParams()` braucht laut Next.js unter `output:"export"` eine
-// umschließende Suspense-Grenze, sonst schlägt der statische Build fehl.
-export default function DesignerPage() {
+// umschließende Suspense-Grenze, siehe designer/page.tsx.
+export default function DmnDesignerPage() {
   return (
     <RequireAuth>
       <Suspense fallback={null}>
-        <DesignerPageInner />
+        <DmnDesignerPageInner />
       </Suspense>
     </RequireAuth>
   );

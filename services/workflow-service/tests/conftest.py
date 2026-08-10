@@ -93,7 +93,10 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(
-            text("TRUNCATE workflow.process_instance, workflow.process_definition CASCADE")
+            text(
+                "TRUNCATE workflow.process_instance, workflow.process_definition, "
+                "workflow.dmn_definition CASCADE"
+            )
         )
     await eng.dispose()
     yield
@@ -153,6 +156,45 @@ def signature_task_bpmn() -> str:
     spiff_adapter.py für die CamundaParser-Umstellung, die diese Extensions
     überhaupt sichtbar macht."""
     path = os.path.join(os.path.dirname(__file__), "fixtures", "signature_task.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def approval_level_dmn() -> str:
+    """Eine DMN-1.3-Entscheidungstabelle mit genau einer `<decision
+    id="approval-level">` (7.1, P14-S4) - siehe spiff_adapter.py's
+    `parse_dmn`/DMN-aware `parse_bpmn`."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "approval_level.dmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def business_rule_task_bpmn() -> str:
+    """Ein einzelner `bpmn:businessRuleTask` mit `camunda:decisionRef="approval-level"`
+    (7.1, P14-S4) - referenziert `approval_level_dmn`."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "business_rule_task.bpmn")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def business_rule_task_unknown_decision_bpmn() -> str:
+    """Wie `business_rule_task_bpmn`, aber `camunda:decisionRef` referenziert
+    eine nirgends geladene Decision (P14-S4, Fehlerfall)."""
+    path = os.path.join(
+        os.path.dirname(__file__), "fixtures", "business_rule_task_unknown_decision.bpmn"
+    )
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.fixture
+def multi_decision_dmn() -> str:
+    """DMN-Datei mit zwei `<decision>`-Elementen - SpiffWorkflow unterstützt nur
+    genau eine je Datei (P14-S4, siehe `spiff_adapter.parse_dmn`)."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "multi_decision.dmn")
     with open(path, encoding="utf-8") as f:
         return f.read()
 
