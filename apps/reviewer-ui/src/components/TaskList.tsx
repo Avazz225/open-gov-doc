@@ -5,7 +5,9 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   completeTask,
+  listActiveDelegationsForDeputy,
   listReadyTasks,
+  type Delegation,
   type ReadyTaskWithInstance,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -24,9 +26,14 @@ export function TaskList() {
   const [completedBy, setCompletedBy] = useState("");
   const [signatureId, setSignatureId] = useState("");
   const [dataJson, setDataJson] = useState("");
+  const [onBehalfOf, setOnBehalfOf] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // Stellvertretung bei Abwesenheit (4.4a, P14-S11) - für wen die
+  // angemeldete Person gerade aktiv als Stellvertretung eingetragen ist,
+  // füllt die "Im Auftrag von"-Auswahl unten.
+  const [delegations, setDelegations] = useState<Delegation[]>([]);
 
   const reload = () => {
     if (!accessToken) return;
@@ -37,6 +44,13 @@ export function TaskList() {
 
   useEffect(reload, [accessToken, t]);
 
+  useEffect(() => {
+    if (!accessToken || !user) return;
+    listActiveDelegationsForDeputy(accessToken, user.sub)
+      .then(setDelegations)
+      .catch(() => setDelegations([]));
+  }, [accessToken, user]);
+
   function toggleExpand(task: ReadyTaskWithInstance) {
     if (expandedTaskId === task.id) {
       setExpandedTaskId(null);
@@ -46,6 +60,7 @@ export function TaskList() {
     setCompletedBy(user?.username ?? "");
     setSignatureId("");
     setDataJson("");
+    setOnBehalfOf("");
     setFormError(null);
     setSuccessMessage(null);
   }
@@ -71,6 +86,7 @@ export function TaskList() {
         completedBy,
         data,
         signatureId: signatureId || undefined,
+        onBehalfOfPrincipalId: onBehalfOf || undefined,
       });
       setSuccessMessage(t("taskList.success"));
       setExpandedTaskId(null);
@@ -149,6 +165,28 @@ export function TaskList() {
                             onChange={(e) => setCompletedBy(e.target.value)}
                             required
                           />
+                          {delegations.length > 0 && (
+                            <>
+                              <label htmlFor={`on-behalf-of-${task.id}`}>
+                                {t("taskList.onBehalfOfLabel")}
+                              </label>
+                              <select
+                                id={`on-behalf-of-${task.id}`}
+                                value={onBehalfOf}
+                                onChange={(e) => setOnBehalfOf(e.target.value)}
+                              >
+                                <option value="">{t("taskList.onBehalfOfSelf")}</option>
+                                {delegations.map((delegation) => (
+                                  <option
+                                    key={delegation.id}
+                                    value={delegation.delegator_principal_id}
+                                  >
+                                    {delegation.delegator_principal_id}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
+                          )}
                           {isSignature && (
                             <>
                               <label htmlFor={`signature-id-${task.id}`}>

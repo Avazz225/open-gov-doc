@@ -1,14 +1,48 @@
+import os
+import uuid
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
+from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
 from workflow_service import main
 from workflow_service.main import app
+
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 
 @pytest.fixture
 def client():
     with TestClient(app) as c:
         yield c
+
+
+def _create_delegation(
+    *,
+    deputy_principal_id: str,
+    delegator_principal_id: str,
+    process_definition_id: int | None = None,
+) -> dict:
+    """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - echter Aufruf gegen
+    den laufenden permission-service (kein Mocking, gleiches Prinzip wie
+    `_grant_config_admin_permission` in conftest.py)."""
+    now = datetime.now(UTC)
+    body = {
+        "deputy_principal_id": deputy_principal_id,
+        "starts_at": (now - timedelta(hours=1)).isoformat(),
+        "ends_at": (now + timedelta(days=1)).isoformat(),
+    }
+    if process_definition_id is not None:
+        body["scope_process_definition_ids"] = [process_definition_id]
+    response = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/delegations",
+        json=body,
+        headers={"X-DMS-Principal": delegator_principal_id},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def _upload_definition(
@@ -512,6 +546,141 @@ def test_complete_unknown_task_returns_409(client, manual_task_bpmn, admin_heade
         json={"completed_by": "bob"},
     )
     assert response.status_code == 409
+
+
+# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+
+
+def test_complete_task_on_behalf_of_without_principal_header_returns_401(
+    client, manual_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": "bob", "on_behalf_of_principal_id": "alice"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_complete_task_on_behalf_of_without_active_delegation_returns_403(
+    client, manual_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": "bob", "on_behalf_of_principal_id": "someone-without-delegation"},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 403
+
+
+def test_complete_task_on_behalf_of_with_active_delegation_succeeds_and_annotates_event(
+    client, manual_task_bpmn, admin_headers, monkeypatch
+):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    delegator = f"delegator-{uuid.uuid4().hex[:8]}"
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+    _create_delegation(deputy_principal_id=deputy, delegator_principal_id=delegator)
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": deputy, "on_behalf_of_principal_id": delegator},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 200
+
+    completed_events = [e for e in published if e.event_type == "workflow.task.completed"]
+    assert len(completed_events) == 1
+    assert completed_events[0].actor == deputy
+    assert completed_events[0].on_behalf_of == delegator
+
+
+def test_complete_task_on_behalf_of_respects_process_definition_scope(
+    client, manual_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    other_definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval2", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    delegator = f"delegator-{uuid.uuid4().hex[:8]}"
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+    # Delegation gilt nur für einen ANDEREN Prozess als den, dessen Aufgabe
+    # hier abgeschlossen werden soll - muss trotz existierender Delegation
+    # abgelehnt werden.
+    _create_delegation(
+        deputy_principal_id=deputy,
+        delegator_principal_id=delegator,
+        process_definition_id=other_definition_id,
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": deputy, "on_behalf_of_principal_id": delegator},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 403
+
+
+def test_complete_task_without_on_behalf_of_needs_no_principal_header(
+    client, manual_task_bpmn, admin_headers
+):
+    """Regulärer, nicht delegierter Abschluss bleibt unverändert möglich
+    ohne X-DMS-Principal-Header - `completed_by` bleibt wie bisher ein
+    ungeprüftes Freitextfeld, siehe main.py._require_delegation_if_on_behalf_of."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "alice"}
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": "bob"},
+    )
+
+    assert response.status_code == 200
 
 
 def test_get_unknown_instance_returns_404(client):

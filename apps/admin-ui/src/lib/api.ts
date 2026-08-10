@@ -1503,3 +1503,36 @@ export async function updateShareLinkConfig(
   );
   return response.json();
 }
+
+// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - reine Admin-Übersicht +
+// Widerrufsmöglichkeit (Konzept-Wortlaut: "kann jederzeit vorzeitig von der
+// vertretenen Person oder einer berechtigten Admin-Rolle beendet werden").
+// Anlegen selbst ist bewusst kein Admin-UI-Feature (Selbstverwaltung, siehe
+// user-ui's `DelegationsPane`).
+export interface Delegation {
+  id: string;
+  delegator_principal_id: string;
+  deputy_principal_id: string;
+  starts_at: string;
+  ends_at: string;
+  scope_object_type_ids: number[] | null;
+  scope_process_definition_ids: number[] | null;
+  scope_folder_resource_ids: string[] | null;
+  created_at: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+}
+
+export async function listAllDelegations(token: string): Promise<Delegation[]> {
+  const response = await request("permission-service", "delegations", {}, token);
+  return response.json();
+}
+
+export async function revokeDelegationAsAdmin(token: string, delegationId: string): Promise<void> {
+  await request(
+    "permission-service",
+    `delegations/${encodeURIComponent(delegationId)}`,
+    { method: "DELETE" },
+    token
+  );
+}

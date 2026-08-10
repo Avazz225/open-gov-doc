@@ -46,13 +46,28 @@ ohne Wildcard-Matching-Logik am Gateway selbst, siehe
 [ADR 0047](../adr/0047-public-share-link-query-param-token-and-disable-semantics.md)).
 Bei Erfolg werden die Identitäts-Claims als
 `X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`-Header an den Downstream
-weitergereicht (aktuell von keinem Backend-Service konsumiert, siehe
-[ADR 0005](../adr/0005-gateway-registry-routing-and-inprocess-rate-limiting.md)).
+weitergereicht — ursprünglich (ADR 0005) von keinem Backend-Service
+konsumiert, inzwischen aber die Grundlage mehrerer echter Prüfungen
+(`search-service`/`teamspace-service` seit P14-S6/P5-S4, `document-service`
+seit P14-S10, `permission-service`/`workflow-service` seit P14-S11 u. a.).
 Für eine öffentliche `public_routes`-Route lässt der Gateway einen im
 Original-Request bereits vorhandenen `Authorization`-Header unverändert an
 den Downstream durch (kein Überschreiben mit leeren Identitäts-Headern) -
 Grundlage für den Fleet-Agent-Schlüssel-Bypass oben, den nur der jeweilige
 Zielservice selbst prüft, nicht der Gateway.
+
+**Sicherheitsfund + Fix (P14-S11-Live-Verifikation, [ADR 0049](../adr/0049-gateway-header-spoofing-fix-strip-client-x-dms-headers.md)):**
+bis zu diesem Fund konnte ein Client mit gültigem Bearer-Token einen eigenen
+`X-DMS-Principal`/`-Roles`-Header mitschicken, der NICHT vom echten,
+JWT-abgeleiteten Wert überschrieben wurde — ein Fall von Groß-/
+Kleinschreibungs-Ungleichheit zwischen Python-Dict-Schlüsseln
+(`upstream.filter_headers()` behielt die ASGI-normalisierte, kleingeschriebene
+Schreibweise des eingehenden Headers bei, `identity_headers` im Quellcode ist
+großgeschrieben — beide landeten als zwei separate Header beim Downstream).
+`filter_headers()` entfernt seither jeden eingehenden `X-DMS-*`-Header
+unabhängig von seiner Schreibweise, bevor die echten Identitäts-Header
+gesetzt werden. Live verifiziert: derselbe Spoofing-Versuch liefert seither
+nachweislich die echte Identität.
 
 ## Not-Shutdown / Wartungsmodus (4.8, seit P6-S6)
 
@@ -102,11 +117,20 @@ Noch keine — folgt in Phase 11.
 ## Offene Punkte
 
 - Identitäts-Header (`X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`) werden
-  von den meisten Backend-Services weiterhin nicht konsumiert — Endpunkte mit
+  weiterhin nicht von JEDEM Backend-Service konsumiert — viele Endpunkte mit
   Principal-Bedarf nehmen ihn weiterhin explizit als Parameter/Body-Feld
-  entgegen (z. B. `permission-service`s `/check`). **Ausnahme seit P5-S4**:
-  `search-service` liest `X-DMS-Principal`. **Der neue
-  `X-DMS-Maintenance-Active`-Header (4.8, seit P6-S6) wird dagegen bereits von
+  entgegen (z. B. `permission-service`s älterer `/check`, dessen
+  `principal_id` als Query-Parameter statt aus dem Header kommt). Echte
+  Header-Konsumenten inzwischen: `search-service` (seit P5-S4),
+  `teamspace-service`/`auth-service`s `/users/lookup` (seit P14-S6),
+  `document-service`s Freigabelink-Endpunkte (seit P14-S10),
+  `permission-service`s Delegations-Endpunkte/`workflow-service`s
+  Aufgabenabschluss "im Auftrag von" (seit P14-S11). **Bis P14-S11 galt
+  dieser Header fälschlich als lückenlos vertrauenswürdig** — ein Client
+  konnte ihn selbst mitschicken und damit die echte, JWT-abgeleitete
+  Identität überschreiben (behoben, siehe
+  [ADR 0049](../adr/0049-gateway-header-spoofing-fix-strip-client-x-dms-headers.md)).
+  **Der `X-DMS-Maintenance-Active`-Header (4.8, seit P6-S6) wird von
   zwei Services konsumiert** (`auth-service`s `/login`, `workflow-service`s
   Instanzstart/Task-Abschluss) — siehe "Not-Shutdown / Wartungsmodus" oben.
 - Backend-Service-Ports sind in der Docker-Compose-Umgebung weiterhin direkt

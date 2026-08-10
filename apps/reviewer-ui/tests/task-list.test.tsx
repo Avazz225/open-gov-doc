@@ -5,10 +5,13 @@ import { I18nProvider } from "@/i18n";
 
 const listReadyTasksMock = vi.fn();
 const completeTaskMock = vi.fn();
+const listActiveDelegationsForDeputyMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listReadyTasks: (...args: unknown[]) => listReadyTasksMock(...args),
   completeTask: (...args: unknown[]) => completeTaskMock(...args),
+  listActiveDelegationsForDeputy: (...args: unknown[]) =>
+    listActiveDelegationsForDeputyMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -63,6 +66,8 @@ describe("TaskList", () => {
   beforeEach(() => {
     listReadyTasksMock.mockReset();
     completeTaskMock.mockReset();
+    listActiveDelegationsForDeputyMock.mockReset();
+    listActiveDelegationsForDeputyMock.mockResolvedValue([]);
   });
 
   it("shows an empty state when there are no ready tasks", async () => {
@@ -128,5 +133,75 @@ describe("TaskList", () => {
 
     await waitFor(() => expect(screen.getByText("Kein gültiges JSON")).toBeInTheDocument());
     expect(completeTaskMock).not.toHaveBeenCalled();
+  });
+
+  // --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -----------------------
+
+  it("does not show an 'Im Auftrag von' selector when there are no active delegations", async () => {
+    listReadyTasksMock.mockResolvedValue([MANUAL_TASK]);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
+
+    expect(screen.queryByLabelText("Im Auftrag von")).not.toBeInTheDocument();
+  });
+
+  it("shows an 'Im Auftrag von' selector populated from active delegations", async () => {
+    listReadyTasksMock.mockResolvedValue([MANUAL_TASK]);
+    listActiveDelegationsForDeputyMock.mockResolvedValue([
+      {
+        id: "d1",
+        delegator_principal_id: "carol-sub",
+        deputy_principal_id: "u1",
+        starts_at: "2026-01-01T00:00:00Z",
+        ends_at: "2026-12-31T00:00:00Z",
+      },
+    ]);
+    renderList();
+
+    await waitFor(() =>
+      expect(listActiveDelegationsForDeputyMock).toHaveBeenCalledWith("token-123", "u1")
+    );
+    await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
+
+    expect(screen.getByLabelText("Im Auftrag von")).toBeInTheDocument();
+    expect(screen.getByText("Für mich selbst")).toBeInTheDocument();
+    expect(screen.getByText("carol-sub")).toBeInTheDocument();
+  });
+
+  it("completes a task on behalf of a delegator when selected", async () => {
+    listReadyTasksMock.mockResolvedValueOnce([MANUAL_TASK]).mockResolvedValueOnce([]);
+    listActiveDelegationsForDeputyMock.mockResolvedValue([
+      {
+        id: "d1",
+        delegator_principal_id: "carol-sub",
+        deputy_principal_id: "u1",
+        starts_at: "2026-01-01T00:00:00Z",
+        ends_at: "2026-12-31T00:00:00Z",
+      },
+    ]);
+    completeTaskMock.mockResolvedValue(undefined);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
+    await waitFor(() => expect(screen.getByLabelText("Im Auftrag von")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Im Auftrag von"), {
+      target: { value: "carol-sub" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Abschließen" }));
+
+    await waitFor(() =>
+      expect(completeTaskMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-1",
+        completedBy: "alice",
+        data: {},
+        signatureId: undefined,
+        onBehalfOfPrincipalId: "carol-sub",
+      })
+    );
   });
 });

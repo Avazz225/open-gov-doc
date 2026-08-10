@@ -12,6 +12,7 @@ class AuditEventOut(BaseModel):
     subject: str | None
     payload: dict
     actor: str | None
+    on_behalf_of: str | None
     recorded_at: datetime
     prev_hash: str
     hash: str

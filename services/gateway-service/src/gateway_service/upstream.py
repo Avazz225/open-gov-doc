@@ -20,7 +20,29 @@ HOP_BY_HOP_HEADERS = frozenset(
 
 
 def filter_headers(headers) -> dict[str, str]:
-    return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}
+    """Entfernt Hop-by-Hop-Header UND jeden vom Client mitgeschickten
+    ``X-DMS-*``-Header (Sicherheitsfund, P14-S11-Live-Verifikation): diese
+    Header sind ausschließlich für die vom Gateway selbst injizierte,
+    JWT-abgeleitete Identität vorgesehen (``X-DMS-Principal``/`-Username`/
+    `-Roles`/`-Maintenance-Active`) - ohne diesen Filter würde ein Client
+    mit gültigem Bearer-Token einen eigenen ``X-DMS-Principal``-Header
+    mitschicken können, der NICHT überschrieben, sondern als zusätzlicher,
+    andersgroßgeschriebener Dict-Eintrag neben dem echten landete (Python-
+    Dict-Keys sind case-sensitive, ``"x-dms-principal"`` aus den ASGI-
+    normalisierten eingehenden Headern und ``"X-DMS-Principal"`` aus
+    ``proxy()``s ``identity_headers`` sind zwei verschiedene Schlüssel) -
+    beide Header wurden dadurch an den Downstream weitergereicht, der
+    tatsächlich verwendete Wert hing vom jeweiligen HTTP-Parser ab. Live
+    verifiziert: ein authentifizierter Aufrufer konnte sich dadurch als
+    beliebiger anderer Principal ausgeben. Betraf jeden Endpunkt, der
+    ``X-DMS-Principal``/`-Roles` auswertet (u. a. P5e-S2 Kennzeichen-Admin-
+    Rolle, P14-S6 Teamspace-Mitgliedschaft, P14-S10 Freigabelink-Ersteller,
+    P14-S11 Stellvertretung) - siehe ADR 0049."""
+    return {
+        k: v
+        for k, v in headers.items()
+        if k.lower() not in HOP_BY_HOP_HEADERS and not k.lower().startswith("x-dms-")
+    }
 
 
 class InstanceResolver:

@@ -45,6 +45,8 @@
     "signatureBadge": "Signatur erforderlich",
     "completeHeading": "Aufgabe abschließen",
     "completedByLabel": "Abgeschlossen von",
+    "onBehalfOfLabel": "Im Auftrag von",
+    "onBehalfOfSelf": "Für mich selbst",
     "signatureIdLabel": "Signatur-ID",
     "signatureIdHint": "Pflicht bei einem Signatur-Task (3.10) - ID einer beim Signature Service bereits erzeugten, zum Dokument passenden Signatur.",
     "dataLabel": "Zusätzliche Prozessdaten (JSON, optional)",

@@ -30,6 +30,10 @@ class AuditEvent(Base):
     # Cutover-Versionierung, die verhindert, dass dieses neue Feld die
     # bestehende Hash-Kette fuer bereits vorhandene Zeilen bricht.
     actor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Stellvertretung bei Abwesenheit (4.4a, seit P14-S11) - siehe
+    # AuditMeta.on_behalf_of_field_cutover_id fuer dieselbe Cutover-
+    # Versionierung wie beim actor-Feld oben (P7-S2), aus identischem Grund.
+    on_behalf_of: Mapped[str | None] = mapped_column(String(255), nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64), unique=True)
@@ -42,9 +46,13 @@ class AuditMeta(Base):
     ``id <= actor_field_cutover_id`` wurden VOR der Einfuehrung des Feldes
     gehasht und muessen beim Nachrechnen (``verify_chain``) weiterhin ohne
     ``actor`` im kanonischen JSON behandelt werden, sonst bricht die
-    Hash-Kette fuer die komplette Alt-Historie rueckwirkend."""
+    Hash-Kette fuer die komplette Alt-Historie rueckwirkend.
+    ``on_behalf_of_field_cutover_id`` (seit P14-S11) ist dieselbe Versionierung
+    fuer das neue ``on_behalf_of``-Feld (4.4a) - unabhaengiger Cutover-Wert,
+    da beide Felder zu unterschiedlichen Zeitpunkten eingefuehrt wurden."""
 
     __tablename__ = "audit_meta"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     actor_field_cutover_id: Mapped[int] = mapped_column()
+    on_behalf_of_field_cutover_id: Mapped[int] = mapped_column(default=0)

@@ -5,7 +5,7 @@ Publish/Consume-Interface für den Event-Bus (Konzept 3.4) — Services kennen n
 
 - `EventBusClient` — abstraktes Interface (`connect`, `publish`, `subscribe`, `close`).
 - `NatsEventBusClient` — Werkseinstellungs-Implementierung über NATS JetStream (`nats-py`).
-- `Event` — gemeinsame Ereignis-Hülle (Konzept 3.4/5.3): `event_id`, `event_type`, `occurred_at`, `service_name`, `subject`, `payload`. `to_bytes()`/`from_bytes()` für den Transport.
+- `Event` — gemeinsame Ereignis-Hülle (Konzept 3.4/5.3): `event_id`, `event_type`, `occurred_at`, `service_name`, `subject`, `payload`, `actor` (seit P7-S2 — handelnde Person, `None` bei Alt-Events/wo keine Aktions-Identität existiert), `on_behalf_of` (seit P14-S11, 4.4a — vertretene Person bei einer Aktion "im Auftrag von", siehe `docs/services/audit-service.md`). `to_bytes()`/`from_bytes()` für den Transport.
 
 Eine Kafka-Implementierung (für große Einzelinstallationen, siehe 3.4) kann später als
 weitere Klasse hinter demselben Interface ergänzt werden, ohne Aufrufer anzufassen.

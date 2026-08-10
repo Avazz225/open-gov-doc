@@ -160,6 +160,7 @@ export async function completeTask(
     completedBy: string;
     data?: Record<string, unknown>;
     signatureId?: string;
+    onBehalfOfPrincipalId?: string;
   }
 ): Promise<void> {
   await request(
@@ -172,10 +173,39 @@ export async function completeTask(
         completed_by: params.completedBy,
         data: params.data ?? {},
         signature_id: params.signatureId ?? null,
+        on_behalf_of_principal_id: params.onBehalfOfPrincipalId ?? null,
       }),
     },
     token
   );
+}
+
+// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - für wen die angemeldete
+// Person gerade aktiv als Stellvertretung eingetragen ist, gefüllt vom neuen
+// `permission-service`-Delegationsendpunkt (siehe docs/services/
+// permission-service.md). Nur diese Liste befüllt die "Im Auftrag von"-
+// Auswahl in `TaskList.tsx` - die eigentliche Berechtigungsprüfung passiert
+// serverseitig beim Abschluss selbst (workflow-service), diese Liste ist
+// reine UX-Hilfe.
+export interface Delegation {
+  id: string;
+  delegator_principal_id: string;
+  deputy_principal_id: string;
+  starts_at: string;
+  ends_at: string;
+}
+
+export async function listActiveDelegationsForDeputy(
+  token: string,
+  principalId: string
+): Promise<Delegation[]> {
+  const response = await request(
+    "permission-service",
+    `delegations/active-for-deputy/${encodeURIComponent(principalId)}`,
+    {},
+    token
+  );
+  return response.json();
 }
 
 // --- Permission Service (4.3) - generische Vier-Augen-Freigaben ------------

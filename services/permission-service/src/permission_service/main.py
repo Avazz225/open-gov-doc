@@ -8,7 +8,7 @@ from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,9 @@ from permission_service.schemas import (
     BatchCheckRequest,
     BatchCheckResult,
     CheckResult,
+    DelegationCheckResult,
+    DelegationCreate,
+    DelegationOut,
     EffectivePermissionsOut,
     MaintenanceModeActionResult,
     MaintenanceModeLift,
@@ -631,3 +634,133 @@ async def lift_maintenance_mode(
         actor=mode.lifted_by,
     )
     return mode
+
+
+# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+
+
+def _has_delegation_admin_role(x_dms_roles: str) -> bool:
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    return settings.delegation_revoke_admin_role in roles
+
+
+@app.post("/delegations", response_model=DelegationOut, status_code=201)
+async def create_delegation(
+    payload: DelegationCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DelegationOut:
+    """Eine Person hinterlegt selbst eine Stellvertretung (4.4a) - bewusst
+    kein Feld für ``delegator_principal_id`` im Request-Body: die vertretene
+    Person ist immer die anfragende (``X-DMS-Principal``), niemand kann eine
+    Delegation im Namen einer dritten Person anlegen."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if payload.ends_at <= payload.starts_at:
+        raise HTTPException(status_code=400, detail="ends_at muss nach starts_at liegen")
+
+    delegation = await repository.create_delegation(
+        session,
+        delegator_principal_id=x_dms_principal,
+        deputy_principal_id=payload.deputy_principal_id,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        scope_object_type_ids=payload.scope_object_type_ids,
+        scope_process_definition_ids=payload.scope_process_definition_ids,
+        scope_folder_resource_ids=payload.scope_folder_resource_ids,
+    )
+    await session.commit()
+    await publish_event(
+        "permission.delegation.created",
+        {"delegation_id": delegation.id, "deputy_principal_id": delegation.deputy_principal_id},
+        actor=x_dms_principal,
+    )
+    return delegation
+
+
+@app.get("/delegations", response_model=list[DelegationOut])
+async def list_delegations(
+    delegator_principal_id: str | None = None,
+    deputy_principal_id: str | None = None,
+    active_only: bool = False,
+    session: AsyncSession = Depends(get_session),
+) -> list[DelegationOut]:
+    return await repository.list_delegations(
+        session,
+        delegator_principal_id=delegator_principal_id,
+        deputy_principal_id=deputy_principal_id,
+        active_only=active_only,
+    )
+
+
+@app.get("/delegations/active-for-deputy/{principal_id}", response_model=list[DelegationOut])
+async def list_active_delegations_for_deputy(
+    principal_id: str, session: AsyncSession = Depends(get_session)
+) -> list[DelegationOut]:
+    """Für wen ``principal_id`` gerade als Stellvertretung aktiv ist (4.4a) -
+    von user-ui/reviewer-ui genutzt, um "im Auftrag von"-Auswahllisten zu
+    füllen, ohne dass das Frontend selbst über alle Delegationen filtern muss."""
+    return await repository.list_delegations(
+        session, deputy_principal_id=principal_id, active_only=True
+    )
+
+
+@app.get("/delegations/check", response_model=DelegationCheckResult)
+async def check_delegation(
+    deputy_principal_id: str,
+    delegator_principal_id: str,
+    process_definition_id: int | None = None,
+    object_type_id: int | None = None,
+    folder_resource_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> DelegationCheckResult:
+    """Eigentlicher Durchsetzungs-Endpunkt (4.4a) - von workflow-service beim
+    Aufgabenabschluss "im Auftrag von" aufgerufen (gleiches Muster wie
+    document-services `GET /check` für Leserechte, P14-S10)."""
+    allowed = await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id=deputy_principal_id,
+        delegator_principal_id=delegator_principal_id,
+        process_definition_id=process_definition_id,
+        object_type_id=object_type_id,
+        folder_resource_id=folder_resource_id,
+    )
+    return DelegationCheckResult(allowed=allowed)
+
+
+@app.delete("/delegations/{delegation_id}", status_code=204)
+async def revoke_delegation(
+    delegation_id: str,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Vorzeitige Beendigung (4.4a) - durch die vertretene Person selbst oder
+    eine berechtigte Admin-Rolle (Konzept-Wortlaut), NICHT durch die
+    Stellvertretung selbst (die könnte sich sonst eine fremde Delegation
+    einseitig verlängert vorstellen, indem sie die eigene Widerrufsmöglichkeit
+    ignoriert - der Widerruf muss von der Seite kommen können, die die
+    Verantwortung trägt)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    delegation = await repository.get_delegation(session, delegation_id)
+    if delegation is None:
+        raise HTTPException(status_code=404, detail=f"Delegation {delegation_id!r} unbekannt")
+    if delegation.delegator_principal_id != x_dms_principal and not _has_delegation_admin_role(
+        x_dms_roles
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Nur die vertretene Person oder eine Admin-Rolle darf diese Delegation widerrufen"
+            ),
+        )
+
+    await repository.revoke_delegation(session, delegation_id, revoked_by=x_dms_principal)
+    await session.commit()
+    await publish_event(
+        "permission.delegation.revoked",
+        {"delegation_id": delegation_id},
+        actor=x_dms_principal,
+    )

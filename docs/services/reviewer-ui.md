@@ -28,6 +28,8 @@ Konsumiert den neuen `GET /tasks`-Endpunkt (`workflow-service`, P14-S2) — die 
 
 Föderierte Tasks (`taskType=federated`/`federated_return`, 7.4) tauchen in der Liste gar nicht erst auf — `GET /tasks` filtert sie bereits serverseitig heraus, da sie ausschließlich automatisch über den Federation Hub abgeschlossen werden (ein direkter Abschlussversuch würde ohnehin `409` liefern).
 
+**Stellvertretung bei Abwesenheit (4.4a, seit P14-S11)**: das Formular zeigt zusätzlich eine "Im Auftrag von"-Auswahl (`<select>`), aber NUR wenn `GET /delegations/active-for-deputy/{principal_id}` (`permission-service`, beim Laden der App einmalig abgerufen) mindestens eine aktive Delegation für die angemeldete Person liefert — Default-Option "Für mich selbst" entspricht dem bisherigen, unveränderten Verhalten (`on_behalf_of_principal_id` bleibt `undefined`). Bei Auswahl einer vertretenen Person sendet `completeTask()` zusätzlich `on_behalf_of_principal_id` — die tatsächliche Durchsetzung (echte Delegationsprüfung, `403` ohne passende aktive Delegation) passiert serverseitig in `workflow-service` (siehe dortige Doku und [ADR 0048](../adr/0048-delegation-lives-in-permission-service-no-task-assignee-retrofit.md)), diese Auswahl ist reine UX-Hilfe. Die Liste zeigt rohe Principal-IDs, keine Nutzernamen (dieselbe bereits dokumentierte Lücke wie bei Teamspace-Mitgliederlisten, `docs/services/user-ui.md`).
+
 ## Freigaben-Inbox (4.3, `components/ApprovalList.tsx`)
 
 Konsumiert `permission-service`s `GET /approval-requests` **ungefiltert nach Aktionstyp** — die erste generische UI-Oberfläche für diese API im gesamten System (bislang nur drei eng gefilterte Einzelkonsumenten, siehe ADR 0041 "Begründung"). Status-Filter (offen/freigegeben/abgelehnt/alle, Default "offen"), Detailansicht zeigt das rohe `payload`-JSON der Anfrage (die UI kennt die Fachbedeutung einzelner `action_type`s bewusst nicht). Freigeben/Ablehnen ruft `POST .../approve`/`.../reject` mit dem angemeldeten Nutzernamen als `approved_by`/`rejected_by` — serverseitig weiterhin durchgesetzt, dass Initiator und Entscheider nicht identisch sein dürfen (Kern-Vier-Augen-Regel, `403` sonst).
@@ -46,6 +48,7 @@ Ausschließlich über das API-Gateway (3.5):
 | Identität nach Login | `GET /api/auth-service/me` |
 | Bereite Aufgaben über alle laufenden Instanzen (neu, P14-S2) | `GET /api/workflow-service/tasks` |
 | Aufgabe abschließen | `POST /api/workflow-service/instances/{instance_id}/tasks/{task_id}/complete` |
+| Aktive Stellvertretungen für die angemeldete Person (neu, P14-S11) | `GET /api/permission-service/delegations/active-for-deputy/{principal_id}` |
 | Freigabeanfragen listen | `GET /api/permission-service/approval-requests?status=` |
 | Freigeben/Ablehnen | `POST /api/permission-service/approval-requests/{id}/approve\|reject` |
 | Theme-Präferenz lesen/schreiben | `GET/PUT /api/auth-service/me/preferences` |
@@ -62,7 +65,7 @@ Zweistufiges Docker-Image (`apps/reviewer-ui/Dockerfile`, `node:22-alpine` Build
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript-Prüfung, ESLint, produktionsfähiger statischer Export.
-- `npm test` (Vitest + Testing Library, **15 Tests**): `AuthProvider` (Login/Logout/Session-Wiederherstellung, 4 Tests), `TaskList` (leere Liste, Auflistung mit Prozess-/Bezugsobjekt-Kontext, Signatur-Badge + Pflichtfeld, erfolgreicher Abschluss inkl. Neuladen, Ablehnung bei ungültigem JSON in den Zusatzdaten, 5 Tests), `ApprovalList` (Default-Filter "offen", leere Liste, Detail-Payload aufklappen, Freigeben als angemeldeter Nutzer, Ablehnen mit optionaler Begründung, keine Aktionen bei bereits entschiedener Anfrage, 6 Tests).
+- `npm test` (Vitest + Testing Library, **18 Tests**, vorher 15): `AuthProvider` (Login/Logout/Session-Wiederherstellung, 4 Tests), `TaskList` (leere Liste, Auflistung mit Prozess-/Bezugsobjekt-Kontext, Signatur-Badge + Pflichtfeld, erfolgreicher Abschluss inkl. Neuladen, Ablehnung bei ungültigem JSON in den Zusatzdaten, seit **P14-S11** zusätzlich: keine "Im Auftrag von"-Auswahl ohne aktive Delegationen, Auswahl erscheint befüllt bei mindestens einer aktiven Delegation, Abschluss "im Auftrag von" sendet `onBehalfOfPrincipalId` mit, 8 Tests), `ApprovalList` (Default-Filter "offen", leere Liste, Detail-Payload aufklappen, Freigeben als angemeldeter Nutzer, Ablehnen mit optionaler Begründung, keine Aktionen bei bereits entschiedener Anfrage, 6 Tests).
 - Live gegen den gebauten Container in einem echten (headless) Browser verifiziert (Login, Aufgabenliste inkl. Bearbeiten-Formular, Freigaben-Tab inkl. Statusfilter-Wechsel, Design-Umschalter auf Dunkel — jeweils ohne Konsolenfehler; die Aufgabenliste zeigte dabei reale, aus früheren Testläufen liegen gebliebene Tasks, ein zusätzlicher Beleg, dass `GET /tasks` echte Daten korrekt aggregiert).
 
 ## Offene Punkte

@@ -23,6 +23,8 @@ def _hashable_fields(
     *,
     actor: str | None = None,
     include_actor: bool = False,
+    on_behalf_of: str | None = None,
+    include_on_behalf_of: bool = False,
 ) -> dict:
     fields = {
         "event_id": event_id,
@@ -39,6 +41,11 @@ def _hashable_fields(
     # und jede vorherige Pruefung schlaegt rueckwirkend fehl.
     if include_actor:
         fields["actor"] = actor
+    # Gleiche Cutover-Versionierung fuer das seit P14-S11 neue on_behalf_of-
+    # Feld (4.4a) - eigener, unabhaengiger Cutover-Wert (siehe
+    # get_on_behalf_of_field_cutover_id).
+    if include_on_behalf_of:
+        fields["on_behalf_of"] = on_behalf_of
     return fields
 
 
@@ -68,6 +75,27 @@ async def get_actor_field_cutover_id(session: AsyncSession) -> int:
     return row.actor_field_cutover_id
 
 
+async def get_on_behalf_of_field_cutover_id(session: AsyncSession) -> int:
+    """Wie ``get_actor_field_cutover_id`` oben, aber fuer das neue
+    ``on_behalf_of``-Feld (4.4a, seit P14-S11) - eigener, unabhaengiger
+    Cutover-Wert. Anders als beim actor-Cutover (der die AuditMeta-Zeile
+    beim allerersten Aufruf per INSERT ANLEGT) existiert die Zeile hier
+    bereits (seit P7-S2) - der Cutover wird deshalb per ORM-Attribut-Update
+    NACHGETRAGEN statt neu eingefuegt, und dank der Bedingung
+    ``is None`` genau einmal gesetzt."""
+    await get_actor_field_cutover_id(session)  # stellt sicher, dass die Zeile existiert
+    existing = await session.get(AuditMeta, _AUDIT_META_ID)
+    assert existing is not None
+    if existing.on_behalf_of_field_cutover_id is not None:
+        return existing.on_behalf_of_field_cutover_id
+
+    max_id_result = await session.execute(select(func.max(AuditEvent.id)))
+    cutover = max_id_result.scalar() or 0
+    existing.on_behalf_of_field_cutover_id = cutover
+    await session.flush()
+    return cutover
+
+
 async def _latest(session: AsyncSession) -> AuditEvent | None:
     result = await session.execute(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(1))
     return result.scalar_one_or_none()
@@ -92,14 +120,16 @@ async def append_event(session: AsyncSession, event: Event) -> AuditEvent:
     # main.py-Lifespan ruft dies zwar bereits vorab explizit auf, dieser
     # Aufruf hier ist die eigentliche Garantie - idempotent bei Wiederholung).
     await get_actor_field_cutover_id(session)
+    await get_on_behalf_of_field_cutover_id(session)
 
     latest = await _latest(session)
     prev_hash = latest.hash if latest is not None else GENESIS_HASH
     recorded_at = datetime.now(UTC)
 
-    # Jede neu angehaengte Zeile liegt per Definition nach dem Cutover (ihre
-    # id ist noch nicht vergeben, also zwangslaeufig > jeder bestehenden id)
-    # - include_actor ist fuer append_event daher immer True.
+    # Jede neu angehaengte Zeile liegt per Definition nach beiden Cutover-
+    # Punkten (ihre id ist noch nicht vergeben, also zwangslaeufig > jeder
+    # bestehenden id) - include_actor/include_on_behalf_of sind fuer
+    # append_event daher immer True.
     fields = _hashable_fields(
         event.event_id,
         event.event_type,
@@ -110,6 +140,8 @@ async def append_event(session: AsyncSession, event: Event) -> AuditEvent:
         recorded_at,
         actor=event.actor,
         include_actor=True,
+        on_behalf_of=event.on_behalf_of,
+        include_on_behalf_of=True,
     )
     entry = AuditEvent(
         event_id=event.event_id,
@@ -119,6 +151,7 @@ async def append_event(session: AsyncSession, event: Event) -> AuditEvent:
         subject=event.subject,
         payload=event.payload,
         actor=event.actor,
+        on_behalf_of=event.on_behalf_of,
         recorded_at=recorded_at,
         prev_hash=prev_hash,
         hash=compute_hash(prev_hash, fields),
@@ -133,6 +166,7 @@ async def list_events(
     *,
     limit: int = 100,
     actor: str | None = None,
+    on_behalf_of: str | None = None,
     subject: str | None = None,
     event_type: str | None = None,
     since: datetime | None = None,
@@ -141,10 +175,14 @@ async def list_events(
     """Filter-API (5.4b, seit P7-S2): ``event_type`` unterstuetzt dieselbe
     NATS-Wildcard-Schreibweise wie die Subject-Konfiguration selbst
     (``"document.>"`` -> alle ``document.*``-Ereignisse), sonst exakter
-    Treffer."""
+    Treffer. ``on_behalf_of`` (seit P14-S11, 4.4a) filtert auf Aktionen, die
+    im Auftrag einer bestimmten Person ausgefuehrt wurden - unabhaengig von
+    ``actor``, der die tatsaechlich handelnde Stellvertretung bleibt."""
     query = select(AuditEvent)
     if actor is not None:
         query = query.where(AuditEvent.actor == actor)
+    if on_behalf_of is not None:
+        query = query.where(AuditEvent.on_behalf_of == on_behalf_of)
     if subject is not None:
         query = query.where(AuditEvent.subject == subject)
     if event_type is not None:
@@ -170,6 +208,7 @@ class ChainVerificationResult:
 
 async def verify_chain(session: AsyncSession) -> ChainVerificationResult:
     cutover_id = await get_actor_field_cutover_id(session)
+    on_behalf_of_cutover_id = await get_on_behalf_of_field_cutover_id(session)
     result = await session.execute(select(AuditEvent).order_by(AuditEvent.id))
     entries = list(result.scalars().all())
 
@@ -185,6 +224,8 @@ async def verify_chain(session: AsyncSession) -> ChainVerificationResult:
             entry.recorded_at,
             actor=entry.actor,
             include_actor=entry.id > cutover_id,
+            on_behalf_of=entry.on_behalf_of,
+            include_on_behalf_of=entry.id > on_behalf_of_cutover_id,
         )
         expected_hash = compute_hash(expected_prev, fields)
         if entry.prev_hash != expected_prev or entry.hash != expected_hash:

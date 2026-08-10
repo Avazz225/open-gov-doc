@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from permission_service.models import (
     ApprovalActionConfig,
     ApprovalRequest,
+    Delegation,
     EffectivePermissionCache,
     ResourceNode,
     Role,
@@ -499,3 +500,136 @@ async def lift_maintenance_mode(session: AsyncSession, *, lifted_by: str) -> Sys
     mode.lifted_at = datetime.now(UTC)
     await session.flush()
     return mode
+
+
+# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+
+
+async def create_delegation(
+    session: AsyncSession,
+    *,
+    delegator_principal_id: str,
+    deputy_principal_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+    scope_object_type_ids: list[int] | None,
+    scope_process_definition_ids: list[int] | None,
+    scope_folder_resource_ids: list[str] | None,
+) -> Delegation:
+    delegation = Delegation(
+        id=str(uuid.uuid4()),
+        delegator_principal_id=delegator_principal_id,
+        deputy_principal_id=deputy_principal_id,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        scope_object_type_ids=scope_object_type_ids,
+        scope_process_definition_ids=scope_process_definition_ids,
+        scope_folder_resource_ids=scope_folder_resource_ids,
+        created_at=datetime.now(UTC),
+    )
+    session.add(delegation)
+    await session.flush()
+    return delegation
+
+
+async def get_delegation(session: AsyncSession, delegation_id: str) -> Delegation | None:
+    return await session.get(Delegation, delegation_id)
+
+
+async def list_delegations(
+    session: AsyncSession,
+    *,
+    delegator_principal_id: str | None = None,
+    deputy_principal_id: str | None = None,
+    active_only: bool = False,
+) -> list[Delegation]:
+    stmt = select(Delegation)
+    if delegator_principal_id is not None:
+        stmt = stmt.where(Delegation.delegator_principal_id == delegator_principal_id)
+    if deputy_principal_id is not None:
+        stmt = stmt.where(Delegation.deputy_principal_id == deputy_principal_id)
+    stmt = stmt.order_by(Delegation.created_at.desc())
+    result = await session.execute(stmt)
+    delegations = list(result.scalars().all())
+    if active_only:
+        now = datetime.now(UTC)
+        delegations = [d for d in delegations if is_delegation_active(d, now)]
+    return delegations
+
+
+async def revoke_delegation(
+    session: AsyncSession, delegation_id: str, *, revoked_by: str
+) -> Delegation:
+    delegation = await get_delegation(session, delegation_id)
+    if delegation is None:
+        raise NotFoundError(f"Delegation {delegation_id!r} unbekannt")
+    if delegation.revoked_at is None:
+        delegation.revoked_at = datetime.now(UTC)
+        delegation.revoked_by = revoked_by
+        await session.flush()
+    return delegation
+
+
+def is_delegation_active(delegation: Delegation, now: datetime) -> bool:
+    if delegation.revoked_at is not None:
+        return False
+    return delegation.starts_at <= now <= delegation.ends_at
+
+
+def _delegation_scope_matches(
+    delegation: Delegation,
+    *,
+    process_definition_id: int | None,
+    object_type_id: int | None,
+    folder_resource_id: str | None,
+) -> bool:
+    """Eine gesetzte Scope-Liste schränkt auf genau diese IDs ein; eine leere/
+    ``None``-Liste bedeutet "auf dieser Dimension uneingeschränkt". Wird die
+    jeweils zugehörige ID des zu prüfenden Vorgangs nicht mitgeliefert
+    (Aufrufer kennt sie nicht), gilt eine gesetzte Scope-Liste als NICHT
+    erfüllt (fail closed) - siehe main.py ``GET /delegations/check``."""
+    if delegation.scope_process_definition_ids:
+        if process_definition_id is None or process_definition_id not in (
+            delegation.scope_process_definition_ids
+        ):
+            return False
+    if delegation.scope_object_type_ids:
+        if object_type_id is None or object_type_id not in delegation.scope_object_type_ids:
+            return False
+    if delegation.scope_folder_resource_ids:
+        if folder_resource_id is None or folder_resource_id not in (
+            delegation.scope_folder_resource_ids
+        ):
+            return False
+    return True
+
+
+async def is_active_deputy_for(
+    session: AsyncSession,
+    *,
+    deputy_principal_id: str,
+    delegator_principal_id: str,
+    process_definition_id: int | None = None,
+    object_type_id: int | None = None,
+    folder_resource_id: str | None = None,
+) -> bool:
+    """Kern der Delegationsprüfung (4.4a) - wahr, wenn mindestens eine aktive,
+    nicht widerrufene Delegation von ``delegator_principal_id`` an
+    ``deputy_principal_id`` existiert, deren Gültigkeitsfenster ``now``
+    einschließt und deren Scope (falls eingeschränkt) zum geprüften Vorgang
+    passt."""
+    delegations = await list_delegations(
+        session,
+        delegator_principal_id=delegator_principal_id,
+        deputy_principal_id=deputy_principal_id,
+        active_only=True,
+    )
+    return any(
+        _delegation_scope_matches(
+            d,
+            process_definition_id=process_definition_id,
+            object_type_id=object_type_id,
+            folder_resource_id=folder_resource_id,
+        )
+        for d in delegations
+    )

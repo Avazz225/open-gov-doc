@@ -2,8 +2,8 @@
 
 **Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume. Seit P6-S4 zusätzlich der generische Vier-Augen-Approval-Mechanismus (4.3), den auch andere Services (z. B. Document Service) nutzen. Seit P6-S5 zusätzlich Heimat der systemeigenen, domänengetrennten Admin-Rollen (4.6) — von Keycloak-Realm-Rollen komplett getrennt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Seit P6-S6 zusätzlich Heimat des systemweiten Wartungsmodus-Zustands (Not-Shutdown, 4.8) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-**Konzept-Referenz:** 4.1, 4.3, 4.6, 4.7, 4.8
-**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`)
+**Konzept-Referenz:** 4.1, 4.3, 4.6, 4.7, 4.8, 4.4a (Stellvertretung bei Abwesenheit, seit P14-S11)
+**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`)
 
 ## API
 
@@ -36,6 +36,11 @@
 | `POST` | `/maintenance-mode/trigger` | Auslösen (`triggered_by`, optional `reason`) — prüft immer zuerst die Capability `system.not_shutdown.trigger` bei `triggered_by` (`403` sonst), dann direkte Aktivierung oder Vier-Augen-Freigabe je nach `approval-config`; Antwort `{status: "activated"\|"pending_approval", maintenance_mode, approval_request_id}` |
 | `POST` | `/maintenance-mode/lift` | Aufheben (`lifted_by`) — `403`, falls `lifted_by` nicht dem aktuell aktiven Superuser entspricht (Cross-Service-Check gegen `auth-service`, s. u.) |
 | `GET` | `/healthz` | Health-Check |
+| `POST` | `/delegations` | Stellvertretung hinterlegen (4.4a, seit P14-S11) — `delegator_principal_id` ist immer `X-DMS-Principal` (`401` ohne Header), `400` bei `ends_at <= starts_at`. Publiziert `permission.delegation.created` |
+| `GET` | `/delegations?delegator_principal_id=&deputy_principal_id=&active_only=` | Delegationen auflisten, optional gefiltert |
+| `GET` | `/delegations/active-for-deputy/{principal_id}` | Für wen `principal_id` gerade aktiv als Stellvertretung eingetragen ist — Grundlage der "Im Auftrag von"-Auswahl in `reviewer-ui`/`user-ui` |
+| `GET` | `/delegations/check?deputy_principal_id=&delegator_principal_id=&process_definition_id=&object_type_id=&folder_resource_id=` | Eigentlicher Durchsetzungs-Endpunkt (gleiches Antwortformat wie `/check`) — von `workflow-service` bei Aufgabenabschluss "im Auftrag von" aufgerufen |
+| `DELETE` | `/delegations/{id}` | Vorzeitiger Widerruf — nur die vertretene Person oder `X-DMS-Roles: dms-admin` (konfigurierbar, `delegation_revoke_admin_role`), `404` bei unbekannter ID, idempotent. Publiziert `permission.delegation.revoked` |
 
 ## Datenmodell
 
@@ -47,6 +52,7 @@
 - `approval_action_config` (4.3, seit P6-S4): `action_type` (PK, freier String), `requires_approval` (bool, Default `false`), `required_permission` (nullable String, seit **P6-S5**, 4.6), `updated_at`. Fehlt eine Zeile für einen Aktionstyp, gilt implizit `requires_approval=false`/`required_permission=null` (transientes Default-Objekt, nicht persistiert).
 - `approval_request` (4.3, seit P6-S4): `id` (UUID-str), `action_type`, `initiated_by`, `payload` (JSON — genug Information, um die Aktion später auszuführen), `status` (`pending`\|`approved`\|`rejected`), `approved_by`/`rejected_by`/`reason` (nullable), `created_at`, `decided_at` (nullable).
 - `system_maintenance_mode` (4.8, seit P6-S6): Singleton (`id=1`, fest, gleiches Muster wie `OcrConfig`/`GuardConfig`), `active` (bool), `reason` (nullable), `triggered_by` (nullable), `activated_at` (nullable), `lifted_by`/`lifted_at` (nullable) — bei erneuter Aktivierung nach einer Aufhebung werden `lifted_by`/`lifted_at` zurückgesetzt.
+- `delegation` (4.4a, seit P14-S11): `id` (UUID-str, PK), `delegator_principal_id`/`deputy_principal_id`, `starts_at`/`ends_at` (beide Pflicht), `scope_object_type_ids`/`scope_process_definition_ids`/`scope_folder_resource_ids` (je JSON-Liste, `null` = auf dieser Dimension uneingeschränkt), `created_at`, `revoked_at`/`revoked_by` (nullable) — nie hart gelöscht, gleiches Muster wie `scope_lock` oben.
 
 ## Bereichssperren (4.7, seit P3-S4)
 
@@ -119,6 +125,15 @@ Live end-to-end verifiziert (P3-S3): ein über die echte Folder-Service-API ange
 
 **Bekannte Grenze**: Existiert beim Start noch kein Stream für ein konfiguriertes Subject (kein Producer je gelaufen), wird das Subject übersprungen (`SubjectNotFoundError` abgefangen, siehe `dms-eventbus-client`/ADR 0001) statt den Service-Start zu blockieren — es gibt aber keinen Retry-Loop, der den Stream später automatisch nachzieht; ein Neustart ist dann nötig. In der Praxis unkritisch, da der Folder Service inzwischen existiert und seinen Stream beim eigenen Start anlegt.
 
+## Stellvertretung bei Abwesenheit (4.4a, seit P14-S11)
+
+Zeitlich befristete, umfangsbegrenzte Übertragung der Aufgabenwahrnehmung von einer abwesenden Person (`delegator_principal_id`) an eine Stellvertretung (`deputy_principal_id`) — bewusst KEIN Identitätswechsel: die Stellvertretung handelt weiterhin unter dem eigenen Konto, dieser Datensatz ist nur die Grundlage für die Berechtigungsprüfung und den Audit-Vermerk "im Auftrag von". Vollständige Begründung, insbesondere warum Delegation hier statt in `workflow-service` lebt und warum nur `scope_process_definition_ids` tatsächlich ausgewertet wird: [ADR 0048](../adr/0048-delegation-lives-in-permission-service-no-task-assignee-retrofit.md).
+
+- **`POST /delegations`** ist ein Selbstverwaltungs-Endpunkt — `delegator_principal_id` kommt immer aus `X-DMS-Principal`, niemand kann eine Delegation im Namen einer dritten Person anlegen.
+- **`GET /delegations/check`** ist der einzige echte Durchsetzungspunkt — `workflow-service`s `POST .../tasks/{id}/complete` ruft ihn auf, wenn ein Abschluss `on_behalf_of_principal_id` mitschickt (siehe `docs/services/workflow-service.md`).
+- **Widerruf** (`DELETE /delegations/{id}`) nur durch die vertretene Person oder `X-DMS-Roles: dms-admin` (konfigurierbar, `delegation_revoke_admin_role`) — NICHT durch die Stellvertretung selbst.
+- `admin-ui` (`/delegations/`) bietet eine reine installationsweite Übersicht + Admin-Widerruf; Anlegen bleibt ausschließlich Selbstverwaltung (`user-ui`s `DelegationsPane`).
+
 ## Events
 
 **Konsumiert:** `folder.>` (Vertrag bestätigt, s. o.); seit P6-S4 zusätzlich sein eigenes `permission.approval.approved` (Selbst-Konsum, siehe oben).
@@ -133,6 +148,8 @@ Live end-to-end verifiziert (P3-S3): ein über die echte Folder-Service-API ange
 | `permission.approval.rejected` | `{request_id, action_type, initiated_by, rejected_by, reason}` (seit P6-S4) |
 | `permission.maintenance_mode.activated` | `{triggered_by, reason}` (seit P6-S6, 4.8) |
 | `permission.maintenance_mode.lifted` | `{lifted_by}` (seit P6-S6, 4.8) |
+| `permission.delegation.created` | `{delegation_id, deputy_principal_id}` (seit P14-S11, 4.4a) |
+| `permission.delegation.revoked` | `{delegation_id}` (seit P14-S11, 4.4a) |
 
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
@@ -147,6 +164,8 @@ Noch keine — folgt in Phase 11.
 - Gruppenmitgliedschaft wird nicht aufgelöst: `principal_id` einer Zuweisung muss exakt dem abgefragten Principal entsprechen. Eine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" ist nicht Teil dieser Session (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
 - Granularere Cache-Invalidierung (nur betroffener Teilbaum statt gesamter Cache) als spätere Optimierung möglich, ohne die API zu ändern.
 - **Vier-Augen-Prinzip (4.3) ist seit P6-S4 generisch verfügbar, seit P6-S5 auch mit optionaler Rollenbindung (`required_permission`)** — verdrahtet für Bereichssperren, Document-Service-Force-Unlock und Superuser-Break-Glass (`auth.superuser.activate`). Rechte-/Rollenänderungen (`POST /role-assignments`, `POST /roles`) nutzen ihn weiterhin nicht, siehe "Vier-Augen-Approval-Mechanismus" oben.
+- **`scope_object_type_ids`/`scope_folder_resource_ids` einer Delegation (4.4a, seit P14-S11) werden aktuell von keinem Endpunkt ausgewertet** — nur `scope_process_definition_ids` ist bei `GET /delegations/check` tatsächlich wirksam (siehe ADR 0048). Die beiden anderen Felder werden mitgespeichert (Konzept-Wortlaut vollständig abgebildet), aber bräuchten einen zusätzlichen Cross-Service-Umweg über `business_key`, um bei einem konkreten Aufgabenabschluss ausgewertet zu werden — nicht Teil dieser Session.
+- **"Ich vertrete"/"Im Auftrag von"-Anzeigen (4.4a) zeigen rohe Principal-IDs, keine Nutzernamen** — dieselbe bereits dokumentierte Lücke wie bei Teamspace-Mitgliederlisten (P14-S6): keine Rückwärtsauflösung UUID→Username im System vorhanden.
 - Keine Durchsetzung, wer Bereichssperren setzen/aufheben darf: Das Gateway (3.5, P4-S1) prüft nur, dass ein Aufrufer *irgendeinen* gültigen Bearer-Token hat, aber keine Autorisierung für die konkrete Aktion (`POST`/`DELETE /scope-locks`) — jeder authentifizierte Principal kann aktuell Sperren setzen/aufheben (optional mit Vier-Augen-Zwischenschritt, s. o., aber ohne Rollenprüfung, wer überhaupt initiieren/genehmigen darf). Eine echte Capability-Prüfung bräuchte, dass der Permission Service die vom Gateway weitergereichten Identitäts-Header auswertet (siehe `docs/services/gateway-service.md`) — analog zum bereits bestehenden offenen Punkt beim Document-Service-Force-Unlock.
 - **Kein Ausführungs-Rückkanal / keine Genehmigenden-Benachrichtigung** für den Approval-Mechanismus — siehe [ADR 0022](../adr/0022-four-eyes-approval-via-events.md) "Konsequenzen".
 - `GET /check` verlässt sich auf den Aufrufer, den korrekten `access_type` (`read`/`write`) mitzugeben — der Service selbst kennt keine feste Zuordnung Permission-Name → Zugriffsart.

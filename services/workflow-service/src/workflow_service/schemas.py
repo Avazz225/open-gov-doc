@@ -91,6 +91,13 @@ class TaskCompleteRequest(BaseModel):
     # markiert ist (3.10) - verweist auf eine zuvor beim Signature Service
     # erzeugte Signatur, siehe main.py._require_valid_signature_if_needed.
     signature_id: str | None = None
+    # Stellvertretung bei Abwesenheit (4.4a, P14-S11): gesetzt, wenn diese
+    # Aufgabe im Auftrag einer abwesenden Person abgeschlossen wird - die
+    # tatsächlich handelnde Person bleibt der über `X-DMS-Principal`
+    # gemeldete Aufrufer (nicht `completed_by`, das ein ungeprüftes
+    # Freitextfeld bleibt, siehe main.py.complete_task), NICHT dieses Feld -
+    # `on_behalf_of_principal_id` ist nur die vertretene Person.
+    on_behalf_of_principal_id: str | None = None
 
 
 class FederationConfigOut(BaseModel):

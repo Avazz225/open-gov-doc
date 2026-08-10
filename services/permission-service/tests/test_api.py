@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
@@ -680,3 +682,164 @@ def test_lift_maintenance_mode_without_active_superuser_is_forbidden(client):
     assert response.status_code == 403
     status = client.get("/maintenance-mode").json()
     assert status["active"] is True
+
+
+# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+
+
+def _delegation_window():
+    now = datetime.now(UTC)
+    return {
+        "starts_at": (now - timedelta(hours=1)).isoformat(),
+        "ends_at": (now + timedelta(days=1)).isoformat(),
+    }
+
+
+def test_create_delegation_requires_principal_header(client):
+    response = client.post(
+        "/delegations", json={"deputy_principal_id": "bob", **_delegation_window()}
+    )
+    assert response.status_code == 401
+
+
+def test_create_delegation_rejects_ends_at_before_starts_at(client):
+    now = datetime.now(UTC)
+    response = client.post(
+        "/delegations",
+        json={
+            "deputy_principal_id": "bob",
+            "starts_at": now.isoformat(),
+            "ends_at": (now - timedelta(hours=1)).isoformat(),
+        },
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 400
+
+
+def test_create_delegation_succeeds_and_publishes_event(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    response = client.post(
+        "/delegations",
+        json={"deputy_principal_id": "bob", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["delegator_principal_id"] == "alice"
+    assert body["deputy_principal_id"] == "bob"
+    assert body["revoked_at"] is None
+
+    created_events = [e for e in published if e.event_type == "permission.delegation.created"]
+    assert len(created_events) == 1
+    assert created_events[0].actor == "alice"
+
+
+def test_list_delegations_filters_by_query_params(client):
+    client.post(
+        "/delegations",
+        json={"deputy_principal_id": "bob", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    client.post(
+        "/delegations",
+        json={"deputy_principal_id": "carol", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    )
+
+    response = client.get("/delegations", params={"deputy_principal_id": "bob"})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["deputy_principal_id"] == "bob"
+
+
+def test_list_active_delegations_for_deputy(client):
+    client.post(
+        "/delegations",
+        json={"deputy_principal_id": "bob", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    )
+
+    response = client.get("/delegations/active-for-deputy/bob")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["delegator_principal_id"] == "alice"
+
+
+def test_check_delegation_allowed_and_denied(client):
+    client.post(
+        "/delegations",
+        json={"deputy_principal_id": "bob", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    )
+
+    allowed = client.get(
+        "/delegations/check",
+        params={"deputy_principal_id": "bob", "delegator_principal_id": "alice"},
+    )
+    assert allowed.json() == {"allowed": True}
+
+    denied = client.get(
+        "/delegations/check",
+        params={"deputy_principal_id": "bob", "delegator_principal_id": "someone-else"},
+    )
+    assert denied.json() == {"allowed": False}
+
+
+def test_revoke_delegation_requires_creator_or_admin_role(client):
+    created = client.post(
+        "/delegations",
+        json={"deputy_principal_id": "bob", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+
+    forbidden = client.delete(
+        f"/delegations/{created['id']}", headers={"X-DMS-Principal": "someone-else"}
+    )
+    assert forbidden.status_code == 403
+
+    admin = client.delete(
+        f"/delegations/{created['id']}",
+        headers={"X-DMS-Principal": "an-admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert admin.status_code == 204
+
+
+def test_revoke_delegation_by_delegator_succeeds_and_publishes_event(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.publisher, "publish", fake_publish)
+
+    created = client.post(
+        "/delegations",
+        json={"deputy_principal_id": "bob", **_delegation_window()},
+        headers={"X-DMS-Principal": "alice"},
+    ).json()
+
+    response = client.delete(f"/delegations/{created['id']}", headers={"X-DMS-Principal": "alice"})
+    assert response.status_code == 204
+
+    revoked_events = [e for e in published if e.event_type == "permission.delegation.revoked"]
+    assert len(revoked_events) == 1
+
+    check = client.get(
+        "/delegations/check",
+        params={"deputy_principal_id": "bob", "delegator_principal_id": "alice"},
+    )
+    assert check.json() == {"allowed": False}
+
+
+def test_revoke_delegation_unknown_id_returns_404(client):
+    response = client.delete("/delegations/does-not-exist", headers={"X-DMS-Principal": "alice"})
+    assert response.status_code == 404

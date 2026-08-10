@@ -185,3 +185,35 @@ class MaintenanceModeActionResult(BaseModel):
     status: Literal["activated", "pending_approval"]
     maintenance_mode: MaintenanceModeOut | None = None
     approval_request_id: str | None = None
+
+
+# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+
+
+class DelegationCreate(BaseModel):
+    deputy_principal_id: str
+    starts_at: datetime
+    ends_at: datetime
+    scope_object_type_ids: list[int] | None = None
+    scope_process_definition_ids: list[int] | None = None
+    scope_folder_resource_ids: list[str] | None = None
+
+
+class DelegationOut(BaseModel):
+    id: str
+    delegator_principal_id: str
+    deputy_principal_id: str
+    starts_at: datetime
+    ends_at: datetime
+    scope_object_type_ids: list[int] | None
+    scope_process_definition_ids: list[int] | None
+    scope_folder_resource_ids: list[str] | None
+    created_at: datetime
+    revoked_at: datetime | None
+    revoked_by: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class DelegationCheckResult(BaseModel):
+    allowed: bool

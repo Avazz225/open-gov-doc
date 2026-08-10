@@ -1398,3 +1398,79 @@ export function publicShareLinkContentUrl(shareToken: string): string {
     shareToken
   )}`;
 }
+
+// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - selbstverwaltete,
+// zeitlich befristete Übertragung der Aufgabenwahrnehmung, neuer
+// `permission-service`-Datensatz (kein eigener Service, siehe
+// docs/services/permission-service.md). `delegator_principal_id` ist immer
+// die anfragende Person selbst (server-seitig aus `X-DMS-Principal`
+// abgeleitet) - kein Feld dafür im Request-Body.
+export interface Delegation {
+  id: string;
+  delegator_principal_id: string;
+  deputy_principal_id: string;
+  starts_at: string;
+  ends_at: string;
+  scope_object_type_ids: number[] | null;
+  scope_process_definition_ids: number[] | null;
+  scope_folder_resource_ids: string[] | null;
+  created_at: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+}
+
+export async function createDelegation(
+  token: string,
+  params: { deputyPrincipalId: string; startsAt: string; endsAt: string }
+): Promise<Delegation> {
+  const response = await request(
+    "permission-service",
+    "delegations",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deputy_principal_id: params.deputyPrincipalId,
+        starts_at: params.startsAt,
+        ends_at: params.endsAt,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function listMyDelegations(
+  token: string,
+  delegatorPrincipalId: string
+): Promise<Delegation[]> {
+  const response = await request(
+    "permission-service",
+    `delegations?delegator_principal_id=${encodeURIComponent(delegatorPrincipalId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function listActiveDelegationsForDeputy(
+  token: string,
+  principalId: string
+): Promise<Delegation[]> {
+  const response = await request(
+    "permission-service",
+    `delegations/active-for-deputy/${encodeURIComponent(principalId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function revokeDelegation(token: string, delegationId: string): Promise<void> {
+  await request(
+    "permission-service",
+    `delegations/${encodeURIComponent(delegationId)}`,
+    { method: "DELETE" },
+    token
+  );
+}

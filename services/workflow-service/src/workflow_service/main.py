@@ -349,7 +349,11 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def publish_event(
-    event_type: str, subject: str, payload: dict, actor: str | None = None
+    event_type: str,
+    subject: str,
+    payload: dict,
+    actor: str | None = None,
+    on_behalf_of: str | None = None,
 ) -> None:
     event = Event(
         event_type=event_type,
@@ -357,6 +361,7 @@ async def publish_event(
         subject=subject,
         payload=payload,
         actor=actor,
+        on_behalf_of=on_behalf_of,
     )
     await app.state.event_bus.publish(event_type, event.to_bytes())
 
@@ -1045,6 +1050,43 @@ async def _reject_manual_federated_completion(
         )
 
 
+async def _require_delegation_if_on_behalf_of(
+    session: AsyncSession, instance_id: str, payload: TaskCompleteRequest, x_dms_principal: str
+) -> None:
+    """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - ``completed_by``
+    bleibt ein ungeprüftes Freitextfeld (bestehende, bewusste Lücke, siehe
+    docs/services/workflow-service.md), aber ein Abschluss "im Auftrag von"
+    verlangt eine ECHTE, gegen den Permission Service geprüfte Delegation:
+    die aufrufende Identität kommt dafür aus dem vom Gateway injizierten
+    ``X-DMS-Principal``-Header, NICHT aus dem frei wählbaren `completed_by` -
+    sonst könnte jeder Aufrufer eine beliebige Delegation behaupten, indem er
+    einfach einen anderen Namen ins Freitextfeld schreibt."""
+    if not payload.on_behalf_of_principal_id:
+        return
+    if not x_dms_principal:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Fehlender X-DMS-Principal-Header für einen Abschluss "
+                "im Auftrag einer anderen Person"
+            ),
+        )
+    instance = await repository.get_instance(session, instance_id)
+    allowed = await app.state.permission_client.check_delegation(
+        deputy_principal_id=x_dms_principal,
+        delegator_principal_id=payload.on_behalf_of_principal_id,
+        process_definition_id=instance.process_definition_id,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Keine aktive Delegation von {payload.on_behalf_of_principal_id!r} an "
+                f"{x_dms_principal!r} für diesen Prozess"
+            ),
+        )
+
+
 @app.post(
     "/instances/{instance_id}/tasks/{task_id}/complete",
     response_model=ProcessInstanceOut,
@@ -1055,12 +1097,14 @@ async def complete_task(
     task_id: str,
     payload: TaskCompleteRequest,
     x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         await _require_valid_signature_if_needed(session, instance_id, task_id, payload)
         await _reject_manual_federated_completion(session, instance_id, task_id)
+        await _require_delegation_if_on_behalf_of(session, instance_id, payload, x_dms_principal)
         instance = await repository.complete_task(
             session, instance_id, task_id, completed_by=payload.completed_by, data=payload.data
         )
@@ -1080,6 +1124,7 @@ async def complete_task(
         subject=instance_id,
         payload={"task_id": task_id, "completed_by": payload.completed_by},
         actor=payload.completed_by,
+        on_behalf_of=payload.on_behalf_of_principal_id,
     )
     if instance.status == "completed":
         await publish_event(
@@ -1087,6 +1132,7 @@ async def complete_task(
             subject=instance_id,
             payload={"business_key": instance.business_key},
             actor=payload.completed_by,
+            on_behalf_of=payload.on_behalf_of_principal_id,
         )
     await _dispatch_pending_federation_tasks(session, instance_id)
     await session.commit()

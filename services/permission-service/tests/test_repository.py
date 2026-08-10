@@ -614,3 +614,181 @@ async def test_reactivating_after_lift_clears_previous_lift_fields(session):
     assert mode.triggered_by == "bob"
     assert mode.lifted_by is None
     assert mode.lifted_at is None
+
+
+# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+
+
+async def _create_delegation(
+    session,
+    *,
+    delegator="alice",
+    deputy="bob",
+    starts_delta=timedelta(days=-1),
+    ends_delta=timedelta(days=1),
+    scope_object_type_ids=None,
+    scope_process_definition_ids=None,
+    scope_folder_resource_ids=None,
+):
+    now = datetime.now(UTC)
+    return await repository.create_delegation(
+        session,
+        delegator_principal_id=delegator,
+        deputy_principal_id=deputy,
+        starts_at=now + starts_delta,
+        ends_at=now + ends_delta,
+        scope_object_type_ids=scope_object_type_ids,
+        scope_process_definition_ids=scope_process_definition_ids,
+        scope_folder_resource_ids=scope_folder_resource_ids,
+    )
+
+
+async def test_create_delegation_roundtrips(session):
+    delegation = await _create_delegation(session)
+
+    fetched = await repository.get_delegation(session, delegation.id)
+
+    assert fetched is not None
+    assert fetched.delegator_principal_id == "alice"
+    assert fetched.deputy_principal_id == "bob"
+    assert fetched.revoked_at is None
+
+
+async def test_list_delegations_filters_by_delegator_and_deputy(session):
+    await _create_delegation(session, delegator="alice", deputy="bob")
+    await _create_delegation(session, delegator="alice", deputy="carol")
+    await _create_delegation(session, delegator="dave", deputy="bob")
+
+    for_alice = await repository.list_delegations(session, delegator_principal_id="alice")
+    assert len(for_alice) == 2
+
+    for_bob = await repository.list_delegations(session, deputy_principal_id="bob")
+    assert len(for_bob) == 2
+
+
+async def test_list_delegations_active_only_excludes_revoked_and_out_of_window(session):
+    active = await _create_delegation(session, delegator="alice", deputy="bob")
+    await _create_delegation(
+        session,
+        delegator="alice",
+        deputy="carol",
+        starts_delta=timedelta(days=5),
+        ends_delta=timedelta(days=10),
+    )
+    revoked = await _create_delegation(session, delegator="alice", deputy="dave")
+    await repository.revoke_delegation(session, revoked.id, revoked_by="alice")
+
+    results = await repository.list_delegations(
+        session, delegator_principal_id="alice", active_only=True
+    )
+
+    assert [d.id for d in results] == [active.id]
+
+
+async def test_revoke_delegation_is_idempotent_and_keeps_first_revoker(session):
+    delegation = await _create_delegation(session)
+
+    await repository.revoke_delegation(session, delegation.id, revoked_by="alice")
+    twice = await repository.revoke_delegation(session, delegation.id, revoked_by="admin")
+
+    assert twice.revoked_by == "alice"
+
+
+async def test_revoke_delegation_unknown_id_raises_not_found(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.revoke_delegation(session, "does-not-exist", revoked_by="alice")
+
+
+async def test_is_delegation_active_false_when_before_window(session):
+    now = datetime.now(UTC)
+    delegation = repository.Delegation(
+        id="d1",
+        delegator_principal_id="alice",
+        deputy_principal_id="bob",
+        starts_at=now + timedelta(days=1),
+        ends_at=now + timedelta(days=2),
+        scope_object_type_ids=None,
+        scope_process_definition_ids=None,
+        scope_folder_resource_ids=None,
+        created_at=now,
+    )
+    assert repository.is_delegation_active(delegation, now) is False
+
+
+async def test_is_delegation_active_false_when_after_window(session):
+    now = datetime.now(UTC)
+    delegation = repository.Delegation(
+        id="d1",
+        delegator_principal_id="alice",
+        deputy_principal_id="bob",
+        starts_at=now - timedelta(days=2),
+        ends_at=now - timedelta(days=1),
+        scope_object_type_ids=None,
+        scope_process_definition_ids=None,
+        scope_folder_resource_ids=None,
+        created_at=now,
+    )
+    assert repository.is_delegation_active(delegation, now) is False
+
+
+async def test_is_active_deputy_for_true_without_scope_restriction(session):
+    await _create_delegation(session, delegator="alice", deputy="bob")
+
+    assert await repository.is_active_deputy_for(
+        session, deputy_principal_id="bob", delegator_principal_id="alice"
+    )
+
+
+async def test_is_active_deputy_for_false_without_any_delegation(session):
+    assert not await repository.is_active_deputy_for(
+        session, deputy_principal_id="bob", delegator_principal_id="alice"
+    )
+
+
+async def test_is_active_deputy_for_respects_process_definition_scope(session):
+    await _create_delegation(
+        session, delegator="alice", deputy="bob", scope_process_definition_ids=[7]
+    )
+
+    assert await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        process_definition_id=7,
+    )
+    assert not await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        process_definition_id=9,
+    )
+    # Ohne mitgelieferte process_definition_id gilt eine gesetzte Scope-Liste
+    # als NICHT erfüllt (fail closed), siehe repository._delegation_scope_matches.
+    assert not await repository.is_active_deputy_for(
+        session, deputy_principal_id="bob", delegator_principal_id="alice"
+    )
+
+
+async def test_is_active_deputy_for_respects_folder_and_object_type_scope(session):
+    await _create_delegation(
+        session,
+        delegator="alice",
+        deputy="bob",
+        scope_object_type_ids=[3],
+        scope_folder_resource_ids=["folder-a"],
+    )
+
+    assert await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        object_type_id=3,
+        folder_resource_id="folder-a",
+    )
+    assert not await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        object_type_id=3,
+        folder_resource_id="folder-b",
+    )

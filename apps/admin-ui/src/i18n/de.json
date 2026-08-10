@@ -50,6 +50,7 @@
     "forensicTrace": "Forensik-Trace",
     "auditTraceSettings": "Audit-Tiefe",
     "shareLinkSettings": "Öffentlicher Freigabelink",
+    "delegations": "Stellvertretungen",
     "retentionSettings": "Aufbewahrung & Papierkorb",
     "deletionRegister": "Löschregister",
     "archivalTransfers": "Aussonderung & Archivierung",
@@ -227,6 +228,24 @@
     "allowedContentTypesHint": "Kommagetrennt, z. B. \"application/pdf, text/plain, application/json\" - leer = keine Einschränkung.",
     "saved": "Gespeichert.",
     "updatedAt": "Zuletzt geändert"
+  },
+  "delegationsAdmin": {
+    "pageTitle": "Stellvertretungen",
+    "hint": "Installationsweite Übersicht über alle hinterlegten Stellvertretungen (4.4a) - Anlegen ist ein Selbstverwaltungs-Feature (User-UI), hier nur Überblick + vorzeitiger Widerruf durch eine berechtigte Admin-Rolle.",
+    "unreachable": "Permission Service nicht erreichbar.",
+    "empty": "Noch keine Stellvertretungen hinterlegt.",
+    "delegator": "Vertretene Person",
+    "deputy": "Stellvertretung",
+    "startsAt": "Gültig ab",
+    "endsAt": "Gültig bis",
+    "status": "Status",
+    "statusActive": "Aktiv",
+    "statusPending": "Noch nicht begonnen",
+    "statusExpired": "Abgelaufen",
+    "statusRevoked": "Widerrufen",
+    "revoke": "Widerrufen",
+    "revokeConfirm": "Diese Stellvertretung wirklich widerrufen?",
+    "revokeError": "Widerrufen fehlgeschlagen"
   },
   "shareLinkSettings": {
     "pageTitle": "Öffentlicher Freigabelink",

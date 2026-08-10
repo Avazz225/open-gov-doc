@@ -23,6 +23,7 @@ import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
 import { SearchPane } from "./SearchPane";
 import { Splitter } from "./Splitter";
+import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
 
 const MIN_LEFT_WIDTH = 260;
@@ -338,12 +339,14 @@ export function DocumentWorkspace() {
                 onOpenDocument={handleOpenFavoriteDocument}
                 onOpenFolder={handleOpenFavoriteFolder}
               />
-            ) : (
+            ) : view === "teamspaces" ? (
               <TeamspacesPane
                 token={accessToken ?? ""}
                 currentPrincipalId={user?.sub ?? ""}
                 onOpenFolder={handleOpenTeamspaceFolder}
               />
+            ) : (
+              <DelegationsPane token={accessToken ?? ""} currentPrincipalId={user?.sub ?? ""} />
             )}
           </div>
           <Splitter

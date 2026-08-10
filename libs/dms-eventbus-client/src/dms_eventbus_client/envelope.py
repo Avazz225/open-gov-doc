@@ -24,6 +24,14 @@ class Event(BaseModel):
     # Konvention wie bereits document-service/folder-services
     # "system:retention-poll"). None nur fuer Alt-Events vor diesem Feld.
     actor: str | None = None
+    # Stellvertretung bei Abwesenheit (4.4a, seit P14-S11): gesetzt, wenn
+    # ``actor`` im Auftrag einer anderen Person gehandelt hat (Konzept-
+    # Wortlaut 4.4a/5.3, "ein zusaetzlicher Vermerk, in wessen Auftrag sie
+    # erfolgte") - bewusst ein ZWEITES Feld statt ``actor`` zu ueberschreiben:
+    # die handelnde Identitaet bleibt immer die tatsaechlich anmeldende
+    # Person, kein Identitaetswechsel. None fuer jede normale, nicht
+    # delegierte Aktion (der weit ueberwiegende Regelfall).
+    on_behalf_of: str | None = None
 
     def to_bytes(self) -> bytes:
         return self.model_dump_json().encode("utf-8")

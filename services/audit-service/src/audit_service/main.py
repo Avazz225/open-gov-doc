@@ -36,14 +36,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE audit.audit_event ADD COLUMN IF NOT EXISTS actor VARCHAR(255)")
         )
+        # Stellvertretung bei Abwesenheit (4.4a, seit P14-S11) - beide Spalten
+        # bewusst OHNE NOT NULL/DEFAULT-Klausel: `on_behalf_of_field_cutover_id`
+        # bleibt auf einer bereits bestehenden Zeile NULL, bis
+        # `get_on_behalf_of_field_cutover_id` sie einmalig auf den korrekten
+        # MAX(id)-Wert setzt (siehe repository.py).
+        await conn.execute(
+            text("ALTER TABLE audit.audit_event ADD COLUMN IF NOT EXISTS on_behalf_of VARCHAR(255)")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE audit.audit_meta "
+                "ADD COLUMN IF NOT EXISTS on_behalf_of_field_cutover_id INTEGER"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
-    # Cutover-Punkt fuer das actor-Feld einmalig festlegen (P7-S2) - muss vor
-    # dem ersten konsumierten Event geschehen, sonst koennte ein frisches
-    # Event faelschlich als "vor dem Cutover" behandelt werden.
+    # Cutover-Punkte fuer die actor-/on_behalf_of-Felder einmalig festlegen
+    # (P7-S2/P14-S11) - muss vor dem ersten konsumierten Event geschehen,
+    # sonst koennte ein frisches Event faelschlich als "vor dem Cutover"
+    # behandelt werden.
     async with app.state.session_factory() as session:
         await repository.get_actor_field_cutover_id(session)
+        await repository.get_on_behalf_of_field_cutover_id(session)
         await session.commit()
 
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
@@ -92,6 +108,7 @@ def healthz() -> dict:
 async def list_events(
     limit: int = 100,
     actor: str | None = None,
+    on_behalf_of: str | None = None,
     subject: str | None = None,
     event_type: str | None = None,
     since: datetime | None = None,
@@ -102,6 +119,7 @@ async def list_events(
         session,
         limit=limit,
         actor=actor,
+        on_behalf_of=on_behalf_of,
         subject=subject,
         event_type=event_type,
         since=since,

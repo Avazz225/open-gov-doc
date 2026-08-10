@@ -135,6 +135,43 @@ class EffectivePermissionCache(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Delegation(Base):
+    """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - zeitlich befristete,
+    umfangsbegrenzte Übertragung der Aufgabenwahrnehmung von einer
+    abwesenden Person (``delegator_principal_id``) an eine Stellvertretung
+    (``deputy_principal_id``). Bewusst KEIN Identitätswechsel: die
+    Stellvertretung handelt weiterhin unter dem eigenen Konto - dieser
+    Datensatz ist nur die Grundlage für die Berechtigungsprüfung
+    (``GET /delegations/check``, von workflow-service beim Aufgabenabschluss
+    aufgerufen) und den Audit-Vermerk "im Auftrag von" (5.3), kein Login-
+    Mechanismus. Wird nie hart gelöscht (``revoked_at``/``revoked_by``
+    dokumentieren die vorzeitige Beendigung), gleiches Muster wie
+    ``ScopeLock`` oben bzw. document-services ``ShareLink`` (P14-S10)."""
+
+    __tablename__ = "delegation"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    delegator_principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    deputy_principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # None = keine Einschränkung auf dieser Dimension - sind alle drei None,
+    # gilt die "vollständige Übernahme aller offenen Aufgaben" (4.4a).
+    # `scope_process_definition_ids` ist der einzige Wortlaut-Dimension, die
+    # sich beim heutigen Konsumenten (workflow-service) tatsächlich ohne
+    # zusätzlichen Cross-Service-Umweg prüfen lässt (Prozessinstanzen
+    # tragen `process_definition_id` bereits direkt) - die beiden anderen
+    # Felder werden dennoch mitgespeichert (Konzept-Wortlaut "Objekttypen ...
+    # Ordnerbereiche"), auch wenn sie aktuell von keinem Endpunkt ausgewertet
+    # werden (siehe ADR 0048, "Offene Punkte").
+    scope_object_type_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    scope_process_definition_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    scope_folder_resource_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
 class SystemMaintenanceMode(Base):
     """Systemweite Notfallsperre & Wartungsmodus (4.8, P6-S6) - Singleton
     (feste ``id=1``, gleiches Muster wie ``OcrConfig``/``GuardConfig`` in

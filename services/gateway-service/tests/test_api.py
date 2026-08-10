@@ -12,6 +12,11 @@ REGISTRY_URL = os.environ.get("TEST_REGISTRY_SERVICE_URL", "http://localhost:800
 # audit-service ist Teil der Standard-Compose-Umgebung und dient hier nur als
 # real erreichbares Ziel, um echtes Proxying zu verifizieren (kein Mock).
 REAL_TARGET_URL = os.environ.get("TEST_AUDIT_SERVICE_URL", "http://localhost:8002")
+# permission-service dient hier als echtes "Echo"-Ziel für den Header-
+# Spoofing-Sicherheitstest unten (`POST /delegations` spiegelt den
+# empfangenen `X-DMS-Principal` 1:1 in `delegator_principal_id`, siehe
+# docs/services/permission-service.md).
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 
 @pytest.fixture
@@ -152,6 +157,38 @@ async def test_valid_token_routes_via_registry_to_real_instance(client, make_tok
         )
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "service": "audit-service"}
+    finally:
+        await _deregister_instance(service_type, instance_id)
+
+
+async def test_client_supplied_x_dms_principal_header_is_overridden_by_gateway(client, make_token):
+    """Sicherheitsfund (P14-S11-Live-Verifikation, siehe ADR 0049): vor dem
+    Fix in `upstream.filter_headers` konnte ein Client mit gültigem Bearer-
+    Token einen eigenen `X-DMS-Principal`-Header mitschicken, der NICHT
+    überschrieben wurde, sondern neben dem echten, vom Gateway aus dem JWT
+    abgeleiteten Header beim Downstream ankam - permission-service (echtes,
+    bereits laufendes Ziel, kein Mock) übernahm dabei den vom Client
+    gesendeten Wert statt der echten `sub`-Claim. `POST /delegations`
+    spiegelt `X-DMS-Principal` 1:1 in `delegator_principal_id` und dient
+    hier als Echo-Endpunkt."""
+    service_type = f"gw-test-permission-{uuid.uuid4().hex[:8]}"
+    instance_id = await _register_instance(service_type, address=PERMISSION_SERVICE_URL)
+    try:
+        token = make_token(extra_claims={"sub": "real-principal-from-jwt"})
+        response = client.post(
+            f"/api/{service_type}/delegations",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-DMS-Principal": "attacker-spoofed-principal",
+            },
+            json={
+                "deputy_principal_id": f"deputy-{uuid.uuid4().hex[:8]}",
+                "starts_at": "2026-01-01T00:00:00Z",
+                "ends_at": "2026-01-02T00:00:00Z",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["delegator_principal_id"] == "real-principal-from-jwt"
     finally:
         await _deregister_instance(service_type, instance_id)
 

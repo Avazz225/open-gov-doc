@@ -60,6 +60,7 @@
     "approvals": "Genehmigungen",
     "favorites": "Favoriten",
     "teamspaces": "Team-Arbeitsbereiche",
+    "delegations": "Stellvertretung",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -241,6 +242,27 @@
     "contactNamePlaceholder": "Name",
     "contactEmailPlaceholder": "E-Mail (optional)",
     "addContactButton": "Kontakt hinzufügen"
+  },
+  "delegations": {
+    "paneLabel": "Stellvertretung",
+    "heading": "Stellvertretung bei Abwesenheit",
+    "hint": "Hinterlege eine oder mehrere Personen als Stellvertretung für einen befristeten Zeitraum (4.4a) - eine Stellvertretung handelt weiterhin unter dem eigenen Konto, kein Einloggen als eine andere Person.",
+    "loadError": "Stellvertretungen konnten nicht geladen werden",
+    "createError": "Anlegen fehlgeschlagen - Nutzername unbekannt oder ungültiger Zeitraum",
+    "revokeError": "Widerrufen fehlgeschlagen",
+    "myDelegationsHeading": "Meine Stellvertretungen",
+    "myDelegationsEmpty": "Noch keine Stellvertretung hinterlegt.",
+    "deputyUsernamePlaceholder": "Nutzername der Stellvertretung",
+    "startsAtLabel": "Gültig ab",
+    "endsAtLabel": "Gültig bis",
+    "createButton": "Hinterlegen",
+    "revokeButton": "Widerrufen",
+    "revokedState": "widerrufen",
+    "expiredState": "abgelaufen",
+    "deputyForHeading": "Ich vertrete",
+    "deputyForHint": "Personen, für die du gerade aktiv als Stellvertretung eingetragen bist - Aufgaben im Auftrag dieser Personen schließt du in der Reviewer-Oberfläche ab.",
+    "deputyForEmpty": "Du vertrittst aktuell niemanden.",
+    "deputyForUntil": "bis {date}"
   },
   "preview": {
     "paneLabel": "Vorschau",

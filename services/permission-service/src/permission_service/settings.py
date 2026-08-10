@@ -22,3 +22,9 @@ class Settings(BaseServiceSettings):
     # Erster Cross-Service-Aufruf dieses Service (P6-S6, 4.8): nur der aktive
     # Superuser darf den Wartungsmodus aufheben, dessen Identität lebt in auth-service.
     auth_service_base_url: str = "http://localhost:8003"
+
+    # Stellvertretung (4.4a, P14-S11): wer eine Delegation vorzeitig widerrufen
+    # darf, ohne die vertretene Person selbst zu sein - gleiches unabhängig
+    # konfigurierbares Rollen-Setting-Muster wie document-services
+    # `share_link_revoke_admin_role` (P14-S10), auch wenn der Default identisch ist.
+    delegation_revoke_admin_role: str = "dms-admin"

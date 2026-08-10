@@ -9,15 +9,15 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/events?limit=100&actor=&subject=&event_type=&since=&until=` | Aufgezeichnete Ereignisse, chronologisch **absteigend** (neueste zuerst, seit P7-S2b — vorher aufsteigend, siehe unten). Alle Filter optional/kombinierbar (5.4b, seit P7-S2) — `actor`/`subject` exakter Treffer, `event_type` exakt oder NATS-Wildcard (`"document.>"`), `since`/`until` filtert auf `occurred_at` |
+| `GET` | `/events?limit=100&actor=&on_behalf_of=&subject=&event_type=&since=&until=` | Aufgezeichnete Ereignisse, chronologisch **absteigend** (neueste zuerst, seit P7-S2b — vorher aufsteigend, siehe unten). Alle Filter optional/kombinierbar (5.4b, seit P7-S2) — `actor`/`on_behalf_of` (seit **P14-S11**, 4.4a)/`subject` exakter Treffer, `event_type` exakt oder NATS-Wildcard (`"document.>"`), `since`/`until` filtert auf `occurred_at` |
 | `GET` | `/events/verify` | Prüft Hash-Kette vollständig, meldet `broken_at_id` bei Manipulation |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Datenmodell
 
-`audit_event`: `id` (PK, autoincrement), `event_id` (unique, für Idempotenz), `event_type`, `occurred_at`, `service_name`, `subject`, `payload` (JSON), `actor` (nullable, seit P7-S2 — siehe unten), `recorded_at`, `prev_hash`, `hash` (unique). `hash = sha256(prev_hash + kanonisches_JSON({event_id, event_type, occurred_at, service_name, subject, payload, recorded_at[, actor]}))` — `actor` fließt nur für Zeilen NACH dem Cutover-Punkt ins kanonische JSON ein (siehe "Actor-Feld & Cutover-Versionierung" unten).
+`audit_event`: `id` (PK, autoincrement), `event_id` (unique, für Idempotenz), `event_type`, `occurred_at`, `service_name`, `subject`, `payload` (JSON), `actor` (nullable, seit P7-S2 — siehe unten), `on_behalf_of` (nullable, seit **P14-S11**, 4.4a — siehe unten), `recorded_at`, `prev_hash`, `hash` (unique). `hash = sha256(prev_hash + kanonisches_JSON({event_id, event_type, occurred_at, service_name, subject, payload, recorded_at[, actor][, on_behalf_of]}))` — `actor`/`on_behalf_of` fließen jeweils nur für Zeilen NACH ihrem eigenen Cutover-Punkt ins kanonische JSON ein (siehe "Actor-Feld & Cutover-Versionierung" unten und "on_behalf_of-Feld" weiter unten).
 
-`audit_meta`: Singleton-Zeile (`id=1`, gleiches Muster wie `KennzeichenConfig`/`RetentionConfig` anderer Services) — `actor_field_cutover_id` (die `id` der letzten Zeile vor Einführung des `actor`-Feldes).
+`audit_meta`: Singleton-Zeile (`id=1`, gleiches Muster wie `KennzeichenConfig`/`RetentionConfig` anderer Services) — `actor_field_cutover_id` (die `id` der letzten Zeile vor Einführung des `actor`-Feldes), `on_behalf_of_field_cutover_id` (seit P14-S11, gleiches Prinzip, unabhängiger Wert).
 
 ## Events
 
@@ -51,6 +51,14 @@ Konsument ohne eigenen Stream (`NatsEventBusClient(ensure_stream=False)`) — si
 
 **Sortierreihenfolge korrigiert (seit P7-S2b)**: `list_events` sortierte ursprünglich nach `id` aufsteigend vor dem `LIMIT` — bei einer breiten, kaum gefilterten Abfrage lieferte das die **ältesten** Treffer statt der jüngsten. Erst der `reporting-service`s Nutzeraktivitäts-Bericht (erster Aufrufer ohne enges `since`/`until`-Zeitfenster) deckte das auf: eine gerade erst durchgeführte Aktion fehlte im Ergebnis, obwohl sie mit einem `actor`-Filter auffindbar war. Fix: `order_by(id.desc())` — liefert seither die neuesten Treffer zuerst, kein bestehender Test/Konsument pinnte die alte Reihenfolge fest.
 
+## on_behalf_of-Feld (Stellvertretung bei Abwesenheit, 4.4a, seit P14-S11)
+
+Zweites, unabhängiges Envelope-Feld nach exakt demselben Cutover-Versionierungs-Prinzip wie `actor` oben (siehe [ADR 0048](../adr/0048-delegation-lives-in-permission-service-no-task-assignee-retrofit.md) für die vollständige Delegations-Architektur) — `actor` bleibt immer die tatsächlich handelnde Person (die Stellvertretung), `on_behalf_of` die vertretene Person, NIE ein Ersatz für `actor` (kein Identitätswechsel, Konzept-Wortlaut). Aktuell einziger Producer: `workflow-service`s `workflow.task.completed`/`workflow.instance.completed` bei einem Abschluss "im Auftrag von" (siehe `docs/services/workflow-service.md`).
+
+**Cutover unterscheidet sich technisch vom actor-Cutover**: `audit_meta` existiert bereits (seit P7-S2), die neue Spalte `on_behalf_of_field_cutover_id` wird deshalb NICHT per Insert (`ON CONFLICT DO NOTHING`) angelegt, sondern per einmaligem ORM-Attribut-Update auf der bereits bestehenden Zeile nachgetragen (`get_on_behalf_of_field_cutover_id()`) — funktional identisches Ergebnis (Cutover = `MAX(id)` zum Zeitpunkt des ersten Starts nach diesem Deploy), nur ein anderer Mechanismus, weil die Zeile schon da ist.
+
+**Filter-API**: `GET /events?on_behalf_of=...` — exakter Treffer, unabhängig vom `actor`-Filter kombinierbar (z. B. "alle Aktionen, die im Auftrag von Person X ausgeführt wurden", unabhängig davon, welche Stellvertretung sie ausgeführt hat).
+
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
 Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
@@ -61,7 +69,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/audit-service/tests`: Hash-Chain-Grundfunktionen (`test_hashchain.py`, unverändert), Repository inkl. neuer Cutover-Tests (Zeitpunkt-Berechnung, Idempotenz, Verifikation über die Cutover-Grenze hinweg mit manuell als "Alt-Zeile" konstruierten Einträgen) und Filter-Kombinationen (`actor`/`subject`/`event_type` exakt+Wildcard/Zeitfenster), Consumer-Integrationstest gegen echtes NATS inkl. `actor`-Roundtrip. **21 Tests** (vorher 12, 9 neu, seit P7-S2).
+- `uv run pytest services/audit-service/tests`: Hash-Chain-Grundfunktionen (`test_hashchain.py`, unverändert), Repository inkl. neuer Cutover-Tests (Zeitpunkt-Berechnung, Idempotenz, Verifikation über die Cutover-Grenze hinweg mit manuell als "Alt-Zeile" konstruierten Einträgen) und Filter-Kombinationen (`actor`/`subject`/`event_type` exakt+Wildcard/Zeitfenster), Consumer-Integrationstest gegen echtes NATS inkl. `actor`-Roundtrip. **31 Tests** (vorher 21, +10, seit **P14-S11**: `on_behalf_of`-Speicherung, eigener Cutover-Zeitpunkt/Idempotenz, Verifikation über die on_behalf_of-Cutover-Grenze hinweg — realistischerer Fall als beim ursprünglichen actor-Cutover, da hier bereits Zeilen MIT `actor`, aber OHNE `on_behalf_of` existieren —, Filter nach `on_behalf_of`; davor 21, 9 neu, seit P7-S2).
 - **Live-Smoke-Test** (P7-S2): `GET /events/verify` vor und nach der Migration verglichen — `ok: true` mit identischer geprüfter Zeilenzahl für die Alt-Historie, siehe `PROGRESS.md`. Neue Ereignisse (z. B. `POST /folders`) tauchten korrekt mit `actor` auf, `GET /events?actor=...`/`?event_type=folder.>&since=...` lieferten die erwarteten Treffer, ein systemausgelöstes Ereignis zeigte `actor="system:retention-poll"`.
 
 ## Offene Punkte
@@ -71,3 +79,4 @@ Noch keine — folgt in Phase 11.
 - **Forensik-Trace-UI (5.4b) folgt in P7-S2c** — baut direkt auf der hier gebauten Filter-API auf (kompromittierter Account: "alle Aktionen von Nutzer X ab Zeitpunkt Y").
 - **`actor` bleibt an einigen Aufrufstellen `None`**, da die jeweiligen Schemata bislang keine Aktions-Identität tragen (z. B. `document.metadata.updated`, `folder.resource.moved`/`.deleted`, `document.restored`/`.retention.updated`) — Nachrüsten dieser Felder war bewusst nicht Teil von P7-S2 (reiner First-class-statt-ad-hoc-Retrofit bereits vorhandener Angaben, keine neuen Felder in fremden Schemata).
 - **Keine Rollenprüfung für `GET /events`/`GET /events/verify`** — jeder mit Netzwerkzugriff auf das Gateway kann den vollständigen Audit-Trail lesen, identische, bereits bestehende Lücke wie zuvor.
+- **`on_behalf_of` (4.4a, seit P14-S11) hat aktuell genau einen Producer** (`workflow-service`s Aufgabenabschluss "im Auftrag von") — bleibt für jedes andere Event-Schema `None`, exakt dieselbe bewusste Grenze wie beim ursprünglichen `actor`-Feld oben (First-class-statt-ad-hoc-Retrofit nur dort, wo eine solche Aktion bereits real existiert).
