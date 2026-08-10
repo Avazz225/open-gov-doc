@@ -38,6 +38,14 @@ class UserOut(BaseModel):
     last_name: str | None
 
 
+class UserLookupOut(BaseModel):
+    """Minimale Antwort für `GET /users/lookup` (2.5, P14-S6) - bewusst nur
+    `id`/`username`, siehe `admin_users.find_user_by_username`."""
+
+    id: str
+    username: str
+
+
 class ThemePreference(BaseModel):
     theme: ThemeName = "auto"
 

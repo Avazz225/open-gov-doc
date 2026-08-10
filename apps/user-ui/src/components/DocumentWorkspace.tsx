@@ -23,6 +23,7 @@ import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
 import { SearchPane } from "./SearchPane";
 import { Splitter } from "./Splitter";
+import { TeamspacesPane } from "./TeamspacesPane";
 
 const MIN_LEFT_WIDTH = 260;
 const MIN_TOP_HEIGHT = 160;
@@ -220,7 +221,13 @@ export function DocumentWorkspace() {
     setView("documents");
   }
 
-  async function handleOpenFavoriteFolder(folder: Folder) {
+  // Läuft die `parent_id`-Kette clientseitig über den bestehenden `GET
+  // /folders/{id}` bis zur Wurzel (`"root"`) hoch, um den vollständigen
+  // Breadcrumb-Pfad für `navigateToFolder` (P5b-S4) zu rekonstruieren - kein
+  // neuer Backend-Endpunkt dafür nötig. Gemeinsame Grundlage für "Öffnen" aus
+  // der Favoriten-Merkliste (P7-S1d) UND aus einem Teamspace-Wurzelordner
+  // (P14-S6).
+  async function openFolderPath(folder: Folder) {
     if (!accessToken) return;
     const path: Folder[] = [folder];
     let current = folder;
@@ -234,6 +241,23 @@ export function DocumentWorkspace() {
     }
     navigateToFolder(path);
     setView("documents");
+  }
+
+  async function handleOpenFavoriteFolder(folder: Folder) {
+    await openFolderPath(folder);
+  }
+
+  // "Ordner öffnen" aus einem Teamspace (2.5, P14-S6) - der Teamspace selbst
+  // kennt nur die `root_folder_id` (opake Referenz), nicht das vollständige
+  // `Folder`-Objekt, daher hier zunächst ein `GET /folders/{id}` nachladen.
+  async function handleOpenTeamspaceFolder(folderId: string) {
+    if (!accessToken) return;
+    try {
+      const folder = await apiGetFolder(accessToken, folderId);
+      await openFolderPath(folder);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("folderBrowser.loadError"));
+    }
   }
 
   function handleVerticalResize(offsetPx: number) {
@@ -307,12 +331,18 @@ export function DocumentWorkspace() {
               <SearchPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
             ) : view === "approvals" ? (
               <ApprovalsPane token={accessToken ?? ""} currentUsername={user?.username ?? ""} />
-            ) : (
+            ) : view === "favorites" ? (
               <FavoritesPane
                 token={accessToken ?? ""}
                 currentUsername={user?.username ?? ""}
                 onOpenDocument={handleOpenFavoriteDocument}
                 onOpenFolder={handleOpenFavoriteFolder}
+              />
+            ) : (
+              <TeamspacesPane
+                token={accessToken ?? ""}
+                currentPrincipalId={user?.sub ?? ""}
+                onOpenFolder={handleOpenTeamspaceFolder}
               />
             )}
           </div>

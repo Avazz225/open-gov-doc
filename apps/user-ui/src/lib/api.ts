@@ -1065,3 +1065,250 @@ export async function removeFavorite(
   const query = new URLSearchParams(params);
   await request("favorite-service", `favorites?${query.toString()}`, { method: "DELETE" }, token);
 }
+
+// Nutzer-Auflösung per exaktem Username (2.5, P14-S6) - bewusst NICHT hinter
+// `admin.user_management` gegated (anders als eine vollständige Nutzerliste):
+// jeder authentifizierte Nutzer darf einen einzelnen Account auflösen, um ihn
+// z. B. in einen Teamspace einzuladen. `X-DMS-Principal` ist die Keycloak-
+// `sub`-UUID, kein Nutzer kennt sie auswendig - dieser Aufruf übersetzt den
+// eingetippten Username in genau diese UUID.
+export interface UserLookup {
+  id: string;
+  username: string;
+}
+
+export async function lookupUserByUsername(
+  token: string,
+  username: string
+): Promise<UserLookup> {
+  const response = await request(
+    "auth-service",
+    `users/lookup?username=${encodeURIComponent(username)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+// Team-Arbeitsbereich "Teamspace" (2.5, P14-S6) - selbstverwalteter,
+// dauerhafter Gruppenbereich (Ordner/Dokumente/Termine/Kontakte), neuer
+// `teamspace-service`. Eigenes, von der übrigen RBAC unabhängiges
+// Zugriffsregime (siehe docs/services/teamspace-service.md) - jeder Aufruf
+// hier trägt implizit `X-DMS-Principal` über den vom Gateway weitergereichten
+// Bearer-Token, `teamspace-service` prüft die Mitgliedschaft selbst.
+export interface Teamspace {
+  id: string;
+  name: string;
+  description: string;
+  root_folder_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamspaceMember {
+  id: number;
+  teamspace_id: string;
+  principal_id: string;
+  can_manage_members: boolean;
+  invited_by: string;
+  invited_at: string;
+}
+
+export interface TeamspaceAppointment {
+  id: number;
+  teamspace_id: string;
+  title: string;
+  description: string;
+  start_at: string;
+  end_at: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface TeamspaceContact {
+  id: number;
+  teamspace_id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  note: string;
+  created_by: string;
+  created_at: string;
+}
+
+export async function createTeamspace(
+  token: string,
+  params: { name: string; description?: string }
+): Promise<Teamspace> {
+  const response = await request(
+    "teamspace-service",
+    "teamspaces",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: params.name, description: params.description ?? "" }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function listTeamspaces(token: string): Promise<Teamspace[]> {
+  const response = await request("teamspace-service", "teamspaces", {}, token);
+  return response.json();
+}
+
+export async function deleteTeamspace(token: string, teamspaceId: string): Promise<void> {
+  await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function listTeamspaceMembers(
+  token: string,
+  teamspaceId: string
+): Promise<TeamspaceMember[]> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/members`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function inviteTeamspaceMember(
+  token: string,
+  teamspaceId: string,
+  params: { principalId: string; canManageMembers?: boolean }
+): Promise<TeamspaceMember> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/members`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        principal_id: params.principalId,
+        can_manage_members: params.canManageMembers ?? false,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function removeTeamspaceMember(
+  token: string,
+  teamspaceId: string,
+  principalId: string
+): Promise<void> {
+  await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/members/${encodeURIComponent(principalId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function listTeamspaceAppointments(
+  token: string,
+  teamspaceId: string
+): Promise<TeamspaceAppointment[]> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/appointments`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createTeamspaceAppointment(
+  token: string,
+  teamspaceId: string,
+  params: { title: string; description?: string; startAt: string; endAt: string }
+): Promise<TeamspaceAppointment> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/appointments`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: params.title,
+        description: params.description ?? "",
+        start_at: params.startAt,
+        end_at: params.endAt,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteTeamspaceAppointment(
+  token: string,
+  teamspaceId: string,
+  appointmentId: number
+): Promise<void> {
+  await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/appointments/${appointmentId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function listTeamspaceContacts(
+  token: string,
+  teamspaceId: string
+): Promise<TeamspaceContact[]> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/contacts`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createTeamspaceContact(
+  token: string,
+  teamspaceId: string,
+  params: { name: string; email?: string; phone?: string; note?: string }
+): Promise<TeamspaceContact> {
+  const response = await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/contacts`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: params.name,
+        email: params.email || null,
+        phone: params.phone || null,
+        note: params.note ?? "",
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteTeamspaceContact(
+  token: string,
+  teamspaceId: string,
+  contactId: number
+): Promise<void> {
+  await request(
+    "teamspace-service",
+    `teamspaces/${encodeURIComponent(teamspaceId)}/contacts/${contactId}`,
+    { method: "DELETE" },
+    token
+  );
+}

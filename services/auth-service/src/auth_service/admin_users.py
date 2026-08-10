@@ -42,6 +42,22 @@ def list_users(admin: KeycloakAdmin) -> list[dict]:
     return [_to_user_dict(u) for u in admin.get_users()]
 
 
+def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
+    """Exakte Namenssuche für `GET /users/lookup` (2.5, P14-S6) - anders als
+    `list_users()` bewusst OHNE `admin.user_management`-Gate: jeder
+    authentifizierte Nutzer darf einen einzelnen, exakt benannten Account
+    auflösen (nötig, um z. B. jemanden per Username in einen Teamspace
+    einzuladen - `X-DMS-Principal` ist die Keycloak-`sub`-UUID, kein
+    Nutzer kennt die UUID einer anderen Person auswendig). Liefert deshalb
+    auch bewusst nur `id`/`username` zurück, keine E-Mail/Namen/Freigabestatus
+    wie `list_users()` - keine allgemeine Verzeichnis-Funktion, siehe
+    `docs/services/auth-service.md`."""
+    matches = admin.get_users(query={"username": username, "exact": True})
+    if not matches:
+        return None
+    return _to_user_dict(matches[0])
+
+
 def create_user(
     admin: KeycloakAdmin,
     *,

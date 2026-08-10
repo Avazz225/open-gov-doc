@@ -70,6 +70,11 @@ class Settings(BaseServiceSettings):
         # 10.1: Deaktivieren sicherheitsrelevanter Sensoren ist selbst ein
         # sicherheitsrelevanter Vorgang).
         "monitoring.>",
+        # "teamspace.>" kam in P14-S6 dazu - der neue teamspace-service (2.5)
+        # auditiert Anlage/Loeschung eines Team-Arbeitsbereichs sowie
+        # Einladen/Entfernen von Mitgliedern (sicherheitsrelevant, da dies das
+        # eigentliche, von der uebrigen RBAC unabhaengige Zugriffsregime ist).
+        "teamspace.>",
     ]
 
     # Loeschregister-Ledger (10.4, P11-S4): Append-only-Datei auf einem

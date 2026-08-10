@@ -23,6 +23,7 @@ from auth_service.schemas import (
     ThemePreference,
     TokenResponse,
     UserCreate,
+    UserLookupOut,
     UserOut,
 )
 from auth_service.settings import Settings
@@ -228,6 +229,20 @@ async def list_users(user: dict = Depends(get_current_user)) -> list[dict]:
     vollständig durch Keycloak abgedeckt)."""
     await _require_user_management(user)
     return admin_users.list_users(app.state.keycloak_admin)
+
+
+@app.get("/users/lookup", response_model=UserLookupOut)
+async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> dict:
+    """Exakte Namensauflösung für JEDEN authentifizierten Nutzer (2.5,
+    P14-S6) - bewusst OHNE `admin.user_management`-Gate wie `GET /users`
+    oben, siehe `admin_users.find_user_by_username`. `user`-Parameter dient
+    nur der Authentifizierungsprüfung (`Depends(get_current_user)` lehnt ein
+    fehlendes/ungültiges Token bereits selbst ab), wird inhaltlich nicht
+    gebraucht."""
+    match = admin_users.find_user_by_username(app.state.keycloak_admin, username)
+    if match is None:
+        raise HTTPException(status_code=404, detail=f"Nutzer {username!r} unbekannt")
+    return match
 
 
 @app.get("/users/count")
