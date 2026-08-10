@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -13,6 +14,8 @@ from document_service.models import (
     DocumentVersion,
     LegalHold,
     RetentionConfig,
+    ShareLink,
+    ShareLinkConfig,
     TrashConfig,
     UploadConfig,
 )
@@ -21,6 +24,7 @@ _UPLOAD_CONFIG_ID = 1
 _RETENTION_CONFIG_ID = 1
 _TRASH_CONFIG_ID = 1
 _AUDIT_TRACE_CONFIG_ID = 1
+_SHARE_LINK_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -836,3 +840,76 @@ async def mark_rehydrated(session: AsyncSession, document_id: str) -> Document:
     document.updated_at = datetime.now(UTC)
     await session.flush()
     return document
+
+
+# --- Öffentlicher Freigabelink (4.2a, P14-S10) ------------------------------
+
+
+async def get_share_link_config(session: AsyncSession) -> ShareLinkConfig:
+    config = await session.get(ShareLinkConfig, _SHARE_LINK_CONFIG_ID)
+    if config is None:
+        config = ShareLinkConfig(
+            id=_SHARE_LINK_CONFIG_ID,
+            enabled=True,
+            max_validity_days=30,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_share_link_config(
+    session: AsyncSession, *, enabled: bool, max_validity_days: int
+) -> ShareLinkConfig:
+    config = await get_share_link_config(session)
+    config.enabled = enabled
+    config.max_validity_days = max_validity_days
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def create_share_link(
+    session: AsyncSession, *, document_id: str, created_by: str, expires_at: datetime
+) -> ShareLink:
+    # `token_urlsafe(32)` ist zugleich der Primärschlüssel - kein separates,
+    # erratbares ID-Feld daneben mit derselben Zugriffskraft.
+    link = ShareLink(
+        token=secrets.token_urlsafe(32),
+        document_id=document_id,
+        created_by=created_by,
+        created_at=datetime.now(UTC),
+        expires_at=expires_at,
+    )
+    session.add(link)
+    await session.flush()
+    return link
+
+
+async def list_share_links_for_document(session: AsyncSession, document_id: str) -> list[ShareLink]:
+    result = await session.execute(
+        select(ShareLink)
+        .where(ShareLink.document_id == document_id)
+        .order_by(ShareLink.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_share_link(session: AsyncSession, token: str) -> ShareLink | None:
+    return await session.get(ShareLink, token)
+
+
+async def revoke_share_link(session: AsyncSession, token: str, *, revoked_by: str) -> ShareLink:
+    link = await get_share_link(session, token)
+    if link is None:
+        raise NotFoundError(f"Freigabelink {token!r} unbekannt")
+    if link.revoked_at is None:
+        link.revoked_at = datetime.now(UTC)
+        link.revoked_by = revoked_by
+        await session.flush()
+    return link
+
+
+def is_share_link_active(link: ShareLink, now: datetime) -> bool:
+    return link.revoked_at is None and link.expires_at > now

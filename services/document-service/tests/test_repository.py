@@ -566,6 +566,112 @@ async def test_trash_config_defaults_and_update(session):
     assert updated.restore_period_days == 60
 
 
+async def test_share_link_config_defaults_and_update(session):
+    default = await repository.get_share_link_config(session)
+    assert default.enabled is True
+    assert default.max_validity_days == 30
+
+    updated = await repository.update_share_link_config(session, enabled=False, max_validity_days=7)
+    assert updated.enabled is False
+    assert updated.max_validity_days == 7
+
+
+async def test_create_share_link_generates_an_unguessable_token(session):
+    document = await _make_document(session)
+    expires_at = datetime.now(UTC) + timedelta(days=1)
+
+    link = await repository.create_share_link(
+        session, document_id=document.id, created_by="alice", expires_at=expires_at
+    )
+
+    assert len(link.token) >= 32
+    fetched = await repository.get_share_link(session, link.token)
+    assert fetched is not None
+    assert fetched.document_id == document.id
+
+
+async def test_list_share_links_for_document_only_returns_its_own_links(session):
+    doc_a = await _make_document(session)
+    doc_b = await _make_document(session)
+    expires_at = datetime.now(UTC) + timedelta(days=1)
+
+    link_a = await repository.create_share_link(
+        session, document_id=doc_a.id, created_by="alice", expires_at=expires_at
+    )
+    await repository.create_share_link(
+        session, document_id=doc_b.id, created_by="alice", expires_at=expires_at
+    )
+
+    links = await repository.list_share_links_for_document(session, doc_a.id)
+    assert [link.token for link in links] == [link_a.token]
+
+
+async def test_revoke_share_link_sets_revoked_fields_and_is_idempotent(session):
+    document = await _make_document(session)
+    link = await repository.create_share_link(
+        session,
+        document_id=document.id,
+        created_by="alice",
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+    )
+
+    revoked = await repository.revoke_share_link(session, link.token, revoked_by="bob")
+    assert revoked.revoked_by == "bob"
+    assert revoked.revoked_at is not None
+
+    # Erneutes Widerrufen darf den ursprünglichen Widerrufer/Zeitpunkt nicht
+    # überschreiben (idempotent, kein Fehler).
+    revoked_again = await repository.revoke_share_link(session, link.token, revoked_by="carol")
+    assert revoked_again.revoked_by == "bob"
+
+
+async def test_revoke_share_link_unknown_token_raises_not_found(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.revoke_share_link(session, "unknown-token", revoked_by="bob")
+
+
+def test_is_share_link_active_false_when_expired():
+    now = datetime.now(UTC)
+    link = repository.ShareLink(
+        token="t",
+        document_id="d",
+        created_by="alice",
+        created_at=now - timedelta(days=2),
+        expires_at=now - timedelta(days=1),
+        revoked_at=None,
+        revoked_by=None,
+    )
+    assert repository.is_share_link_active(link, now) is False
+
+
+def test_is_share_link_active_false_when_revoked():
+    now = datetime.now(UTC)
+    link = repository.ShareLink(
+        token="t",
+        document_id="d",
+        created_by="alice",
+        created_at=now - timedelta(days=1),
+        expires_at=now + timedelta(days=1),
+        revoked_at=now,
+        revoked_by="bob",
+    )
+    assert repository.is_share_link_active(link, now) is False
+
+
+def test_is_share_link_active_true_otherwise():
+    now = datetime.now(UTC)
+    link = repository.ShareLink(
+        token="t",
+        document_id="d",
+        created_by="alice",
+        created_at=now - timedelta(days=1),
+        expires_at=now + timedelta(days=1),
+        revoked_at=None,
+        revoked_by=None,
+    )
+    assert repository.is_share_link_active(link, now) is True
+
+
 async def test_list_due_for_reminder_respects_lead_days_and_hold(session):
     due_soon = await _make_document(session)
     due_soon.retention_until = datetime.now(UTC) + timedelta(days=2)

@@ -63,7 +63,7 @@ def install():
 
 
 class FakePropertySetInfo:
-    def __init__(self, container: "FakeUserDefinedProperties"):
+    def __init__(self, container: FakeUserDefinedProperties):
         self._container = container
 
     def hasPropertyByName(self, name):

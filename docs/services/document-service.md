@@ -2,8 +2,8 @@
 
 **Verantwortung:** Dokumente als Kernentität (Konzept 2.1) — CRUD, dauerhafte Versionierung (2.1a, kein Überschreiben/Verwerfen), Bearbeitungssperre bei externer Bearbeitung inkl. Force-Unlock und Konfliktkopie (4.2). Hält selbst nie Dateiinhalte — jeder Byte-Zugriff läuft über die HTTP-API des Storage Service (3.6).
 
-**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)/5.4b (Audit-Tiefe für Forensik-Trace, seit P7-S2c)/5.6 (Aussonderungs-Lebenszyklusfelder, seit P7-S3)
-**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`)
+**Konzept-Referenz:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (Aufbewahrung/Legal Hold/Zwangslöschung, seit P7-S1)/5.4b (Audit-Tiefe für Forensik-Trace, seit P7-S2c)/5.6 (Aussonderungs-Lebenszyklusfelder, seit P7-S3)/4.2a (Öffentlicher Freigabelink, seit P14-S10)
+**Eigenes Postgres-Schema:** `document` (Tabellen `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`, `share_link_config`, `share_link`)
 
 ## API
 
@@ -52,6 +52,12 @@
 | `PUT` | `/documents/{id}/rehydrated` | Interner Rückruf von `archival-service` nach erfolgreicher Rückholung (seit P7-S3) — publiziert `document.rehydrated` |
 | `GET` | `/metrics` | Eigene Sensoren im Prometheus-Format (10.1, P11-S1) — wird von `monitoring-service` gescraped, nicht direkt von Prometheus. |
 | `GET` | `/healthz` | Health-Check |
+| `GET`/`PUT` | `/share-link-config` | Installationsweiter Schalter für Freigabelinks (`enabled`, `max_validity_days`, 4.2a, seit P14-S10) |
+| `POST` | `/documents/{id}/share-links` | Freigabelink erzeugen (`expires_at`, 4.2a, seit P14-S10) — `401` ohne `X-DMS-Principal`, `404` wenn Feature deaktiviert oder Dokument unbekannt, `400` bei `expires_at` in der Vergangenheit oder jenseits `max_validity_days`, `403` ohne `document.read` auf dem Zielordner (echte `permission-service`-Prüfung, siehe unten). Publiziert `document.share_link.created` |
+| `GET` | `/documents/{id}/share-links` | Alle Freigabelinks eines Dokuments (aktiv + inaktiv, 4.2a, seit P14-S10) — gleiche Auth-/Rechteprüfung wie beim Erzeugen |
+| `DELETE` | `/share-links/{token}` | Freigabelink widerrufen (4.2a, seit P14-S10) — `403` außer für die erzeugende Person oder `X-DMS-Roles: dms-admin` (konfigurierbar, `share_link_revoke_admin_role`). Idempotent, publiziert `document.share_link.revoked` |
+| `GET` | `/public/share-links?token=...` | **Öffentlich, unauthentifiziert** (4.2a, seit P14-S10) — minimale Metadaten (`title`, `content_type`, `size_bytes`, `expires_at`), `404` bei deaktiviertem Feature/unbekanntem Token, `410` bei abgelaufenem/widerrufenem Link. Publiziert `document.share_link.viewed` |
+| `GET` | `/public/share-links/content?token=...` | **Öffentlich, unauthentifiziert** — Dateiinhalt der aktuellen Hauptversion, gleiche Statuscodes wie oben. Publiziert `document.share_link.accessed` |
 
 ## Datenmodell
 
@@ -200,6 +206,10 @@ Dieser Service bleibt alleinige Autorität für die Dokument-Lebenszyklusfelder 
 | `document.archived` | `{archive_format}` (5.6, seit P7-S3) — Rückruf von `archival-service`, sobald die Archivkopie verifiziert ist |
 | `document.dehydrated` | `{}` (5.6, seit P7-S3) — Rückruf von `archival-service`, nachdem die Live-Speicherkopie entfernt wurde |
 | `document.rehydrated` | `{}` (5.6, seit P7-S3) — Rückruf von `archival-service` nach erfolgreicher Rückholung |
+| `document.share_link.created` | `{token, expires_at}` (4.2a, seit P14-S10) |
+| `document.share_link.revoked` | `{token}` (4.2a, seit P14-S10) |
+| `document.share_link.viewed` | `{token}` (4.2a, seit P14-S10) — öffentlicher Metadaten-Abruf, `GET /public/share-links` |
+| `document.share_link.accessed` | `{token}` (4.2a, seit P14-S10) — öffentlicher Inhalts-Download, `GET /public/share-links/content` |
 
 **Konsumiert** (seit P6-S4, erster Konsument dieses Service überhaupt): `permission.approval.approved` — relevant für `action_type == "document.force_unlock"` (Force-Unlock, seit P6-S4) und seit P7-S1 zusätzlich `action_type == "document.force_delete"` (führt die zuvor aufgeschobene Zwangslöschung aus, siehe "Zwangslöschung & Löschregister" oben); alle anderen Aktionstypen werden ignoriert.
 
@@ -214,6 +224,16 @@ Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`:
 ## Sensoren (Konzept 10.1, P11-S1)
 
 `document-service` ist einer der zwei Sensor-Piloten (kein Vollretrofit, siehe P11-S0-Befund): meldet bei der Selbstregistrierung zwei Sensoren an — `document.upload.duration` (Histogram, Gruppe `performance`, Kosten `expensive`, wörtlich Konzept-10.1-Beispielname; gemessen um `POST /documents`, Timer wird nur bei aktivem Sensor überhaupt gestartet) und `document.count.active_total` (Gauge, Gruppe `capacity`, Kosten `cheap`, nutzt dieselbe `repository.count_active_total`-Query wie `GET /documents/count-active-total`, periodisch gesampelt). Beide exponiert über einen eigenen `GET /metrics`. Aktivierungsstatus kommt per TTL-Poll vom `monitoring-service` (`libs/dms-metrics-client.SensorConfigClient`), das auch die eigentliche Sensor-Registry (Katalog + Ein-/Ausschaltkonfiguration) betreibt und diesen Endpunkt scraped — Details siehe `docs/services/monitoring-service.md`/`docs/operations/monitoring.md`.
+
+## Öffentlicher Freigabelink (4.2a, seit P14-S10)
+
+Zeitlich begrenzter, unauthentifizierter Lesezugriff auf genau ein Dokument, per `secrets.token_urlsafe(32)`-Token (zugleich Primärschlüssel der `share_link`-Tabelle, kein separates ID-Feld). Installationsweiter Schalter (`ShareLinkConfig`, `enabled`/`max_validity_days`) — bei Deaktivierung liefern alle vier betroffenen Endpunkte `404` statt `403` ("keine API-Route erreichbar", nächstliegende Annäherung ohne Neustart, siehe ADR 0047) und bereits ausgegebene Links werden ebenfalls sofort ungültig, nicht nur neue Anlagen blockiert.
+
+**Erzeugung** (`POST /documents/{id}/share-links`) prüft — neu für diesen Service — echt gegen `permission-service` (`permission_client.PermissionServiceClient.check_read`, `GET /check?...&permission=document.read`), ob die anfragende Person `document.read` auf dem Zielordner besitzt; erste echte Leserechtsprüfung in `document-service`, das bislang nur den Vier-Augen-Approval-Mechanismus kannte. `expires_at` muss in der Zukunft liegen und innerhalb `max_validity_days`, sonst `400`.
+
+**Öffentlicher Zugriff** läuft über zwei Endpunkte ohne `X-DMS-Principal` (`GET /public/share-links`/`GET /public/share-links/content`), erreichbar über `gateway-service`s `public_routes`-Ausnahmeliste (siehe `docs/services/gateway-service.md`) — das Token reist bewusst als Query-Parameter, nicht als Pfadsegment (siehe ADR 0047). `PublicShareLinkOut` liefert nur das Minimum (`title`, `content_type`, `size_bytes`, `expires_at`), kein `attributes`/`folder_id`/`created_by`. Abgelaufene/widerrufene (aber bekannte) Links liefern `410 Gone` mit unterscheidbarer Fehlermeldung — kein Informationsleck, da die anfragende Person das Token bereits legitim besitzt.
+
+**Widerruf** (`DELETE /share-links/{token}`) ist nur der erzeugenden Person oder `X-DMS-Roles: dms-admin` (konfigurierbar, `share_link_revoke_admin_role`) erlaubt, idempotent.
 
 ## Offene Punkte
 
@@ -233,3 +253,4 @@ Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`:
 - Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowedParentTypes` (siehe ADR 0013) — dieselbe Einschränkung wie beim Object-Type/Folder Service.
 - **`GET /documents/{id}/content` liefert nach dem Dehydrieren ein einfaches `404`** (5.6, seit P7-S3) statt eines spezifischeren 409 mit Rückhol-Verweis — siehe "Aussonderung & Langzeitarchivierung" oben, bewusst kein Kern-Scope von P7-S3.
 - **Keine Existenzprüfung, dass `archival-service` die aufrufende Instanz der internen Aussonderungs-Endpunkte ist** (5.6, seit P7-S3) — `PUT .../archived`/`.../dehydrated`/`.../rehydrated` sind wie die meisten Endpunkte dieses Systems ungegated, siehe "Autorisierung" in `PROGRESS.md`.
+- **Kein Rate-Limiting speziell für Freigabelink-Tokens** (4.2a, seit P14-S10) über das gateway-weite generische IP-Rate-Limiting hinaus — bei ~256 Bit Entropie pro Token als für eine Referenzimplementierung ausreichend eingestuft, siehe ADR 0047. `max_validity_days`-Änderungen wirken zudem nur auf neu erzeugte Links, nicht rückwirkend auf bereits ausgegebene (anders als die vollständige Deaktivierung).

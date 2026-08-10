@@ -59,6 +59,7 @@ const addFavoriteMock = vi.fn();
 const removeFavoriteMock = vi.fn();
 const getDocumentMock = vi.fn();
 const getFolderMock = vi.fn();
+const getShareLinkConfigMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
@@ -85,6 +86,7 @@ vi.mock("@/lib/api", () => ({
   removeFavorite: (...args: unknown[]) => removeFavoriteMock(...args),
   getDocument: (...args: unknown[]) => getDocumentMock(...args),
   getFolder: (...args: unknown[]) => getFolderMock(...args),
+  getShareLinkConfig: (...args: unknown[]) => getShareLinkConfigMock(...args),
   getObjectType: (...args: unknown[]) => getObjectTypeMock(...args),
   listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
@@ -240,6 +242,12 @@ describe("DocumentWorkspace", () => {
     getKennzeichenConfigMock.mockReset();
     getKennzeichenConfigMock.mockResolvedValue({
       show_before_filename: true,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getShareLinkConfigMock.mockReset();
+    getShareLinkConfigMock.mockResolvedValue({
+      enabled: false,
+      max_validity_days: 30,
       updated_at: "2026-01-01T00:00:00Z",
     });
     authState.realmRoles = [];

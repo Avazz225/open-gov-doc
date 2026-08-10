@@ -6,6 +6,7 @@ import {
   addFavorite,
   getApprovalConfig,
   getKennzeichenConfig,
+  getShareLinkConfig,
   listDeletedDocuments,
   listDeletedFolders,
   listFavorites,
@@ -22,6 +23,7 @@ import { formatDocumentTitle } from "@/lib/kennzeichen";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FolderRetentionModal } from "./FolderRetentionModal";
 import { FolderTree } from "./FolderTree";
+import { ShareLinkModal } from "./ShareLinkModal";
 import { UploadForm } from "./UploadForm";
 
 interface BreadcrumbEntry {
@@ -114,6 +116,10 @@ export function ExplorerPane({
   );
   const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(new Set());
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
+  const [shareLinkEnabled, setShareLinkEnabled] = useState(false);
+  const [shareLinkModalDocument, setShareLinkModalDocument] = useState<DocumentSummary | null>(
+    null
+  );
 
   // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
   // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
@@ -158,6 +164,18 @@ export function ExplorerPane({
       .catch(() => {});
     getApprovalConfig(token, "document.delete")
       .then((config) => setDocumentDeleteRequiresApproval(config.requires_approval))
+      .catch(() => {});
+  }, [token]);
+
+  // Öffentlicher Freigabelink (4.2a, P14-S10): der Kontextmenü-Eintrag wird
+  // nur angeboten, wenn die Funktion installationsweit aktiv ist ("kein
+  // Menüpunkt" laut Konzept-Wortlaut bei Deaktivierung) - bei Fehlschlag
+  // bleibt der sichere Default "false", gleiches Fallback-Prinzip wie bei
+  // den übrigen einmalig geladenen Konfigurationen oben.
+  useEffect(() => {
+    if (!token) return;
+    getShareLinkConfig(token)
+      .then((config) => setShareLinkEnabled(config.enabled))
       .catch(() => {});
   }, [token]);
 
@@ -337,6 +355,14 @@ export function ExplorerPane({
           label: isFavorite ? t("explorer.removeFavorite", { name }) : t("explorer.addFavorite", { name }),
           onSelect: () => toggleFavorite("document", doc.id),
         },
+        ...(shareLinkEnabled
+          ? [
+              {
+                label: t("explorer.shareLink", { name }),
+                onSelect: () => setShareLinkModalDocument(doc),
+              },
+            ]
+          : []),
       ],
     });
   }
@@ -613,6 +639,18 @@ export function ExplorerPane({
         <FolderRetentionModal
           folder={retentionModalFolder}
           onClose={() => setRetentionModalFolder(null)}
+        />
+      )}
+
+      {shareLinkModalDocument && (
+        <ShareLinkModal
+          documentId={shareLinkModalDocument.id}
+          documentTitle={formatDocumentTitle(
+            shareLinkModalDocument,
+            documentTypeById,
+            kennzeichenShowByDefault
+          )}
+          onClose={() => setShareLinkModalDocument(null)}
         />
       )}
 

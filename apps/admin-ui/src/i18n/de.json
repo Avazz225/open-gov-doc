@@ -49,6 +49,7 @@
     "superuser": "Superuser Break-Glass",
     "forensicTrace": "Forensik-Trace",
     "auditTraceSettings": "Audit-Tiefe",
+    "shareLinkSettings": "Öffentlicher Freigabelink",
     "retentionSettings": "Aufbewahrung & Papierkorb",
     "deletionRegister": "Löschregister",
     "archivalTransfers": "Aussonderung & Archivierung",
@@ -224,6 +225,15 @@
     "unreachable": "Document Service nicht erreichbar.",
     "allowedContentTypes": "Erlaubte Content-Types",
     "allowedContentTypesHint": "Kommagetrennt, z. B. \"application/pdf, text/plain, application/json\" - leer = keine Einschränkung.",
+    "saved": "Gespeichert.",
+    "updatedAt": "Zuletzt geändert"
+  },
+  "shareLinkSettings": {
+    "pageTitle": "Öffentlicher Freigabelink",
+    "hint": "Installationsweiter Schalter für zeitlich begrenzte, unauthentifizierte Lesezugriffslinks auf einzelne Dokumente (4.2a). Deaktivierung sperrt sofort auch bereits ausgegebene Links, nicht nur neue Anlagen.",
+    "unreachable": "Document Service nicht erreichbar.",
+    "enabled": "Freigabelinks erlauben",
+    "maxValidityDays": "Maximale Gültigkeitsdauer neuer Links (Tage)",
     "saved": "Gespeichert.",
     "updatedAt": "Zuletzt geändert"
   },

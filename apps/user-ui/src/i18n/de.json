@@ -25,6 +25,13 @@
     "submitting": "Melde an...",
     "error": "Anmeldung fehlgeschlagen"
   },
+  "share": {
+    "heading": "Freigegebenes Dokument",
+    "missingToken": "Kein Freigabelink-Token angegeben.",
+    "loadError": "Freigabelink konnte nicht geladen werden.",
+    "expiresAt": "Gültig bis {date}",
+    "download": "Herunterladen"
+  },
   "folderBrowser": {
     "title": "Dokumente",
     "breadcrumbLabel": "Ordnerpfad",
@@ -106,7 +113,8 @@
     "deleteRequestPending": "Löschantrag gestellt - wartet auf Genehmigung durch eine zweite Person.",
     "addFavorite": "\"{name}\" zu Favoriten hinzufügen",
     "removeFavorite": "\"{name}\" aus Favoriten entfernen",
-    "favoriteError": "Favorit konnte nicht geändert werden"
+    "favoriteError": "Favorit konnte nicht geändert werden",
+    "shareLink": "Freigabelink für \"{name}\""
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -157,6 +165,21 @@
   },
   "folderRetention": {
     "heading": "Aufbewahrung & Löschung: {name}"
+  },
+  "shareLinkModal": {
+    "heading": "Freigabelink: {name}",
+    "expiresAtLabel": "Gültig bis",
+    "create": "Link erzeugen",
+    "creating": "Erzeuge...",
+    "createError": "Freigabelink konnte nicht erzeugt werden",
+    "loadError": "Freigabelinks konnten nicht geladen werden",
+    "revoke": "Widerrufen",
+    "revokeError": "Freigabelink konnte nicht widerrufen werden",
+    "empty": "Noch keine Freigabelinks für dieses Dokument.",
+    "urlLabel": "Freigabe-URL",
+    "expiresAt": "Gültig bis {date}",
+    "revokedState": "Widerrufen",
+    "expiredState": "Abgelaufen"
   },
   "approvals": {
     "paneLabel": "Genehmigungen",

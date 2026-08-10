@@ -1470,3 +1470,36 @@ export async function uploadLicense(token: string, licenseToken: string): Promis
   );
   return response.json();
 }
+
+// Öffentlicher Freigabelink (4.2a, P14-S10) - installationsweiter Schalter,
+// gleiches Get/Update-Muster wie RetentionConfig/TrashConfig (document-service).
+export interface ShareLinkConfig {
+  enabled: boolean;
+  max_validity_days: number;
+  updated_at: string;
+}
+
+export async function getShareLinkConfig(token: string): Promise<ShareLinkConfig> {
+  const response = await request("document-service", "share-link-config", {}, token);
+  return response.json();
+}
+
+export async function updateShareLinkConfig(
+  token: string,
+  payload: { enabled: boolean; maxValidityDays: number }
+): Promise<ShareLinkConfig> {
+  const response = await request(
+    "document-service",
+    "share-link-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: payload.enabled,
+        max_validity_days: payload.maxValidityDays,
+      }),
+    },
+    token
+  );
+  return response.json();
+}

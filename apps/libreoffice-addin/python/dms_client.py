@@ -27,8 +27,17 @@ class ApiError(Exception):
         self.message = message
 
 
-def _request(base_url, service_type, path, *, method="GET", token=None, json_body=None,
-             form_fields=None, file_field=None):
+def _request(
+    base_url,
+    service_type,
+    path,
+    *,
+    method="GET",
+    token=None,
+    json_body=None,
+    form_fields=None,
+    file_field=None,
+):
     """`file_field`: optionales `(field_name, filename, content_type, bytes)`-Tupel
     für multipart/form-data-Uploads (Check-in/Dokument anlegen)."""
     url = f"{base_url}/api/{service_type}/{path}"
@@ -68,7 +77,7 @@ def _build_multipart(fields: dict, file_field):
         parts.append(
             f"--{boundary}\r\n"
             f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-            f"{value}\r\n".encode("utf-8")
+            f"{value}\r\n".encode()
         )
     if file_field is not None:
         field_name, filename, content_type, data = file_field
@@ -77,11 +86,11 @@ def _build_multipart(fields: dict, file_field):
                 f"--{boundary}\r\n"
                 f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
                 f"Content-Type: {content_type}\r\n\r\n"
-            ).encode("utf-8")
+            ).encode()
             + data
             + b"\r\n"
         )
-    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    parts.append(f"--{boundary}--\r\n".encode())
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
@@ -89,8 +98,13 @@ def _build_multipart(fields: dict, file_field):
 
 
 def login(base_url, username, password):
-    return _request(base_url, "auth-service", "login", method="POST",
-                     json_body={"username": username, "password": password})
+    return _request(
+        base_url,
+        "auth-service",
+        "login",
+        method="POST",
+        json_body={"username": username, "password": password},
+    )
 
 
 def get_current_user(base_url, token):
@@ -120,10 +134,22 @@ def download_document_content(base_url, token, document_id):
         raise ApiError(exc.code, exc.read().decode("utf-8", errors="replace")) from exc
 
 
-def checkin_version(base_url, token, document_id, *, file_bytes, filename, content_type,
-                     expected_base_version_number, created_by):
+def checkin_version(
+    base_url,
+    token,
+    document_id,
+    *,
+    file_bytes,
+    filename,
+    content_type,
+    expected_base_version_number,
+    created_by,
+):
     return _request(
-        base_url, "document-service", f"documents/{document_id}/versions", method="POST",
+        base_url,
+        "document-service",
+        f"documents/{document_id}/versions",
+        method="POST",
         token=token,
         form_fields={
             "expected_base_version_number": expected_base_version_number,
@@ -133,9 +159,20 @@ def checkin_version(base_url, token, document_id, *, file_bytes, filename, conte
     )
 
 
-def create_document(base_url, token, *, file_bytes, filename, content_type, title, created_by,
-                     object_type_id=None, attributes=None,
-                     derived_from_document_id=None, derived_from_version_number=None):
+def create_document(
+    base_url,
+    token,
+    *,
+    file_bytes,
+    filename,
+    content_type,
+    title,
+    created_by,
+    object_type_id=None,
+    attributes=None,
+    derived_from_document_id=None,
+    derived_from_version_number=None,
+):
     fields = {"title": title, "created_by": created_by}
     if object_type_id is not None:
         fields["object_type_id"] = object_type_id
@@ -145,7 +182,11 @@ def create_document(base_url, token, *, file_bytes, filename, content_type, titl
     if derived_from_version_number is not None:
         fields["derived_from_version_number"] = derived_from_version_number
     return _request(
-        base_url, "document-service", "documents", method="POST", token=token,
+        base_url,
+        "document-service",
+        "documents",
+        method="POST",
+        token=token,
         form_fields=fields,
         file_field=("file", filename, content_type, file_bytes),
     )
@@ -157,18 +198,36 @@ def update_document_metadata(base_url, token, document_id, *, title=None, attrib
         body["title"] = title
     if attributes is not None:
         body["attributes"] = attributes
-    return _request(base_url, "document-service", f"documents/{document_id}", method="PATCH",
-                     token=token, json_body=body)
+    return _request(
+        base_url,
+        "document-service",
+        f"documents/{document_id}",
+        method="PATCH",
+        token=token,
+        json_body=body,
+    )
 
 
 def acquire_lock(base_url, token, document_id, *, locked_by, session_id):
-    return _request(base_url, "document-service", f"documents/{document_id}/lock", method="POST",
-                     token=token, json_body={"locked_by": locked_by, "session_id": session_id})
+    return _request(
+        base_url,
+        "document-service",
+        f"documents/{document_id}/lock",
+        method="POST",
+        token=token,
+        json_body={"locked_by": locked_by, "session_id": session_id},
+    )
 
 
 def release_lock(base_url, token, document_id, *, released_by):
-    return _request(base_url, "document-service", f"documents/{document_id}/lock", method="DELETE",
-                     token=token, json_body={"released_by": released_by})
+    return _request(
+        base_url,
+        "document-service",
+        f"documents/{document_id}/lock",
+        method="DELETE",
+        token=token,
+        json_body={"released_by": released_by},
+    )
 
 
 # --- Ordner/Vorlagenbibliothek --------------------------------------------
@@ -206,8 +265,9 @@ def list_process_definitions(base_url, token):
 
 
 def list_instances_for_document(base_url, token, document_id):
-    return _request(base_url, "workflow-service", f"instances?business_key={document_id}",
-                     token=token)
+    return _request(
+        base_url, "workflow-service", f"instances?business_key={document_id}", token=token
+    )
 
 
 def list_instance_tasks(base_url, token, instance_id):
@@ -216,14 +276,21 @@ def list_instance_tasks(base_url, token, instance_id):
 
 def start_instance(base_url, token, process_definition_id, *, created_by, business_key):
     return _request(
-        base_url, "workflow-service", f"process-definitions/{process_definition_id}/instances",
-        method="POST", token=token,
+        base_url,
+        "workflow-service",
+        f"process-definitions/{process_definition_id}/instances",
+        method="POST",
+        token=token,
         json_body={"created_by": created_by, "business_key": business_key},
     )
 
 
 def complete_task(base_url, token, instance_id, task_id, *, completed_by):
     return _request(
-        base_url, "workflow-service", f"instances/{instance_id}/tasks/{task_id}/complete",
-        method="POST", token=token, json_body={"completed_by": completed_by, "data": {}},
+        base_url,
+        "workflow-service",
+        f"instances/{instance_id}/tasks/{task_id}/complete",
+        method="POST",
+        token=token,
+        json_body={"completed_by": completed_by, "data": {}},
     )

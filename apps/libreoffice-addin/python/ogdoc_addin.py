@@ -62,11 +62,7 @@ def attributes_from_field_values(schema_attribute_names, field_values: dict) -> 
     auf genau die im Objekttyp-Schema bekannten Attributnamen, leere Werte
     werden weggelassen (identisches Verhalten wie ein leeres Textfeld im
     Web-Taskpane, das beim Speichern nicht mitgeschickt wird)."""
-    return {
-        name: field_values[name]
-        for name in schema_attribute_names
-        if field_values.get(name)
-    }
+    return {name: field_values[name] for name in schema_attribute_names if field_values.get(name)}
 
 
 def guess_file_extension(content_type: str | None, fallback: str = ".odt") -> str:
@@ -200,9 +196,16 @@ def _show_hub_dialog() -> str | None:
     pending_template = _STATE.get("pending_template")
 
     model = dialogs.create_dialog_model(smgr, ctx, title="OG Doc", width=220, height=40)
-    dialogs.add_label(model, "lblStatus", x=10, y=8, width=200, height=24,
-                       label=hub_status_text(session, linked, pending_template is not None),
-                       MultiLine=True)
+    dialogs.add_label(
+        model,
+        "lblStatus",
+        x=10,
+        y=8,
+        width=200,
+        height=24,
+        label=hub_status_text(session, linked, pending_template is not None),
+        MultiLine=True,
+    )
 
     buttons = _hub_buttons(session, linked, pending_template is not None)
     y = 36
@@ -288,8 +291,11 @@ def _handle_login():
         settings_store.save_session(
             base_url=base_url, token=token_response["access_token"], username=username
         )
-        _STATE["session"] = {"base_url": base_url, "token": token_response["access_token"],
-                              "username": username}
+        _STATE["session"] = {
+            "base_url": base_url,
+            "token": token_response["access_token"],
+            "username": username,
+        }
         dialog.endExecute()
 
     dialog.getControl("btnLogin").addActionListener(_ActionListener(do_login))
@@ -359,15 +365,21 @@ def _open_document_by_id(smgr, ctx, document_id: str):
     token, base_url = _token(), _base_url()
     detail = dms_client.get_document(base_url, token, document_id)
     content, content_type = dms_client.download_document_content(base_url, token, document_id)
-    new_doc = _load_into_new_window(smgr, ctx, file_bytes=content,
-                                     extension=guess_file_extension(content_type),
-                                     as_template=False)
-    settings_store.set_linked_document(new_doc, document_id, detail["current_version_number"],
-                                        content_type)
+    new_doc = _load_into_new_window(
+        smgr,
+        ctx,
+        file_bytes=content,
+        extension=guess_file_extension(content_type),
+        as_template=False,
+    )
+    settings_store.set_linked_document(
+        new_doc, document_id, detail["current_version_number"], content_type
+    )
     try:
         session_id = str(uuid.uuid4())
-        dms_client.acquire_lock(base_url, token, document_id,
-                                 locked_by=_session()["username"], session_id=session_id)
+        dms_client.acquire_lock(
+            base_url, token, document_id, locked_by=_session()["username"], session_id=session_id
+        )
     except dms_client.ApiError:
         pass  # Sperre bereits von jemand anderem gehalten - schreibgeschützt weiter öffnen
     _STATE["working_doc"] = new_doc
@@ -392,9 +404,7 @@ def _handle_template():
 
     try:
         root_folders = dms_client.list_root_folders(base_url, token)
-        folder = next(
-            (f for f in root_folders if f["name"] == TEMPLATE_LIBRARY_FOLDER_NAME), None
-        )
+        folder = next((f for f in root_folders if f["name"] == TEMPLATE_LIBRARY_FOLDER_NAME), None)
         state["templates"] = (
             dms_client.list_documents_in_folder(base_url, token, folder["id"]) if folder else []
         )
@@ -416,7 +426,10 @@ def _handle_template():
                 base_url, token, template["id"]
             )
             new_doc = _load_into_new_window(
-                smgr, ctx, file_bytes=content, extension=guess_file_extension(content_type),
+                smgr,
+                ctx,
+                file_bytes=content,
+                extension=guess_file_extension(content_type),
                 as_template=True,
             )
         except dms_client.ApiError as exc:
@@ -460,16 +473,23 @@ def _handle_metadata():
         object_type = dms_client.get_object_type(base_url, token, detail["object_type_id"])
         attribute_names = [a["name"] for a in object_type.get("attributes", [])]
 
-    model = dialogs.create_dialog_model(smgr, ctx, title="Metadaten", width=220,
-                                         height=40 + 14 * (len(attribute_names) + 1))
+    model = dialogs.create_dialog_model(
+        smgr, ctx, title="Metadaten", width=220, height=40 + 14 * (len(attribute_names) + 1)
+    )
     dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label="Titel")
     dialogs.add_edit(model, "edTitle", x=10, y=18, width=200, text=detail["title"])
     y = 34
     for name in attribute_names:
         dialogs.add_label(model, f"lblAttr_{name}", x=10, y=y, width=200, label=name)
         y += 10
-        dialogs.add_edit(model, f"edAttr_{name}", x=10, y=y, width=200,
-                          text=str(detail.get("attributes", {}).get(name, "")))
+        dialogs.add_edit(
+            model,
+            f"edAttr_{name}",
+            x=10,
+            y=y,
+            width=200,
+            text=str(detail.get("attributes", {}).get(name, "")),
+        )
         y += 14
     dialogs.add_label(model, "lblError", x=10, y=y, width=200, label="")
     y += 12
@@ -481,12 +501,14 @@ def _handle_metadata():
 
     def do_save():
         title = dialog.getControl("edTitle").getText()
-        field_values = {name: dialog.getControl(f"edAttr_{name}").getText()
-                         for name in attribute_names}
+        field_values = {
+            name: dialog.getControl(f"edAttr_{name}").getText() for name in attribute_names
+        }
         attributes = attributes_from_field_values(attribute_names, field_values)
         try:
-            dms_client.update_document_metadata(base_url, token, document_id, title=title,
-                                                 attributes=attributes)
+            dms_client.update_document_metadata(
+                base_url, token, document_id, title=title, attributes=attributes
+            )
         except dms_client.ApiError as exc:
             dialogs.set_status(dialog, "lblError", f"Speichern fehlgeschlagen: {exc.message}")
             return
@@ -514,8 +536,13 @@ def _handle_save():
     file_bytes = _document_bytes(doc, content_type=linked.content_type)
     filename = f"document{guess_file_extension(linked.content_type)}"
     result = dms_client.checkin_version(
-        base_url, token, linked.document_id, file_bytes=file_bytes, filename=filename,
-        content_type=linked.content_type, expected_base_version_number=linked.version_number,
+        base_url,
+        token,
+        linked.document_id,
+        file_bytes=file_bytes,
+        filename=filename,
+        content_type=linked.content_type,
+        expected_base_version_number=linked.version_number,
         created_by=_session()["username"],
     )
     settings_store.set_linked_document(
@@ -537,16 +564,27 @@ def _handle_save_new_from_template():
         object_type = dms_client.get_object_type(base_url, token, object_type_id)
         attribute_names = [a["name"] for a in object_type.get("attributes", [])]
 
-    model = dialogs.create_dialog_model(smgr, ctx, title="Als neues Dokument speichern",
-                                         width=220, height=40 + 14 * (len(attribute_names) + 1))
+    model = dialogs.create_dialog_model(
+        smgr,
+        ctx,
+        title="Als neues Dokument speichern",
+        width=220,
+        height=40 + 14 * (len(attribute_names) + 1),
+    )
     dialogs.add_label(model, "lblTitle", x=10, y=8, width=200, label="Titel")
     dialogs.add_edit(model, "edTitle", x=10, y=18, width=200)
     y = 34
     for name in attribute_names:
         dialogs.add_label(model, f"lblAttr_{name}", x=10, y=y, width=200, label=name)
         y += 10
-        dialogs.add_edit(model, f"edAttr_{name}", x=10, y=y, width=200,
-                          text=str(pending_template.get("attributes", {}).get(name, "")))
+        dialogs.add_edit(
+            model,
+            f"edAttr_{name}",
+            x=10,
+            y=y,
+            width=200,
+            text=str(pending_template.get("attributes", {}).get(name, "")),
+        )
         y += 14
     dialogs.add_label(model, "lblError", x=10, y=y, width=200, label="")
     y += 12
@@ -561,17 +599,24 @@ def _handle_save_new_from_template():
         if not title.strip():
             dialogs.set_status(dialog, "lblError", "Bitte einen Titel eingeben.")
             return
-        field_values = {name: dialog.getControl(f"edAttr_{name}").getText()
-                         for name in attribute_names}
+        field_values = {
+            name: dialog.getControl(f"edAttr_{name}").getText() for name in attribute_names
+        }
         attributes = attributes_from_field_values(attribute_names, field_values)
         content_type = pending_template["content_type"]
         file_bytes = _document_bytes(doc, content_type=content_type)
         filename = f"document{guess_file_extension(content_type)}"
         try:
             created = dms_client.create_document(
-                base_url, token, file_bytes=file_bytes, filename=filename,
-                content_type=content_type, title=title, created_by=_session()["username"],
-                object_type_id=object_type_id, attributes=attributes,
+                base_url,
+                token,
+                file_bytes=file_bytes,
+                filename=filename,
+                content_type=content_type,
+                title=title,
+                created_by=_session()["username"],
+                object_type_id=object_type_id,
+                attributes=attributes,
                 derived_from_document_id=pending_template["template_id"],
                 derived_from_version_number=pending_template["template_version_number"],
             )
@@ -596,8 +641,9 @@ def _handle_unlink():
     linked = settings_store.get_linked_document(doc)
     if linked is not None:
         try:
-            dms_client.release_lock(base_url, token, linked.document_id,
-                                     released_by=_session()["username"])
+            dms_client.release_lock(
+                base_url, token, linked.document_id, released_by=_session()["username"]
+            )
         except dms_client.ApiError:
             pass  # Sperre ggf. bereits abgelaufen/nie erworben (Lesezugriff) - egal
         settings_store.clear_linked_document(doc)
@@ -626,11 +672,25 @@ def _handle_workflow():
     definitions = dms_client.list_process_definitions(base_url, token)
 
     model = dialogs.create_dialog_model(smgr, ctx, title="Workflow", width=220, height=150)
-    dialogs.add_list_box(model, "lstTasks", x=10, y=8, width=200, height=50,
-                          items=[t["name"] for _iid, t in task_rows])
+    dialogs.add_list_box(
+        model,
+        "lstTasks",
+        x=10,
+        y=8,
+        width=200,
+        height=50,
+        items=[t["name"] for _iid, t in task_rows],
+    )
     dialogs.add_button(model, "btnComplete", x=10, y=60, width=200, label="Abschließen")
-    dialogs.add_list_box(model, "lstDefinitions", x=10, y=76, width=200, height=40,
-                          items=[d["name"] for d in definitions])
+    dialogs.add_list_box(
+        model,
+        "lstDefinitions",
+        x=10,
+        y=76,
+        width=200,
+        height=40,
+        items=[d["name"] for d in definitions],
+    )
     dialogs.add_button(model, "btnStart", x=10, y=118, width=200, label="Workflow starten")
     dialogs.add_label(model, "lblError", x=10, y=134, width=200, label="")
     dialogs.add_button(model, "btnClose", x=10, y=146, width=200, label="Schließen")
@@ -646,8 +706,9 @@ def _handle_workflow():
             return
         instance_id, task = task_rows[index]
         try:
-            dms_client.complete_task(base_url, token, instance_id, task["id"],
-                                      completed_by=_session()["username"])
+            dms_client.complete_task(
+                base_url, token, instance_id, task["id"], completed_by=_session()["username"]
+            )
         except dms_client.ApiError as exc:
             dialogs.set_status(dialog, "lblError", f"Abschließen fehlgeschlagen: {exc.message}")
             return
@@ -661,9 +722,13 @@ def _handle_workflow():
             return
         definition = definitions[index]
         try:
-            dms_client.start_instance(base_url, token, definition["id"],
-                                       created_by=_session()["username"],
-                                       business_key=document_id)
+            dms_client.start_instance(
+                base_url,
+                token,
+                definition["id"],
+                created_by=_session()["username"],
+                business_key=document_id,
+            )
         except dms_client.ApiError as exc:
             dialogs.set_status(dialog, "lblError", f"Start fehlgeschlagen: {exc.message}")
             return

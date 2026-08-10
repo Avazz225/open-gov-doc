@@ -35,6 +35,12 @@ class Settings(BaseServiceSettings):
     # Gateway selbst kennt diesen Schlüssel nicht, lässt den `Authorization`-
     # Header nur unangetastet durch (kein Keycloak-Token-Zwang mehr auf
     # diesen vier Pfaden).
+    # Seit P14-S10 zusätzlich die beiden öffentlichen Freigabelink-Endpunkte
+    # (4.2a) - anonyme Betrachter besitzen keinen Bearer-Token, das Token des
+    # Freigabelinks selbst reist stattdessen als Query-Parameter mit (`?token=`,
+    # siehe document-service.main._resolve_active_share_link), damit diese
+    # beiden Einträge simple, statische Exact-Match-Strings bleiben können,
+    # ohne Wildcard-/Matching-Logik am Gateway selbst zu ändern.
     public_routes: list[str] = [
         "auth-service:login",
         "auth-service:refresh",
@@ -44,6 +50,8 @@ class Settings(BaseServiceSettings):
         "license-service:license/status",
         "license-service:license",
         "config-service:config/import",
+        "document-service:public/share-links",
+        "document-service:public/share-links/content",
     ]
 
     # Not-Shutdown (4.8, P6-S6): während aktivem Wartungsmodus werden alle

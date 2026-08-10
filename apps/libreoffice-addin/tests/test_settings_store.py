@@ -27,16 +27,23 @@ class SessionPersistenceTests(unittest.TestCase):
         self.assertIsNone(settings_store.load_session())
 
     def test_save_and_load_roundtrip(self):
-        settings_store.save_session(base_url="http://localhost:8009", token="tok-1",
-                                     username="alice")
+        settings_store.save_session(
+            base_url="http://localhost:8009", token="tok-1", username="alice"
+        )
         session = settings_store.load_session()
-        self.assertEqual(session, {
-            "base_url": "http://localhost:8009", "token": "tok-1", "username": "alice",
-        })
+        self.assertEqual(
+            session,
+            {
+                "base_url": "http://localhost:8009",
+                "token": "tok-1",
+                "username": "alice",
+            },
+        )
 
     def test_clear_removes_the_file(self):
-        settings_store.save_session(base_url="http://localhost:8009", token="tok-1",
-                                     username="alice")
+        settings_store.save_session(
+            base_url="http://localhost:8009", token="tok-1", username="alice"
+        )
         settings_store.clear_session()
         self.assertIsNone(settings_store.load_session())
 
@@ -52,7 +59,9 @@ class DocumentLinkingTests(unittest.TestCase):
         self.assertIsNone(settings_store.get_linked_document(self.doc))
 
     def test_set_then_get_roundtrip(self):
-        settings_store.set_linked_document(self.doc, "doc-1", 3, "application/vnd.oasis.opendocument.text")
+        settings_store.set_linked_document(
+            self.doc, "doc-1", 3, "application/vnd.oasis.opendocument.text"
+        )
         linked = settings_store.get_linked_document(self.doc)
         self.assertEqual(linked.document_id, "doc-1")
         self.assertEqual(linked.version_number, 3)

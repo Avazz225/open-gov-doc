@@ -1312,3 +1312,89 @@ export async function deleteTeamspaceContact(
     token
   );
 }
+
+// Öffentlicher Freigabelink (4.2a, P14-S10) - zeitlich begrenzter,
+// unauthentifizierter Lesezugriff auf genau ein Dokument. Die beiden
+// `public/...`-Aufrufe unten übergeben bewusst KEIN Token (letzter Parameter
+// von `request()` bleibt weg) - sie laufen über die gateway-eigene
+// `public_routes`-Ausnahmeliste, das Freigabelink-Token selbst reist als
+// Query-Parameter mit, siehe docs/services/gateway-service.md.
+
+export interface ShareLinkConfig {
+  enabled: boolean;
+  max_validity_days: number;
+  updated_at: string;
+}
+
+export async function getShareLinkConfig(token: string): Promise<ShareLinkConfig> {
+  const response = await request("document-service", "share-link-config", {}, token);
+  return response.json();
+}
+
+export interface ShareLink {
+  token: string;
+  document_id: string;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+  revoked_by: string | null;
+}
+
+export async function listShareLinks(token: string, documentId: string): Promise<ShareLink[]> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/share-links`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createShareLink(
+  token: string,
+  documentId: string,
+  expiresAt: string
+): Promise<ShareLink> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/share-links`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expires_at: expiresAt }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function revokeShareLink(token: string, shareToken: string): Promise<void> {
+  await request(
+    "document-service",
+    `share-links/${encodeURIComponent(shareToken)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export interface PublicShareLink {
+  title: string;
+  content_type: string | null;
+  size_bytes: number;
+  expires_at: string;
+}
+
+export async function getPublicShareLink(shareToken: string): Promise<PublicShareLink> {
+  const response = await request(
+    "document-service",
+    `public/share-links?token=${encodeURIComponent(shareToken)}`
+  );
+  return response.json();
+}
+
+export function publicShareLinkContentUrl(shareToken: string): string {
+  return `${GATEWAY_BASE_URL}/api/document-service/public/share-links/content?token=${encodeURIComponent(
+    shareToken
+  )}`;
+}

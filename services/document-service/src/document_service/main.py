@@ -34,6 +34,7 @@ from document_service.folder_client import FolderClient
 from document_service.license_client import LicenseLimitClient
 from document_service.models import Base, Document
 from document_service.object_type_client import ObjectTypeClient
+from document_service.permission_client import PermissionServiceClient
 from document_service.schemas import (
     ArchiveStatusOut,
     AuditTraceConfigIn,
@@ -60,10 +61,15 @@ from document_service.schemas import (
     LockOut,
     LockReleaseRequest,
     MarkArchivedRequest,
+    PublicShareLinkOut,
     ReconcileRestoreDeletionRequest,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
+    ShareLinkConfigIn,
+    ShareLinkConfigOut,
+    ShareLinkCreate,
+    ShareLinkOut,
     TrashConfigIn,
     TrashConfigOut,
     TrashRequest,
@@ -362,6 +368,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.virus_scan_client = VirusScanClient(settings.virus_scan_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.license_limit_client = LicenseLimitClient(
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
     )
@@ -436,6 +443,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.object_type_client.close()
     await app.state.virus_scan_client.close()
     await app.state.approval_client.close()
+    await app.state.permission_client.close()
     await app.state.license_limit_client.close()
     await engine.dispose()
 
@@ -1265,6 +1273,192 @@ async def put_trash_config(
     )
     await session.commit()
     return config
+
+
+def _has_share_link_admin_role(x_dms_roles: str) -> bool:
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    return settings.share_link_revoke_admin_role in roles
+
+
+@app.get("/share-link-config", response_model=ShareLinkConfigOut)
+async def get_share_link_config(session: AsyncSession = Depends(get_session)) -> ShareLinkConfigOut:
+    config = await repository.get_share_link_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/share-link-config", response_model=ShareLinkConfigOut)
+async def put_share_link_config(
+    body: ShareLinkConfigIn, session: AsyncSession = Depends(get_session)
+) -> ShareLinkConfigOut:
+    config = await repository.update_share_link_config(
+        session, enabled=body.enabled, max_validity_days=body.max_validity_days
+    )
+    await session.commit()
+    return config
+
+
+@app.post("/documents/{document_id}/share-links", response_model=ShareLinkOut, status_code=201)
+async def create_share_link(
+    document_id: str,
+    body: ShareLinkCreate,
+    x_dms_principal: str = Header(default=""),
+    x_dms_username: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> ShareLinkOut:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    config = await repository.get_share_link_config(session)
+    if not config.enabled:
+        # Konzept 4.2a: bei Deaktivierung "keine API-Route erreichbar" - hier
+        # als `404` statt `403` umgesetzt (eine FastAPI-Route lässt sich zur
+        # Laufzeit nicht ohne Neustart abmelden), siehe ADR 0047.
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    now = datetime.now(UTC)
+    if body.expires_at <= now:
+        raise HTTPException(status_code=400, detail="expires_at muss in der Zukunft liegen")
+    if body.expires_at > now + timedelta(days=config.max_validity_days):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"expires_at darf höchstens {config.max_validity_days} Tage in der Zukunft liegen"
+            ),
+        )
+
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+
+    link = await repository.create_share_link(
+        session, document_id=document_id, created_by=x_dms_principal, expires_at=body.expires_at
+    )
+    await session.commit()
+    await publish_event(
+        "document.share_link.created",
+        document_id,
+        {"token": link.token, "expires_at": link.expires_at.isoformat()},
+        actor=x_dms_username or x_dms_principal,
+    )
+    return link
+
+
+@app.get("/documents/{document_id}/share-links", response_model=list[ShareLinkOut])
+async def list_share_links(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[ShareLinkOut]:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    config = await repository.get_share_link_config(session)
+    if not config.enabled:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+
+    links = await repository.list_share_links_for_document(session, document_id)
+    await session.commit()
+    return links
+
+
+@app.delete("/share-links/{token}", status_code=204)
+async def revoke_share_link_endpoint(
+    token: str,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    link = await repository.get_share_link(session, token)
+    if link is None:
+        raise HTTPException(status_code=404, detail=f"Freigabelink {token!r} unbekannt")
+    if link.created_by != x_dms_principal and not _has_share_link_admin_role(x_dms_roles):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur die erzeugende Person oder eine Admin-Rolle darf diesen Link widerrufen",
+        )
+
+    await repository.revoke_share_link(session, token, revoked_by=x_dms_principal)
+    await session.commit()
+    await publish_event(
+        "document.share_link.revoked", link.document_id, {"token": token}, actor=x_dms_principal
+    )
+
+
+# --- Öffentliche, unauthentifizierte Endpunkte (4.2a) -----------------------
+# Erreichbar über die Gateway-`public_routes`-Ausnahmeliste (kein
+# X-DMS-Principal, da anonym) - siehe docs/services/gateway-service.md.
+
+
+async def _resolve_active_share_link(session: AsyncSession, token: str):
+    config = await repository.get_share_link_config(session)
+    if not config.enabled:
+        raise HTTPException(status_code=404, detail="Not Found")
+    link = await repository.get_share_link(session, token)
+    if link is None:
+        raise HTTPException(status_code=404, detail="Freigabelink unbekannt")
+    if not repository.is_share_link_active(link, datetime.now(UTC)):
+        detail = "Freigabelink widerrufen" if link.revoked_at else "Freigabelink abgelaufen"
+        raise HTTPException(status_code=410, detail=detail)
+    try:
+        document = await repository.get_document(session, link.document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Dokument nicht mehr vorhanden") from exc
+    return link, document
+
+
+@app.get("/public/share-links", response_model=PublicShareLinkOut)
+async def get_public_share_link(
+    token: str, session: AsyncSession = Depends(get_session)
+) -> PublicShareLinkOut:
+    link, document = await _resolve_active_share_link(session, token)
+    version = await repository.get_current_version(session, document.id)
+    await publish_event("document.share_link.viewed", document.id, {"token": token})
+    await session.commit()
+    return PublicShareLinkOut(
+        title=document.title,
+        content_type=version.content_type,
+        size_bytes=version.size_bytes,
+        expires_at=link.expires_at,
+    )
+
+
+@app.get("/public/share-links/content")
+async def get_public_share_link_content(
+    token: str, session: AsyncSession = Depends(get_session)
+) -> Response:
+    link, document = await _resolve_active_share_link(session, token)
+    version = await repository.get_current_version(session, document.id)
+    try:
+        data = await app.state.storage.download(version.storage_object_key)
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
+        ) from exc
+    await publish_event("document.share_link.accessed", document.id, {"token": token})
+    await session.commit()
+    return Response(content=data, media_type=version.content_type or "application/octet-stream")
 
 
 @app.get("/documents/{document_id}/versions", response_model=list[DocumentVersionOut])

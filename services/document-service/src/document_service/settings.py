@@ -70,3 +70,9 @@ class Settings(BaseServiceSettings):
     # kommt vom `monitoring-service`.
     monitoring_service_base_url: str = "http://localhost:8026"
     sensor_sample_interval_seconds: float = 15.0
+
+    # Öffentlicher Freigabelink (4.2a, P14-S10): wer einen Link vorzeitig
+    # widerrufen darf, ohne dessen Ersteller zu sein - gleiches unabhängig
+    # konfigurierbares Rollen-Setting-Muster wie `kennzeichen_admin_role`/
+    # `governance_bypass_role`, auch wenn der Default identisch ist.
+    share_link_revoke_admin_role: str = "dms-admin"

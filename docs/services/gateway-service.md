@@ -34,7 +34,16 @@ Inbound-Endpunkte; seit P13-S2 zusätzlich vier Routen für den unabhängig
 betriebenen `fleet-management-service` — `registry-service:installation`,
 `license-service:license/status`, `license-service:license`,
 `config-service:config/import`, siehe
-[ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)).
+[ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md);
+seit P14-S10 zusätzlich `document-service:public/share-links` und
+`document-service:public/share-links/content` für den öffentlichen
+Freigabelink (4.2a) — anonyme Betrachter besitzen keinen Bearer-Token dieser
+Installation, das eigentliche Zugriffsgeheimnis ist stattdessen das
+Freigabelink-Token selbst, das als Query-Parameter mitreist (`?token=...`,
+nicht als Pfadsegment) und von `document-service` geprüft wird; dadurch
+bleiben diese beiden neuen Einträge einfache, statische Exact-Match-Strings
+ohne Wildcard-Matching-Logik am Gateway selbst, siehe
+[ADR 0047](../adr/0047-public-share-link-query-param-token-and-disable-semantics.md)).
 Bei Erfolg werden die Identitäts-Claims als
 `X-DMS-Principal`/`X-DMS-Username`/`X-DMS-Roles`-Header an den Downstream
 weitergereicht (aktuell von keinem Backend-Service konsumiert, siehe

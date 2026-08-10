@@ -123,6 +123,16 @@ def test_fleet_management_routes_bypass_gateway_auth_check(client):
         assert response.json().get("detail") != "Fehlender Bearer-Token"
 
 
+def test_public_share_link_routes_bypass_gateway_auth_check(client):
+    """4.2a/P14-S10: anonyme Betrachter eines Freigabelinks besitzen keinen
+    Bearer-Token dieser Installation - das eigentliche Zugriffsgeheimnis ist
+    der Token als Query-Parameter, den document-service selbst prüft (siehe
+    dortiges `_resolve_active_share_link`)."""
+    for path in ("public/share-links", "public/share-links/content"):
+        response = client.get(f"/api/document-service/{path}", params={"token": "irrelevant"})
+        assert response.json().get("detail") != "Fehlender Bearer-Token"
+
+
 def test_no_healthy_instance_returns_503(client, make_token):
     token = make_token()
     response = client.get(

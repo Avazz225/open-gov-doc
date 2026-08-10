@@ -1,4 +1,6 @@
 import os
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -9,6 +11,34 @@ from fastapi.testclient import TestClient
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
+
+
+def _grant_document_read(principal_id: str) -> None:
+    """Vergibt `document.read` auf `root` für `principal_id` (4.2a) - gleiches
+    Muster wie search-service's `_grant_root_read`. Dokumente, die über den
+    `upload()`-Helfer ohne `folder_id` angelegt werden, prüfen intern gegen
+    die Ressource `"root"` (siehe main.py's Freigabelink-Endpunkte)."""
+    role = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/roles",
+        json={
+            "name": f"share-link-test-role-{uuid.uuid4().hex[:8]}",
+            "permissions": ["document.read"],
+        },
+        timeout=30.0,
+    )
+    role.raise_for_status()
+    assignment = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": principal_id,
+            "role_id": role.json()["id"],
+            "resource_id": "root",
+        },
+        timeout=30.0,
+    )
+    assignment.raise_for_status()
+
 
 # Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
 # echten Antivirus-Produkten zu Integrationstestzwecken erkannt, hier zum
@@ -1088,6 +1118,270 @@ def test_mark_archived_dehydrated_rehydrated_lifecycle(client):
     rehydrated = client.put(f"/documents/{document_id}/rehydrated")
     assert rehydrated.status_code == 200
     assert rehydrated.json()["dehydrated_at"] is None
+
+
+# --- Öffentlicher Freigabelink (4.2a, P14-S10) ------------------------------
+
+
+def _future(days: float) -> str:
+    return (datetime.now(UTC) + timedelta(days=days)).isoformat()
+
+
+def test_share_link_config_get_and_put_roundtrip(client):
+    get_response = client.get("/share-link-config")
+    assert get_response.status_code == 200
+    assert get_response.json() == {
+        "enabled": True,
+        "max_validity_days": 30,
+        "updated_at": get_response.json()["updated_at"],
+    }
+
+    put_response = client.put("/share-link-config", json={"enabled": True, "max_validity_days": 7})
+    assert put_response.status_code == 200
+    assert put_response.json()["max_validity_days"] == 7
+    # Aufräumen.
+    client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
+
+
+def test_create_share_link_requires_principal_header(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/share-links", json={"expires_at": _future(1)})
+    assert response.status_code == 401
+
+
+def test_create_share_link_returns_404_for_unknown_document(client):
+    response = client.post(
+        "/documents/does-not-exist/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 404
+
+
+def test_create_share_link_rejects_expiry_in_the_past(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(-1)},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 400
+
+
+def test_create_share_link_rejects_expiry_beyond_max_validity(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(365)},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 400
+
+
+def test_create_share_link_requires_read_permission(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_create_share_link_returns_404_when_feature_disabled(client):
+    document_id = upload(client).json()["id"]
+    client.put("/share-link-config", json={"enabled": False, "max_validity_days": 30})
+    try:
+        response = client.post(
+            f"/documents/{document_id}/share-links",
+            json={"expires_at": _future(1)},
+            headers={"X-DMS-Principal": "alice"},
+        )
+        assert response.status_code == 404
+    finally:
+        client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
+
+
+def test_create_share_link_succeeds_and_publishes_event(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert len(body["token"]) >= 32
+    assert body["document_id"] == document_id
+    assert body["created_by"] == principal
+    assert body["revoked_at"] is None
+
+    created_events = [e for e in published if e.event_type == "document.share_link.created"]
+    assert len(created_events) == 1
+
+
+def test_list_share_links_requires_read_permission(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.get(
+        f"/documents/{document_id}/share-links",
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_list_share_links_returns_all_links_for_the_document(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+
+    client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    )
+    client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(2)},
+        headers={"X-DMS-Principal": principal},
+    )
+
+    response = client.get(
+        f"/documents/{document_id}/share-links", headers={"X-DMS-Principal": principal}
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_revoke_share_link_requires_creator_or_admin_role(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    ).json()["token"]
+
+    forbidden = client.delete(f"/share-links/{token}", headers={"X-DMS-Principal": "someone-else"})
+    assert forbidden.status_code == 403
+
+    admin = client.delete(
+        f"/share-links/{token}",
+        headers={"X-DMS-Principal": "an-admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert admin.status_code == 204
+
+
+def test_revoke_share_link_by_creator_succeeds(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    ).json()["token"]
+
+    response = client.delete(f"/share-links/{token}", headers={"X-DMS-Principal": principal})
+    assert response.status_code == 204
+
+
+def test_revoke_share_link_unknown_token_returns_404(client):
+    response = client.delete("/share-links/does-not-exist", headers={"X-DMS-Principal": "alice"})
+    assert response.status_code == 404
+
+
+def test_public_share_link_returns_minimal_metadata_without_authentication(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client, title="Öffentliches Dokument", content=b"geheimer Inhalt").json()[
+        "id"
+    ]
+    token = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    ).json()["token"]
+
+    response = client.get("/public/share-links", params={"token": token})
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "title": "Öffentliches Dokument",
+        "content_type": "text/plain",
+        "size_bytes": len(b"geheimer Inhalt"),
+        "expires_at": body["expires_at"],
+    }
+    assert "attributes" not in body
+    assert "created_by" not in body
+
+
+def test_public_share_link_content_downloads_original_bytes(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client, content=b"Freigegebener Inhalt").json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    ).json()["token"]
+
+    response = client.get("/public/share-links/content", params={"token": token})
+    assert response.status_code == 200
+    assert response.content == b"Freigegebener Inhalt"
+
+
+def test_public_share_link_unknown_token_returns_404(client):
+    response = client.get("/public/share-links", params={"token": "does-not-exist"})
+    assert response.status_code == 404
+
+
+def test_public_share_link_revoked_returns_410(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    ).json()["token"]
+    client.delete(f"/share-links/{token}", headers={"X-DMS-Principal": principal})
+
+    response = client.get("/public/share-links", params={"token": token})
+    assert response.status_code == 410
+
+
+def test_public_share_link_returns_404_when_feature_disabled(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": principal},
+    ).json()["token"]
+
+    client.put("/share-link-config", json={"enabled": False, "max_validity_days": 30})
+    try:
+        response = client.get("/public/share-links", params={"token": token})
+        assert response.status_code == 404
+    finally:
+        client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
 
 
 def test_archive_endpoints_return_404_for_unknown_document(client):

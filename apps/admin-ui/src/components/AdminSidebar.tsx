@@ -67,6 +67,7 @@ const GROUPS: NavGroup[] = [
       { href: "/superuser/", labelKey: "nav.superuser" },
       { href: "/forensic-trace/", labelKey: "nav.forensicTrace" },
       { href: "/audit-trace-settings/", labelKey: "nav.auditTraceSettings" },
+      { href: "/share-link-settings/", labelKey: "nav.shareLinkSettings" },
     ],
   },
   {

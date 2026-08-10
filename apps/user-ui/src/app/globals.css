@@ -631,6 +631,30 @@ body {
   max-width: 420px;
 }
 
+/* Öffentliche Freigabelink-Seite (4.2a, P14-S10) - eigene, schlanke Box statt
+   `.modal-content` (kein Dialog, eine eigenständige Seite ohne Backdrop). */
+.share-card {
+  max-width: 420px;
+  margin: 2rem auto;
+  padding: 1.5rem;
+  border: 1px solid var(--dms-border);
+  border-radius: 0.5rem;
+}
+
+.share-download-button {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--dms-accent);
+  color: var(--dms-bg);
+  border-radius: 0.375rem;
+  text-decoration: none;
+}
+
+.share-link-url {
+  width: 100%;
+}
+
 /* Upload-Dialog (P5d-S2) - breiter als der Basis-Modal-Zuschnitt, da er
    dynamische Objekttyp-Attributfelder aufnehmen muss. */
 .modal-content-wide {

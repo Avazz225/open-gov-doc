@@ -269,3 +269,45 @@ class ArchiveStatusOut(BaseModel):
 
 class HasActiveHoldOut(BaseModel):
     has_active_hold: bool
+
+
+# --- Öffentlicher Freigabelink (4.2a, P14-S10) ------------------------------
+
+
+class ShareLinkConfigIn(BaseModel):
+    enabled: bool = True
+    max_validity_days: int = 30
+
+
+class ShareLinkConfigOut(ShareLinkConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class ShareLinkCreate(BaseModel):
+    expires_at: datetime
+
+
+class ShareLinkOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    token: str
+    document_id: str
+    created_by: str
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    revoked_by: str | None
+
+
+class PublicShareLinkOut(BaseModel):
+    """Bewusst NUR das für die Anzeige nötige Minimum (Konzept-Wortlaut) -
+    keine `attributes`/`folder_id`/`created_by` o. Ä., die über eine reine
+    Vorschau/den Download hinaus etwas über das Dokument oder seinen Kontext
+    preisgeben würden."""
+
+    title: str
+    content_type: str | None
+    size_bytes: int
+    expires_at: datetime

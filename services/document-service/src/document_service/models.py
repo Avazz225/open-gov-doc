@@ -260,3 +260,45 @@ class AuditTraceRoleOverride(Base):
     log_viewed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     log_downloaded: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ShareLinkConfig(Base):
+    """Öffentlicher Freigabelink (4.2a, P14-S10) - installationsweiter
+    Schalter, gleiches Einzelzeilen-Muster wie ``UploadConfig``/
+    ``RetentionConfig``. ``enabled=False`` heißt laut Konzept-Wortlaut nicht
+    nur "serverseitig blockieren", sondern "API-Route nicht erreichbar" -
+    umgesetzt als `404` statt `403` auf den betroffenen Endpunkten (main.py),
+    da ein echtes Nicht-Registrieren der Route zur Laufzeit ohne Neustart
+    nicht möglich wäre. Default bewusst als Implementierungsentscheidung
+    dieser Session gewählt (Konzept selbst legt sich nicht auf eine
+    Werkseinstellung fest, siehe ADR 0047)."""
+
+    __tablename__ = "share_link_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_validity_days: Mapped[int] = mapped_column(Integer, default=30)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ShareLink(Base):
+    """Ein einzelner Freigabelink (4.2a) - ``token`` ist der Primärschlüssel
+    UND der in der öffentlichen URL verwendete Wert (``secrets.token_urlsafe``,
+    siehe repository.py) - bewusst kein separates, erratbares ID-Feld daneben,
+    das dieselbe Zugriffskraft hätte. Ausschließlich Lesezugriff auf GENAU
+    dieses eine Dokument (kein Ordner-/Metadaten-Zugriff darüber hinaus,
+    Konzept-Wortlaut) - ``document_id`` ist die einzige fachliche Referenz,
+    keine Ordner-ID wird hier je gespeichert."""
+
+    __tablename__ = "share_link"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(128), index=True)
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Zwingend (Konzept-Wortlaut: "kein dauerhaft gültiger Link") - kein
+    # `nullable=True` wie bei Aufbewahrungsfristen, die bewusst unbefristet
+    # sein dürfen.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
