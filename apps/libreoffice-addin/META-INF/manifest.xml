@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pflicht-Manifest jedes .oxt-Pakets (UNO Package Format) - listet die
+  enthaltenen "Komponenten": das Konfigurationsschema (Addons.xcu, für den
+  Menüeintrag) und das Python-Skriptverzeichnis. Kein kompiliertes
+  UNO-Service nötig - Python-Skripte unter python/ werden von LibreOffices
+  eingebautem `ScriptProviderForPython` automatisch erkannt (siehe
+  README.md/docs/services/libreoffice-addin.md).
+-->
+<manifest:manifest xmlns:manifest="http://openoffice.org/2001/manifest">
+  <manifest:file-entry manifest:media-type="application/vnd.sun.star.configuration-data"
+    manifest:full-path="Addons.xcu" />
+</manifest:manifest>

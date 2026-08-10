@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Registriert GENAU EINEN Menüeintrag ("Extras > OG Doc öffnen...") - bewusst
+  dasselbe Ein-Knopf-öffnet-alles-Design wie apps/office-addin (P14-S8, ein
+  einziger Ribbon-Button öffnet den Taskpane): jede Interaktion (Öffnen/
+  Speichern/Metadaten/Workflow/Vorlagen) läuft innerhalb des sich öffnenden
+  "Hub"-Dialogs, keine weiteren Menüpunkte/Symbolleisten-Schaltflächen nötig.
+  Nur für Writer-Textdokumente (com.sun.star.text.TextDocument) - siehe
+  description.xml/ADR 0046 für die Word/Writer-only-Begründung.
+-->
+<oor:component-data xmlns:oor="http://openoffice.org/2001/registry"
+                     xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                     oor:name="Addons"
+                     oor:package="org.openoffice.Office">
+  <node oor:name="AddonUI">
+    <node oor:name="OfficeMenuBarMerging">
+      <node oor:name="org.ogdoc.writer-addin.menu" oor:op="replace">
+        <node oor:name="MergeMenuBar">
+          <node oor:name="m1" oor:op="replace">
+            <prop oor:name="MergePoint"><value>.uno:ToolsMenu\.uno:MacrosMenu</value></prop>
+            <prop oor:name="MergeCommand"><value>AddBefore</value></prop>
+            <prop oor:name="MergeFallback"><value>AddPath</value></prop>
+            <prop oor:name="MergeContext"><value>com.sun.star.text.TextDocument</value></prop>
+            <node oor:name="MenuItems">
+              <node oor:name="mi1" oor:op="replace">
+                <prop oor:name="URL"><value>vnd.sun.star.script:ogdoc_addin.py$open_ogdoc?language=Python&amp;location=user</value></prop>
+                <prop oor:name="Title">
+                  <value xml:lang="de">OG Doc öffnen...</value>
+                  <value xml:lang="en-US">Open OG Doc...</value>
+                </prop>
+                <prop oor:name="Target"><value>_self</value></prop>
+                <prop oor:name="Context"><value>com.sun.star.text.TextDocument</value></prop>
+              </node>
+            </node>
+          </node>
+        </node>
+      </node>
+    </node>
+  </node>
+</oor:component-data>

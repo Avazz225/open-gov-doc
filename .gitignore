@@ -18,6 +18,9 @@ node_modules/
 .next/
 out/
 
+# --- LibreOffice-Add-in-Build (P14-S9) ---
+apps/libreoffice-addin/*.oxt
+
 # --- Env / Secrets ---
 .env
 .env.*

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<description xmlns="http://openoffice.org/extensions/description/2006"
+              xmlns:d="http://openoffice.org/extensions/description/2006"
+              xmlns:xlink="http://www.w3.org/1999/xlink">
+  <identifier value="org.ogdoc.writer-addin" />
+  <version value="1.0.0" />
+  <display-name>
+    <name lang="de">OG Doc</name>
+    <name lang="en">OG Doc</name>
+  </display-name>
+  <!-- Nur Writer (ODF/OOXML-Textdokumente) - dieselbe Word-only-Beschränkung
+       wie apps/office-addin (P14-S8, ADR 0045): "gesamtes Dokument
+       ersetzen" ist eine Writer-XTextDocument-Fähigkeit
+       (`insertDocumentFromURL`), keine vergleichbare API existiert für
+       Calc/Impress. -->
+  <platform value="all" />
+  <!-- `value` prüft NICHT gegen die tatsächliche Produktversion, sondern
+       gegen den intern konstant gehaltenen `ReferenceOOoMajorMinor`-Wert
+       (in LibreOffice 26.2 z. B. weiterhin "4.1", siehe
+       program/versionrc) - ein bei der Live-Verifikation dieser Session
+       echt gefundener Stolperstein: ein zunächst eingetragener Wert
+       "7.0" ließ `unopkg add` mit "unsatisfied dependencies" fehlschlagen,
+       obwohl eine echte LibreOffice-26.2-Instanz installiert war. -->
+  <dependencies>
+    <OpenOffice.org-minimal-version value="4.1" d:name="LibreOffice/OpenOffice 7.0 oder neuer" />
+  </dependencies>
+  <publisher>
+    <name xlink:href="https://localhost:3006" lang="de">OG Doc</name>
+  </publisher>
+  <extension-description>
+    <src lang="de" xlink:href="description/description-de.txt" />
+    <src lang="en" xlink:href="description/description-en.txt" />
+  </extension-description>
+  <icon>
+    <default xlink:href="registration/icon.png" />
+    <high-contrast xlink:href="registration/icon.png" />
+  </icon>
+</description>
