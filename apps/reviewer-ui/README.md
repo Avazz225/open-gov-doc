@@ -49,5 +49,5 @@ npm test
 
 ```bash
 cd ../../infra && docker compose up -d --build reviewer-ui
-curl localhost:3003/
+curl localhost:3005/
 ```

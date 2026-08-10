@@ -1209,8 +1209,10 @@ services:
       DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-600}
       DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
       # Vom Browser aus erreichbare Frontend-Origins (CORS) - bei geänderten
-      # USER_UI_PORT/ADMIN_UI_PORT entsprechend mit anpassen.
-      DMS_CORS_ALLOWED_ORIGINS: ${GATEWAY_SERVICE_CORS_ALLOWED_ORIGINS:-["http://localhost:3000","http://localhost:3001"]}
+      # <APP>_PORT-Werten entsprechend mit anpassen. Enthielt vor P14-S2
+      # PROCESS_DESIGNER_PORT (3002) nicht (real gefundene, mit aufgeräumte
+      # Lücke) - jetzt alle fünf Frontend-Apps vollständig gelistet.
+      DMS_CORS_ALLOWED_ORIGINS: ${GATEWAY_SERVICE_CORS_ALLOWED_ORIGINS:-["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3004","http://localhost:3005"]}
     ports:
       - "${GATEWAY_SERVICE_PORT:-8009}:8000"
     depends_on:
@@ -1262,6 +1264,36 @@ services:
     restart: unless-stopped
     ports:
       - "${PROCESS_DESIGNER_PORT:-3002}:80"
+    depends_on:
+      gateway-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  reviewer-ui:
+    build:
+      context: ..
+      dockerfile: apps/reviewer-ui/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_BASE_URL: ${REVIEWER_UI_GATEWAY_BASE_URL:-http://localhost:8009}
+    restart: unless-stopped
+    ports:
+      - "${REVIEWER_UI_PORT:-3005}:80"
+    depends_on:
+      gateway-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  migration-console:
+    build:
+      context: ..
+      dockerfile: apps/migration-console/Dockerfile
+      args:
+        NEXT_PUBLIC_GATEWAY_BASE_URL: ${MIGRATION_CONSOLE_GATEWAY_BASE_URL:-http://localhost:8009}
+    restart: unless-stopped
+    ports:
+      - "${MIGRATION_CONSOLE_PORT:-3004}:80"
     depends_on:
       gateway-service:
         condition: service_started
