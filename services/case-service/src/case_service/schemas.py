@@ -25,6 +25,18 @@ class CaseOut(BaseModel):
     closed_at: datetime | None
     archive_after: datetime | None
     archived_at: datetime | None
+    vorgangsnummer: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class CaseNumberConfigIn(BaseModel):
+    format: str
+
+
+class CaseNumberConfigOut(BaseModel):
+    format: str
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 

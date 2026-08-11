@@ -698,6 +698,153 @@ export async function purgeQuarantinedScan(token: string, scanId: string): Promi
   );
 }
 
+// Posteingang/Postausgang (2.5/3.3, P15-S3) - technischer Empfang/Versand
+// externer Korrespondenz, Sichtung/Zuordnung durch die Poststelle-Rolle
+// (siehe mail-connector main.py).
+export interface InboundAttachment {
+  id: number;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  scan_status: "clean" | "infected";
+  scan_id: string;
+  resulting_document_id: string | null;
+}
+
+export interface InboundMessage {
+  id: string;
+  from_address: string;
+  subject: string;
+  body_text: string;
+  received_at: string;
+  status: "unassigned" | "proposed_match" | "confirmed" | "rejected";
+  match_type: "kennzeichen" | "vorgangsnummer" | null;
+  match_value: string | null;
+  proposed_target_type: "document" | "case" | null;
+  proposed_target_id: string | null;
+  match_candidates: string[];
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  rejected_reason: string | null;
+  attachments: InboundAttachment[];
+}
+
+export interface OutboundMessage {
+  id: string;
+  to_address: string;
+  subject: string;
+  body: string;
+  related_document_id: string | null;
+  related_case_id: string | null;
+  sent_by: string;
+  sent_at: string;
+  status: "sent" | "failed";
+  error_message: string | null;
+}
+
+export async function listInboundMessages(
+  token: string,
+  statusFilter?: string
+): Promise<InboundMessage[]> {
+  const path = statusFilter
+    ? `inbound?status_filter=${encodeURIComponent(statusFilter)}`
+    : "inbound";
+  const response = await request("mail-connector", path, {}, token);
+  return response.json();
+}
+
+export async function confirmInboundMatch(
+  token: string,
+  messageId: string,
+  params: { title: string; folderId?: string }
+): Promise<InboundMessage> {
+  const response = await request(
+    "mail-connector",
+    `inbound/${encodeURIComponent(messageId)}/confirm-match`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: params.title, folder_id: params.folderId ?? null }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function assignInboundMessage(
+  token: string,
+  messageId: string,
+  params: { title: string; folderId: string; caseId?: string }
+): Promise<InboundMessage> {
+  const response = await request(
+    "mail-connector",
+    `inbound/${encodeURIComponent(messageId)}/assign`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: params.title,
+        folder_id: params.folderId,
+        case_id: params.caseId ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function rejectInboundMessage(
+  token: string,
+  messageId: string,
+  reason?: string
+): Promise<InboundMessage> {
+  const response = await request(
+    "mail-connector",
+    `inbound/${encodeURIComponent(messageId)}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? null }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function sendOutboundMessage(
+  token: string,
+  params: {
+    toAddress: string;
+    subject: string;
+    body: string;
+    relatedDocumentId?: string;
+    relatedCaseId?: string;
+  }
+): Promise<OutboundMessage> {
+  const response = await request(
+    "mail-connector",
+    "outbound",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to_address: params.toAddress,
+        subject: params.subject,
+        body: params.body,
+        related_document_id: params.relatedDocumentId ?? null,
+        related_case_id: params.relatedCaseId ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function listOutboundMessages(token: string): Promise<OutboundMessage[]> {
+  const response = await request("mail-connector", "outbound", {}, token);
+  return response.json();
+}
+
 export interface LegalHold {
   id: string;
   document_id: string;

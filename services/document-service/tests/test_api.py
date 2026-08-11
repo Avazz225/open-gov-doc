@@ -1619,6 +1619,63 @@ def _release_from_quarantine(client, *, content=EICAR_SIGNATURE, title="Fehlalar
     )
 
 
+def test_lookup_by_kennzeichen_finds_matching_document(client):
+    body = upload(client).json()
+    patched = client.patch(
+        f"/documents/{body['id']}",
+        json={"attributes": {"Kennzeichen": "2026-lookup-test"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    assert patched.status_code == 200
+
+    response = client.get("/documents/by-kennzeichen", params={"value": "2026-lookup-test"})
+
+    assert response.status_code == 200
+    ids = [d["id"] for d in response.json()]
+    assert ids == [body["id"]]
+
+
+def test_lookup_by_kennzeichen_returns_empty_list_when_unknown(client):
+    response = client.get("/documents/by-kennzeichen", params={"value": "does-not-exist"})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_lookup_by_kennzeichen_excludes_deleted_documents(client):
+    body = upload(client, folder_id="root").json()
+    client.patch(
+        f"/documents/{body['id']}",
+        json={"attributes": {"Kennzeichen": "2026-lookup-deleted"}},
+        headers={"X-DMS-Roles": "dms-admin"},
+    )
+    client.delete(f"/documents/{body['id']}", params={"deleted_by": "alice"})
+
+    response = client.get("/documents/by-kennzeichen", params={"value": "2026-lookup-deleted"})
+
+    assert response.json() == []
+
+
+def test_lookup_by_kennzeichen_can_return_multiple_documents():
+    """`Kennzeichen` ist nur je Objekttyp+Jahr eindeutig (P5e-S1), nicht
+    global - zwei unterschiedliche Dokumente können denselben Wert tragen
+    (siehe P15-S3, `mail-connector`s Matching muss damit umgehen können)."""
+    with TestClient(app) as c:
+        first = upload(c, title="Erstes").json()
+        second = upload(c, title="Zweites").json()
+        for doc_id in (first["id"], second["id"]):
+            response = c.patch(
+                f"/documents/{doc_id}",
+                json={"attributes": {"Kennzeichen": "2026-lookup-ambiguous"}},
+                headers={"X-DMS-Roles": "dms-admin"},
+            )
+            assert response.status_code == 200
+
+        response = c.get("/documents/by-kennzeichen", params={"value": "2026-lookup-ambiguous"})
+
+    assert response.status_code == 200
+    assert {d["id"] for d in response.json()} == {first["id"], second["id"]}
+
+
 def test_quarantine_release_requires_principal(client):
     response = _release_from_quarantine(client)
     assert response.status_code == 401

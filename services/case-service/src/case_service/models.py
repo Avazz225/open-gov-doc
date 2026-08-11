@@ -39,6 +39,17 @@ class Case(Base):
     # aussonderungsfaehig sind.
     archive_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Vorgangsnummer (2.3/2.5, P15-S3): server-generierter, installationsweit
+    # eindeutiger Bezug (anders als `Document.attributes["Kennzeichen"]", das
+    # nur je Objekttyp+Jahr eindeutig ist) - Grundlage für den neuen
+    # `mail-connector`, der eingehende Post anhand eines im Betreff/Text
+    # gefundenen Tokens automatisch einer Umlaufmappe zuordnen können muss.
+    # Nullable, da nur für ab dieser Session neu angelegte Fälle vergeben
+    # (kein rückwirkendes Befüllen bestehender Zeilen). Bewusst NICHT über
+    # PATCH änderbar (anders als Kennzeichen) - ein stabiler, rein
+    # systemseitig vergebener Bezug ist Voraussetzung für verlässliches
+    # Matching.
+    vorgangsnummer: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class CaseDocumentReference(Base):
@@ -75,3 +86,32 @@ class CaseArchivalConfig(Base):
     default_archive_after_days_closed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CaseNumberConfig(Base):
+    """Installationsweiter Format-String für die Vorgangsnummer (2.3/2.5,
+    P15-S3) - einzelne Zeile (`id=1`), gleiches Muster wie
+    `CaseArchivalConfig`. Bewusst EIN installationsweites Schema statt eines
+    je-Objekttyp-Generators wie beim Kennzeichen (object-type-service kennt
+    "case" nicht als eigene `applies_to`-Kategorie, siehe Kommentar an
+    `CaseArchivalConfig` oben) - für den hier verfolgten Zweck (verlässliches
+    Matching eingehender Post) reicht ein einzelner, garantiert eindeutiger
+    Zähler."""
+
+    __tablename__ = "case_number_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    format: Mapped[str] = mapped_column(String(64), default="{YYYY}-{Laufende_Nummer}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CaseSequence(Base):
+    """Atomarer, gegen Nebenläufigkeit abgesicherter Jahres-Zähler für die
+    Vorgangsnummer (P15-S3) - gleiches Idiom wie object-type-services
+    `ObjectTypeSequence` (P5e-S1), hier ohne Objekttyp-Dimension (eine Zeile
+    je Jahr statt je Objekttyp+Jahr)."""
+
+    __tablename__ = "case_sequence"
+
+    jahr: Mapped[int] = mapped_column(primary_key=True)
+    naechste_nummer: Mapped[int] = mapped_column(default=1)

@@ -36,7 +36,7 @@ from folder_service.schemas import (
     TrashRequest,
     TrashResult,
 )
-from folder_service.settings import ROOT_FOLDER_ID, Settings
+from folder_service.settings import PROTECTED_FOLDER_IDS, ROOT_FOLDER_ID, Settings
 
 settings = Settings()
 configure_logging(settings)
@@ -242,6 +242,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with app.state.session_factory() as session:
         await repository.ensure_root_folder(session)
+        # Posteingang/Postausgang (2.5/3.3, P15-S3).
+        await repository.ensure_special_folders(session)
         # Singleton-Configs einmalig vor dem ersten Request/Poll-Tick anlegen
         # (Race-Vermeidung, siehe document-service P7-S1).
         await repository.get_retention_config(session)
@@ -525,6 +527,18 @@ async def update_folder(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    # Posteingang/Postausgang (2.5, P15-S3): dürfen weder umbenannt noch
+    # verschoben werden - "ein Sonderbereich existiert genau einmal je
+    # Installation", eine Umbenennung/Verschiebung würde das UI-seitige
+    # Wiederfinden über die feste ID (siehe user-ui PoststellePane) brechen.
+    if folder_id in PROTECTED_FOLDER_IDS and (
+        payload.name is not None or payload.parent_id is not None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sonderordner {folder_id!r} kann nicht umbenannt/verschoben werden",
+        )
+
     # Bugfix (P14-S12, gefunden bei der Recherche zur Sammelbearbeitung von
     # Metadaten, 8): Constraint-Prüfung (4.5) griff bislang NUR bei einer
     # tatsächlichen Verschiebung (`is_move`) - eine reine Attribut-/Namens-
@@ -583,6 +597,10 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
     """Sofortiger Hard-Delete - bleibt als Fallback für bereits-leere,
     nie-retention-behaftete Fälle bestehen. Der reguläre Weg ist seit
     P7-S1b `POST /folders/{folder_id}/trash`."""
+    if folder_id in PROTECTED_FOLDER_IDS:
+        raise HTTPException(
+            status_code=409, detail=f"Sonderordner {folder_id!r} kann nicht gelöscht werden"
+        )
     try:
         await repository.delete_folder(session, folder_id)
     except repository.NotFoundError as exc:
@@ -609,6 +627,11 @@ async def trash_folder(
     exaktes Muster wie `document_service.main.trash_document`/
     `force_release_lock` (P6-S4). Per Default (keine Konfiguration) bleibt
     das Verhalten unverändert: sofortige Ausführung."""
+    if folder_id in PROTECTED_FOLDER_IDS:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sonderordner {folder_id!r} kann nicht in den Papierkorb verschoben werden",
+        )
     if await app.state.approval_client.requires_approval("folder.delete"):
         request = await app.state.approval_client.create_request(
             action_type="folder.delete",

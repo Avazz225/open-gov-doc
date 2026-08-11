@@ -12,7 +12,7 @@ from folder_service.models import (
     RetentionConfig,
     TrashConfig,
 )
-from folder_service.settings import ROOT_FOLDER_ID
+from folder_service.settings import INBOX_FOLDER_ID, OUTBOX_FOLDER_ID, ROOT_FOLDER_ID
 
 _RETENTION_CONFIG_ID = 1
 _TRASH_CONFIG_ID = 1
@@ -57,6 +57,31 @@ async def ensure_root_folder(session: AsyncSession) -> None:
             )
         )
         await session.flush()
+
+
+async def ensure_special_folders(session: AsyncSession) -> None:
+    """Posteingang/Postausgang (2.5/3.3, P15-S3) - identisches Idempotenz-
+    Muster wie `ensure_root_folder` (get-by-fester-PK, insert-if-missing),
+    direkt unter `root` gehängt statt selbst wurzelständig, damit die
+    normale Ordner-Navigation der User-UI sie ohne Sonderfall anzeigen
+    kann."""
+    now = datetime.now(UTC)
+    for folder_id, name in ((INBOX_FOLDER_ID, "Posteingang"), (OUTBOX_FOLDER_ID, "Postausgang")):
+        existing = await session.get(Folder, folder_id)
+        if existing is None:
+            session.add(
+                Folder(
+                    id=folder_id,
+                    name=name,
+                    parent_id=ROOT_FOLDER_ID,
+                    object_type_id=None,
+                    attributes={},
+                    created_by="system",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+    await session.flush()
 
 
 async def _get_folder_row(session: AsyncSession, folder_id: str) -> Folder:

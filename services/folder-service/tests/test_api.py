@@ -39,6 +39,45 @@ def test_root_folder_exists(client):
     assert response.json()["parent_id"] is None
 
 
+def test_inbox_and_outbox_folders_exist_under_root(client):
+    inbox = client.get("/folders/inbox")
+    outbox = client.get("/folders/outbox")
+    assert inbox.status_code == 200
+    assert inbox.json()["parent_id"] == "root"
+    assert inbox.json()["name"] == "Posteingang"
+    assert outbox.status_code == 200
+    assert outbox.json()["parent_id"] == "root"
+    assert outbox.json()["name"] == "Postausgang"
+
+
+def test_inbox_folder_cannot_be_renamed(client):
+    response = client.patch("/folders/inbox", json={"name": "Umbenannt"})
+    assert response.status_code == 409
+
+
+def test_inbox_folder_cannot_be_moved(client):
+    new_parent = client.post("/folders", json={"name": "Ziel", "created_by": "alice"}).json()
+    response = client.patch("/folders/inbox", json={"parent_id": new_parent["id"]})
+    assert response.status_code == 409
+
+
+def test_inbox_folder_cannot_be_hard_deleted(client):
+    response = client.delete("/folders/inbox")
+    assert response.status_code == 409
+
+
+def test_outbox_folder_cannot_be_trashed(client):
+    response = client.post("/folders/outbox/trash", json={"deleted_by": "alice"})
+    assert response.status_code == 409
+
+
+def test_attribute_only_patch_on_inbox_still_allowed(client):
+    """Der Schutz gilt gezielt Name/Elternteil (2.5) - eine reine
+    Attribut-Änderung (kein `name`/`parent_id` im Payload) bleibt möglich."""
+    response = client.patch("/folders/inbox", json={"attributes": {"note": "x"}})
+    assert response.status_code == 200
+
+
 def test_create_folder_defaults_to_root_parent(client):
     response = client.post("/folders", json={"name": "Projekte", "created_by": "alice"})
     assert response.status_code == 201

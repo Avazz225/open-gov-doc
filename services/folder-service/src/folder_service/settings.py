@@ -2,6 +2,20 @@ from dms_common import BaseServiceSettings
 
 ROOT_FOLDER_ID = "root"
 
+# Posteingang/Postausgang (2.5/3.3, P15-S3): weitere feste Sonderordner nach
+# demselben Muster wie ROOT_FOLDER_ID (schlichte, fest bekannte ID statt
+# UUID, kein eigenes `kind`-Unterscheidungsmerkmal - siehe
+# `repository.ensure_special_folders`). Anders als `root` sind diese beiden
+# vor Umbenennen/Verschieben/Löschen geschützt (siehe main.py), da Konzept
+# §2.5 einen Sonderbereich als "existiert genau einmal je Installation"
+# beschreibt - eine bereits vorbestehende, hier bewusst nicht rückwirkend
+# geschlossene Lücke bei `root` selbst (siehe "Offene Punkte" in
+# docs/services/folder-service.md).
+INBOX_FOLDER_ID = "inbox"
+OUTBOX_FOLDER_ID = "outbox"
+SPECIAL_FOLDER_IDS = frozenset({ROOT_FOLDER_ID, INBOX_FOLDER_ID, OUTBOX_FOLDER_ID})
+PROTECTED_FOLDER_IDS = frozenset({INBOX_FOLDER_ID, OUTBOX_FOLDER_ID})
+
 
 class Settings(BaseServiceSettings):
     service_name: str = "folder-service"

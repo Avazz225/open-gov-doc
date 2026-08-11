@@ -25,6 +25,8 @@ from case_service.schemas import (
     CaseDocumentAdd,
     CaseDocumentReferenceOut,
     CaseDocumentRemove,
+    CaseNumberConfigIn,
+    CaseNumberConfigOut,
     CaseOut,
 )
 from case_service.settings import Settings
@@ -52,6 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
+        )
+        # Vorgangsnummer (2.3/2.5, P15-S3) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS vorgangsnummer VARCHAR(64)')
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
@@ -172,6 +178,12 @@ async def create_case(payload: CaseCreate, session: AsyncSession = Depends(get_s
     except ProcessDefinitionUnknownError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # Vorgangsnummer (2.3/2.5, P15-S3): jede neue Umlaufmappe bekommt ab
+    # dieser Session einen server-generierten, installationsweit eindeutigen
+    # Bezug (Grundlage für das automatische Zuordnen eingehender Post über
+    # den neuen mail-connector).
+    vorgangsnummer = await repository.next_vorgangsnummer(session)
+
     case = await repository.create_case(
         session,
         case_id=case_id,
@@ -181,6 +193,7 @@ async def create_case(payload: CaseCreate, session: AsyncSession = Depends(get_s
         process_definition_id=payload.process_definition_id,
         process_instance_id=instance["id"],
         created_by=payload.created_by,
+        vorgangsnummer=vorgangsnummer,
     )
     await session.commit()
     await publish_event(
@@ -199,6 +212,17 @@ async def list_cases(
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
     return await repository.list_cases(session, status=status, object_type_id=object_type_id)
+
+
+@app.get("/cases/by-vorgangsnummer", response_model=list[CaseOut])
+async def list_cases_by_vorgangsnummer(
+    value: str, session: AsyncSession = Depends(get_session)
+) -> list[CaseOut]:
+    """Für den neuen `mail-connector` (2.5/3.3, P15-S3) - vor
+    `/cases/{case_id}` registriert, damit `"by-vorgangsnummer"` nicht als
+    `{case_id}` interpretiert wird (gleiche Route-Reihenfolge-Regel wie
+    `/cases/due-for-archival` unten)."""
+    return await repository.list_cases_by_vorgangsnummer(session, value)
 
 
 @app.get("/cases/due-for-archival", response_model=list[CaseOut])
@@ -350,5 +374,24 @@ async def update_case_archival_config(
         default_archive_after_days_closed=payload.default_archive_after_days_closed,
         archive_encryption_enabled=payload.archive_encryption_enabled,
     )
+    await session.commit()
+    return config
+
+
+@app.get("/case-number-config", response_model=CaseNumberConfigOut)
+async def get_case_number_config(
+    session: AsyncSession = Depends(get_session),
+) -> CaseNumberConfigOut:
+    return await repository.get_case_number_config(session)
+
+
+@app.put("/case-number-config", response_model=CaseNumberConfigOut)
+async def update_case_number_config(
+    payload: CaseNumberConfigIn, session: AsyncSession = Depends(get_session)
+) -> CaseNumberConfigOut:
+    try:
+        config = await repository.update_case_number_format(session, format=payload.format)
+    except repository.InvalidFieldError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return config

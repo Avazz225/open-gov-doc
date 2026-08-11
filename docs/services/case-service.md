@@ -9,8 +9,9 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/cases` | Anlegen (`name`, optional `object_type_id`/`attributes`, `process_definition_id`, `created_by`, optional `initial_data`) — validiert `object_type_id` (falls gesetzt) gegen den Object-Type Service (immer als Wurzel-Objekt, keine Ordner-Elternschaft), startet danach eine Prozessinstanz in workflow-service mit `business_key = case_id`. `400` bei unbekanntem `process_definition_id` |
+| `POST` | `/cases` | Anlegen (`name`, optional `object_type_id`/`attributes`, `process_definition_id`, `created_by`, optional `initial_data`) — validiert `object_type_id` (falls gesetzt) gegen den Object-Type Service (immer als Wurzel-Objekt, keine Ordner-Elternschaft), startet danach eine Prozessinstanz in workflow-service mit `business_key = case_id`. `400` bei unbekanntem `process_definition_id`. Vergibt seit **P15-S3** zusätzlich automatisch eine `vorgangsnummer` (2.3/2.5), siehe unten |
 | `GET` | `/cases` | Liste, Filter `status`/`object_type_id` |
+| `GET` | `/cases/by-vorgangsnummer?value=...` | Vorgangsnummer-Suche (2.5/3.3, seit P15-S3) — vor `/cases/{id}` registriert. Liefert eine Liste (Konsistenz mit `document-service`s Kennzeichen-Lookup), obwohl `vorgangsnummer` per Konstruktion global eindeutig ist. Für den neuen `mail-connector` |
 | `GET` | `/cases/due-for-archival` | Interner Aufruf von `archival-service` (5.6, seit P7-S3b) — vor `/cases/{id}` registriert, damit `"due-for-archival"` nicht als `{case_id}` interpretiert wird |
 | `GET` | `/cases/{id}` | Detail — `404` |
 | `POST` | `/cases/{id}/documents` | Dokumentreferenz hinzufügen (`document_id`, `added_by`) — `400` falls `document_id` laut Document Service unbekannt, `404` falls die Umlaufmappe unbekannt ist, `409` falls sie bereits abgeschlossen ist |
@@ -20,13 +21,15 @@
 | `GET` | `/cases/{id}/archive-status` | Aussonderungsstatus lesen (`archive_after`/`archived_at`, seit P7-S3b) |
 | `PUT` | `/cases/{id}/archived` | Interner Rückruf von `archival-service`, sobald das XDOMEA-Paket verifiziert ist (seit P7-S3b) — publiziert `case.archived` |
 | `GET`/`PUT` | `/case-archival-config` | Installationsweite Aussonderungs-Konfiguration (`default_archive_after_days_closed`, `archive_encryption_enabled`, seit P7-S3b) |
+| `GET`/`PUT` | `/case-number-config` | Format-String der Vorgangsnummer (2.5, seit P15-S3, Default `{YYYY}-{Laufende_Nummer}`) — `400` bei unbekanntem Platzhalter oder fehlendem `{Laufende_Nummer}` |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
 
-- `cases`: `id` (UUID), `name`, `object_type_id` (opake Referenz, optional), `attributes` (JSON), `status` (`"open"`\|`"closed"`), `process_definition_id`/`process_instance_id` (opake Referenzen auf workflow-service), `created_by`/`created_at`, `closed_at` (nullable), `archive_after`/`archived_at` (beide nullable, 5.6, seit P7-S3b).
+- `cases`: `id` (UUID), `name`, `object_type_id` (opake Referenz, optional), `attributes` (JSON), `status` (`"open"`\|`"closed"`), `process_definition_id`/`process_instance_id` (opake Referenzen auf workflow-service), `created_by`/`created_at`, `closed_at` (nullable), `archive_after`/`archived_at` (beide nullable, 5.6, seit P7-S3b), `vorgangsnummer` (nullable — nur für ab P15-S3 neu angelegte Fälle vergeben, 2.3/2.5).
 - `case_document_reference`: `id`, `case_id` (FK), `document_id` (opake Referenz auf document-service), `added_by`/`added_at`, `removed_by`/`removed_at` (beide nullable — weiche Löschung statt Hard-Delete), `snapshot_version_number` (nullable, nur nach Abschluss gesetzt).
 - `case_archival_config` (5.6, seit P7-S3b): einzelne Zeile (`id=1`, gleiches Singleton-Muster wie document-services `RetentionConfig`) — `default_archive_after_days_closed` (Integer, nullable), `archive_encryption_enabled` (Boolean), `updated_at`.
+- `case_number_config`/`case_sequence` (2.5, seit P15-S3): siehe "Vorgangsnummer" unten.
 
 `business_key` der gestarteten Prozessinstanz ist bewusst **identisch mit der Case-ID** (kein separates Feld) — einzige Grundlage dafür, wie `consumer.py` den späteren Abschluss einer Instanz der richtigen Umlaufmappe zuordnet (siehe "Abschluss-Snapshot" unten).
 
@@ -55,6 +58,15 @@ Nur **geschlossene** Umlaufmappen sind aussonderungsfähig — die eigentliche T
 - **Kein Dehydrieren für Cases selbst** — eine Umlaufmappe besitzt keinen eigenen Live-Inhalt (nur Referenzen), nur die referenzierten Dokumente durchlaufen ihren eigenen, unabhängigen P7-S3-Archivierungs-/Dehydrierungs-Zyklus.
 - **`GET /cases/due-for-archival`** filtert auf `status="closed" AND archive_after <= now AND archived_at IS NULL` — vor `/cases/{id}` registriert (Route-Reihenfolge, s. o.).
 
+## Vorgangsnummer (2.3/2.5, seit P15-S3)
+
+Jede neue Umlaufmappe bekommt automatisch eine server-generierte, **installationsweit eindeutige** `vorgangsnummer` (`POST /cases` ruft intern `repository.next_vorgangsnummer()` auf, bevor die Zeile angelegt wird) — Grundlage für den neuen `mail-connector` (2.5/3.3), der eingehende Post anhand einer im Betreff/Text gefundenen Vorgangsnummer automatisch einer Umlaufmappe zuordnen können muss.
+
+- **Ein einzelner installationsweiter Zähler statt eines je-Objekttyp-Zählers** (anders als document-services Kennzeichengenerator, P5e-S1) — `ObjectType.applies_to` kennt `"case"` nicht als eigene Kategorie (siehe "Objekttyp-Integration" oben), ein eigener, einfacherer Generator direkt in diesem Service vermeidet eine invasive Erweiterung von `object-type-service`. Format konfigurierbar über `GET`/`PUT /case-number-config` (Default `{YYYY}-{Laufende_Nummer}`, Platzhalter `{YYYY}`/`{YY}`/`{Laufende_Nummer}`), atomarer Jahres-Zähler (`case_sequence`, `SELECT ... FOR UPDATE`, identisches Idiom wie `object_type_service.ObjectTypeSequence`).
+- **Nicht über PATCH änderbar** (anders als `Kennzeichen`) — ein stabiler, rein systemseitig vergebener Bezug ist Voraussetzung für verlässliches Matching, kein Anwendungsfall für eine nachträgliche Admin-Änderung in dieser Session.
+- **`GET /cases/by-vorgangsnummer?value=...`** liefert eine Liste (Konsistenz mit dem analogen Dokument-Endpunkt), obwohl die Vorgangsnummer per Konstruktion global eindeutig ist.
+- Vollständige Architekturbegründung: [ADR 0053](../adr/0053-posteingang-postausgang-pop3-loopback-connector-and-cross-service-matching.md).
+
 ## Events
 
 **Publiziert** (Stream `case`, `ensure_stream=True`):
@@ -81,7 +93,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-`uv run pytest services/case-service/tests` (**39 Tests**, davon 13 neu seit P7-S3b):
+`uv run pytest services/case-service/tests` (**45 Tests**, davon 6 neu seit **P15-S3**: eindeutige `vorgangsnummer` je neuer Umlaufmappe, `GET /cases/by-vorgangsnummer` Treffer/leer, `case-number-config`-Roundtrip inkl. Ablehnung eines Formats ohne `{Laufende_Nummer}`/mit unbekanntem Platzhalter; davor 39 Tests, davon 13 neu seit P7-S3b):
 - `test_repository.py` — reine DB-Logik (Anlegen, Referenzen hinzufügen/entfernen, Abschluss-Snapshot inkl. Randfälle: entfernte Referenz bleibt ohne Snapshot, fehlende `document_id` im Snapshot-Dict bleibt ohne Snapshot) — läuft gegen echte Postgres wie überall im Projekt, keine HTTP-Aufrufe (`repository.py` kennt keine Sibling-Services). Seit P7-S3b zusätzlich: `archive_after`-Auflösung bei `close_case` (mit/ohne konfigurierten Default), `CaseArchivalConfig`-CRUD, `list_due_for_archival`-Filter, `request_archive` inkl. `CaseNotClosedError` bei offener Umlaufmappe, `mark_archived`.
 - `test_consumer.py` — simuliertes `workflow.instance.completed`-Event direkt an den Handler (kein echtes NATS nötig, gleiches Muster wie `notification-service/tests/test_consumer.py`), Fake-`DocumentClient` statt echtem HTTP.
 - `test_api.py` — echte Integrationstests gegen lokal erreichbare `workflow-service`-/`document-service`-/`object-type-service`-Instanzen (gleiches Muster wie document-services `folder_client`/`object_type_client`-Tests) — jeder Testfall legt sich seine eigene Prozessdefinition/sein eigenes Testdokument an. Deckt bewusst **nicht** die tatsächliche asynchrone Event-Zustellung ab (siehe `test_consumer.py` für die Konsumentenlogik, Live-Smoke-Test für die Ende-zu-Ende-Verdrahtung). Seit P7-S3b zusätzlich: `/cases/due-for-archival`, `/case-archival-config`-Roundtrip, `409` bei Aussonderungsanfrage für eine offene Umlaufmappe, vollständiger Trigger→Rückruf-Roundtrip für eine über `session`/`repository` direkt geschlossene Umlaufmappe (kein voller BPMN-Durchlauf nötig, um nur die Aussonderungs-Endpunkte zu testen).

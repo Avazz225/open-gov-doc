@@ -63,6 +63,7 @@
     "delegations": "Stellvertretung",
     "trash": "Papierkorb",
     "quarantine": "Quarantäne",
+    "poststelle": "Posteingang/Postausgang",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -295,6 +296,42 @@
     "loadError": "Quarantäne-Bereich konnte nicht geladen werden",
     "releaseError": "Freigabe fehlgeschlagen",
     "purgeError": "Endgültiges Löschen fehlgeschlagen"
+  },
+  "poststelle": {
+    "paneLabel": "Posteingang/Postausgang",
+    "heading": "Posteingang/Postausgang",
+    "hint": "Externe Korrespondenz, die noch keinem Vorgang zugeordnet ist (2.5) - nach Sichtung wandert ein Element in den Aktenplan oder eine Umlaufmappe.",
+    "tabLabel": "Ansicht",
+    "inbox": "Posteingang",
+    "outbox": "Postausgang",
+    "inboxEmpty": "Kein ungesichteter Zulauf.",
+    "outboxEmpty": "Noch keine versandte Post.",
+    "loadError": "Konnte nicht geladen werden",
+    "status": {
+      "unassigned": "nicht zugeordnet",
+      "proposed_match": "Treffer vorgeschlagen",
+      "confirmed": "zugeordnet",
+      "rejected": "verworfen"
+    },
+    "confirm": "Bestätigen",
+    "assign": "Zuordnen",
+    "reject": "Verwerfen",
+    "rejectConfirm": "\"{subject}\" verwerfen?",
+    "rejectError": "Verwerfen fehlgeschlagen",
+    "confirmError": "Bestätigen fehlgeschlagen",
+    "assignError": "Zuordnen fehlgeschlagen",
+    "titleLabel": "Titel",
+    "folderLabel": "Zielordner",
+    "folderOverrideLabel": "Zielordner (optional, sonst wie zugeordnetes Dokument)",
+    "caseLabel": "Umlaufmappe (optional)",
+    "actionConfirm": "Übernehmen",
+    "actionCancel": "Abbrechen",
+    "compose": "Neue Nachricht",
+    "toLabel": "Empfänger",
+    "subjectLabel": "Betreff",
+    "bodyLabel": "Text",
+    "send": "Senden",
+    "sendError": "Versand fehlgeschlagen"
   },
   "delegations": {
     "paneLabel": "Stellvertretung",

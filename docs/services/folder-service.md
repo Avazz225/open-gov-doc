@@ -13,10 +13,10 @@
 | `GET` | `/folders/deleted?parent_id=` | Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1b). Alternativ `?scope=personal\|admin` statt `parent_id` (installationsweiter Papierkorb, 2.5, seit P15-S1), siehe "Papierkorb-Familie" unten |
 | `GET` | `/folders/{id}` | Metadaten — behandelt einen soft-gelöschten Ordner wie nicht existent (404) |
 | `GET` | `/folders/{id}/children` | Direkte Unterordner (nicht gelöschte) |
-| `PATCH` | `/folders/{id}` | Umbenennen und/oder verschieben (`parent_id`) und/oder Attribute ändern |
-| `DELETE` | `/folders/{id}` | Sofortiger Hard-Delete — 409, falls noch Unterordner vorhanden. Fallback für bereits-leere, nie-retention-behaftete Fälle; der reguläre Weg ist seit P7-S1b `POST .../trash` |
+| `PATCH` | `/folders/{id}` | Umbenennen und/oder verschieben (`parent_id`) und/oder Attribute ändern — `inbox`/`outbox` (2.5, seit P15-S3) lehnen ein gesetztes `name`/`parent_id` mit `409` ab, reine Attribut-Änderungen bleiben erlaubt |
+| `DELETE` | `/folders/{id}` | Sofortiger Hard-Delete — 409, falls noch Unterordner vorhanden, oder falls `inbox`/`outbox` (seit P15-S3). Fallback für bereits-leere, nie-retention-behaftete Fälle; der reguläre Weg ist seit P7-S1b `POST .../trash` |
 | `POST` | `/folders/{id}/purge` | Manuelle, sofortige endgültige Löschung eines bereits im Papierkorb liegenden Ordners (2.5, seit P15-S1) — `409` wenn nicht im Papierkorb oder Teilbaum nicht leer, `403` ohne Löschadministration-Rolle, siehe "Papierkorb-Familie" unten |
-| `POST` | `/folders/{id}/trash` | Papierkorb-Weg (5.2, seit P7-S1b) — kaskadiert über den gesamten aktiven Teilbaum. Seit **P7-S1c** optional per Vier-Augen-Prinzip gegated (Aktionstyp `folder.delete`, Löschantrag-Workflow für reguläre Nutzer) — Response `TrashResult{status: "trashed"\|"pending_approval", folder, approval_request_id}` |
+| `POST` | `/folders/{id}/trash` | Papierkorb-Weg (5.2, seit P7-S1b) — kaskadiert über den gesamten aktiven Teilbaum. Seit **P7-S1c** optional per Vier-Augen-Prinzip gegated (Aktionstyp `folder.delete`, Löschantrag-Workflow für reguläre Nutzer) — Response `TrashResult{status: "trashed"\|"pending_approval", folder, approval_request_id}`. `409` für `inbox`/`outbox` (seit P15-S3) |
 | `POST` | `/folders/{id}/restore` | Papierkorb-Wiederherstellung inkl. kaskadierter Unterordner/Dokumente (5.2, seit P7-S1b) |
 | `PUT` | `/folders/{id}/retention` | Aufbewahrungsfrist/Zwangslöschung terminieren (5.2/5.2a, seit P7-S1b) |
 | `POST` | `/legal-holds` | Legal Hold setzen (5.2, seit P7-S1b) |
@@ -28,7 +28,7 @@
 | `GET`/`PUT` | `/trash-config` | Papierkorb-Wiederherstellungsfrist für Ordner (eigenständig) |
 | `GET` | `/healthz` | Health-Check |
 
-Ein Wurzelordner (`id: "root"`) wird beim Start idempotent angelegt — analog zum `ROOT_RESOURCE_ID` des Permission Service.
+Ein Wurzelordner (`id: "root"`) wird beim Start idempotent angelegt — analog zum `ROOT_RESOURCE_ID` des Permission Service. Seit P15-S3 zusätzlich zwei feste Sonderordner **`inbox`**/**`outbox`** (Posteingang/Postausgang, 2.5/3.3) direkt unter `root`, gleiches Idempotenz-Muster (`repository.ensure_special_folders`). Anders als `root` sind sie vor Umbenennen/Verschieben (`PATCH`, 409 bei gesetztem `name`/`parent_id`) und Löschen (`DELETE`/`POST .../trash`, 409) geschützt — ein Sonderbereich "existiert genau einmal je Installation" (2.5). `root` selbst hat diesen Schutz nicht, siehe "Offene Punkte".
 
 ## Datenmodell
 
@@ -98,7 +98,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-**93 Tests** (vorher 79, 14 neu seit **P15-S1**: `test_api.py` bekam Tests für `scope`-Sichtbarkeit auf `GET /folders/deleted` (401/403/personal/admin-Filterung), `POST /folders/{id}/purge` (401/403/404/409-nicht-im-Papierkorb/409-verbleibende-Kind-Zeile/204-Erfolg inkl. Löschregister-Eintrag), `test_retention.py` bekam Tests für `deleted_by`-Persistierung/-Rücksetzung/-Filterung) (`test_api.py`, `test_repository.py`, `test_object_type_validation.py`, `test_events.py`, `test_retention.py`, `test_retention_actions.py`, `test_consumer.py`) — die letzten drei Dateien neu seit P7-S1b (Kaskaden-Logik gegen einen Fake-`DocumentClient`, Poll-Loop-Zweige direkt aufgerufen wie bei `document-service`, Vier-Augen-Consumer-Integration, inkl. eines Regressionstests für einen beim Live-Smoke-Test gefundenen echten Bug — siehe `PROGRESS.md`: die Nicht-leer-Prüfung vor einer Zwangslöschung hielt einen Ordner mit nur einem bereits soft-gelöschten Unterordner fälschlich für leer und crashte an der Postgres-FK-Constraint; `has_any_child_folder_row` prüft seither zusätzlich ohne `deleted_at`-Filter).
+**99 Tests** (vorher 93, 6 neu seit **P15-S3**: `inbox`/`outbox` existieren + liegen unter `root`, Umbenennen/Verschieben/Hart-Löschen/Trashen von `inbox` je `409`, reine Attribut-Änderung bleibt erlaubt; davor 93, vorher 79, 14 neu seit **P15-S1**: `test_api.py` bekam Tests für `scope`-Sichtbarkeit auf `GET /folders/deleted` (401/403/personal/admin-Filterung), `POST /folders/{id}/purge` (401/403/404/409-nicht-im-Papierkorb/409-verbleibende-Kind-Zeile/204-Erfolg inkl. Löschregister-Eintrag), `test_retention.py` bekam Tests für `deleted_by`-Persistierung/-Rücksetzung/-Filterung) (`test_api.py`, `test_repository.py`, `test_object_type_validation.py`, `test_events.py`, `test_retention.py`, `test_retention_actions.py`, `test_consumer.py`) — die letzten drei Dateien neu seit P7-S1b (Kaskaden-Logik gegen einen Fake-`DocumentClient`, Poll-Loop-Zweige direkt aufgerufen wie bei `document-service`, Vier-Augen-Consumer-Integration, inkl. eines Regressionstests für einen beim Live-Smoke-Test gefundenen echten Bug — siehe `PROGRESS.md`: die Nicht-leer-Prüfung vor einer Zwangslöschung hielt einen Ordner mit nur einem bereits soft-gelöschten Unterordner fälschlich für leer und crashte an der Postgres-FK-Constraint; `has_any_child_folder_row` prüft seither zusätzlich ohne `deleted_at`-Filter).
 
 ## Offene Punkte
 
@@ -108,3 +108,4 @@ Noch keine — folgt in Phase 11.
 - Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowedParentTypes` (siehe ADR 0013) — betrifft dieselbe Einschränkung wie beim Object-Type Service.
 - **Keine Legal-Hold-Rollenprüfung** (5.2, seit P7-S1b) — identische offene Frage wie bei `document-service` (P7-S1).
 - **Löschregister nicht Backup-differenziert** (5.2a) — identische Einschränkung wie bei `document-service` (Phase 11 fehlt noch). Bei `document-service` wird das teilweise über die `audit-service`-Hash-Kette kompensiert (`document.>` wird dort konsumiert) — `audit-service` konsumiert bislang **kein** `folder.>` (vorbestehende, nicht in dieser Session eingeführte Lücke), daher fehlt diese Kompensation hier vollständig.
+- **`root` selbst hat keinen Umbenennen-/Verschieben-/Löschen-Schutz** (P15-S3, beim Bauen des neuen `inbox`/`outbox`-Schutzes gefunden) — anders als die beiden neuen Sonderordner ist `root` durch keinen der drei Endpunkte gegen versehentliches Ändern abgesichert. Vorbestehende, echte Lücke, in dieser Session bewusst nicht rückwirkend geschlossen (außerhalb des Sitzungsumfangs, siehe ADR 0053).

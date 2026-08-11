@@ -73,6 +73,24 @@ async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> lis
     return list(result.scalars().all())
 
 
+async def list_documents_by_kennzeichen(session: AsyncSession, kennzeichen: str) -> list[Document]:
+    """Objekttyp-übergreifende Kennzeichen-Suche (2.5/3.3, P15-S3) - für den
+    neuen `mail-connector`, der eingehende Post anhand eines in Betreff/Text
+    gefundenen Kennzeichens einem bestehenden Dokument zuordnen will. Liefert
+    bewusst eine Liste statt eines Einzelobjekts: `Kennzeichen` ist nur je
+    Objekttyp+Jahr eindeutig (P5e-S1-Zählerschema), nicht global - zwei
+    unterschiedliche Objekttypen mit identischem Format können denselben
+    gerenderten String erzeugen. Der Aufrufer muss selbst auf Eindeutigkeit
+    prüfen (0/1/N Treffer)."""
+    result = await session.execute(
+        select(Document).where(
+            Document.attributes["Kennzeichen"].as_string() == kennzeichen,
+            Document.deleted_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def create_document(
     session: AsyncSession,
     *,

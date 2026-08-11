@@ -203,6 +203,59 @@ def test_list_cases_due_for_archival_empty(client):
     assert response.json() == []
 
 
+def test_create_case_assigns_unique_vorgangsnummer(client, process_definition_id):
+    first = client.post(
+        "/cases",
+        json={"name": "A", "process_definition_id": process_definition_id, "created_by": "alice"},
+    ).json()
+    second = client.post(
+        "/cases",
+        json={"name": "B", "process_definition_id": process_definition_id, "created_by": "alice"},
+    ).json()
+
+    assert first["vorgangsnummer"] is not None
+    assert second["vorgangsnummer"] is not None
+    assert first["vorgangsnummer"] != second["vorgangsnummer"]
+
+
+def test_lookup_by_vorgangsnummer_finds_matching_case(client, process_definition_id):
+    created = client.post(
+        "/cases",
+        json={"name": "A", "process_definition_id": process_definition_id, "created_by": "alice"},
+    ).json()
+
+    response = client.get("/cases/by-vorgangsnummer", params={"value": created["vorgangsnummer"]})
+
+    assert response.status_code == 200
+    assert [c["id"] for c in response.json()] == [created["id"]]
+
+
+def test_lookup_by_vorgangsnummer_returns_empty_list_when_unknown(client):
+    response = client.get("/cases/by-vorgangsnummer", params={"value": "does-not-exist"})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_case_number_config_get_put_roundtrip(client):
+    default = client.get("/case-number-config")
+    assert default.status_code == 200
+    assert default.json()["format"] == "{YYYY}-{Laufende_Nummer}"
+
+    updated = client.put("/case-number-config", json={"format": "{YY}/{Laufende_Nummer}"})
+    assert updated.status_code == 200
+    assert updated.json()["format"] == "{YY}/{Laufende_Nummer}"
+
+
+def test_case_number_config_rejects_format_without_laufende_nummer(client):
+    response = client.put("/case-number-config", json={"format": "{YYYY}"})
+    assert response.status_code == 400
+
+
+def test_case_number_config_rejects_unknown_placeholder(client):
+    response = client.put("/case-number-config", json={"format": "{Unbekannt}-{Laufende_Nummer}"})
+    assert response.status_code == 400
+
+
 def test_case_archival_config_get_put_roundtrip(client):
     default = client.get("/case-archival-config")
     assert default.status_code == 200

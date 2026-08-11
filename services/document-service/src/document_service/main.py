@@ -1003,6 +1003,20 @@ async def list_documents(
     return await repository.list_documents_by_folder(session, folder_id)
 
 
+@app.get("/documents/by-kennzeichen", response_model=list[DocumentOut])
+async def list_documents_by_kennzeichen(
+    value: str, session: AsyncSession = Depends(get_session)
+) -> list[DocumentOut]:
+    """Objekttyp-übergreifende Kennzeichen-Suche (2.5/3.3, P15-S3) - Route
+    MUSS vor `/documents/{document_id}` registriert sein, sonst würde
+    FastAPI `"by-kennzeichen"` fälschlich als `document_id` interpretieren
+    (gleiches Muster wie `/documents/deleted`). Liefert eine Liste statt
+    eines Einzeltreffers - `Kennzeichen` ist nicht global eindeutig (siehe
+    `repository.list_documents_by_kennzeichen`), der Aufrufer (z. B.
+    `mail-connector`) muss selbst auf 0/1/N Treffer prüfen."""
+    return await repository.list_documents_by_kennzeichen(session, value)
+
+
 @app.get("/documents/deleted", response_model=list[DocumentOut])
 async def list_deleted_documents(
     folder_id: str | None = None,

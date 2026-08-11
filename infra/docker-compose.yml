@@ -167,9 +167,21 @@ services:
   mailpit:
     image: axllent/mailpit:v1.30.6
     restart: unless-stopped
+    # POP3-Server (seit mailpit v1.15, standardmäßig deaktiviert - erst
+    # `--pop3-auth-file` schaltet ihn frei) dient `mail-connector` (2.5/3.3,
+    # P15-S3) als Selbst-Loopback-Quelle: dieselbe eingelieferte Mail lässt
+    # sich über ein echtes Standardprotokoll wieder abholen, ohne einen
+    # externen Mailserver zu brauchen - gleiches Prinzip wie der Federation-
+    # Hub-Selbst-Loopback (P6-S9). Zugangsdaten (dev-only, Klartext-Datei wie
+    # überall sonst in diesem Repo) müssen zu `mail-connector`s
+    # `DMS_POP3_USERNAME`/`DMS_POP3_PASSWORD` passen.
+    command: ["--pop3", "[::]:1110", "--pop3-auth-file", "/data/pop3-auth"]
+    volumes:
+      - ./mailpit-pop3-auth:/data/pop3-auth:ro
     ports:
       - "${MAILPIT_SMTP_PORT:-1025}:1025"
       - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_POP3_PORT:-1110}:1110"
     networks:
       - dms-net
 
@@ -1014,6 +1026,52 @@ services:
       auth-service:
         condition: service_started
       registry-service:
+        condition: service_started
+    networks:
+      - dms-net
+
+  mail-connector:
+    build:
+      context: ..
+      dockerfile: services/mail-connector/Dockerfile
+    restart: unless-stopped
+    environment:
+      DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
+      DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      DMS_NATS_URL: nats://nats:4222
+      DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
+      DMS_VIRUS_SCAN_SERVICE_BASE_URL: http://virus-scan-service:8000
+      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
+      DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
+      # Posteingang/Postausgang (2.5/3.3, P15-S3): mailpits eigener POP3-
+      # Server dient als Selbst-Loopback-Quelle (siehe dortiger Kommentar) -
+      # Zugangsdaten müssen zu `infra/mailpit-pop3-auth` passen.
+      DMS_POP3_HOST: mailpit
+      DMS_POP3_PORT: "1110"
+      DMS_POP3_USERNAME: ${MAIL_CONNECTOR_POP3_USERNAME:-mailconnector}
+      DMS_POP3_PASSWORD: ${MAIL_CONNECTOR_POP3_PASSWORD:-mailconnector}
+      DMS_SMTP_HOST: mailpit
+      DMS_SMTP_PORT: "1025"
+      DMS_POSTSTELLE_ROLE: ${MAIL_CONNECTOR_POSTSTELLE_ROLE:-dms-poststelle}
+      DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      DMS_SELF_ADDRESS: http://mail-connector:8000
+    ports:
+      - "${MAIL_CONNECTOR_PORT:-8033}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+      storage-service:
+        condition: service_started
+      virus-scan-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      case-service:
         condition: service_started
     networks:
       - dms-net

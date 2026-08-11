@@ -1,14 +1,29 @@
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from case_service.models import Case, CaseArchivalConfig, CaseDocumentReference
+from case_service.models import (
+    Case,
+    CaseArchivalConfig,
+    CaseDocumentReference,
+    CaseNumberConfig,
+    CaseSequence,
+)
 
 _ARCHIVAL_CONFIG_ID = 1
+_NUMBER_CONFIG_ID = 1
+_VORGANGSNUMMER_PLACEHOLDERS = {"YYYY", "YY", "Laufende_Nummer"}
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_]+)\}")
 
 
 class NotFoundError(Exception):
+    pass
+
+
+class InvalidFieldError(Exception):
     pass
 
 
@@ -32,6 +47,7 @@ async def create_case(
     process_definition_id: int,
     process_instance_id: str | None,
     created_by: str,
+    vorgangsnummer: str | None = None,
 ) -> Case:
     case = Case(
         id=case_id,
@@ -43,10 +59,83 @@ async def create_case(
         process_instance_id=process_instance_id,
         created_by=created_by,
         created_at=datetime.now(UTC),
+        vorgangsnummer=vorgangsnummer,
     )
     session.add(case)
     await session.flush()
     return case
+
+
+async def list_cases_by_vorgangsnummer(session: AsyncSession, vorgangsnummer: str) -> list[Case]:
+    """Für den neuen `mail-connector` (2.5/3.3, P15-S3), der eingehende Post
+    anhand einer in Betreff/Text gefundenen Vorgangsnummer einer Umlaufmappe
+    zuordnen will. Liefert eine Liste statt eines Einzelobjekts, konsistent
+    mit `document_service.repository.list_documents_by_kennzeichen` - auch
+    wenn die Vorgangsnummer per Konstruktion global eindeutig ist, bleibt der
+    Aufrufer robust gegenüber einer künftigen Formatänderung."""
+    result = await session.execute(select(Case).where(Case.vorgangsnummer == vorgangsnummer))
+    return list(result.scalars().all())
+
+
+def _render_vorgangsnummer(format_str: str, *, jahr: int, laufende_nummer: int) -> str:
+    return format_str.format(
+        YYYY=f"{jahr:04d}", YY=f"{jahr % 100:02d}", Laufende_Nummer=f"{laufende_nummer:03d}"
+    )
+
+
+async def get_case_number_config(session: AsyncSession) -> CaseNumberConfig:
+    config = await session.get(CaseNumberConfig, _NUMBER_CONFIG_ID)
+    if config is None:
+        config = CaseNumberConfig(id=_NUMBER_CONFIG_ID, updated_at=datetime.now(UTC))
+        session.add(config)
+        await session.flush()
+    return config
+
+
+def _validate_vorgangsnummer_format(format_str: str) -> None:
+    used = set(_PLACEHOLDER_RE.findall(format_str))
+    unknown = sorted(used - _VORGANGSNUMMER_PLACEHOLDERS)
+    if unknown:
+        raise InvalidFieldError(f"format enthält unbekannte Platzhalter: {unknown}")
+    if "Laufende_Nummer" not in used:
+        raise InvalidFieldError("format muss den Platzhalter {Laufende_Nummer} enthalten")
+
+
+async def update_case_number_format(session: AsyncSession, *, format: str) -> CaseNumberConfig:
+    _validate_vorgangsnummer_format(format)
+    config = await get_case_number_config(session)
+    config.format = format
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def _next_case_sequence_number(session: AsyncSession, jahr: int) -> int:
+    """Atomarer Jahres-Zähler (P15-S3) - identisches Idiom wie
+    object_type_service.repository._next_sequence_number (P5e-S1), hier ohne
+    Objekttyp-Dimension."""
+    insert_stmt = (
+        pg_insert(CaseSequence)
+        .values(jahr=jahr, naechste_nummer=1)
+        .on_conflict_do_nothing(index_elements=["jahr"])
+    )
+    await session.execute(insert_stmt)
+
+    result = await session.execute(
+        select(CaseSequence).where(CaseSequence.jahr == jahr).with_for_update()
+    )
+    row = result.scalar_one()
+    assigned = row.naechste_nummer
+    row.naechste_nummer = assigned + 1
+    await session.flush()
+    return assigned
+
+
+async def next_vorgangsnummer(session: AsyncSession) -> str:
+    config = await get_case_number_config(session)
+    jahr = datetime.now(UTC).year
+    laufende_nummer = await _next_case_sequence_number(session, jahr)
+    return _render_vorgangsnummer(config.format, jahr=jahr, laufende_nummer=laufende_nummer)
 
 
 async def get_case(session: AsyncSession, case_id: str) -> Case:

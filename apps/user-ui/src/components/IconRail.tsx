@@ -13,7 +13,8 @@ export type WorkspaceView =
   | "teamspaces"
   | "delegations"
   | "trash"
-  | "quarantine";
+  | "quarantine"
+  | "poststelle";
 
 // Quarantäne-Bereich (2.5/10.3, P15-S2) - anders als der Papierkorb (immer
 // zumindest in der persönlichen Sicht sichtbar) gibt es hier laut Konzept
@@ -22,6 +23,10 @@ export type WorkspaceView =
 // alle anderen Rollen unsichtbar, nicht nur die Aktionen darin (gleiches
 // unabhängig konfigurierbares Rollen-Setting-Muster wie überall im Projekt).
 const QUARANTINE_ADMIN_ROLE = "dms-admin";
+
+// Posteingang/Postausgang (2.5/3.3, P15-S3) - gleiches Muster: "Nur eine
+// dedizierte Poststelle-Rolle sieht/bearbeitet den ungesichteten Zulauf."
+const POSTSTELLE_ROLE = "dms-poststelle";
 
 // Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
 // Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
@@ -38,6 +43,7 @@ export function IconRail({
   const { t } = useI18n();
   const { user } = useAuth();
   const isQuarantineAdmin = Boolean(user?.realm_roles.includes(QUARANTINE_ADMIN_ROLE));
+  const isPoststelle = Boolean(user?.realm_roles.includes(POSTSTELLE_ROLE));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
@@ -114,6 +120,17 @@ export function IconRail({
           onClick={() => onSelectView("quarantine")}
         >
           <span aria-hidden="true">☣️</span>
+        </button>
+      )}
+      {isPoststelle && (
+        <button
+          type="button"
+          className={`icon-rail-button${activeView === "poststelle" ? " icon-rail-active" : ""}`}
+          title={t("iconRail.poststelle")}
+          aria-current={activeView === "poststelle" ? "page" : undefined}
+          onClick={() => onSelectView("poststelle")}
+        >
+          <span aria-hidden="true">📬</span>
         </button>
       )}
       <div className="icon-rail-settings">

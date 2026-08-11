@@ -74,6 +74,12 @@ async def _clean_tables():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text('TRUNCATE "case".case_document_reference, "case".cases CASCADE'))
         await conn.execute(text('TRUNCATE "case".case_archival_config'))
+        # Vorgangsnummer (2.5, P15-S3) - beide ebenfalls Singleton-/Zähler-
+        # Zeilen, sonst leckt z. B. ein per Test geänderter Format-String in
+        # nachfolgende Testläufe (gleiches Vergessen wie ursprünglich bei
+        # case_archival_config oben, hier von Anfang an mitgezogen).
+        await conn.execute(text('TRUNCATE "case".case_number_config'))
+        await conn.execute(text('TRUNCATE "case".case_sequence'))
     await eng.dispose()
     yield
 

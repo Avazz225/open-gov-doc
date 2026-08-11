@@ -75,6 +75,10 @@ class Settings(BaseServiceSettings):
         # Einladen/Entfernen von Mitgliedern (sicherheitsrelevant, da dies das
         # eigentliche, von der uebrigen RBAC unabhaengige Zugriffsregime ist).
         "teamspace.>",
+        # "mail_connector.>" kam in P15-S3 dazu - der neue mail-connector
+        # (2.5/3.3) auditiert Empfang/Zuordnung/Versand externer Korrespondenz
+        # durch die Poststelle-Rolle.
+        "mail_connector.>",
     ]
 
     # Loeschregister-Ledger (10.4, P11-S4): Append-only-Datei auf einem
