@@ -1819,3 +1819,43 @@ export async function revokeDelegation(token: string, delegationId: string): Pro
     token
   );
 }
+
+// Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - bereits ausgesonderte,
+// aber noch innerhalb der Übergangsfrist befindliche Dokumente/Umlaufmappen.
+export interface ReleasedItem {
+  transfer_id: string;
+  kind: "document" | "case";
+  subject_id: string;
+  title: string;
+  identifier: string | null;
+  released_at: string | null;
+  purge_at: string | null;
+}
+
+export async function listReleasedItems(token: string, q?: string): Promise<ReleasedItem[]> {
+  const path = q ? `released-items?q=${encodeURIComponent(q)}` : "released-items";
+  const response = await request("archival-service", path, {}, token);
+  return response.json();
+}
+
+export async function retrieveArchivalTransfer(token: string, transferId: string): Promise<void> {
+  await request(
+    "archival-service",
+    `archival-transfers/${encodeURIComponent(transferId)}/retrieve`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function downloadCaseArchivalPackage(
+  token: string,
+  transferId: string
+): Promise<Blob> {
+  const response = await request(
+    "archival-service",
+    `case-archival-transfers/${encodeURIComponent(transferId)}/package`,
+    {},
+    token
+  );
+  return response.blob();
+}

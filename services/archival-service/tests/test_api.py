@@ -139,6 +139,95 @@ async def test_retrieve_writes_back_to_live_target_and_marks_rehydrated(client, 
     app.state.document_client.mark_rehydrated.assert_awaited_once_with("doc-1")
 
 
+async def test_list_released_items_requires_configured_role(client, session):
+    transfer = await repository.create_transfer(session, "doc-1")
+    await repository.update_status(
+        session, transfer, status="released", released_at=datetime.now(UTC)
+    )
+    await session.commit()
+
+    response = client.get("/released-items")
+
+    assert response.status_code == 403
+
+
+async def test_list_released_items_empty(client):
+    response = client.get("/released-items", headers={"X-DMS-Roles": "dms-admin"})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_list_released_items_excludes_non_released_transfers(client, session):
+    await repository.create_transfer(session, "doc-pending")
+    dehydrated = await repository.create_transfer(session, "doc-dehydrated")
+    await repository.update_status(
+        session,
+        dehydrated,
+        status="dehydrated",
+        released_at=datetime.now(UTC),
+        dehydrated_at=datetime.now(UTC),
+    )
+    await session.commit()
+
+    response = client.get("/released-items", headers={"X-DMS-Roles": "dms-admin"})
+
+    assert response.json() == []
+
+
+async def test_list_released_items_returns_hydrated_document_and_case(client, session):
+    doc_transfer = await repository.create_transfer(session, "doc-1")
+    await repository.update_status(
+        session, doc_transfer, status="released", released_at=datetime.now(UTC)
+    )
+    case_transfer = await repository.create_case_transfer(session, "case-1")
+    await repository.update_status(
+        session, case_transfer, status="released", released_at=datetime.now(UTC)
+    )
+    await session.commit()
+
+    app.state.document_client.get_document.return_value = {
+        "title": "Rueckmeldung Buergeranfrage",
+        "attributes": {"Kennzeichen": "2026-042"},
+    }
+    app.state.case_client.get_case.return_value = {
+        "name": "Bauantrag Musterstrasse",
+        "vorgangsnummer": "2026-007",
+    }
+
+    response = client.get("/released-items", headers={"X-DMS-Roles": "dms-admin"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {item["kind"] for item in body} == {"document", "case"}
+    doc_item = next(i for i in body if i["kind"] == "document")
+    assert doc_item["title"] == "Rueckmeldung Buergeranfrage"
+    assert doc_item["identifier"] == "2026-042"
+    assert doc_item["purge_at"] is not None
+    case_item = next(i for i in body if i["kind"] == "case")
+    assert case_item["identifier"] == "2026-007"
+    assert case_item["purge_at"] is None
+
+
+async def test_list_released_items_filters_by_query(client, session):
+    doc_transfer = await repository.create_transfer(session, "doc-1")
+    await repository.update_status(
+        session, doc_transfer, status="released", released_at=datetime.now(UTC)
+    )
+    await session.commit()
+
+    app.state.document_client.get_document.return_value = {
+        "title": "Rueckmeldung Buergeranfrage",
+        "attributes": {"Kennzeichen": "2026-042"},
+    }
+
+    response = client.get(
+        "/released-items", params={"q": "does-not-match"}, headers={"X-DMS-Roles": "dms-admin"}
+    )
+
+    assert response.json() == []
+
+
 async def test_list_case_archival_transfers_empty(client):
     response = client.get("/case-archival-transfers")
     assert response.status_code == 200

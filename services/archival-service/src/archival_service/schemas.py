@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -22,6 +23,19 @@ class ArchivalTransferOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ReleasedItemOut(BaseModel):
+    """Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - hydratisierte Sicht
+    auf `released`-Transfers, siehe `browse.build_released_items`."""
+
+    transfer_id: str
+    kind: Literal["document", "case"]
+    subject_id: str
+    title: str
+    identifier: str | None
+    released_at: datetime | None
+    purge_at: datetime | None
 
 
 class CaseArchivalTransferOut(BaseModel):

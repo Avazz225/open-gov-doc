@@ -15,7 +15,8 @@ export type WorkspaceView =
   | "trash"
   | "quarantine"
   | "poststelle"
-  | "kontakte";
+  | "kontakte"
+  | "aussonderung";
 
 // Quarantäne-Bereich (2.5/10.3, P15-S2) - anders als der Papierkorb (immer
 // zumindest in der persönlichen Sicht sichtbar) gibt es hier laut Konzept
@@ -28,6 +29,11 @@ const QUARANTINE_ADMIN_ROLE = "dms-admin";
 // Posteingang/Postausgang (2.5/3.3, P15-S3) - gleiches Muster: "Nur eine
 // dedizierte Poststelle-Rolle sieht/bearbeitet den ungesichteten Zulauf."
 const POSTSTELLE_ROLE = "dms-poststelle";
+
+// Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - gleiches Rollen-Gate wie
+// archival-services `archive_retrieval_role` (Konzept 2.5: "eine dedizierte
+// Archiv-/Registratur-Rolle"), keine ungegatete Sicht wie bei Kontakte.
+const ARCHIVAL_ACCESS_ROLE = "dms-admin";
 
 // Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
 // Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
@@ -45,6 +51,7 @@ export function IconRail({
   const { user } = useAuth();
   const isQuarantineAdmin = Boolean(user?.realm_roles.includes(QUARANTINE_ADMIN_ROLE));
   const isPoststelle = Boolean(user?.realm_roles.includes(POSTSTELLE_ROLE));
+  const isArchivalAccess = Boolean(user?.realm_roles.includes(ARCHIVAL_ACCESS_ROLE));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
@@ -143,6 +150,17 @@ export function IconRail({
       >
         <span aria-hidden="true">📇</span>
       </button>
+      {isArchivalAccess && (
+        <button
+          type="button"
+          className={`icon-rail-button${activeView === "aussonderung" ? " icon-rail-active" : ""}`}
+          title={t("iconRail.aussonderung")}
+          aria-current={activeView === "aussonderung" ? "page" : undefined}
+          onClick={() => onSelectView("aussonderung")}
+        >
+          <span aria-hidden="true">🗄️</span>
+        </button>
+      )}
       <div className="icon-rail-settings">
         <button
           type="button"

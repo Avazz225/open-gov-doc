@@ -65,6 +65,7 @@
     "quarantine": "Quarantäne",
     "poststelle": "Posteingang/Postausgang",
     "kontakte": "Kontakte",
+    "aussonderung": "Aussonderung",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -345,6 +346,24 @@
     "federatedHeading": "Föderierte Installationen",
     "empty": "Keine Treffer.",
     "searchError": "Suche fehlgeschlagen"
+  },
+  "aussonderung": {
+    "paneLabel": "Aussonderung",
+    "heading": "Aussonderung",
+    "hint": "Bereits ausgesonderte, aber noch innerhalb der Übergangsfrist befindliche Akten/Umlaufmappen (5.6) - hier durchsuch-/einsehbar, statt nur indirekt über Audit-Trail-Verweise auffindbar zu sein. Nach Ablauf der Übergangsfrist verschwindet ein Dokument automatisch aus dieser Sicht.",
+    "searchPlaceholder": "Titel oder Kennzeichen/Vorgangsnummer",
+    "searchLabel": "Suche",
+    "search": "Suchen",
+    "kindDocument": "Dokument",
+    "kindCase": "Umlaufmappe",
+    "releasedAt": "ausgesondert am {date}",
+    "purgeAt": "Löschung ab {date}",
+    "retrieve": "Rückholung",
+    "downloadPackage": "Paket herunterladen",
+    "empty": "Keine ausgesonderten Elemente innerhalb der Übergangsfrist.",
+    "loadError": "Aussonderungs-Bereich konnte nicht geladen werden",
+    "retrieveError": "Rückholung fehlgeschlagen",
+    "downloadError": "Paket-Download fehlgeschlagen"
   },
   "delegations": {
     "paneLabel": "Stellvertretung",

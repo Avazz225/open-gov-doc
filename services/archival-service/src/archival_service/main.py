@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from archival_service import case_pipeline, crypto, pipeline, repository
+from archival_service import browse, case_pipeline, crypto, pipeline, repository
 from archival_service.clients import (
     CaseClient,
     DocumentClient,
@@ -22,7 +22,7 @@ from archival_service.clients import (
 )
 from archival_service.keystore import EnvKeyStore, KeyNotFoundError
 from archival_service.models import Base
-from archival_service.schemas import ArchivalTransferOut, CaseArchivalTransferOut
+from archival_service.schemas import ArchivalTransferOut, CaseArchivalTransferOut, ReleasedItemOut
 from archival_service.settings import Settings
 
 settings = Settings()
@@ -215,6 +215,43 @@ async def retrieve_archival_transfer(
     )
     await session.commit()
     return transfer
+
+
+@app.get("/released-items", response_model=list[ReleasedItemOut])
+async def list_released_items(
+    q: str | None = None,
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - durchsuchbare Sicht
+    auf bereits ausgesonderte, aber noch innerhalb der Übergangsfrist
+    befindliche Dokumente/Umlaufmappen, statt sie nur indirekt über Audit-
+    Trail-Verweise auffindbar zu machen (Konzept 5.6, wörtlich). Reine
+    gefilterte Sicht auf die bereits bestehende `released`-Zustandsmaschine -
+    kein neuer Datenspeicher. Gleiches Rollen-Gate wie die Rückholung
+    (`archive_retrieval_role`) - Konzept 2.5 nennt für diesen Sonderbereich
+    "dieselben Rollen ... zusätzlich ggf. eine dedizierte Archiv-/
+    Registratur-Rolle", die bereits bestehende Rückhol-Rolle deckt genau
+    diesen Fall ab, ohne ein zweites, redundantes Setting einzuführen."""
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    if settings.archive_retrieval_role not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Rolle {settings.archive_retrieval_role!r} erforderlich für den "
+                "Aussonderungs-Zugriffsbereich"
+            ),
+        )
+    document_transfers = await repository.list_transfers(session, status="released")
+    case_transfers = await repository.list_case_transfers(session, status="released")
+    return await browse.build_released_items(
+        document_transfers,
+        case_transfers,
+        document_client=app.state.document_client,
+        case_client=app.state.case_client,
+        dehydration_delay_days=settings.dehydration_delay_days,
+        query=q,
+    )
 
 
 @app.get("/case-archival-transfers", response_model=list[CaseArchivalTransferOut])

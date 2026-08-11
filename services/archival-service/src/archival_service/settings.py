@@ -25,8 +25,11 @@ class Settings(BaseServiceSettings):
     dehydration_delay_days: int = 30
 
     # Rollen-Gate fuer die Rueckholung (5.6, "Entschluesselung nur fuer
-    # berechtigte Rollen") - gleiches Muster wie
-    # `storage_service.governance_bypass_role`/
+    # berechtigte Rollen") sowie - seit P15-S5 - fuer den lesenden
+    # Aussonderungs-Zugriffsbereich (`GET /released-items`, 2.5): Konzept 2.5
+    # nennt dafuer "eine dedizierte Archiv-/Registratur-Rolle", die bereits
+    # bestehende Rueckhol-Rolle deckt das ab, kein zweites Setting noetig.
+    # Gleiches Muster wie `storage_service.governance_bypass_role`/
     # `document_service.kennzeichen_admin_role`.
     archive_retrieval_role: str = "dms-admin"
 
