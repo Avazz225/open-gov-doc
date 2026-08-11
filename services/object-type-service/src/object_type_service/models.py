@@ -61,14 +61,21 @@ class ObjectType(Base):
     # (5.6) - ueber archival-service's KeyStore-Plugin-Schnittstelle (ADR
     # 0029), Default aus false (unverschluesselt).
     archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Verschlusssachen-Kennzeichnung (2.5, P15-S1) - nur für applies_to ==
-    # "document" gesetzt (der Konzepttext nennt ausdrücklich nur Dokumente,
-    # keine Ordner). Ein als Verschlusssache eingestuftes, gelöschtes
-    # Dokument landet im strukturell getrennten Verschlusssachen-Papierkorb
-    # statt im regulären, siehe document-service `settings.classified_trash_
-    # hard_delete_admin_role`. Keine eigene Klassifizierungsstufen-Systematik
-    # (nur binär), gleiches einfaches Muster wie archive_encryption_enabled.
-    is_classified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Verschlusssachen-Einstufung (2.5, P15-S1, seit P17-S2 mehrstufig statt
+    # binär - 14.2) - nur für applies_to == "document" gesetzt (der
+    # Konzepttext nennt ausdrücklich nur Dokumente, keine Ordner). None =
+    # nicht eingestuft, sonst eine der vier gängigen deutschen
+    # VS-Einstufungen (siehe schemas.ClassificationLevel). Jeder gesetzte
+    # Wert (unabhängig von der konkreten Stufe) löst weiterhin denselben
+    # binären Gate wie zuvor aus: ein klassifiziertes, gelöschtes Dokument
+    # landet im strukturell getrennten Verschlusssachen-Papierkorb statt im
+    # regulären, siehe document-service `settings.classified_trash_hard_
+    # delete_admin_role` - die konkrete Stufe ist reine Zusatzinformation
+    # (Anzeige/Audit), keine zusätzliche Rollen-Differenzierung in dieser
+    # Referenzimplementierung. Ersetzt das bis P17-S1 rein binäre `is_
+    # classified: bool` (identisches schema-gebundenes Architekturmuster,
+    # siehe ADR 0051 "Begründung" - nur der Werteraum wurde erweitert).
+    classification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

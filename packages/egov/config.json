@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "exported_at": "2026-08-11T00:00:00Z",
+  "manifest": {
+    "name": "eGov-Konfigurationspaket",
+    "version": "0.1.0",
+    "compatibility_range": ">=1.0",
+    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - Teil 1 (P17-S2): Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte), Aktenzeichen-Format, Aufbewahrungsfristen-Vorschlag, Verschlusssachen-Klassifizierung. Teil 2 (P17-S3, folgt in einer künftigen Version) ergänzt Poststelle-Rollenvorlage, BPMN-Prozessvorlagen, Vier-Augen-Vorbelegung, Geschäftskalender und erweiterte Admin-Rollen im selben Dokument.",
+    "origin": "dms-project",
+    "license": "MIT"
+  },
+  "object_types": [
+    {
+      "name": "Abteilung",
+      "applies_to": "folder",
+      "attributes": [],
+      "allowed_parent_types": ["$ROOT"],
+      "icon": "folder"
+    },
+    {
+      "name": "Aktenplan",
+      "applies_to": "folder",
+      "attributes": [],
+      "allowed_parent_types": ["Abteilung"],
+      "icon": "folder"
+    },
+    {
+      "name": "Akte",
+      "applies_to": "document",
+      "attributes": [
+        { "name": "Aktentitel", "type": "string", "required": true },
+        { "name": "Federführung", "type": "string", "required": true }
+      ],
+      "allowed_parent_types": ["Aktenplan"],
+      "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+      "default_retention_days": 3653
+    },
+    {
+      "name": "Verschlusssache-Akte",
+      "applies_to": "document",
+      "attributes": [
+        { "name": "Aktentitel", "type": "string", "required": true },
+        { "name": "Federführung", "type": "string", "required": true }
+      ],
+      "allowed_parent_types": ["Aktenplan"],
+      "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+      "default_retention_days": 3653,
+      "classification_level": "VS-NfD"
+    }
+  ]
+}

@@ -61,7 +61,7 @@ async def export_object_types(client: ObjectTypeServiceClient) -> list[ObjectTyp
                 deletion_reason_required_override=object_type["deletion_reason_required_override"],
                 default_archive_after_days=object_type["default_archive_after_days"],
                 archive_encryption_enabled=object_type["archive_encryption_enabled"],
-                is_classified=object_type["is_classified"],
+                classification_level=object_type["classification_level"],
                 layouts=layouts,
             )
         )

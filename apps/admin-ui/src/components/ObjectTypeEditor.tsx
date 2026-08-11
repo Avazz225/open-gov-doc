@@ -11,6 +11,7 @@ import {
   putObjectTypeLayout,
   updateObjectType,
   type AttributeType,
+  type ClassificationLevel,
   type LayoutRow,
   type ObjectType,
   type ObjectTypeAttribute,
@@ -24,6 +25,12 @@ const ATTRIBUTE_TYPES: AttributeType[] = [
   "boolean",
   "date",
   "reference",
+];
+const CLASSIFICATION_LEVELS: ClassificationLevel[] = [
+  "VS-NfD",
+  "VS-VERTRAULICH",
+  "GEHEIM",
+  "STRENG GEHEIM",
 ];
 const ICON_OPTIONS = [
   "folder",
@@ -124,10 +131,12 @@ export function ObjectTypeEditor() {
   // defaultRetentionDays für beide appliesTo-Werte.
   const [defaultArchiveAfterDays, setDefaultArchiveAfterDays] = useState("");
   const [archiveEncryptionEnabled, setArchiveEncryptionEnabled] = useState(false);
-  // Verschlusssachen-Kennzeichnung (2.5, seit P15-S1) - nur für
-  // appliesTo="document" gültig, gleiches clientseitiges Erzwingungsmuster
-  // wie kennzeichenFormat/requiredSignatureLevel oben.
-  const [isClassified, setIsClassified] = useState(false);
+  // Verschlusssachen-Einstufung (2.5, seit P15-S1, mehrstufig seit P17-S2,
+  // 14.2) - nur für appliesTo="document" gültig, gleiches clientseitiges
+  // Erzwingungsmuster wie kennzeichenFormat/requiredSignatureLevel oben.
+  // "" = nicht eingestuft (kein `ClassificationLevel`-Wert ist ein leerer
+  // String, daher als Sentinel für die <select>-Leerauswahl nutzbar).
+  const [classificationLevel, setClassificationLevel] = useState<ClassificationLevel | "">("");
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -168,7 +177,7 @@ export function ObjectTypeEditor() {
     setDeletionReasonRequiredOverride("default");
     setDefaultArchiveAfterDays("");
     setArchiveEncryptionEnabled(false);
-    setIsClassified(false);
+    setClassificationLevel("");
   }
 
   function startEdit(ot: ObjectType) {
@@ -211,7 +220,7 @@ export function ObjectTypeEditor() {
       ot.default_archive_after_days === null ? "" : String(ot.default_archive_after_days)
     );
     setArchiveEncryptionEnabled(ot.archive_encryption_enabled);
-    setIsClassified(ot.is_classified);
+    setClassificationLevel(ot.classification_level ?? "");
     setError(null);
   }
 
@@ -275,9 +284,10 @@ export function ObjectTypeEditor() {
     // beide appliesTo-Werte.
     const defaultArchiveAfterDaysValue =
       defaultArchiveAfterDays.trim() === "" ? null : Number(defaultArchiveAfterDays);
-    // Verschlusssachen-Kennzeichnung (2.5, P15-S1) ist wie Kennzeichen-Felder
-    // nur für Dokumentklassen gültig.
-    const isClassifiedValue = appliesTo === "document" && isClassified;
+    // Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2) ist
+    // wie Kennzeichen-Felder nur für Dokumentklassen gültig.
+    const classificationLevelValue =
+      appliesTo === "document" && classificationLevel !== "" ? classificationLevel : null;
 
     try {
       if (editingId === null) {
@@ -294,7 +304,7 @@ export function ObjectTypeEditor() {
           deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
           defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
           archiveEncryptionEnabled,
-          isClassified: isClassifiedValue,
+          classificationLevel: classificationLevelValue,
         });
 
         // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
@@ -330,7 +340,7 @@ export function ObjectTypeEditor() {
           deletionReasonRequiredOverride: deletionReasonRequiredOverrideValue,
           defaultArchiveAfterDays: defaultArchiveAfterDaysValue,
           archiveEncryptionEnabled,
-          isClassified: isClassifiedValue,
+          classificationLevel: classificationLevelValue,
         });
       }
       resetForm();
@@ -490,18 +500,26 @@ export function ObjectTypeEditor() {
               {t("objectTypes.archiveEncryptionEnabledLabel")}
             </label>
             {appliesTo === "document" && (
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={isClassified}
-                  onChange={(e) => setIsClassified(e.target.checked)}
-                />
-                {t("objectTypes.isClassifiedLabel")}
+              <label>
+                {t("objectTypes.classificationLevelLabel")}
+                <select
+                  value={classificationLevel}
+                  onChange={(e) =>
+                    setClassificationLevel(e.target.value as ClassificationLevel | "")
+                  }
+                >
+                  <option value="">{t("objectTypes.classificationLevelNone")}</option>
+                  {CLASSIFICATION_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {level}
+                    </option>
+                  ))}
+                </select>
               </label>
             )}
           </div>
           {appliesTo === "document" && (
-            <p className="hint">{t("objectTypes.isClassifiedHint")}</p>
+            <p className="hint">{t("objectTypes.classificationLevelHint")}</p>
           )}
 
           <h3>{t("objectTypes.attributesHeading")}</h3>

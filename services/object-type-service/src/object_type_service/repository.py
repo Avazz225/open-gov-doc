@@ -15,8 +15,15 @@ from object_type_service.models import (
 from object_type_service.schemas import LayoutIn, ObjectTypeCreate, ObjectTypeUpdate
 
 # Kennzeichengenerator-Platzhalter (P5e-S1) - siehe PROGRESS.md "Kennzeichengenerator".
+# Datums-/Zähler-Platzhalter sind fest verdrahtet; jeder andere Platzhalter
+# wird seit P17-S2 (14.2) als Attributname interpretiert (z. B.
+# `{Federführung}`), siehe _validate_kennzeichen_format/_render_kennzeichen.
 KENNZEICHEN_PLACEHOLDERS = {"YYYY", "YY", "MM", "DD", "Laufende_Nummer"}
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_]+)\}")
+# `\w` statt `[A-Za-z_]`, damit Unicode-Attributnamen (Umlaute wie in
+# "Federführung") als Platzhalter funktionieren - Python-Bezeichner/-format()
+# unterstützen das ohnehin bereits (PEP 3131), die alte Regex war hier enger
+# als nötig.
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 _KENNZEICHEN_CONFIG_ID = 1
 
 
@@ -31,6 +38,14 @@ class DuplicateNameError(Exception):
 class NoKennzeichenFormatError(Exception):
     """Kein `kennzeichen_format` für diesen Objekttyp konfiguriert - vom
     Aufrufer als 404 zu behandeln (P5e-S1)."""
+
+
+class MissingKennzeichenAttributeError(Exception):
+    """Ein im `kennzeichen_format` referenzierter Attribut-Platzhalter (P17-S2,
+    14.2) hat beim Anlegen keinen Wert erhalten - vom Aufrufer als 422 zu
+    behandeln. Tritt nur auf, wenn das referenzierte Attribut nicht als
+    Pflichtfeld markiert ist (ein Pflichtattribut wäre bereits vorher durch
+    `object_type_client.validate()` durchgesetzt worden)."""
 
 
 class InvalidFieldError(Exception):
@@ -76,7 +91,9 @@ def _validate_icon(applies_to: str, icon: str | None) -> None:
         raise InvalidFieldError("icon ist nur für Ordnerklassen (applies_to='folder') zulässig")
 
 
-def _validate_kennzeichen_format(applies_to: str, kennzeichen_format: str | None) -> None:
+def _validate_kennzeichen_format(
+    applies_to: str, kennzeichen_format: str | None, attributes: list[dict] | None = None
+) -> None:
     if kennzeichen_format is None:
         return
     if applies_to != "document":
@@ -84,9 +101,19 @@ def _validate_kennzeichen_format(applies_to: str, kennzeichen_format: str | None
             "kennzeichen_format ist nur für Dokumentklassen (applies_to='document') zulässig"
         )
     used = set(_PLACEHOLDER_RE.findall(kennzeichen_format))
-    unknown = sorted(used - KENNZEICHEN_PLACEHOLDERS)
+    # Seit P17-S2 (14.2): ein Platzhalter, der kein Datums-/Zähler-Platzhalter
+    # ist, muss auf ein tatsächlich am Objekttyp definiertes Attribut
+    # verweisen (z. B. {Federführung}) - kein beliebiger freier Name, sonst
+    # würde ein Tippfehler erst beim ersten tatsächlichen Anlegen eines
+    # Dokuments (KeyError, siehe _render_kennzeichen) statt schon beim
+    # Speichern des Formats auffallen.
+    attribute_names = {a["name"] for a in (attributes or []) if "name" in a}
+    unknown = sorted(used - KENNZEICHEN_PLACEHOLDERS - attribute_names)
     if unknown:
-        raise InvalidFieldError(f"kennzeichen_format enthält unbekannte Platzhalter: {unknown}")
+        raise InvalidFieldError(
+            f"kennzeichen_format enthält unbekannte Platzhalter (weder Datums-/"
+            f"Zähler-Platzhalter noch ein Attribut dieses Objekttyps): {unknown}"
+        )
     if "Laufende_Nummer" not in used:
         raise InvalidFieldError(
             "kennzeichen_format muss den Platzhalter {Laufende_Nummer} enthalten"
@@ -126,13 +153,15 @@ def _validate_default_archive_after_days(value: int | None) -> None:
         raise InvalidFieldError("default_archive_after_days darf nicht negativ sein")
 
 
-def _validate_is_classified(applies_to: str, value: bool) -> None:
-    """Verschlusssachen-Kennzeichnung (2.5, P15-S1) ist laut Konzepttext nur
-    für Dokumentklassen vorgesehen - gleiche Einschränkung wie beim
-    Kennzeichengenerator/Signaturniveau."""
-    if value and applies_to != "document":
+def _validate_classification_level(applies_to: str, value: str | None) -> None:
+    """Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2) ist
+    laut Konzepttext nur für Dokumentklassen vorgesehen - gleiche
+    Einschränkung wie beim Kennzeichengenerator/Signaturniveau. Die konkrete
+    Stufe selbst wird hier nicht geprüft (Pydantic's `Literal` an der
+    Schema-Grenze übernimmt das bereits, siehe ClassificationLevel)."""
+    if value is not None and applies_to != "document":
         raise InvalidFieldError(
-            "is_classified ist nur für Dokumentklassen (applies_to='document') zulässig"
+            "classification_level ist nur für Dokumentklassen (applies_to='document') zulässig"
         )
 
 
@@ -142,12 +171,12 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         raise DuplicateNameError(f"Objekttyp {payload.name!r} existiert bereits")
     await _validate_allowed_parent_types(session, payload.allowed_parent_types)
     _validate_icon(payload.applies_to, payload.icon)
-    _validate_kennzeichen_format(payload.applies_to, payload.kennzeichen_format)
+    _validate_kennzeichen_format(payload.applies_to, payload.kennzeichen_format, payload.attributes)
     _validate_kennzeichen_display_override(payload.applies_to, payload.kennzeichen_display_override)
     _validate_required_signature_level(payload.applies_to, payload.required_signature_level)
     _validate_default_retention_days(payload.default_retention_days)
     _validate_default_archive_after_days(payload.default_archive_after_days)
-    _validate_is_classified(payload.applies_to, payload.is_classified)
+    _validate_classification_level(payload.applies_to, payload.classification_level)
 
     now = datetime.now(UTC)
     object_type = ObjectType(
@@ -165,7 +194,7 @@ async def create_object_type(session: AsyncSession, payload: ObjectTypeCreate) -
         deletion_reason_required_override=payload.deletion_reason_required_override,
         default_archive_after_days=payload.default_archive_after_days,
         archive_encryption_enabled=payload.archive_encryption_enabled,
-        is_classified=payload.is_classified,
+        classification_level=payload.classification_level,
         created_at=now,
         updated_at=now,
     )
@@ -184,11 +213,17 @@ async def get_object_type(session: AsyncSession, object_type_id: int) -> ObjectT
 async def list_object_types(
     session: AsyncSession, *, applies_to: str | None = None, is_classified: bool | None = None
 ) -> list[ObjectType]:
+    """``is_classified`` bleibt als Filter-Parametername erhalten (Aufrufer,
+    z. B. document-service, fragen "irgendeine Verschlusssachen-Einstufung
+    oder keine", nicht nach einer konkreten Stufe) - übersetzt seit P17-S2
+    intern auf ``classification_level IS (NOT) NULL``."""
     query = select(ObjectType)
     if applies_to is not None:
         query = query.where(ObjectType.applies_to == applies_to)
-    if is_classified is not None:
-        query = query.where(ObjectType.is_classified == is_classified)
+    if is_classified is True:
+        query = query.where(ObjectType.classification_level.is_not(None))
+    elif is_classified is False:
+        query = query.where(ObjectType.classification_level.is_(None))
     result = await session.execute(query.order_by(ObjectType.name))
     return list(result.scalars().all())
 
@@ -199,14 +234,16 @@ async def update_object_type(
     object_type = await get_object_type(session, object_type_id)
     await _validate_allowed_parent_types(session, payload.allowed_parent_types)
     _validate_icon(object_type.applies_to, payload.icon)
-    _validate_kennzeichen_format(object_type.applies_to, payload.kennzeichen_format)
+    _validate_kennzeichen_format(
+        object_type.applies_to, payload.kennzeichen_format, payload.attributes
+    )
     _validate_kennzeichen_display_override(
         object_type.applies_to, payload.kennzeichen_display_override
     )
     _validate_required_signature_level(object_type.applies_to, payload.required_signature_level)
     _validate_default_retention_days(payload.default_retention_days)
     _validate_default_archive_after_days(payload.default_archive_after_days)
-    _validate_is_classified(object_type.applies_to, payload.is_classified)
+    _validate_classification_level(object_type.applies_to, payload.classification_level)
     object_type.attributes = payload.attributes
     object_type.naming_constraints = payload.naming_constraints
     object_type.conditions = payload.conditions
@@ -219,7 +256,7 @@ async def update_object_type(
     object_type.deletion_reason_required_override = payload.deletion_reason_required_override
     object_type.default_archive_after_days = payload.default_archive_after_days
     object_type.archive_encryption_enabled = payload.archive_encryption_enabled
-    object_type.is_classified = payload.is_classified
+    object_type.classification_level = payload.classification_level
     object_type.updated_at = datetime.now(UTC)
     await session.flush()
     return object_type
@@ -290,16 +327,36 @@ async def delete_layout(session: AsyncSession, object_type_id: int, purpose: str
 
 
 def _render_kennzeichen(
-    format_str: str, *, jahr: int, monat: int, tag: int, laufende_nummer: int
+    format_str: str,
+    *,
+    jahr: int,
+    monat: int,
+    tag: int,
+    laufende_nummer: int,
+    attribute_values: dict | None = None,
 ) -> str:
-    values = {
+    values: dict = {
         "YYYY": f"{jahr:04d}",
         "YY": f"{jahr % 100:02d}",
         "MM": f"{monat:02d}",
         "DD": f"{tag:02d}",
         "Laufende_Nummer": f"{laufende_nummer:03d}",
     }
-    return format_str.format(**values)
+    # Attributbasierte Platzhalter (P17-S2, 14.2, z. B. {Federführung}) -
+    # `_validate_kennzeichen_format` stellt beim Speichern des Formats bereits
+    # sicher, dass jeder hier nicht abgedeckte Platzhalter ein Attribut des
+    # Objekttyps ist; fehlt der Wert trotzdem (Attribut nicht als Pflichtfeld
+    # markiert, siehe MissingKennzeichenAttributeError), bricht `.format()``
+    # unten mit `KeyError` ab statt eine unvollständige Kennzeichnung
+    # stillschweigend mit einer leeren Lücke zu erzeugen.
+    for name, value in (attribute_values or {}).items():
+        values[name] = "" if value is None else str(value)
+    try:
+        return format_str.format(**values)
+    except KeyError as exc:
+        raise MissingKennzeichenAttributeError(
+            f"Für den Kennzeichen-Platzhalter {exc} wurde kein Attributwert übergeben"
+        ) from exc
 
 
 async def _next_sequence_number(session: AsyncSession, object_type_id: int, jahr: int) -> int:
@@ -332,7 +389,9 @@ async def _next_sequence_number(session: AsyncSession, object_type_id: int, jahr
     return assigned
 
 
-async def generate_next_kennzeichen(session: AsyncSession, object_type_id: int) -> str:
+async def generate_next_kennzeichen(
+    session: AsyncSession, object_type_id: int, attribute_values: dict | None = None
+) -> str:
     object_type = await get_object_type(session, object_type_id)
     if object_type.kennzeichen_format is None:
         raise NoKennzeichenFormatError(
@@ -346,6 +405,7 @@ async def generate_next_kennzeichen(session: AsyncSession, object_type_id: int) 
         monat=now.month,
         tag=now.day,
         laufende_nummer=laufende_nummer,
+        attribute_values=attribute_values,
     )
 
 

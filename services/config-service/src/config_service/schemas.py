@@ -43,9 +43,10 @@ class ObjectTypeExport(BaseModel):
     deletion_reason_required_override: bool | None = None
     default_archive_after_days: int | None = None
     archive_encryption_enabled: bool = False
-    # Verschlusssachen-Kennzeichnung (2.5, P15-S1) - ohne dieses Feld würde ein
-    # Konfigurationsexport/-import den Flag stillschweigend fallen lassen.
-    is_classified: bool = False
+    # Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2, 14.2) -
+    # ohne dieses Feld würde ein Konfigurationsexport/-import die Einstufung
+    # stillschweigend fallen lassen.
+    classification_level: str | None = None
     layouts: list[ObjectTypeLayoutExport] = []
 
 

@@ -347,6 +347,36 @@ def test_create_with_kennzeichen_format_missing_laufende_nummer_returns_422(clie
     assert response.status_code == 422
 
 
+def test_create_with_kennzeichen_format_unknown_attribute_placeholder_returns_422(client):
+    """P17-S2 (14.2): ein Platzhalter, der weder Datum/Zähler noch ein am
+    Objekttyp definiertes Attribut ist, wird schon beim Speichern des Formats
+    abgelehnt, nicht erst beim ersten tatsächlichen Anlegen eines Dokuments."""
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "TippfehlerPlatzhalterAPI",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string", "required": True}],
+            "kennzeichen_format": "{Federfuehrung}-{Laufende_Nummer}",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_create_with_kennzeichen_format_attribute_placeholder_succeeds(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "AttributPlatzhalterAPI",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string", "required": True}],
+            "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["kennzeichen_format"] == "{Federführung}-{YYYY}-{Laufende_Nummer}"
+
+
 def test_create_with_required_signature_level_on_folder_type_returns_422(client):
     response = client.post(
         "/object-types",
@@ -429,48 +459,60 @@ def test_create_with_negative_default_archive_after_days_returns_422(client):
     assert response.status_code == 422
 
 
-def test_create_with_is_classified_on_document_type_succeeds(client):
-    """Verschlusssachen-Kennzeichnung (2.5, P15-S1)."""
+def test_create_with_classification_level_on_document_type_succeeds(client):
+    """Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2/14.2)."""
     response = client.post(
         "/object-types",
         json={
             "name": "VerschlusssacheAPI",
             "applies_to": "document",
-            "is_classified": True,
+            "classification_level": "VS-NfD",
         },
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["is_classified"] is True
+    assert body["classification_level"] == "VS-NfD"
 
 
-def test_create_with_is_classified_on_folder_type_returns_422(client):
+def test_create_with_classification_level_on_folder_type_returns_422(client):
     response = client.post(
         "/object-types",
         json={
             "name": "OrdnerAlsVerschlusssacheAPI",
             "applies_to": "folder",
-            "is_classified": True,
+            "classification_level": "GEHEIM",
         },
     )
     assert response.status_code == 422
 
 
-def test_update_with_is_classified_on_folder_type_returns_422(client):
+def test_create_with_invalid_classification_level_returns_422(client):
+    response = client.post(
+        "/object-types",
+        json={
+            "name": "UngueltigeStufeAPI",
+            "applies_to": "document",
+            "classification_level": "TOP SECRET",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_update_with_classification_level_on_folder_type_returns_422(client):
     object_type_id = client.post(
         "/object-types", json={"name": "OrdnerFuerUpdateAPI", "applies_to": "folder"}
     ).json()["id"]
     response = client.put(
         f"/object-types/{object_type_id}",
-        json={"is_classified": True},
+        json={"classification_level": "STRENG GEHEIM"},
     )
     assert response.status_code == 422
 
 
-def test_create_without_is_classified_defaults_to_false(client):
+def test_create_without_classification_level_defaults_to_none(client):
     object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
     response = client.get(f"/object-types/{object_type_id}")
-    assert response.json()["is_classified"] is False
+    assert response.json()["classification_level"] is None
 
 
 def test_next_kennzeichen_returns_incrementing_formatted_values(client):
@@ -503,6 +545,45 @@ def test_next_kennzeichen_without_configured_format_returns_404(client):
 def test_next_kennzeichen_unknown_object_type_returns_404(client):
     response = client.post("/object-types/999999/next-kennzeichen")
     assert response.status_code == 404
+
+
+def test_next_kennzeichen_with_attribute_placeholder_renders_attribute_value(client):
+    """P17-S2 (14.2), wörtliches Konzept-Beispiel `{Abteilung}-{YYYY}-
+    {Laufende_Nummer}` - hier mit `{Federführung}` als konkretem, am
+    eGov-Paket verwendetem Attributnamen (siehe packages/egov/)."""
+    object_type_id = client.post(
+        "/object-types",
+        json={
+            "name": "AkteMitFederfuehrungAPI",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string", "required": True}],
+            "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
+        },
+    ).json()["id"]
+
+    response = client.post(
+        f"/object-types/{object_type_id}/next-kennzeichen",
+        json={"attributes": {"Federführung": "IT"}},
+    )
+    assert response.status_code == 200
+    kennzeichen = response.json()["kennzeichen"]
+    assert kennzeichen.startswith("IT-")
+    assert kennzeichen.endswith("-001")
+
+
+def test_next_kennzeichen_with_missing_attribute_value_returns_422(client):
+    object_type_id = client.post(
+        "/object-types",
+        json={
+            "name": "AkteOhneWertAPI",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string"}],
+            "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
+        },
+    ).json()["id"]
+
+    response = client.post(f"/object-types/{object_type_id}/next-kennzeichen", json={})
+    assert response.status_code == 422
 
 
 def test_get_kennzeichen_config_defaults_to_show_before_filename(client):

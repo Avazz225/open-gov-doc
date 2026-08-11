@@ -1,6 +1,12 @@
 import httpx
 
 
+class MissingKennzeichenAttributeError(Exception):
+    """Ein im `kennzeichen_format` referenzierter Attribut-Platzhalter
+    (P17-S2, 14.2) hat beim Anlegen keinen Wert erhalten - object-type-service
+    liefert dafür `422`, siehe dortiges `repository.MissingKennzeichenAttributeError`."""
+
+
 class ObjectTypeClient:
     """HTTP-Client gegen den Object-Type Service (2.2/4.5) - Document Service
     ruft dessen `/validate`-Endpunkt auf, statt die Constraint-Engine-Lib
@@ -41,14 +47,22 @@ class ObjectTypeClient:
         response.raise_for_status()
         return response.json()
 
-    async def next_kennzeichen(self, object_type_id: int) -> str | None:
-        """Kennzeichengenerator (2.2, P5e-S2) - `None` bedeutet, dass für diese
-        Dokumentklasse kein Generator konfiguriert ist (404), nicht dass der
-        Objekttyp selbst unbekannt wäre (der wurde bereits über `validate()`
-        geprüft, bevor dieser Aufruf erfolgt)."""
-        response = await self._client.post(f"/object-types/{object_type_id}/next-kennzeichen")
+    async def next_kennzeichen(
+        self, object_type_id: int, attributes: dict | None = None
+    ) -> str | None:
+        """Kennzeichengenerator (2.2, P5e-S2, seit P17-S2 mit Attributwerten
+        für attributbasierte Platzhalter wie `{Federführung}`, 14.2) - `None`
+        bedeutet, dass für diese Dokumentklasse kein Generator konfiguriert
+        ist (404), nicht dass der Objekttyp selbst unbekannt wäre (der wurde
+        bereits über `validate()` geprüft, bevor dieser Aufruf erfolgt)."""
+        response = await self._client.post(
+            f"/object-types/{object_type_id}/next-kennzeichen",
+            json={"attributes": attributes or {}},
+        )
         if response.status_code == 404:
             return None
+        if response.status_code == 422:
+            raise MissingKennzeichenAttributeError(response.json().get("detail", response.text))
         response.raise_for_status()
         return response.json()["kennzeichen"]
 

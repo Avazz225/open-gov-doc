@@ -16,6 +16,10 @@ class LayoutPurpose(StrEnum):
 
 SignatureLevel = Literal["ses", "aes", "qes"]
 
+# Verschlusssachen-Einstufung (2.5, seit P17-S2 mehrstufig - 14.2): die vier
+# gängigen deutschen VS-Einstufungen, wörtlich aus dem Konzepttext.
+ClassificationLevel = Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
+
 
 class ObjectTypeCreate(BaseModel):
     name: str
@@ -32,7 +36,7 @@ class ObjectTypeCreate(BaseModel):
     deletion_reason_required_override: bool | None = None
     default_archive_after_days: int | None = None
     archive_encryption_enabled: bool = False
-    is_classified: bool = False
+    classification_level: ClassificationLevel | None = None
 
 
 class ObjectTypeUpdate(BaseModel):
@@ -48,7 +52,7 @@ class ObjectTypeUpdate(BaseModel):
     deletion_reason_required_override: bool | None = None
     default_archive_after_days: int | None = None
     archive_encryption_enabled: bool = False
-    is_classified: bool = False
+    classification_level: ClassificationLevel | None = None
 
 
 class ObjectTypeOut(BaseModel):
@@ -67,7 +71,7 @@ class ObjectTypeOut(BaseModel):
     deletion_reason_required_override: bool | None
     default_archive_after_days: int | None
     archive_encryption_enabled: bool
-    is_classified: bool
+    classification_level: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -76,6 +80,17 @@ class ObjectTypeOut(BaseModel):
 
 class KennzeichenOut(BaseModel):
     kennzeichen: str
+
+
+class NextKennzeichenRequest(BaseModel):
+    """Attributwerte des anzulegenden Dokuments (seit P17-S2, 14.2) - Grundlage
+    für attributbasierte Kennzeichen-Platzhalter wie `{Federfuehrung}` (jeder
+    Platzhalter, der kein Datums-/Zähler-Platzhalter ist, wird als Attributname
+    interpretiert, siehe repository._render_kennzeichen). Leer/weggelassen
+    bleibt für einen rein datums-/zählerbasierten Format-String wie zuvor
+    (P5e-S1) folgenlos."""
+
+    attributes: dict = {}
 
 
 class KennzeichenConfigIn(BaseModel):

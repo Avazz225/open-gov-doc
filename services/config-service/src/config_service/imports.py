@@ -28,7 +28,7 @@ _OBJECT_TYPE_MUTABLE_FIELDS = (
     "deletion_reason_required_override",
     "default_archive_after_days",
     "archive_encryption_enabled",
-    "is_classified",
+    "classification_level",
 )
 
 

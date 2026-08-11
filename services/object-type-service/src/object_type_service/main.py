@@ -22,6 +22,7 @@ from object_type_service.schemas import (
     LayoutIn,
     LayoutOut,
     LayoutPurpose,
+    NextKennzeichenRequest,
     ObjectTypeCreate,
     ObjectTypeOut,
     ObjectTypeUpdate,
@@ -101,11 +102,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS archive_encryption_enabled BOOLEAN NOT NULL DEFAULT false"
             )
         )
-        # Verschlusssachen-Kennzeichnung (2.5, P15-S1) - gleiches Ad-hoc-Migrationsmuster.
+        # Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2) -
+        # gleiches Ad-hoc-Migrationsmuster. `is_classified` (das bis P17-S1
+        # rein binäre Vorgängerfeld) wird hier bewusst nicht mehr angelegt -
+        # eine bereits laufende Installation behält die alte Spalte
+        # unbenutzt in der DB (kein Datenverlust, keine destruktive
+        # Migration), ein frischer Stack legt sie gar nicht erst an.
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
-                "ADD COLUMN IF NOT EXISTS is_classified BOOLEAN NOT NULL DEFAULT false"
+                "ADD COLUMN IF NOT EXISTS classification_level VARCHAR(32)"
             )
         )
     app.state.engine = engine
@@ -237,14 +243,20 @@ async def validate_against_object_type(
 
 @app.post("/object-types/{object_type_id}/next-kennzeichen", response_model=KennzeichenOut)
 async def next_kennzeichen(
-    object_type_id: int, session: AsyncSession = Depends(get_session)
+    object_type_id: int,
+    payload: NextKennzeichenRequest = NextKennzeichenRequest(),
+    session: AsyncSession = Depends(get_session),
 ) -> KennzeichenOut:
     try:
-        kennzeichen = await repository.generate_next_kennzeichen(session, object_type_id)
+        kennzeichen = await repository.generate_next_kennzeichen(
+            session, object_type_id, payload.attributes
+        )
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.NoKennzeichenFormatError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.MissingKennzeichenAttributeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return KennzeichenOut(kennzeichen=kennzeichen)
 

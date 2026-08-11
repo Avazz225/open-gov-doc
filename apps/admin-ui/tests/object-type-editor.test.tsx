@@ -63,7 +63,7 @@ const RECHNUNG = {
   deletion_reason_required_override: null,
   default_archive_after_days: null,
   archive_encryption_enabled: false,
-  is_classified: false,
+  classification_level: null,
 };
 
 const PROJEKTORDNER = {
@@ -81,7 +81,7 @@ const PROJEKTORDNER = {
   deletion_reason_required_override: null,
   default_archive_after_days: null,
   archive_encryption_enabled: false,
-  is_classified: false,
+  classification_level: null,
 };
 
 describe("ObjectTypeEditor", () => {
@@ -126,7 +126,7 @@ describe("ObjectTypeEditor", () => {
         deletionReasonRequiredOverride: null,
         defaultArchiveAfterDays: null,
         archiveEncryptionEnabled: false,
-        isClassified: false,
+        classificationLevel: null,
       })
     );
     // Kein abweichender Anzeigename vergeben -> kein Layout-Override nötig.
@@ -197,7 +197,7 @@ describe("ObjectTypeEditor", () => {
         deletionReasonRequiredOverride: null,
         defaultArchiveAfterDays: null,
         archiveEncryptionEnabled: false,
-        isClassified: false,
+        classificationLevel: null,
       })
     );
   });
@@ -377,36 +377,41 @@ describe("ObjectTypeEditor", () => {
     expect(screen.getByLabelText("Archiv-Kopie verschlüsseln")).toBeChecked();
   });
 
-  it("shows the Verschlusssache checkbox only for document-applying types and submits it", async () => {
+  it("shows the Verschlusssachen-Einstufung select only for document-applying types and submits it", async () => {
     createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
     renderObjectTypeEditor();
     await screen.findByText("Rechnung");
-    expect(screen.getByLabelText("Verschlusssache")).toBeInTheDocument();
+    expect(screen.getByLabelText("Verschlusssachen-Einstufung")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
-    expect(screen.queryByLabelText("Verschlusssache")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Verschlusssachen-Einstufung")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "document" } });
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
-    fireEvent.click(screen.getByLabelText("Verschlusssache"));
+    fireEvent.change(screen.getByLabelText("Verschlusssachen-Einstufung"), {
+      target: { value: "VS-VERTRAULICH" },
+    });
     fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
 
     await waitFor(() =>
       expect(createObjectTypeMock).toHaveBeenCalledWith(
         "token-123",
-        expect.objectContaining({ isClassified: true })
+        expect.objectContaining({ classificationLevel: "VS-VERTRAULICH" })
       )
     );
   });
 
-  it("loads an existing Verschlusssache flag into the form for editing", async () => {
-    listObjectTypesMock.mockResolvedValue([{ ...RECHNUNG, is_classified: true }, PROJEKTORDNER]);
+  it("loads an existing Verschlusssachen-Einstufung into the form for editing", async () => {
+    listObjectTypesMock.mockResolvedValue([
+      { ...RECHNUNG, classification_level: "GEHEIM" },
+      PROJEKTORDNER,
+    ]);
     renderObjectTypeEditor();
     await screen.findByText("Rechnung");
 
     const row = screen.getByText("Rechnung").closest("tr")!;
     fireEvent.click(within(row).getByText("Bearbeiten"));
 
-    expect(await screen.findByLabelText("Verschlusssache")).toBeChecked();
+    expect(await screen.findByLabelText("Verschlusssachen-Einstufung")).toHaveValue("GEHEIM");
   });
 });

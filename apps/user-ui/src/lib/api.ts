@@ -405,8 +405,9 @@ export interface ObjectType {
   // globaler Standard (KennzeichenConfig) gilt, siehe lib/kennzeichen.ts.
   kennzeichen_format?: string | null;
   kennzeichen_display_override?: boolean | null;
-  // Verschlusssachen-Kennzeichnung (2.5, P15-S1) - nur für applies_to="document".
-  is_classified?: boolean;
+  // Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2, 14.2) -
+  // nur für applies_to="document".
+  classification_level?: string | null;
 }
 
 export interface KennzeichenConfig {

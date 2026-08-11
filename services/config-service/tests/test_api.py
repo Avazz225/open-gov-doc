@@ -311,12 +311,14 @@ def test_import_role_creates_then_updates_by_name(authorized_principal):
     assert role["permissions"] == ["read", "write"]
 
 
-def test_import_object_type_roundtrips_is_classified(authorized_principal):
-    """Verschlusssachen-Kennzeichnung (2.5, P15-S1) - `is_classified` muss den
-    Export/Import-Roundtrip überleben, sonst geht die Klassifizierung einer
-    Dokumentklasse beim Verteilen einer Konfiguration stillschweigend
-    verloren (echter, bei P15-S1 selbst gefundener Bug in `ObjectTypeExport`/
-    `_OBJECT_TYPE_MUTABLE_FIELDS`)."""
+def test_import_object_type_roundtrips_classification_level(authorized_principal):
+    """Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2/14.2)
+    - `classification_level` muss den Export/Import-Roundtrip überleben,
+    sonst geht die Einstufung einer Dokumentklasse beim Verteilen einer
+    Konfiguration stillschweigend verloren (echter, bei P15-S1 selbst
+    gefundener Bug in `ObjectTypeExport`/`_OBJECT_TYPE_MUTABLE_FIELDS` für das
+    damals noch binäre `is_classified` - dieselbe Klasse Fehler wäre beim
+    P17-S2-Umbenennen ebenso leicht wieder möglich gewesen)."""
     type_name = f"config-import-classified-{uuid.uuid4().hex[:8]}"
     payload = {
         "schema_version": "1.0",
@@ -325,7 +327,7 @@ def test_import_object_type_roundtrips_is_classified(authorized_principal):
             {
                 "name": type_name,
                 "applies_to": "document",
-                "is_classified": True,
+                "classification_level": "VS-VERTRAULICH",
             }
         ],
     }
@@ -340,10 +342,10 @@ def test_import_object_type_roundtrips_is_classified(authorized_principal):
         created = next(
             t for t in object_type_client.get("/object-types").json() if t["name"] == type_name
         )
-        assert created["is_classified"] is True
+        assert created["classification_level"] == "VS-VERTRAULICH"
 
     with _client() as client:
-        payload["object_types"][0]["is_classified"] = False
+        payload["object_types"][0]["classification_level"] = None
         second = client.post(
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
@@ -354,12 +356,12 @@ def test_import_object_type_roundtrips_is_classified(authorized_principal):
         updated = next(
             t for t in object_type_client.get("/object-types").json() if t["name"] == type_name
         )
-        assert updated["is_classified"] is False
+        assert updated["classification_level"] is None
 
     with _client() as client:
         export = client.get("/config/export", params={"categories": "object_types"})
     exported = next(t for t in export.json()["object_types"] if t["name"] == type_name)
-    assert exported["is_classified"] is False
+    assert exported["classification_level"] is None
 
 
 def _dmn_xml(decision_id: str) -> str:

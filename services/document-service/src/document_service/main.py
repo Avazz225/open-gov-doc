@@ -33,7 +33,7 @@ from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
 from document_service.license_client import LicenseLimitClient
 from document_service.models import Base, Document
-from document_service.object_type_client import ObjectTypeClient
+from document_service.object_type_client import MissingKennzeichenAttributeError, ObjectTypeClient
 from document_service.permission_client import PermissionServiceClient
 from document_service.schemas import (
     ArchiveStatusOut,
@@ -772,7 +772,12 @@ async def _prepare_document_fields(
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
 
-        kennzeichen = await app.state.object_type_client.next_kennzeichen(object_type_id)
+        try:
+            kennzeichen = await app.state.object_type_client.next_kennzeichen(
+                object_type_id, parsed_attributes
+            )
+        except MissingKennzeichenAttributeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if kennzeichen is not None:
             parsed_attributes[KENNZEICHEN_ATTRIBUTE] = kennzeichen
 
@@ -1088,8 +1093,8 @@ async def purge_document(
 ) -> None:
     """Manuelle, sofortige endgültige Löschung aus dem Papierkorb (2.5,
     P15-S1) - Löschadministration vorausgesetzt (regulär oder
-    Verschlusssachen, je nach `ObjectType.is_classified`), unabhängig vom
-    automatischen `_retention_poll_loop` (der nach Ablauf von
+    Verschlusssachen, je nach `ObjectType.classification_level`), unabhängig
+    vom automatischen `_retention_poll_loop` (der nach Ablauf von
     `TrashConfig.restore_period_days` dieselbe `retention_actions.
     purge_expired_trash_entry` mit `trigger="trash_expiry"` aufruft - hier
     `trigger="manual_purge"` mit dem echten Principal als `triggered_by`)."""
@@ -1105,7 +1110,9 @@ async def purge_document(
     is_classified = False
     if document.object_type_id is not None:
         object_type = await app.state.object_type_client.get(document.object_type_id)
-        is_classified = bool(object_type and object_type.get("is_classified"))
+        # Jede gesetzte Stufe (unabhängig davon, welche) loest denselben Gate
+        # aus wie das bis P17-S1 rein binaere `is_classified` (P17-S2, 14.2).
+        is_classified = bool(object_type and object_type.get("classification_level"))
     required_role = (
         settings.classified_trash_hard_delete_admin_role
         if is_classified

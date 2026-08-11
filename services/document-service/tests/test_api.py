@@ -15,15 +15,18 @@ OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http:/
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
-    """Papierkorb-Familie (2.5, P15-S1) - legt einen echten Dokument-Objekttyp
-    im laufenden object-type-service an, gleiches Cross-Service-Testmuster
-    wie `_grant_document_read` gegen permission-service."""
+    """Papierkorb-Familie (2.5, P15-S1, mehrstufige Einstufung seit P17-S2) -
+    legt einen echten Dokument-Objekttyp im laufenden object-type-service an,
+    gleiches Cross-Service-Testmuster wie `_grant_document_read` gegen
+    permission-service. `is_classified` bleibt der Parametername dieses
+    Test-Helpers (reines Ja/Nein genügt für alle Aufrufer hier) - übersetzt
+    intern auf eine konkrete `classification_level`-Stufe."""
     response = httpx.post(
         f"{OBJECT_TYPE_SERVICE_URL}/object-types",
         json={
             "name": f"trash-test-type-{uuid.uuid4().hex[:8]}",
             "applies_to": "document",
-            "is_classified": is_classified,
+            "classification_level": "VS-NfD" if is_classified else None,
         },
         timeout=30.0,
     )
@@ -443,6 +446,50 @@ def test_create_document_discards_client_supplied_kennzeichen(client):
     response = upload(client, attributes='{"Kennzeichen": "FAKE-001"}')
     assert response.status_code == 201
     assert "Kennzeichen" not in response.json()["attributes"]
+
+
+def test_create_document_renders_kennzeichen_attribute_placeholder(client):
+    """P17-S2 (14.2) - attributbasierter Kennzeichen-Platzhalter, echter
+    End-zu-Ende-Durchlauf gegen den laufenden object-type-service. Grundlage
+    für das eGov-Aktenzeichen-Format `{Federführung}-{YYYY}-{Laufende_Nummer}`
+    (siehe packages/egov/)."""
+    object_type_id = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"akte-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string", "required": True}],
+            "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
+        },
+        timeout=30.0,
+    ).json()["id"]
+
+    response = upload(
+        client, object_type_id=str(object_type_id), attributes='{"Federführung": "IT"}'
+    )
+    assert response.status_code == 201
+    kennzeichen = response.json()["attributes"]["Kennzeichen"]
+    assert kennzeichen.startswith("IT-")
+
+
+def test_create_document_missing_kennzeichen_attribute_returns_422(client):
+    object_type_id = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"akte-ohne-wert-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            # Bewusst NICHT `required`, sonst würde bereits `validate()` mit
+            # `400` ablehnen, bevor `next_kennzeichen()` überhaupt aufgerufen
+            # wird - dieser Test prüft gezielt den Fallback-Pfad in
+            # `object_type_client.next_kennzeichen()`/`MissingKennzeichenAttributeError`.
+            "attributes": [{"name": "Federführung", "type": "string"}],
+            "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
+        },
+        timeout=30.0,
+    ).json()["id"]
+
+    response = upload(client, object_type_id=str(object_type_id))
+    assert response.status_code == 422
 
 
 def test_update_kennzeichen_without_admin_role_returns_403(client):
