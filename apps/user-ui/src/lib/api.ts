@@ -636,6 +636,68 @@ export async function purgeDocument(token: string, documentId: string): Promise<
   );
 }
 
+// Quarantäne-Bereich (2.5/10.3, P15-S2) - infizierte (oder als solche
+// eingestufte) Uploads, die nie ein Dokument wurden (siehe virus-scan-service
+// main.py). "released"/"purged" sind Endzustände, kein weiterer Übergang.
+export interface ScanResult {
+  id: string;
+  document_id: string | null;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  checksum_sha256: string;
+  status: "clean" | "infected" | "released" | "purged";
+  threat_name: string | null;
+  engine: string;
+  quarantine_object_key: string | null;
+  created_by: string | null;
+  scanned_at: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+}
+
+export async function listQuarantinedScans(token: string): Promise<ScanResult[]> {
+  const response = await request("virus-scan-service", "scans?status=infected", {}, token);
+  return response.json();
+}
+
+export async function releaseQuarantinedScan(
+  token: string,
+  scanId: string,
+  params: {
+    title: string;
+    folderId?: string;
+    objectTypeId?: number;
+    attributes?: Record<string, unknown>;
+  }
+): Promise<ScanResult> {
+  const response = await request(
+    "virus-scan-service",
+    `scans/${encodeURIComponent(scanId)}/release`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: params.title,
+        folder_id: params.folderId ?? null,
+        object_type_id: params.objectTypeId ?? null,
+        attributes: params.attributes ?? {},
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function purgeQuarantinedScan(token: string, scanId: string): Promise<void> {
+  await request(
+    "virus-scan-service",
+    `scans/${encodeURIComponent(scanId)}/purge`,
+    { method: "POST" },
+    token
+  );
+}
+
 export interface LegalHold {
   id: string;
   document_id: string;

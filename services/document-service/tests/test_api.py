@@ -1609,3 +1609,58 @@ def test_has_active_hold_reflects_legal_hold_state(client):
     assert client.get(f"/documents/{document_id}/has-active-hold").json() == {
         "has_active_hold": True
     }
+
+
+def _release_from_quarantine(client, *, content=EICAR_SIGNATURE, title="Fehlalarm", **headers):
+    data = {"title": title, "created_by": "reviewer-1", "source_scan_id": "scan-1"}
+    files = {"file": ("verdaechtig.pdf", content, "application/pdf")}
+    return client.post(
+        "/documents/from-quarantine-release", data=data, files=files, headers=headers
+    )
+
+
+def test_quarantine_release_requires_principal(client):
+    response = _release_from_quarantine(client)
+    assert response.status_code == 401
+
+
+def test_quarantine_release_requires_admin_role(client):
+    response = _release_from_quarantine(
+        client, **{"X-DMS-Principal": "reviewer-1", "X-DMS-Roles": "nothing-relevant"}
+    )
+    assert response.status_code == 403
+
+
+def test_quarantine_release_bypasses_virus_scan(client):
+    """Der interne Anlage-Pfad (2.5, P15-S2) muss EICAR-Inhalt akzeptieren -
+    genau der (jetzt als Fehlalarm eingestufte) Scan-Befund ist der Anlass
+    der Freigabe, ein erneuter Scan würde ihn nur reproduzieren."""
+    response = _release_from_quarantine(
+        client, **{"X-DMS-Principal": "reviewer-1", "X-DMS-Roles": "dms-admin"}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["title"] == "Fehlalarm"
+    assert body["created_by"] == "reviewer-1"
+
+    fetched = client.get(f"/documents/{body['id']}")
+    assert fetched.status_code == 200
+
+
+def test_quarantine_release_publishes_dedicated_event(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    response = _release_from_quarantine(
+        client, **{"X-DMS-Principal": "reviewer-1", "X-DMS-Roles": "dms-admin"}
+    )
+
+    assert response.status_code == 201
+    events = [e for e in published if e.event_type == "document.created_from_quarantine_release"]
+    assert len(events) == 1
+    assert events[0].payload["source_scan_id"] == "scan-1"

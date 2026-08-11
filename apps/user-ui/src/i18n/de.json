@@ -62,6 +62,7 @@
     "teamspaces": "Team-Arbeitsbereiche",
     "delegations": "Stellvertretung",
     "trash": "Papierkorb",
+    "quarantine": "Quarantäne",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -276,6 +277,23 @@
     "empty": "Papierkorb ist leer.",
     "loadError": "Papierkorb konnte nicht geladen werden",
     "restoreError": "Wiederherstellen fehlgeschlagen",
+    "purgeError": "Endgültiges Löschen fehlgeschlagen"
+  },
+  "quarantine": {
+    "paneLabel": "Quarantäne",
+    "heading": "Quarantäne",
+    "hint": "Uploads, die den verpflichtenden Virenscan nicht bestanden haben (10.3) - hier landen sie statt im regulären Bestand. Freigabe nach Klärung eines Fehlalarms legt das Dokument nachträglich an; endgültiges Löschen entfernt den Inhalt unwiderruflich.",
+    "release": "Freigeben",
+    "releaseTitleLabel": "Titel",
+    "releaseFolderLabel": "Zielordner (optional)",
+    "releaseFolderPlaceholder": "leer = oberste Ebene",
+    "releaseConfirm": "Freigabe bestätigen",
+    "releaseCancel": "Abbrechen",
+    "purge": "Endgültig löschen",
+    "purgeConfirm": "{name} unwiderruflich aus der Quarantäne löschen?",
+    "empty": "Keine Quarantäne-Fälle.",
+    "loadError": "Quarantäne-Bereich konnte nicht geladen werden",
+    "releaseError": "Freigabe fehlgeschlagen",
     "purgeError": "Endgültiges Löschen fehlgeschlagen"
   },
   "delegations": {

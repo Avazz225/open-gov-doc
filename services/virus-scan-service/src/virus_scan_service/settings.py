@@ -19,3 +19,16 @@ class Settings(BaseServiceSettings):
     clamd_host: str = "clamav"
     clamd_port: int = 3310
     clamd_timeout_seconds: float = 15.0
+
+    # Quarantäne-Bereich (2.5/10.3, P15-S2): Freigabe eines Fehlalarms ruft
+    # den internen Anlage-Pfad des Document Service auf (kein erneuter Scan,
+    # siehe document-service main.py "from-quarantine-release").
+    document_service_base_url: str = "http://localhost:8006"
+
+    # "Eine eigene, eng begrenzte Rolle darf einen Quarantäne-Fall einsehen,
+    # endgültig löschen oder ... freigeben" (Konzept 2.5, wörtlich) - eine
+    # Rolle für alle drei Aktionen, da das Konzept sie nicht weiter auftrennt
+    # (anders als die Papierkorb-Familie, P15-S1, deren regulärer und
+    # Verschlusssachen-Zweig echte, im Betrieb häufig personell getrennte
+    # Rollen sind).
+    quarantine_admin_role: str = "dms-admin"

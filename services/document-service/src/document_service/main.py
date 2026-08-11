@@ -105,6 +105,11 @@ def _has_kennzeichen_admin_role(x_dms_roles: str) -> bool:
     return settings.kennzeichen_admin_role in roles
 
 
+def _has_quarantine_release_role(x_dms_roles: str) -> bool:
+    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+    return settings.quarantine_release_admin_role in roles
+
+
 async def _should_log_document_access(
     session: AsyncSession, category: str, x_dms_roles: str
 ) -> bool:
@@ -714,41 +719,26 @@ async def mark_document_rehydrated(
     return document
 
 
-@app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
-async def create_document(
-    file: UploadFile = File(...),
-    title: str = Form(...),
-    created_by: str = Form(...),
-    folder_id: str | None = Form(None),
-    object_type_id: int | None = Form(None),
-    attributes: str | None = Form(None),
-    derived_from_document_id: str | None = Form(None),
-    derived_from_version_number: int | None = Form(None),
-    originating_case_id: str | None = Form(None),
-    session: AsyncSession = Depends(get_session),
-) -> DocumentOut:
-    # Sensor "document.upload.duration" (10.1, P11-S1): Startzeit wird nur
-    # genommen, wenn der Sensor aktuell aktiv ist - bei Deaktivierung
-    # unterbleibt selbst dieser minimale Overhead vollständig.
-    upload_sensor = app.state.upload_duration_sensor
-    upload_started_at = time.monotonic() if upload_sensor.is_active() else None
-
-    # Lizenz-Limit-Blockade (Konzept 9.3, P9-S2): nur echte Neuanlagen, nicht
-    # Versionierung/Wiederherstellung bestehender Dokumente - "blockiert nicht
-    # rückwirkend bestehende Daten, verhindert aber neue Anlagen".
-    if await app.state.license_limit_client.is_exceeded("documents"):
-        raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
+async def _prepare_document_fields(
+    session: AsyncSession,
+    *,
+    title: str,
+    folder_id: str | None,
+    object_type_id: int | None,
+    attributes: str | None,
+    derived_from_document_id: str | None,
+    derived_from_version_number: int | None,
+) -> tuple[dict, datetime | None, datetime | None]:
+    """Geteilte Validierung/Ableitung für jeden Dokument-Neuanlage-Pfad -
+    identisch für `POST /documents` und `POST /documents/
+    from-quarantine-release` (2.5, P15-S2), die sich nur im Scan-Schritt
+    unterscheiden."""
     try:
         parsed_attributes = json.loads(attributes) if attributes else {}
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="attributes ist kein gültiges JSON") from exc
     parsed_attributes.pop(KENNZEICHEN_ATTRIBUTE, None)
 
-    # Prozessspezifische Bearbeitungskopie (2.3, P6-S3, z. B. eine Schwärzung
-    # für die Akteneinsicht): keine neue Version des Ursprungsdokuments,
-    # sondern ein eigenständiges Dokument mit Verweis auf die konkrete
-    # Ausgangsversion - durchläuft ansonsten exakt dieselbe Pipeline
-    # (Virenscan, Storage, Versionierung, Audit) wie jedes andere Dokument.
     if derived_from_document_id is not None:
         if derived_from_version_number is None:
             raise HTTPException(
@@ -801,6 +791,97 @@ async def create_document(
                 days=object_type["default_archive_after_days"]
             )
 
+    return parsed_attributes, retention_until, archive_after
+
+
+async def _persist_new_document(
+    session: AsyncSession,
+    *,
+    data: bytes,
+    filename: str,
+    content_type: str | None,
+    title: str,
+    created_by: str,
+    folder_id: str | None,
+    object_type_id: int | None,
+    attributes: dict,
+    derived_from_document_id: str | None,
+    derived_from_version_number: int | None,
+    originating_case_id: str | None,
+    retention_until: datetime | None,
+    archive_after: datetime | None,
+    event_type: str = "document.created",
+    extra_event_payload: dict | None = None,
+) -> Document:
+    checksum = compute_checksum(data)
+    document_id = str(uuid.uuid4())
+    key = _object_key(document_id, checksum)
+    await app.state.storage.upload(key, data, content_type, retain_until=retention_until)
+
+    document = await repository.create_document(
+        session,
+        document_id=document_id,
+        title=title,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=len(data),
+        checksum_sha256=checksum,
+        storage_object_key=key,
+        folder_id=folder_id,
+        object_type_id=object_type_id,
+        attributes=attributes,
+        created_by=created_by,
+        derived_from_document_id=derived_from_document_id,
+        derived_from_version_number=derived_from_version_number,
+        originating_case_id=originating_case_id,
+        retention_until=retention_until,
+        archive_after=archive_after,
+    )
+    await session.commit()
+    event_payload = {"title": title, "created_by": created_by, "folder_id": folder_id}
+    if derived_from_document_id is not None:
+        event_payload["derived_from_document_id"] = derived_from_document_id
+    if extra_event_payload:
+        event_payload.update(extra_event_payload)
+    await publish_event(event_type, subject=document_id, payload=event_payload, actor=created_by)
+    return document
+
+
+@app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
+async def create_document(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    created_by: str = Form(...),
+    folder_id: str | None = Form(None),
+    object_type_id: int | None = Form(None),
+    attributes: str | None = Form(None),
+    derived_from_document_id: str | None = Form(None),
+    derived_from_version_number: int | None = Form(None),
+    originating_case_id: str | None = Form(None),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    # Sensor "document.upload.duration" (10.1, P11-S1): Startzeit wird nur
+    # genommen, wenn der Sensor aktuell aktiv ist - bei Deaktivierung
+    # unterbleibt selbst dieser minimale Overhead vollständig.
+    upload_sensor = app.state.upload_duration_sensor
+    upload_started_at = time.monotonic() if upload_sensor.is_active() else None
+
+    # Lizenz-Limit-Blockade (Konzept 9.3, P9-S2): nur echte Neuanlagen, nicht
+    # Versionierung/Wiederherstellung bestehender Dokumente - "blockiert nicht
+    # rückwirkend bestehende Daten, verhindert aber neue Anlagen".
+    if await app.state.license_limit_client.is_exceeded("documents"):
+        raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
+
+    parsed_attributes, retention_until, archive_after = await _prepare_document_fields(
+        session,
+        title=title,
+        folder_id=folder_id,
+        object_type_id=object_type_id,
+        attributes=attributes,
+        derived_from_document_id=derived_from_document_id,
+        derived_from_version_number=derived_from_version_number,
+    )
+
     data = await file.read()
     content_type = await _resolve_content_type(session, data)
 
@@ -821,40 +902,98 @@ async def create_document(
             status_code=503, detail="Virenscan-Dienst nicht erreichbar - Upload abgelehnt"
         ) from exc
 
-    checksum = compute_checksum(data)
-    document_id = str(uuid.uuid4())
-    key = _object_key(document_id, checksum)
-    await app.state.storage.upload(key, data, content_type, retain_until=retention_until)
-
-    document = await repository.create_document(
+    document = await _persist_new_document(
         session,
-        document_id=document_id,
-        title=title,
+        data=data,
         filename=file.filename or title,
         content_type=content_type,
-        size_bytes=len(data),
-        checksum_sha256=checksum,
-        storage_object_key=key,
+        title=title,
+        created_by=created_by,
         folder_id=folder_id,
         object_type_id=object_type_id,
         attributes=parsed_attributes,
-        created_by=created_by,
         derived_from_document_id=derived_from_document_id,
         derived_from_version_number=derived_from_version_number,
         originating_case_id=originating_case_id,
         retention_until=retention_until,
         archive_after=archive_after,
     )
-    await session.commit()
-    event_payload = {"title": title, "created_by": created_by, "folder_id": folder_id}
-    if derived_from_document_id is not None:
-        event_payload["derived_from_document_id"] = derived_from_document_id
-    await publish_event(
-        "document.created", subject=document_id, payload=event_payload, actor=created_by
-    )
     if upload_started_at is not None:
         upload_sensor.observe(time.monotonic() - upload_started_at)
     return document
+
+
+@app.post(
+    "/documents/from-quarantine-release",
+    response_model=DocumentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_document_from_quarantine_release(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    created_by: str = Form(...),
+    folder_id: str | None = Form(None),
+    object_type_id: int | None = Form(None),
+    attributes: str | None = Form(None),
+    source_scan_id: str = Form(...),
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    """Interner Anlage-Pfad ausschließlich für den virus-scan-service beim
+    Freigeben eines als Fehlalarm geklärten Quarantäne-Falls (2.5/10.3,
+    P15-S2). Löst bewusst KEINEN erneuten Scan über `virus_scan_client` aus
+    (im Unterschied zu `POST /documents`): die Datei wurde bereits gescannt,
+    genau dieser (jetzt als falsch positiv eingestufte) Scan ist der Anlass
+    der Freigabe - ein erneuter Scan würde denselben Befund reproduzieren und
+    die Freigabe strukturell unmöglich machen (siehe ADR 0052). Eigenes
+    Rollen-Gate (`quarantine_release_admin_role`) als zweite Instanz neben der
+    Rollenprüfung im virus-scan-service selbst, das die Rollen des
+    ursprünglichen Aufrufers weiterreicht - kein Endpunkt, der den
+    verpflichtenden Virenscan umgeht, sollte allein von einer Prüfung
+    abhängen."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
+    if not _has_quarantine_release_role(x_dms_roles):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Nur die Rolle {settings.quarantine_release_admin_role!r} darf einen "
+            "Quarantäne-Fall freigeben",
+        )
+    if await app.state.license_limit_client.is_exceeded("documents"):
+        raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
+
+    parsed_attributes, retention_until, archive_after = await _prepare_document_fields(
+        session,
+        title=title,
+        folder_id=folder_id,
+        object_type_id=object_type_id,
+        attributes=attributes,
+        derived_from_document_id=None,
+        derived_from_version_number=None,
+    )
+
+    data = await file.read()
+    content_type = await _resolve_content_type(session, data)
+
+    return await _persist_new_document(
+        session,
+        data=data,
+        filename=file.filename or title,
+        content_type=content_type,
+        title=title,
+        created_by=created_by,
+        folder_id=folder_id,
+        object_type_id=object_type_id,
+        attributes=parsed_attributes,
+        derived_from_document_id=None,
+        derived_from_version_number=None,
+        originating_case_id=None,
+        retention_until=retention_until,
+        archive_after=archive_after,
+        event_type="document.created_from_quarantine_release",
+        extra_event_payload={"source_scan_id": source_scan_id},
+    )
 
 
 @app.get("/documents", response_model=list[DocumentOut])

@@ -57,3 +57,46 @@ async def test_infected_scan_result_carries_quarantine_key(session):
     )
 
     assert created.quarantine_object_key == "quarantine/abc"
+
+
+async def test_list_scan_results_filters_by_status(session):
+    await repository.create_scan_result(session, **_scan_kwargs(status="clean"))
+    await repository.create_scan_result(
+        session, **_scan_kwargs(status="infected", quarantine_object_key="quarantine/x")
+    )
+
+    results = await repository.list_scan_results(session, status="infected")
+
+    assert len(results) == 1
+    assert results[0].status == "infected"
+
+
+async def test_mark_resolved_release_sets_status_document_id_and_resolver(session):
+    created = await repository.create_scan_result(
+        session,
+        **_scan_kwargs(status="infected", quarantine_object_key="quarantine/x"),
+    )
+
+    resolved = await repository.mark_resolved(
+        session, created.id, new_status="released", resolved_by="bob", document_id="doc-99"
+    )
+
+    assert resolved.status == "released"
+    assert resolved.document_id == "doc-99"
+    assert resolved.resolved_by == "bob"
+    assert resolved.resolved_at is not None
+
+
+async def test_mark_resolved_purge_leaves_document_id_untouched(session):
+    created = await repository.create_scan_result(
+        session,
+        **_scan_kwargs(status="infected", quarantine_object_key="quarantine/x"),
+    )
+
+    resolved = await repository.mark_resolved(
+        session, created.id, new_status="purged", resolved_by="bob"
+    )
+
+    assert resolved.status == "purged"
+    assert resolved.document_id is None
+    assert resolved.resolved_by == "bob"

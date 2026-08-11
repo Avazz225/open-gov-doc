@@ -52,10 +52,33 @@ async def get_scan_result(session: AsyncSession, scan_id: str) -> ScanResult:
 
 
 async def list_scan_results(
-    session: AsyncSession, *, document_id: str | None = None
+    session: AsyncSession, *, document_id: str | None = None, status: str | None = None
 ) -> list[ScanResult]:
     query = select(ScanResult)
     if document_id is not None:
         query = query.where(ScanResult.document_id == document_id)
+    if status is not None:
+        query = query.where(ScanResult.status == status)
     result = await session.execute(query.order_by(ScanResult.scanned_at.desc()))
     return list(result.scalars().all())
+
+
+async def mark_resolved(
+    session: AsyncSession,
+    scan_id: str,
+    *,
+    new_status: str,
+    resolved_by: str,
+    document_id: str | None = None,
+) -> ScanResult:
+    """Löst einen Quarantäne-Fall auf (2.5, P15-S2) - `new_status` ist
+    "released" (Fehlalarm geklärt, `document_id` auf das neu angelegte
+    Dokument gesetzt) oder "purged" (endgültig gelöscht)."""
+    result = await get_scan_result(session, scan_id)
+    result.status = new_status
+    result.resolved_by = resolved_by
+    result.resolved_at = datetime.now(UTC)
+    if document_id is not None:
+        result.document_id = document_id
+    await session.flush()
+    return result

@@ -25,6 +25,7 @@ import { SearchPane } from "./SearchPane";
 import { Splitter } from "./Splitter";
 import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
+import { QuarantinePane } from "./QuarantinePane";
 import { TrashPane } from "./TrashPane";
 
 const MIN_LEFT_WIDTH = 260;
@@ -348,8 +349,10 @@ export function DocumentWorkspace() {
               />
             ) : view === "delegations" ? (
               <DelegationsPane token={accessToken ?? ""} currentPrincipalId={user?.sub ?? ""} />
-            ) : (
+            ) : view === "trash" ? (
               <TrashPane token={accessToken ?? ""} />
+            ) : (
+              <QuarantinePane token={accessToken ?? ""} />
             )}
           </div>
           <Splitter

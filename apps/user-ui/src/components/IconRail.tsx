@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/i18n";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
@@ -11,7 +12,16 @@ export type WorkspaceView =
   | "favorites"
   | "teamspaces"
   | "delegations"
-  | "trash";
+  | "trash"
+  | "quarantine";
+
+// Quarantäne-Bereich (2.5/10.3, P15-S2) - anders als der Papierkorb (immer
+// zumindest in der persönlichen Sicht sichtbar) gibt es hier laut Konzept
+// KEINE allgemein zugängliche Sicht: "eine eigene, eng begrenzte Rolle darf
+// einen Quarantäne-Fall einsehen" - der Icon-Rail-Eintrag selbst bleibt für
+// alle anderen Rollen unsichtbar, nicht nur die Aktionen darin (gleiches
+// unabhängig konfigurierbares Rollen-Setting-Muster wie überall im Projekt).
+const QUARANTINE_ADMIN_ROLE = "dms-admin";
 
 // Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
 // Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
@@ -26,6 +36,8 @@ export function IconRail({
   onSelectView: (view: WorkspaceView) => void;
 }) {
   const { t } = useI18n();
+  const { user } = useAuth();
+  const isQuarantineAdmin = Boolean(user?.realm_roles.includes(QUARANTINE_ADMIN_ROLE));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
@@ -93,6 +105,17 @@ export function IconRail({
       >
         <span aria-hidden="true">🗑️</span>
       </button>
+      {isQuarantineAdmin && (
+        <button
+          type="button"
+          className={`icon-rail-button${activeView === "quarantine" ? " icon-rail-active" : ""}`}
+          title={t("iconRail.quarantine")}
+          aria-current={activeView === "quarantine" ? "page" : undefined}
+          onClick={() => onSelectView("quarantine")}
+        >
+          <span aria-hidden="true">☣️</span>
+        </button>
+      )}
       <div className="icon-rail-settings">
         <button
           type="button"

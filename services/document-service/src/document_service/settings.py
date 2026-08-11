@@ -84,3 +84,11 @@ class Settings(BaseServiceSettings):
     # nicht zwingend personell identisch besetzt sind.
     trash_hard_delete_admin_role: str = "dms-admin"
     classified_trash_hard_delete_admin_role: str = "dms-admin"
+
+    # Quarantäne-Bereich (2.5/10.3, P15-S2): zweites, unabhängiges Rollen-Gate
+    # für `POST /documents/from-quarantine-release` (interner Anlage-Pfad, der
+    # bewusst keinen erneuten Virenscan auslöst) - der virus-scan-service
+    # prüft dieselbe Freigabe-Berechtigung bereits selbst
+    # (`quarantine_admin_role`), unabhängig konfigurierbar wie jedes andere
+    # Rollen-Setting-Paar in diesem Projekt.
+    quarantine_release_admin_role: str = "dms-admin"
