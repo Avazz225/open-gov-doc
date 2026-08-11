@@ -20,6 +20,50 @@
   --dms-danger: #b91c1c;
   --dms-surface: canvas;
   --dms-surface-fg: canvastext;
+
+  /* dockview-Theming (Konzept 8, P16-S1) - bewusst keines der mitgelieferten
+     Preset-Themes (abyss/gh/mocha/...) verwendet, sondern die von dockview
+     tatsächlich konsumierten `--dv-*`-Variablen direkt auf die bereits
+     bestehenden `--dms-*`-Tokens abgebildet (siehe ADR 0009): einmalige
+     Zuordnung hier reicht für alle vier Farbschemata, da `var(--dv-x)` erst
+     zur Verwendungszeit über `var(--dms-x)` aufgelöst wird - kein separater
+     Satz pro `[data-theme]`-Block nötig. Deckt nur die Variablen ab, die
+     dockviews CSS ohne eigenen Fallback-Wert konsumiert (siehe dockview.css);
+     rein layoutbezogene Variablen (Abstände, Übergangsdauern) bleiben auf
+     dockviews eigenen Defaults. */
+  --dv-group-view-background-color: var(--dms-bg);
+  --dv-tabs-and-actions-container-background-color: var(--dms-bg);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--dms-surface);
+  --dv-activegroup-visiblepanel-tab-color: var(--dms-surface-fg);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--dms-fg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--dms-surface);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--dms-fg);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--dms-fg);
+  --dv-tab-divider-color: var(--dms-border);
+  --dv-separator-border: 1px solid var(--dms-border);
+  --dv-sash-color: var(--dms-border);
+  --dv-active-sash-color: var(--dms-accent);
+  --dv-icon-hover-background-color: var(--dms-accent-bg);
+  --dv-drag-over-background-color: var(--dms-accent-bg);
+  --dv-drag-over-border: 2px dashed var(--dms-accent);
+  --dv-drag-over-border-color: var(--dms-accent);
+  --dv-edge-dock-indicator-color: var(--dms-accent);
+  --dv-floating-titlebar-background-color: var(--dms-surface);
+  --dv-floating-border: 1px solid var(--dms-border);
+  --dv-floating-group-border: 1px solid var(--dms-border);
+  --dv-floating-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --dv-context-menu-background-color: var(--dms-surface);
+  --dv-context-menu-color: var(--dms-surface-fg);
+  --dv-scrollbar-background-color: var(--dms-border);
+  --dv-tabs-container-scrollbar-color: var(--dms-border);
+  --dv-paneview-header-border-color: var(--dms-border);
+  --dv-smart-guides-color: var(--dms-accent);
+  --dv-smart-guides-preview-color: var(--dms-accent-bg);
+  --dv-border-radius: 4px;
+  --dv-dropdown-border-radius: 4px;
+  --dv-tab-border-radius: 4px 4px 0 0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -68,9 +112,16 @@
   --dms-surface-fg: #ffffff;
 }
 
-:root[data-theme="high-contrast"] .icon-rail-active,
-:root[data-theme="high-contrast"] .tab-active {
+:root[data-theme="high-contrast"] .icon-rail-active {
   color: #000000;
+}
+
+/* `--dms-accent-bg` ist im Hoher-Kontrast-Schema volles Gelb (s. o.) - Text
+   darauf muss schwarz statt der sonstigen hellen Vordergrundfarbe sein,
+   damit der aktive dockview-Tab lesbar bleibt (gleiches Prinzip wie bei
+   `.icon-rail-active` oben). */
+:root[data-theme="high-contrast"] {
+  --dv-activegroup-visiblepanel-tab-color: #000000;
 }
 
 body {
@@ -201,16 +252,45 @@ body {
   font-size: 0.9rem;
 }
 
-.main-area {
+/* Dockbarer Arbeitsbereich (Konzept 8, P16-S1, `dockview-react`) - ersetzt
+   das frühere feste `.main-area`/`.left-col`-Splitter-Grid für die
+   Dokumentenansicht. Bleibt immer im DOM (nur per `display` ausgeblendet,
+   siehe `DockableDocumentArea`), damit weder das dockview-Layout noch
+   offene Dokument-Panels beim Wechsel zu einem IconRail-Sonderbereich
+   verloren gehen. */
+.dockable-document-area {
   flex: 1;
   min-width: 0;
-  display: grid;
+  flex-direction: column;
   height: 100%;
 }
 
-.left-col {
-  display: grid;
+.dockable-document-area-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--dms-border);
+  flex-shrink: 0;
+}
+
+.dockable-document-area-toolbar button {
+  font-size: 0.85rem;
+}
+
+.dockable-document-area-host {
+  flex: 1;
   min-height: 0;
+}
+
+/* Sonderbereiche außerhalb des dreigeteilten Haupt-Workspace (2.5) - füllen
+   die volle Breite, kein geteiltes Layout (Konzept nennt sie ausdrücklich
+   nicht Teil des dockbaren Bereichs, siehe P16-S0). */
+.main-area-single {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem;
 }
 
 .explorer-pane,
@@ -401,47 +481,6 @@ body {
 .splitter:hover,
 .splitter:focus-visible {
   background: var(--dms-accent-bg-strong);
-}
-
-.tab-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
-}
-
-.tab {
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--dms-border);
-  border-radius: 0.25rem 0.25rem 0 0;
-  overflow: hidden;
-}
-
-.tab button[role="tab"] {
-  background: none;
-  border: none;
-  padding: 0.35rem 0.5rem;
-  cursor: pointer;
-  font: inherit;
-}
-
-.tab-active {
-  border-bottom-color: transparent;
-  background: var(--dms-accent-bg);
-}
-
-.tab-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.35rem 0.5rem;
-  font: inherit;
-  opacity: 0.6;
-}
-
-.tab-close:hover {
-  opacity: 1;
 }
 
 .explorer-toolbar {

@@ -382,8 +382,17 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   const currentContentType =
     versions.find((v) => v.version_number === selectedVersion)?.content_type ?? null;
 
+  // Seit P16-S1 (dockbarer Arbeitsbereich) kann mehr als eine `PreviewPane`
+  // gleichzeitig im DOM stehen (ein Panel je geöffnetem Dokument, "mehrere
+  // Dokumente gleichzeitig sicht- und anordenbar", Konzept 8) - ein pauschales
+  // `aria-label="Vorschau"` wäre für Screenreader-Nutzende nicht mehr
+  // eindeutig. Der Titel des jeweiligen Dokuments macht jede Instanz
+  // unterscheidbar.
   return (
-    <section className="preview-pane" aria-label={t("preview.paneLabel")}>
+    <section
+      className="preview-pane"
+      aria-label={t("preview.paneLabelFor", { title: activeDocument.title })}
+    >
       <h2 className="pane-heading">{activeDocument.title}</h2>
 
       {versions.length > 1 && (

@@ -127,7 +127,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: seite.html");
     const iframe = await within(previewPane).findByTitle("seite.html");
     expect(iframe.tagName).toBe("IFRAME");
     expect(iframe).toHaveAttribute("sandbox", "");
@@ -143,7 +143,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     const embed = await within(previewPane).findByTitle("vertrag.pdf");
     expect(embed.tagName).toBe("EMBED");
     expect(embed).toHaveAttribute("type", "application/pdf");
@@ -173,7 +173,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: scan.pdf");
     await within(previewPane).findByRole("img");
     expect(previewPane.querySelector("embed")).not.toBeInTheDocument();
     expect(downloadDocumentVersionMock).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: textlayer.pdf");
     const embed = await within(previewPane).findByTitle("textlayer.pdf");
     expect(embed.tagName).toBe("EMBED");
     expect(downloadOcrPageImageMock).not.toHaveBeenCalled();
@@ -229,7 +229,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: foto.jpg");
     await within(previewPane).findByRole("img");
     expect(within(previewPane).getByText("Erkannter Text (OCR)")).toBeInTheDocument();
     expect(within(previewPane).getByText("Erkannter Bildtext")).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: foto.jpg");
     const image = await within(previewPane).findByRole("img");
     expect(image).toHaveAttribute("src", "blob:mock-url");
     expect(downloadDocumentVersionMock).toHaveBeenCalledWith("token-123", "d1", 1);
@@ -271,7 +271,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.docx");
     const embed = await within(previewPane).findByTitle("vertrag.docx");
     expect(embed.tagName).toBe("EMBED");
     expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "pdf-archive-1");
@@ -299,7 +299,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.docx");
     expect(await within(previewPane).findByText("Vertragsinhalt als Text")).toBeInTheDocument();
     expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "substitute-1");
   });
@@ -311,7 +311,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     renderPreview(doc);
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: notiz.txt");
     expect(await within(previewPane).findByText("Hallo Welt")).toBeInTheDocument();
     expect(previewPane.querySelector("pre.preview-text")).toBeInTheDocument();
     expect(listRenditionsMock).not.toHaveBeenCalled();

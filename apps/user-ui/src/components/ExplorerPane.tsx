@@ -27,7 +27,7 @@ import { FolderTree } from "./FolderTree";
 import { ShareLinkModal } from "./ShareLinkModal";
 import { UploadForm } from "./UploadForm";
 
-interface BreadcrumbEntry {
+export interface BreadcrumbEntry {
   id: string;
   name: string;
 }
@@ -40,26 +40,25 @@ function loadViewMode(): ExplorerViewMode {
   return window.localStorage.getItem(VIEW_MODE_KEY) === "tree" ? "tree" : "list";
 }
 
-// Obere linke Spalte des 3-Spalten-Layouts (Nutzer-Feedback nach P4-S3, 8):
-// Windows-Explorer-artige Ordnernavigation mit Ordner-CRUD (bisher gab es
-// nur Navigation, keine Erstellung/Umbenennung/Löschung in der UI - die
-// Backend-Endpunkte existierten bereits seit P3-S3) plus einer Tableiste
-// für geöffnete Dokumente. Die Tab-Auswahl treibt Metadaten-Panel und
-// Vorschau (siehe `DocumentWorkspace`) synchron.
+// Eigenständiges Panel im dockbaren Arbeitsbereich (Konzept 8, seit P16-S1) -
+// Windows-Explorer-artige Ordnernavigation mit Ordner-CRUD (bisher gab es nur
+// Navigation, keine Erstellung/Umbenennung/Löschung in der UI - die Backend-
+// Endpunkte existierten bereits seit P3-S3). Trug bis P16-S1 zusätzlich die
+// Tableiste für geöffnete Dokumente - die wandert seit P16-S1 mit der
+// Vorschau zusammen in eine eigene dockview-Gruppe (`DockableDocumentArea`,
+// "Dokumenttabs künftig über der Vorschau statt über dem Explorer", Konzept
+// 8) und wird jetzt von dockviews eigenem Tab-Strip gerendert statt einer
+// handgebauten Tableiste hier.
 export function ExplorerPane({
   trail,
   folders,
   documents,
   isLoading,
   error,
-  tabs,
-  activeTabId,
   onOpenFolder,
   onNavigateToFolder,
   onBreadcrumbClick,
   onOpenDocument,
-  onSelectTab,
-  onCloseTab,
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
@@ -74,14 +73,10 @@ export function ExplorerPane({
   documents: DocumentSummary[];
   isLoading: boolean;
   error: string | null;
-  tabs: DocumentSummary[];
-  activeTabId: string | null;
   onOpenFolder: (folder: Folder) => void;
   onNavigateToFolder: (path: Folder[]) => void;
   onBreadcrumbClick: (index: number) => void;
   onOpenDocument: (doc: DocumentSummary) => void;
-  onSelectTab: (id: string) => void;
-  onCloseTab: (id: string) => void;
   onCreateFolder: (name: string, objectTypeId?: number) => Promise<boolean>;
   onRenameFolder: (folderId: string, name: string) => Promise<boolean>;
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
@@ -412,31 +407,6 @@ export function ExplorerPane({
 
   return (
     <section className="explorer-pane" aria-label={t("explorer.paneLabel")}>
-      {tabs.length > 0 && (
-        <div className="tab-bar" role="tablist" aria-label={t("explorer.openDocuments")}>
-          {tabs.map((tab) => (
-            <div key={tab.id} className={`tab ${tab.id === activeTabId ? "tab-active" : ""}`}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab.id === activeTabId}
-                onClick={() => onSelectTab(tab.id)}
-              >
-                {formatDocumentTitle(tab, documentTypeById, kennzeichenShowByDefault)}
-              </button>
-              <button
-                type="button"
-                className="tab-close"
-                aria-label={t("explorer.closeTab", { title: tab.title })}
-                onClick={() => onCloseTab(tab.id)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
       {viewMode === "list" && (
         <nav className="breadcrumbs" aria-label={t("folderBrowser.breadcrumbLabel")}>
           {trail.map((entry, index) => (

@@ -16,13 +16,10 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ApprovalsPane } from "./ApprovalsPane";
-import { ExplorerPane } from "./ExplorerPane";
+import { DockableDocumentArea, type DockableDocumentAreaHandle } from "./DockableDocumentArea";
 import { FavoritesPane } from "./FavoritesPane";
 import { IconRail, type WorkspaceView } from "./IconRail";
-import { MetadataPanel } from "./MetadataPanel";
-import { PreviewPane } from "./PreviewPane";
 import { SearchPane } from "./SearchPane";
-import { Splitter } from "./Splitter";
 import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
 import { AussonderungPane } from "./AussonderungPane";
@@ -32,35 +29,18 @@ import { QuarantinePane } from "./QuarantinePane";
 import { TrashPane } from "./TrashPane";
 import { VorlagenPane } from "./VorlagenPane";
 
-const MIN_LEFT_WIDTH = 260;
-const MIN_TOP_HEIGHT = 160;
-const MIN_PANE_REMAINDER = 200;
-
-function usePersistedSize(key: string, initial: number): [number, (value: number) => void] {
-  const [size, setSize] = useState(initial);
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(key);
-    if (stored) setSize(Number(stored));
-  }, [key]);
-
-  const update = useCallback(
-    (value: number) => {
-      setSize(value);
-      window.localStorage.setItem(key, String(value));
-    },
-    [key]
-  );
-
-  return [size, update];
-}
-
-// Ersetzt seit P4-S4 die frühere flache `FolderBrowser` (P4-S2): dreigeteiltes
-// Layout gemäß Nutzer-Feedback nach dem ersten echten Browser-Test des MVP
-// (Konzept 8) - oben links Explorer mit Dokumententabs, unten links
-// Metadaten-Panel, rechts Vorschau, alle drei über die Tab-Auswahl
-// synchronisiert und per Ziehgriff (`Splitter`) in der Größe veränderbar.
-// Ganz links außerhalb des Main-Contents die iconbasierte Navigationsleiste.
+// Ersetzt seit P4-S4 die frühere flache `FolderBrowser` (P4-S2). Bis P16-S1
+// ein festes, per Hand gebautes Splitter-Dreispaltenlayout (Konzept 8,
+// Werksstandard) - seit P16-S1 übernimmt `DockableDocumentArea` (echtes
+// VS-Code-artiges Docking über `dockview-react`, siehe ADR 0057/P16-S0) den
+// gesamten Explorer/Dokumenttabs/Vorschau/Metadaten-Bereich. Bleibt dabei
+// immer gemountet (nur per CSS ausgeblendet, wenn ein IconRail-Sonderbereich
+// aktiv ist) - ein Aus-/Wiedereinhängen würde sowohl das dockview-Layout als
+// auch offene Dokument-Panels unnötig verwerfen. Welche Dokumente offen sind
+// bleibt bewusst hier in `DocumentWorkspace` (nicht in `DockableDocumentArea`
+// selbst), damit dieser Zustand einen Wechsel zu einem Sonderbereich und
+// zurück übersteht. Ganz links außerhalb des Main-Contents die iconbasierte
+// Navigationsleiste.
 export function DocumentWorkspace() {
   const { user, accessToken, logout } = useAuth();
   const { t } = useI18n();
@@ -72,17 +52,11 @@ export function DocumentWorkspace() {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tabs, setTabs] = useState<DocumentSummary[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [openDocuments, setOpenDocuments] = useState<DocumentSummary[]>([]);
   const [view, setView] = useState<WorkspaceView>("documents");
-
-  const outerRef = useRef<HTMLDivElement>(null);
-  const leftColRef = useRef<HTMLDivElement>(null);
-  const [leftWidth, setLeftWidth] = usePersistedSize("dms.explorer.leftWidth", 380);
-  const [topHeight, setTopHeight] = usePersistedSize("dms.explorer.topHeight", 340);
+  const dockableAreaRef = useRef<DockableDocumentAreaHandle>(null);
 
   const currentFolder = trail[trail.length - 1];
-  const activeDocument = tabs.find((tab) => tab.id === activeTabId) ?? null;
 
   const load = useCallback(
     async (folderId: string) => {
@@ -131,29 +105,37 @@ export function DocumentWorkspace() {
     setTrail((prev) => prev.slice(0, index + 1));
   }
 
-  function openDocumentTab(doc: DocumentSummary) {
-    setTabs((prev) => (prev.some((tab) => tab.id === doc.id) ? prev : [...prev, doc]));
-    setActiveTabId(doc.id);
-  }
+  // Reiner Zustands-Updater (offene-Dokumente-Liste) - wird als `onOpenDocument`
+  // an `DockableDocumentArea` durchgereicht, die daraus zusammen mit dem
+  // Anlegen/Aktivieren des zugehörigen dockview-Panels den vollständigen
+  // "Dokument öffnen"-Ablauf zusammensetzt (siehe dort). Getrennt von
+  // `openDocumentTab` unten, da `DockableDocumentArea`s eigener Ref-Handle
+  // `openDocument` diesen Updater bereits selbst aufruft - ein Aufruf von
+  // `openDocumentTab` an dieser Stelle würde eine Endlosschleife erzeugen.
+  const addOpenDocument = useCallback((doc: DocumentSummary) => {
+    setOpenDocuments((prev) => (prev.some((d) => d.id === doc.id) ? prev : [...prev, doc]));
+  }, []);
 
-  function selectTab(id: string) {
-    setActiveTabId(id);
-  }
+  const closeDocumentTab = useCallback((documentId: string) => {
+    setOpenDocuments((prev) => prev.filter((d) => d.id !== documentId));
+  }, []);
 
-  function closeTab(id: string) {
-    setTabs((prev) => {
-      const next = prev.filter((tab) => tab.id !== id);
-      if (activeTabId === id) {
-        setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
-      }
-      return next;
-    });
-  }
+  // Einziger externer Einstiegspunkt zum Öffnen eines Dokuments (Explorer,
+  // Suche, Favoriten, Teamspaces) - schaltet auf die Dokumentenansicht um
+  // (damit ein aus einem Sonderbereich, z. B. der Suche, geöffnetes Dokument
+  // auch tatsächlich sichtbar wird - vor P16-S1 blieb es bei einem Klick in
+  // der Suche unbemerkt im Hintergrund offen, da die Vorschau nur innerhalb
+  // der Dokumentenansicht gerendert wurde) und delegiert an den Ref-Handle
+  // von `DockableDocumentArea`, die Zustand + dockview-Panel gemeinsam aktualisiert.
+  const openDocumentTab = useCallback((doc: DocumentSummary) => {
+    setView("documents");
+    dockableAreaRef.current?.openDocument(doc);
+  }, []);
 
-  function handleMetadataSaved(updated: DocumentSummary) {
-    setTabs((prev) => prev.map((tab) => (tab.id === updated.id ? updated : tab)));
+  const handleMetadataSaved = useCallback((updated: DocumentSummary) => {
+    setOpenDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
     setDocuments((prev) => prev.map((doc) => (doc.id === updated.id ? updated : doc)));
-  }
+  }, []);
 
   async function handleCreateFolder(name: string, objectTypeId?: number): Promise<boolean> {
     if (!accessToken || !user) return false;
@@ -225,7 +207,6 @@ export function DocumentWorkspace() {
   // Backend-Endpunkt dafür nötig.
   function handleOpenFavoriteDocument(doc: DocumentSummary) {
     openDocumentTab(doc);
-    setView("documents");
   }
 
   // Läuft die `parent_id`-Kette clientseitig über den bestehenden `GET
@@ -267,20 +248,6 @@ export function DocumentWorkspace() {
     }
   }
 
-  function handleVerticalResize(offsetPx: number) {
-    const rect = outerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const max = rect.width - MIN_PANE_REMAINDER;
-    setLeftWidth(Math.min(Math.max(offsetPx, MIN_LEFT_WIDTH), Math.max(max, MIN_LEFT_WIDTH)));
-  }
-
-  function handleHorizontalResize(offsetPx: number) {
-    const rect = leftColRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const max = rect.height - MIN_PANE_REMAINDER;
-    setTopHeight(Math.min(Math.max(offsetPx, MIN_TOP_HEIGHT), Math.max(max, MIN_TOP_HEIGHT)));
-  }
-
   return (
     <div className="workspace">
       <div className="top-bar">
@@ -295,46 +262,33 @@ export function DocumentWorkspace() {
 
       <div className="workspace-body">
         <IconRail activeView={view} onSelectView={setView} />
-        <div className="main-area" ref={outerRef} style={{ gridTemplateColumns: `${leftWidth}px 6px 1fr` }}>
-          <div
-            className="left-col"
-            ref={leftColRef}
-            style={{ gridTemplateRows: `${topHeight}px 6px 1fr` }}
-          >
-            {view === "documents" ? (
-              <>
-                <ExplorerPane
-                  trail={trail}
-                  folders={folders}
-                  documents={documents}
-                  isLoading={isLoading}
-                  error={error}
-                  tabs={tabs}
-                  activeTabId={activeTabId}
-                  onOpenFolder={openFolder}
-                  onNavigateToFolder={navigateToFolder}
-                  onBreadcrumbClick={goToBreadcrumb}
-                  onOpenDocument={openDocumentTab}
-                  onSelectTab={selectTab}
-                  onCloseTab={closeTab}
-                  onCreateFolder={handleCreateFolder}
-                  onRenameFolder={handleRenameFolder}
-                  onDeleteFolder={handleDeleteFolder}
-                  onDeleteDocument={handleDeleteDocument}
-                  token={accessToken ?? ""}
-                  createdBy={user?.username ?? ""}
-                  currentFolderId={currentFolder.id}
-                  onUploaded={() => load(currentFolder.id)}
-                />
-                <Splitter
-                  orientation="horizontal"
-                  containerRef={leftColRef}
-                  onResize={handleHorizontalResize}
-                  label={t("explorer.resizeVertical")}
-                />
-                <MetadataPanel document={activeDocument} onSaved={handleMetadataSaved} />
-              </>
-            ) : view === "search" ? (
+        <DockableDocumentArea
+          ref={dockableAreaRef}
+          hidden={view !== "documents"}
+          trail={trail}
+          folders={folders}
+          documents={documents}
+          isLoading={isLoading}
+          error={error}
+          onOpenFolder={openFolder}
+          onNavigateToFolder={navigateToFolder}
+          onBreadcrumbClick={goToBreadcrumb}
+          onCreateFolder={handleCreateFolder}
+          onRenameFolder={handleRenameFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onDeleteDocument={handleDeleteDocument}
+          token={accessToken ?? ""}
+          createdBy={user?.username ?? ""}
+          currentFolderId={currentFolder.id}
+          onUploaded={() => load(currentFolder.id)}
+          openDocuments={openDocuments}
+          onOpenDocument={addOpenDocument}
+          onCloseDocument={closeDocumentTab}
+          onMetadataSaved={handleMetadataSaved}
+        />
+        {view !== "documents" && (
+          <div className="main-area-single">
+            {view === "search" ? (
               <SearchPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
             ) : view === "approvals" ? (
               <ApprovalsPane token={accessToken ?? ""} currentUsername={user?.username ?? ""} />
@@ -367,14 +321,7 @@ export function DocumentWorkspace() {
               <KontaktePane token={accessToken ?? ""} />
             )}
           </div>
-          <Splitter
-            orientation="vertical"
-            containerRef={outerRef}
-            onResize={handleVerticalResize}
-            label={t("explorer.resizeHorizontal")}
-          />
-          <PreviewPane document={activeDocument} />
-        </div>
+        )}
       </div>
     </div>
   );

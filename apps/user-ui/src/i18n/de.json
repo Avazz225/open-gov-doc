@@ -78,8 +78,6 @@
   },
   "explorer": {
     "paneLabel": "Explorer",
-    "openDocuments": "Geöffnete Dokumente",
-    "closeTab": "{title} schließen",
     "newFolder": "Neuer Ordner",
     "newFolderFormLabel": "Neuen Ordner anlegen",
     "newFolderPlaceholder": "Ordnername",
@@ -93,8 +91,6 @@
     "createFolderError": "Ordner konnte nicht angelegt werden",
     "renameFolderError": "Ordner konnte nicht umbenannt werden",
     "deleteFolderError": "Ordner konnte nicht gelöscht werden (ggf. nicht leer)",
-    "resizeHorizontal": "Spaltenbreite ändern",
-    "resizeVertical": "Zeilenhöhe ändern",
     "viewModeLabel": "Ansicht",
     "viewModeList": "Liste",
     "viewModeTree": "Baum",
@@ -388,6 +384,13 @@
     "empty": "Noch keine Vorlagen.",
     "loadError": "Vorlagen konnten nicht geladen werden"
   },
+  "workspace": {
+    "explorerPanelTitle": "Explorer",
+    "metadataPanelTitle": "Metadaten",
+    "previewPanelTitle": "Vorschau",
+    "resetLayout": "Standardanordnung",
+    "resetLayoutHint": "Setzt die Anordnung der Arbeitsbereich-Panels auf die Standardanordnung zurück"
+  },
   "delegations": {
     "paneLabel": "Stellvertretung",
     "heading": "Stellvertretung bei Abwesenheit",
@@ -411,6 +414,7 @@
   },
   "preview": {
     "paneLabel": "Vorschau",
+    "paneLabelFor": "Vorschau: {title}",
     "noSelection": "Kein Dokument ausgewählt.",
     "loading": "Vorschau wird geladen...",
     "noRendition": "Für dieses Dokument liegt noch keine Vorschau vor.",

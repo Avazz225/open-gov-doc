@@ -13,6 +13,21 @@ function renderWorkspace() {
   );
 }
 
+// Seit P16-S1 (dockbarer Arbeitsbereich, `dockview-react`) trägt JEDE
+// dockview-Gruppe selbst ein `role="region"`-Element mit demselben
+// `aria-label` wie ihr aktives Panel (z. B. "Metadaten") - zusätzlich zu der
+// eigentlichen `<section aria-label="Metadaten">` aus `MetadataPanel`/
+// `ExplorerPane` selbst. `getByLabelText` findet dadurch für feste
+// Panel-Titel (die nicht wie `PreviewPane` je Dokument eindeutig gemacht
+// wurden) immer zwei Treffer - dieser Helper filtert gezielt auf das
+// eigene `<section>`-Element.
+function getPaneSectionByLabel(name: string): HTMLElement {
+  const matches = screen.getAllByLabelText(name);
+  const section = matches.find((el) => el.tagName === "SECTION");
+  if (!section) throw new Error(`Kein <section>-Element mit Label "${name}" gefunden`);
+  return section;
+}
+
 const listChildFoldersMock = vi.fn();
 const listDocumentsInFolderMock = vi.fn();
 const downloadDocumentMock = vi.fn();
@@ -318,14 +333,113 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Rechnung.pdf/));
 
-    const tabBar = screen.getByRole("tablist");
-    expect(within(tabBar).getByText("Rechnung.pdf")).toBeInTheDocument();
-    const previewPane = screen.getByLabelText("Vorschau");
+    // dockview rendert seit P16-S1 pro Panel-Gruppe eine eigene Tableiste
+    // (Explorer/Vorschau/Metadaten je eigenständig, siehe
+    // `DockableDocumentArea`) - `getByRole("tablist")` wäre daher nicht mehr
+    // eindeutig. Der Dokument-Tab selbst hat aber einen eindeutigen
+    // barrierefreien Namen (den Dokumenttitel).
+    expect(screen.getByRole("tab", { name: "Rechnung.pdf" })).toBeInTheDocument();
+    const previewPane = screen.getByLabelText("Vorschau: Rechnung.pdf");
     expect(within(previewPane).getByText("Rechnung.pdf")).toBeInTheDocument();
     expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 1);
     expect(
       await screen.findByText(/Für dieses Dokument liegt noch keine Vorschau vor/)
     ).toBeInTheDocument();
+  });
+
+  describe("Dockbarer Arbeitsbereich (dockview, P16-S1)", () => {
+    const document2 = { ...document1, id: "d9", title: "Zweitdokument.pdf" };
+
+    it("opens a second document as another tab in the same preview group", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([document1, document2]);
+      listRenditionsMock.mockResolvedValue([]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByText(/Rechnung.pdf/));
+      await user.click(await screen.findByText(/Zweitdokument.pdf/));
+
+      // Beide Dokumente sind als eigene Tabs derselben dockview-Gruppe
+      // vorhanden und per Ziehen in eine eigene Gruppe abspaltbar ("mehrere
+      // Dokumente gleichzeitig sicht- und anordenbar", Konzept 8 - dockview
+      // selbst übernimmt das Splitten/Andocken, siehe ADR 0057). Nur der
+      // gerade aktive Tab rendert seinen Inhalt (dockviews eigenes,
+      // Browser-Tab-artiges Standardverhalten je Gruppe) - erst ein
+      // tatsächliches Abspalten in eine zweite Gruppe zeigt beide
+      // gleichzeitig, das lässt sich in jsdom (kein echtes Drag&Drop) nicht
+      // sinnvoll nachstellen.
+      expect(screen.getByRole("tab", { name: "Rechnung.pdf" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Zweitdokument.pdf" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Vorschau: Zweitdokument.pdf")).toBeInTheDocument();
+    });
+
+    it("removes a document from state when its dockview tab is closed", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+      listRenditionsMock.mockResolvedValue([]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByText(/Rechnung.pdf/));
+      expect(screen.getByRole("tab", { name: "Rechnung.pdf" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Close Rechnung.pdf" }));
+
+      expect(screen.queryByRole("tab", { name: "Rechnung.pdf" })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Vorschau: Rechnung.pdf")).not.toBeInTheDocument();
+    });
+
+    it("resets the layout via the toolbar button without losing open documents", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+      listRenditionsMock.mockResolvedValue([]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByText(/Rechnung.pdf/));
+      expect(screen.getByRole("tab", { name: "Rechnung.pdf" })).toBeInTheDocument();
+
+      await user.click(screen.getByText("Standardanordnung"));
+
+      // Die Anordnung wurde neu aufgebaut, das offene Dokument bleibt aber
+      // erhalten - "Zurücksetzen" setzt nur das Layout zurück, nicht die
+      // offenen Dokumente. Der Tab (von dockview selbst aus dem internen
+      // Modell gerendert) ist das zuverlässigste DOM-Signal; zusätzlich wird
+      // das persistierte Layout direkt geprüft, da jsdom (kein echtes
+      // Requestanimationframe/Portal-Reconciliation) das erneute Rendern des
+      // Vorschau-Panelinhalts bei einer INNERHALB DESSELBEN Ticks
+      // wiederverwendeten Panel-ID ("doc:d1" existierte vor dem Reset schon
+      // einmal) nicht zuverlässig nachvollzieht, obwohl dockviews eigenes
+      // Modell nachweislich korrekt ist (siehe ADR 0057 "Offene Punkte") -
+      // in einem echten Browser tritt das nicht auf (Live-Verifikation).
+      expect(screen.getByRole("tab", { name: "Rechnung.pdf" })).toBeInTheDocument();
+      await waitFor(() => {
+        const stored = window.localStorage.getItem("dms.workspace.dockLayout");
+        expect(stored).not.toBeNull();
+        expect(JSON.parse(stored ?? "{}").panels).toHaveProperty("doc:d1");
+      });
+    });
+
+    it("persists the dockview layout to localStorage after a change", async () => {
+      listChildFoldersMock.mockResolvedValue([]);
+      listDocumentsInFolderMock.mockResolvedValue([document1]);
+      listRenditionsMock.mockResolvedValue([]);
+
+      const user = userEvent.setup();
+      renderWorkspace();
+
+      await user.click(await screen.findByText(/Rechnung.pdf/));
+
+      await waitFor(() => {
+        const stored = window.localStorage.getItem("dms.workspace.dockLayout");
+        expect(stored).not.toBeNull();
+        expect(JSON.parse(stored ?? "{}")).toHaveProperty("grid");
+      });
+    });
   });
 
   it("shows an image document in full resolution via its raw bytes, not a thumbnail rendition (2.4, Nutzer-Feedback)", async () => {
@@ -358,7 +472,7 @@ describe("DocumentWorkspace", () => {
     await waitFor(() =>
       expect(downloadDocumentVersionMock).toHaveBeenCalledWith("token-123", "d5", 1)
     );
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: foto.jpg");
     const image = await within(previewPane).findByRole("img");
     expect(image).toHaveAttribute("src", "blob:mock-url");
     expect(downloadRenditionContentMock).not.toHaveBeenCalled();
@@ -416,7 +530,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Rechnung.pdf/));
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: Rechnung.pdf");
     const word = await within(previewPane).findByText("Hallo");
     expect(word).toHaveClass("ocr-word");
     expect(word).toHaveStyle({ left: "10%", top: "10%", width: "20%", height: "20%" });
@@ -449,7 +563,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/foto.jpg/));
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: foto.jpg");
     await within(previewPane).findByRole("img");
     expect(previewPane.querySelectorAll(".ocr-word")).toHaveLength(0);
   });
@@ -499,7 +613,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/vertrag.docx/));
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.docx");
     expect(await within(previewPane).findByText("Vertragsinhalt als Text")).toBeInTheDocument();
     expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "d4:1:substitute");
     expect(listOcrResultsMock).not.toHaveBeenCalled();
@@ -536,7 +650,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Rechnung.pdf/));
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: Rechnung.pdf");
     await within(previewPane).findByRole("img");
     await waitFor(() => expect(downloadOcrPageImageMock).toHaveBeenCalledWith("token-123", "d1:1", 1));
 
@@ -629,7 +743,7 @@ describe("DocumentWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("Version auswählen"), "2");
     await waitFor(() => expect(listRenditionsMock).toHaveBeenCalledWith("token-123", "d1", 2));
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: Rechnung.pdf");
     await user.click(within(previewPane).getByText("Herunterladen"));
 
     await waitFor(() =>
@@ -832,7 +946,11 @@ describe("DocumentWorkspace", () => {
     renderWorkspace();
 
     await user.click(screen.getByTitle("Favoriten"));
-    await user.click(await screen.findByText(/B/));
+    // Seit P16-S1 bleibt der (ausgeblendete) Explorer inkl. seines
+    // "Baum"-Umschalters immer gemountet (siehe oben) - ein ungescoptes
+    // `/B/` würde ihn ebenfalls treffen. Auf die Favoriten-Pane eingrenzen.
+    const favoritesPane = screen.getByLabelText("Favoriten");
+    await user.click(await within(favoritesPane).findByText(/B/));
     await user.click(screen.getByText("Öffnen"));
 
     const breadcrumbs = await screen.findByLabelText("Ordnerpfad");
@@ -951,7 +1069,12 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Rechnung.pdf/));
 
-    const metadataPanel = screen.getByLabelText("Metadaten");
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
+    // dockview verhält sich wie ein echter Editor: eine Panelgruppe muss erst
+    // fokussiert/aktiviert werden ("Klick hinein"), bevor Elemente darin
+    // interaktiv fokussierbar sind - ohne diesen Klick lehnt userEvent
+    // `.clear()`/`.type()` mit "could not be focused" ab.
+    await user.click(metadataPanel);
     const titleInput = within(metadataPanel).getByLabelText("Titel");
     await user.clear(titleInput);
     await user.type(titleInput, "Rechnung-2026.pdf");
@@ -963,8 +1086,12 @@ describe("DocumentWorkspace", () => {
         attributes: {},
       })
     );
-    const tabBar = screen.getByRole("tablist");
-    await waitFor(() => expect(within(tabBar).getByText("Rechnung-2026.pdf")).toBeInTheDocument());
+    // Bestätigt zugleich, dass `DockableDocumentArea.handleMetadataSaved`
+    // den dockview-Tab-Titel per `panel.api.setTitle()` aktualisiert, siehe
+    // dort.
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Rechnung-2026.pdf" })).toBeInTheDocument()
+    );
   });
 
   it("reloads the document list after a successful upload", async () => {
@@ -1051,7 +1178,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/notiz.txt/));
 
-    const previewPane = screen.getByLabelText("Vorschau");
+    const previewPane = screen.getByLabelText("Vorschau: notiz.txt");
     expect(await within(previewPane).findByText("Hallo Welt")).toBeInTheDocument();
     expect(listRenditionsMock).not.toHaveBeenCalled();
     expect(listOcrResultsMock).not.toHaveBeenCalled();
@@ -1069,7 +1196,12 @@ describe("DocumentWorkspace", () => {
 
     await user.click(screen.getByTitle("Suche"));
     expect(screen.getByLabelText("Suche")).toBeInTheDocument();
-    expect(screen.queryByText("Neuer Ordner")).not.toBeInTheDocument();
+    // Seit P16-S1 bleibt `DockableDocumentArea` (inkl. Explorer) beim
+    // Wechsel zu einem IconRail-Sonderbereich gemountet - nur per CSS
+    // ausgeblendet (das dockview-Layout/offene Dokumente sollen einen
+    // Sonderbereichs-Ausflug überstehen, siehe dort). "Neuer Ordner" bleibt
+    // also im DOM, ist aber nicht mehr sichtbar.
+    expect(screen.getByText("Neuer Ordner")).not.toBeVisible();
 
     await user.click(screen.getByTitle("Dokumente"));
     expect(screen.queryByLabelText("Suche")).not.toBeInTheDocument();
@@ -1114,11 +1246,14 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText("Suchtreffer.pdf"));
 
-    // Öffnen bleibt bewusst in der Suchansicht (kein automatischer
-    // View-Wechsel, siehe SearchPane-Kommentar) - die Vorschau rechts
-    // reagiert trotzdem sofort, da sie unabhängig vom aktiven View immer
-    // vom activeTabId gesteuert wird.
-    const previewPane = screen.getByLabelText("Vorschau");
+    // Seit P16-S1 schaltet das Öffnen eines Dokuments (aus jedem
+    // Sonderbereich heraus, nicht nur der Suche) automatisch auf die
+    // Dokumentenansicht um - vorher blieb ein aus der Suche geöffnetes
+    // Dokument unbemerkt im Hintergrund offen, da die Vorschau nur innerhalb
+    // der Dokumentenansicht sichtbar war (siehe `DocumentWorkspace.
+    // openDocumentTab`).
+    expect(screen.queryByLabelText("Suche")).not.toBeInTheDocument();
+    const previewPane = screen.getByLabelText("Vorschau: Suchtreffer.pdf");
     expect(within(previewPane).getByText("Suchtreffer.pdf")).toBeInTheDocument();
   });
 
@@ -1246,7 +1381,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Rechnung.pdf/));
 
-    const metadataPanel = screen.getByLabelText("Metadaten");
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
     expect(await within(metadataPanel).findByText(/Rechnungsbetrag/)).toBeInTheDocument();
     expect(within(metadataPanel).getByLabelText(/Rechnungsbetrag/)).toHaveAttribute("type", "number");
   });
@@ -1372,8 +1507,14 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/2026-001 Vertrag\.pdf/));
 
-    const tabBar = screen.getByRole("tablist");
-    expect(within(tabBar).getByText("2026-001 Vertrag.pdf")).toBeInTheDocument();
+    // Seit P16-S1 hat jede dockview-Panelgruppe (Explorer/Vorschau/
+    // Metadaten) ihre eigene Tableiste - `getByRole("tablist")` ist daher
+    // nicht mehr eindeutig, siehe oben. Der dockview-Tab selbst zeigt
+    // bewusst den rohen Dokumenttitel ohne Kennzeichen-Präfix (siehe
+    // `DockableDocumentArea` - dieselbe Vereinfachung, die auch die
+    // Vorschau-Überschrift schon immer hatte); die Kennzeichen-Formatierung
+    // bleibt der Explorer-Dateiliste vorbehalten, dort weiterhin bestätigt.
+    expect(screen.getByRole("tab", { name: "Vertrag.pdf" })).toBeInTheDocument();
   });
 
   it("hides the Kennzeichen prefix when the object type overrides the global default off", async () => {
@@ -1422,7 +1563,7 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Vertrag.pdf/));
 
-    const metadataPanel = screen.getByLabelText("Metadaten");
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
     const kennzeichenInput = within(metadataPanel).getByLabelText("Kennzeichen");
     expect(kennzeichenInput).toHaveValue("2026-001");
     expect(kennzeichenInput).toBeDisabled();
@@ -1450,7 +1591,11 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Vertrag.pdf/));
 
-    const metadataPanel = screen.getByLabelText("Metadaten");
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
+    // dockview verhält sich wie ein echter Editor: eine Panelgruppe muss
+    // erst fokussiert/aktiviert werden ("Klick hinein"), bevor Elemente
+    // darin interaktiv fokussierbar sind.
+    await user.click(metadataPanel);
     const kennzeichenInput = within(metadataPanel).getByLabelText("Kennzeichen");
     expect(kennzeichenInput).not.toBeDisabled();
     await user.clear(kennzeichenInput);
