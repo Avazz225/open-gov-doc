@@ -23,6 +23,11 @@ from folder_service.schemas import (
     DeletionRegisterEntryOut,
     FolderCreate,
     FolderOut,
+    FolderTemplateApplyRequest,
+    FolderTemplateApplyResult,
+    FolderTemplateCreate,
+    FolderTemplateDetailOut,
+    FolderTemplateOut,
     FolderUpdate,
     LegalHoldCreate,
     LegalHoldOut,
@@ -870,3 +875,97 @@ async def put_trash_config(
     )
     await session.commit()
     return config
+
+
+# --- Struktur-Vorlagen (2.5/7.3, seit P15-S6) ---
+
+
+@app.post(
+    "/folder-templates", response_model=FolderTemplateOut, status_code=status.HTTP_201_CREATED
+)
+async def create_folder_template(
+    payload: FolderTemplateCreate, session: AsyncSession = Depends(get_session)
+) -> FolderTemplateOut:
+    """Erfasst den aktiven Teilbaum ab `payload.source_folder_id` als
+    benannte, wiederverwendbare Struktur-Vorlage (2.5/7.3, z. B. Aktenplan-
+    Rohbau) - siehe `repository.build_template_structure`/ADR 0056."""
+    try:
+        structure = await repository.build_template_structure(session, payload.source_folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    template = await repository.create_template(
+        session,
+        name=payload.name,
+        description=payload.description,
+        structure=structure,
+        created_by=payload.created_by,
+    )
+    await session.commit()
+    return template
+
+
+@app.get("/folder-templates", response_model=list[FolderTemplateOut])
+async def list_folder_templates(
+    session: AsyncSession = Depends(get_session),
+) -> list[FolderTemplateOut]:
+    return await repository.list_templates(session)
+
+
+@app.get("/folder-templates/{template_id}", response_model=FolderTemplateDetailOut)
+async def get_folder_template(
+    template_id: str, session: AsyncSession = Depends(get_session)
+) -> FolderTemplateDetailOut:
+    try:
+        return await repository.get_template(session, template_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/folder-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_folder_template(
+    template_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    try:
+        await repository.delete_template(session, template_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+
+
+@app.post("/folder-templates/{template_id}/apply", response_model=FolderTemplateApplyResult)
+async def apply_folder_template(
+    template_id: str,
+    payload: FolderTemplateApplyRequest,
+    session: AsyncSession = Depends(get_session),
+) -> FolderTemplateApplyResult:
+    """Wendet eine Struktur-Vorlage unterhalb `payload.target_parent_id` an -
+    erzeugt echte Ordner (siehe `repository.apply_template`) und publiziert
+    für jeden davon ein reguläres `folder.resource.created`-Event, damit
+    `permission-service`s `ResourceNode`-Baum synchron bleibt (identisches
+    Event wie bei einer einzelnen `POST /folders`)."""
+    try:
+        template = await repository.get_template(session, template_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        created = await repository.apply_template(
+            session,
+            template,
+            target_parent_id=payload.target_parent_id,
+            created_by=payload.created_by,
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    for folder in created:
+        await publish_event(
+            "folder.resource.created",
+            subject=folder.id,
+            payload={
+                "resource_id": folder.id,
+                "parent_id": folder.parent_id,
+                "resource_type": "folder",
+            },
+            actor=payload.created_by,
+        )
+    return FolderTemplateApplyResult(root_folder=created[0], created_count=len(created))

@@ -53,6 +53,25 @@ class Folder(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class FolderTemplate(Base):
+    """Struktur-Vorlagen (2.5/7.3, seit P15-S6) - ein Ordner-Teilbaum als
+    benannte, wiederverwendbare Vorlage (z. B. Aktenplan-Rohbau). `structure`
+    ist ein verschachtelter Baum ({"name", "object_type_id", "children"}) -
+    erfasst bewusst NUR Struktur (Name + Objekttyp je Knoten), keine
+    Attributwerte: ein "Rohbau" wird nach dem Anwenden erst befüllt, siehe
+    ADR 0056. Kein FK auf `Folder` - eine Vorlage bleibt unabhängig vom
+    Fortbestehen ihres ursprünglichen Quellordners gültig."""
+
+    __tablename__ = "folder_template"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(256))
+    description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    structure: Mapped[dict] = mapped_column(JSON)
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class LegalHold(Base):
     """Legal Hold für Ordner (5.2, seit P7-S1b) - strukturgleich zu
     `document_service.LegalHold` (P7-S1), aber eigenständige Tabelle im

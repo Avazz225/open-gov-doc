@@ -238,6 +238,14 @@ Neuer `IconRail`-Eintrag "Aussonderung" (🗄️, `WorkspaceView` um `"aussonder
 - **Nur bereits bestehende Aktionen, keine neuen Mutationen**: "Rückholung" (Dokumente, `POST /archival-transfers/{id}/retrieve`, lädt nach Erfolg neu — der Transfer bleibt danach weiterhin `released`, `released_at` wird aber zurückgesetzt) und "Paket herunterladen" (Umlaufmappen, `GET /case-archival-transfers/{id}/package`, Blob-Download über `URL.createObjectURL` — gleiches Muster wie `PreviewPane`s `triggerBrowserDownload`, hier lokal in der Pane nachgebaut statt einer gemeinsamen Utility, da es die einzige Download-Aktion dieser Pane ist).
 - **`lib/api.ts`**: neue `listReleasedItems`/`retrieveArchivalTransfer`/`downloadCaseArchivalPackage` gegen `archival-service`.
 
+## Struktur-Vorlagen (2.5/7.3, seit P15-S6)
+
+Neuer `IconRail`-Eintrag "Vorlagen" (📐, `WorkspaceView` um `"vorlagen"` erweitert, ungegated wie Kontakte), siehe `docs/services/folder-service.md` und [ADR 0056](../adr/0056-struktur-vorlagen-folder-service-json-tree-no-attribute-values.md). Letzter neuer Sonderbereich der Phase 15.
+
+- **`components/VorlagenPane.tsx`** (neu): ein Formular zum Erfassen (Quellordner-ID, Name, optionale Beschreibung → `POST /folder-templates`), eine Liste bestehender Vorlagen mit "Anwenden" (Inline-Formular für die Ziel-Ordner-ID, analog zu `QuarantinePane`s Freigabe-Formular) und "Löschen" (mit Bestätigungsdialog). Quell-/Zielordner werden bewusst als rohe Text-IDs erfasst, kein Ordnerbaum-Picker — identisches, bereits etabliertes Muster wie `QuarantinePane`/`PoststellePane` (P15-S2/S3).
+- **`lib/api.ts`**: neue `listFolderTemplates`/`getFolderTemplate`/`createFolderTemplate`/`deleteFolderTemplate`/`applyFolderTemplate` gegen `folder-service`.
+- **Phase 15 damit vollständig abgeschlossen** — `graphify dms/ --update` im Anschluss an diese Session ausgeführt.
+
 ## Theming (Konzept 8, seit P4-S6)
 
 `src/lib/theme-context.tsx` (`ThemeProvider`/`useTheme()`): Hell/Dunkel/Hoher-Kontrast/Automatisch, umschaltbar über den `ThemeSwitcher` im Einstellungen-Popover der `IconRail`. Geräteübergreifend am Nutzerkonto gespeichert (`GET/PUT /api/auth-service/me/preferences`), siehe [ADR 0009](../adr/0009-cross-ui-theming-profile-persistence.md) für die Begründung (Keycloak-Attribut statt neuer Persistenz-Baustein) und den dabei gefundenen Stolperstein (Declarative User Profile verwirft nicht deklarierte Attribute stillschweigend). `localStorage` (`dms.theme`) dient als sofort verfügbarer Cache, u. a. damit die Login-Seite ohne Sitzung ebenfalls ein Theme hat. `data-theme` auf `<html>` steuert per CSS-Variablen (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) das gesamte Stylesheet (`globals.css`).
@@ -253,6 +261,7 @@ Zweistufiges Docker-Image (`apps/user-ui/Dockerfile`): Node nur im Build-Stage (
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — Typprüfung, ESLint, produktionsfähiger statischer Export.
+- **Seit P15-S6: 163 Tests** (vorher 156) — neue eigenständige `vorlagen-pane.test.tsx` (7 Tests: Leerzustand, Liste zeigt Vorlage inkl. Beschreibung, Erfassen aus einer Quellordner-ID, Fehleranzeige bei fehlgeschlagenem Erfassen, Anwenden auf eine Zielordner-ID, Löschen nach Bestätigung, kein Löschen bei abgebrochenem Bestätigungsdialog).
 - **Seit P15-S5: 156 Tests** (vorher 150) — neue eigenständige `aussonderung-pane.test.tsx` (6 Tests: Leerzustand, Liste zeigt Dokument und Umlaufmappe inkl. Kennzeichen/Vorgangsnummer, Suche löst Reload mit Query aus, Rückholung lädt danach neu, Fehleranzeige bei fehlgeschlagener Rückholung, Paket-Download für eine Umlaufmappe).
 - **Seit P15-S4: 150 Tests** (vorher 144) — neue eigenständige `kontakte-pane.test.tsx` (6 Tests: Leerzustand vor der ersten Suche, lokale Treffer, Leerzustand ohne Treffer, Föderations-Checkbox bleibt verborgen wenn deaktiviert, föderierte Treffer bei aktivierter Föderation + angehaktem Kästchen, Fehleranzeige bei fehlgeschlagener Suche).
 - **Seit P15-S3: 144 Tests** (vorher 138) — neue eigenständige `poststelle-pane.test.tsx` (6 Tests: Leerzustand Posteingang, Liste zeigt einen vorgeschlagenen Treffer, Bestätigen mit vorbefülltem Titel, manuelles Zuordnen mit Zielordner, Verwerfen nach Bestätigung, Tab-Wechsel zu Postausgang inkl. Versenden einer neuen Nachricht) — wie `QuarantinePane` rendert `PoststellePane` selbst keine Rollenprüfung (sitzt in `IconRail.tsx`), ein isolierter Komponententest genügt.

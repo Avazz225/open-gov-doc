@@ -495,3 +495,164 @@ def test_trash_config_get_and_put(client):
     assert response.status_code == 200
     assert response.json()["restore_period_days"] == 10
     client.put("/trash-config", json={"restore_period_days": 30})
+
+
+def _create_folder(client, *, name, parent_id="root", object_type_id=None):
+    response = client.post(
+        "/folders",
+        json={
+            "name": name,
+            "parent_id": parent_id,
+            "object_type_id": object_type_id,
+            "attributes": {},
+            "created_by": "alice",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_create_and_list_folder_template(client):
+    projekte = _create_folder(client, name="Projekte")
+    _create_folder(client, name="Vertraege", parent_id=projekte["id"])
+
+    response = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": projekte["id"],
+            "name": "Aktenplan-Rohbau",
+            "description": "Standard-Struktur",
+            "created_by": "alice",
+        },
+    )
+    assert response.status_code == 201
+    template = response.json()
+    assert template["name"] == "Aktenplan-Rohbau"
+
+    listed = client.get("/folder-templates").json()
+    assert [t["id"] for t in listed] == [template["id"]]
+
+
+def test_create_folder_template_unknown_source_returns_404(client):
+    response = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": "does-not-exist",
+            "name": "X",
+            "description": None,
+            "created_by": "alice",
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_get_folder_template_returns_structure(client):
+    projekte = _create_folder(client, name="Projekte")
+    _create_folder(client, name="Vertraege", parent_id=projekte["id"])
+    template = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": projekte["id"],
+            "name": "Vorlage",
+            "description": None,
+            "created_by": "alice",
+        },
+    ).json()
+
+    response = client.get(f"/folder-templates/{template['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["structure"]["name"] == "Projekte"
+    assert body["structure"]["children"][0]["name"] == "Vertraege"
+    assert body["structure"]["children"][0]["object_type_id"] is None
+
+
+def test_get_folder_template_returns_404_for_unknown_id(client):
+    response = client.get("/folder-templates/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_delete_folder_template(client):
+    projekte = _create_folder(client, name="Projekte")
+    template = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": projekte["id"],
+            "name": "Vorlage",
+            "description": None,
+            "created_by": "alice",
+        },
+    ).json()
+
+    response = client.delete(f"/folder-templates/{template['id']}")
+
+    assert response.status_code == 204
+    assert client.get("/folder-templates").json() == []
+
+
+def test_delete_folder_template_returns_404_for_unknown_id(client):
+    response = client.delete("/folder-templates/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_apply_folder_template_creates_folders_under_target(client):
+    projekte = _create_folder(client, name="Projekte")
+    _create_folder(client, name="Vertraege", parent_id=projekte["id"])
+    template = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": projekte["id"],
+            "name": "Vorlage",
+            "description": None,
+            "created_by": "alice",
+        },
+    ).json()
+    target = _create_folder(client, name="Neues Projekt")
+
+    response = client.post(
+        f"/folder-templates/{template['id']}/apply",
+        json={"target_parent_id": target["id"], "created_by": "bob"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created_count"] == 2
+    assert body["root_folder"]["name"] == "Projekte"
+    assert body["root_folder"]["parent_id"] == target["id"]
+
+    children = client.get(f"/folders/{body['root_folder']['id']}/children").json()
+    assert [c["name"] for c in children] == ["Vertraege"]
+    # Angewendete Ordner sind unabhängige Kopien - keine Attributwerte aus
+    # dem Rohbau übernommen (es gab keine), aber auch keine Verknüpfung
+    # zurück zur Vorlage.
+    assert children[0]["attributes"] == {}
+
+
+def test_apply_folder_template_unknown_template_returns_404(client):
+    target = _create_folder(client, name="Ziel")
+    response = client.post(
+        "/folder-templates/does-not-exist/apply",
+        json={"target_parent_id": target["id"], "created_by": "bob"},
+    )
+    assert response.status_code == 404
+
+
+def test_apply_folder_template_unknown_target_returns_404(client):
+    projekte = _create_folder(client, name="Projekte")
+    template = client.post(
+        "/folder-templates",
+        json={
+            "source_folder_id": projekte["id"],
+            "name": "Vorlage",
+            "description": None,
+            "created_by": "alice",
+        },
+    ).json()
+
+    response = client.post(
+        f"/folder-templates/{template['id']}/apply",
+        json={"target_parent_id": "does-not-exist", "created_by": "bob"},
+    )
+
+    assert response.status_code == 404

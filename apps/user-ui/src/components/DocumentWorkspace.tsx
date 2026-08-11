@@ -30,6 +30,7 @@ import { KontaktePane } from "./KontaktePane";
 import { PoststellePane } from "./PoststellePane";
 import { QuarantinePane } from "./QuarantinePane";
 import { TrashPane } from "./TrashPane";
+import { VorlagenPane } from "./VorlagenPane";
 
 const MIN_LEFT_WIDTH = 260;
 const MIN_TOP_HEIGHT = 160;
@@ -360,6 +361,8 @@ export function DocumentWorkspace() {
               <PoststellePane token={accessToken ?? ""} />
             ) : view === "aussonderung" ? (
               <AussonderungPane token={accessToken ?? ""} />
+            ) : view === "vorlagen" ? (
+              <VorlagenPane token={accessToken ?? ""} createdBy={user?.username ?? ""} />
             ) : (
               <KontaktePane token={accessToken ?? ""} />
             )}

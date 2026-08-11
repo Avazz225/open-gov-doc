@@ -27,7 +27,7 @@ async def _clean_tables():
         await conn.execute(
             text(
                 "TRUNCATE folder.legal_hold, folder.deletion_register_entry, folder.folder, "
-                "folder.retention_config, folder.trash_config CASCADE"
+                "folder.retention_config, folder.trash_config, folder.folder_template CASCADE"
             )
         )
     await eng.dispose()

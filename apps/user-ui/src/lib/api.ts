@@ -1859,3 +1859,98 @@ export async function downloadCaseArchivalPackage(
   );
   return response.blob();
 }
+
+// Struktur-Vorlagen (2.5/7.3, P15-S6) - Ordner-Teilbaum als benannte,
+// wiederverwendbare Vorlage (z. B. Aktenplan-Rohbau).
+export interface FolderTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface FolderTemplateNode {
+  name: string;
+  object_type_id: number | null;
+  children: FolderTemplateNode[];
+}
+
+export interface FolderTemplateDetail extends FolderTemplate {
+  structure: FolderTemplateNode;
+}
+
+export interface FolderTemplateApplyResult {
+  root_folder: Folder;
+  created_count: number;
+}
+
+export async function listFolderTemplates(token: string): Promise<FolderTemplate[]> {
+  const response = await request("folder-service", "folder-templates", {}, token);
+  return response.json();
+}
+
+export async function getFolderTemplate(
+  token: string,
+  templateId: string
+): Promise<FolderTemplateDetail> {
+  const response = await request(
+    "folder-service",
+    `folder-templates/${encodeURIComponent(templateId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createFolderTemplate(
+  token: string,
+  params: { sourceFolderId: string; name: string; description?: string; createdBy: string }
+): Promise<FolderTemplate> {
+  const response = await request(
+    "folder-service",
+    "folder-templates",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_folder_id: params.sourceFolderId,
+        name: params.name,
+        description: params.description || null,
+        created_by: params.createdBy,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteFolderTemplate(token: string, templateId: string): Promise<void> {
+  await request(
+    "folder-service",
+    `folder-templates/${encodeURIComponent(templateId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function applyFolderTemplate(
+  token: string,
+  templateId: string,
+  params: { targetParentId: string; createdBy: string }
+): Promise<FolderTemplateApplyResult> {
+  const response = await request(
+    "folder-service",
+    `folder-templates/${encodeURIComponent(templateId)}/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_parent_id: params.targetParentId,
+        created_by: params.createdBy,
+      }),
+    },
+    token
+  );
+  return response.json();
+}

@@ -124,3 +124,49 @@ class TrashConfigOut(TrashConfigIn):
     model_config = {"from_attributes": True}
 
     updated_at: datetime
+
+
+# --- Struktur-Vorlagen (2.5/7.3, seit P15-S6) ---
+
+
+class FolderTemplateNode(BaseModel):
+    """Ein Knoten im verschachtelten Struktur-Baum einer Vorlage - bewusst
+    kein `attributes`-Feld, ein Rohbau erfasst nur Name + Objekttyp."""
+
+    name: str
+    object_type_id: int | None = None
+    children: list["FolderTemplateNode"] = []
+
+
+FolderTemplateNode.model_rebuild()
+
+
+class FolderTemplateCreate(BaseModel):
+    source_folder_id: str
+    name: str
+    description: str | None = None
+    created_by: str
+
+
+class FolderTemplateOut(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    created_by: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FolderTemplateDetailOut(FolderTemplateOut):
+    structure: FolderTemplateNode
+
+
+class FolderTemplateApplyRequest(BaseModel):
+    target_parent_id: str
+    created_by: str
+
+
+class FolderTemplateApplyResult(BaseModel):
+    root_folder: FolderOut
+    created_count: int

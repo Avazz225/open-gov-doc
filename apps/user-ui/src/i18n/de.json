@@ -66,6 +66,7 @@
     "poststelle": "Posteingang/Postausgang",
     "kontakte": "Kontakte",
     "aussonderung": "Aussonderung",
+    "vorlagen": "Vorlagen",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -364,6 +365,28 @@
     "loadError": "Aussonderungs-Bereich konnte nicht geladen werden",
     "retrieveError": "Rückholung fehlgeschlagen",
     "downloadError": "Paket-Download fehlgeschlagen"
+  },
+  "vorlagen": {
+    "paneLabel": "Vorlagen",
+    "heading": "Vorlagen",
+    "hint": "Struktur-Vorlagen (2.5/7.3, z. B. Aktenplan-Rohbau) - ein Ordner-Teilbaum als benannte, wiederverwendbare Vorlage. Erfasst nur Struktur (Namen, Objekttypen), keine Attributwerte - ein Rohbau wird nach dem Anwenden erst befüllt.",
+    "sourceFolderLabel": "Quellordner-ID",
+    "sourceFolderPlaceholder": "Ordner-ID des zu erfassenden Teilbaums",
+    "nameLabel": "Name",
+    "descriptionLabel": "Beschreibung (optional)",
+    "create": "Vorlage erfassen",
+    "createError": "Erfassen fehlgeschlagen",
+    "apply": "Anwenden",
+    "applyConfirm": "Anwendung bestätigen",
+    "applyCancel": "Abbrechen",
+    "applyError": "Anwenden fehlgeschlagen",
+    "targetFolderLabel": "Zielordner-ID",
+    "targetFolderPlaceholder": "Ordner-ID, unter der die Struktur angelegt wird",
+    "delete": "Löschen",
+    "deleteConfirm": "Vorlage \"{name}\" löschen?",
+    "deleteError": "Löschen fehlgeschlagen",
+    "empty": "Noch keine Vorlagen.",
+    "loadError": "Vorlagen konnten nicht geladen werden"
   },
   "delegations": {
     "paneLabel": "Stellvertretung",

@@ -16,7 +16,8 @@ export type WorkspaceView =
   | "quarantine"
   | "poststelle"
   | "kontakte"
-  | "aussonderung";
+  | "aussonderung"
+  | "vorlagen";
 
 // Quarantäne-Bereich (2.5/10.3, P15-S2) - anders als der Papierkorb (immer
 // zumindest in der persönlichen Sicht sichtbar) gibt es hier laut Konzept
@@ -161,6 +162,15 @@ export function IconRail({
           <span aria-hidden="true">🗄️</span>
         </button>
       )}
+      <button
+        type="button"
+        className={`icon-rail-button${activeView === "vorlagen" ? " icon-rail-active" : ""}`}
+        title={t("iconRail.vorlagen")}
+        aria-current={activeView === "vorlagen" ? "page" : undefined}
+        onClick={() => onSelectView("vorlagen")}
+      >
+        <span aria-hidden="true">📐</span>
+      </button>
       <div className="icon-rail-settings">
         <button
           type="button"

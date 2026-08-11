@@ -8,6 +8,7 @@ from folder_service.document_client import DocumentClient
 from folder_service.models import (
     DeletionRegisterEntry,
     Folder,
+    FolderTemplate,
     LegalHold,
     RetentionConfig,
     TrashConfig,
@@ -492,3 +493,93 @@ async def list_expired_trash(session: AsyncSession, *, restore_period_days: int)
     )
     candidates = list(result.scalars().all())
     return [f for f in candidates if not await has_active_hold(session, f.id)]
+
+
+# --- Struktur-Vorlagen (2.5/7.3, seit P15-S6) ---
+
+
+async def _build_structure_node(session: AsyncSession, folder_id: str) -> dict:
+    folder = await get_folder(session, folder_id)
+    children = await list_children(session, folder_id)
+    return {
+        "name": folder.name,
+        "object_type_id": folder.object_type_id,
+        "children": [await _build_structure_node(session, child.id) for child in children],
+    }
+
+
+async def build_template_structure(session: AsyncSession, folder_id: str) -> dict:
+    """Erfasst den aktiven Teilbaum ab `folder_id` als verschachtelten
+    Struktur-Baum (2.5/7.3, P15-S6) - nur Name/`object_type_id` je Knoten,
+    bewusst keine Attributwerte (Rohbau, siehe ADR 0056). `list_children`
+    schließt bereits soft-gelöschte Unterordner aus."""
+    return await _build_structure_node(session, folder_id)
+
+
+async def create_template(
+    session: AsyncSession, *, name: str, description: str | None, structure: dict, created_by: str
+) -> FolderTemplate:
+    template = FolderTemplate(
+        id=str(uuid.uuid4()),
+        name=name,
+        description=description,
+        structure=structure,
+        created_by=created_by,
+        created_at=datetime.now(UTC),
+    )
+    session.add(template)
+    await session.flush()
+    return template
+
+
+async def list_templates(session: AsyncSession) -> list[FolderTemplate]:
+    result = await session.execute(select(FolderTemplate).order_by(FolderTemplate.name))
+    return list(result.scalars().all())
+
+
+async def get_template(session: AsyncSession, template_id: str) -> FolderTemplate:
+    template = await session.get(FolderTemplate, template_id)
+    if template is None:
+        raise NotFoundError(f"folder_template_id {template_id!r} unbekannt")
+    return template
+
+
+async def delete_template(session: AsyncSession, template_id: str) -> None:
+    template = await get_template(session, template_id)
+    await session.delete(template)
+    await session.flush()
+
+
+async def _apply_structure_node(
+    session: AsyncSession, node: dict, *, parent_id: str, created_by: str
+) -> list[Folder]:
+    folder = await create_folder(
+        session,
+        name=node["name"],
+        parent_id=parent_id,
+        object_type_id=node.get("object_type_id"),
+        attributes={},
+        created_by=created_by,
+    )
+    created = [folder]
+    for child in node.get("children", []):
+        created.extend(
+            await _apply_structure_node(session, child, parent_id=folder.id, created_by=created_by)
+        )
+    return created
+
+
+async def apply_template(
+    session: AsyncSession, template: FolderTemplate, *, target_parent_id: str, created_by: str
+) -> list[Folder]:
+    """Wendet eine Struktur-Vorlage unterhalb `target_parent_id` an (2.5/7.3,
+    P15-S6) - erzeugt für jeden Knoten einen echten Ordner über die reguläre
+    `create_folder`-Grundfunktion, bewusst OHNE die object-type-Validierung
+    aus `main.py`s `_validate_against_object_type` (Rohbau: Pflichtattribute
+    sind zum Anwendungszeitpunkt naturgemäß noch nicht befüllt, werden erst
+    beim späteren Ausfüllen via PATCH geprüft - siehe ADR 0056). Gibt alle
+    neu erzeugten Ordner zurück, Wurzel des angewendeten Teilbaums zuerst."""
+    await get_folder(session, target_parent_id)  # 404, falls Ziel unbekannt/gelöscht
+    return await _apply_structure_node(
+        session, template.structure, parent_id=target_parent_id, created_by=created_by
+    )
