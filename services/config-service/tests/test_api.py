@@ -18,6 +18,7 @@ CONFIG_SERVICE_URL = os.environ.get("TEST_CONFIG_SERVICE_URL", "http://localhost
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
+AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
 
 
 def _client() -> httpx.Client:
@@ -44,6 +45,7 @@ def test_export_returns_all_categories_by_default():
         "business_calendars",
         "roles",
         "approval_config",
+        "realm_roles",
     ):
         assert body[category] is not None
     assert body["sensor_config"] is not None
@@ -213,26 +215,49 @@ def test_import_with_unauthorized_principal_returns_403():
     assert response.status_code == 403
 
 
-def test_import_with_fleet_agent_key_bypasses_rbac():
-    """3a/P13-S2: derselbe installationsweite Fleet-Agent-Schlüssel wie bei
-    license-service (`DMS_FLEET_AGENT_API_KEY`, hier per Compose-Default
-    `dev-fleet-agent-key` im gebündelten Dev-/Test-Stack) - kein
-    `X-DMS-Principal` nötig."""
+def test_import_with_fleet_agent_key_no_longer_bypasses_rbac_on_config_import():
+    """P17-S1: `POST /config/import` verlangt seit der Trennung von
+    `POST /config/fleet-import` ausschließlich RBAC - ein Fleet-Agent-
+    Schlüssel ohne `X-DMS-Principal` wird hier jetzt abgelehnt (vorher, als
+    beide Zugriffswege denselben Pfad teilten, war das ein Bypass)."""
     with _client() as client:
         response = client.post(
             "/config/import",
             json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
             headers={"Authorization": "Bearer dev-fleet-agent-key"},
         )
+    assert response.status_code == 403
+
+
+def test_fleet_import_with_fleet_agent_key_bypasses_rbac():
+    """3a/P13-S2, seit P17-S1 unter eigenem Pfad `POST /config/fleet-import`:
+    derselbe installationsweite Fleet-Agent-Schlüssel wie bei license-service
+    (`DMS_FLEET_AGENT_API_KEY`, hier per Compose-Default `dev-fleet-agent-key`
+    im gebündelten Dev-/Test-Stack) - kein `X-DMS-Principal` nötig."""
+    with _client() as client:
+        response = client.post(
+            "/config/fleet-import",
+            json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
+            headers={"Authorization": "Bearer dev-fleet-agent-key"},
+        )
     assert response.status_code == 200
 
 
-def test_import_with_wrong_fleet_agent_key_returns_403():
+def test_fleet_import_with_wrong_fleet_agent_key_returns_403():
     with _client() as client:
         response = client.post(
-            "/config/import",
+            "/config/fleet-import",
             json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
             headers={"Authorization": "Bearer not-the-right-key"},
+        )
+    assert response.status_code == 403
+
+
+def test_fleet_import_without_any_header_returns_403():
+    with _client() as client:
+        response = client.post(
+            "/config/fleet-import",
+            json={"schema_version": "1.0", "exported_at": "2026-01-01T00:00:00Z"},
         )
     assert response.status_code == 403
 
@@ -479,6 +504,37 @@ def test_export_import_roundtrip_preserves_role_count(authorized_principal):
     assert result["created"] == 0
     assert result["errors"] == []
     assert result["updated"] == len(exported["roles"])
+
+
+def test_import_realm_roles_creates_new_keycloak_realm_role(authorized_principal):
+    """14.1/P17-S1: `realm_roles` ist eine Namensliste, keine `RoleExport`-
+    artige Kategorie - Anwendung erfolgt über `auth-service`s
+    `POST /realm-roles` (idempotent, `create_realm_role(..., skip_exists=True)`)."""
+    role_name = f"config-import-realm-role-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "realm_roles": [role_name],
+    }
+    with _client() as client:
+        response = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+    assert response.status_code == 200
+    assert response.json()["results"]["realm_roles"] == {
+        "created": 0,
+        "updated": 1,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    with httpx.Client(base_url=AUTH_SERVICE_URL) as auth_client:
+        roles = auth_client.get("/realm-roles").json()
+    assert role_name in [r["name"] for r in roles]
+
+    with _client() as client:
+        export = client.get("/config/export", params={"categories": "realm_roles"})
+    assert role_name in export.json()["realm_roles"]
 
 
 def test_import_federation_config_updates_workflow_service(authorized_principal):

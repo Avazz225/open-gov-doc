@@ -8,6 +8,7 @@ class Settings(BaseServiceSettings):
     workflow_service_base_url: str = "http://localhost:8014"
     permission_service_base_url: str = "http://localhost:8004"
     monitoring_service_base_url: str = "http://localhost:8026"
+    auth_service_base_url: str = "http://localhost:8003"
 
     # Gate für POST /config/import (7.3) - dieselbe Domain-Admin-Capability wie
     # workflow-service's Prozessdefinition-Upload (P6-S6-Retrofit): ein voller

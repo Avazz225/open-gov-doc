@@ -23,6 +23,11 @@ _LIST_IDENTITY_FIELD = {
     "approval_config": "action_type",
 }
 SINGLETON_CATEGORIES = ("sensor_config", "federation_config")
+# `realm_roles` ist eine reine Namensliste (`list[str]`, keine
+# `list[dict]`-Kategorie wie die übrigen) - eigener, einfacherer Diff-Modus
+# statt `_LIST_IDENTITY_FIELD` (das `item[identity_field]` auf jedem Eintrag
+# erwartet).
+STRING_LIST_CATEGORIES = ("realm_roles",)
 
 
 def normalize(value: str, pattern: str | None) -> str:
@@ -85,6 +90,30 @@ def diff_list_category(
     return delta
 
 
+def diff_string_list_category(
+    category: str,
+    base_names: list[str] | None,
+    compare_names: list[str] | None,
+    *,
+    ignore_regex: dict[str, str] | None,
+) -> CategoryDelta:
+    pattern = resolve_pattern(category, ignore_regex)
+    base_by_norm = {normalize(name, pattern): name for name in (base_names or [])}
+    compare_by_norm = {normalize(name, pattern): name for name in (compare_names or [])}
+
+    delta = CategoryDelta()
+    for norm_name in sorted(set(base_by_norm) - set(compare_by_norm)):
+        delta.only_in_base.append(base_by_norm[norm_name])
+    for norm_name in sorted(set(compare_by_norm) - set(base_by_norm)):
+        delta.only_in_compare.append(compare_by_norm[norm_name])
+    for norm_name in sorted(set(base_by_norm) & set(compare_by_norm)):
+        # Ein Name ist entweder identisch oder gar nicht vorhanden - anders als
+        # `diff_list_category` gibt es keine weiteren Felder, die abweichen
+        # könnten.
+        delta.identical.append(base_by_norm[norm_name])
+    return delta
+
+
 def diff_singleton_category(
     category: str, base_doc: dict[str, Any] | None, compare_doc: dict[str, Any] | None
 ) -> CategoryDelta:
@@ -130,5 +159,12 @@ def compare_documents(
                 category,
                 base_doc.model_dump() if base_doc else None,
                 compare_doc.model_dump() if compare_doc else None,
+            )
+        elif category in STRING_LIST_CATEGORIES:
+            result[category] = diff_string_list_category(
+                category,
+                getattr(base, category),
+                getattr(compare, category),
+                ignore_regex=ignore_regex,
             )
     return result

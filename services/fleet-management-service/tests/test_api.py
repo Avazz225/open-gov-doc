@@ -32,7 +32,7 @@ def _make_stub(*, license_installed: bool = True) -> FastAPI:
         body = await request.json()
         return {"installed": True, "valid": True, "license_token": body["license_token"]}
 
-    @stub.post("/api/config-service/config/import")
+    @stub.post("/api/config-service/config/fleet-import")
     async def _import_config(request: Request, authorization: str = Header(default="")) -> dict:
         if authorization != f"Bearer {FLEET_KEY}":
             raise HTTPException(status_code=403, detail="Fehlender/ungueltiger Fleet-Agent-Key")

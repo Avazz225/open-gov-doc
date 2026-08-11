@@ -36,6 +36,8 @@ from auth_service.schemas import (
     DirectorySearchRequest,
     FederatedDirectoryEntryOut,
     LoginRequest,
+    RealmRoleOut,
+    RealmRolesRequest,
     RefreshRequest,
     SuperuserStatus,
     ThemePreference,
@@ -465,6 +467,63 @@ async def delete_user(user_id: str, user: dict = Depends(get_current_user)) -> N
         admin_users.delete_user(app.state.keycloak_admin, user_id)
     except UserNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+# Keycloak legt diese Realm-Rollen selbst an (Default-Verhalten seit jeher) -
+# eine Paket-getriebene Liste (14.1/P17-S1) soll sie nicht als "eigene"
+# DMS-Rolle mit auflisten.
+_KEYCLOAK_BUILTIN_REALM_ROLE_PREFIXES = ("default-roles-",)
+_KEYCLOAK_BUILTIN_REALM_ROLE_NAMES = {"offline_access", "uma_authorization"}
+
+
+def _is_builtin_realm_role(name: str) -> bool:
+    return name in _KEYCLOAK_BUILTIN_REALM_ROLE_NAMES or name.startswith(
+        _KEYCLOAK_BUILTIN_REALM_ROLE_PREFIXES
+    )
+
+
+async def _require_service_user_management(x_dms_principal: str) -> None:
+    """Wie `_require_user_management` oben, aber für Service-zu-Service-Aufrufe
+    ohne Keycloak-JWT (`X-DMS-Principal`-Header statt `Depends(get_current_user)`)
+    - identisches Muster wie `workflow_service.main._require_object_config`.
+    Genutzt von `config-service`s Konfigurationspaket-Import (14.1, P17-S1),
+    das im eigenen Namen (`X-DMS-Principal: config-service`) neue Realm-Rollen
+    anlegen können muss."""
+    allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.user_management"
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Fehlende Domain-Admin-Rolle 'Nutzer-/Rechteverwaltung'",
+        )
+
+
+@app.get("/realm-roles", response_model=list[RealmRoleOut])
+def list_realm_roles() -> list[dict]:
+    """Aktuell existierende Keycloak-Realm-Rollen (14.1, P17-S1) - Grundlage
+    für den Export-Zweig eines Konfigurationspakets (`config-service`s
+    `realm_roles`-Kategorie). Ungegatet wie `GET /users/count` u. ä. - liefert
+    nur Namen, keine sensiblen Daten, identisches Vertrauensmodell wie
+    `permission-service`s `GET /roles`, das ebenfalls ungegatet ist."""
+    roles = app.state.keycloak_admin.get_realm_roles()
+    return [{"name": role["name"]} for role in roles if not _is_builtin_realm_role(role["name"])]
+
+
+@app.post("/realm-roles", status_code=status.HTTP_204_NO_CONTENT)
+async def ensure_realm_roles(
+    payload: RealmRolesRequest, x_dms_principal: str = Header(default="")
+) -> None:
+    """Legt die übergebenen Realm-Rollen idempotent an (14.1, P17-S1) -
+    identisches Primitiv wie `bootstrap._ensure_dms_admin_role`
+    (`create_realm_role(..., skip_exists=True)`), hier für beliebige, von
+    einem Konfigurationspaket vorgegebene Namen (z. B. `dms-poststelle`, 2.5)
+    statt fest codiert für `dms-admin`. Legt nur die Rolle an, weist sie
+    niemandem zu - Zuweisung bleibt wie bisher außerhalb dieses Service über
+    die Keycloak Admin Console (siehe `bootstrap.py`)."""
+    await _require_service_user_management(x_dms_principal)
+    for name in payload.names:
+        app.state.keycloak_admin.create_realm_role(payload={"name": name}, skip_exists=True)
 
 
 @app.get("/superuser/status", response_model=SuperuserStatus)

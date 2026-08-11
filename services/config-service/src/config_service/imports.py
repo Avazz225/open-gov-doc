@@ -5,6 +5,7 @@ anlegt. Best-effort je Eintrag: ein einzelner fehlerhafter Eintrag bricht
 nicht den gesamten Import ab (Fehler landen in `CategoryResult.errors`)."""
 
 from config_service.clients import (
+    AuthServiceClient,
     MonitoringServiceClient,
     ObjectTypeServiceClient,
     PermissionServiceClient,
@@ -182,6 +183,23 @@ async def apply_federation_config(client: WorkflowServiceClient, entry) -> Categ
     return result
 
 
+async def apply_realm_roles(client: AuthServiceClient, names: list[str]) -> CategoryResult:
+    """Keine Upsert-per-Name-Logik wie bei `apply_roles` nötig -
+    `auth-service`s `POST /realm-roles` ist selbst bereits idempotent
+    (`create_realm_role(..., skip_exists=True)`, siehe dortiges
+    `ensure_realm_roles`). Best-effort dennoch je Name statt einem
+    Sammelaufruf, damit ein einzelner ungültiger Name (z. B. leerer String)
+    nicht den ganzen Batch scheitern lässt."""
+    result = CategoryResult()
+    for name in names:
+        try:
+            await client.create_realm_roles([name])
+            result.updated += 1
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{name}: {exc}")
+    return result
+
+
 async def apply_import(
     doc: ConfigDocument,
     *,
@@ -190,6 +208,7 @@ async def apply_import(
     workflow_client: WorkflowServiceClient,
     permission_client: PermissionServiceClient,
     monitoring_client: MonitoringServiceClient,
+    auth_client: AuthServiceClient,
 ) -> dict[str, CategoryResult]:
     results: dict[str, CategoryResult] = {}
     if "object_types" in categories and doc.object_types is not None:
@@ -221,4 +240,6 @@ async def apply_import(
         results["federation_config"] = await apply_federation_config(
             workflow_client, doc.federation_config
         )
+    if "realm_roles" in categories and doc.realm_roles is not None:
+        results["realm_roles"] = await apply_realm_roles(auth_client, doc.realm_roles)
     return results

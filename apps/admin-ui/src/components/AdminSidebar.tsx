@@ -30,6 +30,11 @@ const GROUPS: NavGroup[] = [
       { href: "/users/", labelKey: "nav.users", requiresCapability: "admin.user_management" },
       { href: "/object-types/", labelKey: "nav.objectTypes" },
       { href: "/kennzeichen-settings/", labelKey: "nav.kennzeichenSettings" },
+      {
+        href: "/config-packages/",
+        labelKey: "nav.configPackages",
+        requiresCapability: "admin.object_config",
+      },
       { href: "/registry/", labelKey: "nav.registry" },
     ],
   },

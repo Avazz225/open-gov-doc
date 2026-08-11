@@ -59,7 +59,7 @@ Siehe [ADR 0038](../adr/0038-fleet-update-orchestration-external-gates-not-remot
 | `GET` | `/installations/{id}/status` | Live-Statusabruf einer Installation (Identität + Lizenzstatus über deren Gateway) - `reachable=false` statt Exception bei Netzwerk-/Auth-Fehlern |
 | `GET` | `/installations/status` | Statusabruf aller verwalteten Installationen, parallel (`asyncio.gather`) |
 | `POST` | `/installations/{id}/license` | Lizenztoken an die Ziel-Installation weiterreichen (`POST .../license` über deren Gateway) |
-| `POST` | `/installations/{id}/provision` | Konfigurationsdokument an die Ziel-Installation weiterreichen (`POST .../config/import` über deren Gateway) |
+| `POST` | `/installations/{id}/provision` | Konfigurationsdokument an die Ziel-Installation weiterreichen (`POST .../config/fleet-import` über deren Gateway — **seit P17-S1**, vorher `.../config/import`, siehe "Gegenstück auf der verwalteten Installation" unten) |
 
 ## Datenmodell
 
@@ -73,8 +73,8 @@ Keine neue Rolle/kein neuer Service auf der Zielseite - drei bestehende Endpunkt
 
 - `registry-service` `GET /installation` (P13-S1, unverändert ungegatet) - liefert `{id, display_name}`.
 - `license-service` `GET /license/status` (P9-S2, unverändert ungegatet) sowie `POST /license` (neu: akzeptiert zusätzlich `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` statt RBAC, siehe dortiges `_is_fleet_agent()`).
-- `config-service` `POST /config/import` (neu: derselbe Bypass, siehe dortiges `_is_fleet_agent()`).
-- `gateway-service.settings.public_routes` (neu: vier Einträge, damit diese Pfade ohne Keycloak-Token durch den Gateway erreichbar sind - die eigentliche Absicherung der beiden Schreib-Pfade bleibt bei den Zielservices selbst).
+- `config-service` `POST /config/fleet-import` (derselbe Bypass wie `license-service`, siehe dortiges `_is_fleet_agent()`) - **seit P17-S1 ein eigener, dedizierter Pfad statt geteilt mit `POST /config/import`** (RBAC-Aufrufer). Grund: Pfade in `gateway-service.settings.public_routes` bekommen NIE einen validierten Bearer-Token/`X-DMS-Principal` vom Gateway, egal ob der Aufrufer einen mitschickt - solange beide Zugriffswege denselben Pfad teilten, war der RBAC-Zweig von `config-service`s Import-Gate für echte, eingeloggte Admins faktisch unerreichbar (erst bei der ersten Admin-UI-Anbindung von `config-service`, P17-S1, gefunden - siehe [ADR 0058](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md)). `agent_client.py`s `provision_config()` ruft entsprechend den neuen Pfad auf.
+- `gateway-service.settings.public_routes` (vier Einträge, damit diese Pfade ohne Keycloak-Token durch den Gateway erreichbar sind - die eigentliche Absicherung der beiden Schreib-Pfade bleibt bei den Zielservices selbst).
 
 ## Selbst-Registrierung
 
@@ -87,7 +87,7 @@ Keine - dieser Service gehört zu keiner einzelnen Installation, daher kein `dms
 ## Offene Punkte
 
 - Keine Schlüssel-Rotation (siehe ADR 0037) - ein kompromittierter `fleet_agent_api_key` erfordert manuelles Ändern auf beiden Seiten.
-- Keine Vorlagen-Bibliothek für `POST .../provision` - reiner Durchreicher, kuratierte Pakete folgen erst mit Phase 17 (Konzept §14).
+- Keine Vorlagen-Bibliothek für `POST .../provision` - reiner Durchreicher. Seit P17-S1 kann das durchgereichte Dokument ein optionales `manifest` tragen (Konzept §14.1, `config-service`), aber das erste konkrete, kuratierte Paket (eGov, 14.2) ist erst P17-S2/S3 zugewiesen.
 - Keine proaktive Benachrichtigung bei Lizenzablauf/-überschreitung über die Fleet-Ebene - rein Pull-basiert (`GET .../status`), kein Push/Webhook von der verwalteten Installation zurück an diesen Service.
 - **`gate`-Schritte sind nicht ferngesteuert, nur bestätigt** (siehe ADR 0038) - `fleet-management-service` verifiziert nicht, dass eine Bereichssperre/ein Backup/ein Rolling Update tatsächlich stattgefunden hat, bevor `mark-done` den Schritt als erledigt markiert. Eine engere, aktions-/installationsspezifische Fernsteuerung bleibt ein möglicher, im Detail zu entwerfender Ausbauschritt.
 - **Vier-Augen ohne eigene Nutzerverwaltung** (ADR 0038) - `approve` erzwingt nur `actor != proposed_by` als Freitext-Vergleich, keine echte, kryptografisch verankerte Zwei-Identitäten-Prüfung.

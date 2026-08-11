@@ -85,6 +85,19 @@ class ThemePreference(BaseModel):
     theme: ThemeName = "auto"
 
 
+class RealmRoleOut(BaseModel):
+    name: str
+
+
+class RealmRolesRequest(BaseModel):
+    """Konfigurationspakete (14.1, P17-S1) können neue Keycloak-Realm-Rollen
+    mitbringen (z. B. `dms-poststelle`, 2.5), für die es bislang keinen
+    Importweg gab - siehe `bootstrap._ensure_dms_admin_role` für dasselbe
+    Primitiv, hier auf beliebige, vom Paket vorgegebene Namen verallgemeinert."""
+
+    names: list[str]
+
+
 class SuperuserStatus(BaseModel):
     active: bool
     expires_at: str | None = None

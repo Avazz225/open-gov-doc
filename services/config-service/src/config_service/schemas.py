@@ -18,6 +18,7 @@ CATEGORIES = (
     "approval_config",
     "sensor_config",
     "federation_config",
+    "realm_roles",
 )
 
 
@@ -101,9 +102,31 @@ class FederationConfigExport(BaseModel):
     min_compatible_peer_version: str
 
 
+class PackageManifest(BaseModel):
+    """Macht aus einem rohen `ConfigDocument` ein benanntes, versioniertes
+    **Konfigurationspaket** (14.1, P17-S1) - z. B. das eGov-Konfigurationspaket
+    (14.2). Rein beschreibend (Name/Version/Kompatibilitätsspanne/Beschreibung/
+    Herkunft/Lizenz), keine eigene Anwendungslogik - `compatibility_range` ist
+    bewusst ein freier String (z. B. `">=1.0,<2.0"`), analog zu
+    `FederationConfigExport.min_compatible_peer_version`: dieser Service prüft
+    sie nicht selbst, sie ist reine Information für die Person, die ein Paket
+    anwendet (siehe ADR zu P17-S1 für die Begründung, warum keine automatische
+    Durchsetzung eingebaut wurde). Optional auf `ConfigDocument` - ein
+    Dokument ohne `manifest` bleibt ein gewöhnlicher 7.3-Export/Import wie vor
+    P17-S1."""
+
+    name: str
+    version: str
+    compatibility_range: str
+    description: str = ""
+    origin: str = ""
+    license: str = ""
+
+
 class ConfigDocument(BaseModel):
     schema_version: str = SCHEMA_VERSION
     exported_at: datetime
+    manifest: PackageManifest | None = None
     object_types: list[ObjectTypeExport] | None = None
     workflows: list[WorkflowExport] | None = None
     dmn_definitions: list[DmnDefinitionExport] | None = None
@@ -112,6 +135,13 @@ class ConfigDocument(BaseModel):
     approval_config: list[ApprovalConfigExport] | None = None
     sensor_config: SensorConfigExport | None = None
     federation_config: FederationConfigExport | None = None
+    # Keycloak-Realm-Rollen (14.1, P17-S0-Befund: `roles` oben deckt nur
+    # permission-services DB-basierte Rollen ab, nicht Keycloaks separates
+    # Realm-Rollen-System - z. B. `dms-poststelle`, 2.5). Reine Namensliste,
+    # kein `RoleExport`-artiges Objekt: eine Keycloak-Realm-Rolle hat in
+    # diesem Projekt bislang keine Beschreibung/Berechtigungsliste (siehe
+    # `bootstrap._ensure_dms_admin_role`).
+    realm_roles: list[str] | None = None
 
 
 class CategoryResult(BaseModel):

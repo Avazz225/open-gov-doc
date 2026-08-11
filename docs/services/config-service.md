@@ -3,29 +3,34 @@
 **Verantwortung:** Konfigurationsimport/-export (Konzept 7.3, P12-S3): vollständige
 Systemkonfiguration (Objekttypen inkl. Formular-Layouts, Workflows, seit P14-S4 zusätzlich
 DMN-1.3-Entscheidungstabellen, seit P14-S5 zusätzlich Geschäftskalender, Rollen-/Rechte-Templates,
-Vier-Augen-Einstellungen je Aktionstyp, Sensor-Konfiguration) als ein JSON-Dokument exportierbar
-und in ein anderes (oder dasselbe, z. B. Staging→Produktion) System re-importierbar —
-Versionierung des Konfigurationsschemas selbst, damit Export aus einer älteren Version in eine
-neuere importiert werden kann.
+Vier-Augen-Einstellungen je Aktionstyp, Sensor-Konfiguration, seit P17-S1 zusätzlich
+Keycloak-Realm-Rollen) als ein JSON-Dokument exportierbar und in ein anderes (oder dasselbe, z. B.
+Staging→Produktion) System re-importierbar — Versionierung des Konfigurationsschemas selbst, damit
+Export aus einer älteren Version in eine neuere importiert werden kann. **Seit P17-S1** trägt
+dasselbe Dokument optional ein `manifest` (Name/Version/Kompatibilitätsspanne/Beschreibung/
+Herkunft/Lizenz) und wird damit zu einem benannten **Konfigurationspaket** (14.1) — siehe
+"Konfigurationspakete" unten.
 
-**Konzept-Referenz:** 7.3, 7.5
+**Konzept-Referenz:** 7.3, 7.5, 14.1
 **Eigenes Postgres-Schema:** keines — reiner Orchestrator, jede Kategorie wird direkt beim
 jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-service`,
-`permission-service`, `monitoring-service`), gleiches "stateless orchestrator"-Muster wie
-`webdav-connector` (P12-S1).
+`permission-service`, `monitoring-service`, seit P17-S1 zusätzlich `auth-service`), gleiches
+"stateless orchestrator"-Muster wie `webdav-connector` (P12-S1).
 **ADR:** [0035 — Scope des Exports, Upsert-Semantik, Gating-Wiederverwendung](../adr/0035-config-service-scope-and-upsert-semantics.md),
-[0040 — Delta-Vergleich: Feld-Ebene-Diff, kein automatischer Cross-Installation-Abruf](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md)
+[0040 — Delta-Vergleich: Feld-Ebene-Diff, kein automatischer Cross-Installation-Abruf](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md),
+[0058 — Konfigurationspakete: Manifest + `realm_roles`, Gateway-Routen-Trennung](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md)
 
 ## API
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/config/export` | Exportiert ein `ConfigDocument` — optional `?categories=roles&categories=workflows` zur Einschränkung, sonst alle acht Kategorien |
+| `GET` | `/config/export` | Exportiert ein `ConfigDocument` — optional `?categories=roles&categories=workflows` zur Einschränkung, sonst alle neun Kategorien |
 | `POST` | `/config/compare` | **Seit P14-S1**: Delta-/Vergleichsfunktion (7.5) — Body `{compare, base?, categories?, ignore_regex?}`; fehlt `base`, wird der eigene aktuelle Live-Export als Basisinstanz verwendet. Rein lesend/diagnostisch, ungegated wie `GET /config/export`. `422` bei unbekannter Kategorie oder ungültiger `ignore_regex` |
-| `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, oder seit P13-S2 einen gültigen `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, siehe [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422` |
+| `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422`. **Seit P17-S1 KEIN öffentlicher Gateway-Pfad mehr** (siehe "Gateway-Routen-Trennung" unten) |
+| `POST` | `/config/fleet-import` | **Seit P17-S1** (vorher derselbe Pfad wie `/config/import`): identische Anwendungslogik, aber ausschließlich für `fleet-management-service` — verlangt `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (3a/P13-S2, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), kein RBAC-Zweig. Bleibt der öffentliche Gateway-Pfad |
 | `GET` | `/healthz` | Health-Check (ungegated) |
 
-## Die acht Kategorien
+## Die neun Kategorien
 
 | Kategorie | Owner-Service | Natürlicher Schlüssel (Upsert) | Besonderheit |
 |---|---|---|---|
@@ -37,6 +42,7 @@ jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-s
 | `approval_config` | permission-service | `action_type` | Vier-Augen-Konfiguration (4.3) — Ziel-Endpunkt ist bereits ein Upsert |
 | `sensor_config` | monitoring-service | — (Singleton + Overrides) | Globaler Default + Sensor-Overrides (10.1, P11-S1) |
 | `federation_config` | workflow-service | — (Singleton) | Versionskompatibilitätsspanne für föderierte Workflows (7.4, P13-S3) — `PUT` löst dort sofort eine Re-Registrierung beim Federation Hub aus, siehe `docs/services/workflow-service.md` "Federation" |
+| `realm_roles` | auth-service | Name (reine `list[str]`, kein `list[dict]`) | **Seit P17-S1** (14.1): Keycloak-Realm-Rollen (z. B. `dms-poststelle`, 2.5) — anders als `roles` oben (permission-services DB-basierte `Role`s) ein komplett getrenntes System. Anwendung idempotent über `create_realm_role(..., skip_exists=True)`, identisches Primitiv wie `bootstrap._ensure_dms_admin_role` |
 
 Bewusst **nicht** enthalten: "UI-Anpassungen" (Branding/Theming) und AD-Gruppen-Mapping-Regeln —
 beide existieren an keiner Stelle im Code (siehe ADR 0035), wurden also nicht als leere,
@@ -54,15 +60,63 @@ einzeln in einem `try`/`except` verarbeitet — ein fehlerhafter Eintrag (z. B. 
 auf dem Zielsystem gegen eine Constraint verstößt) landet in `CategoryResult.errors`, bricht aber
 nicht den gesamten Import ab.
 
+## Konfigurationspakete (14.1, seit P17-S1)
+
+Ein Konfigurationspaket ist technisch weiterhin exakt ein `ConfigDocument` — nur um ein optionales
+`manifest`-Feld erweitert:
+
+```json
+{
+  "schema_version": "1.0",
+  "exported_at": "2026-08-11T00:00:00Z",
+  "manifest": {
+    "name": "eGov-Konfigurationspaket",
+    "version": "1.0.0",
+    "compatibility_range": ">=1.0,<2.0",
+    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung",
+    "origin": "dms-project",
+    "license": "MIT"
+  },
+  "object_types": [...],
+  "realm_roles": ["dms-poststelle"]
+}
+```
+
+`manifest` ist rein beschreibend — `compatibility_range` wird **nicht** automatisch gegen die
+laufende Systemversion geprüft (analog zu `federation_config`s Kompatibilitätsspanne, die ebenfalls
+nur informativ ist). Die Anwendung läuft vollständig über den bereits bestehenden
+`POST /config/import` (additiv/Upsert, wiederholt anwendbar — 14.1 wörtlich: "auch auf eine bereits
+laufende, teilweise anders konfigurierte Installation anwendbar"). Ein `ConfigDocument` ohne
+`manifest` bleibt ein gewöhnlicher 7.3-Export/Import wie vor P17-S1. Vorschau vor Anwendung nutzt
+das bereits bestehende `POST /config/compare` (7.5, P14-S1) — kein neuer Endpunkt, `base`
+weglassen zieht automatisch den eigenen Live-Export heran ("was würde sich ändern, wenn ich dieses
+Paket importiere"). Erste konkrete Bedienoberfläche: die neue Admin-UI-Seite `/config-packages/`
+(siehe `docs/services/admin-ui.md`) — vorher hatte `config-service` gar keine Frontend-Anbindung.
+Details/Begründung siehe [ADR 0058](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md).
+
+## Gateway-Routen-Trennung: `config/import` vs. `config/fleet-import` (seit P17-S1)
+
+Bis P17-S1 teilten sich RBAC-Aufrufer (echte, eingeloggte `config-admin`-Nutzer) und der
+Fleet-Agent-Schlüssel (3a/P13-S2) denselben Gateway-Pfad `config-service:config/import`, der seit
+ADR 0037 als öffentlich (kein Keycloak-Token-Zwang) markiert war. **Realer, bei der ersten
+Admin-UI-Anbindung gefundener Bug**: für öffentliche Pfade validiert der Gateway grundsätzlich
+keinen Bearer-Token und setzt `X-DMS-Principal` nie (`gateway_service.main.proxy`) — der
+RBAC-Zweig von `_require_import_permission` war dadurch für JEDEN Aufruf über den Gateway
+faktisch unerreichbar, auch für echte Admins. Seit P17-S1: `POST /config/import` ist ein
+regulärer, Keycloak-Token-pflichtiger Pfad (reines RBAC, kein Fleet-Bypass mehr); der Fleet-Agent
+ruft stattdessen den neuen, weiterhin öffentlichen `POST /config/fleet-import` auf. Details siehe
+[ADR 0058](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md).
+
 ## Gating (7.3-Import)
 
 `POST /config/import` verlangt dieselbe `admin.object_config`-Capability wie `workflow-service`s
 Prozessdefinition-Upload (keine neue, eigene Domain-Admin-Rolle) — ein voller Konfigurationsimport
 ist eine Erweiterung derselben Verantwortung. Da Sensor-Konfigurations-Schreibzugriffe zusätzlich
-`admin.monitoring` verlangen (P11-S1), bootstrapped sich `config-service` beim Start selbst
-**beide** Rollen (`domain-admin-config` und `domain-admin-monitoring`) — idempotente
-Selbstzuweisung, identisches Muster wie `migration-service`s `_ensure_config_admin_permission()`
-(P12-S2).
+`admin.monitoring` (P11-S1) und die `realm_roles`-Kategorie zusätzlich `admin.user_management`
+(P17-S1, `auth-service`s neues `POST /realm-roles`) verlangen, bootstrapped sich `config-service`
+beim Start selbst **drei** Rollen (`domain-admin-config`, `domain-admin-monitoring`,
+`domain-admin-users`) — idempotente Selbstzuweisung, identisches Muster wie `migration-service`s
+`_ensure_config_admin_permission()` (P12-S2).
 
 ## Schema-Versionierung
 
@@ -150,6 +204,7 @@ lesend/diagnostisch, verändert nichts an einer der beiden Seiten (7.5). Details
 | `DMS_WORKFLOW_SERVICE_BASE_URL` | `http://localhost:8014` | workflow-service |
 | `DMS_PERMISSION_SERVICE_BASE_URL` | `http://localhost:8004` | permission-service |
 | `DMS_MONITORING_SERVICE_BASE_URL` | `http://localhost:8026` | monitoring-service |
+| `DMS_AUTH_SERVICE_BASE_URL` | `http://localhost:8003` | auth-service (`realm_roles`-Kategorie, seit P17-S1) |
 | `CONFIG_SERVICE_PORT` | `8029` | Host-Port im Dev-Compose-Stack |
 
 ## Tests
@@ -158,7 +213,9 @@ lesend/diagnostisch, verändert nichts an einer der beiden Seiten (7.5). Details
 `normalize()`/`resolve_pattern()`, `diff_list_category()`/`diff_singleton_category()` je für
 nur-in-Basis/nur-in-Vergleich/identisch/abweichend, das Ignore-Regex-Beispiel aus 7.5 wörtlich
 nachgebaut (numerische Präfixe, inhaltlicher Vergleich bleibt trotzdem vollständig), sowie
-`compare_documents()` über alle acht Kategorien hinweg.
+`compare_documents()` über alle neun Kategorien hinweg. Seit **P17-S1**: `diff_string_list_category()`
+(neuer dritter Diff-Modus für die reine `list[str]`-Kategorie `realm_roles`) einzeln sowie als Teil
+von `compare_documents()`.
 
 `test_api.py` — läuft wie `webdav-connector`/`migration-service` gegen den echten, laufenden
 Container (kein In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) —
@@ -166,19 +223,24 @@ Container (kein In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) —
 `domain-admin-config` zu und entfernt die Zuweisung danach wieder. Deckt ab: Export mit/ohne
 Kategorie-Filter, unbekannte Kategorie (`422`), Import ohne/mit falschem Principal (`403`), nicht
 unterstützte `schema_version` (`422`), Rollen-Upsert (create→update per Name),
-Vier-Augen-Konfig-Upsert, einen vollständigen Export→Reimport-Roundtrip, sowie (P13-S3) den
-Fleet-Agent-Key-Bypass und den `federation_config`-Import (wirkt tatsächlich auf den laufenden
-`workflow-service`-Container). Seit **P14-S1**: `POST /config/compare` gegen sich selbst (keine
-Abweichungen), ohne `base` (zieht den eigenen Live-Export heran), mit echten inhaltlichen
-Abweichungen, mit Ignore-Regex-Zuordnung (mit/ohne Regex derselbe Fall verglichen), ungültige
-Regex → `422`, unbekannte Kategorie → `422`. Seit **P14-S4**: `dmn_definitions` in der
-Standard-Kategorienliste des Exports, `dmn_definitions`-Anlegen erzeugt beim Wiederholen unter
-demselben Namen automatisch eine neue Version (`created: 1` bei jedem Aufruf, gleiches Muster wie
-`workflows`), echt gegen den laufenden `workflow-service`-Container verifiziert. Seit **P14-S5**:
-`business_calendars` in der Standard-Kategorienliste des Exports, ein Import unter neuem Namen
-zählt als `created`, ein wiederholter Import mit geändertem `non_working_dates` unter demselben
-Namen als `updated` (Upsert-Semantik, anders als `dmn_definitions`), echt gegen den laufenden
-`workflow-service`-Container verifiziert.
+Vier-Augen-Konfig-Upsert, einen vollständigen Export→Reimport-Roundtrip, sowie den
+`federation_config`-Import (wirkt tatsächlich auf den laufenden `workflow-service`-Container). Seit
+**P14-S1**: `POST /config/compare` gegen sich selbst (keine Abweichungen), ohne `base` (zieht den
+eigenen Live-Export heran), mit echten inhaltlichen Abweichungen, mit Ignore-Regex-Zuordnung
+(mit/ohne Regex derselbe Fall verglichen), ungültige Regex → `422`, unbekannte Kategorie → `422`.
+Seit **P14-S4**: `dmn_definitions` in der Standard-Kategorienliste des Exports,
+`dmn_definitions`-Anlegen erzeugt beim Wiederholen unter demselben Namen automatisch eine neue
+Version (`created: 1` bei jedem Aufruf, gleiches Muster wie `workflows`), echt gegen den laufenden
+`workflow-service`-Container verifiziert. Seit **P14-S5**: `business_calendars` in der
+Standard-Kategorienliste des Exports, ein Import unter neuem Namen zählt als `created`, ein
+wiederholter Import mit geändertem `non_working_dates` unter demselben Namen als `updated`
+(Upsert-Semantik, anders als `dmn_definitions`), echt gegen den laufenden `workflow-service`-
+Container verifiziert. Seit **P17-S1**: der Fleet-Agent-Key-Bypass wanderte von `/config/import`
+zu eigenen Tests für `/config/fleet-import` (Erfolg mit korrektem Schlüssel, `403` bei falschem/
+fehlendem Schlüssel), ein neuer Test bestätigt explizit, dass ein Fleet-Agent-Schlüssel auf
+`/config/import` NICHT mehr durchgeht (RBAC-only), sowie ein `realm_roles`-Import-/Export-Roundtrip
+(prüft echt gegen den laufenden `auth-service`-Container, dass die Realm-Rolle in Keycloak
+existiert).
 
 **`tools/cli`**: `test_config_commands.py` deckt `dms config export` (JSON-Ausgabe, Datei-Export,
 `--category`-Query-Parameter) und `dms config compare` (liest Datei(en), sendet korrekten

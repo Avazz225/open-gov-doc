@@ -4,6 +4,7 @@ Owner-Services - config-service hat keine eigene Kopie dieser Daten."""
 from datetime import UTC, datetime
 
 from config_service.clients import (
+    AuthServiceClient,
     MonitoringServiceClient,
     ObjectTypeServiceClient,
     PermissionServiceClient,
@@ -134,6 +135,10 @@ async def export_federation_config(client: WorkflowServiceClient) -> FederationC
     )
 
 
+async def export_realm_roles(client: AuthServiceClient) -> list[str]:
+    return await client.list_realm_roles()
+
+
 async def build_export(
     *,
     categories: set[str],
@@ -141,6 +146,7 @@ async def build_export(
     workflow_client: WorkflowServiceClient,
     permission_client: PermissionServiceClient,
     monitoring_client: MonitoringServiceClient,
+    auth_client: AuthServiceClient,
 ) -> ConfigDocument:
     doc = ConfigDocument(exported_at=datetime.now(UTC))
     if "object_types" in categories:
@@ -159,4 +165,6 @@ async def build_export(
         doc.sensor_config = await export_sensor_config(monitoring_client)
     if "federation_config" in categories:
         doc.federation_config = await export_federation_config(workflow_client)
+    if "realm_roles" in categories:
+        doc.realm_roles = await export_realm_roles(auth_client)
     return doc

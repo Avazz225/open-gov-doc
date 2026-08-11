@@ -1142,6 +1142,8 @@ services:
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # Realm-Rollen-Kategorie (14.1, P17-S1).
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       # Fleet-Agent-Schluessel (3a, P13-S2) - siehe license-service oben,
       # derselbe Wert (ein fleet-management-service provisioniert beide Wege
       # ueber dieselbe Installation).
@@ -1158,6 +1160,8 @@ services:
       monitoring-service:
         condition: service_started
       registry-service:
+        condition: service_started
+      auth-service:
         condition: service_started
     networks:
       - dms-net

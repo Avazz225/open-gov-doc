@@ -2,7 +2,7 @@
 
 **Verantwortung:** Schlanker OIDC-Broker vor Keycloak — hält Client-Secret und Admin-Zugang, Aufrufer sehen nur Login/Refresh/Token-Validierung (Konzept 4.4). Keine eigene IAM-Logik, keine eigene Nutzertabelle.
 
-**Konzept-Referenz:** 4.4/2.5 (Kontakte, seit P15-S4)/7.4 (föderierte Kontaktsuche, seit P15-S4)
+**Konzept-Referenz:** 4.4/2.5 (Kontakte, seit P15-S4)/7.4 (föderierte Kontaktsuche, seit P15-S4)/14.1 (Realm-Rollen für Konfigurationspakete, seit P17-S1)
 **Eigenes Postgres-Schema:** `auth` (seit P15-S4, nur `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche, siehe unten). Bis dahin war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
 
 ## API
@@ -26,6 +26,8 @@
 | `GET` | `/users/directory/federation-status` | Ob die föderierte Kontaktsuche auf dieser Installation aktiviert ist (`{enabled, peer_installation_count}`) — ungegatet, steuert die Sichtbarkeit der entsprechenden Frontend-Sektion |
 | `GET` | `/users/directory/federated?q=` | Föderierte Suche über alle bekannten, für Kontaktsuche freigegebenen Peer-Installationen (2.5/7.4, seit P15-S4) — `403`, falls auf dieser Installation nicht aktiviert |
 | `POST` | `/users/directory/federated-search-inbound` | Von einer Peer-Installation aufgerufen (öffentliche Route, kein `X-DMS-Principal`) — authentisiert über `X-Installation-Signature`/`X-Installation-Id`, siehe "Kontakte" unten |
+| `GET` | `/realm-roles` | **Seit P17-S1** (14.1): aktuelle Keycloak-Realm-Rollen, gefiltert um Keycloak-Built-ins (`offline_access`, `uma_authorization`, `default-roles-*`) — ungegatet, liefert nur Namen (identisches Vertrauensmodell wie `permission-service`s `GET /roles`) |
+| `POST` | `/realm-roles` | **Seit P17-S1**: legt die übergebenen Realm-Rollen idempotent an (`{names: [...]}`, `create_realm_role(..., skip_exists=True)`) — verlangt `X-DMS-Principal`-Header mit `admin.user_management`-Berechtigung (Service-zu-Service, kein Keycloak-JWT-Endpunkt), sonst `403`. Weist die Rolle niemandem zu, siehe "Realm-Rollen-Verwaltung" unten |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Realm-/Client-Bootstrap
@@ -77,6 +79,19 @@ Verzeichnis zum Auffinden anderer Mitarbeitender - "lokal, immer verfügbar" (2.
 - **`POST /users/directory/federated-search-inbound`**: empfängt eine signierte Anfrage einer Peer-Installation — verifiziert `X-Installation-Signature` gegen den beim Hub hinterlegten öffentlichen Schlüssel der ANFRAGENDEN Installation (live per `GET /installations` abgerufen, kein lokaler Peer-Schlüsselspeicher), lehnt unbekannte/widerrufene/nicht für Kontaktsuche registrierte Installationen mit `401` ab. Öffentliche Route am Gateway (`gateway-service`s `public_routes`, kein `X-DMS-Principal`), analog zu `workflow-service`s `federation/inbound`.
 - **Keine Ende-zu-Ende-Verschlüsselung der Nutzlast** (anders als das Handover-Schema) — der Hub liegt bei direkten Aufrufen ohnehin nie im Anfragepfad, siehe ADR 0054 "Begründung".
 
+## Realm-Rollen-Verwaltung (14.1, seit P17-S1)
+
+Bis P17-S1 wurde jede Keycloak-Realm-Rolle einzeln, hart codiert im Bootstrap angelegt
+(`bootstrap._ensure_dms_admin_role` für `dms-admin`) — kein genereller Weg, eine NEUE Realm-Rolle
+anzulegen, ohne Code zu ändern und den Service neu zu deployen. `GET`/`POST /realm-roles`
+verallgemeinert exakt dasselbe Primitiv (`create_realm_role(..., skip_exists=True)`) auf beliebige
+Namen, damit ein Konfigurationspaket (`config-service`s neue `realm_roles`-Kategorie, z. B. für
+`dms-poststelle`, 2.5) sie mitbringen kann, ohne einen neuen Mechanismus zu erfinden. **Bewusste
+Grenze, identisch zum bestehenden `dms-admin`-Muster**: der Endpunkt legt nur die Rolle an, weist
+sie niemandem zu — Zuweisung an konkrete Nutzer bleibt weiterhin außerhalb dieses Service über die
+Keycloak Admin Console (siehe "Offene Punkte"). Details/Begründung siehe
+[ADR 0058](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md).
+
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
 Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
@@ -87,7 +102,12 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-`uv run pytest services/auth-service/tests` (**59 Tests**, davon 11 neu seit **P15-S4**, `test_directory.py`): lokale Verzeichnis-Suche (Authentifizierungspflicht, Präfix-Treffer je Feld, für reguläre Nutzer verfügbar nicht nur Domain-Admins), Federation-Status-Default, `403` auf den föderierten Endpunkten ohne Aktivierung, sowie eine echte Selbst-Registrierung gegen den laufenden `federation-hub-service` (`federation_enabled`-Fixture, monkeypatcht `settings` vor einem frischen `TestClient(app)`) inkl. echtem Signaturprüfungs-Pfad (gültige/ungültige Signatur, unbekannte Installation, eigene Installation wird aus den föderierten Ergebnissen ausgeschlossen) — läuft gegen echtes Postgres/Keycloak/`federation-hub-service`, keine Mocks. **Nebenbei gefundener und behobener Bug**: `FederationHubClient.register()` übermittelte `supported_process_types` ursprünglich gar nicht an den Hub — die eigene Fähigkeits-Markierung (`dms.contact-directory.v1`) wäre dadurch nie tatsächlich im Adressbuch sichtbar gewesen, jede eingehende föderierte Anfrage (auch eine legitime) wäre mit `401` abgelehnt worden. Erst durch den echten Live-Selbst-Loopback-Test sichtbar geworden, nicht durch reines Mocking. **Zusätzlicher Befund bei der Live-Verifikation gegen den laufenden Gateway**: Keycloaks `search`-Parameter ist entgegen der ursprünglichen Annahme kein Teilstring-, sondern ein Präfix-Match je Feld — Dokumentation entsprechend korrigiert (siehe oben, ADR 0054 "Offene Punkte"). Ebenfalls beobachtet: wiederholte `federation_enabled`-Testläufe hinterlassen echte, dauerhafte Registrierungen im geteilten `federation-hub-service`-Adressbuch (kein Aufräumen möglich ohne konfigurierten `hub_operator_key`) — siehe ADR 0054 "Offene Punkte".
+`uv run pytest services/auth-service/tests` (**64 Tests**, davon 5 neu seit **P17-S1**,
+`test_realm_roles.py`: `GET /realm-roles` enthält das bereits bootstrapped `dms-admin`, schließt
+Keycloak-Built-ins aus, `POST /realm-roles` ohne/mit unautorisiertem Principal → `403`, legt eine
+neue Rolle idempotent an — zweiter Aufruf mit demselben Namen scheitert nicht, gleiches
+`authorized_principal`-Fixture-Muster wie `config-service`s `tests/conftest.py`. Davon 11 seit
+**P15-S4**, `test_directory.py`): lokale Verzeichnis-Suche (Authentifizierungspflicht, Präfix-Treffer je Feld, für reguläre Nutzer verfügbar nicht nur Domain-Admins), Federation-Status-Default, `403` auf den föderierten Endpunkten ohne Aktivierung, sowie eine echte Selbst-Registrierung gegen den laufenden `federation-hub-service` (`federation_enabled`-Fixture, monkeypatcht `settings` vor einem frischen `TestClient(app)`) inkl. echtem Signaturprüfungs-Pfad (gültige/ungültige Signatur, unbekannte Installation, eigene Installation wird aus den föderierten Ergebnissen ausgeschlossen) — läuft gegen echtes Postgres/Keycloak/`federation-hub-service`, keine Mocks. **Nebenbei gefundener und behobener Bug**: `FederationHubClient.register()` übermittelte `supported_process_types` ursprünglich gar nicht an den Hub — die eigene Fähigkeits-Markierung (`dms.contact-directory.v1`) wäre dadurch nie tatsächlich im Adressbuch sichtbar gewesen, jede eingehende föderierte Anfrage (auch eine legitime) wäre mit `401` abgelehnt worden. Erst durch den echten Live-Selbst-Loopback-Test sichtbar geworden, nicht durch reines Mocking. **Zusätzlicher Befund bei der Live-Verifikation gegen den laufenden Gateway**: Keycloaks `search`-Parameter ist entgegen der ursprünglichen Annahme kein Teilstring-, sondern ein Präfix-Match je Feld — Dokumentation entsprechend korrigiert (siehe oben, ADR 0054 "Offene Punkte"). Ebenfalls beobachtet: wiederholte `federation_enabled`-Testläufe hinterlassen echte, dauerhafte Registrierungen im geteilten `federation-hub-service`-Adressbuch (kein Aufräumen möglich ohne konfigurierten `hub_operator_key`) — siehe ADR 0054 "Offene Punkte".
 
 ## Offene Punkte
 
@@ -95,7 +115,7 @@ Noch keine — folgt in Phase 11.
 - **Issuer-Hostname-Konsistenz**: Der Auth Service spricht Keycloak intern über `DMS_KEYCLOAK_BASE_URL` (im Compose-Netz `http://keycloak:8080`) an; ausgestellte Tokens tragen entsprechend `iss=http://keycloak:8080/realms/dms`. Sobald ein browserbasierter Redirect-Flow (`standardFlowEnabled`) hinzukommt, muss die vom Browser sichtbare Keycloak-URL (`http://localhost:8080`) und die interne Service-zu-Service-URL konsistent gehalten werden (Keycloak-Hostname-Konfiguration) — für die aktuelle reine Password-Grant-Nutzung nicht relevant, da immer derselbe interne Pfad verwendet wird.
 - **SAML 2.0** (Konzept 4.4, für ADFS-Alt-Föderationen) nicht Teil dieser Session.
 - **`/users`-Endpunkte seit P6-S5 gegated** (siehe oben) — löst den vormaligen offenen Punkt für diesen Service. Die Zuweisung von `admin.user_management` an *weitere* Principals (z. B. echte Menschen zusätzlich zum technischen `users-admin`-Konto) läuft über die jetzt selbst gegatete Nutzer-/Rechteverwaltungs-Admin-UI-Seite (`POST /role-assignments` gegen `permission-service`).
-- **Keine Rollenzuweisungs-API/-UI für `dms-admin`** (seit P5e-S2, weiterhin offen): `dms-admin` ist eine Keycloak-Realm-Rolle, kein systemeigenes `permission-service`-Konstrukt (anders als die neuen Domain-Admin-Rollen aus P6-S5) — Zuweisung weiterhin nur über die Keycloak Admin Console. Nicht rückwirkend auf das neue Muster migriert, da außerhalb des P6-S5-Scopes (der bestehende Kennzeichen-Check in `document-service` liest weiterhin `X-DMS-Roles`, siehe ADR 0023 "Konsequenzen").
+- **Keine Rollenzuweisungs-API/-UI für Keycloak-Realm-Rollen** (seit P5e-S2, seit P17-S1 nur teilweise gelöst): `dms-admin`/`dms-poststelle` etc. sind Keycloak-Realm-Rollen, kein systemeigenes `permission-service`-Konstrukt (anders als die Domain-Admin-Rollen aus P6-S5). Seit P17-S1 existiert immerhin ein genereller **Anlege**-Weg (`POST /realm-roles`, z. B. aus einem Konfigurationspaket) — die **Zuweisung** an konkrete Nutzer bleibt aber weiterhin ausschließlich über die Keycloak Admin Console, keine API/UI dafür in diesem Projekt.
 - **5 der 7 Domain-Admin-Rollen aus 4.6 ohne zugeordnetes technisches Konto** (seit P6-S5/S6): `domain-admin-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs` existieren nur als `Role`-Zeile in `permission-service`, ohne Keycloak-Konto und ohne dass irgendein Endpunkt sie prüft — folgt jeweils mit der künftigen Retrofit-Session der betreffenden Domäne. `domain-admin-config` ist seit **P6-S6** durchgesetzt (`config-admin`-Konto, `workflow-service`s Prozessdefinitions-Endpunkte).
 - **Keine erhöhte Auditierungspriorität während einer aktiven Superuser-Session** (4.6, seit P6-S5): `audit-service` konsumiert die Break-Glass-Lifecycle-Events (`auth.>`) mit normaler Priorität; Fremdaktionen, die *während* der Aktivierung in anderen Services ausgeführt werden, sind nicht gesondert markiert.
 - **Keine rollierende Inaktivitäts-Deaktivierung** (4.6, seit P6-S5): ein einziger absoluter Ablauf-Zeitstempel statt getrennter Gesamtdauer-/10-Minuten-Inaktivitäts-Timer, siehe ADR 0023.

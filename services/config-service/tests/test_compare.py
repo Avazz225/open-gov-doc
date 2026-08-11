@@ -126,7 +126,7 @@ def test_diff_singleton_category_both_absent_is_fully_empty():
     assert delta.identical == []
 
 
-def test_compare_documents_covers_all_eight_categories():
+def test_compare_documents_covers_all_nine_categories():
     base = _doc(
         object_types=[ObjectTypeExport(name="a", applies_to="document")],
         dmn_definitions=[DmnDefinitionExport(name="d1", dmn_xml="<dmn1/>")],
@@ -135,6 +135,7 @@ def test_compare_documents_covers_all_eight_categories():
         approval_config=[ApprovalConfigExport(action_type="x", requires_approval=False)],
         sensor_config=SensorConfigExport(global_default=True, overrides={}),
         federation_config=FederationConfigExport(version="1.0", min_compatible_peer_version="1.0"),
+        realm_roles=["dms-poststelle"],
     )
     compare_doc = _doc(
         object_types=[ObjectTypeExport(name="a", applies_to="document")],
@@ -144,6 +145,7 @@ def test_compare_documents_covers_all_eight_categories():
         approval_config=[ApprovalConfigExport(action_type="x", requires_approval=True)],
         sensor_config=SensorConfigExport(global_default=False, overrides={}),
         federation_config=FederationConfigExport(version="2.0", min_compatible_peer_version="1.0"),
+        realm_roles=["dms-poststelle", "dms-registratur"],
     )
     result = compare.compare_documents(
         base,
@@ -157,6 +159,7 @@ def test_compare_documents_covers_all_eight_categories():
             "approval_config",
             "sensor_config",
             "federation_config",
+            "realm_roles",
         },
     )
     # Kategorie wurde angefragt, aber auf keiner Seite exportiert -> Delta
@@ -177,3 +180,30 @@ def test_compare_documents_covers_all_eight_categories():
         "base": "1.0",
         "compare": "2.0",
     }
+    assert result["realm_roles"].identical == ["dms-poststelle"]
+    assert result["realm_roles"].only_in_compare == ["dms-registratur"]
+
+
+def test_diff_string_list_category_reports_only_in_base_and_only_in_compare():
+    result = compare.diff_string_list_category(
+        "realm_roles", ["dms-poststelle"], ["dms-registratur"], ignore_regex=None
+    )
+    assert result.only_in_base == ["dms-poststelle"]
+    assert result.only_in_compare == ["dms-registratur"]
+    assert result.identical == []
+
+
+def test_diff_string_list_category_identical():
+    result = compare.diff_string_list_category(
+        "realm_roles", ["dms-poststelle"], ["dms-poststelle"], ignore_regex=None
+    )
+    assert result.identical == ["dms-poststelle"]
+    assert result.only_in_base == []
+    assert result.only_in_compare == []
+
+
+def test_diff_string_list_category_both_absent_is_fully_empty():
+    result = compare.diff_string_list_category("realm_roles", None, None, ignore_regex=None)
+    assert result.only_in_base == []
+    assert result.only_in_compare == []
+    assert result.identical == []

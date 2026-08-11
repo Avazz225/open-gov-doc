@@ -33,7 +33,8 @@ erst einen Token braucht; seit P6-S9 zusätzlich die beiden Federation-Hub-
 Inbound-Endpunkte; seit P13-S2 zusätzlich vier Routen für den unabhängig
 betriebenen `fleet-management-service` — `registry-service:installation`,
 `license-service:license/status`, `license-service:license`,
-`config-service:config/import`, siehe
+`config-service:config/fleet-import` (**bis P17-S1**: `config-service:
+config/import`, siehe "Korrektur" unten), siehe
 [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md);
 seit P14-S10 zusätzlich `document-service:public/share-links` und
 `document-service:public/share-links/content` für den öffentlichen
@@ -68,6 +69,19 @@ großgeschrieben — beide landeten als zwei separate Header beim Downstream).
 unabhängig von seiner Schreibweise, bevor die echten Identitäts-Header
 gesetzt werden. Live verifiziert: derselbe Spoofing-Versuch liefert seither
 nachweislich die echte Identität.
+
+**Korrektur an `public_routes` (P17-S1-Fund, [ADR 0058](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md)):**
+`config-service:config/import` teilte sich bis P17-S1 einen einzigen, öffentlichen Pfad zwischen
+RBAC-Aufrufern (echte, eingeloggte `config-admin`-Nutzer) und dem Fleet-Agent-Schlüssel (ADR 0037).
+Für Pfade in `public_routes` validiert `proxy()` **grundsätzlich keinen Bearer-Token und setzt
+`X-DMS-Principal` nie** — unabhängig davon, ob ein gültiger Token im Request steckt. Das bedeutete:
+der RBAC-Zweig von `config-service`s Import-Gate war für JEDEN Aufruf dieses Pfads über den
+Gateway faktisch unerreichbar, auch für echte Admins — erst bei der ersten Admin-UI-Anbindung von
+`config-service` (P17-S1, bis dahin gab es dafür keine Frontend-Seite) gefunden. Fix: eigener,
+weiterhin öffentlicher Pfad `config-service:config/fleet-import` ausschließlich für den
+Fleet-Agent; `config-service:config/import` ist seither ein regulärer, Token-pflichtiger Pfad. Test
+`test_config_import_route_now_requires_gateway_auth_check` bestätigt explizit, dass dieser Pfad
+seither einen Bearer-Token verlangt.
 
 ## Not-Shutdown / Wartungsmodus (4.8, seit P6-S6)
 

@@ -71,12 +71,16 @@ class FleetAgentClient:
     async def provision_config(
         self, config_document: dict, *, categories: list[str] | None
     ) -> dict:
-        """``POST /api/config-service/config/import`` - gegated hinter
+        """``POST /api/config-service/config/fleet-import`` - gegated hinter
         demselben `DMS_FLEET_AGENT_API_KEY` (P13-S2), reiner Durchreicher des
-        vom Betreiber mitgegebenen Konfigurationsdokuments (7.3)."""
+        vom Betreiber mitgegebenen Konfigurationsdokuments (7.3). Eigener,
+        dedizierter Pfad seit P17-S1 (vorher `config/import`, geteilt mit dem
+        RBAC-Zugriffsweg - siehe `gateway_service.settings.public_routes` und
+        `config_service.main.fleet_import_config` für die Begründung der
+        Trennung)."""
         params = {"categories": categories} if categories else None
         response = await self._client.post(
-            "/api/config-service/config/import", json=config_document, params=params
+            "/api/config-service/config/fleet-import", json=config_document, params=params
         )
         if response.is_error:
             raise AgentError(

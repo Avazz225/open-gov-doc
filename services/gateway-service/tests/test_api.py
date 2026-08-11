@@ -122,10 +122,21 @@ def test_fleet_management_routes_bypass_gateway_auth_check(client):
         ("GET", "/api/registry-service/installation"),
         ("GET", "/api/license-service/license/status"),
         ("POST", "/api/license-service/license"),
-        ("POST", "/api/config-service/config/import"),
+        ("POST", "/api/config-service/config/fleet-import"),
     ):
         response = client.request(method, path, json={})
         assert response.json().get("detail") != "Fehlender Bearer-Token"
+
+
+def test_config_import_route_now_requires_gateway_auth_check(client):
+    """P17-S1: `config-service:config/import` ist seit P17-S1 KEIN
+    öffentlicher Pfad mehr (nur noch `config/fleet-import`) - vorher blieb
+    der Gateway für JEDEN Aufruf dieses Pfads unvalidiert, wodurch echte,
+    eingeloggte Admins nie ein `X-DMS-Principal` bekamen (siehe
+    `gateway_service.settings.public_routes`-Kommentar)."""
+    response = client.post("/api/config-service/config/import", json={})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Fehlender Bearer-Token"
 
 
 def test_public_share_link_routes_bypass_gateway_auth_check(client):

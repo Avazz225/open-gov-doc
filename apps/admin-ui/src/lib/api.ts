@@ -1544,3 +1544,117 @@ export async function revokeDelegationAsAdmin(token: string, delegationId: strin
     token
   );
 }
+
+// Vorkonfigurierte Konfigurationspakete (14.1, P17-S1) - "Paket" ist am Ende
+// nur ein `ConfigDocument` (7.3-Format, bereits seit P12-S3 bestehend) mit
+// einem optionalen, rein beschreibenden `manifest`. Der Dokumentinhalt selbst
+// bleibt hier bewusst lose typisiert (`Record<string, unknown>` je Kategorie)
+// statt jede der neun Kategorien 1:1 nachzubilden - diese Seite liest ein vom
+// Nutzer hochgeladenes JSON-Dokument ein und reicht es unverändert an
+// config-service weiter (Vorschau/Anwendung), sie interpretiert dessen
+// Feldinhalte selbst nicht.
+export const CONFIG_CATEGORIES = [
+  "object_types",
+  "workflows",
+  "dmn_definitions",
+  "business_calendars",
+  "roles",
+  "approval_config",
+  "sensor_config",
+  "federation_config",
+  "realm_roles",
+] as const;
+export type ConfigCategory = (typeof CONFIG_CATEGORIES)[number];
+
+export interface PackageManifest {
+  name: string;
+  version: string;
+  compatibility_range: string;
+  description?: string;
+  origin?: string;
+  license?: string;
+}
+
+export type ConfigDocument = {
+  schema_version: string;
+  exported_at: string;
+  manifest?: PackageManifest | null;
+} & Partial<Record<ConfigCategory, unknown>>;
+
+function categoryQuery(categories?: ConfigCategory[]): string {
+  if (!categories || categories.length === 0) return "";
+  const query = new URLSearchParams();
+  categories.forEach((c) => query.append("categories", c));
+  return `?${query.toString()}`;
+}
+
+export async function exportConfig(
+  token: string,
+  categories?: ConfigCategory[]
+): Promise<ConfigDocument> {
+  const response = await request(
+    "config-service",
+    `config/export${categoryQuery(categories)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export interface CategoryDelta {
+  only_in_base: string[];
+  only_in_compare: string[];
+  differing: Record<string, Record<string, { base: unknown; compare: unknown }>>;
+  identical: string[];
+}
+
+export interface CompareResult {
+  schema_version: string;
+  base_exported_at: string;
+  compare_exported_at: string;
+  categories: Record<string, CategoryDelta>;
+}
+
+// `base` weglassen zieht bei config-service automatisch den eigenen aktuellen
+// Live-Export heran (7.5-Anwendungsfall "was würde sich ändern, wenn ich
+// dieses Paket importiere") - das ist die von dieser Seite genutzte Vorschau
+// vor dem eigentlichen Anwenden.
+export async function compareConfig(
+  token: string,
+  compareDoc: ConfigDocument,
+  categories?: ConfigCategory[]
+): Promise<CompareResult> {
+  const response = await request(
+    "config-service",
+    "config/compare",
+    jsonInit({ compare: compareDoc, categories: categories && categories.length ? categories : undefined }),
+    token
+  );
+  return response.json();
+}
+
+export interface ConfigCategoryResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
+export interface ConfigImportResult {
+  schema_version: string;
+  results: Record<string, ConfigCategoryResult>;
+}
+
+export async function importConfig(
+  token: string,
+  document: ConfigDocument,
+  categories?: ConfigCategory[]
+): Promise<ConfigImportResult> {
+  const response = await request(
+    "config-service",
+    `config/import${categoryQuery(categories)}`,
+    jsonInit(document),
+    token
+  );
+  return response.json();
+}

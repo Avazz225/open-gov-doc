@@ -188,6 +188,33 @@ class PermissionServiceClient:
         return response.json()
 
 
+class AuthServiceClient:
+    """Für die `realm_roles`-Kategorie (14.1, P17-S1) - Keycloak-Realm-Rollen
+    leben in `auth-service`, nicht in `permission-service` (siehe `roles`
+    oben)."""
+
+    _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30.0,
+            headers={"X-DMS-Principal": self._CONFIG_ADMIN_PRINCIPAL_ID},
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def list_realm_roles(self) -> list[str]:
+        response = await self._client.get("/realm-roles")
+        response.raise_for_status()
+        return [role["name"] for role in response.json()]
+
+    async def create_realm_roles(self, names: list[str]) -> None:
+        response = await self._client.post("/realm-roles", json={"names": names})
+        response.raise_for_status()
+
+
 class MonitoringServiceClient:
     _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
 

@@ -46,6 +46,18 @@ class Settings(BaseServiceSettings):
     # authentisiert sich stattdessen über `X-Installation-Signature` (siehe
     # auth_service.main.federated_search_inbound, gleiches Prinzip wie
     # workflow-service's federation/inbound oben).
+    # Seit P17-S1 `config-service:config/import` durch `config-service:config/
+    # fleet-import` ersetzt (nicht nur ergänzt): der alte, gemeinsame Pfad für
+    # sowohl den Fleet-Agent-Schlüssel als auch echte, eingeloggte Admins
+    # bedeutete, dass der Gateway für JEDEN Aufruf dieses Pfads keinen
+    # Bearer-Token validierte - `X-DMS-Principal` blieb dadurch auch für
+    # echte Admins immer leer, der RBAC-Zweig von `config-service`s
+    # `_require_import_permission` war faktisch unerreichbar (bei P17-S1
+    # gefunden, als die erste Admin-UI-Anbindung für Konfigurationspakete,
+    # 14.1, entstand). `POST /config/import` ist jetzt ein regulärer,
+    # Keycloak-Token-pflichtiger Pfad; nur der neue, dedizierte
+    # `config/fleet-import`-Pfad bleibt öffentlich, siehe
+    # `config_service.main.fleet_import_config`.
     public_routes: list[str] = [
         "auth-service:login",
         "auth-service:refresh",
@@ -55,7 +67,7 @@ class Settings(BaseServiceSettings):
         "registry-service:installation",
         "license-service:license/status",
         "license-service:license",
-        "config-service:config/import",
+        "config-service:config/fleet-import",
         "document-service:public/share-links",
         "document-service:public/share-links/content",
     ]
