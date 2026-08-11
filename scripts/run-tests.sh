@@ -30,9 +30,18 @@ LOG_DIR="$REPO_ROOT/.test-results"
 POSTGRES_CONTAINER="dms-postgres-1"
 TEST_DB="dms_test"
 
-# Services mit eigenem NATS-Konsumenten (durable=<service-name>) - siehe
+# Services mit eigenem NATS-Konsumenten (durable=<service-name>), DEREN
+# TESTS EIGENSTÄNDIG PER IN-PROZESS-TESTCLIENT LAUFEN - siehe
 # `grep -rl "durable=" services/*/src/*/*.py`. Nur diese müssen vor ihrem
-# eigenen Testlauf als Container gestoppt werden.
+# eigenen Testlauf als Container gestoppt werden, da sonst der laufende
+# Container-Konsument und der in-process gestartete Test-Konsument um
+# denselben Durable-Namen konkurrieren. Services, deren Tests stattdessen
+# gegen den echten laufenden Container gehen (kein In-Prozess-`TestClient`,
+# z. B. `config-service`/`migration-service`) gehören NICHT hierher, obwohl
+# sie ebenfalls einen eigenen Konsumenten haben - ihre Tests brauchen den
+# Container gerade laufend, ein Stoppen bricht sie (P17-S3-Fund: fälschlich
+# hinzugefügtes `config-service` ließ jeden `config-service`-Test mit
+# "Connection refused" fehlschlagen).
 CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service registry-service rendering-service reporting-service search-service)
 
 BUILD=0

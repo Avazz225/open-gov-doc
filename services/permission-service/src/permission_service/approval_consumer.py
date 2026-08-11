@@ -14,12 +14,12 @@ def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
     publish_event: Callable[[str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Führt die eigenen gegateten Aktionen (Bereichssperren, 4.7) erst nach
-    Genehmigung aus (4.3) - Selbst-Konsum des eigenen
-    `permission.approval.approved`-Events, exakt derselbe Mechanismus wie
-    für fremde Services (z. B. `document-service`). Aktionstypen, die nicht
-    zu diesem Service gehören (z. B. `document.force_unlock`), werden
-    ignoriert."""
+    """Führt die eigenen gegateten Aktionen (Bereichssperren, 4.7, seit P17-S3
+    zusätzlich Rollenzuweisungen, 4.3/14.2) erst nach Genehmigung aus (4.3) -
+    Selbst-Konsum des eigenen `permission.approval.approved`-Events, exakt
+    derselbe Mechanismus wie für fremde Services (z. B. `document-service`).
+    Aktionstypen, die nicht zu diesem Service gehören (z. B.
+    `document.force_unlock`), werden ignoriert."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -28,6 +28,7 @@ def make_handler(
             "permission.scope_lock.create",
             "permission.scope_lock.release",
             "system.not_shutdown.trigger",
+            "permission.role_assignment.create",
         )
         if action_type not in known_action_types:
             return
@@ -71,7 +72,7 @@ def make_handler(
                         },
                         actor=lock.locked_by,
                     )
-                else:
+                elif action_type == "permission.scope_lock.release":
                     lock = await repository.release_scope_lock(
                         session, action_payload["lock_id"], action_payload["released_by"]
                     )
@@ -84,6 +85,31 @@ def make_handler(
                             "released_by": lock.released_by,
                         },
                         actor=lock.released_by,
+                    )
+                else:
+                    # permission.role_assignment.create (P17-S3, 14.2
+                    # "Berechtigungsänderung") - `create_role_assignment` ist
+                    # bereits idempotent-freundlich über
+                    # `repository.NotFoundError` abgesichert (unbekannte
+                    # role_id/Ressource), siehe except-Zweig unten.
+                    assignment = await repository.create_role_assignment(
+                        session,
+                        principal_type=action_payload["principal_type"],
+                        principal_id=action_payload["principal_id"],
+                        role_id=action_payload["role_id"],
+                        resource_id=action_payload["resource_id"],
+                    )
+                    await session.commit()
+                    await publish_event(
+                        "permission.role_assignment.created",
+                        {
+                            "role_assignment_id": assignment.id,
+                            "principal_type": assignment.principal_type,
+                            "principal_id": assignment.principal_id,
+                            "role_id": assignment.role_id,
+                            "resource_id": assignment.resource_id,
+                        },
+                        actor=assignment.principal_id,
                     )
             except (repository.NotFoundError, KeyError):
                 # KeyError deckt Fremd-/Fehlform-Payloads ab (z. B. ein zu

@@ -190,6 +190,15 @@ export interface RoleAssignment {
   resource_id: string;
 }
 
+// Seit P17-S3 (14.2 "Berechtigungsänderung"): `POST /role-assignments` kann
+// optional per Vier-Augen-Prinzip gegated sein - `role_assignment` ist nur
+// bei `status === "created"` gesetzt.
+export interface RoleAssignmentActionResult {
+  status: "created" | "pending_approval";
+  role_assignment: RoleAssignment | null;
+  approval_request_id: string | null;
+}
+
 export async function listRoleAssignments(token: string): Promise<RoleAssignment[]> {
   const response = await request("permission-service", "role-assignments", {}, token);
   return response.json();
@@ -198,7 +207,7 @@ export async function listRoleAssignments(token: string): Promise<RoleAssignment
 export async function createRoleAssignment(
   token: string,
   params: { principalType: string; principalId: string; roleId: number; resourceId: string }
-): Promise<RoleAssignment> {
+): Promise<RoleAssignmentActionResult> {
   const response = await request(
     "permission-service",
     "role-assignments",
@@ -1648,11 +1657,20 @@ export interface ConfigImportResult {
   results: Record<string, ConfigCategoryResult>;
 }
 
+// Seit P17-S3 (14.2 "Konfigurationsimport"): `POST /config/import` kann
+// optional per Vier-Augen-Prinzip gegated sein - `result` ist nur bei
+// `status === "applied"` gesetzt.
+export interface ConfigImportActionResult {
+  status: "applied" | "pending_approval";
+  result: ConfigImportResult | null;
+  approval_request_id: string | null;
+}
+
 export async function importConfig(
   token: string,
   document: ConfigDocument,
   categories?: ConfigCategory[]
-): Promise<ConfigImportResult> {
+): Promise<ConfigImportActionResult> {
   const response = await request(
     "config-service",
     `config/import${categoryQuery(categories)}`,

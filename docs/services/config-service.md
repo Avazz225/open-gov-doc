@@ -11,14 +11,17 @@ dasselbe Dokument optional ein `manifest` (Name/Version/Kompatibilitätsspanne/B
 Herkunft/Lizenz) und wird damit zu einem benannten **Konfigurationspaket** (14.1) — siehe
 "Konfigurationspakete" unten.
 
-**Konzept-Referenz:** 7.3, 7.5, 14.1
+**Konzept-Referenz:** 7.3, 7.5, 14.1, 14.2
 **Eigenes Postgres-Schema:** keines — reiner Orchestrator, jede Kategorie wird direkt beim
 jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-service`,
 `permission-service`, `monitoring-service`, seit P17-S1 zusätzlich `auth-service`), gleiches
-"stateless orchestrator"-Muster wie `webdav-connector` (P12-S1).
+"stateless orchestrator"-Muster wie `webdav-connector` (P12-S1). Seit **P17-S3** dennoch ein
+reiner NATS-**Konsument** ohne eigenen Stream (`ensure_stream=False`) — siehe "Vier-Augen für
+`config.import`" unten.
 **ADR:** [0035 — Scope des Exports, Upsert-Semantik, Gating-Wiederverwendung](../adr/0035-config-service-scope-and-upsert-semantics.md),
 [0040 — Delta-Vergleich: Feld-Ebene-Diff, kein automatischer Cross-Installation-Abruf](../adr/0040-config-compare-field-level-diff-no-cross-installation-fetch.md),
-[0058 — Konfigurationspakete: Manifest + `realm_roles`, Gateway-Routen-Trennung](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md)
+[0058 — Konfigurationspakete: Manifest + `realm_roles`, Gateway-Routen-Trennung](../adr/0058-konfigurationspakete-manifest-realm-roles-and-gateway-import-route-split.md),
+[0060 — eGov-Paket Teil 2: Vier-Augen-Lücken geschlossen](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)
 
 ## API
 
@@ -26,9 +29,31 @@ jeweiligen Owner-Service gelesen/geschrieben (`object-type-service`, `workflow-s
 |---|---|---|
 | `GET` | `/config/export` | Exportiert ein `ConfigDocument` — optional `?categories=roles&categories=workflows` zur Einschränkung, sonst alle neun Kategorien |
 | `POST` | `/config/compare` | **Seit P14-S1**: Delta-/Vergleichsfunktion (7.5) — Body `{compare, base?, categories?, ignore_regex?}`; fehlt `base`, wird der eigene aktuelle Live-Export als Basisinstanz verwendet. Rein lesend/diagnostisch, ungegated wie `GET /config/export`. `422` bei unbekannter Kategorie oder ungültiger `ignore_regex` |
-| `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422`. **Seit P17-S1 KEIN öffentlicher Gateway-Pfad mehr** (siehe "Gateway-Routen-Trennung" unten) |
-| `POST` | `/config/fleet-import` | **Seit P17-S1** (vorher derselbe Pfad wie `/config/import`): identische Anwendungslogik, aber ausschließlich für `fleet-management-service` — verlangt `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (3a/P13-S2, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), kein RBAC-Zweig. Bleibt der öffentliche Gateway-Pfad |
+| `POST` | `/config/import` | Wendet ein `ConfigDocument` an (Upsert je Kategorie) — verlangt `X-DMS-Principal`-Header mit `admin.object_config`-Berechtigung, sonst `403`; unbekannte `schema_version` ohne Migrationspfad → `422`. **Seit P17-S1 KEIN öffentlicher Gateway-Pfad mehr** (siehe "Gateway-Routen-Trennung" unten). **Seit P17-S3** optional per Vier-Augen gegated (`config.import`, s. u.) — Antwort `ImportActionResult` (`status: "applied"\|"pending_approval"`, `result`, `approval_request_id`) statt des bisherigen flachen `ImportResult` |
+| `POST` | `/config/fleet-import` | **Seit P17-S1** (vorher derselbe Pfad wie `/config/import`): identische Anwendungslogik, aber ausschließlich für `fleet-management-service` — verlangt `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (3a/P13-S2, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)), kein RBAC-Zweig. Bleibt der öffentliche Gateway-Pfad. **Bewusst weiterhin ungegated** (s. u.) |
 | `GET` | `/healthz` | Health-Check (ungegated) |
+
+## Vier-Augen für `config.import` (4.3/14.2, seit P17-S3)
+
+`POST /config/import` fragt vor der Anwendung `ApprovalClient.requires_approval("config.import")`
+beim `permission-service` ab (identisches Client-Muster wie `document-service`s Force-Unlock-Gate) —
+per Default (`requires_approval=false`) bleibt das Verhalten unverändert: sofortige Anwendung,
+`status="applied"`. Ist die Genehmigungspflicht aktiviert (z. B. über das eGov-Paket, siehe
+`packages/egov/`), wird stattdessen ein `ApprovalRequest` angelegt (`{document, categories}` als
+`payload`) und `status="pending_approval"` zurückgegeben — `result` bleibt `null`, bis eine zweite
+Person über `POST /approval-requests/{id}/approve` bestätigt. Die tatsächliche Anwendung läuft dann
+asynchron über einen neuen, reinen NATS-Konsumenten (`consumer.py`, `durable="config-service"`,
+abonniert `permission.approval.approved` auf dem von `permission-service` besessenen `permission`-
+Stream, `ensure_stream=False`), der bei `action_type="config.import"` dieselbe
+`_apply_config_document()`-Anwendungslogik wie der sofortige Pfad aufruft. `POST /config/fleet-import`
+bleibt bewusst ungegated — der automatisierte Fleet-Agent-Provisionierungspfad hat kein
+Mensch-im-Loop, der einen später ausstehenden Freigabe-Request sinnvoll bestätigen könnte
+([ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)).
+
+Da `config-service` sonst keine eigene Event-Bus-Anbindung hat, verlangt der Konsument
+`DMS_NATS_URL` (`infra/docker-compose.yml`: `nats://nats:4222`) — ohne diese Variable fällt
+`BaseServiceSettings` auf `nats://localhost:4222` zurück, was im Container nicht erreichbar ist
+(bei P17-S3 selbst gefundener Bug, siehe [ADR 0060](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)).
 
 ## Die neun Kategorien
 
@@ -218,7 +243,9 @@ nachgebaut (numerische Präfixe, inhaltlicher Vergleich bleibt trotzdem vollstä
 von `compare_documents()`.
 
 `test_api.py` — läuft wie `webdav-connector`/`migration-service` gegen den echten, laufenden
-Container (kein In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) —
+Container (kein In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) — **daher NICHT** in
+`scripts/run-tests.sh`s `CONSUMER_SERVICES` (der Container muss während des Testlaufs erreichbar
+bleiben, siehe [ADR 0060](../adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)) —
 `tests/conftest.py`s `authorized_principal`-Fixture weist einem Testprinzipal vorübergehend
 `domain-admin-config` zu und entfernt die Zuweisung danach wieder. Deckt ab: Export mit/ohne
 Kategorie-Filter, unbekannte Kategorie (`422`), Import ohne/mit falschem Principal (`403`), nicht
@@ -226,7 +253,13 @@ unterstützte `schema_version` (`422`), Rollen-Upsert (create→update per Name)
 Vier-Augen-Konfig-Upsert, einen vollständigen Export→Reimport-Roundtrip, sowie den
 `federation_config`-Import (wirkt tatsächlich auf den laufenden `workflow-service`-Container). Seit
 **P14-S1**: `POST /config/compare` gegen sich selbst (keine Abweichungen), ohne `base` (zieht den
-eigenen Live-Export heran), mit echten inhaltlichen Abweichungen, mit Ignore-Regex-Zuordnung
+eigenen Live-Export heran), mit echten inhaltlichen Abweichungen, mit Ignore-Regex-Zuordnung. Seit
+**P17-S3**: `status="applied"` per Default, `config.import`-Vier-Augen-Gate liefert
+`pending_approval` und importiert (noch) nichts (`test_import_with_approval_required_defers_execution`).
+`test_consumer.py` (neu) — reiner Unit-Test von `consumer.make_handler` mit einem Fake-`apply_import`-
+Callback statt echter DB/Downstream-Aufrufe: genehmigter `config.import` ruft den Callback korrekt
+auf, fremde Aktionstypen werden ignoriert, fehlendes `document` im Payload wird geloggt statt zu
+crashen, ein fehlschlagender Callback propagiert nicht (keine unbestätigte NATS-Nachricht)
 (mit/ohne Regex derselbe Fall verglichen), ungültige Regex → `422`, unbekannte Kategorie → `422`.
 Seit **P14-S4**: `dmn_definitions` in der Standard-Kategorienliste des Exports,
 `dmn_definitions`-Anlegen erzeugt beim Wiederholen unter demselben Namen automatisch eine neue

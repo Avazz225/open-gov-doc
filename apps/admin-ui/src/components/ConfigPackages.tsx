@@ -12,7 +12,7 @@ import {
   type CompareResult,
   type ConfigCategory,
   type ConfigDocument,
-  type ConfigImportResult,
+  type ConfigImportActionResult,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -85,7 +85,7 @@ export function ConfigPackages() {
   const [isComparing, setIsComparing] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
 
-  const [importResult, setImportResult] = useState<ConfigImportResult | null>(null);
+  const [importResult, setImportResult] = useState<ConfigImportActionResult | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
@@ -276,7 +276,10 @@ export function ConfigPackages() {
           {importError}
         </p>
       )}
-      {importResult && (
+      {importResult && importResult.status === "pending_approval" && (
+        <p className="hint">{t("configPackages.pendingApproval")}</p>
+      )}
+      {importResult && importResult.result && (
         <div className="card">
           <h2>{t("configPackages.applyResultTitle")}</h2>
           <table className="data-table">
@@ -290,7 +293,7 @@ export function ConfigPackages() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(importResult.results).map(([category, result]) => (
+              {Object.entries(importResult.result.results).map(([category, result]) => (
                 <tr key={category}>
                   <td>{category}</td>
                   <td>{result.created}</td>

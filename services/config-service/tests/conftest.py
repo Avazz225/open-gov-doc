@@ -25,6 +25,10 @@ def authorized_principal():
     with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as client:
         roles = client.get("/roles").json()
         role = next(r for r in roles if r["name"] == "domain-admin-config")
+        # Seit P17-S3 (4.3/14.2) liefert `POST /role-assignments` das
+        # gegatete `RoleAssignmentActionResult` - ohne aktivierte
+        # Genehmigungspflicht (Default) bleibt `role_assignment` sofort
+        # gesetzt, siehe permission_service/schemas.py.
         assignment = client.post(
             "/role-assignments",
             json={
@@ -33,6 +37,6 @@ def authorized_principal():
                 "role_id": role["id"],
                 "resource_id": "root",
             },
-        ).json()
+        ).json()["role_assignment"]
         yield IMPORT_TEST_PRINCIPAL
         client.delete(f"/role-assignments/{assignment['id']}")

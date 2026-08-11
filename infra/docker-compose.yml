@@ -1148,9 +1148,16 @@ services:
       # derselbe Wert (ein fleet-management-service provisioniert beide Wege
       # ueber dieselbe Installation).
       DMS_FLEET_AGENT_API_KEY: ${DMS_FLEET_AGENT_API_KEY:-dev-fleet-agent-key}
+      # Reiner NATS-Konsument seit P17-S3 (4.3/14.2, `permission.approval.approved`
+      # fuer zurueckgestellten `config.import`) - ohne diese Variable faellt
+      # `BaseServiceSettings` auf `nats://localhost:4222` zurueck, was im
+      # Container nicht den `nats`-Service erreicht (P17-S3-Fund).
+      DMS_NATS_URL: nats://nats:4222
     ports:
       - "${CONFIG_SERVICE_PORT:-8029}:8000"
     depends_on:
+      nats:
+        condition: service_healthy
       object-type-service:
         condition: service_started
       workflow-service:

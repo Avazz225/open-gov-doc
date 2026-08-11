@@ -35,6 +35,7 @@ from permission_service.schemas import (
     MaintenanceModeTrigger,
     ResourceNodeOut,
     ResourceNodeUpdate,
+    RoleAssignmentActionResult,
     RoleAssignmentCreate,
     RoleAssignmentOut,
     RoleCreate,
@@ -200,10 +201,37 @@ async def update_role(
     return role
 
 
-@app.post("/role-assignments", response_model=RoleAssignmentOut, status_code=201)
+@app.post("/role-assignments", response_model=RoleAssignmentActionResult, status_code=201)
 async def create_role_assignment(
     payload: RoleAssignmentCreate, session: AsyncSession = Depends(get_session)
-) -> RoleAssignmentOut:
+) -> RoleAssignmentActionResult:
+    """Seit P17-S3 optional per generischem Vier-Augen-Mechanismus gegated
+    (4.3, `permission.role_assignment.create`) - 14.2 nennt
+    "Berechtigungsänderung" wörtlich als sensiblen Aktionstyp für die
+    Vier-Augen-Vorbelegung des eGov-Pakets. Per Default (keine Konfiguration)
+    bleibt das Verhalten unverändert: sofortige Anlage, gleiches Muster wie
+    `document.force_unlock`/`permission.scope_lock.create`."""
+    config = await repository.get_approval_config(session, "permission.role_assignment.create")
+    if config.requires_approval:
+        # `RoleAssignmentCreate` hat kein eigenes "wer beantragt das"-Feld
+        # (dieser Endpunkt liest wie `create_scope_lock` bewusst keinen
+        # `X-DMS-Principal`-Header, älteres, einfacheres Muster als die
+        # neueren Delegation-Endpunkte) - `principal_id` (die Person, die die
+        # Rolle erhalten soll) ist der einzige verfügbare Platzhalter für
+        # `initiated_by`, identisches Kompromiss-Muster wie dort.
+        request = await _request_approval(
+            session,
+            action_type="permission.role_assignment.create",
+            initiated_by=payload.principal_id,
+            payload={
+                "principal_type": payload.principal_type,
+                "principal_id": payload.principal_id,
+                "role_id": payload.role_id,
+                "resource_id": payload.resource_id,
+            },
+        )
+        return RoleAssignmentActionResult(status="pending_approval", approval_request_id=request.id)
+
     try:
         assignment = await repository.create_role_assignment(
             session,
@@ -215,7 +243,7 @@ async def create_role_assignment(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
-    return assignment
+    return RoleAssignmentActionResult(status="created", role_assignment=assignment)
 
 
 @app.get("/role-assignments", response_model=list[RoleAssignmentOut])

@@ -102,7 +102,8 @@
     "resourceColumn": "Ressource",
     "remove": "Entfernen",
     "empty": "Keine Zuweisungen.",
-    "createError": "Zuweisung fehlgeschlagen"
+    "createError": "Zuweisung fehlgeschlagen",
+    "pendingApproval": "Vier-Augen-Prinzip aktiv - die Zuweisung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
   },
   "objectTypes": {
     "pageTitle": "Objekttypen",
@@ -504,6 +505,7 @@
     "noManifest": "Kein Manifest - reines Konfigurationsdokument (7.3) ohne Name/Version/Beschreibung.",
     "preview": "Vorschau",
     "apply": "Paket anwenden",
+    "pendingApproval": "Vier-Augen-Prinzip aktiv - die Anwendung des Pakets wartet auf Genehmigung durch eine zweite Person, bevor sie erfolgt.",
     "previewResultTitle": "Vorschau: Was würde sich ändern?",
     "deltaNoChanges": "Keine Unterschiede.",
     "deltaOnlyInPackage": "Neu (nur im Paket)",

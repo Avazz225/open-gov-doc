@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -155,6 +155,19 @@ class CategoryResult(BaseModel):
 class ImportResult(BaseModel):
     schema_version: str
     results: dict[str, CategoryResult]
+
+
+class ImportActionResult(BaseModel):
+    """Wie `ForceReleaseResult` (document-service)/`RoleAssignmentActionResult`
+    (permission-service) - `POST /config/import` kann seit P17-S3 optional per
+    generischem Vier-Augen-Mechanismus gegated sein (`config.import`, 14.2
+    "Konfigurationsimport"). `POST /config/fleet-import` bleibt bewusst
+    ungegated (siehe dortiger Docstring in `main.py`) und liefert weiterhin
+    das einfache `ImportResult`."""
+
+    status: Literal["applied", "pending_approval"]
+    result: ImportResult | None = None
+    approval_request_id: str | None = None
 
 
 class CategoryDelta(BaseModel):

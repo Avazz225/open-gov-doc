@@ -3,9 +3,9 @@
   "exported_at": "2026-08-11T00:00:00Z",
   "manifest": {
     "name": "eGov-Konfigurationspaket",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "compatibility_range": ">=1.0",
-    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - Teil 1 (P17-S2): Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte), Aktenzeichen-Format, Aufbewahrungsfristen-Vorschlag, Verschlusssachen-Klassifizierung. Teil 2 (P17-S3, folgt in einer künftigen Version) ergänzt Poststelle-Rollenvorlage, BPMN-Prozessvorlagen, Vier-Augen-Vorbelegung, Geschäftskalender und erweiterte Admin-Rollen im selben Dokument.",
+    "description": "Standardkonfiguration für die deutsche öffentliche Verwaltung (Konzept 14.2) - vollständig: Aktenplan-Objekttyp-Hierarchie (Abteilung → Aktenplan → Akte), Aktenzeichen-Format, Aufbewahrungsfristen-Vorschlag, Verschlusssachen-Klassifizierung (Teil 1, P17-S2); Poststelle-Rollenvorlage, BPMN-Prozessvorlagen für Umlaufmappen (Freigabe/Kenntnisnahme/Aufgabe), Vier-Augen-Vorbelegung für sensible Aktionstypen, bundeseinheitlicher und landesspezifischer Geschäftskalender, erweiterte domänengetrennte Admin-Rollen (Teil 2, P17-S3).",
     "origin": "dms-project",
     "license": "MIT"
   },
@@ -14,24 +14,38 @@
       "name": "Abteilung",
       "applies_to": "folder",
       "attributes": [],
-      "allowed_parent_types": ["$ROOT"],
+      "allowed_parent_types": [
+        "$ROOT"
+      ],
       "icon": "folder"
     },
     {
       "name": "Aktenplan",
       "applies_to": "folder",
       "attributes": [],
-      "allowed_parent_types": ["Abteilung"],
+      "allowed_parent_types": [
+        "Abteilung"
+      ],
       "icon": "folder"
     },
     {
       "name": "Akte",
       "applies_to": "document",
       "attributes": [
-        { "name": "Aktentitel", "type": "string", "required": true },
-        { "name": "Federführung", "type": "string", "required": true }
+        {
+          "name": "Aktentitel",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "Federführung",
+          "type": "string",
+          "required": true
+        }
       ],
-      "allowed_parent_types": ["Aktenplan"],
+      "allowed_parent_types": [
+        "Aktenplan"
+      ],
       "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
       "default_retention_days": 3653
     },
@@ -39,13 +53,547 @@
       "name": "Verschlusssache-Akte",
       "applies_to": "document",
       "attributes": [
-        { "name": "Aktentitel", "type": "string", "required": true },
-        { "name": "Federführung", "type": "string", "required": true }
+        {
+          "name": "Aktentitel",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "Federführung",
+          "type": "string",
+          "required": true
+        }
       ],
-      "allowed_parent_types": ["Aktenplan"],
+      "allowed_parent_types": [
+        "Aktenplan"
+      ],
       "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
       "default_retention_days": 3653,
       "classification_level": "VS-NfD"
+    }
+  ],
+  "realm_roles": [
+    "dms-poststelle"
+  ],
+  "workflows": [
+    {
+      "name": "egov_freigabe",
+      "bpmn_xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" xmlns:bpmndi=\"http://www.omg.org/spec/BPMN/20100524/DI\" xmlns:dc=\"http://www.omg.org/spec/DD/20100524/DC\" xmlns:di=\"http://www.omg.org/spec/DD/20100524/DI\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" id=\"Definitions_egov_freigabe\" targetNamespace=\"http://bpmn.io/schema/bpmn\" exporter=\"dms-egov-package\" exporterVersion=\"1.0.0\">\n  <bpmn:process id=\"egov_freigabe\" name=\"Freigabe (Umlaufmappe)\" isExecutable=\"true\">\n    <bpmn:documentation>Verwaltungs-Umlaufmappen-Muster \"Freigabe\" (Konzept 2.3/7.1/14.2): ein Element durchläuft eine Freigabeentscheidung - je nach Ergebnis endet der Vorgang als genehmigt oder abgelehnt. Startpunkt für installationsspezifische Anpassungen, kein starres Endprodukt.</bpmn:documentation>\n    <bpmn:startEvent id=\"StartEvent_1\">\n      <bpmn:outgoing>Flow_start_to_entscheidung</bpmn:outgoing>\n    </bpmn:startEvent>\n    <bpmn:manualTask id=\"Task_entscheidung\" name=\"Freigabe entscheiden\">\n      <bpmn:documentation>Abschluss setzt die Prozessvariable \"entscheidung\" auf \"Genehmigt\" oder \"Abgelehnt\" (z. B. per POST /instances/{id}/tasks/{task_id}/complete mit data={\"entscheidung\": \"Genehmigt\"}).</bpmn:documentation>\n      <bpmn:incoming>Flow_start_to_entscheidung</bpmn:incoming>\n      <bpmn:outgoing>Flow_entscheidung_to_gateway</bpmn:outgoing>\n    </bpmn:manualTask>\n    <bpmn:sequenceFlow id=\"Flow_start_to_entscheidung\" sourceRef=\"StartEvent_1\" targetRef=\"Task_entscheidung\" />\n    <bpmn:sequenceFlow id=\"Flow_entscheidung_to_gateway\" sourceRef=\"Task_entscheidung\" targetRef=\"Gateway_entscheidung\" />\n    <bpmn:exclusiveGateway id=\"Gateway_entscheidung\" name=\"Genehmigt?\" default=\"Flow_gateway_to_abgelehnt\">\n      <bpmn:incoming>Flow_entscheidung_to_gateway</bpmn:incoming>\n      <bpmn:outgoing>Flow_gateway_to_genehmigt</bpmn:outgoing>\n      <bpmn:outgoing>Flow_gateway_to_abgelehnt</bpmn:outgoing>\n    </bpmn:exclusiveGateway>\n    <bpmn:sequenceFlow id=\"Flow_gateway_to_genehmigt\" name=\"Genehmigt\" sourceRef=\"Gateway_entscheidung\" targetRef=\"Event_genehmigt\">\n      <bpmn:conditionExpression xsi:type=\"bpmn:tFormalExpression\">entscheidung == 'Genehmigt'</bpmn:conditionExpression>\n    </bpmn:sequenceFlow>\n    <bpmn:sequenceFlow id=\"Flow_gateway_to_abgelehnt\" name=\"Abgelehnt\" sourceRef=\"Gateway_entscheidung\" targetRef=\"Event_abgelehnt\" />\n    <bpmn:endEvent id=\"Event_genehmigt\" name=\"Genehmigt\">\n      <bpmn:incoming>Flow_gateway_to_genehmigt</bpmn:incoming>\n    </bpmn:endEvent>\n    <bpmn:endEvent id=\"Event_abgelehnt\" name=\"Abgelehnt\">\n      <bpmn:incoming>Flow_gateway_to_abgelehnt</bpmn:incoming>\n    </bpmn:endEvent>\n  </bpmn:process>\n  <bpmndi:BPMNDiagram id=\"BPMNDiagram_1\">\n    <bpmndi:BPMNPlane id=\"BPMNPlane_1\" bpmnElement=\"egov_freigabe\">\n      <bpmndi:BPMNShape id=\"StartEvent_1_di\" bpmnElement=\"StartEvent_1\">\n        <dc:Bounds x=\"179\" y=\"159\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Task_entscheidung_di\" bpmnElement=\"Task_entscheidung\">\n        <dc:Bounds x=\"270\" y=\"137\" width=\"100\" height=\"80\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Gateway_entscheidung_di\" bpmnElement=\"Gateway_entscheidung\" isMarkerVisible=\"true\">\n        <dc:Bounds x=\"425\" y=\"152\" width=\"50\" height=\"50\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Event_genehmigt_di\" bpmnElement=\"Event_genehmigt\">\n        <dc:Bounds x=\"532\" y=\"82\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Event_abgelehnt_di\" bpmnElement=\"Event_abgelehnt\">\n        <dc:Bounds x=\"532\" y=\"222\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNEdge id=\"Flow_start_to_entscheidung_di\" bpmnElement=\"Flow_start_to_entscheidung\">\n        <di:waypoint x=\"215\" y=\"177\" />\n        <di:waypoint x=\"270\" y=\"177\" />\n      </bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_entscheidung_to_gateway_di\" bpmnElement=\"Flow_entscheidung_to_gateway\">\n        <di:waypoint x=\"370\" y=\"177\" />\n        <di:waypoint x=\"425\" y=\"177\" />\n      </bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_gateway_to_genehmigt_di\" bpmnElement=\"Flow_gateway_to_genehmigt\">\n        <di:waypoint x=\"450\" y=\"152\" />\n        <di:waypoint x=\"450\" y=\"100\" />\n        <di:waypoint x=\"532\" y=\"100\" />\n      </bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_gateway_to_abgelehnt_di\" bpmnElement=\"Flow_gateway_to_abgelehnt\">\n        <di:waypoint x=\"450\" y=\"202\" />\n        <di:waypoint x=\"450\" y=\"240\" />\n        <di:waypoint x=\"532\" y=\"240\" />\n      </bpmndi:BPMNEdge>\n    </bpmndi:BPMNPlane>\n  </bpmndi:BPMNDiagram>\n</bpmn:definitions>\n"
+    },
+    {
+      "name": "egov_kenntnisnahme",
+      "bpmn_xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" xmlns:bpmndi=\"http://www.omg.org/spec/BPMN/20100524/DI\" xmlns:dc=\"http://www.omg.org/spec/DD/20100524/DC\" xmlns:di=\"http://www.omg.org/spec/DD/20100524/DI\" id=\"Definitions_egov_kenntnisnahme\" targetNamespace=\"http://bpmn.io/schema/bpmn\" exporter=\"dms-egov-package\" exporterVersion=\"1.0.0\">\n  <bpmn:process id=\"egov_kenntnisnahme\" name=\"Kenntnisnahme (Umlaufmappe)\" isExecutable=\"true\">\n    <bpmn:documentation>Verwaltungs-Umlaufmappen-Muster \"Kenntnisnahme\" (Konzept 2.3/7.1/14.2): ein Element wird einer Person ausschließlich zur Information vorgelegt, ohne eigene Entscheidung - der Vorgang endet mit der Bestätigung, es gesehen zu haben.</bpmn:documentation>\n    <bpmn:startEvent id=\"StartEvent_1\">\n      <bpmn:outgoing>Flow_start_to_kenntnisnahme</bpmn:outgoing>\n    </bpmn:startEvent>\n    <bpmn:manualTask id=\"Task_kenntnisnahme\" name=\"Zur Kenntnis nehmen\">\n      <bpmn:documentation>Abschluss bestätigt die Kenntnisnahme (z. B. POST /instances/{id}/tasks/{task_id}/complete mit data={\"kenntnis_genommen_am\": \"...\"}) - keine Verzweigung, reine Bestätigung.</bpmn:documentation>\n      <bpmn:incoming>Flow_start_to_kenntnisnahme</bpmn:incoming>\n      <bpmn:outgoing>Flow_kenntnisnahme_to_end</bpmn:outgoing>\n    </bpmn:manualTask>\n    <bpmn:sequenceFlow id=\"Flow_start_to_kenntnisnahme\" sourceRef=\"StartEvent_1\" targetRef=\"Task_kenntnisnahme\" />\n    <bpmn:sequenceFlow id=\"Flow_kenntnisnahme_to_end\" sourceRef=\"Task_kenntnisnahme\" targetRef=\"Event_ende\" />\n    <bpmn:endEvent id=\"Event_ende\" name=\"Zur Kenntnis genommen\">\n      <bpmn:incoming>Flow_kenntnisnahme_to_end</bpmn:incoming>\n    </bpmn:endEvent>\n  </bpmn:process>\n  <bpmndi:BPMNDiagram id=\"BPMNDiagram_1\">\n    <bpmndi:BPMNPlane id=\"BPMNPlane_1\" bpmnElement=\"egov_kenntnisnahme\">\n      <bpmndi:BPMNShape id=\"StartEvent_1_di\" bpmnElement=\"StartEvent_1\">\n        <dc:Bounds x=\"179\" y=\"159\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Task_kenntnisnahme_di\" bpmnElement=\"Task_kenntnisnahme\">\n        <dc:Bounds x=\"270\" y=\"137\" width=\"100\" height=\"80\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Event_ende_di\" bpmnElement=\"Event_ende\">\n        <dc:Bounds x=\"432\" y=\"159\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNEdge id=\"Flow_start_to_kenntnisnahme_di\" bpmnElement=\"Flow_start_to_kenntnisnahme\">\n        <di:waypoint x=\"215\" y=\"177\" />\n        <di:waypoint x=\"270\" y=\"177\" />\n      </bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_kenntnisnahme_to_end_di\" bpmnElement=\"Flow_kenntnisnahme_to_end\">\n        <di:waypoint x=\"370\" y=\"177\" />\n        <di:waypoint x=\"432\" y=\"177\" />\n      </bpmndi:BPMNEdge>\n    </bpmndi:BPMNPlane>\n  </bpmndi:BPMNDiagram>\n</bpmn:definitions>\n"
+    },
+    {
+      "name": "egov_aufgabe",
+      "bpmn_xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" xmlns:bpmndi=\"http://www.omg.org/spec/BPMN/20100524/DI\" xmlns:dc=\"http://www.omg.org/spec/DD/20100524/DC\" xmlns:di=\"http://www.omg.org/spec/DD/20100524/DI\" id=\"Definitions_egov_aufgabe\" targetNamespace=\"http://bpmn.io/schema/bpmn\" exporter=\"dms-egov-package\" exporterVersion=\"1.0.0\">\n  <bpmn:process id=\"egov_aufgabe\" name=\"Aufgabe (Umlaufmappe)\" isExecutable=\"true\">\n    <bpmn:documentation>Verwaltungs-Umlaufmappen-Muster \"Aufgabe\" (Konzept 2.3/7.1/14.2): einer Person wird eine konkret zu erledigende Aufgabe zu einem Element zugewiesen - der Vorgang endet mit der Erledigung.</bpmn:documentation>\n    <bpmn:startEvent id=\"StartEvent_1\">\n      <bpmn:outgoing>Flow_start_to_aufgabe</bpmn:outgoing>\n    </bpmn:startEvent>\n    <bpmn:manualTask id=\"Task_aufgabe\" name=\"Aufgabe erledigen\">\n      <bpmn:documentation>Abschluss bestätigt die Erledigung (z. B. POST /instances/{id}/tasks/{task_id}/complete mit data={\"erledigt_am\": \"...\", \"bemerkung\": \"...\"}) - keine Verzweigung, reine Erledigungsbestätigung.</bpmn:documentation>\n      <bpmn:incoming>Flow_start_to_aufgabe</bpmn:incoming>\n      <bpmn:outgoing>Flow_aufgabe_to_end</bpmn:outgoing>\n    </bpmn:manualTask>\n    <bpmn:sequenceFlow id=\"Flow_start_to_aufgabe\" sourceRef=\"StartEvent_1\" targetRef=\"Task_aufgabe\" />\n    <bpmn:sequenceFlow id=\"Flow_aufgabe_to_end\" sourceRef=\"Task_aufgabe\" targetRef=\"Event_ende\" />\n    <bpmn:endEvent id=\"Event_ende\" name=\"Erledigt\">\n      <bpmn:incoming>Flow_aufgabe_to_end</bpmn:incoming>\n    </bpmn:endEvent>\n  </bpmn:process>\n  <bpmndi:BPMNDiagram id=\"BPMNDiagram_1\">\n    <bpmndi:BPMNPlane id=\"BPMNPlane_1\" bpmnElement=\"egov_aufgabe\">\n      <bpmndi:BPMNShape id=\"StartEvent_1_di\" bpmnElement=\"StartEvent_1\">\n        <dc:Bounds x=\"179\" y=\"159\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Task_aufgabe_di\" bpmnElement=\"Task_aufgabe\">\n        <dc:Bounds x=\"270\" y=\"137\" width=\"100\" height=\"80\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Event_ende_di\" bpmnElement=\"Event_ende\">\n        <dc:Bounds x=\"432\" y=\"159\" width=\"36\" height=\"36\" />\n      </bpmndi:BPMNShape>\n      <bpmndi:BPMNEdge id=\"Flow_start_to_aufgabe_di\" bpmnElement=\"Flow_start_to_aufgabe\">\n        <di:waypoint x=\"215\" y=\"177\" />\n        <di:waypoint x=\"270\" y=\"177\" />\n      </bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_aufgabe_to_end_di\" bpmnElement=\"Flow_aufgabe_to_end\">\n        <di:waypoint x=\"370\" y=\"177\" />\n        <di:waypoint x=\"432\" y=\"177\" />\n      </bpmndi:BPMNEdge>\n    </bpmndi:BPMNPlane>\n  </bpmndi:BPMNDiagram>\n</bpmn:definitions>\n"
+    }
+  ],
+  "approval_config": [
+    {
+      "action_type": "document.force_delete",
+      "requires_approval": true
+    },
+    {
+      "action_type": "folder.force_delete",
+      "requires_approval": true
+    },
+    {
+      "action_type": "document.force_unlock",
+      "requires_approval": true
+    },
+    {
+      "action_type": "permission.role_assignment.create",
+      "requires_approval": true
+    },
+    {
+      "action_type": "config.import",
+      "requires_approval": true
+    }
+  ],
+  "business_calendars": [
+    {
+      "name": "DE-Bund",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": true
+    },
+    {
+      "name": "DE-BW",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-01-06",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-06-04",
+        "2026-10-03",
+        "2026-11-01",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-01-06",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-05-27",
+        "2027-10-03",
+        "2027-11-01",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-BY",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-01-06",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-06-04",
+        "2026-10-03",
+        "2026-11-01",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-01-06",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-05-27",
+        "2027-10-03",
+        "2027-11-01",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-BE",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-03-08",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-08",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-BB",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-HB",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-HH",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-HE",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-06-04",
+        "2026-10-03",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-05-27",
+        "2027-10-03",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-MV",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-03-08",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-08",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-NI",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-NW",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-06-04",
+        "2026-10-03",
+        "2026-11-01",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-05-27",
+        "2027-10-03",
+        "2027-11-01",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-RP",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-06-04",
+        "2026-10-03",
+        "2026-11-01",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-05-27",
+        "2027-10-03",
+        "2027-11-01",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-SL",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-06-04",
+        "2026-08-15",
+        "2026-10-03",
+        "2026-11-01",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-05-27",
+        "2027-08-15",
+        "2027-10-03",
+        "2027-11-01",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-SN",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-11-18",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-11-17",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-ST",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-01-06",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-01-06",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-SH",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    },
+    {
+      "name": "DE-TH",
+      "non_working_dates": [
+        "2026-01-01",
+        "2026-04-03",
+        "2026-04-06",
+        "2026-05-01",
+        "2026-05-14",
+        "2026-05-25",
+        "2026-09-20",
+        "2026-10-03",
+        "2026-10-31",
+        "2026-12-25",
+        "2026-12-26",
+        "2027-01-01",
+        "2027-03-26",
+        "2027-03-29",
+        "2027-05-01",
+        "2027-05-06",
+        "2027-05-17",
+        "2027-09-20",
+        "2027-10-03",
+        "2027-10-31",
+        "2027-12-25",
+        "2027-12-26"
+      ],
+      "is_default": false
+    }
+  ],
+  "roles": [
+    {
+      "name": "Registratur/Aktenverwaltung",
+      "description": "Tägliche Aktenverwaltung: Anlegen, Bearbeiten und Ablegen von Akten im Aktenplan (Registratur-Funktion, 14.2).",
+      "permissions": [
+        "read",
+        "write"
+      ]
+    },
+    {
+      "name": "Amtsleitung",
+      "description": "Amtsleitung/Behördenleitung: erweiterte Aufsichts- und Freigabebefugnis, u. a. Zugriff trotz aktiver Bereichssperre für dringende Vorgänge (14.2).",
+      "permissions": [
+        "read",
+        "write",
+        "scope_lock.bypass"
+      ]
     }
   ]
 }

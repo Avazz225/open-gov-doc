@@ -15,3 +15,8 @@ class Settings(BaseServiceSettings):
     # Konfigurationsimport ist eine Erweiterung derselben "Objekttyp-/Workflow-
     # Konfiguration"-Verantwortung, keine eigene neue Domäne.
     import_required_capability: str = "admin.object_config"
+
+    # Seit P17-S3 (4.3/14.2): reiner NATS-Konsument für
+    # `permission.approval.approved`, damit ein per Vier-Augen-Prinzip
+    # zurückgestellter `config.import` nach Genehmigung angewendet wird.
+    approval_subjects: list[str] = ["permission.approval.approved"]

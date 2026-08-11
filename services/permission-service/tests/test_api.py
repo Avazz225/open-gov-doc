@@ -77,6 +77,9 @@ def test_assignment_with_unknown_resource_returns_404(client):
 
 def test_full_flow_via_api(client):
     role = client.post("/roles", json={"name": "Editor", "permissions": ["read", "write"]}).json()
+    # Seit P17-S3 (4.3/14.2) liefert `POST /role-assignments` das gegatete
+    # `RoleAssignmentActionResult` - ohne aktivierte Genehmigungspflicht
+    # (Default) bleibt `role_assignment` sofort gesetzt, siehe schemas.py.
     assignment = client.post(
         "/role-assignments",
         json={
@@ -85,7 +88,7 @@ def test_full_flow_via_api(client):
             "role_id": role["id"],
             "resource_id": ROOT_RESOURCE_ID,
         },
-    ).json()
+    ).json()["role_assignment"]
 
     effective = client.get(f"/effective-permissions/carol/{ROOT_RESOURCE_ID}").json()
     assert set(effective["permissions"]) == {"read", "write"}
@@ -209,7 +212,7 @@ def test_list_role_assignments_returns_all(client):
             "role_id": role["id"],
             "resource_id": ROOT_RESOURCE_ID,
         },
-    ).json()
+    ).json()["role_assignment"]
 
     response = client.get("/role-assignments")
 
@@ -514,6 +517,37 @@ def test_release_scope_lock_with_approval_required_defers_release(client):
 
     still_active = client.get(f"/scope-locks/effective/{ROOT_RESOURCE_ID}").json()
     assert len(still_active) == 1
+
+
+def test_create_role_assignment_with_approval_required_defers_creation(client):
+    """Vier-Augen-Retrofit für Rollenzuweisung (4.3/14.2, seit P17-S3) -
+    identisches Muster wie die Bereichssperren oben, nur mit
+    `permission.role_assignment.create`."""
+    role = client.post("/roles", json={"name": "GatedAssigneeRole", "permissions": ["read"]}).json()
+    client.put(
+        "/approval-config/permission.role_assignment.create", json={"requires_approval": True}
+    )
+
+    response = client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": "gina",
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending_approval"
+    assert body["approval_request_id"] is not None
+    assert body["role_assignment"] is None
+
+    # Die Zuweisung existiert noch nicht - Genehmigung erfolgt asynchron ueber
+    # das Event (siehe test_approval_consumer.py fuer die Konsumentenlogik).
+    assignments = client.get("/role-assignments", params={"principal_id": "gina"}).json()
+    assert assignments == []
 
 
 def test_superuser_activate_is_preseeded_with_required_permission(client):

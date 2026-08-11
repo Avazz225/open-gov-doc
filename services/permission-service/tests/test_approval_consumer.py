@@ -187,6 +187,81 @@ async def test_missing_resource_at_execution_time_is_logged_not_raised(engine):
     assert published == []
 
 
+async def test_approved_role_assignment_create_executes_and_publishes(engine):
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        await repository.ensure_root_resource(session)
+        role = await repository.create_role(session, "GatedRole", "", ["read"])
+        await session.commit()
+        role_id = role.id
+
+    published = []
+
+    async def fake_publish(event_type, payload, actor=None):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(session_factory, fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-7",
+            "action_type": "permission.role_assignment.create",
+            "initiated_by": "gina",
+            "approved_by": "bob",
+            "payload": {
+                "principal_type": "user",
+                "principal_id": "gina",
+                "role_id": role_id,
+                "resource_id": ROOT_RESOURCE_ID,
+            },
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        assignments = await repository.list_role_assignments(session, principal_id="gina")
+    assert len(assignments) == 1
+    assert assignments[0].role_id == role_id
+    assert published == [
+        (
+            "permission.role_assignment.created",
+            {
+                "role_assignment_id": assignments[0].id,
+                "principal_type": "user",
+                "principal_id": "gina",
+                "role_id": role_id,
+                "resource_id": ROOT_RESOURCE_ID,
+            },
+        )
+    ]
+
+
+async def test_role_assignment_create_with_missing_keys_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, payload, actor=None):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-8",
+            "action_type": "permission.role_assignment.create",
+            "initiated_by": "gina",
+            "approved_by": "bob",
+            "payload": {"x": 1},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []
+
+
 async def test_approved_not_shutdown_trigger_activates_and_publishes(engine):
     session_factory = _session_factory(engine)
     async with session_factory() as session:

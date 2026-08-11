@@ -47,6 +47,16 @@ class RoleAssignmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RoleAssignmentActionResult(BaseModel):
+    """Wie `ScopeLockActionResult` (4.3/4.7) - `POST /role-assignments` kann
+    seit P17-S3 optional per generischem Vier-Augen-Mechanismus gegated sein
+    (`permission.role_assignment.create`, 14.2 "Berechtigungsänderung")."""
+
+    status: Literal["created", "pending_approval"]
+    role_assignment: RoleAssignmentOut | None = None
+    approval_request_id: str | None = None
+
+
 class ResourceNodeUpdate(BaseModel):
     inherit: bool
 

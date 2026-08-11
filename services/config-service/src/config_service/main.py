@@ -5,10 +5,12 @@ from contextlib import asynccontextmanager
 
 import httpx
 from dms_common import configure_logging
+from dms_eventbus_client import NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import FastAPI, Header, HTTPException, Query, status
 
-from config_service import compare, export, imports, migrations
+from config_service import compare, consumer, export, imports, migrations
+from config_service.approval_client import ApprovalClient
 from config_service.clients import (
     AuthServiceClient,
     MonitoringServiceClient,
@@ -21,6 +23,7 @@ from config_service.schemas import (
     CompareRequest,
     CompareResult,
     ConfigDocument,
+    ImportActionResult,
     ImportResult,
 )
 from config_service.settings import Settings
@@ -114,7 +117,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.monitoring_client = MonitoringServiceClient(settings.monitoring_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
+    app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
     await _ensure_bootstrap_permissions()
+
+    # Seit P17-S3 (4.3/14.2): reiner Konsument, kein eigener Stream
+    # (`ensure_stream=False`) - config-service hat nichts Eigenes zu
+    # publizieren, es reagiert nur auf permission-services bereits
+    # bestehendes `permission.approval.approved`-Event, um einen per
+    # Vier-Augen-Prinzip zurückgestellten `config.import` nach Genehmigung
+    # anzuwenden (siehe consumer.py).
+    consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await consumer_bus.connect()
+    app.state.consumer_bus = consumer_bus
+    await consumer.start_consuming(consumer_bus, settings.approval_subjects, _apply_config_document)
 
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
@@ -129,11 +144,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if registration:
         await registration.stop()
+    await consumer_bus.close()
     await app.state.object_type_client.close()
     await app.state.workflow_client.close()
     await app.state.permission_client.close()
     await app.state.monitoring_client.close()
     await app.state.auth_client.close()
+    await app.state.approval_client.close()
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -199,10 +216,12 @@ async def _apply_config_document(payload: dict, categories: list[str] | None) ->
     """`payload` wird bewusst als rohes `dict` entgegengenommen (nicht direkt
     als `ConfigDocument`), damit `migrations.upgrade_to_current()` zuerst auf
     dem rohen Dict ansetzen kann, bevor die aktuelle Schema-Version validiert
-    wird. Gemeinsame Anwendungslogik für `POST /config/import` (RBAC) und
-    `POST /config/fleet-import` (Fleet-Agent-Schlüssel, P17-S1) - beide
-    Zugriffswege wenden dasselbe Dokument identisch an, nur die
-    Authentisierung unterscheidet sich."""
+    wird. Gemeinsame Anwendungslogik für `POST /config/import` (RBAC),
+    `POST /config/fleet-import` (Fleet-Agent-Schlüssel, P17-S1) und - seit
+    P17-S3 - `consumer.py`s Nachvollzug eines per Vier-Augen-Prinzip
+    genehmigten `config.import` (4.3/14.2) - alle drei Zugriffswege wenden
+    dasselbe Dokument identisch an, nur die Authentisierung/der Auslöser
+    unterscheidet sich."""
     resolved = _resolve_categories(categories)
     try:
         upgraded = migrations.upgrade_to_current(payload)
@@ -221,12 +240,12 @@ async def _apply_config_document(payload: dict, categories: list[str] | None) ->
     return ImportResult(schema_version=doc.schema_version, results=results)
 
 
-@app.post("/config/import", response_model=ImportResult)
+@app.post("/config/import", response_model=ImportActionResult)
 async def import_config(
     payload: dict,
     categories: list[str] | None = Query(default=None),
     x_dms_principal: str = Header(default=""),
-) -> ImportResult:
+) -> ImportActionResult:
     """Gegated hinter `admin.object_config` (dieselbe Domain-Admin-Capability
     wie workflow-service's Prozessdefinition-Upload) - ein voller
     Konfigurationsimport ist eine Erweiterung derselben Verantwortung, siehe
@@ -237,9 +256,27 @@ async def import_config(
     JEDEN Aufruf leer, auch für echte eingeloggte Admins - der RBAC-Zweig war
     faktisch unerreichbar, siehe ADR zu P17-S1). Der Fleet-Agent-Zugriffsweg
     lebt seitdem getrennt unter `POST /config/fleet-import` (reines RBAC hier,
-    kein Fleet-Bypass mehr)."""
+    kein Fleet-Bypass mehr).
+
+    Seit P17-S3 zusätzlich optional per generischem Vier-Augen-Mechanismus
+    gegated (4.3, `config.import`) - 14.2 nennt "Konfigurationsimport"
+    wörtlich als sensiblen Aktionstyp für die Vier-Augen-Vorbelegung des
+    eGov-Pakets. Per Default (keine Konfiguration) bleibt das Verhalten
+    unverändert: sofortige Anwendung. `POST /config/fleet-import` bleibt
+    bewusst ungegated - der automatisierte, kopflose Provisionierungspfad des
+    Fleet-Agents hat kein Mensch-im-Loop, der einen später ausstehenden
+    Freigabe-Request sinnvoll bestätigen könnte (ADR 0037)."""
     await _require_import_permission(x_dms_principal)
-    return await _apply_config_document(payload, categories)
+    if await app.state.approval_client.requires_approval("config.import"):
+        request = await app.state.approval_client.create_request(
+            action_type="config.import",
+            initiated_by=x_dms_principal,
+            payload={"document": payload, "categories": categories},
+        )
+        return ImportActionResult(status="pending_approval", approval_request_id=request["id"])
+
+    result = await _apply_config_document(payload, categories)
+    return ImportActionResult(status="applied", result=result)
 
 
 async def _require_fleet_agent(authorization: str | None) -> None:

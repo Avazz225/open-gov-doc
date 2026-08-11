@@ -148,11 +148,18 @@ describe("ConfigPackages", () => {
   });
 
   it("applies the package and shows the per-category result", async () => {
+    // Seit P17-S3 (14.2 "Konfigurationsimport") liefert `importConfig` das
+    // gegatete `ConfigImportActionResult` - ohne aktivierte
+    // Genehmigungspflicht (Default) bleibt `result` sofort gesetzt.
     importConfigMock.mockResolvedValue({
-      schema_version: "1.0",
-      results: {
-        roles: { created: 1, updated: 0, skipped: 0, errors: [] },
+      status: "applied",
+      result: {
+        schema_version: "1.0",
+        results: {
+          roles: { created: 1, updated: 0, skipped: 0, errors: [] },
+        },
       },
+      approval_request_id: null,
     });
 
     const user = userEvent.setup();
@@ -167,6 +174,28 @@ describe("ConfigPackages", () => {
       "token-123",
       expect.objectContaining({ schema_version: "1.0" })
     );
+  });
+
+  it("shows a pending-approval hint without a result table when four-eyes is active", async () => {
+    importConfigMock.mockResolvedValue({
+      status: "pending_approval",
+      result: null,
+      approval_request_id: "req-1",
+    });
+
+    const user = userEvent.setup();
+    renderConfigPackages();
+    await user.upload(screen.getByLabelText("Paket-Datei auswählen (JSON)"), makePackageFile());
+    await screen.findByText("eGov-Konfigurationspaket");
+
+    await user.click(screen.getByRole("button", { name: "Paket anwenden" }));
+
+    expect(
+      await screen.findByText(
+        "Vier-Augen-Prinzip aktiv - die Anwendung des Pakets wartet auf Genehmigung durch eine zweite Person, bevor sie erfolgt."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Ergebnis der Anwendung")).not.toBeInTheDocument();
   });
 
   it("exports the current live configuration", async () => {

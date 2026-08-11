@@ -27,6 +27,7 @@ export function UserManagement() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [assignments, setAssignments] = useState<RoleAssignment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [assignmentPending, setAssignmentPending] = useState(false);
 
   const [newUser, setNewUser] = useState({
     username: "",
@@ -110,15 +111,22 @@ export function UserManagement() {
   async function handleCreateAssignment(event: FormEvent) {
     event.preventDefault();
     if (!accessToken || !newAssignment.roleId) return;
+    setAssignmentPending(false);
     try {
-      await createRoleAssignment(accessToken, {
+      const result = await createRoleAssignment(accessToken, {
         principalType: "user",
         principalId: newAssignment.principalId,
         roleId: Number(newAssignment.roleId),
         resourceId: newAssignment.resourceId,
       });
       setNewAssignment({ principalId: "", roleId: "", resourceId: ROOT_RESOURCE_ID });
-      await reload();
+      if (result.status === "pending_approval") {
+        // Vier-Augen aktiv (4.3/14.2) - noch nicht angelegt, daher kein
+        // reload() (die Liste würde ohnehin unverändert bleiben).
+        setAssignmentPending(true);
+      } else {
+        await reload();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("roleAssignments.createError"));
     }
@@ -311,6 +319,7 @@ export function UserManagement() {
           </label>
           <button type="submit">{t("roleAssignments.submit")}</button>
         </form>
+        {assignmentPending && <p className="hint">{t("roleAssignments.pendingApproval")}</p>}
 
         <table className="data-table">
           <thead>

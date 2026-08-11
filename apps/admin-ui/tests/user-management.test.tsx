@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UserManagement } from "@/components/UserManagement";
 import { I18nProvider } from "@/i18n";
@@ -123,5 +123,57 @@ describe("UserManagement", () => {
     fireEvent.click(screen.getByText("Entfernen"));
 
     await waitFor(() => expect(deleteRoleAssignmentMock).toHaveBeenCalledWith("token-123", 10));
+  });
+
+  it("creates a role assignment and reloads the list", async () => {
+    createRoleAssignmentMock.mockResolvedValue({
+      status: "created",
+      role_assignment: { id: 11, principal_type: "user", principal_id: "bob", role_id: 1, resource_id: "root" },
+      approval_request_id: null,
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Rolle zuweisen" });
+    fireEvent.change(within(form).getByLabelText("Nutzername"), { target: { value: "bob" } });
+    fireEvent.change(within(form).getByLabelText("Rolle"), { target: { value: "1" } });
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(createRoleAssignmentMock).toHaveBeenCalledWith("token-123", {
+        principalType: "user",
+        principalId: "bob",
+        roleId: 1,
+        resourceId: "root",
+      })
+    );
+    await waitFor(() => expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(2));
+    expect(
+      screen.queryByText(
+        "Vier-Augen-Prinzip aktiv - die Zuweisung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
+      )
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a pending-approval hint without reloading when four-eyes is active", async () => {
+    createRoleAssignmentMock.mockResolvedValue({
+      status: "pending_approval",
+      role_assignment: null,
+      approval_request_id: "req-1",
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Rolle zuweisen" });
+    fireEvent.change(within(form).getByLabelText("Nutzername"), { target: { value: "bob" } });
+    fireEvent.change(within(form).getByLabelText("Rolle"), { target: { value: "1" } });
+    fireEvent.submit(form);
+
+    expect(
+      await screen.findByText(
+        "Vier-Augen-Prinzip aktiv - die Zuweisung wartet auf Genehmigung durch eine zweite Person, bevor sie wirksam wird."
+      )
+    ).toBeInTheDocument();
+    expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(1);
   });
 });

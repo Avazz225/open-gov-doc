@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_egov_aufgabe" targetNamespace="http://bpmn.io/schema/bpmn" exporter="dms-egov-package" exporterVersion="1.0.0">
+  <bpmn:process id="egov_aufgabe" name="Aufgabe (Umlaufmappe)" isExecutable="true">
+    <bpmn:documentation>Verwaltungs-Umlaufmappen-Muster "Aufgabe" (Konzept 2.3/7.1/14.2): einer Person wird eine konkret zu erledigende Aufgabe zu einem Element zugewiesen - der Vorgang endet mit der Erledigung.</bpmn:documentation>
+    <bpmn:startEvent id="StartEvent_1">
+      <bpmn:outgoing>Flow_start_to_aufgabe</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:manualTask id="Task_aufgabe" name="Aufgabe erledigen">
+      <bpmn:documentation>Abschluss bestätigt die Erledigung (z. B. POST /instances/{id}/tasks/{task_id}/complete mit data={"erledigt_am": "...", "bemerkung": "..."}) - keine Verzweigung, reine Erledigungsbestätigung.</bpmn:documentation>
+      <bpmn:incoming>Flow_start_to_aufgabe</bpmn:incoming>
+      <bpmn:outgoing>Flow_aufgabe_to_end</bpmn:outgoing>
+    </bpmn:manualTask>
+    <bpmn:sequenceFlow id="Flow_start_to_aufgabe" sourceRef="StartEvent_1" targetRef="Task_aufgabe" />
+    <bpmn:sequenceFlow id="Flow_aufgabe_to_end" sourceRef="Task_aufgabe" targetRef="Event_ende" />
+    <bpmn:endEvent id="Event_ende" name="Erledigt">
+      <bpmn:incoming>Flow_aufgabe_to_end</bpmn:incoming>
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="egov_aufgabe">
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="179" y="159" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_aufgabe_di" bpmnElement="Task_aufgabe">
+        <dc:Bounds x="270" y="137" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_ende_di" bpmnElement="Event_ende">
+        <dc:Bounds x="432" y="159" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_start_to_aufgabe_di" bpmnElement="Flow_start_to_aufgabe">
+        <di:waypoint x="215" y="177" />
+        <di:waypoint x="270" y="177" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_aufgabe_to_end_di" bpmnElement="Flow_aufgabe_to_end">
+        <di:waypoint x="370" y="177" />
+        <di:waypoint x="432" y="177" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

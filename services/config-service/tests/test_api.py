@@ -272,6 +272,74 @@ def test_import_with_unsupported_schema_version_returns_422(authorized_principal
     assert response.status_code == 422
 
 
+def test_import_returns_applied_status_by_default(authorized_principal):
+    """Seit P17-S3 (4.3/14.2) liefert `POST /config/import` das gegatete
+    `ImportActionResult` - ohne aktivierte Genehmigungspflicht (Default)
+    bleibt das Verhalten unverändert: sofortige Anwendung, `status="applied"`,
+    `result` sofort gesetzt."""
+    role_name = f"config-import-applied-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": "2026-01-01T00:00:00Z",
+        "roles": [{"name": role_name, "description": "d", "permissions": ["read"]}],
+    }
+    with _client() as client:
+        response = client.post(
+            "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "applied"
+    assert body["approval_request_id"] is None
+    assert body["result"]["results"]["roles"]["created"] == 1
+
+
+def test_import_with_approval_required_defers_execution(authorized_principal):
+    """Vier-Augen-Vorbelegung des eGov-Pakets (14.2 "Konfigurationsimport") -
+    mit aktivierter Genehmigungspflicht wird NICHT sofort importiert, echte
+    Integration gegen den lokal laufenden permission-service, gleiches "kein
+    Mocking von Sibling-Services"-Muster wie document-service's
+    `test_force_release_with_approval_required_defers_execution`."""
+    role_name = f"config-import-pending-{uuid.uuid4().hex[:8]}"
+    httpx.put(
+        f"{PERMISSION_SERVICE_URL}/approval-config/config.import",
+        json={"requires_approval": True},
+    )
+    try:
+        payload = {
+            "schema_version": "1.0",
+            "exported_at": "2026-01-01T00:00:00Z",
+            "roles": [{"name": role_name, "description": "d", "permissions": ["read"]}],
+        }
+        with _client() as client:
+            response = client.post(
+                "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "pending_approval"
+        assert body["result"] is None
+        assert body["approval_request_id"] is not None
+
+        # Keine sofortige Ausführung - die Rolle ist (noch) nicht angelegt.
+        # Die tatsächliche Anwendung folgt asynchron über consumer.py, sobald
+        # das Approval-Event eintrifft (siehe test_consumer.py).
+        with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+            roles = permission_client.get("/roles").json()
+        assert role_name not in [r["name"] for r in roles]
+
+        with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+            permission_client.post(
+                f"/approval-requests/{body['approval_request_id']}/reject",
+                json={"rejected_by": "supervisor"},
+            )
+    finally:
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/config.import",
+            json={"requires_approval": False},
+        )
+
+
 def test_import_role_creates_then_updates_by_name(authorized_principal):
     role_name = f"config-import-test-{uuid.uuid4().hex[:8]}"
     payload = {
@@ -284,7 +352,7 @@ def test_import_role_creates_then_updates_by_name(authorized_principal):
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert first.status_code == 200
-        assert first.json()["results"]["roles"] == {
+        assert first.json()["result"]["results"]["roles"] == {
             "created": 1,
             "updated": 0,
             "skipped": 0,
@@ -297,7 +365,7 @@ def test_import_role_creates_then_updates_by_name(authorized_principal):
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert second.status_code == 200
-        assert second.json()["results"]["roles"] == {
+        assert second.json()["result"]["results"]["roles"] == {
             "created": 0,
             "updated": 1,
             "skipped": 0,
@@ -336,7 +404,7 @@ def test_import_object_type_roundtrips_classification_level(authorized_principal
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert first.status_code == 200
-        assert first.json()["results"]["object_types"]["created"] == 1
+        assert first.json()["result"]["results"]["object_types"]["created"] == 1
 
     with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL) as object_type_client:
         created = next(
@@ -350,7 +418,7 @@ def test_import_object_type_roundtrips_classification_level(authorized_principal
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert second.status_code == 200
-        assert second.json()["results"]["object_types"]["updated"] == 1
+        assert second.json()["result"]["results"]["object_types"]["updated"] == 1
 
     with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL) as object_type_client:
         updated = next(
@@ -404,7 +472,7 @@ def test_import_dmn_definition_creates_new_version_at_workflow_service(authorize
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert first.status_code == 200
-        assert first.json()["results"]["dmn_definitions"] == {
+        assert first.json()["result"]["results"]["dmn_definitions"] == {
             "created": 1,
             "updated": 0,
             "skipped": 0,
@@ -415,7 +483,7 @@ def test_import_dmn_definition_creates_new_version_at_workflow_service(authorize
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert second.status_code == 200
-        assert second.json()["results"]["dmn_definitions"]["created"] == 1
+        assert second.json()["result"]["results"]["dmn_definitions"]["created"] == 1
 
     with httpx.Client(base_url=WORKFLOW_SERVICE_URL) as workflow_client:
         definitions = workflow_client.get("/dmn-definitions", params={"name": name}).json()
@@ -440,7 +508,7 @@ def test_import_business_calendar_creates_then_updates_by_name(authorized_princi
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert first.status_code == 200
-        assert first.json()["results"]["business_calendars"] == {
+        assert first.json()["result"]["results"]["business_calendars"] == {
             "created": 1,
             "updated": 0,
             "skipped": 0,
@@ -452,7 +520,7 @@ def test_import_business_calendar_creates_then_updates_by_name(authorized_princi
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
         assert second.status_code == 200
-        assert second.json()["results"]["business_calendars"] == {
+        assert second.json()["result"]["results"]["business_calendars"] == {
             "created": 0,
             "updated": 1,
             "skipped": 0,
@@ -477,7 +545,7 @@ def test_import_approval_config_is_upsert(authorized_principal):
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
     assert response.status_code == 200
-    assert response.json()["results"]["approval_config"] == {
+    assert response.json()["result"]["results"]["approval_config"] == {
         "created": 0,
         "updated": 1,
         "skipped": 0,
@@ -500,7 +568,7 @@ def test_export_import_roundtrip_preserves_role_count(authorized_principal):
             headers={"X-DMS-Principal": authorized_principal},
         )
     assert reimport.status_code == 200
-    result = reimport.json()["results"]["roles"]
+    result = reimport.json()["result"]["results"]["roles"]
     # Alle bereits vorhandenen Rollen werden per Name gefunden -> ausschliesslich
     # Updates, keine Duplikate (Upsert-Garantie, 7.3).
     assert result["created"] == 0
@@ -523,7 +591,7 @@ def test_import_realm_roles_creates_new_keycloak_realm_role(authorized_principal
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
     assert response.status_code == 200
-    assert response.json()["results"]["realm_roles"] == {
+    assert response.json()["result"]["results"]["realm_roles"] == {
         "created": 0,
         "updated": 1,
         "skipped": 0,
@@ -553,7 +621,7 @@ def test_import_federation_config_updates_workflow_service(authorized_principal)
             "/config/import", json=payload, headers={"X-DMS-Principal": authorized_principal}
         )
     assert response.status_code == 200
-    assert response.json()["results"]["federation_config"] == {
+    assert response.json()["result"]["results"]["federation_config"] == {
         "created": 0,
         "updated": 1,
         "skipped": 0,
