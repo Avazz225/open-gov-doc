@@ -274,6 +274,18 @@ services:
       DMS_SELF_ADDRESS: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_NATS_URL: nats://nats:4222
+      # Verzeichnis/Kontakte (2.5/4.4, P15-S4) - erstes eigenes Postgres-
+      # Schema dieses Service (Federation-Identität für die optionale
+      # föderierte Kontaktsuche, siehe unten).
+      DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
+      # Föderierte Kontaktsuche (7.4) - eigene, von workflow-services
+      # Federation-Hub-Teilnahme unabhängige Registrierung (ADR 0054). Kein
+      # `depends_on: federation-hub-service` (Registrierung ist best-effort,
+      # kein Hard-Dependency dieser Installation, gleiches Prinzip wie
+      # workflow-service's eigene Registrierung).
+      DMS_FEDERATION_HUB_BASE_URL: ${AUTH_SERVICE_FEDERATION_HUB_BASE_URL:-http://federation-hub-service:8000}
+      DMS_FEDERATED_DIRECTORY_ENABLED: ${AUTH_SERVICE_FEDERATED_DIRECTORY_ENABLED:-true}
+      DMS_INSTALLATION_GATEWAY_BASE_URL: ${INSTALLATION_GATEWAY_BASE_URL:-http://gateway-service:8000}
     ports:
       - "${AUTH_SERVICE_PORT:-8003}:8000"
     depends_on:
@@ -282,6 +294,8 @@ services:
       permission-service:
         condition: service_started
       nats:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - dms-net

@@ -46,7 +46,7 @@ Beide Fixes sind reine Ablauf-/Protokolländerungen ohne Auswirkung auf die eige
 
 ## Nutzung (seit P6-S9)
 
-Einziger Aufrufer aktuell: `workflow-service` (`federation_client.py`) — registriert sich beim eigenen Start (opt-in über `DMS_FEDERATION_HUB_BASE_URL`), löst darüber föderierte BPMN-Schritte (`taskType=federated`/`federated_return`) aus. Siehe `docs/services/workflow-service.md` "Federation" für die Gegenseite des Protokolls.
+Zwei Aufrufer: `workflow-service` (`federation_client.py`) — registriert sich beim eigenen Start (opt-in über `DMS_FEDERATION_HUB_BASE_URL`), löst darüber föderierte BPMN-Schritte (`taskType=federated`/`federated_return`) aus (siehe `docs/services/workflow-service.md` "Federation" für die Gegenseite des Protokolls); seit **P15-S4** zusätzlich `auth-service` (eigene, unabhängige zweite Registrierung für die optionale föderierte Kontaktsuche, 2.5 - siehe `docs/services/auth-service.md` "Kontakte" und [ADR 0054](../adr/0054-kontakte-directory-independent-second-federation-identity-per-installation.md)). Bestätigt live: `Installation` ist tatsächlich ein generischer, von jedem Service unabhängig registrierbarer Adressbuch-Eintrag — zwei Zeilen für dieselbe physische Installation (unterschieden nur durch den Anzeigename-Suffix `" (Kontakte)"`) funktionieren ohne jede Code-Änderung an diesem Service. `auth-service` nutzt außerdem `POST /handovers` NICHT — die föderierte Kontaktsuche ruft Peer-Installationen direkt an (kein Hub-Relay), der Hub dient dort ausschließlich der Adress-/Schlüssel-Auffindung über das ohnehin bereits ungegatet lesbare `GET /installations`.
 
 ## Sensoren (Konzept 10.1)
 

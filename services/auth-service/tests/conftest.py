@@ -1,11 +1,29 @@
+import os
 import uuid
 
 import pytest
-from auth_service.bootstrap import DOMAIN_ADMIN_USERS_USERNAME, ensure_realm_and_client
-from auth_service.main import app
-from auth_service.settings import Settings
-from fastapi.testclient import TestClient
-from keycloak import KeycloakAdmin
+from dms_db_base import build_engine
+from sqlalchemy import text
+
+DSN = os.environ.get(
+    "TEST_POSTGRES_DSN",
+    "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms",
+)
+# Erzwingt dieselbe DB für die App-Settings wie für die Test-Fixtures unten -
+# sonst testet TestClient(app) unbemerkt an TEST_POSTGRES_DSN vorbei die
+# Live-DB, siehe PROGRESS.md "Tooling & Testing". Erstes eigenes Postgres-
+# Schema dieses Service überhaupt (P15-S4, Federation-Identität).
+os.environ["DMS_POSTGRES_DSN"] = DSN
+
+from auth_service.bootstrap import (  # noqa: E402
+    DOMAIN_ADMIN_USERS_USERNAME,
+    ensure_realm_and_client,
+)
+from auth_service.main import app  # noqa: E402
+from auth_service.models import Base  # noqa: E402
+from auth_service.settings import Settings  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from keycloak import KeycloakAdmin  # noqa: E402
 
 settings = Settings()
 
@@ -13,6 +31,17 @@ settings = Settings()
 @pytest.fixture(scope="session", autouse=True)
 def _bootstrap():
     ensure_realm_and_client(settings)
+
+
+@pytest.fixture(autouse=True)
+async def _clean_tables():
+    eng = build_engine(DSN)
+    async with eng.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS auth"))
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("TRUNCATE auth.federation_identity"))
+    await eng.dispose()
+    yield
 
 
 @pytest.fixture

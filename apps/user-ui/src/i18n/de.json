@@ -64,6 +64,7 @@
     "trash": "Papierkorb",
     "quarantine": "Quarantäne",
     "poststelle": "Posteingang/Postausgang",
+    "kontakte": "Kontakte",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -332,6 +333,18 @@
     "bodyLabel": "Text",
     "send": "Senden",
     "sendError": "Versand fehlgeschlagen"
+  },
+  "kontakte": {
+    "paneLabel": "Kontakte",
+    "heading": "Kontakte",
+    "hint": "Verzeichnis zum Auffinden anderer Mitarbeitender (2.5) - primär innerhalb dieser Installation, optional installationsübergreifend, sofern konfiguriert.",
+    "searchPlaceholder": "Name, Benutzername oder E-Mail",
+    "searchLabel": "Suche",
+    "search": "Suchen",
+    "includeFederated": "Auch föderierte Installationen durchsuchen",
+    "federatedHeading": "Föderierte Installationen",
+    "empty": "Keine Treffer.",
+    "searchError": "Suche fehlgeschlagen"
   },
   "delegations": {
     "paneLabel": "Stellvertretung",

@@ -4,6 +4,8 @@ from dms_common import BaseServiceSettings
 class Settings(BaseServiceSettings):
     service_name: str = "auth-service"
 
+    postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
+
     keycloak_base_url: str = "http://localhost:8080"
     keycloak_realm: str = "dms"
     keycloak_client_id: str = "dms-api"
@@ -21,3 +23,12 @@ class Settings(BaseServiceSettings):
     # die SLA-Zeitüberwachung in workflow-service (ADR 0020).
     superuser_activation_minutes: int = 30
     superuser_poll_interval_seconds: float = 30.0
+
+    # Föderierte Kontaktsuche (2.5/7.4, P15-S4) - eigene, von workflow-services
+    # Federation-Hub-Teilnahme unabhängige Registrierung (siehe models.py).
+    # Bewusst opt-in: bleibt `None`/`False`, bis eine Installation dies
+    # ausdrücklich konfiguriert - "keine automatische Nebenwirkung der
+    # bestehenden Föderationsfunktion" (Konzept 2.5, wörtlich).
+    federation_hub_base_url: str | None = None
+    federated_directory_enabled: bool = False
+    installation_gateway_base_url: str = "http://gateway-service:8000"

@@ -1,22 +1,40 @@
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 from dms_auth_client import TokenValidator, make_current_user_dependency
 from dms_common import configure_logging
+from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth_service import admin_users, keycloak_client, superuser
+from auth_service import (
+    admin_users,
+    directory_federation,
+    federation_crypto,
+    keycloak_client,
+    superuser,
+)
 from auth_service.admin_users import UserAlreadyExistsError, UserNotFoundError, build_admin_client
 from auth_service.bootstrap import DOMAIN_ADMIN_ACCOUNTS, ensure_realm_and_client
 from auth_service.consumer import start_consuming
+from auth_service.directory_federation import CONTACT_DIRECTORY_CAPABILITY
+from auth_service.federation_hub_client import FederationHubClient
 from auth_service.keycloak_client import InvalidCredentialsError
+from auth_service.models import Base, FederationIdentity
 from auth_service.permission_client import PermissionServiceClient
 from auth_service.schemas import (
+    DirectoryEntryOut,
+    DirectoryFederationStatusOut,
+    DirectorySearchRequest,
+    FederatedDirectoryEntryOut,
     LoginRequest,
     RefreshRequest,
     SuperuserStatus,
@@ -31,6 +49,8 @@ from auth_service.settings import Settings
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+_FEDERATION_IDENTITY_ID = 1
 
 
 async def _superuser_poll_loop() -> None:
@@ -52,12 +72,78 @@ async def _superuser_poll_loop() -> None:
         await asyncio.sleep(settings.superuser_poll_interval_seconds)
 
 
+async def _ensure_federation_identity(
+    session_factory,
+) -> FederationHubClient | None:
+    """Einmalige Selbstregistrierung am Federation Hub für die föderierte
+    Kontaktsuche (2.5/7.4, P15-S4) - opt-in, bleibt `None` ohne konfigurierten
+    `settings.federation_hub_base_url`. Gleiches Muster wie `workflow_service.
+    main._ensure_federation_identity` (ADR 0028/0039), hier bewusst eine
+    eigene, von workflow-services Registrierung unabhängige Installation im
+    selben Adressbuch (siehe `models.FederationIdentity`-Docstring/ADR 0054)."""
+    if not settings.federation_hub_base_url:
+        return None
+    client = FederationHubClient(settings.federation_hub_base_url)
+    callback_base_url = f"{settings.installation_gateway_base_url}/api/auth-service"
+    async with session_factory() as session:
+        identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+        if identity is None:
+            private_pem, public_pem = federation_crypto.generate_keypair()
+            installation_id = str(uuid.uuid4())
+            await client.register(
+                installation_id=installation_id,
+                private_key_pem=private_pem,
+                display_name=f"{settings.installation_display_name} (Kontakte)",
+                callback_base_url=callback_base_url,
+                public_key_pem=public_pem.decode("utf-8"),
+                version="1.0",
+                min_compatible_peer_version="1.0",
+                supported_process_types=[CONTACT_DIRECTORY_CAPABILITY],
+            )
+            identity = FederationIdentity(
+                id=_FEDERATION_IDENTITY_ID,
+                installation_id=installation_id,
+                private_key_pem=private_pem,
+                public_key_pem=public_pem,
+                created_at=datetime.now(UTC),
+            )
+            session.add(identity)
+            await session.commit()
+        else:
+            try:
+                await client.register(
+                    installation_id=identity.installation_id,
+                    private_key_pem=identity.private_key_pem,
+                    display_name=f"{settings.installation_display_name} (Kontakte)",
+                    callback_base_url=callback_base_url,
+                    public_key_pem=identity.public_key_pem.decode("utf-8"),
+                    version="1.0",
+                    min_compatible_peer_version="1.0",
+                    supported_process_types=[CONTACT_DIRECTORY_CAPABILITY],
+                )
+            except Exception:
+                logger.warning(
+                    "federation_hub_reregistration_failed - Kontaktsuche bleibt beim vorherigen "
+                    "Registrierungsstand, kein Hard-Dependency dieser Installation.",
+                    exc_info=True,
+                )
+    return client
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
     ensure_realm_and_client(settings)
     app.state.keycloak_admin = build_admin_client(settings)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+
+    engine = build_engine(settings.postgres_dsn)
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS auth"))
+        await conn.run_sync(Base.metadata.create_all)
+    app.state.engine = engine
+    app.state.session_factory = make_session_factory(engine)
+    app.state.federation_hub_client = await _ensure_federation_identity(app.state.session_factory)
 
     # Best-Effort (P6-S5, seit P6-S6 für zwei Domänen statt einer): der
     # Permission Service könnte beim eigenen Start noch nicht erreichbar sein
@@ -120,6 +206,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await consumer_bus.close()
     await event_bus.close()
     await app.state.permission_client.close()
+    if app.state.federation_hub_client is not None:
+        await app.state.federation_hub_client.close()
+    await engine.dispose()
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
@@ -131,6 +220,11 @@ _validator = TokenValidator(
     jwks_url=f"{_issuer}/protocol/openid-connect/certs",
 )
 get_current_user = make_current_user_dependency(_validator)
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with app.state.session_factory() as session:
+        yield session
 
 
 async def publish_event(event_type: str, payload: dict, actor: str | None = None) -> None:
@@ -243,6 +337,87 @@ async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> 
     if match is None:
         raise HTTPException(status_code=404, detail=f"Nutzer {username!r} unbekannt")
     return match
+
+
+@app.get("/users/directory", response_model=list[DirectoryEntryOut])
+async def search_directory(q: str, user: dict = Depends(get_current_user)) -> list[dict]:
+    """Verzeichnis zum Auffinden anderer Mitarbeitender (2.5/4.4, P15-S4) -
+    lokal, immer verfügbar für jeden authentifizierten Nutzer (kein
+    `admin.user_management`-Gate, siehe `admin_users.search_users`)."""
+    return admin_users.search_users(app.state.keycloak_admin, q)
+
+
+@app.get("/users/directory/federation-status", response_model=DirectoryFederationStatusOut)
+async def directory_federation_status(
+    session: AsyncSession = Depends(get_session),
+) -> DirectoryFederationStatusOut:
+    """Ob die föderierte Kontaktsuche auf dieser Installation aktiviert ist
+    (2.5: "eigene, explizit opt-in konfigurierbare Fähigkeit") - das Frontend
+    zeigt die entsprechende UI-Sektion nur, wenn `enabled=true`."""
+    if not settings.federated_directory_enabled or app.state.federation_hub_client is None:
+        return DirectoryFederationStatusOut(enabled=False, peer_installation_count=0)
+    identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+    if identity is None:
+        return DirectoryFederationStatusOut(enabled=False, peer_installation_count=0)
+    installations = await app.state.federation_hub_client.list_installations()
+    peers = directory_federation.eligible_peers(installations, identity.installation_id)
+    return DirectoryFederationStatusOut(enabled=True, peer_installation_count=len(peers))
+
+
+@app.get("/users/directory/federated", response_model=list[FederatedDirectoryEntryOut])
+async def search_federated_directory(
+    q: str,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Installationsübergreifende Kontaktsuche (2.5/7.4, P15-S4) - fragt jede
+    über den Federation Hub bekannte, für Kontaktsuche freigegebene Peer-
+    Installation DIREKT an (nicht über den Hub relayt, siehe ADR 0054). Liefert
+    ausschließlich Treffer ANDERER Installationen - das Frontend ruft
+    zusätzlich `GET /users/directory` für die lokalen aus."""
+    if not settings.federated_directory_enabled or app.state.federation_hub_client is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Föderierte Kontaktsuche ist auf dieser Installation nicht aktiviert",
+        )
+    identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
+    if identity is None:
+        raise HTTPException(status_code=503, detail="Federation Hub noch nicht registriert")
+    installations = await app.state.federation_hub_client.list_installations()
+    return await directory_federation.search_all_peers(installations, identity, q)
+
+
+@app.post("/users/directory/federated-search-inbound", response_model=list[DirectoryEntryOut])
+async def federated_search_inbound(request: Request) -> list[dict]:
+    """Empfängt eine signierte Verzeichnis-Suchanfrage einer Peer-Installation
+    (2.5/7.4, P15-S4) - bewusst öffentlich (kein `X-DMS-Principal`, analog zu
+    `workflow_service.main.federation_inbound`), authentisiert stattdessen
+    über `X-Installation-Signature`, verifiziert gegen den beim Hub
+    hinterlegten öffentlichen Schlüssel der ANFRAGENDEN Installation (live
+    abgerufen, kein lokal gecachter Peer-Schlüsselspeicher - siehe ADR 0054)."""
+    if not settings.federated_directory_enabled or app.state.federation_hub_client is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Föderierte Kontaktsuche ist auf dieser Installation nicht aktiviert",
+        )
+    body = await request.body()
+    caller_installation_id = request.headers.get("X-Installation-Id", "")
+    signature = request.headers.get("X-Installation-Signature", "")
+    installations = await app.state.federation_hub_client.list_installations()
+    caller = next((inst for inst in installations if inst["id"] == caller_installation_id), None)
+    if (
+        caller is None
+        or caller.get("revoked_at") is not None
+        or CONTACT_DIRECTORY_CAPABILITY not in caller.get("supported_process_types", [])
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Unbekannte oder nicht für Kontaktsuche freigegebene Installation",
+        )
+    if not federation_crypto.verify_body(caller["public_key_pem"].encode("utf-8"), body, signature):
+        raise HTTPException(status_code=401, detail="Ungültige Installations-Signatur")
+    payload = DirectorySearchRequest.model_validate_json(body)
+    return admin_users.search_users(app.state.keycloak_admin, payload.query)
 
 
 @app.get("/users/count")

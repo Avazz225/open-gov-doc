@@ -25,6 +25,7 @@ import { SearchPane } from "./SearchPane";
 import { Splitter } from "./Splitter";
 import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
+import { KontaktePane } from "./KontaktePane";
 import { PoststellePane } from "./PoststellePane";
 import { QuarantinePane } from "./QuarantinePane";
 import { TrashPane } from "./TrashPane";
@@ -354,8 +355,10 @@ export function DocumentWorkspace() {
               <TrashPane token={accessToken ?? ""} />
             ) : view === "quarantine" ? (
               <QuarantinePane token={accessToken ?? ""} />
-            ) : (
+            ) : view === "poststelle" ? (
               <PoststellePane token={accessToken ?? ""} />
+            ) : (
+              <KontaktePane token={accessToken ?? ""} />
             )}
           </div>
           <Splitter

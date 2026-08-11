@@ -2,8 +2,8 @@
 
 **Verantwortung:** Schlanker OIDC-Broker vor Keycloak — hält Client-Secret und Admin-Zugang, Aufrufer sehen nur Login/Refresh/Token-Validierung (Konzept 4.4). Keine eigene IAM-Logik, keine eigene Nutzertabelle.
 
-**Konzept-Referenz:** 4.4
-**Eigenes Postgres-Schema:** keins — Auth Service selbst ist zustandslos, Keycloak verwaltet seine Daten im Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
+**Konzept-Referenz:** 4.4/2.5 (Kontakte, seit P15-S4)/7.4 (föderierte Kontaktsuche, seit P15-S4)
+**Eigenes Postgres-Schema:** `auth` (seit P15-S4, nur `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche, siehe unten). Bis dahin war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
 
 ## API
 
@@ -22,6 +22,10 @@
 | `GET` | `/users/lookup` | Exakte Namensauflösung (`?username=`) — liefert nur `{id, username}` zurück, `404` bei unbekanntem Namen. Neu in P14-S6, für `teamspace-service`s Einladen-per-Nutzername (2.5): erfordert lediglich `Depends(get_current_user)` (jeder gültige Token), bewusst NICHT hinter `admin.user_management` wie `GET /users` oben — jede Person, nicht nur Domain-Admins, soll andere zu einem Team-Arbeitsbereich einladen können. Siehe [ADR 0043](../adr/0043-teamspace-service-membership-and-permission-integration.md) |
 | `GET` | `/users/count` | Interner Aufruf von `license-service` (9.1 "benannte Accounts"-Modell, seit P9-S1) — ungegatet, da kein Service einen echten Keycloak-Bearer-Token für `Depends(get_current_user)` besitzt |
 | `GET` | `/sessions/count` | Interner Aufruf von `license-service` (9.1 "gleichzeitige Nutzer"-Modell, seit P9-S1) — `KeycloakAdmin.get_client_sessions_stats()`, ungegatet |
+| `GET` | `/users/directory?q=` | Verzeichnissuche (2.5/4.4, seit P15-S4, Keycloak-`search`-Parameter — Präfix je Feld, kein Teilstring, siehe "Kontakte" unten) — `Depends(get_current_user)` genügt (jeder gültige Token, kein `admin.user_management`-Gate) |
+| `GET` | `/users/directory/federation-status` | Ob die föderierte Kontaktsuche auf dieser Installation aktiviert ist (`{enabled, peer_installation_count}`) — ungegatet, steuert die Sichtbarkeit der entsprechenden Frontend-Sektion |
+| `GET` | `/users/directory/federated?q=` | Föderierte Suche über alle bekannten, für Kontaktsuche freigegebenen Peer-Installationen (2.5/7.4, seit P15-S4) — `403`, falls auf dieser Installation nicht aktiviert |
+| `POST` | `/users/directory/federated-search-inbound` | Von einer Peer-Installation aufgerufen (öffentliche Route, kein `X-DMS-Principal`) — authentisiert über `X-Installation-Signature`/`X-Installation-Id`, siehe "Kontakte" unten |
 | `GET` | `/healthz` | Eigener Health-Check |
 
 ## Realm-/Client-Bootstrap
@@ -62,6 +66,17 @@ Ein periodischer Poll-Loop (`_superuser_poll_loop`, `superuser_poll_interval_sec
 
 **Konsumiert** (`durable="auth-service"`, seit P6-S5, erster Konsument dieses Service): `permission.approval.approved`, gefiltert auf `action_type="auth.superuser.activate"` — jeder andere Aktionstyp wird ignoriert (gehört einem anderen Service, gleiches Prinzip wie in ADR 0022 beschrieben).
 
+## Kontakte (2.5/4.4/7.4, seit P15-S4)
+
+Verzeichnis zum Auffinden anderer Mitarbeitender - "lokal, immer verfügbar" (2.5, wörtlich), optional installationsübergreifend. Vollständige Architekturbegründung: [ADR 0054](../adr/0054-kontakte-directory-independent-second-federation-identity-per-installation.md).
+
+- **Lokale Suche**: `admin_users.search_users` nutzt Keycloaks eingebauten `search`-Query-Parameter (case-insensitive über Benutzername/Vor-/Nachname/E-Mail, serverseitig in Keycloak selbst) — kein eigener Filter-Mechanismus nötig. Antwort bewusst ohne `enabled`-Feld (Freigabestatus ist eine administrative Angelegenheit). **Per Live-Verifikation korrigiert** (ursprünglich als "Teilstring" angenommen): Keycloaks `search` matcht je Feld nur als **Präfix**, nicht an beliebiger Stelle — `q=admin` findet `config-admin` nicht, `q=config` schon (siehe ADR 0054 "Offene Punkte").
+- **Föderierte Suche - eigene, zweite Federation-Hub-Identität**: `auth-service` registriert sich unabhängig von `workflow-service`s bereits bestehender Federation-Teilnahme (P6-S9/P13-S4) ein zweites Mal beim selben Hub (eigenes RSA-2048-Schlüsselpaar, eigene `installation_id`, Anzeigename-Suffix `" (Kontakte)"`) — `_ensure_federation_identity()` in `main.py`, identisches Muster wie `workflow_service.main._ensure_federation_identity`. Opt-in über `DMS_FEDERATION_HUB_BASE_URL`; zusätzlich `DMS_FEDERATED_DIRECTORY_ENABLED` muss `true` sein, damit die föderierten Endpunkte tatsächlich aktiv sind (zwei getrennte Schalter: Hub-Registrierung vs. tatsächliche Freigabe für Suchanfragen).
+- **Fähigkeits-Markierung**: registriert sich mit `supported_process_types=["dms.contact-directory.v1"]` — zweckentfremdet das bereits bestehende, generische Listenfeld in `federation-hub-service`s `Installation`-Modell als Fähigkeits-Marker (`directory_federation.CONTACT_DIRECTORY_CAPABILITY`), keine Code-Änderung in federation-hub-service nötig.
+- **Direkte Installation-zu-Installation-Anfragen, nicht über den Hub relayt**: `GET /users/directory/federated` fragt jede über `GET /installations` bekannte, nicht widerrufene, für Kontaktsuche freigegebene Peer-Installation DIREKT über deren `callback_base_url` an (`directory_federation.search_all_peers`/`query_peer`), signiert mit dem eigenen privaten Schlüssel (`X-Installation-Signature`, RSA-PSS/SHA-256, identisches Schema wie ADR 0039 — `federation_crypto.py`, dupliziert wie bereits zweimal zuvor in diesem Projekt, siehe ADR 0054). Ein einzelner nicht erreichbarer/ablehnender Peer blockiert die übrigen nicht.
+- **`POST /users/directory/federated-search-inbound`**: empfängt eine signierte Anfrage einer Peer-Installation — verifiziert `X-Installation-Signature` gegen den beim Hub hinterlegten öffentlichen Schlüssel der ANFRAGENDEN Installation (live per `GET /installations` abgerufen, kein lokaler Peer-Schlüsselspeicher), lehnt unbekannte/widerrufene/nicht für Kontaktsuche registrierte Installationen mit `401` ab. Öffentliche Route am Gateway (`gateway-service`s `public_routes`, kein `X-DMS-Principal`), analog zu `workflow-service`s `federation/inbound`.
+- **Keine Ende-zu-Ende-Verschlüsselung der Nutzlast** (anders als das Handover-Schema) — der Hub liegt bei direkten Aufrufen ohnehin nie im Anfragepfad, siehe ADR 0054 "Begründung".
+
 ## Selbst-Registrierung (Konzept 3.2a, seit P4-S1)
 
 Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`: Register, periodischer Heartbeat, Deregister beim Shutdown) - Grundlage für das Routing des API-Gateways (`docs/services/gateway-service.md`). Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`; ohne beide Werte läuft der Service unverändert ohne Discovery.
@@ -69,6 +84,10 @@ Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`:
 ## Sensoren (Konzept 10.1)
 
 Noch keine — folgt in Phase 11.
+
+## Tests
+
+`uv run pytest services/auth-service/tests` (**59 Tests**, davon 11 neu seit **P15-S4**, `test_directory.py`): lokale Verzeichnis-Suche (Authentifizierungspflicht, Präfix-Treffer je Feld, für reguläre Nutzer verfügbar nicht nur Domain-Admins), Federation-Status-Default, `403` auf den föderierten Endpunkten ohne Aktivierung, sowie eine echte Selbst-Registrierung gegen den laufenden `federation-hub-service` (`federation_enabled`-Fixture, monkeypatcht `settings` vor einem frischen `TestClient(app)`) inkl. echtem Signaturprüfungs-Pfad (gültige/ungültige Signatur, unbekannte Installation, eigene Installation wird aus den föderierten Ergebnissen ausgeschlossen) — läuft gegen echtes Postgres/Keycloak/`federation-hub-service`, keine Mocks. **Nebenbei gefundener und behobener Bug**: `FederationHubClient.register()` übermittelte `supported_process_types` ursprünglich gar nicht an den Hub — die eigene Fähigkeits-Markierung (`dms.contact-directory.v1`) wäre dadurch nie tatsächlich im Adressbuch sichtbar gewesen, jede eingehende föderierte Anfrage (auch eine legitime) wäre mit `401` abgelehnt worden. Erst durch den echten Live-Selbst-Loopback-Test sichtbar geworden, nicht durch reines Mocking. **Zusätzlicher Befund bei der Live-Verifikation gegen den laufenden Gateway**: Keycloaks `search`-Parameter ist entgegen der ursprünglichen Annahme kein Teilstring-, sondern ein Präfix-Match je Feld — Dokumentation entsprechend korrigiert (siehe oben, ADR 0054 "Offene Punkte"). Ebenfalls beobachtet: wiederholte `federation_enabled`-Testläufe hinterlassen echte, dauerhafte Registrierungen im geteilten `federation-hub-service`-Adressbuch (kein Aufräumen möglich ohne konfigurierten `hub_operator_key`) — siehe ADR 0054 "Offene Punkte".
 
 ## Offene Punkte
 

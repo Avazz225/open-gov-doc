@@ -42,6 +42,21 @@ def list_users(admin: KeycloakAdmin) -> list[dict]:
     return [_to_user_dict(u) for u in admin.get_users()]
 
 
+def search_users(admin: KeycloakAdmin, query: str) -> list[dict]:
+    """Verzeichnis-Suche (2.5/4.4, P15-S4) - jeder authentifizierte Nutzer
+    darf andere Mitarbeitende auffinden, anders als `list_users()` bewusst
+    OHNE `admin.user_management`-Gate (siehe `find_user_by_username` für
+    dasselbe Muster). Nutzt Keycloaks eingebauten `search`-Query-Parameter
+    statt eines eigenen Filter-Mechanismus - identisches Verhalten wie die
+    Nutzersuche im Keycloak-eigenen Admin-Konsolen-UI. Per Live-Verifikation
+    (P15-S4) bestätigt: kein echtes Teilstring-/Infix-Matching, sondern ein
+    Präfix-Treffer je Feld (Benutzername/Vor-/Nachname/E-Mail) - z. B. matcht
+    "config" oder "conf" den Benutzernamen "config-admin", "admin" (mitten im
+    String) hingegen nicht. Case-insensitive, serverseitig in Keycloak selbst
+    umgesetzt."""
+    return [_to_user_dict(u) for u in admin.get_users(query={"search": query})]
+
+
 def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
     """Exakte Namenssuche für `GET /users/lookup` (2.5, P14-S6) - anders als
     `list_users()` bewusst OHNE `admin.user_management`-Gate: jeder

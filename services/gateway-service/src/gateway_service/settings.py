@@ -41,9 +41,15 @@ class Settings(BaseServiceSettings):
     # siehe document-service.main._resolve_active_share_link), damit diese
     # beiden Einträge simple, statische Exact-Match-Strings bleiben können,
     # ohne Wildcard-/Matching-Logik am Gateway selbst zu ändern.
+    # Seit P15-S4 zusätzlich die föderierte Kontaktsuche (2.5/7.4) - eine
+    # Peer-Installation besitzt keinen Bearer-Token dieser Installation,
+    # authentisiert sich stattdessen über `X-Installation-Signature` (siehe
+    # auth_service.main.federated_search_inbound, gleiches Prinzip wie
+    # workflow-service's federation/inbound oben).
     public_routes: list[str] = [
         "auth-service:login",
         "auth-service:refresh",
+        "auth-service:users/directory/federated-search-inbound",
         "workflow-service:federation/inbound",
         "workflow-service:federation/inbound-result",
         "registry-service:installation",

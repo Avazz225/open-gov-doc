@@ -46,6 +46,41 @@ class UserLookupOut(BaseModel):
     username: str
 
 
+class DirectoryEntryOut(BaseModel):
+    """Verzeichnis-Eintrag (2.5/4.4, P15-S4) - bewusst ohne `enabled`
+    (Freigabestatus eines Kontos ist eine administrative Angelegenheit,
+    keine für das reine Auffinden einer Person nötige Information), sonst
+    identisches Feldset wie `UserOut`."""
+
+    id: str
+    username: str
+    email: str | None
+    first_name: str | None
+    last_name: str | None
+
+
+class FederatedDirectoryEntryOut(DirectoryEntryOut):
+    """Wie `DirectoryEntryOut`, ergänzt um die Herkunftsinstallation (2.5,
+    "installationsübergreifende Kontaktsuche") - notwendig, da zwei
+    Installationen unabhängige Nutzerpopulationen mit potenziell
+    kollidierenden `id`s/Namen führen."""
+
+    installation_id: str
+    installation_display_name: str
+
+
+class DirectorySearchRequest(BaseModel):
+    """Payload einer eingehenden, signierten Verzeichnis-Suchanfrage einer
+    Peer-Installation (`POST /users/directory/federated-search-inbound`)."""
+
+    query: str
+
+
+class DirectoryFederationStatusOut(BaseModel):
+    enabled: bool
+    peer_installation_count: int
+
+
 class ThemePreference(BaseModel):
     theme: ThemeName = "auto"
 

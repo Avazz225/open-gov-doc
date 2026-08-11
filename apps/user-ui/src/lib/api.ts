@@ -845,6 +845,57 @@ export async function listOutboundMessages(token: string): Promise<OutboundMessa
   return response.json();
 }
 
+// Kontakte (2.5/4.4/7.4, P15-S4) - Verzeichnis zum Auffinden anderer
+// Mitarbeitender, lokal immer verfügbar, optional installationsübergreifend
+// über den Federation Hub (siehe auth-service main.py).
+export interface DirectoryEntry {
+  id: string;
+  username: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+export interface FederatedDirectoryEntry extends DirectoryEntry {
+  installation_id: string;
+  installation_display_name: string;
+}
+
+export interface DirectoryFederationStatus {
+  enabled: boolean;
+  peer_installation_count: number;
+}
+
+export async function searchDirectory(token: string, q: string): Promise<DirectoryEntry[]> {
+  const response = await request(
+    "auth-service",
+    `users/directory?q=${encodeURIComponent(q)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function getDirectoryFederationStatus(
+  token: string
+): Promise<DirectoryFederationStatus> {
+  const response = await request("auth-service", "users/directory/federation-status", {}, token);
+  return response.json();
+}
+
+export async function searchFederatedDirectory(
+  token: string,
+  q: string
+): Promise<FederatedDirectoryEntry[]> {
+  const response = await request(
+    "auth-service",
+    `users/directory/federated?q=${encodeURIComponent(q)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 export interface LegalHold {
   id: string;
   document_id: string;
