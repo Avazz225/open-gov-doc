@@ -9,8 +9,16 @@ class OcrServiceClient:
     potenziell großen Volltext selbst (siehe consumer.py) - dieser Client holt
     ihn bei Bedarf per HTTP nach."""
 
+    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - `GET /ocr-results/
+    # {id}` verlangt seither `ocr.read`; dieser Aufruf läuft aus einem
+    # NATS-Consumer heraus, kein menschlicher Principal verfügbar - gleiches
+    # `system:<Service>`-Muster wie `archival-service`s `CaseClient`.
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:rendering-service"}
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def get_full_text(self, document_id: str, version_number: int) -> str | None:
         response = await self._client.get(f"/ocr-results/{document_id}:{version_number}")

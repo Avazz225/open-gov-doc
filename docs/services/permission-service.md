@@ -91,6 +91,7 @@ Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründu
 | `domain-admin-deletion-vs` | `admin.deletion_classified` | noch keins |
 | `breakglass-approver` | `breakglass.approve` | keins (echte Menschen, manuell zugewiesen) |
 | `domain-admin-emergency` | `system.not_shutdown.trigger` | keins (seit **P6-S6**, echte Menschen, manuell zugewiesen — siehe "Not-Shutdown" unten) |
+| `domain-admin-virus-scan` | `admin.quarantine` | keins (seit **Post-Roadmap Phase 19 Session 8**, [ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md) — Durchsetzung direkt in `virus-scan-service`, ersetzt dessen vorheriges reines `X-DMS-Roles`-Gate) |
 
 `domain-admin-users` und (seit **P6-S6**) `domain-admin-config` haben ein eigenes technisches Keycloak-Konto (`auth-service`s `/users` bzw. `workflow-service`s Prozessdefinitions-Endpunkte, Admin-UI-Gating). `domain-admin-query-console`/`-manipulate` (seit **P8-S1**/**P8-S2**) sowie **seit P9-S1** `domain-admin-license` sind ebenfalls tatsächlich durchgesetzt, aber **ohne** eigenes technisches Konto — der jeweilige Service prüft die Rollenzuweisung direkt über `GET /effective-permissions/{principal}/root`, kein dediziertes Konto nötig (siehe `docs/services/query-service.md`/`docs/services/license-service.md`). Die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement. `breakglass-approver` und (seit P6-S6) `domain-admin-emergency` bekommen bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 bzw. die Auslöse-Berechtigung aus 4.8 verlangt eine echte, individuell zurechenbare Person, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
 
@@ -132,7 +133,12 @@ Mitglied, unabhängig von seiner eigenen `principal_id`. Der Vererbungsalgorithm
   `case.write` — `case-service` hatte zuvor gar keine Berechtigungsprüfung, die Erweiterung erhält das
   bisherige De-facto-offene Verhalten. **Seit P19-S7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md))
   zusätzlich `archival.read`, `archival.write`, `reporting.read`, `reporting.write`,
-  `reporting.forensic_trace` — gleiches Prinzip für `archival-service`/`reporting-service`. **Wichtig für
+  `reporting.forensic_trace` — gleiches Prinzip für `archival-service`/`reporting-service`. **Seit P19-S8**
+  ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) zusätzlich `ocr.read`, `ocr.write`,
+  `rendering.read`, `rendering.write` — gleiches Prinzip für `ocr-service`/`rendering-service`.
+  **Bewusst NICHT enthalten**: `admin.quarantine` (`virus-scan-service`, dieselbe Session) — anders als
+  die übrigen war der Quarantäne-Bereich schon vor P19-S8 eine echte, auf eine dedizierte Rolle
+  (`domain-admin-virus-scan`) beschränkte Berechtigung, keine bislang de-facto offene Lücke. **Wichtig für
   künftige Erweiterungen dieser Liste**:
   `ensure_everyone_role` aktualisiert eine bereits angelegte "everyone"-Rolle NICHT automatisch (kein
   Migrationsmechanismus, siehe dortiger Docstring) — auf einer bereits laufenden Installation muss eine

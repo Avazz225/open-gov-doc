@@ -25,10 +25,8 @@ class Settings(BaseServiceSettings):
     # siehe document-service main.py "from-quarantine-release").
     document_service_base_url: str = "http://localhost:8006"
 
-    # "Eine eigene, eng begrenzte Rolle darf einen Quarantäne-Fall einsehen,
-    # endgültig löschen oder ... freigeben" (Konzept 2.5, wörtlich) - eine
-    # Rolle für alle drei Aktionen, da das Konzept sie nicht weiter auftrennt
-    # (anders als die Papierkorb-Familie, P15-S1, deren regulärer und
-    # Verschlusssachen-Zweig echte, im Betrieb häufig personell getrennte
-    # Rollen sind).
-    quarantine_admin_role: str = "dms-admin"
+    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ersetzt das
+    # bisherige reine `X-DMS-Roles`-Gate (`quarantine_admin_role`) durch eine
+    # echte permission-service-Prüfung (`admin.quarantine`, Rolle
+    # "domain-admin-virus-scan").
+    permission_service_base_url: str = "http://localhost:8004"

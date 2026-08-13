@@ -17,33 +17,33 @@ def _real_pdf(pages: int = 2) -> bytes:
 
 
 def test_healthz():
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["service"] == "rendering-service"
 
 
 def test_list_renditions_empty_for_unknown_document():
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.get("/renditions", params={"document_id": "unbekannt"})
     assert response.status_code == 200
     assert response.json() == []
 
 
 def test_get_rendition_404():
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.get("/renditions/unbekannt:1:thumbnail")
     assert response.status_code == 404
 
 
 def test_download_rendition_content_404():
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.get("/renditions/unbekannt:1:thumbnail/content")
     assert response.status_code == 404
 
 
 def test_render_watermark_returns_stamped_pdf():
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.post(
             "/render/watermark",
             data={"text": "VERTRAULICH"},
@@ -57,7 +57,7 @@ def test_render_watermark_returns_stamped_pdf():
 
 
 def test_render_watermark_rejects_garbage():
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.post(
             "/render/watermark",
             data={"text": "VERTRAULICH"},

@@ -9,11 +9,11 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/ocr-results?document_id=...&version_number=...` | OCR-Ergebnisse zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) |
-| `GET` | `/ocr-results/{id}` | Einzelnes OCR-Ergebnis (Volltext, Wort-Bounding-Boxen, Konfidenz) — 404 bei unbekannter `id` |
-| `GET` | `/ocr-results/{id}/page-image?page_number=...` | Vom OCR Service selbst gerastertes Seitenbild einer Seite (nur PDFs, siehe unten; `page_number` optional, Default `1`) — 404 bei unbekannter `id` oder außerhalb des gültigen Seitenbereichs, 409 wenn kein eigenständiges Seitenbild existiert (Rasterbild-Fall) |
-| `GET` | `/config` | Aktuelle Konfiguration (`max_word_count`, `batch_size`, `allowed_content_types`, `updated_at`) — legt beim allerersten Aufruf die Default-Zeile an (P5b-S5) |
-| `PUT` | `/config` | Aktualisiert `max_word_count`/`batch_size`/`allowed_content_types`, wirkt ohne Neustart auf das nächste verarbeitete Dokument (Admin-UI "OCR-Einstellungen") |
+| `GET` | `/ocr-results?document_id=...&version_number=...` | OCR-Ergebnisse zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) — seit **P19-S8** `ocr.read`-gegated |
+| `GET` | `/ocr-results/{id}` | Einzelnes OCR-Ergebnis (Volltext, Wort-Bounding-Boxen, Konfidenz) — 404 bei unbekannter `id`; seit **P19-S8** `ocr.read`-gegated |
+| `GET` | `/ocr-results/{id}/page-image?page_number=...` | Vom OCR Service selbst gerastertes Seitenbild einer Seite (nur PDFs, siehe unten; `page_number` optional, Default `1`) — 404 bei unbekannter `id` oder außerhalb des gültigen Seitenbereichs, 409 wenn kein eigenständiges Seitenbild existiert (Rasterbild-Fall); seit **P19-S8** `ocr.read`-gegated |
+| `GET` | `/config` | Aktuelle Konfiguration (`max_word_count`, `batch_size`, `allowed_content_types`, `updated_at`) — legt beim allerersten Aufruf die Default-Zeile an (P5b-S5); seit **P19-S8** `ocr.read`-gegated |
+| `PUT` | `/config` | Aktualisiert `max_word_count`/`batch_size`/`allowed_content_types`, wirkt ohne Neustart auf das nächste verarbeitete Dokument (Admin-UI "OCR-Einstellungen"); seit **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `ocr.write`-gegated |
 | `GET` | `/healthz` | Health-Check |
 
 `id` eines OCR-Ergebnisses ist ein natürlicher Schlüssel `{document_id}:{version_number}` (siehe Datenmodell) — anders als bei rendering-service gibt es hier bewusst nur ein autoritatives Ergebnis je Version, kein Diskriminator für mehrere Regeln.
@@ -157,7 +157,7 @@ Noch keine — folgt in Phase 11.
 - **Textlayer-Verfügbarkeit wird nur anhand Seite 1 entschieden**: `select_engine()` prüft nicht seitenweise, ob ein nutzbarer Textlayer existiert — ein PDF mit z. B. nativer Seite 1 und gescannter Seite 2 bekäme fälschlich `NativeTextLayerEngine` für das gesamte Dokument (Seite 2 hätte dann keine erkannten Wörter). Bewusste Vereinfachung, kein bekannter Anwendungsfall dafür bisher.
 - **`needs_review` ohne echte Workflow-Anbindung**: BPMN-gestützte manuelle Nachprüfung folgt frühestens mit P6-S1/P6-S4.
 - **Keine automatische Nachverarbeitung bei dauerhaftem `failed`**: kein Retry-Mechanismus, analog zu rendering-service.
-- **Keine Autorisierung** (wie bei allen bisherigen Services): Gateway prüft nur Token-Gültigkeit, keine Rollenprüfung.
+- ~~Keine Autorisierung~~ — **behoben in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): alle Endpunkte prüfen jetzt `ocr.read`/`ocr.write` über `permission-service`.
 - **Wortobergrenze ist eine grobe Schätzung** (P5b-S5): `Seitenzahl × 250` statt exakter Zählung — kann bei textarmen mehrseitigen PDFs zu früh und bei textdichten Einzelbildern nie greifen (Details/Begründung siehe ADR 0016).
 - **Batch-Size begrenzt nur die Anzahl gleichzeitiger Aufrufe, nicht den Ressourcenverbrauch je Aufruf** — kein echter Worker-Pool mit Speicher-/CPU-Accounting.
 - **`ocrEnabled` ist nur als Compose-Profil sichtbar/steuerbar** — die Admin-UI zeigt lediglich "erreichbar"/"nicht erreichbar", kein Schalter (Begründung siehe ADR 0016).

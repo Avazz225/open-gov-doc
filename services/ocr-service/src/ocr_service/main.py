@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from ocr_service import repository
 from ocr_service.consumer import start_consuming
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
     app.state.storage = StorageClient(settings.storage_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     # Reiner Konsument fremder Streams (`document.>`, ensure_stream=False) und
     # eigener Producer-Client (eigener Stream "ocr") getrennt, wie bei
@@ -92,6 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.close()
     await app.state.document_client.close()
     await app.state.storage.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -121,8 +124,31 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+async def _require_ocr_permission(x_dms_principal: str, *, access_type: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ocr-service hatte
+    zuvor GAR KEINE Berechtigungsprüfung. Prüft `ocr.read`/`ocr.write` an
+    der Wurzelressource (`root`) - ocr-service registriert keine eigenen
+    Ressourcen-Baumknoten. Die "everyone"-Gruppe (ADR 0067) gewährt beide
+    standardmäßig - erhält das bisherige De-facto-offene Verhalten, macht
+    es aber admin-editierbar."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    permission = "ocr.read" if access_type == "read" else "ocr.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
 @app.get("/config", response_model=OcrConfigOut)
-async def get_config(session: AsyncSession = Depends(get_session)) -> OcrConfigOut:
+async def get_config(
+    x_dms_principal: str = Header(default=""), session: AsyncSession = Depends(get_session)
+) -> OcrConfigOut:
+    await _require_ocr_permission(x_dms_principal, access_type="read")
     config = await repository.get_config(session)
     await session.commit()
     return config
@@ -130,8 +156,11 @@ async def get_config(session: AsyncSession = Depends(get_session)) -> OcrConfigO
 
 @app.put("/config", response_model=OcrConfigOut)
 async def put_config(
-    body: OcrConfigIn, session: AsyncSession = Depends(get_session)
+    body: OcrConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> OcrConfigOut:
+    await _require_ocr_permission(x_dms_principal, access_type="write")
     config = await repository.update_config(
         session,
         max_word_count=body.max_word_count,
@@ -146,8 +175,10 @@ async def put_config(
 async def list_ocr_results(
     document_id: str,
     version_number: int | None = None,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[OcrResultOut]:
+    await _require_ocr_permission(x_dms_principal, access_type="read")
     return await repository.list_ocr_results(
         session, document_id=document_id, version_number=version_number
     )
@@ -155,8 +186,11 @@ async def list_ocr_results(
 
 @app.get("/ocr-results/{ocr_result_id}", response_model=OcrResultOut)
 async def get_ocr_result(
-    ocr_result_id: str, session: AsyncSession = Depends(get_session)
+    ocr_result_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> OcrResultOut:
+    await _require_ocr_permission(x_dms_principal, access_type="read")
     try:
         return await repository.get_ocr_result(session, ocr_result_id)
     except repository.NotFoundError as exc:
@@ -165,8 +199,12 @@ async def get_ocr_result(
 
 @app.get("/ocr-results/{ocr_result_id}/page-image")
 async def download_page_image(
-    ocr_result_id: str, page_number: int = 1, session: AsyncSession = Depends(get_session)
+    ocr_result_id: str,
+    page_number: int = 1,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
+    await _require_ocr_permission(x_dms_principal, access_type="read")
     try:
         result = await repository.get_ocr_result(session, ocr_result_id)
     except repository.NotFoundError as exc:

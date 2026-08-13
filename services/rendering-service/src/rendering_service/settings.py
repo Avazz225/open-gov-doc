@@ -28,3 +28,7 @@ class Settings(BaseServiceSettings):
     # mangels OCR nicht bedienen konnte (gescannte/bildbasierte Dokumente).
     ocr_service_base_url: str = "http://localhost:8012"
     ocr_subjects: list[str] = ["ocr.completed"]
+
+    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - rendering-service
+    # hatte bislang gar keine Berechtigungsprüfung.
+    permission_service_base_url: str = "http://localhost:8004"

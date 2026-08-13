@@ -61,10 +61,19 @@ class RenderingClient:
     """Duenner HTTP-Client gegen rendering-service - liest die bereits vom
     regulaeren Rendition-Pipeline erzeugte `pdf_archive`-Ersatzdarstellung
     (P7-S3-Erweiterung von `PdfArchiveRenderer`), triggert selbst keine neue
-    Konvertierung."""
+    Konvertierung.
+
+    RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073): `GET /renditions`/
+    `.../content` verlangen seither `rendering.read` - beide hier genutzten
+    Aufrufe laufen als reiner Maschine-zu-Maschine-Aufruf ohne menschlichen
+    Principal, gleiches `system:<Service>`-Muster wie `CaseClient` unten."""
+
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:archival-service"}
 
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def get_pdf_archive_rendition(
         self, *, document_id: str, version_number: int

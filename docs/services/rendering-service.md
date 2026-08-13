@@ -8,10 +8,10 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/renditions?document_id=...&version_number=...` | Erzeugte Ersatzdarstellungen/Vorschauen zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) |
-| `GET` | `/renditions/{id}` | Einzelne Ersatzdarstellung (Metadaten) — 404 bei unbekannter `id` |
-| `GET` | `/renditions/{id}/content` | Bytes der Ersatzdarstellung (Proxy auf den Storage Service) — 404 bei unbekannter `id`, 409 bei Status `failed` |
-| `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → On-Demand-Wasserzeichen, liefert das gestempelte PDF direkt zurück, **ohne** es zu persistieren |
+| `GET` | `/renditions?document_id=...&version_number=...` | Erzeugte Ersatzdarstellungen/Vorschauen zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) — seit **P19-S8** `rendering.read`-gegated |
+| `GET` | `/renditions/{id}` | Einzelne Ersatzdarstellung (Metadaten) — 404 bei unbekannter `id`; seit **P19-S8** `rendering.read`-gegated |
+| `GET` | `/renditions/{id}/content` | Bytes der Ersatzdarstellung (Proxy auf den Storage Service) — 404 bei unbekannter `id`, 409 bei Status `failed`; seit **P19-S8** `rendering.read`-gegated |
+| `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → On-Demand-Wasserzeichen, liefert das gestempelte PDF direkt zurück, **ohne** es zu persistieren; seit **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gegated |
 | `GET` | `/healthz` | Health-Check |
 
 `id` einer Ersatzdarstellung ist ein natürlicher Schlüssel `{document_id}:{version_number}:{rendition_type}` (siehe Datenmodell) — kein zufälliger UUID.
@@ -113,5 +113,5 @@ Noch keine — folgt in Phase 11.
 - **Größeres Docker-Image** durch die LibreOffice-Installation (seit P7-S3) — bewusster Trade-off für die geforderte Formatabdeckung (5.6), kein Weg daran vorbei ohne proprietäre Cloud-APIs.
 - **Kein Video-Transkriptions-Plugin**: laut Konzept selbst optional, keine Engine vorhanden.
 - **Keine Bereinigung fehlgeschlagener Renditions**: eine dauerhaft `status="failed"` bleibende Zeile wird nicht automatisch erneut versucht (kein Retry-Mechanismus).
-- **Keine Autorisierung** (wie bei allen bisherigen Services): Gateway prüft nur Token-Gültigkeit, keine Rollenprüfung; Ersatzdarstellungen erben laut 2.4 dieselben Berechtigungen wie das Original, was hier (mangels durchgängiger Autorisierung im Gesamtsystem, siehe `PROGRESS.md`) noch nicht technisch durchgesetzt wird.
+- ~~Keine Autorisierung~~ — **behoben in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): alle Endpunkte prüfen jetzt `rendering.read`/`rendering.write` über `permission-service`. Weiterhin offen: Ersatzdarstellungen erben laut 2.4 dieselben Berechtigungen wie das Original (feingranular, dokumentspezifisch) — die neue Prüfung ist ein grobes, service-weites `read`/`write`, keine Vererbung der konkreten Dokument-Berechtigung.
 - **Wasserzeichen-Endpunkt bewusst minimal**: fester diagonaler Stempel, keine Positions-/Wiederholungs-/Farbkonfiguration.

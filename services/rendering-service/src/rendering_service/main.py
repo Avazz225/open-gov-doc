@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
     app.state.storage = StorageClient(settings.storage_service_base_url)
     app.state.ocr_client = OcrServiceClient(settings.ocr_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     # Reiner Konsument fremder Streams (`document.>`, ensure_stream=False) und
     # eigener Producer-Client (eigener Stream "rendering") getrennt, wie bei
@@ -92,6 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.document_client.close()
     await app.state.storage.close()
     await app.state.ocr_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -121,12 +124,34 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+async def _require_rendering_permission(x_dms_principal: str, *, access_type: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - rendering-service
+    hatte zuvor GAR KEINE Berechtigungsprüfung. Prüft `rendering.read`/
+    `rendering.write` an der Wurzelressource (`root`) - rendering-service
+    registriert keine eigenen Ressourcen-Baumknoten. Die "everyone"-Gruppe
+    (ADR 0067) gewährt beide standardmäßig - erhält das bisherige De-facto-
+    offene Verhalten, macht es aber admin-editierbar."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    permission = "rendering.read" if access_type == "read" else "rendering.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
 @app.get("/renditions", response_model=list[RenditionOut])
 async def list_renditions(
     document_id: str,
     version_number: int | None = None,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[RenditionOut]:
+    await _require_rendering_permission(x_dms_principal, access_type="read")
     return await repository.list_renditions(
         session, document_id=document_id, version_number=version_number
     )
@@ -134,8 +159,11 @@ async def list_renditions(
 
 @app.get("/renditions/{rendition_id}", response_model=RenditionOut)
 async def get_rendition(
-    rendition_id: str, session: AsyncSession = Depends(get_session)
+    rendition_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> RenditionOut:
+    await _require_rendering_permission(x_dms_principal, access_type="read")
     try:
         return await repository.get_rendition(session, rendition_id)
     except repository.NotFoundError as exc:
@@ -144,8 +172,11 @@ async def get_rendition(
 
 @app.get("/renditions/{rendition_id}/content")
 async def download_rendition_content(
-    rendition_id: str, session: AsyncSession = Depends(get_session)
+    rendition_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
+    await _require_rendering_permission(x_dms_principal, access_type="read")
     try:
         rendition = await repository.get_rendition(session, rendition_id)
     except repository.NotFoundError as exc:
@@ -160,10 +191,13 @@ async def download_rendition_content(
 
 @app.post("/render/watermark")
 async def render_watermark(
-    file: UploadFile = File(...), text_: str = Form(..., alias="text")
+    file: UploadFile = File(...),
+    text_: str = Form(..., alias="text"),
+    x_dms_principal: str = Header(default=""),
 ) -> Response:
     """On-Demand-Wasserzeichen (3.7) - kein automatischer Pipelineschritt,
     keine Persistenz (siehe watermark.py)."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
     data = await file.read()
     try:
         watermarked = add_text_watermark(data, text_)

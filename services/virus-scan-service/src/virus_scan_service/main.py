@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy import text
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.storage = StorageClient(settings.storage_service_base_url)
     app.state.documents = DocumentClient(settings.document_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.scan_engine = build_scan_engine(settings)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="virus_scan")
@@ -82,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.close()
     await app.state.storage.close()
     await app.state.documents.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -173,9 +176,23 @@ async def get_scan(scan_id: str, session: AsyncSession = Depends(get_session)) -
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _has_quarantine_role(x_dms_roles: str) -> bool:
-    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
-    return settings.quarantine_admin_role in roles
+async def _require_quarantine_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ersetzt das
+    bisherige reine `X-DMS-Roles`-Gate (`_has_quarantine_role`,
+    `quarantine_admin_role`) durch eine echte permission-service-Prüfung.
+    "Eine eigene, eng begrenzte Rolle darf einen Quarantäne-Fall einsehen,
+    endgültig löschen oder ... freigeben" (Konzept 2.5, wörtlich) - eine
+    einzige Permission (`admin.quarantine`) für alle drei Aktionen, da das
+    Konzept sie nicht weiter auftrennt. Bewusst NICHT in der "everyone"-
+    Gruppe (anders als z. B. `case.read`) - Quarantäne-Zugriff war schon vor
+    dieser Session eine echte, auf eine dedizierte Rolle beschränkte
+    Berechtigung (Default `dms-admin`), keine bislang de-facto offene
+    Lücke, die es nur zu erhalten gälte."""
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.quarantine"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Berechtigung 'admin.quarantine' für den Quarantäne-Bereich",
+        )
 
 
 @app.get("/scans", response_model=list[ScanResultOut])
@@ -183,7 +200,6 @@ async def list_scans(
     document_id: str | None = None,
     status: str | None = None,
     x_dms_principal: str = Header(default=""),
-    x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[ScanResultOut]:
     """Ohne `status` bzw. mit `status != "infected"` unverändertes Verhalten
@@ -195,12 +211,7 @@ async def list_scans(
     if status == "infected":
         if not x_dms_principal:
             raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
-        if not _has_quarantine_role(x_dms_roles):
-            raise HTTPException(
-                status_code=403,
-                detail=f"Nur die Rolle {settings.quarantine_admin_role!r} darf den "
-                "Quarantäne-Bereich einsehen",
-            )
+        await _require_quarantine_permission(x_dms_principal)
     return await repository.list_scan_results(session, document_id=document_id, status=status)
 
 
@@ -223,12 +234,7 @@ async def release_scan(
     scheitert - keine stille Wiederherstellung bei nur teilweisem Erfolg."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
-    if not _has_quarantine_role(x_dms_roles):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Nur die Rolle {settings.quarantine_admin_role!r} darf einen "
-            "Quarantäne-Fall freigeben",
-        )
+    await _require_quarantine_permission(x_dms_principal)
     try:
         scan = await repository.get_scan_result(session, scan_id)
     except repository.NotFoundError as exc:
@@ -291,7 +297,6 @@ async def release_scan(
 async def purge_scan(
     scan_id: str,
     x_dms_principal: str = Header(default=""),
-    x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Endgültige Löschung eines Quarantäne-Falls (2.5) - entfernt nur die
@@ -300,12 +305,7 @@ async def purge_scan(
     `DeletionRegisterEntry`-Muster der Papierkorb-Familie (P15-S1)."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
-    if not _has_quarantine_role(x_dms_roles):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Nur die Rolle {settings.quarantine_admin_role!r} darf einen "
-            "Quarantäne-Fall endgültig löschen",
-        )
+    await _require_quarantine_permission(x_dms_principal)
     try:
         scan = await repository.get_scan_result(session, scan_id)
     except repository.NotFoundError as exc:

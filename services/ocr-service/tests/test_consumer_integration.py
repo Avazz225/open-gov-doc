@@ -14,7 +14,7 @@ DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://local
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as c:
         yield c
 
 

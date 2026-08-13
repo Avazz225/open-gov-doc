@@ -13,12 +13,17 @@ DSN = os.environ.get(
     "TEST_POSTGRES_DSN",
     "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms",
 )
+# Muss mit conftest.py::ROLE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
+# `_grant_role_admin_permission`-Fixture berechtigt) - kein Cross-File-Import
+# von Test-Konstanten, gleiche Projektkonvention wie andernorts.
+ROLE_ADMIN_PRINCIPAL_ID = "search-service-test-role-admin"
 
 
 def _grant_root_read(principal_id: str) -> None:
     role = httpx.post(
         f"{PERMISSION_SERVICE_URL}/roles",
         json={"name": f"search-test-role-{uuid.uuid4().hex[:8]}", "permissions": ["document.read"]},
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         timeout=30.0,
     )
     role.raise_for_status()

@@ -138,6 +138,13 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # P11-S1) - Deaktivieren sicherheitsrelevanter Sensoren ist laut Konzept
     # selbst ein sicherheitsrelevanter, auditierter Vorgang.
     ("domain-admin-monitoring", "Monitoring-/Sensor-Konfiguration", ["admin.monitoring"]),
+    # Post-Roadmap Phase 19 Session 8 (ADR 0073): ersetzt virus-scan-services
+    # bisheriges reines `X-DMS-Roles`-Gate (`quarantine_admin_role`,
+    # "dms-admin") - "eine eigene, eng begrenzte Rolle darf einen
+    # Quarantäne-Fall einsehen, endgültig löschen oder ... freigeben"
+    # (Konzept 2.5, wörtlich) ist jetzt eine echte, admin-editierbare Domäne
+    # statt eines hartkodierten Keycloak-Realm-Rollennamens.
+    ("domain-admin-virus-scan", "Virenschutz-/Quarantäne-Verwaltung", ["admin.quarantine"]),
 ]
 
 
@@ -188,6 +195,16 @@ EVERYONE_ROLE_PERMISSIONS: list[str] = [
     "reporting.read",
     "reporting.write",
     "reporting.forensic_trace",
+    # Post-Roadmap Phase 19 Session 8 (ADR 0073): ocr-service/rendering-
+    # service hatten zuvor GAR KEINE RBAC-Prüfung. `admin.quarantine`
+    # (virus-scan-service, dieselbe Session) ist bewusst NICHT hier gelistet
+    # - anders als diese beiden war der Quarantäne-Bereich schon vorher eine
+    # echte, auf eine dedizierte Rolle beschränkte Berechtigung, keine
+    # bislang de-facto offene Lücke.
+    "ocr.read",
+    "ocr.write",
+    "rendering.read",
+    "rendering.write",
 ]
 
 

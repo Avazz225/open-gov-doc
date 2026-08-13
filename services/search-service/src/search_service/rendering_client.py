@@ -7,8 +7,16 @@ class RenderingServiceClient:
     `GET /renditions` filtert nicht nach `rendition_type` - Filterung passiert
     hier client-seitig."""
 
+    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - `GET /renditions`/
+    # `.../content` verlangen seither `rendering.read`; dieser Aufruf läuft
+    # aus einem NATS-Consumer heraus, kein menschlicher Principal verfügbar -
+    # gleiches `system:<Service>`-Muster wie `archival-service`s `CaseClient`.
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:search-service"}
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def get_substitute_text(self, document_id: str, version_number: int) -> str | None:
         response = await self._client.get(

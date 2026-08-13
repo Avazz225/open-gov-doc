@@ -15,6 +15,10 @@ class Settings(BaseServiceSettings):
     # dort, nie im OCR Service selbst (3.6, gleiches Prinzip wie rendering-service).
     storage_service_base_url: str = "http://localhost:8005"
 
+    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ocr-service hatte
+    # bislang gar keine Berechtigungsprüfung.
+    permission_service_base_url: str = "http://localhost:8004"
+
     # Gleiches Muster wie rendering-service: ein breites document.>-Abo statt
     # zweier Einzel-Subscriptions, Dispatch nach event_type im Consumer.
     document_subjects: list[str] = ["document.>"]

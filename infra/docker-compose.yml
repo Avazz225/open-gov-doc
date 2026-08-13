@@ -454,7 +454,7 @@ services:
       # bewusst-kein-depends_on-Muster wie beim license-/monitoring-service-
       # Client von document-service selbst, siehe dessen Kommentar oben).
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
-      DMS_QUARANTINE_ADMIN_ROLE: ${VIRUS_SCAN_QUARANTINE_ADMIN_ROLE:-dms-admin}
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${VIRUS_SCAN_SERVICE_PORT:-8010}:8000"
     depends_on:
@@ -463,6 +463,8 @@ services:
       nats:
         condition: service_healthy
       storage-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net
@@ -482,6 +484,7 @@ services:
       DMS_OCR_SERVICE_BASE_URL: http://ocr-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://rendering-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${RENDERING_SERVICE_PORT:-8011}:8000"
     depends_on:
@@ -492,6 +495,8 @@ services:
       storage-service:
         condition: service_started
       document-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net
@@ -520,6 +525,7 @@ services:
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://ocr-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${OCR_SERVICE_PORT:-8012}:8000"
     depends_on:
@@ -530,6 +536,8 @@ services:
       storage-service:
         condition: service_started
       document-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net
