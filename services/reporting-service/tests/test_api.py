@@ -1,12 +1,43 @@
+import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from dms_db_base import make_session_factory
 from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
 from reporting_service import repository
 from reporting_service.main import _run_due_schedules, app
+
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+REPORTING_TEST_PRINCIPAL_ID = "reporting-service-tests"
+# Post-Roadmap Phase 19 Session 6 (ADR 0071): `PUT /roles/{id}` verlangt seit
+# dieser Session `admin.user_management` - separates Testprincipal fuer
+# `everyone_role_without` unten (siehe `_grant_role_admin_permission`).
+ROLE_ADMIN_PRINCIPAL_ID = "reporting-service-test-role-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_role_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture
@@ -15,8 +46,15 @@ def client():
     service) durch Fakes ersetzt - identisches Muster wie folder-services
     `fake_document_client` (siehe tests/test_api.py dort): die reine
     Aggregations-/Formatierungs-Logik ist bereits in test_reports.py gegen
-    diese Clients getestet, hier geht es um die Endpunkt-Verdrahtung."""
-    with TestClient(app) as c:
+    diese Clients getestet, hier geht es um die Endpunkt-Verdrahtung.
+    `permission_client` bleibt UNGEMOCKT (echter Aufruf gegen den laufenden
+    permission-service) - der TestClient traegt daher standardmaessig einen
+    `X-DMS-Principal`-Header (RBAC seit Post-Roadmap Phase 19 Session 7,
+    ADR 0072; die "everyone"-Gruppe gewaehrt `reporting.read`/`.write`/
+    `.forensic_trace` jedem authentifizierten Principal). Einzelne Tests
+    koennen den Header per `headers={"X-DMS-Principal": ""}` ueberschreiben,
+    um den Negativfall zu pruefen."""
+    with TestClient(app, headers={"X-DMS-Principal": REPORTING_TEST_PRINCIPAL_ID}) as c:
         app.state.workflow_client = AsyncMock()
         app.state.workflow_client.list_active_instances.return_value = []
         app.state.audit_client = AsyncMock()
@@ -25,6 +63,58 @@ def client():
         app.state.storage_client.get_usage.return_value = []
         app.state.notification_client = AsyncMock()
         yield c
+
+
+@pytest.fixture
+def everyone_role_without():
+    """Entfernt eine Berechtigung temporär aus der geseedeten "everyone"-
+    Rolle, um den Negativpfad (fehlende Berechtigung -> 403) zu beweisen -
+    gleiches Muster wie case-service/archival-service (dupliziert statt
+    geteilt, Projektkonvention). Seit Post-Roadmap Phase 19 Session 6
+    (ADR 0071) verlangt `PUT /roles/{id}` zusätzlich `admin.user_management`."""
+    role_management_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        everyone = next(r for r in roles if r["name"] == "everyone")
+        original_permissions = list(everyone["permissions"])
+
+        def _remove(permission: str) -> None:
+            pc.put(
+                f"/roles/{everyone['id']}",
+                json={
+                    "description": everyone["description"],
+                    "permissions": [p for p in original_permissions if p != permission],
+                },
+                headers=role_management_headers,
+            ).raise_for_status()
+
+        yield _remove
+
+        pc.put(
+            f"/roles/{everyone['id']}",
+            json={"description": everyone["description"], "permissions": original_permissions},
+            headers=role_management_headers,
+        ).raise_for_status()
+
+
+def test_document_volume_report_without_principal_header_is_401(client):
+    response = client.get("/reports/document-volume", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_document_volume_report_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("reporting.read")
+    response = client.get("/reports/document-volume")
+    assert response.status_code == 403
+
+
+def test_forensic_trace_without_everyone_permission_is_403(client, everyone_role_without):
+    """`reporting.forensic_trace` ist eine separate, engere Permission als
+    `reporting.read` (ADR 0072) - Entzug von `reporting.read` alleine darf
+    den Forensik-Trace nicht sperren, nur der Entzug der eigenen Permission."""
+    everyone_role_without("reporting.forensic_trace")
+    response = client.get("/forensic-trace")
+    assert response.status_code == 403
 
 
 def test_healthz(client):
@@ -147,9 +237,14 @@ async def test_download_report_run_proxies_storage_client(client):
     app.state.storage_client.download.assert_called_once_with("reports/x/y.csv")
 
 
-def test_forensic_trace_requires_queried_by(client):
-    response = client.get("/forensic-trace")
-    assert response.status_code == 422
+def test_forensic_trace_requires_principal_header(client):
+    """`queried_by` war vor Post-Roadmap Phase 19 Session 7 (ADR 0072) ein
+    vom Client frei waehlbarer, ungeprueften Query-Parameter (Spoofing-
+    Luecke, siehe docs/services/reporting-service.md "Offene Punkte") -
+    ersetzt durch den verifizierten `X-DMS-Principal`-Header als alleinige
+    Akteur-Quelle fuer die Selbst-Auditierung."""
+    response = client.get("/forensic-trace", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
 
 
 def test_forensic_trace_returns_categorized_entries(client):
@@ -174,7 +269,7 @@ def test_forensic_trace_returns_categorized_entries(client):
         },
     ]
 
-    response = client.get("/forensic-trace", params={"queried_by": "security-officer"})
+    response = client.get("/forensic-trace", params={})
 
     assert response.status_code == 200
     body = response.json()
@@ -206,9 +301,7 @@ def test_forensic_trace_filters_by_category(client):
         },
     ]
 
-    response = client.get(
-        "/forensic-trace", params={"queried_by": "security-officer", "category": "download"}
-    )
+    response = client.get("/forensic-trace", params={"category": "download"})
 
     assert response.status_code == 200
     entries = response.json()["entries"]
@@ -234,7 +327,7 @@ def test_forensic_trace_reports_download_anomaly(client):
     # Wenige echte Events reichen fuer den Test - Schwellwert temporaer senken.
     reporting_settings.anomaly_download_threshold_count = 2
     try:
-        response = client.get("/forensic-trace", params={"queried_by": "security-officer"})
+        response = client.get("/forensic-trace", params={})
     finally:
         reporting_settings.anomaly_download_threshold_count = 20
 
@@ -246,9 +339,7 @@ def test_forensic_trace_reports_download_anomaly(client):
 def test_forensic_trace_export_csv(client):
     app.state.audit_client.list_events.return_value = []
 
-    response = client.get(
-        "/forensic-trace/export", params={"format": "csv", "queried_by": "security-officer"}
-    )
+    response = client.get("/forensic-trace/export", params={"format": "csv"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
@@ -257,9 +348,7 @@ def test_forensic_trace_export_csv(client):
 def test_forensic_trace_export_pdf(client):
     app.state.audit_client.list_events.return_value = []
 
-    response = client.get(
-        "/forensic-trace/export", params={"format": "pdf", "queried_by": "security-officer"}
-    )
+    response = client.get("/forensic-trace/export", params={"format": "pdf"})
 
     assert response.status_code == 200
     assert response.content.startswith(b"%PDF")
@@ -276,12 +365,12 @@ def test_forensic_trace_query_is_self_audited(client, monkeypatch):
 
     client.get(
         "/forensic-trace",
-        params={"queried_by": "security-officer", "actor": "alice", "subject": "doc-1"},
+        params={"actor": "alice", "subject": "doc-1"},
     )
 
     trace_events = [e for e in published if e.event_type == "reporting.forensic_trace.queried"]
     assert len(trace_events) == 1
-    assert trace_events[0].actor == "security-officer"
+    assert trace_events[0].actor == REPORTING_TEST_PRINCIPAL_ID
     assert trace_events[0].payload["actor"] == "alice"
     assert trace_events[0].payload["subject"] == "doc-1"
 

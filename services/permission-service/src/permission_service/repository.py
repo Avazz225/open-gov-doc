@@ -181,6 +181,13 @@ EVERYONE_ROLE_PERMISSIONS: list[str] = [
     "users.directory",
     "case.read",
     "case.write",
+    # Post-Roadmap Phase 19 Session 7 (ADR 0072): archival-service/
+    # reporting-service hatten zuvor GAR KEINE RBAC-Prüfung.
+    "archival.read",
+    "archival.write",
+    "reporting.read",
+    "reporting.write",
+    "reporting.forensic_trace",
 ]
 
 

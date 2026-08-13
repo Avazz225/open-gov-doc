@@ -10,8 +10,9 @@ from datetime import UTC, datetime
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -262,6 +263,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.audit_client = AuditClient(settings.audit_service_base_url)
     app.state.storage_client = StorageClient(settings.storage_service_base_url)
     app.state.notification_client = NotificationClient(settings.notification_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     # Eigener Producer-Bus (5.4b, seit P7-S2c) - fuer die Selbst-Auditierung
     # des Forensik-Trace-Zugriffs ("wer hat wann welchen Trace abgefragt").
@@ -302,6 +304,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.audit_client.close()
     await app.state.storage_client.close()
     await app.state.notification_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -318,14 +321,44 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+async def _require_reporting_permission(
+    x_dms_principal: str, *, permission: str, access_type: str
+) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - reporting-service
+    hatte zuvor GAR KEINE Berechtigungsprüfung, auch nicht der Forensik-Trace
+    trotz dessen erhöhter Sensibilität. Prüft an der Wurzelressource (`root`)
+    - reporting-service registriert keine eigenen Ressourcen-Baumknoten.
+    Standardberichte/Planungen nutzen `reporting.read`/`reporting.write`,
+    der Forensik-Trace die separate, engere `reporting.forensic_trace`
+    (eigene Permission statt `reporting.read`, da er potenziell sensible
+    Nutzeraktivität offenlegt, siehe docs/services/reporting-service.md
+    "Offene Punkte"). Die "everyone"-Gruppe (ADR 0067) gewährt alle drei
+    standardmäßig - erhält das bisherige De-facto-offene Verhalten, macht es
+    aber admin-editierbar."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
 @app.get("/reports/document-volume", response_model=list[DocumentVolumeEntry])
 async def get_document_volume_report(
     since: datetime | None = None,
     until: datetime | None = None,
     folder_id: str | None = None,
     group_by: GroupBy = "day",
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[DocumentVolumeEntry]:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     return await reports.document_volume(
         session, since=since, until=until, folder_id=folder_id, group_by=group_by
     )
@@ -338,7 +371,11 @@ async def export_document_volume_report(
     until: datetime | None = None,
     folder_id: str | None = None,
     group_by: GroupBy = "day",
+    x_dms_principal: str = Header(default=""),
 ) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     filters = {
         "since": since.isoformat() if since else None,
         "until": until.isoformat() if until else None,
@@ -351,24 +388,44 @@ async def export_document_volume_report(
 
 
 @app.get("/reports/open-workflow-tasks", response_model=list[OpenWorkflowTaskEntry])
-async def get_open_workflow_tasks_report() -> list[OpenWorkflowTaskEntry]:
+async def get_open_workflow_tasks_report(
+    x_dms_principal: str = Header(default=""),
+) -> list[OpenWorkflowTaskEntry]:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     return await reports.open_workflow_tasks(app.state.workflow_client)
 
 
 @app.get("/reports/open-workflow-tasks/export")
-async def export_open_workflow_tasks_report(format: ReportFormat) -> Response:
+async def export_open_workflow_tasks_report(
+    format: ReportFormat, x_dms_principal: str = Header(default="")
+) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     async with app.state.session_factory() as session:
         content, content_type = await _generate_report(session, "open_workflow_tasks", format, {})
     return Response(content=content, media_type=content_type)
 
 
 @app.get("/reports/storage-usage", response_model=list[StorageUsageEntry])
-async def get_storage_usage_report() -> list[StorageUsageEntry]:
+async def get_storage_usage_report(
+    x_dms_principal: str = Header(default=""),
+) -> list[StorageUsageEntry]:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     return await reports.storage_usage(app.state.storage_client)
 
 
 @app.get("/reports/storage-usage/export")
-async def export_storage_usage_report(format: ReportFormat) -> Response:
+async def export_storage_usage_report(
+    format: ReportFormat, x_dms_principal: str = Header(default="")
+) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     async with app.state.session_factory() as session:
         content, content_type = await _generate_report(session, "storage_usage", format, {})
     return Response(content=content, media_type=content_type)
@@ -379,7 +436,11 @@ async def get_user_activity_report(
     actor: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    x_dms_principal: str = Header(default=""),
 ) -> list[UserActivityEntry]:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     return await reports.user_activity(
         app.state.audit_client, actor=actor, since=since, until=until
     )
@@ -391,7 +452,11 @@ async def export_user_activity_report(
     actor: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    x_dms_principal: str = Header(default=""),
 ) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     filters = {
         "actor": actor,
         "since": since.isoformat() if since else None,
@@ -406,8 +471,13 @@ async def export_user_activity_report(
     "/report-schedules", response_model=ReportScheduleOut, status_code=status.HTTP_201_CREATED
 )
 async def create_report_schedule(
-    payload: ReportScheduleCreate, session: AsyncSession = Depends(get_session)
+    payload: ReportScheduleCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> ReportScheduleOut:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.write", access_type="write"
+    )
     schedule = await repository.create_schedule(
         session,
         report_type=payload.report_type,
@@ -422,15 +492,24 @@ async def create_report_schedule(
 
 @app.get("/report-schedules", response_model=list[ReportScheduleOut])
 async def list_report_schedules(
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[ReportScheduleOut]:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     return await repository.list_schedules(session)
 
 
 @app.delete("/report-schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_report_schedule(
-    schedule_id: str, session: AsyncSession = Depends(get_session)
+    schedule_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.write", access_type="write"
+    )
     try:
         await repository.delete_schedule(session, schedule_id)
     except repository.NotFoundError as exc:
@@ -440,8 +519,13 @@ async def delete_report_schedule(
 
 @app.get("/report-runs/{run_id}/download")
 async def download_report_run(
-    run_id: str, session: AsyncSession = Depends(get_session)
+    run_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.read", access_type="read"
+    )
     try:
         run = await repository.get_report_run(session, run_id)
     except repository.NotFoundError as exc:
@@ -452,7 +536,6 @@ async def download_report_run(
 
 @app.get("/forensic-trace", response_model=ForensicTraceResult)
 async def get_forensic_trace(
-    queried_by: str,
     actor: str | None = None,
     subject: str | None = None,
     event_type: str | None = None,
@@ -460,7 +543,11 @@ async def get_forensic_trace(
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int = 5000,
+    x_dms_principal: str = Header(default=""),
 ) -> ForensicTraceResult:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.forensic_trace", access_type="read"
+    )
     entries, anomalies = await _fetch_forensic_trace(
         actor=actor,
         subject=subject,
@@ -471,7 +558,7 @@ async def get_forensic_trace(
         limit=limit,
     )
     await _record_trace_query(
-        queried_by=queried_by,
+        queried_by=x_dms_principal,
         actor=actor,
         subject=subject,
         event_type=event_type,
@@ -485,7 +572,6 @@ async def get_forensic_trace(
 @app.get("/forensic-trace/export")
 async def export_forensic_trace(
     format: ReportFormat,
-    queried_by: str,
     actor: str | None = None,
     subject: str | None = None,
     event_type: str | None = None,
@@ -493,7 +579,11 @@ async def export_forensic_trace(
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int = 5000,
+    x_dms_principal: str = Header(default=""),
 ) -> Response:
+    await _require_reporting_permission(
+        x_dms_principal, permission="reporting.forensic_trace", access_type="read"
+    )
     entries, _ = await _fetch_forensic_trace(
         actor=actor,
         subject=subject,
@@ -504,7 +594,7 @@ async def export_forensic_trace(
         limit=limit,
     )
     await _record_trace_query(
-        queried_by=queried_by,
+        queried_by=x_dms_principal,
         actor=actor,
         subject=subject,
         event_type=event_type,

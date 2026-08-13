@@ -26,20 +26,20 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/reports/document-volume?since=&until=&folder_id=&group_by=day\|week\|month` | Dokumentenaufkommen aus dem eigenen Read-Modell, gruppiert nach Zeitraum (+optional Ordner) |
-| `GET` | `/reports/document-volume/export?format=csv\|pdf&...` | Gleiche Filter, CSV/PDF-Download |
-| `GET` | `/reports/open-workflow-tasks` | Live-Abfrage offener Workflow-Aufgaben gegen `workflow-service` |
-| `GET` | `/reports/open-workflow-tasks/export?format=csv\|pdf` | CSV/PDF-Download |
-| `GET` | `/reports/storage-usage` | Live-Abfrage `GET /storage/usage` gegen `storage-service` |
-| `GET` | `/reports/storage-usage/export?format=csv\|pdf` | CSV/PDF-Download |
-| `GET` | `/reports/user-activity?actor=&since=&until=` | Live-Abfrage gegen `audit-service` (`GET /events`-Filter-API), clientseitig nach `(actor, event_type)` aggregiert |
-| `GET` | `/reports/user-activity/export?format=csv\|pdf&...` | CSV/PDF-Download |
-| `POST` | `/report-schedules` | Planung anlegen (`report_type`, `format`, `frequency: "daily"\|"weekly"\|"monthly"`, `recipient_email`, optional `filters`) |
-| `GET` | `/report-schedules` | Alle Planungen |
-| `DELETE` | `/report-schedules/{id}` | Planung entfernen |
-| `GET` | `/report-runs/{id}/download` | Proxy-Download eines erzeugten Berichtslaufs (aus `storage-service`) — Ziel des Downloadlinks in der Planungs-E-Mail |
-| `GET` | `/forensic-trace?queried_by=&actor=&subject=&event_type=&category=&since=&until=&limit=` | Forensik-Trace (5.4b, seit P7-S2c) — ruft die P7-S2-Filter-API von `audit-service` auf, kategorisiert client-seitig, berechnet Anomalie-Hinweise. `queried_by` ist Pflicht (Selbst-Audit, s. u.). `category` ∈ `view`\|`download`\|`change`\|`delete` |
-| `GET` | `/forensic-trace/export?format=csv\|pdf&queried_by=&...` | Gleiche Filter, CSV/PDF-Download |
+| `GET` | `/reports/document-volume?since=&until=&folder_id=&group_by=day\|week\|month` | Dokumentenaufkommen aus dem eigenen Read-Modell, gruppiert nach Zeitraum (+optional Ordner) — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/document-volume/export?format=csv\|pdf&...` | Gleiche Filter, CSV/PDF-Download — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/open-workflow-tasks` | Live-Abfrage offener Workflow-Aufgaben gegen `workflow-service` — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/open-workflow-tasks/export?format=csv\|pdf` | CSV/PDF-Download — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/storage-usage` | Live-Abfrage `GET /storage/usage` gegen `storage-service` — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/storage-usage/export?format=csv\|pdf` | CSV/PDF-Download — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/user-activity?actor=&since=&until=` | Live-Abfrage gegen `audit-service` (`GET /events`-Filter-API), clientseitig nach `(actor, event_type)` aggregiert — seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/reports/user-activity/export?format=csv\|pdf&...` | CSV/PDF-Download — seit **P19-S7** `reporting.read`-gegated |
+| `POST` | `/report-schedules` | Planung anlegen (`report_type`, `format`, `frequency: "daily"\|"weekly"\|"monthly"`, `recipient_email`, optional `filters`) — seit **P19-S7** `reporting.write`-gegated |
+| `GET` | `/report-schedules` | Alle Planungen — seit **P19-S7** `reporting.read`-gegated |
+| `DELETE` | `/report-schedules/{id}` | Planung entfernen — seit **P19-S7** `reporting.write`-gegated |
+| `GET` | `/report-runs/{id}/download` | Proxy-Download eines erzeugten Berichtslaufs (aus `storage-service`) — Ziel des Downloadlinks in der Planungs-E-Mail; seit **P19-S7** `reporting.read`-gegated |
+| `GET` | `/forensic-trace?actor=&subject=&event_type=&category=&since=&until=&limit=` | Forensik-Trace (5.4b, seit P7-S2c) — ruft die P7-S2-Filter-API von `audit-service` auf, kategorisiert client-seitig, berechnet Anomalie-Hinweise. `category` ∈ `view`\|`download`\|`change`\|`delete`. Seit **P19-S7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md)) `reporting.forensic_trace`-gegated (eigene, engere Permission statt `reporting.read`) — der bisherige, unverifizierte `queried_by`-Query-Parameter ist entfallen, die Selbst-Audit-Akteurquelle ist jetzt ausschließlich der verifizierte `X-DMS-Principal`-Header |
+| `GET` | `/forensic-trace/export?format=csv\|pdf&...` | Gleiche Filter, CSV/PDF-Download — seit **P19-S7** `reporting.forensic_trace`-gegated, `queried_by` ebenso entfallen |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -60,7 +60,7 @@ Zweite Funktion dieses Service (s. o.) — objektbezogene Nachverfolgung über d
 
 - **`_fetch_forensic_trace`** ruft `AuditClient.list_events(actor=, subject=, event_type=, since=, until=, limit=)` auf, kategorisiert jeden Treffer client-seitig über `forensic.categorize_event_type(event_type)` (Suffix-basiert: `.downloaded` → `download`, `.viewed` → `view`, `.deleted`/`.force_deleted`/`.trash_purged` → `delete`, alles andere → Rest-Kategorie `change`) und filtert optional zusätzlich nach der angeforderten `category`.
 - **Anomalie-Hinweise** (`forensic.detect_download_anomalies`): Sliding-Window (Zwei-Zeiger) je Akteur über dessen `download`-Zeitstempel in der aktuellen Trefferliste — meldet, wenn mehr als `Settings.anomaly_download_threshold_count` (Default 20) Downloads innerhalb von `Settings.anomaly_download_threshold_minutes` (Default 5) Minuten auftreten. Nur dieser eine Regeltyp, ausschließlich über die Trace-Ergebnisse selbst berechnet (keine zusätzliche Abfrage).
-- **Selbst-Audit** (`_record_trace_query`, wörtliche Konzeptvorgabe "selbst wieder als Zugriff auditiert"): jede `GET /forensic-trace`-Abfrage (auch der Export) publiziert unconditional `reporting.forensic_trace.queried` mit den verwendeten Filtern als Payload und `actor=queried_by` — kein Abschalten möglich, da dies selbst der Kontrollmechanismus ist. `queried_by` ist deshalb ein Pflichtparameter, kein optionaler.
+- **Selbst-Audit** (`_record_trace_query`, wörtliche Konzeptvorgabe "selbst wieder als Zugriff auditiert"): jede `GET /forensic-trace`-Abfrage (auch der Export) publiziert unconditional `reporting.forensic_trace.queried` mit den verwendeten Filtern als Payload und `actor=<X-DMS-Principal>` — kein Abschalten möglich, da dies selbst der Kontrollmechanismus ist. Seit **P19-S7** ist der Header die einzige Akteur-Quelle (vorher ein separater, unverifizierter `queried_by`-Parameter, siehe [ADR 0072](../adr/0072-archival-reporting-rbac.md)).
 - **Eigener Producer-Bus neu seit dieser Session**: bis P7-S2c hatte dieser Service nur einen Consumer-Bus (`document.>`). Lifespan bekam einen zweiten, unabhängigen `event_bus` (Stream `reporting`, `ensure_stream=True`) dazu — identisches Dual-Bus-Muster wie `document-service` (eigener `event_bus` für Publish, separater `consumer_bus` für Subscribe).
 
 ## Events
@@ -89,10 +89,10 @@ Registriert sich beim Start selbst bei der Registry (`libs/dms-registry-client`)
 ## Offene Punkte
 
 - **Lizenzauslastung nicht gebaut** (s. o.) — nachzurüsten, sobald Phase 9 den License Service liefert.
-- **Kein Rollen-/Berechtigungscheck** auf den Berichts-Endpunkten — wie bei den meisten administrativen Endpunkten dieses Systems bislang ungated (siehe `PROGRESS.md` "Autorisierung"), nur über die Admin-UI-Navigation praktisch auf Admins beschränkt.
+- ~~Kein Rollen-/Berechtigungscheck auf den Berichts-Endpunkten~~ — **behoben in Post-Roadmap Phase 19 Session 7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md)): alle Berichts-/Planungs-/Download-Endpunkte prüfen jetzt `reporting.read`/`reporting.write` über `permission-service`.
 - **Ad-hoc-Exporte werden nicht persistiert** (bewusst, s. o.) — ein Nutzer, der einen Export-Link teilen möchte, muss die Datei manuell weiterreichen; nur geplante Läufe haben einen dauerhaften Downloadlink.
 - **`recipient_email` einer Planung muss ein echtes `auth-service`-Konto sein** — `notification-service` lehnt jede E-Mail an eine unbekannte Adresse mit `400` ab (bestehende Empfänger-Validierung seit P6-S6, siehe `docs/services/notification-service.md`). Dieser Service selbst validiert das beim Anlegen einer Planung **nicht** vorab — ein Tippfehler oder eine beliebige externe Adresse fällt erst beim nächsten fälligen Poll-Tick auf (Fehler wird geloggt, Planung bleibt bestehen und wird beim nächsten Tick erneut versucht, kein Statusfeld an der Planung selbst zeigt den Fehlschlag an). Weder im Backend noch in der Admin-UI kommuniziert — ein sinnvoller künftiger Schnitt wäre eine serverseitige Vorabprüfung gegen `auth-service` bei `POST /report-schedules`.
 - **Forensik-Trace deckt nur Nutzer/Dokument/Ordner ab, nicht Rolle** (5.4b, seit P7-S2c) — siehe Architekturentscheidung oben; `permission-service` publiziert für Rollen-CRUD keine Events.
 - **`document.viewed`/`document.downloaded` nur für Dokumente** (5.4b, seit P7-S2c) — Ordner-Lesezugriffe bleiben unauditiert, siehe `docs/services/document-service.md` "Audit-Tiefe".
-- **Kein Rollen-/Berechtigungscheck auf `/forensic-trace`** — dieselbe bereits bestehende Lücke wie bei den Standardberichten (s. o.), hier zusätzlich sicherheitsrelevanter, da der Trace potenziell sensible Nutzeraktivität offenlegt. `queried_by` wird vom Client mitgesendet, nicht serverseitig gegen ein echtes Konto verifiziert — ein Aufrufer könnte theoretisch einen falschen Namen angeben, der Selbst-Audit-Eintrag wäre dann irreführend.
+- ~~Kein Rollen-/Berechtigungscheck auf `/forensic-trace`~~ — **behoben in Post-Roadmap Phase 19 Session 7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md)): eigene, engere `reporting.forensic_trace`-Permission statt `reporting.read`. Der bisherige, unverifizierte `queried_by`-Parameter ist entfallen — die Selbst-Audit-Akteurquelle ist jetzt ausschließlich der verifizierte `X-DMS-Principal`-Header, ein Aufrufer kann den Audit-Eintrag nicht mehr durch einen falschen Namen verfälschen.
 - **Anomalie-Schwellwerte nur über Env-Variablen konfigurierbar** — kein Admin-UI-Editor dafür (gleiches Muster wie andere Poll-Intervalle in diesem System), ein künftiger Bedarf für Admin-seitige Anpassung ohne Neustart wäre ein separater Schnitt.

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 
@@ -16,6 +17,7 @@ DSN = os.environ.get(
 # Schema dieses Service überhaupt (P15-S4, Federation-Identität).
 os.environ["DMS_POSTGRES_DSN"] = DSN
 
+from auth_service import domain_admins  # noqa: E402
 from auth_service.bootstrap import (  # noqa: E402
     DOMAIN_ADMIN_USERS_USERNAME,
     ensure_realm_and_client,
@@ -150,7 +152,7 @@ def role_assignment_immediate():
 
 
 @pytest.fixture
-def everyone_role_without():
+def everyone_role_without(client):
     """Post-Roadmap Phase 19 Session 3 (ADR 0068) - erlaubt Tests, gezielt zu
     beweisen, dass `GET /users/lookup`/`GET /users/directory` tatsächlich
     gegen die "everyone"-Rolle (P19-S2, ADR 0067) geprüft werden, nicht nur
@@ -158,7 +160,31 @@ def everyone_role_without():
     geseedeten "everyone"-Rolle, stellt die ursprüngliche Liste danach
     wieder her. `update_role` invalidiert seit dieser Session den Effective-
     Permissions-Cache (siehe `permission_service.repository.update_role`) -
-    ohne diesen Fix hätte diese Fixture keine sofortige Wirkung."""
+    ohne diesen Fix hätte diese Fixture keine sofortige Wirkung. Seit
+    Post-Roadmap Phase 19 Session 6 (ADR 0071) verlangt `PUT /roles/{id}`
+    zusätzlich `admin.user_management` per `X-DMS-Principal`-Header - das
+    bereits per Bootstrap `domain-admin-users`-berechtigte technische Konto
+    deckt das ab, aber `permission-service`s `principal_id` dafür ist die
+    `TechnicalAccount.id` (Integer als String), NICHT `DOMAIN_ADMIN_USERS_
+    USERNAME` selbst (siehe `main.py`s `ensure_role_assignment(principal_id=
+    account_id, ...)`). Bewusst EIGENE Engine statt `app.state.session_
+    factory` (an TestClients internen Loop gebunden) - ein async Zugriff
+    darauf aus dieser (synchronen, `asyncio.run()`-nutzenden) Fixture heraus
+    würde mit "attached to a different loop" fehlschlagen, exakt das bereits
+    an anderer Stelle im Projekt dokumentierte asyncpg/pytest-asyncio-Problem
+    (siehe reporting-service/tests/test_api.py::poll_env)."""
+
+    async def _get_account_id() -> str:
+        eng = build_engine(DSN)
+        try:
+            return await domain_admins.get_technical_account_id(
+                make_session_factory(eng), DOMAIN_ADMIN_USERS_USERNAME
+            )
+        finally:
+            await eng.dispose()
+
+    account_id = asyncio.run(_get_account_id())
+    role_management_headers = {"X-DMS-Principal": account_id}
     with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
         roles = pc.get("/roles").json()
         everyone = next(r for r in roles if r["name"] == "everyone")
@@ -171,6 +197,7 @@ def everyone_role_without():
                     "description": everyone["description"],
                     "permissions": [p for p in original_permissions if p != permission],
                 },
+                headers=role_management_headers,
             ).raise_for_status()
 
         yield _remove
@@ -178,6 +205,7 @@ def everyone_role_without():
         pc.put(
             f"/roles/{everyone['id']}",
             json={"description": everyone["description"], "permissions": original_permissions},
+            headers=role_management_headers,
         ).raise_for_status()
 
 

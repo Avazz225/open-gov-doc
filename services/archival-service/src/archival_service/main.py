@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
@@ -96,6 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage_client = StorageClient(settings.storage_service_base_url)
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.case_client = CaseClient(settings.case_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.keystore = EnvKeyStore(settings.archive_encryption_key)
 
     registration = await maybe_start_registration(
@@ -123,6 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.storage_client.close()
     await app.state.object_type_client.close()
     await app.state.case_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -139,17 +142,48 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+async def _require_archival_permission(x_dms_principal: str, *, access_type: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - archival-service
+    hatte zuvor GAR KEINE allgemeine Berechtigungsprüfung, nur das separate,
+    engere `archive_retrieval_role`-Gate (X-DMS-Roles) für Rückholung/
+    Aussonderungs-Zugriffsbereich/Paket-Download (5.6 "Entschlüsselung nur
+    für berechtigte Rollen") - dieses Gate bleibt UNVERÄNDERT bestehen, die
+    RBAC-Prüfung hier kommt zusätzlich, nicht ersetzend, exakt wie bei
+    case-service (ADR 0070). Prüft `archival.read`/`archival.write` an der
+    Wurzelressource (`root`) - archival-service registriert keine eigenen
+    Ressourcen-Baumknoten. Die "everyone"-Gruppe (ADR 0067) gewährt beide
+    Permissions standardmäßig - erhält das bisherige De-facto-offene
+    Verhalten, macht es aber admin-editierbar."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    permission = "archival.read" if access_type == "read" else "archival.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
 @app.get("/archival-transfers", response_model=list[ArchivalTransferOut])
 async def list_archival_transfers(
-    status: str | None = None, session: AsyncSession = Depends(get_session)
+    status: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[ArchivalTransferOut]:
+    await _require_archival_permission(x_dms_principal, access_type="read")
     return await repository.list_transfers(session, status=status)
 
 
 @app.get("/archival-transfers/{transfer_id}", response_model=ArchivalTransferOut)
 async def get_archival_transfer(
-    transfer_id: str, session: AsyncSession = Depends(get_session)
+    transfer_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> ArchivalTransferOut:
+    await _require_archival_permission(x_dms_principal, access_type="read")
     try:
         return await repository.get_transfer(session, transfer_id)
     except repository.NotFoundError as exc:
@@ -159,6 +193,7 @@ async def get_archival_transfer(
 @app.post("/archival-transfers/{transfer_id}/retrieve", response_model=ArchivalTransferOut)
 async def retrieve_archival_transfer(
     transfer_id: str,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ArchivalTransferOut:
@@ -168,6 +203,7 @@ async def retrieve_archival_transfer(
     unter genau demselben Storage-Schluessel wie die aktuelle Version, damit
     der reguläre `document-service`-Download-Pfad danach unveraendert
     funktioniert."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     if settings.archive_retrieval_role not in roles:
         raise HTTPException(
@@ -220,6 +256,7 @@ async def retrieve_archival_transfer(
 @app.get("/released-items", response_model=list[ReleasedItemOut])
 async def list_released_items(
     q: str | None = None,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
@@ -233,6 +270,7 @@ async def list_released_items(
     "dieselben Rollen ... zusätzlich ggf. eine dedizierte Archiv-/
     Registratur-Rolle", die bereits bestehende Rückhol-Rolle deckt genau
     diesen Fall ab, ohne ein zweites, redundantes Setting einzuführen."""
+    await _require_archival_permission(x_dms_principal, access_type="read")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     if settings.archive_retrieval_role not in roles:
         raise HTTPException(
@@ -256,15 +294,21 @@ async def list_released_items(
 
 @app.get("/case-archival-transfers", response_model=list[CaseArchivalTransferOut])
 async def list_case_archival_transfers(
-    status: str | None = None, session: AsyncSession = Depends(get_session)
+    status: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[CaseArchivalTransferOut]:
+    await _require_archival_permission(x_dms_principal, access_type="read")
     return await repository.list_case_transfers(session, status=status)
 
 
 @app.get("/case-archival-transfers/{transfer_id}", response_model=CaseArchivalTransferOut)
 async def get_case_archival_transfer(
-    transfer_id: str, session: AsyncSession = Depends(get_session)
+    transfer_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> CaseArchivalTransferOut:
+    await _require_archival_permission(x_dms_principal, access_type="read")
     try:
         return await repository.get_case_transfer(session, transfer_id)
     except repository.NotFoundError as exc:
@@ -274,6 +318,7 @@ async def get_case_archival_transfer(
 @app.get("/case-archival-transfers/{transfer_id}/package")
 async def download_case_archival_package(
     transfer_id: str,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
@@ -281,6 +326,7 @@ async def download_case_archival_package(
     referenzierte Dokumentinhalte, 5.6, seit P7-S3b) direkt als Download -
     anders als bei Dokumenten (`.../retrieve`) kein Zurueckschreiben auf ein
     Live-Ziel, da eine Umlaufmappe keinen eigenen Live-Speicherplatz besitzt."""
+    await _require_archival_permission(x_dms_principal, access_type="read")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     if settings.archive_retrieval_role not in roles:
         raise HTTPException(

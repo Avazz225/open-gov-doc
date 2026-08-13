@@ -38,10 +38,10 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/archival-transfers?status=...` | Alle Transfers, optional nach Status gefiltert (Admin-UI-Statustabelle) |
-| `GET` | `/archival-transfers/{id}` | Einzelner Transfer — `404` bei unbekannter `id` |
-| `POST` | `/archival-transfers/{id}/retrieve` | Rückholung — `403` ohne `archive_retrieval_role` im `X-DMS-Roles`-Header, `404` bei unbekanntem Transfer, `409` wenn der Transfer nicht `released`/`dehydrated` ist (noch keine verlässliche Archivkopie) |
-| `GET` | `/released-items?q=` | Aussonderungs-Zugriffsbereich (2.5, seit **P15-S5**) — hydratisierte, durchsuchbare Sicht auf `released`-Dokumente UND -Umlaufmappen kombiniert, `403` ohne `archive_retrieval_role`, siehe "Aussonderungs-Zugriffsbereich" unten |
+| `GET` | `/archival-transfers?status=...` | Alle Transfers, optional nach Status gefiltert (Admin-UI-Statustabelle) — seit **P19-S7** `archival.read`-gegated |
+| `GET` | `/archival-transfers/{id}` | Einzelner Transfer — `404` bei unbekannter `id`; seit **P19-S7** `archival.read`-gegated |
+| `POST` | `/archival-transfers/{id}/retrieve` | Rückholung — `403` ohne `archive_retrieval_role` im `X-DMS-Roles`-Header, `404` bei unbekanntem Transfer, `409` wenn der Transfer nicht `released`/`dehydrated` ist (noch keine verlässliche Archivkopie); seit **P19-S7** zusätzlich `archival.write`-gegated (RBAC läuft vor dem Rollen-Gate) |
+| `GET` | `/released-items?q=` | Aussonderungs-Zugriffsbereich (2.5, seit **P15-S5**) — hydratisierte, durchsuchbare Sicht auf `released`-Dokumente UND -Umlaufmappen kombiniert, `403` ohne `archive_retrieval_role`, siehe "Aussonderungs-Zugriffsbereich" unten; seit **P19-S7** zusätzlich `archival.read`-gegated |
 | `GET` | `/healthz` | Health-Check |
 
 Keine `POST`-Route zum manuellen Anlegen eines Transfers — Auslösung läuft über `document-service`s `POST /documents/{id}/archive-request` (setzt `archive_after=jetzt`), der nächste Poll-Tick dieses Service holt fällige Dokumente automatisch ab.
@@ -98,9 +98,9 @@ Bewusste Vereinfachungen (dokumentiert, nicht versteckt):
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `GET` | `/case-archival-transfers?status=...` | Alle Case-Transfers, optional gefiltert |
-| `GET` | `/case-archival-transfers/{id}` | Einzelner Transfer — `404` bei unbekannter `id` |
-| `GET` | `/case-archival-transfers/{id}/package` | Lädt das (ggf. entschlüsselte) ZIP-Paket direkt herunter — `403` ohne `archive_retrieval_role`, `404`/`409` analog zur Dokument-Rückholung. **Kein** Zurückschreiben auf ein Live-Ziel (anders als bei Dokumenten): eine Umlaufmappe besitzt keinen eigenen Live-Speicherplatz, nur ein reiner Download |
+| `GET` | `/case-archival-transfers?status=...` | Alle Case-Transfers, optional gefiltert — seit **P19-S7** `archival.read`-gegated |
+| `GET` | `/case-archival-transfers/{id}` | Einzelner Transfer — `404` bei unbekannter `id`; seit **P19-S7** `archival.read`-gegated |
+| `GET` | `/case-archival-transfers/{id}/package` | Lädt das (ggf. entschlüsselte) ZIP-Paket direkt herunter — `403` ohne `archive_retrieval_role`, `404`/`409` analog zur Dokument-Rückholung. **Kein** Zurückschreiben auf ein Live-Ziel (anders als bei Dokumenten): eine Umlaufmappe besitzt keinen eigenen Live-Speicherplatz, nur ein reiner Download; seit **P19-S7** zusätzlich `archival.read`-gegated |
 
 ### Datenmodell
 
@@ -139,7 +139,7 @@ Noch keine — folgt in Phase 11.
 
 ## Offene Punkte
 
-- **Kein Rollen-/Berechtigungscheck außer bei der Rückholung** — `GET /archival-transfers`/`.../{id}` sind wie die meisten administrativen Endpunkte dieses Systems ungegated (siehe `PROGRESS.md` "Autorisierung"), nur über die Admin-UI-Navigation praktisch auf Admins beschränkt. Gilt gleichermaßen für die neuen `/case-archival-transfers`-Endpunkte.
+- ~~Kein Rollen-/Berechtigungscheck außer bei der Rückholung~~ — **behoben in Post-Roadmap Phase 19 Session 7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md)): alle acht Endpunkte prüfen jetzt `archival.read`/`archival.write` über `permission-service` (`_require_archival_permission`, `resource_id="root"`). Das bestehende `archive_retrieval_role`-Gate (X-DMS-Roles) bei Rückholung/`/released-items`/Paket-Download bleibt zusätzlich bestehen, unverändert.
 - **Kein Retry für `failed`-Transfers** — ein fehlgeschlagener Transfer bleibt terminal, ein neuer Anlauf bräuchte einen manuellen `POST /documents/{id}/archive-request` in `document-service` (bzw. `.../cases/{id}/archive-request` in case-service), das aber erneut denselben Aktive-Transfer-Ausschluss greifen lassen würde, solange die alte `failed`-Zeile nicht separat behandelt wird — kein Admin-UI-Bedienelement dafür in dieser Session.
 - **Verschlüsselung nur mit einem einzigen, statischen Schlüssel** (`EnvKeyStore`) — kein Schlüssel-Rotation-/Multi-Tenant-Support, siehe "KeyStore-Plugin" oben.
 - **Nur die 0503-Nachricht, kein voller XDOMEA-Verhandlungsfluss** (s. o.) — 0501/0502/0504–0507 sind nicht implementiert, da es kein antwortendes zweites System gibt.

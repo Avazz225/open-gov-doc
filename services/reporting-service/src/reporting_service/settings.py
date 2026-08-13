@@ -10,6 +10,10 @@ class Settings(BaseServiceSettings):
     audit_service_base_url: str = "http://localhost:8002"
     storage_service_base_url: str = "http://localhost:8005"
     notification_service_base_url: str = "http://localhost:8015"
+    # RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - reporting-service
+    # hatte bislang gar keine Berechtigungsprüfung, auch nicht der Forensik-
+    # Trace.
+    permission_service_base_url: str = "http://localhost:8004"
     # Extern erreichbare Gateway-Adresse fuer den Downloadlink in geplanten
     # Berichts-E-Mails (5.4a) - bewusst getrennt von `self_address` (interne
     # Docker-DNS-Adresse fuer die Registry-Selbstregistrierung, fuer einen

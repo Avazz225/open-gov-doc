@@ -1,12 +1,45 @@
 import base64
+import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from archival_service import crypto, repository
 from archival_service.keystore import EnvKeyStore
 from archival_service.main import app
 from fastapi.testclient import TestClient
+
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+
+
+ARCHIVAL_TEST_PRINCIPAL_ID = "archival-service-tests"
+# Post-Roadmap Phase 19 Session 6 (ADR 0071): `PUT /roles/{id}` verlangt seit
+# dieser Session `admin.user_management` - separates Testprincipal fuer
+# `everyone_role_without` unten (siehe `_grant_role_admin_permission`).
+ROLE_ADMIN_PRINCIPAL_ID = "archival-service-test-role-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_role_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture
@@ -15,8 +48,16 @@ def client():
     service) durch Fakes ersetzt - identisches Muster wie reporting-
     service's `client`-Fixture: die eigentliche Pipeline-Logik ist bereits
     in test_pipeline.py gegen diese Clients getestet, hier geht es um die
-    Endpunkt-Verdrahtung."""
-    with TestClient(app) as c:
+    Endpunkt-Verdrahtung. `permission_client` bleibt UNGEMOCKT (echter Aufruf
+    gegen den laufenden permission-service, gleiche "kein Mocking von
+    Sibling-Services"-Philosophie wie case-service) - der TestClient traegt
+    daher standardmaessig einen `X-DMS-Principal`-Header (RBAC seit
+    Post-Roadmap Phase 19 Session 7, ADR 0072; die "everyone"-Gruppe gewaehrt
+    `archival.read`/`.write` jedem authentifizierten Principal, kein
+    Rollen-Setup fuer den Positivfall noetig). Einzelne Tests koennen den
+    Header per `headers={"X-DMS-Principal": ""}` ueberschreiben, um den
+    Negativfall zu pruefen."""
+    with TestClient(app, headers={"X-DMS-Principal": ARCHIVAL_TEST_PRINCIPAL_ID}) as c:
         app.state.document_client = AsyncMock()
         app.state.rendering_client = AsyncMock()
         app.state.storage_client = AsyncMock()
@@ -27,6 +68,49 @@ def client():
         }
         app.state.keystore = EnvKeyStore(None)
         yield c
+
+
+@pytest.fixture
+def everyone_role_without():
+    """Entfernt eine Berechtigung temporär aus der geseedeten "everyone"-
+    Rolle, um den Negativpfad (fehlende Berechtigung -> 403) zu beweisen -
+    gleiches Muster wie case-service/auth-service (dupliziert statt geteilt,
+    Projektkonvention). Seit Post-Roadmap Phase 19 Session 6 (ADR 0071)
+    verlangt `PUT /roles/{id}` zusätzlich `admin.user_management`."""
+    role_management_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        everyone = next(r for r in roles if r["name"] == "everyone")
+        original_permissions = list(everyone["permissions"])
+
+        def _remove(permission: str) -> None:
+            pc.put(
+                f"/roles/{everyone['id']}",
+                json={
+                    "description": everyone["description"],
+                    "permissions": [p for p in original_permissions if p != permission],
+                },
+                headers=role_management_headers,
+            ).raise_for_status()
+
+        yield _remove
+
+        pc.put(
+            f"/roles/{everyone['id']}",
+            json={"description": everyone["description"], "permissions": original_permissions},
+            headers=role_management_headers,
+        ).raise_for_status()
+
+
+def test_list_archival_transfers_without_principal_header_is_401(client):
+    response = client.get("/archival-transfers", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_list_archival_transfers_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("archival.read")
+    response = client.get("/archival-transfers")
+    assert response.status_code == 403
 
 
 def test_healthz(client):

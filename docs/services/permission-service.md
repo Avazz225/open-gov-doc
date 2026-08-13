@@ -130,7 +130,10 @@ Mitglied, unabhängig von seiner eigenen `principal_id`. Der Vererbungsalgorithm
   nicht** — die eigentliche Umstellung der beiden Endpunkte auf eine echte `has_permission`-Prüfung folgt
   in P19-S3. **Seit P19-S5** ([ADR 0070](../adr/0070-case-service-rbac.md)) zusätzlich `case.read`/
   `case.write` — `case-service` hatte zuvor gar keine Berechtigungsprüfung, die Erweiterung erhält das
-  bisherige De-facto-offene Verhalten. **Wichtig für künftige Erweiterungen dieser Liste**:
+  bisherige De-facto-offene Verhalten. **Seit P19-S7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md))
+  zusätzlich `archival.read`, `archival.write`, `reporting.read`, `reporting.write`,
+  `reporting.forensic_trace` — gleiches Prinzip für `archival-service`/`reporting-service`. **Wichtig für
+  künftige Erweiterungen dieser Liste**:
   `ensure_everyone_role` aktualisiert eine bereits angelegte "everyone"-Rolle NICHT automatisch (kein
   Migrationsmechanismus, siehe dortiger Docstring) — auf einer bereits laufenden Installation muss eine
   neue Berechtigung einmalig manuell per `PUT /roles/{id}` nachgezogen werden.

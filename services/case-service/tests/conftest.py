@@ -34,6 +34,11 @@ os.environ["DMS_PERMISSION_SERVICE_BASE_URL"] = PERMISSION_SERVICE_URL
 # Muster hier dupliziert statt geteilt, da beide Services unabhängig
 # testbar bleiben sollen).
 CONFIG_ADMIN_PRINCIPAL_ID = "case-service-test-config-admin"
+# Post-Roadmap Phase 19 Session 6 (ADR 0071): `PUT /roles/{id}` verlangt seit
+# dieser Session `admin.user_management` - separates Testprincipal, da
+# `CONFIG_ADMIN_PRINCIPAL_ID` oben nur `domain-admin-config`
+# (`admin.object_config`) hält, siehe `everyone_role_without` unten.
+ROLE_ADMIN_PRINCIPAL_ID = "case-service-test-role-admin"
 
 
 @pytest.fixture
@@ -60,7 +65,11 @@ def everyone_role_without():
     Rolle, um den Negativpfad (fehlende Berechtigung -> 403) zu beweisen -
     stellt die ursprüngliche Liste danach wieder her. Gleiches Muster wie
     `auth-service/tests/conftest.py::everyone_role_without`, hier dupliziert
-    statt geteilt (beide Services unabhängig testbar, Projektkonvention)."""
+    statt geteilt (beide Services unabhängig testbar, Projektkonvention).
+    Seit Post-Roadmap Phase 19 Session 6 (ADR 0071) verlangt `PUT
+    /roles/{id}` zusätzlich `admin.user_management` per `X-DMS-Principal`
+    (siehe `_grant_role_admin_permission` unten)."""
+    role_management_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
     with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
         roles = pc.get("/roles").json()
         everyone = next(r for r in roles if r["name"] == "everyone")
@@ -73,6 +82,7 @@ def everyone_role_without():
                     "description": everyone["description"],
                     "permissions": [p for p in original_permissions if p != permission],
                 },
+                headers=role_management_headers,
             ).raise_for_status()
 
         yield _remove
@@ -80,6 +90,7 @@ def everyone_role_without():
         pc.put(
             f"/roles/{everyone['id']}",
             json={"description": everyone["description"], "permissions": original_permissions},
+            headers=role_management_headers,
         ).raise_for_status()
 
 
@@ -100,6 +111,32 @@ async def _grant_config_admin_permission():
             json={
                 "principal_type": "user",
                 "principal_id": CONFIG_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_role_admin_permission():
+    """Post-Roadmap Phase 19 Session 6 (ADR 0071): `PUT /roles/{id}`
+    verlangt seither `admin.user_management` - gleiches Idempotenz-Muster
+    wie `_grant_config_admin_permission` oben, nur mit `domain-admin-users`
+    statt `domain-admin-config`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
+        roles = (await client.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = (
+            await client.get("/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

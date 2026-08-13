@@ -11,6 +11,10 @@ class Settings(BaseServiceSettings):
     storage_service_base_url: str = "http://localhost:8005"
     object_type_service_base_url: str = "http://localhost:8007"
     case_service_base_url: str = "http://localhost:8016"
+    # RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - archival-service hatte
+    # bislang gar keine allgemeine Berechtigungsprüfung (nur `archive_retrieval_
+    # role` unten, ein separates, engeres Gate für die Rückholung).
+    permission_service_base_url: str = "http://localhost:8004"
 
     # Poll-Intervall fuer faellige Aussonderungs-/Dehydrierungs-Ticks (5.6) -
     # gleiches Idiom wie document-service's `_retention_poll_loop`/reporting-

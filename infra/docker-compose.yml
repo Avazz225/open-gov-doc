@@ -767,6 +767,7 @@ services:
       DMS_AUDIT_SERVICE_BASE_URL: http://audit-service:8000
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_NOTIFICATION_SERVICE_BASE_URL: http://notification-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       # Extern erreichbare Gateway-Adresse fuer Downloadlinks in geplanten
       # Berichts-E-Mails (5.4a, seit P7-S2b) - bewusst nicht die interne
       # Docker-DNS-Adresse, siehe settings.py.
@@ -786,6 +787,8 @@ services:
       storage-service:
         condition: service_started
       notification-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net
@@ -807,6 +810,7 @@ services:
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       # XDOMEA-Aussonderung fuer Umlaufmappen (5.6, seit P7-S3b)
       DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_ARCHIVAL_POLL_INTERVAL_SECONDS: ${ARCHIVAL_SERVICE_POLL_INTERVAL_SECONDS:-3600}
       DMS_DEHYDRATION_DELAY_DAYS: ${ARCHIVAL_SERVICE_DEHYDRATION_DELAY_DAYS:-30}
       DMS_ARCHIVE_RETRIEVAL_ROLE: ${ARCHIVAL_SERVICE_RETRIEVAL_ROLE:-dms-admin}
@@ -828,6 +832,8 @@ services:
       object-type-service:
         condition: service_started
       case-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net
