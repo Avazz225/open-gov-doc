@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
+from permission_service import repository
 from permission_service.main import app
 from permission_service.settings import ROOT_RESOURCE_ID
 
@@ -91,7 +92,9 @@ def test_full_flow_via_api(client):
     ).json()["role_assignment"]
 
     effective = client.get(f"/effective-permissions/carol/{ROOT_RESOURCE_ID}").json()
-    assert set(effective["permissions"]) == {"read", "write"}
+    # Seit Phase 19 Session 2 ("everyone"-Gruppe, ADR 0067) hat JEDER Principal
+    # zusätzlich die an der Wurzelressource geseedete "everyone"-Basisrolle.
+    assert set(effective["permissions"]) == {"read", "write", *repository.EVERYONE_ROLE_PERMISSIONS}
 
     allowed = client.get(
         "/check",
@@ -249,7 +252,9 @@ def test_list_role_assignments_filters_by_principal_id(client):
     assert principal_ids == {"erin"}
 
     after = client.get(f"/effective-permissions/carol/{ROOT_RESOURCE_ID}").json()
-    assert after["permissions"] == []
+    # Seit Phase 19 Session 2 ("everyone"-Gruppe, ADR 0067) ist die Liste nicht
+    # mehr leer, sondern die an der Wurzelressource geseedete Basisrolle.
+    assert after["permissions"] == sorted(repository.EVERYONE_ROLE_PERMISSIONS)
 
 
 def test_scope_lock_with_unknown_resource_returns_404(client):

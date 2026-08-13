@@ -792,3 +792,75 @@ async def test_is_active_deputy_for_respects_folder_and_object_type_scope(sessio
         object_type_id=3,
         folder_resource_id="folder-b",
     )
+
+
+async def test_ensure_everyone_role_seeds_role_and_root_assignment(session):
+    await repository.ensure_everyone_role(session)
+
+    role = await repository.get_role_by_name(session, repository.EVERYONE_ROLE_NAME)
+    assert role is not None
+    assert role.permissions == repository.EVERYONE_ROLE_PERMISSIONS
+    assignments = await repository.list_role_assignments(
+        session, principal_id=repository.EVERYONE_PRINCIPAL_ID, resource_id=ROOT_RESOURCE_ID
+    )
+    assert len(assignments) == 1
+    assert assignments[0].principal_type == repository.EVERYONE_PRINCIPAL_TYPE
+    assert assignments[0].role_id == role.id
+
+
+async def test_ensure_everyone_role_is_idempotent(session):
+    await repository.ensure_everyone_role(session)
+    await repository.ensure_everyone_role(session)
+
+    roles = await repository.list_roles(session)
+    assert len([r for r in roles if r.name == repository.EVERYONE_ROLE_NAME]) == 1
+    assignments = await repository.list_role_assignments(
+        session, principal_id=repository.EVERYONE_PRINCIPAL_ID, resource_id=ROOT_RESOURCE_ID
+    )
+    assert len(assignments) == 1
+
+
+async def test_everyone_assignment_applies_to_an_arbitrary_unknown_principal(session):
+    await repository.ensure_everyone_role(session)
+
+    entry = await repository.get_effective_permissions(
+        session, "some-random-principal", ROOT_RESOURCE_ID
+    )
+
+    assert set(entry.permissions) == set(repository.EVERYONE_ROLE_PERMISSIONS)
+    assert entry.roles == [repository.EVERYONE_ROLE_NAME]
+
+
+async def test_everyone_assignment_is_inherited_like_any_root_assignment(session):
+    await repository.ensure_everyone_role(session)
+    await _add_child(session, "folder-a")
+
+    entry = await repository.get_effective_permissions(session, "some-random-principal", "folder-a")
+
+    assert set(entry.permissions) == set(repository.EVERYONE_ROLE_PERMISSIONS)
+
+
+async def test_everyone_assignment_respects_broken_inheritance(session):
+    await repository.ensure_everyone_role(session)
+    await _add_child(session, "folder-a", inherit=False)
+
+    entry = await repository.get_effective_permissions(session, "some-random-principal", "folder-a")
+
+    assert entry.permissions == []
+    assert entry.roles == []
+
+
+async def test_everyone_assignment_combines_with_individual_assignment(session):
+    await repository.ensure_everyone_role(session)
+    editor = await repository.create_role(session, "Editor", "", ["document.write"])
+    await repository.create_role_assignment(
+        session,
+        principal_type="user",
+        principal_id="alice",
+        role_id=editor.id,
+        resource_id=ROOT_RESOURCE_ID,
+    )
+
+    entry = await repository.get_effective_permissions(session, "alice", ROOT_RESOURCE_ID)
+
+    assert set(entry.permissions) == {"document.write", *repository.EVERYONE_ROLE_PERMISSIONS}

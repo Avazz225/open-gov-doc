@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with app.state.session_factory() as session:
         await repository.ensure_root_resource(session)
         await repository.ensure_domain_admin_roles(session)
+        await repository.ensure_everyone_role(session)
         # Break-Glass-Aktivierung (4.6) verlangt zwingend Vier-Augen mit
         # Gruppenbindung - anders als Force-Unlock/Bereichssperren (P6-S4)
         # bewusst schon beim Seeding als `requires_approval=True` mit

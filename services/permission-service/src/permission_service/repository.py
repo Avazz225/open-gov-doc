@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from permission_service.models import (
@@ -137,6 +137,54 @@ async def ensure_domain_admin_roles(session: AsyncSession) -> None:
             await create_role(session, name, description, permissions)
 
 
+# "everyone"-Gruppe (Post-Roadmap Phase 19 Session 2, ADR 0067): jeder
+# authentifizierte Principal ist implizit Mitglied, ohne dass irgendein Konto
+# einzeln zugewiesen werden muss - `_collect_effective_roles` unten
+# behandelt eine `RoleAssignment` mit genau diesem
+# `(principal_type, principal_id)`-Paar an jedem durchlaufenen Resource-Knoten
+# als für JEDEN Principal zutreffend. Ersetzt die zuvor hartkodierten
+# "jeder authentifizierte Nutzer darf..."-Bypässe in `auth-service`
+# (`GET /users/lookup`, `GET /users/directory`, siehe P19-S3) durch eine
+# echte, admin-editierbare Rolle - am Ist-Verhalten ändert die Umstellung
+# selbst nichts, nur die Durchsetzung wird systemeigen statt fest verdrahtet.
+EVERYONE_PRINCIPAL_TYPE = "group"
+EVERYONE_PRINCIPAL_ID = "everyone"
+EVERYONE_ROLE_NAME = "everyone"
+EVERYONE_ROLE_DESCRIPTION = (
+    "Jeder authentifizierte Principal (implizite Mitgliedschaft, keine Zuweisung pro Konto nötig)"
+)
+EVERYONE_ROLE_PERMISSIONS: list[str] = ["users.lookup", "users.directory"]
+
+
+async def ensure_everyone_role(session: AsyncSession) -> None:
+    """Idempotent (gleiches Muster wie `ensure_domain_admin_roles`) - legt
+    zusätzlich zur Rolle selbst auch deren `RoleAssignment` an der
+    Wurzelressource an, da die "everyone"-Gruppe (anders als Domain-Admin-
+    Rollen) kein externes Konto hat, dem die Zuweisung sonst zugeordnet
+    würde. Läuft NACH `ensure_root_resource` (braucht `ROOT_RESOURCE_ID` als
+    FK-Ziel) und bewusst direkt gegen die Session statt über den
+    Vier-Augen-gegateten `POST /role-assignments`-Endpunkt - dies ist
+    Bootstrap-Infrastruktur wie `ensure_domain_admin_roles`, keine
+    Laufzeit-Admin-Aktion."""
+    role = await get_role_by_name(session, EVERYONE_ROLE_NAME)
+    if role is None:
+        role = await create_role(
+            session, EVERYONE_ROLE_NAME, EVERYONE_ROLE_DESCRIPTION, EVERYONE_ROLE_PERMISSIONS
+        )
+
+    existing_assignments = await list_role_assignments(
+        session, principal_id=EVERYONE_PRINCIPAL_ID, resource_id=ROOT_RESOURCE_ID
+    )
+    if not any(a.role_id == role.id for a in existing_assignments):
+        await create_role_assignment(
+            session,
+            principal_type=EVERYONE_PRINCIPAL_TYPE,
+            principal_id=EVERYONE_PRINCIPAL_ID,
+            role_id=role.id,
+            resource_id=ROOT_RESOURCE_ID,
+        )
+
+
 async def create_role_assignment(
     session: AsyncSession, *, principal_type: str, principal_id: str, role_id: int, resource_id: str
 ) -> RoleAssignment:
@@ -201,6 +249,11 @@ async def _collect_effective_roles(
     Ein Knoten mit ``inherit=False`` beendet den Aufstieg NACH Auswertung
     seiner eigenen Zuweisungen (4.1: Vererbung mit Override-Möglichkeit,
     Standard-DMS-Verhalten wie SharePoint/Alfresco).
+
+    Schließt seit Phase 19 Session 2 zusätzlich Zuweisungen an die
+    "everyone"-Gruppe ein (``principal_type="group", principal_id="everyone"``,
+    siehe ``ensure_everyone_role``) - jeder authentifizierte Principal gilt
+    dafür implizit als Mitglied, unabhängig von seiner eigenen `principal_id`.
     """
     collected: dict[int, Role] = {}
     current_id: str | None = resource_id
@@ -213,7 +266,13 @@ async def _collect_effective_roles(
         result = await session.execute(
             select(RoleAssignment).where(
                 RoleAssignment.resource_id == current_id,
-                RoleAssignment.principal_id == principal_id,
+                or_(
+                    RoleAssignment.principal_id == principal_id,
+                    and_(
+                        RoleAssignment.principal_type == EVERYONE_PRINCIPAL_TYPE,
+                        RoleAssignment.principal_id == EVERYONE_PRINCIPAL_ID,
+                    ),
+                ),
             )
         )
         for assignment in result.scalars().all():

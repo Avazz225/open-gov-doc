@@ -46,7 +46,7 @@
 
 - `resource_node`: `resource_id` (PK), `parent_id` (self-FK, nullable), `resource_type`, `inherit` (bool). Wurzelknoten `"root"` wird beim Start idempotent angelegt.
 - `role`: `id`, `name` (unique), `description`, `permissions` (JSON-Liste von Capability-Strings, z. B. `["read","write"]`).
-- `role_assignment`: `principal_type` (`user`|`group`), `principal_id`, `role_id`, `resource_id` — unique auf der Kombination.
+- `role_assignment`: `principal_type` (`user`|`group`), `principal_id`, `role_id`, `resource_id` — unique auf der Kombination. `principal_type="group"` war bis Phase 19 Session 2 reine Schema-Deko (nirgends ausgewertet) — seit dieser Session wird genau ein reservierter Wert (`principal_id="everyone"`) tatsächlich verarbeitet, siehe "'everyone'-Gruppe" unten.
 - `effective_permission_cache`: `(principal_id, resource_id)` → `roles`, `permissions`, `computed_at`. Wird bei jeder Rechte-/Strukturänderung **vollständig geleert** (bewusste Vereinfachung, siehe README) statt granular je Teilbaum invalidiert.
 - `scope_lock`: `id` (PK), `resource_id` (FK), `locked_by`, `reason`, `blocks_read` (bool, Default `false`), `expires_at` (nullable), `created_at`, `released_at`/`released_by` (nullable) — nie hart gelöscht, die Aufhebung wird dokumentiert statt die Zeile zu entfernen (Audit-Trail bleibt vollständig).
 - `approval_action_config` (4.3, seit P6-S4): `action_type` (PK, freier String), `requires_approval` (bool, Default `false`), `required_permission` (nullable String, seit **P6-S5**, 4.6), `updated_at`. Fehlt eine Zeile für einen Aktionstyp, gilt implizit `requires_approval=false`/`required_permission=null` (transientes Default-Objekt, nicht persistiert).
@@ -111,6 +111,29 @@ Systemweite Notfallsperre + Wartungsmodus — vollständige Architekturbegründu
 
 Von der angefragten Ressource aus wird die Vorfahrenkette (`parent_id`) nach oben durchlaufen, an jedem Knoten werden die Zuweisungen des Principals gesammelt. Ein Knoten mit `inherit=false` beendet den Aufstieg **nach** Auswertung seiner eigenen Zuweisungen — Standard-DMS-Verhalten (SharePoint/Alfresco), wie in Konzept 4.1 gefordert.
 
+## "everyone"-Gruppe (Post-Roadmap Phase 19, seit Session 2, siehe [ADR 0067](../adr/0067-everyone-gruppe-permission-service.md))
+
+`principal_type="group"` war bis zu dieser Session reine Schema-Deko — `_collect_effective_roles` prüfte
+ausschließlich `RoleAssignment.principal_id == principal_id`. Seit Session 2 wird an jedem durchlaufenen
+Resource-Knoten zusätzlich geprüft, ob eine Zuweisung mit `principal_type="group",
+principal_id="everyone"` existiert — **jeder** authentifizierte Principal gilt dafür implizit als
+Mitglied, unabhängig von seiner eigenen `principal_id`. Der Vererbungsalgorithmus selbst (Vorfahrenkette,
+`inherit=false` stoppt den Aufstieg) gilt für "everyone"-Zuweisungen identisch zu Einzelzuweisungen.
+
+- **`repository.ensure_everyone_role`** (Bootstrap, Lifespan, gleiches idempotentes Muster wie
+  `ensure_domain_admin_roles`) legt sowohl die `Role("everyone")` als auch ihre `RoleAssignment` an der
+  Wurzelressource an — anders als Domain-Admin-Rollen hat "everyone" kein externes Konto, dem die
+  Zuweisung sonst zugeordnet würde.
+- **Aktuell geseedete Berechtigungen**: `users.lookup`, `users.directory` — entsprechen den beiden in
+  `auth-service` seit P14-S6/P15-S4 hartkodiert offenen Endpunkten (`GET /users/lookup`, `GET
+  /users/directory`, bislang ohne jede RBAC-Prüfung). **Diese Session ändert `auth-service` selbst noch
+  nicht** — die eigentliche Umstellung der beiden Endpunkte auf eine echte `has_permission`-Prüfung folgt
+  in P19-S3.
+- **Kein vollständiges Gruppenverwaltungssystem**: `"everyone"` ist die einzige reservierte
+  Gruppen-Kennung, keine benutzerdefinierten Gruppen mit eigener Mitgliederverwaltung. Echte
+  Gruppenmitgliedschaft (z. B. "Nutzer X ist Mitglied von AD-Gruppe Y") bleibt weiterhin ungelöst, siehe
+  "Offene Punkte" unten.
+
 ## Struktur-Synchronisation (Vertrag bestätigt seit P3-S3)
 
 Der Folder Service (P3-S3) implementiert genau den in P2-S2 provisorisch angenommenen Vertrag — keine Anpassung nötig. `structure_consumer.py` abonniert `settings.structure_subjects` (Default `["folder.>"]`) über `NatsEventBusClient(ensure_stream=False)`:
@@ -161,7 +184,7 @@ Noch keine — folgt in Phase 11.
 
 ## Offene Punkte
 
-- Gruppenmitgliedschaft wird nicht aufgelöst: `principal_id` einer Zuweisung muss exakt dem abgefragten Principal entsprechen. Eine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" ist nicht Teil dieser Session (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
+- **Echte, benutzerdefinierte Gruppenmitgliedschaft wird weiterhin nicht aufgelöst** (seit Phase 19 Session 2 nur teilweise behoben, siehe "'everyone'-Gruppe" oben): `principal_id` einer Zuweisung muss weiterhin exakt dem abgefragten Principal entsprechen — mit der einzigen Ausnahme der reservierten `"everyone"`-Kennung, für die JEDER Principal implizit als Mitglied gilt. Eine allgemeine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" (beliebige, admin-definierte Gruppen) ist weiterhin nicht Teil des Systems (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
 - Granularere Cache-Invalidierung (nur betroffener Teilbaum statt gesamter Cache) als spätere Optimierung möglich, ohne die API zu ändern.
 - **Vier-Augen-Prinzip (4.3) ist seit P6-S4 generisch verfügbar, seit P6-S5 auch mit optionaler Rollenbindung (`required_permission`)** — verdrahtet für Bereichssperren, Document-Service-Force-Unlock und Superuser-Break-Glass (`auth.superuser.activate`). Rechte-/Rollenänderungen (`POST /role-assignments`, `POST /roles`) nutzen ihn weiterhin nicht, siehe "Vier-Augen-Approval-Mechanismus" oben.
 - **`scope_object_type_ids`/`scope_folder_resource_ids` einer Delegation (4.4a, seit P14-S11) werden aktuell von keinem Endpunkt ausgewertet** — nur `scope_process_definition_ids` ist bei `GET /delegations/check` tatsächlich wirksam (siehe ADR 0048). Die beiden anderen Felder werden mitgespeichert (Konzept-Wortlaut vollständig abgebildet), aber bräuchten einen zusätzlichen Cross-Service-Umweg über `business_key`, um bei einem konkreten Aufgabenabschluss ausgewertet zu werden — nicht Teil dieser Session.
