@@ -387,12 +387,26 @@ def test_put_retention_unknown_folder_returns_404(client):
     assert response.status_code == 404
 
 
+LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-legal-hold-admin"}
+
+
+def test_create_legal_hold_without_permission_is_403(client):
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    response = client.post(
+        "/legal-holds",
+        json={"folder_id": created["id"], "set_by": "alice", "reason": "Rechtsstreit"},
+        headers={"X-DMS-Principal": "no-legal-hold-permission-user"},
+    )
+    assert response.status_code == 403
+
+
 def test_legal_hold_lifecycle(client):
     created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
 
     create_response = client.post(
         "/legal-holds",
         json={"folder_id": created["id"], "set_by": "alice", "reason": "Rechtsstreit"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert create_response.status_code == 201
     hold_id = create_response.json()["id"]
@@ -402,7 +416,11 @@ def test_legal_hold_lifecycle(client):
     )
     assert len(list_response.json()) == 1
 
-    release_response = client.post(f"/legal-holds/{hold_id}/release", json={"released_by": "bob"})
+    release_response = client.post(
+        f"/legal-holds/{hold_id}/release",
+        json={"released_by": "bob"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
+    )
     assert release_response.status_code == 200
     assert release_response.json()["released_at"] is not None
 
@@ -410,17 +428,29 @@ def test_legal_hold_lifecycle(client):
 def test_release_legal_hold_twice_returns_409(client):
     created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
     hold_id = client.post(
-        "/legal-holds", json={"folder_id": created["id"], "set_by": "alice", "reason": None}
+        "/legal-holds",
+        json={"folder_id": created["id"], "set_by": "alice", "reason": None},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     ).json()["id"]
-    client.post(f"/legal-holds/{hold_id}/release", json={"released_by": "bob"})
+    client.post(
+        f"/legal-holds/{hold_id}/release",
+        json={"released_by": "bob"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
+    )
 
-    response = client.post(f"/legal-holds/{hold_id}/release", json={"released_by": "bob"})
+    response = client.post(
+        f"/legal-holds/{hold_id}/release",
+        json={"released_by": "bob"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
+    )
     assert response.status_code == 409
 
 
 def test_create_legal_hold_unknown_folder_returns_404(client):
     response = client.post(
-        "/legal-holds", json={"folder_id": "does-not-exist", "set_by": "alice", "reason": None}
+        "/legal-holds",
+        json={"folder_id": "does-not-exist", "set_by": "alice", "reason": None},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert response.status_code == 404
 

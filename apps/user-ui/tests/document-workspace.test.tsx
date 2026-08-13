@@ -158,6 +158,7 @@ vi.mock("@/lib/auth-context", async () => {
     ...actual,
     useAuth: () => ({
       user: { sub: "u1", username: "alice", email: null, realm_roles: authState.realmRoles },
+      permissions: [],
       accessToken: "token-123",
       isLoading: false,
       login: vi.fn(),

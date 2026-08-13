@@ -1,5 +1,6 @@
 import os
 
+import httpx
 import pytest
 from dms_db_base import build_engine, make_session_factory
 from folder_service import repository
@@ -16,6 +17,34 @@ DSN = os.environ.get(
 os.environ["DMS_POSTGRES_DSN"] = DSN
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+# Post-Roadmap Phase 19 Session 10 (ADR 0075): `POST /legal-holds`/
+# `.../release` verlangen seither `admin.legal_hold`.
+LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "folder-service-test-legal-hold-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_legal_hold_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-legal-hold")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": LEGAL_HOLD_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": LEGAL_HOLD_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture(autouse=True)

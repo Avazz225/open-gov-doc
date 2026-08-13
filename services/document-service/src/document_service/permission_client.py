@@ -45,5 +45,14 @@ class PermissionServiceClient:
         response.raise_for_status()
         return bool(response.json()["allowed"])
 
+    async def has_permission(self, principal_id: str, permission: str) -> bool:
+        """Post-Roadmap Phase 19 Session 10 (ADR 0075) - Domain-Admin-
+        Capability-Prüfung (`admin.legal_hold`), anders als `check_read`/
+        `check_write` oben keine ressourcenskalierte RBAC-Prüfung, sondern
+        eine globale Rolle an der Wurzelressource."""
+        response = await self._client.get(f"/effective-permissions/{principal_id}/root")
+        response.raise_for_status()
+        return permission in response.json()["permissions"]
+
     async def close(self) -> None:
         await self._client.aclose()

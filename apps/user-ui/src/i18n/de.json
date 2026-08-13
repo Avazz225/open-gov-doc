@@ -166,6 +166,7 @@
     "legalHoldReasonLabel": "Grund für Legal Hold",
     "setLegalHold": "Legal Hold setzen",
     "releaseLegalHold": "Legal Hold aufheben",
+    "legalHoldPermissionHint": "Nur für die Rolle \"Legal-Hold-Verwaltung\" verfügbar",
     "holdError": "Legal Hold konnte nicht geändert werden"
   },
   "folderRetention": {

@@ -145,6 +145,12 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # (Konzept 2.5, wörtlich) ist jetzt eine echte, admin-editierbare Domäne
     # statt eines hartkodierten Keycloak-Realm-Rollennamens.
     ("domain-admin-virus-scan", "Virenschutz-/Quarantäne-Verwaltung", ["admin.quarantine"]),
+    # Post-Roadmap Phase 19 Session 10 (ADR 0075): Konzept 5.2 nennt keine
+    # eigene Rolle für Legal Hold - eine eigene Domäne statt Wiederverwendung
+    # von "domain-admin-deletion" (Löschadministration), da beide inhaltlich
+    # gegensätzlich sind (Hold verhindert Löschung, Deletion-Admin führt sie
+    # aus) - siehe ADR 0075 "Begründung".
+    ("domain-admin-legal-hold", "Legal-Hold-Verwaltung", ["admin.legal_hold"]),
 ]
 
 

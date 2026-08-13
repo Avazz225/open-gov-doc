@@ -1318,6 +1318,26 @@ export async function getApprovalConfig(token: string, actionType: string): Prom
   return response.json();
 }
 
+// Domänengetrennte Admin-Rollen (4.6) - systemeigene Capabilities aus dem
+// Permission Service, NICHT aus `user.realm_roles` (getrennte Quelle,
+// gleiches Muster wie `apps/admin-ui/src/lib/api.ts`s gleichnamige
+// Funktion). Erster Konsument in user-ui: RetentionPanel/FolderRetentionModal
+// (Post-Roadmap Phase 19 Session 10, ADR 0075) blenden den Legal-Hold-
+// Aktionsbutton nur für Principals mit `admin.legal_hold` ein.
+export async function getEffectivePermissions(
+  token: string,
+  principalId: string
+): Promise<string[]> {
+  const response = await request(
+    "permission-service",
+    `effective-permissions/${principalId}/root`,
+    {},
+    token
+  );
+  const body = (await response.json()) as { permissions: string[] };
+  return body.permissions;
+}
+
 export interface ApprovalRequest {
   id: string;
   action_type: string;

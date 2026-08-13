@@ -19,8 +19,8 @@
 | `POST` | `/folders/{id}/trash` | Papierkorb-Weg (5.2, seit P7-S1b) — kaskadiert über den gesamten aktiven Teilbaum. Seit **P7-S1c** optional per Vier-Augen-Prinzip gegated (Aktionstyp `folder.delete`, Löschantrag-Workflow für reguläre Nutzer) — Response `TrashResult{status: "trashed"\|"pending_approval", folder, approval_request_id}`. `409` für `inbox`/`outbox` (seit P15-S3) |
 | `POST` | `/folders/{id}/restore` | Papierkorb-Wiederherstellung inkl. kaskadierter Unterordner/Dokumente (5.2, seit P7-S1b) |
 | `PUT` | `/folders/{id}/retention` | Aufbewahrungsfrist/Zwangslöschung terminieren (5.2/5.2a, seit P7-S1b) |
-| `POST` | `/legal-holds` | Legal Hold setzen (5.2, seit P7-S1b) |
-| `POST` | `/legal-holds/{id}/release` | Legal Hold aufheben |
+| `POST` | `/legal-holds` | Legal Hold setzen (5.2, seit P7-S1b) — seit **Post-Roadmap Phase 19 Session 10** ([ADR 0075](../adr/0075-legal-hold-rbac.md)) `admin.legal_hold`-gegated |
+| `POST` | `/legal-holds/{id}/release` | Legal Hold aufheben — seit **P19-S10** ebenso `admin.legal_hold`-gegated |
 | `GET` | `/legal-holds?folder_id=&active_only=` | Legal Holds eines Ordners |
 | `GET` | `/deletion-register?folder_id=` | Löschregister (5.2a, seit P7-S1b) |
 | `POST` | `/folders/{id}/reconcile-restore-deletion` | Löschabgleich nach Restore (10.4, seit P11-S4) — `X-DMS-Roles: dms-admin`, 1:1 dasselbe Muster wie `document-service` |
@@ -123,7 +123,7 @@ Noch keine — folgt in Phase 11.
 - Kein Endpunkt für Breadcrumb/vollständigen Pfad — nur direkte Kinder abrufbar, für die aktuellen Bedürfnisse ausreichend.
 - Bereichssperren (4.7, "ganzer Ordnerbereich für reguläre Nutzer gesperrt") sind nicht Teil dieser Session — gehören konzeptionell eher zum Permission Service und sind für eine spätere Phase vorgesehen.
 - Kein Rückwirkungs-Check und keine Zyklen-Erkennung für `allowedParentTypes` (siehe ADR 0013) — betrifft dieselbe Einschränkung wie beim Object-Type Service.
-- **Keine Legal-Hold-Rollenprüfung** (5.2, seit P7-S1b) — identische offene Frage wie bei `document-service` (P7-S1).
+- ~~Keine Legal-Hold-Rollenprüfung (5.2, seit P7-S1b) — identische offene Frage wie bei `document-service` (P7-S1)~~ — **behoben in Post-Roadmap Phase 19 Session 10** ([ADR 0075](../adr/0075-legal-hold-rbac.md)), gemeinsam mit `document-service`. Erster Konsument von `libs/dms-permission-client` in diesem Service.
 - **Löschregister nicht Backup-differenziert** (5.2a) — identische Einschränkung wie bei `document-service` (Phase 11 fehlt noch). Bei `document-service` wird das teilweise über die `audit-service`-Hash-Kette kompensiert (`document.>` wird dort konsumiert) — `audit-service` konsumiert bislang **kein** `folder.>` (vorbestehende, nicht in dieser Session eingeführte Lücke), daher fehlt diese Kompensation hier vollständig.
 - **Struktur-Vorlagen prüfen beim Anwenden weder Pflichtattribute noch Eltern-Kind-Objekttyp-Nestingregeln (2.2b)** (seit P15-S6, siehe oben) — bewusste, dokumentierte Vereinfachung (ADR 0056), kein Modus in `object-type-service` für "nur Struktur-, keine Attributprüfung" vorhanden.
 - **`created_by` bei den Vorlagen-Endpunkten bleibt client-seitig im Body** (seit P15-S6) — folgt bewusst dem bereits durchgängig in diesem Service verwendeten Muster (`FolderCreate.created_by`, `TrashRequest.deleted_by`), nicht der neueren, an anderer Stelle im Projekt bereits gehärteten `X-DMS-Principal`-Konvention — vorbestehende, nicht in dieser Session behobene Alt-Lücke des gesamten Service.

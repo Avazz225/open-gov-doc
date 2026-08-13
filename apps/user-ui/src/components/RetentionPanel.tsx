@@ -24,8 +24,14 @@ function toDateInputValue(iso: string | null): string {
 // wird ausschließlich serverseitig durchgesetzt (422 bei Verstoß), hier nur
 // clientseitig gespiegelt über die Fehlermeldung.
 export function RetentionPanel({ document: activeDocument }: { document: DocumentSummary }) {
-  const { accessToken, user } = useAuth();
+  const { accessToken, user, permissions } = useAuth();
   const { t } = useI18n();
+  // RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075): Legal Hold setzen/
+  // aufheben verlangt serverseitig `admin.legal_hold` - der Button bleibt
+  // sichtbar (Statusanzeige gilt für jeden Betrachter), aber nur für
+  // berechtigte Principals aktiv. Das serverseitige 403 bleibt die
+  // eigentliche Durchsetzung, dies ist reines UX.
+  const canManageLegalHold = permissions.includes("admin.legal_hold");
   const [retentionUntil, setRetentionUntil] = useState(
     toDateInputValue(activeDocument.retention_until)
   );
@@ -118,7 +124,12 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
             {t("retention.legalHoldActive", { setBy: activeHold.set_by })}
             {activeHold.reason ? ` (${activeHold.reason})` : ""}
           </p>
-          <button type="button" onClick={handleReleaseHold} disabled={isHoldBusy}>
+          <button
+            type="button"
+            onClick={handleReleaseHold}
+            disabled={isHoldBusy || !canManageLegalHold}
+            title={canManageLegalHold ? undefined : t("retention.legalHoldPermissionHint")}
+          >
             {t("retention.releaseLegalHold")}
           </button>
         </div>
@@ -126,9 +137,18 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
         <div className="legal-hold-form">
           <label>
             {t("retention.legalHoldReasonLabel")}
-            <input value={holdReason} onChange={(e) => setHoldReason(e.target.value)} />
+            <input
+              value={holdReason}
+              onChange={(e) => setHoldReason(e.target.value)}
+              disabled={!canManageLegalHold}
+            />
           </label>
-          <button type="button" onClick={handleSetHold} disabled={isHoldBusy}>
+          <button
+            type="button"
+            onClick={handleSetHold}
+            disabled={isHoldBusy || !canManageLegalHold}
+            title={canManageLegalHold ? undefined : t("retention.legalHoldPermissionHint")}
+          >
             {t("retention.setLegalHold")}
           </button>
         </div>

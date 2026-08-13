@@ -1425,13 +1425,33 @@ async def put_retention(
     return updated
 
 
+async def _require_legal_hold_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075) - Legal Hold setzen/
+    aufheben hatte zuvor GAR KEINE Berechtigungsprüfung. Prüft die neue
+    Domain-Admin-Capability `admin.legal_hold` (Rolle "domain-admin-legal-
+    hold") - bewusst NICHT in der "everyone"-Gruppe, ein Legal Hold ist eine
+    rechtlich bedeutsame, administrative Aktion (5.2), keine reguläre
+    Fachnutzung. `GET /legal-holds` bleibt bewusst ungegatet - jeder Nutzer,
+    der ein Dokument betrachtet, muss sehen können, ob/warum es gesperrt
+    ist."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.legal_hold"):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Legal-Hold-Verwaltung'"
+        )
+
+
 @app.post("/legal-holds", response_model=LegalHoldOut, status_code=status.HTTP_201_CREATED)
 async def create_legal_hold(
-    payload: LegalHoldCreate, session: AsyncSession = Depends(get_session)
+    payload: LegalHoldCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
     """Legal Hold setzen (5.2, seit P7-S1) - überschreibt jede fällige
-    Aktion im Poll-Loop, bis er wieder aufgehoben wird. Keine eigene
-    Rollenprüfung in diesem Grundgerüst (siehe "Offene Punkte")."""
+    Aktion im Poll-Loop, bis er wieder aufgehoben wird. Seit P19-S10
+    `admin.legal_hold`-gegated, siehe `_require_legal_hold_permission`."""
+    await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.create_legal_hold(
             session, payload.document_id, set_by=payload.set_by, reason=payload.reason
@@ -1450,8 +1470,12 @@ async def create_legal_hold(
 
 @app.post("/legal-holds/{hold_id}/release", response_model=LegalHoldOut)
 async def release_legal_hold(
-    hold_id: str, payload: LegalHoldReleaseRequest, session: AsyncSession = Depends(get_session)
+    hold_id: str,
+    payload: LegalHoldReleaseRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
+    await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.release_legal_hold(
             session, hold_id, released_by=payload.released_by

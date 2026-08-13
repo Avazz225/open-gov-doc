@@ -12,6 +12,7 @@ import {
 import {
   ApiError,
   getCurrentUser,
+  getEffectivePermissions,
   login as apiLogin,
   logoutSession,
   refreshToken as apiRefresh,
@@ -62,6 +63,12 @@ function toStoredTokens(response: TokenResponse): StoredTokens {
 
 interface AuthContextValue {
   user: CurrentUser | null;
+  // Domänengetrennte Admin-Rollen (4.6): systemeigene Capabilities aus dem
+  // Permission Service, NICHT aus `user.realm_roles` - getrennte Quelle,
+  // gleiches Muster wie `apps/admin-ui`s Auth-Context (siehe api.ts
+  // `getEffectivePermissions`). Erster Konsument seit Post-Roadmap Phase 19
+  // Session 10 (ADR 0075): `admin.legal_hold`.
+  permissions: string[];
   accessToken: string | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
@@ -78,6 +85,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [tokens, setTokens] = useState<StoredTokens | null>(null);
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     setTokens(null);
     setUser(null);
+    setPermissions([]);
     saveStoredTokens(null);
   }, []);
 
@@ -95,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setTokens(stored);
       const me = await getCurrentUser(stored.accessToken);
       setUser(me);
+      setPermissions(await getEffectivePermissions(stored.accessToken, me.sub));
     },
     []
   );
@@ -149,7 +159,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setTokens(stored);
     getCurrentUser(stored.accessToken)
-      .then(setUser)
+      .then(async (me) => {
+        setUser(me);
+        setPermissions(await getEffectivePermissions(stored.accessToken, me.sub));
+      })
       .catch(() => clearSession())
       .finally(() => setIsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,6 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value: AuthContextValue = {
     user,
+    permissions,
     accessToken: tokens?.accessToken ?? null,
     isLoading,
     login,

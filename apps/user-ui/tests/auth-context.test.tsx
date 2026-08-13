@@ -8,6 +8,7 @@ const getCurrentUserMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   login: (...args: unknown[]) => loginMock(...args),
   getCurrentUser: (...args: unknown[]) => getCurrentUserMock(...args),
+  getEffectivePermissions: vi.fn().mockResolvedValue([]),
   refreshToken: vi.fn(),
   logoutSession: vi.fn().mockResolvedValue(undefined),
   ApiError: class ApiError extends Error {

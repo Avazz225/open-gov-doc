@@ -12,6 +12,12 @@ STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localho
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
+# Muss mit conftest.py::ROLE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
+# `_grant_role_admin_permission`-Fixture berechtigt) - kein Cross-File-Import
+# von Test-Konstanten, gleiche Projektkonvention wie andernorts.
+ROLE_ADMIN_PRINCIPAL_ID = "document-service-test-role-admin"
+LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "document-service-test-legal-hold-admin"
+LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": LEGAL_HOLD_ADMIN_PRINCIPAL_ID}
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
@@ -65,6 +71,7 @@ def _grant_root_permission(principal_id: str, permission: str, role_prefix: str)
                 "name": f"{role_prefix}-{uuid.uuid4().hex[:8]}",
                 "permissions": [permission],
             },
+            headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
             timeout=30.0,
         )
         role.raise_for_status()
@@ -1241,12 +1248,23 @@ def test_count_active_total_counts_across_all_folders(client):
     assert response.json()["count"] == 1
 
 
+def test_create_legal_hold_without_permission_is_403(client):
+    document_id = upload(client).json()["id"]
+    response = client.post(
+        "/legal-holds",
+        json={"document_id": document_id, "set_by": "alice", "reason": "Rechtsstreit"},
+        headers={"X-DMS-Principal": "no-legal-hold-permission-user"},
+    )
+    assert response.status_code == 403
+
+
 def test_legal_hold_lifecycle(client):
     document_id = upload(client).json()["id"]
 
     create_response = client.post(
         "/legal-holds",
         json={"document_id": document_id, "set_by": "alice", "reason": "Rechtsstreit"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert create_response.status_code == 201
     hold = create_response.json()
@@ -1258,7 +1276,9 @@ def test_legal_hold_lifecycle(client):
     assert len(list_response.json()) == 1
 
     release_response = client.post(
-        f"/legal-holds/{hold['id']}/release", json={"released_by": "bob"}
+        f"/legal-holds/{hold['id']}/release",
+        json={"released_by": "bob"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert release_response.status_code == 200
     assert release_response.json()["released_by"] == "bob"
@@ -1272,18 +1292,30 @@ def test_legal_hold_lifecycle(client):
 def test_release_legal_hold_twice_returns_409(client):
     document_id = upload(client).json()["id"]
     hold = client.post(
-        "/legal-holds", json={"document_id": document_id, "set_by": "alice", "reason": None}
+        "/legal-holds",
+        json={"document_id": document_id, "set_by": "alice", "reason": None},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     ).json()
-    client.post(f"/legal-holds/{hold['id']}/release", json={"released_by": "alice"})
+    client.post(
+        f"/legal-holds/{hold['id']}/release",
+        json={"released_by": "alice"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
+    )
 
-    response = client.post(f"/legal-holds/{hold['id']}/release", json={"released_by": "alice"})
+    response = client.post(
+        f"/legal-holds/{hold['id']}/release",
+        json={"released_by": "alice"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
+    )
 
     assert response.status_code == 409
 
 
 def test_create_legal_hold_unknown_document_returns_404(client):
     response = client.post(
-        "/legal-holds", json={"document_id": "does-not-exist", "set_by": "alice", "reason": None}
+        "/legal-holds",
+        json={"document_id": "does-not-exist", "set_by": "alice", "reason": None},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert response.status_code == 404
 
@@ -1833,7 +1865,9 @@ def test_has_active_hold_reflects_legal_hold_state(client):
     }
 
     hold_response = client.post(
-        "/legal-holds", json={"document_id": document_id, "set_by": "alice"}
+        "/legal-holds",
+        json={"document_id": document_id, "set_by": "alice"},
+        headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert hold_response.status_code == 201
 

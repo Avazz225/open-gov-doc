@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy import text
@@ -258,6 +259,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.document_client = DocumentClient(settings.document_service_base_url)
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="folder")
     await event_bus.connect()
@@ -302,6 +304,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.object_type_client.close()
     await app.state.document_client.close()
     await app.state.approval_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -728,14 +731,29 @@ async def put_retention(
     return updated
 
 
+async def _require_legal_hold_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075) - identisches
+    Muster wie `document-service`s gleichnamiger Helfer: prüft die neue
+    Domain-Admin-Capability `admin.legal_hold`, bewusst NICHT in der
+    "everyone"-Gruppe. `GET /legal-holds` bleibt ungegatet."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.legal_hold"):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Legal-Hold-Verwaltung'"
+        )
+
+
 @app.post("/legal-holds", response_model=LegalHoldOut, status_code=status.HTTP_201_CREATED)
 async def create_legal_hold(
-    payload: LegalHoldCreate, session: AsyncSession = Depends(get_session)
+    payload: LegalHoldCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
     """Legal Hold setzen (5.2, seit P7-S1b) - überschreibt jede fällige
-    Aktion im Poll-Loop, bis er wieder aufgehoben wird. Keine eigene
-    Rollenprüfung in diesem Grundgerüst (identisches offenes Wissen wie
-    document-service, P7-S1)."""
+    Aktion im Poll-Loop, bis er wieder aufgehoben wird. Seit P19-S10
+    `admin.legal_hold`-gegated, siehe `_require_legal_hold_permission`."""
+    await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.create_legal_hold(
             session, payload.folder_id, set_by=payload.set_by, reason=payload.reason
@@ -754,8 +772,12 @@ async def create_legal_hold(
 
 @app.post("/legal-holds/{hold_id}/release", response_model=LegalHoldOut)
 async def release_legal_hold(
-    hold_id: str, payload: LegalHoldReleaseRequest, session: AsyncSession = Depends(get_session)
+    hold_id: str,
+    payload: LegalHoldReleaseRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
+    await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.release_legal_hold(
             session, hold_id, released_by=payload.released_by
