@@ -13,6 +13,7 @@ dependencies = [
     "dms-db-base",
     "dms-registry-client",
     "dms-permission-client",
+    "dms-retry",
 ]
 
 [tool.uv.sources]
@@ -20,6 +21,7 @@ dms-common = { workspace = true }
 dms-db-base = { workspace = true }
 dms-registry-client = { workspace = true }
 dms-permission-client = { workspace = true }
+dms-retry = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -45,6 +45,7 @@ async def _archival_poll_loop(session_factory) -> None:
                 object_type_client=app.state.object_type_client,
                 storage_client=app.state.storage_client,
                 keystore=app.state.keystore,
+                max_attempts=settings.max_archival_attempts,
             )
         except Exception:
             logger.exception(
@@ -72,6 +73,7 @@ async def _archival_poll_loop(session_factory) -> None:
                 storage_client=app.state.storage_client,
                 keystore=app.state.keystore,
                 encryption_enabled=case_config.get("archive_encryption_enabled", False),
+                max_attempts=settings.max_archival_attempts,
             )
         except Exception:
             logger.exception(
@@ -89,6 +91,35 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS archival"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Migration fuer bereits laufende Installationen (Post-Roadmap
+        # Phase 20 Session 2, ADR 0078) - `create_all` legt neue Tabellen an,
+        # aendert aber keine bestehenden. `IF NOT EXISTS` macht dies idempotent,
+        # betrifft nur additive, defaultbehaftete Spalten (gleiches Muster wie
+        # document-service's `main.py`-Lifespan).
+        await conn.execute(
+            text(
+                "ALTER TABLE archival.archival_transfer "
+                "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE archival.archival_transfer "
+                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE archival.case_archival_transfer "
+                "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE archival.case_archival_transfer "
+                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -188,6 +219,34 @@ async def get_archival_transfer(
         return await repository.get_transfer(session, transfer_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/archival-transfers/{transfer_id}/retry", response_model=ArchivalTransferOut)
+async def retry_archival_transfer(
+    transfer_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ArchivalTransferOut:
+    """Manueller Neustart eines dauerhaft fehlgeschlagenen Transfers
+    (Post-Roadmap Phase 20 Session 2, ADR 0078) - nur fuer `failed_permanent`
+    sinnvoll (409 sonst, ein noch aktiver oder bereits abgeschlossener
+    Transfer braucht keinen manuellen Neustart)."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    try:
+        transfer = await repository.get_transfer(session, transfer_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if transfer.status != "failed_permanent":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Transfer hat Status {transfer.status!r}, nur 'failed_permanent' "
+                "kann erneut versucht werden"
+            ),
+        )
+    await repository.reset_for_retry(session, transfer)
+    await session.commit()
+    return transfer
 
 
 @app.post("/archival-transfers/{transfer_id}/retrieve", response_model=ArchivalTransferOut)
@@ -313,6 +372,32 @@ async def get_case_archival_transfer(
         return await repository.get_case_transfer(session, transfer_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/case-archival-transfers/{transfer_id}/retry", response_model=CaseArchivalTransferOut)
+async def retry_case_archival_transfer(
+    transfer_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> CaseArchivalTransferOut:
+    """Case-Pendant zu `retry_archival_transfer` oben (Post-Roadmap Phase 20
+    Session 2, ADR 0078)."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    try:
+        transfer = await repository.get_case_transfer(session, transfer_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if transfer.status != "failed_permanent":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Transfer hat Status {transfer.status!r}, nur 'failed_permanent' "
+                "kann erneut versucht werden"
+            ),
+        )
+    await repository.reset_for_retry(session, transfer)
+    await session.commit()
+    return transfer
 
 
 @app.get("/case-archival-transfers/{transfer_id}/package")

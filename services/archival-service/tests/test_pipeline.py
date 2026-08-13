@@ -225,7 +225,9 @@ async def test_advance_transfer_encrypts_when_object_type_requires_it(session):
     assert stored != rendering_client.content
 
 
-async def test_run_active_transfers_tick_marks_failed_on_verification_mismatch(session_factory):
+async def test_run_active_transfers_tick_reaches_failed_permanent_on_verification_mismatch(
+    session_factory,
+):
     async with session_factory() as session:
         await repository.create_transfer(session, "doc-1")
         await session.commit()
@@ -244,13 +246,48 @@ async def test_run_active_transfers_tick_marks_failed_on_verification_mismatch(s
         object_type_client=FakeObjectTypeClient(),
         storage_client=storage_client,
         keystore=EnvKeyStore(None),
+        max_attempts=1,
     )
 
     async with session_factory() as session:
         transfer = await repository.get_active_transfer_for_document(session, "doc-1")
         assert transfer is None
-        [failed] = await repository.list_transfers(session, status="failed")
+        [failed] = await repository.list_transfers(session, status="failed_permanent")
         assert "Verifikation" in failed.error_message
+
+
+async def test_run_active_transfers_tick_keeps_transfer_active_below_max_attempts(
+    session_factory,
+):
+    """Post-Roadmap Phase 20 Session 2 (ADR 0078): unterhalb von
+    `max_attempts` bleibt der Transfer in seiner Phase und im aktiven Satz
+    (mit gesetztem `next_retry_at`), statt sofort dauerhaft zu scheitern."""
+    async with session_factory() as session:
+        await repository.create_transfer(session, "doc-1b")
+        await session.commit()
+
+    doc_client = FakeDocumentClient(
+        documents={"doc-1b": {"id": "doc-1b", "current_version_number": 1, "object_type_id": None}},
+    )
+    rendering_client = FakeRenderingClient(renditions={("doc-1b", 1): _ready_rendition()})
+    storage_client = FakeStorageClient()
+    storage_client.verify_ok = False
+
+    await pipeline.run_active_transfers_tick(
+        session_factory,
+        document_client=doc_client,
+        rendering_client=rendering_client,
+        object_type_client=FakeObjectTypeClient(),
+        storage_client=storage_client,
+        keystore=EnvKeyStore(None),
+        max_attempts=5,
+    )
+
+    async with session_factory() as session:
+        transfer = await repository.get_active_transfer_for_document(session, "doc-1b")
+        assert transfer is not None
+        assert transfer.attempts == 1
+        assert transfer.next_retry_at is not None
 
 
 async def test_run_dehydration_tick_skips_document_with_active_hold(session_factory):

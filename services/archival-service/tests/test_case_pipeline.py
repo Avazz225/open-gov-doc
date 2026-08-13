@@ -170,7 +170,9 @@ async def test_advance_case_transfer_encrypts_when_requested(session):
         zipfile.ZipFile(io.BytesIO(stored))
 
 
-async def test_run_case_transfers_tick_marks_failed_on_verification_mismatch(session_factory):
+async def test_run_case_transfers_tick_reaches_failed_permanent_on_verification_mismatch(
+    session_factory,
+):
     async with session_factory() as session:
         await repository.create_case_transfer(session, "case-1")
         await session.commit()
@@ -193,10 +195,11 @@ async def test_run_case_transfers_tick_marks_failed_on_verification_mismatch(ses
         storage_client=storage_client,
         keystore=EnvKeyStore(None),
         encryption_enabled=False,
+        max_attempts=1,
     )
 
     async with session_factory() as session:
         transfer = await repository.get_active_case_transfer_for_case(session, "case-1")
         assert transfer is None
-        [failed] = await repository.list_case_transfers(session, status="failed")
+        [failed] = await repository.list_case_transfers(session, status="failed_permanent")
         assert "Verifikation" in failed.error_message

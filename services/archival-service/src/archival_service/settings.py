@@ -21,6 +21,12 @@ class Settings(BaseServiceSettings):
     # service's `_report_schedule_poll_loop`.
     archival_poll_interval_seconds: int = 3600
 
+    # Retry/Backoff (Post-Roadmap Phase 20 Session 2, ADR 0078) - gleicher
+    # Zahlenwert wie storage-service's bereits bestehendes
+    # `max_replication_attempts`, hier fuer beide Transfer-Arten geteilt.
+    # Nach Erschoepfung wechselt der Transfer auf `failed_permanent`.
+    max_archival_attempts: int = 5
+
     # Uebergangsfrist (5.6) zwischen erfolgreicher Archivierung
     # ("released") und dem Entfernen der Live-Speicherkopie ("dehydrated") -
     # macht eine versehentliche Aussonderung leicht revidierbar, ohne gleich

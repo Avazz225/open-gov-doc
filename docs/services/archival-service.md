@@ -20,17 +20,34 @@
 
 ## Zustandsmaschine
 
-`ArchivalTransfer.status`: `pending → locked → copied → verified → released → dehydrated` (+ `failed` mit `error_message`, erreichbar aus jedem aktiven Zwischenstatus).
+`ArchivalTransfer.status`: `pending → locked → copied → verified → released → dehydrated` (+
+`failed_permanent` mit `error_message`, erreichbar erst nach Erschöpfung von
+`Settings.max_archival_attempts`, seit Post-Roadmap Phase 20 Session 2, [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)).
 
 | Status | Bedeutung | Übergang ausgelöst durch |
 |---|---|---|
 | `pending` | Transfer angelegt, noch nicht bearbeitet | `discover_due_transfers` (Phase 1 jedes Ticks) — legt für jedes fällige, noch nicht in Bearbeitung befindliche Dokument (`GET /documents/due-for-archival`) genau eine Zeile an |
 | `locked` | Bearbeitung begonnen | Symbolische Markierung (kein verteiltes Lock-System, nur eine Instanz dieses Service vorgesehen) — sucht die `pdf_archive`-Rendition der aktuellen Dokumentversion; solange sie noch nicht `ready` ist, bleibt der Transfer hier stehen (kein Fehler, nächster Tick versucht es erneut) |
 | `copied` | Archivkopie geschrieben | Rendition heruntergeladen, optional verschlüsselt (`ObjectType.archive_encryption_enabled`), per `PUT /objects/{key}/archive-copy` auf die Archiv-Ziele geschrieben |
-| `verified` | Fixity-Check bestanden | `GET /objects/{key}/archive-copy/verify` — alle zurückgegebenen Kopien müssen `ok` sein, sonst `failed` |
+| `verified` | Fixity-Check bestanden | `GET /objects/{key}/archive-copy/verify` — alle zurückgegebenen Kopien müssen `ok` sein, sonst bleibt die Phase erhalten (siehe unten) |
 | `released` | Dokument als archiviert markiert | `PUT /documents/{id}/archived` (document-service publiziert `document.archived`) |
 | `dehydrated` | Live-Kopie entfernt | Zweite, unabhängige Tick-Phase (`run_dehydration_tick`): `released_at + dehydration_delay_days <= now`, kein aktiver Legal Hold (`GET /documents/{id}/has-active-hold`) → `DELETE /objects/{key}/live-copies` + `PUT /documents/{id}/dehydrated` |
-| `failed` | Ein Schritt ist technisch fehlgeschlagen | Konvertierung fehlgeschlagen (`rendition.status == "failed"`), Verifikation nicht `ok`, oder eine unerwartete Exception — `error_message` enthält den Grund, kein automatischer Retry (bleibt terminal) |
+| `failed_permanent` | `max_archival_attempts` erschöpft | Ein technischer Fehlschlag (Konvertierung, Verifikation, unerwartete Exception) erhöht `attempts`; unterhalb des Limits bleibt `status` in seiner aktuellen Phase (nur `error_message`/`next_retry_at` ändern sich, siehe "Retry & Backoff" unten) — erst beim letzten erlaubten Versuch wechselt `status` hierher |
+
+### Retry & Backoff (Post-Roadmap Phase 20 Session 2, [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md))
+
+Ein Fehlschlag **unterhalb** von `Settings.max_archival_attempts` (Default 5) verlässt NICHT die
+aktuelle Phase — `attempts` wird erhöht, `error_message` gesetzt, und `next_retry_at` per
+`compute_backoff_seconds` (`libs/dms-retry`, Full-Jitter-Exponentiell-Backoff) auf einen Zeitpunkt in
+der nahen Zukunft gesetzt. `list_active_transfers` überspringt einen Transfer, dessen `next_retry_at`
+noch in der Zukunft liegt — der nächste Poll-Tick, der NACH diesem Zeitpunkt läuft, greift ihn wieder
+auf und versucht dieselbe Phase erneut. Erst beim `max_archival_attempts`-ten erfolglosen Versuch
+wechselt `status` auf `failed_permanent` (terminal, `next_retry_at=null`).
+
+`POST /archival-transfers/{id}/retry` (`archival.write`-gegated) startet einen `failed_permanent`-
+Transfer manuell neu: `409` wenn der Transfer nicht `failed_permanent` ist, sonst Rücksetzung auf
+`status="pending"`, `attempts=0`, `next_retry_at=null`, `error_message=null` — die Pipeline beginnt von
+vorne (jede Phase holt ihre Eingaben ohnehin frisch, ein Neustart ist idempotent).
 
 `retrieve_archival_transfer` (Rückholung) setzt einen `released`/`dehydrated`-Transfer zurück auf `status="released"` mit neu gesetztem `released_at`/`rehydrated_at` und `dehydrated_at=null` — die Übergangsfrist bis zur nächsten Dehydrierung beginnt dadurch bewusst neu, statt sofort wieder fällig zu sein. **Achtung bei `dehydration_delay_days=0`** (z. B. zu Testzwecken): die Fälligkeitsprüfung (`released_at <= now - delay_days`) macht dann *jeden* `released`-Transfer sofort wieder fällig — eine Rückholung wird vom nächsten Tick umgehend erneut dehydriert, obwohl `released_at` gerade erst neu gesetzt wurde. Live verifiziert (siehe `PROGRESS.md` "P7-S3"); mit einer realistischen Frist (Produktions-Default 30 Tage) bleibt der wiederhergestellte Inhalt wie vorgesehen für die volle Übergangsfrist erreichbar.
 
@@ -40,6 +57,7 @@
 |---|---|---|
 | `GET` | `/archival-transfers?status=...` | Alle Transfers, optional nach Status gefiltert (Admin-UI-Statustabelle) — seit **P19-S7** `archival.read`-gegated |
 | `GET` | `/archival-transfers/{id}` | Einzelner Transfer — `404` bei unbekannter `id`; seit **P19-S7** `archival.read`-gegated |
+| `POST` | `/archival-transfers/{id}/retry` | Manueller Neustart (seit **P20-S2**, [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)) — `404` bei unbekanntem Transfer, `409` wenn `status != "failed_permanent"`, `archival.write`-gegated |
 | `POST` | `/archival-transfers/{id}/retrieve` | Rückholung — `403` ohne `archive_retrieval_role` im `X-DMS-Roles`-Header, `404` bei unbekanntem Transfer, `409` wenn der Transfer nicht `released`/`dehydrated` ist (noch keine verlässliche Archivkopie); seit **P19-S7** zusätzlich `archival.write`-gegated (RBAC läuft vor dem Rollen-Gate) |
 | `GET` | `/released-items?q=` | Aussonderungs-Zugriffsbereich (2.5, seit **P15-S5**) — hydratisierte, durchsuchbare Sicht auf `released`-Dokumente UND -Umlaufmappen kombiniert, `403` ohne `archive_retrieval_role`, siehe "Aussonderungs-Zugriffsbereich" unten; seit **P19-S7** zusätzlich `archival.read`-gegated |
 | `GET` | `/healthz` | Health-Check |
@@ -48,7 +66,7 @@ Keine `POST`-Route zum manuellen Anlegen eines Transfers — Auslösung läuft �
 
 ## Datenmodell
 
-`archival_transfer`: `id` (UUID PK), `document_id`, `status`, `archive_format` (`"pdf_a"`, nullable bis `copied`), `encrypted` (Boolean), `storage_object_key` (Archiv-Schlüssel, nullable bis `copied`), `checksum_sha256` (nullable bis `copied`), `error_message` (nullable), `locked_at`/`copied_at`/`verified_at`/`released_at`/`dehydrated_at`/`rehydrated_at` (je nullable, gesetzt beim jeweiligen Phasenübergang), `created_at`/`updated_at`.
+`archival_transfer`: `id` (UUID PK), `document_id`, `status`, `archive_format` (`"pdf_a"`, nullable bis `copied`), `encrypted` (Boolean), `storage_object_key` (Archiv-Schlüssel, nullable bis `copied`), `checksum_sha256` (nullable bis `copied`), `error_message` (nullable), `attempts` (Integer, Default 0, seit P20-S2), `next_retry_at` (nullable, seit P20-S2), `locked_at`/`copied_at`/`verified_at`/`released_at`/`dehydrated_at`/`rehydrated_at` (je nullable, gesetzt beim jeweiligen Phasenübergang), `created_at`/`updated_at`.
 
 ## Anbindung an das Backend
 
@@ -64,7 +82,9 @@ Zweite Funktion dieses Service (s. o.) — erweitert die in P7-S3 gebaute Transf
 
 ### Zustandsmaschine
 
-`CaseArchivalTransfer.status`: `pending → locked → packaged → verified → released` (+ `failed`). **Kein `dehydrated`-Status** — anders als ein Dokument besitzt eine Umlaufmappe keinen eigenen Live-Inhalt, der entfernt werden könnte (nur Referenzen auf Dokumente mit eigenem, unabhängigem P7-S3-Archivierungs-/Dehydrierungs-Lebenszyklus). Die `Case`-Zeile selbst wird nie gelöscht.
+`CaseArchivalTransfer.status`: `pending → locked → packaged → verified → released` (+
+`failed_permanent`, gleiches Retry-/Backoff-Verhalten wie bei `ArchivalTransfer` oben, seit
+Post-Roadmap Phase 20 Session 2). **Kein `dehydrated`-Status** — anders als ein Dokument besitzt eine Umlaufmappe keinen eigenen Live-Inhalt, der entfernt werden könnte (nur Referenzen auf Dokumente mit eigenem, unabhängigem P7-S3-Archivierungs-/Dehydrierungs-Lebenszyklus). Die `Case`-Zeile selbst wird nie gelöscht.
 
 | Status | Bedeutung | Übergang ausgelöst durch |
 |---|---|---|
@@ -73,7 +93,7 @@ Zweite Funktion dieses Service (s. o.) — erweitert die in P7-S3 gebaute Transf
 | `packaged` | XDOMEA-Paket geschrieben | Pro Referenz Dokumentinhalt geladen, `xdomea.build_aussonderung_message()` erzeugt + `xdomea.validate_message()` gegen das echte vendorte Schema geprüft, alles in einer ZIP-Datei (`aussonderung.xml` + `dokumente/<paketname>` je Dokument) verpackt, optional verschlüsselt (`CaseArchivalConfig.archive_encryption_enabled`, case-service), per `PUT /objects/{key}/archive-copy` hochgeladen |
 | `verified` | Fixity-Check bestanden | `GET /objects/{key}/archive-copy/verify` — alle Kopien müssen `ok` sein, sonst `failed` |
 | `released` | Case als archiviert markiert | `PUT /cases/{id}/archived` (case-service publiziert `case.archived`) |
-| `failed` | Ein Schritt technisch fehlgeschlagen | XDOMEA-Validierungsfehler, Verifikation nicht `ok`, oder eine unerwartete Exception — `error_message` enthält den Grund, kein automatischer Retry |
+| `failed_permanent` | `max_archival_attempts` erschöpft | XDOMEA-Validierungsfehler, Verifikation nicht `ok`, oder eine unerwartete Exception — identisches Retry-/Backoff-Verhalten wie bei `ArchivalTransfer` (siehe "Retry & Backoff" oben) |
 
 ### Paket-Format
 
@@ -100,11 +120,12 @@ Bewusste Vereinfachungen (dokumentiert, nicht versteckt):
 |---|---|---|
 | `GET` | `/case-archival-transfers?status=...` | Alle Case-Transfers, optional gefiltert — seit **P19-S7** `archival.read`-gegated |
 | `GET` | `/case-archival-transfers/{id}` | Einzelner Transfer — `404` bei unbekannter `id`; seit **P19-S7** `archival.read`-gegated |
+| `POST` | `/case-archival-transfers/{id}/retry` | Case-Pendant zu `/archival-transfers/{id}/retry` (seit **P20-S2**, [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)) |
 | `GET` | `/case-archival-transfers/{id}/package` | Lädt das (ggf. entschlüsselte) ZIP-Paket direkt herunter — `403` ohne `archive_retrieval_role`, `404`/`409` analog zur Dokument-Rückholung. **Kein** Zurückschreiben auf ein Live-Ziel (anders als bei Dokumenten): eine Umlaufmappe besitzt keinen eigenen Live-Speicherplatz, nur ein reiner Download; seit **P19-S7** zusätzlich `archival.read`-gegated |
 
 ### Datenmodell
 
-`case_archival_transfer`: `id` (UUID PK), `case_id`, `status`, `encrypted` (Boolean), `storage_object_key` (nullable bis `packaged`), `checksum_sha256` (nullable bis `packaged`), `error_message` (nullable), `locked_at`/`packaged_at`/`verified_at`/`released_at` (je nullable), `created_at`/`updated_at`.
+`case_archival_transfer`: `id` (UUID PK), `case_id`, `status`, `encrypted` (Boolean), `storage_object_key` (nullable bis `packaged`), `checksum_sha256` (nullable bis `packaged`), `error_message` (nullable), `attempts` (Integer, Default 0, seit P20-S2), `next_retry_at` (nullable, seit P20-S2), `locked_at`/`packaged_at`/`verified_at`/`released_at` (je nullable), `created_at`/`updated_at`.
 
 ## KeyStore-Plugin (5.6, [ADR 0029](../adr/0029-aussonderung-xdomea-eigenimplementierung-kdbx-plugin.md))
 
@@ -134,15 +155,16 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/archival-service/tests` (**59 Tests**, davon 9 neu seit P15-S5): `test_keystore.py`/`test_crypto.py` (Roundtrip, falscher Schlüssel, fehlender Schlüssel, frischer Nonce je Aufruf), `test_repository.py` (CRUD, aktive-Transfer-Erkennung inkl. Ausschluss terminaler Status, Dehydrierungs-Fälligkeitsfilter), `test_pipeline.py` (volle Phasenkaskade `pending → released` gegen Fake-Clients, Verharren in `locked` solange die Rendition nicht bereit ist, `failed` bei fehlgeschlagener Konvertierung/Verifikation, Verschlüsselungspfad, Dehydrierungs-Tick inkl. Legal-Hold-Blockade), `test_api.py` (Endpunkt-Verdrahtung mit gemockten externen Clients — Rollen-Gate `403`, Status-Gate `409`, erfolgreiche Rückholung inkl. Live-Upload/`mark_rehydrated`-Aufruf). Seit P7-S3b zusätzlich: **`test_xdomea.py` validiert die erzeugte Nachricht gegen das echte, vendorte XDOMEA-4.0.0-Schema** (kein Mock, keine vereinfachte Teilmenge — der wertvollste Test dieser Session, verifiziert die komplette Schema-Kette end-to-end ohne Netzwerkzugriff), `test_case_pipeline.py` (Phasenkaskade `pending → released` inkl. ZIP-Inhaltsprüfung, Ausschluss weich-gelöschter Dokumentreferenzen, Verschlüsselungspfad, `failed` bei Verifikationsfehler), `test_api.py`-Erweiterung für `/case-archival-transfers`. Seit **P15-S5** zusätzlich: `test_browse.py` (Hydrierung von Dokument+Umlaufmappe, Überspringen nicht auflösbarer Verweise, Substring-Filterung gegen Titel/Kennzeichen, Sortierung nach `released_at`), `test_api.py`-Erweiterung für `/released-items` (Rollen-Gate, leer, Ausschluss nicht-`released`-Transfers, gehydratisierte gemischte Ergebnisse, Suchfilter).
+- `uv run pytest services/archival-service/tests` (**71 Tests**, davon 15 neu seit **Post-Roadmap Phase 20 Session 2** — Retry-/Backoff-Verhalten unterhalb/bei Erschöpfung von `max_archival_attempts`, `next_retry_at`-Filterung in `list_active_transfers`, `reset_for_retry`, gleiches Muster für `case_pipeline`, beide neuen `retry`-Endpunkte inkl. `404`/`409`/`403`, siehe [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)). Davon 9 neu seit P15-S5: `test_keystore.py`/`test_crypto.py` (Roundtrip, falscher Schlüssel, fehlender Schlüssel, frischer Nonce je Aufruf), `test_repository.py` (CRUD, aktive-Transfer-Erkennung inkl. Ausschluss terminaler Status, Dehydrierungs-Fälligkeitsfilter), `test_pipeline.py` (volle Phasenkaskade `pending → released` gegen Fake-Clients, Verharren in `locked` solange die Rendition nicht bereit ist, `failed` bei fehlgeschlagener Konvertierung/Verifikation, Verschlüsselungspfad, Dehydrierungs-Tick inkl. Legal-Hold-Blockade), `test_api.py` (Endpunkt-Verdrahtung mit gemockten externen Clients — Rollen-Gate `403`, Status-Gate `409`, erfolgreiche Rückholung inkl. Live-Upload/`mark_rehydrated`-Aufruf). Seit P7-S3b zusätzlich: **`test_xdomea.py` validiert die erzeugte Nachricht gegen das echte, vendorte XDOMEA-4.0.0-Schema** (kein Mock, keine vereinfachte Teilmenge — der wertvollste Test dieser Session, verifiziert die komplette Schema-Kette end-to-end ohne Netzwerkzugriff), `test_case_pipeline.py` (Phasenkaskade `pending → released` inkl. ZIP-Inhaltsprüfung, Ausschluss weich-gelöschter Dokumentreferenzen, Verschlüsselungspfad, `failed` bei Verifikationsfehler), `test_api.py`-Erweiterung für `/case-archival-transfers`. Seit **P15-S5** zusätzlich: `test_browse.py` (Hydrierung von Dokument+Umlaufmappe, Überspringen nicht auflösbarer Verweise, Substring-Filterung gegen Titel/Kennzeichen, Sortierung nach `released_at`), `test_api.py`-Erweiterung für `/released-items` (Rollen-Gate, leer, Ausschluss nicht-`released`-Transfers, gehydratisierte gemischte Ergebnisse, Suchfilter).
 - Kein eigener Live-Docker-Smoke-Test-Abschnitt hier — siehe `PROGRESS.md` "P7-S3"/"P7-S3b" für den vollständigen End-to-End-Ablauf über mehrere Services hinweg (Objekttyp mit `default_archive_after_days`, PDF/`.docx`/`.png`-Dokumente, Dehydrierung, Legal-Hold-Blockade, verschlüsselte Rückholung; seit P7-S3b zusätzlich eine geschlossene Umlaufmappe mit mehreren Dokumenten, Paket-Download, unabhängige Zweitvalidierung der `aussonderung.xml` außerhalb der Pytest-Suite).
 
 ## Offene Punkte
 
 - ~~Kein Rollen-/Berechtigungscheck außer bei der Rückholung~~ — **behoben in Post-Roadmap Phase 19 Session 7** ([ADR 0072](../adr/0072-archival-reporting-rbac.md)): alle acht Endpunkte prüfen jetzt `archival.read`/`archival.write` über `permission-service` (`_require_archival_permission`, `resource_id="root"`). Das bestehende `archive_retrieval_role`-Gate (X-DMS-Roles) bei Rückholung/`/released-items`/Paket-Download bleibt zusätzlich bestehen, unverändert.
-- **Kein Retry für `failed`-Transfers** — ein fehlgeschlagener Transfer bleibt terminal, ein neuer Anlauf bräuchte einen manuellen `POST /documents/{id}/archive-request` in `document-service` (bzw. `.../cases/{id}/archive-request` in case-service), das aber erneut denselben Aktive-Transfer-Ausschluss greifen lassen würde, solange die alte `failed`-Zeile nicht separat behandelt wird — kein Admin-UI-Bedienelement dafür in dieser Session.
+- ~~**Kein Retry für `failed`-Transfers**~~ — **behoben in Post-Roadmap Phase 20 Session 2** ([ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)): automatischer Retry mit Full-Jitter-Backoff bis `max_archival_attempts`, danach `failed_permanent` + manueller Neustart über `POST .../retry`. Noch offen: eine Admin-UI-Sichtbarkeit/Bedienelement dafür (P20-S7).
 - **Verschlüsselung nur mit einem einzigen, statischen Schlüssel** (`EnvKeyStore`) — kein Schlüssel-Rotation-/Multi-Tenant-Support, siehe "KeyStore-Plugin" oben.
 - **Nur die 0503-Nachricht, kein voller XDOMEA-Verhandlungsfluss** (s. o.) — 0501/0502/0504–0507 sind nicht implementiert, da es kein antwortendes zweites System gibt.
 - **`Format/Name` immer Code "100" statt einer vollständigen MIME-Typ-zu-XDOMEA-Codeliste-Abbildung** (s. o.) — strukturell schema-valide, aber semantisch weniger präzise als eine echte Formatzuordnung (z. B. der spezifische PDF-Code statt "Sonstiges").
 - ~~Kein durchsuchbarer "Aussonderungs-Sonderbereich" (2.5)~~ — seit **P15-S5** geschlossen, siehe "Aussonderungs-Zugriffsbereich" oben und [ADR 0055](../adr/0055-aussonderungs-zugriffsbereich-hydrated-read-only-view.md).
 - **Umlaufmappen haben keinen automatischen "Verschwindet nach Übergangsfrist"-Mechanismus** (seit P15-S5 sichtbar) — `CaseArchivalTransfer` kennt keinen `dehydrated`-Status, ein Case bleibt daher unbegrenzt im Aussonderungs-Zugriffsbereich sichtbar, auch lange nach Ablauf einer im Konzept 5.6 genannten Übergangsfrist. Ein echtes Case-Purge-Konzept ist nicht Teil dieser Session, siehe ADR 0055 "Konsequenzen".
+- **Testfixture-Race in `test_api.py`s `client`-Fixture** (bei der Live-Verifikation von P20-S2 entdeckt, vorbestehend, nicht behoben): `TestClient(app)`s Lifespan startet den Poll-Task, bevor der Fixture-Rumpf `app.state.document_client` durch ein `AsyncMock()` ersetzen kann — trifft der allererste Tick auf die noch echte `DocumentClient`-Instanz und existiert auf demselben Host ein echter, gerade fälliger Testdokument (z. B. durch manuelle Live-Verifikation), kann ein echter Transfer in `dms_test` landen und nachfolgende "leer"-Assertions zum Scheitern bringen. Außerhalb des Sessionumfangs, siehe [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md) "Konsequenzen".

@@ -177,6 +177,7 @@ async def run_active_transfers_tick(
     object_type_client: ObjectTypeClient,
     storage_client: StorageClient,
     keystore: KeyStore,
+    max_attempts: int,
 ) -> None:
     async with session_factory() as session:
         await discover_due_transfers(session, document_client)
@@ -204,7 +205,10 @@ async def run_active_transfers_tick(
                 async with session_factory() as failure_session:
                     failed_transfer = await repository.get_transfer(failure_session, transfer.id)
                     await repository.mark_failed(
-                        failure_session, failed_transfer, error_message=str(exc)
+                        failure_session,
+                        failed_transfer,
+                        error_message=str(exc),
+                        max_attempts=max_attempts,
                     )
                     await failure_session.commit()
 

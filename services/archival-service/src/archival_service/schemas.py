@@ -13,6 +13,8 @@ class ArchivalTransferOut(BaseModel):
     storage_object_key: str | None
     checksum_sha256: str | None
     error_message: str | None
+    attempts: int
+    next_retry_at: datetime | None
     locked_at: datetime | None
     copied_at: datetime | None
     verified_at: datetime | None
@@ -46,6 +48,8 @@ class CaseArchivalTransferOut(BaseModel):
     storage_object_key: str | None
     checksum_sha256: str | None
     error_message: str | None
+    attempts: int
+    next_retry_at: datetime | None
     locked_at: datetime | None
     packaged_at: datetime | None
     verified_at: datetime | None

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from dms_retry import compute_backoff_seconds
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from archival_service.models import ArchivalTransfer, CaseArchivalTransfer
@@ -57,9 +58,17 @@ async def create_transfer(session: AsyncSession, document_id: str) -> ArchivalTr
 
 async def list_active_transfers(session: AsyncSession) -> list[ArchivalTransfer]:
     """Transfers, die noch einen Fortschrittsschritt brauchen (5.6) - jeder
-    Poll-Tick versucht, sie einen Schritt weiterzubewegen."""
+    Poll-Tick versucht, sie einen Schritt weiterzubewegen. Seit Post-Roadmap
+    Phase 20 Session 2 zusaetzlich durch `next_retry_at` gefiltert - ein
+    Transfer, der gerade erst einen Backoff-Zeitpunkt fuer den naechsten
+    Versuch bekommen hat (siehe `mark_failed`), wird vor dessen Ablauf
+    uebersprungen statt in jedem Tick erneut sofort zu scheitern."""
+    now = datetime.now(UTC)
     result = await session.execute(
-        select(ArchivalTransfer).where(ArchivalTransfer.status.in_(_ACTIVE_STATUSES))
+        select(ArchivalTransfer).where(
+            ArchivalTransfer.status.in_(_ACTIVE_STATUSES),
+            or_(ArchivalTransfer.next_retry_at.is_(None), ArchivalTransfer.next_retry_at <= now),
+        )
     )
     return list(result.scalars().all())
 
@@ -86,10 +95,41 @@ async def update_status(session: AsyncSession, transfer: ArchivalTransfer, **fie
 
 
 async def mark_failed(
-    session: AsyncSession, transfer: ArchivalTransfer, *, error_message: str
+    session: AsyncSession,
+    transfer: ArchivalTransfer,
+    *,
+    error_message: str,
+    max_attempts: int,
 ) -> None:
-    transfer.status = "failed"
+    """Post-Roadmap Phase 20 Session 2 (ADR 0078): ein Fehlschlag verlaesst
+    NICHT mehr sofort die aktuelle Phase (`status` bleibt z. B. `locked`,
+    damit `list_active_transfers` den Transfer weiterhin erfasst) - stattdessen
+    zaehlt `attempts` hoch und setzt per `compute_backoff_seconds` einen
+    `next_retry_at`. Erst nach `max_attempts` erfolglosen Versuchen wechselt
+    `status` auf das echte Terminalstatus `failed_permanent`."""
+    transfer.attempts += 1
     transfer.error_message = error_message
+    transfer.updated_at = datetime.now(UTC)
+    if transfer.attempts >= max_attempts:
+        transfer.status = "failed_permanent"
+        transfer.next_retry_at = None
+    else:
+        delay = compute_backoff_seconds(transfer.attempts - 1)
+        transfer.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+    await session.flush()
+
+
+async def reset_for_retry(session: AsyncSession, transfer: ArchivalTransfer) -> None:
+    """Manueller Neustart eines `failed_permanent`-Transfers (`POST
+    /archival-transfers/{id}/retry`, Post-Roadmap Phase 20 Session 2) - setzt
+    ihn auf `pending` zurueck, damit die Pipeline von vorne beginnt (jede
+    Phase holt ihre Eingaben ohnehin frisch, ein Neustart ist idempotent -
+    einfacher als die genaue unterbrochene Phase zu rekonstruieren, die beim
+    Uebergang auf `failed_permanent` nicht mehr separat vorgehalten wird)."""
+    transfer.status = "pending"
+    transfer.attempts = 0
+    transfer.next_retry_at = None
+    transfer.error_message = None
     transfer.updated_at = datetime.now(UTC)
     await session.flush()
 
@@ -134,7 +174,14 @@ async def create_case_transfer(session: AsyncSession, case_id: str) -> CaseArchi
 
 
 async def list_active_case_transfers(session: AsyncSession) -> list[CaseArchivalTransfer]:
+    now = datetime.now(UTC)
     result = await session.execute(
-        select(CaseArchivalTransfer).where(CaseArchivalTransfer.status.in_(_ACTIVE_CASE_STATUSES))
+        select(CaseArchivalTransfer).where(
+            CaseArchivalTransfer.status.in_(_ACTIVE_CASE_STATUSES),
+            or_(
+                CaseArchivalTransfer.next_retry_at.is_(None),
+                CaseArchivalTransfer.next_retry_at <= now,
+            ),
+        )
     )
     return list(result.scalars().all())

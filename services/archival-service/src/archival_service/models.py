@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("archival")
@@ -11,12 +11,20 @@ Base = make_declarative_base("archival")
 class ArchivalTransfer(Base):
     """Resumable Zustandsmaschine fuer die Aussonderung eines einzelnen
     Dokuments (5.6): `pending -> locked -> copied -> verified -> released
-    -> dehydrated` (+ `failed`). Jede Phase wird einzeln committet, bevor der
-    naechste Schritt beginnt - gleiches Poll-Loop-Idiom wie document-
-    service's `_retention_poll_loop`/workflow-service's `_sla_poll_loop`
-    (kein echter BPMN-Prozess, siehe docs/services/archival-service.md).
-    Ein Absturz mitten im Ablauf wird beim naechsten Tick am persistierten
-    `status` fortgesetzt, nicht neu gestartet."""
+    -> dehydrated` (+ `failed_permanent`). Jede Phase wird einzeln
+    committet, bevor der naechste Schritt beginnt - gleiches Poll-Loop-Idiom
+    wie document-service's `_retention_poll_loop`/workflow-service's
+    `_sla_poll_loop` (kein echter BPMN-Prozess, siehe
+    docs/services/archival-service.md). Ein Absturz mitten im Ablauf wird
+    beim naechsten Tick am persistierten `status` fortgesetzt, nicht neu
+    gestartet. Seit Post-Roadmap Phase 20 Session 2 (ADR 0078, `libs/
+    dms-retry`): ein technischer Fehlschlag in einer Phase setzt NICHT mehr
+    sofort `status="failed"` (das entfernte den Transfer dauerhaft aus dem
+    aktiven Satz, ohne jede Wiederholung) - stattdessen bleibt `status` in
+    seiner aktuellen Phase stehen, `attempts`/`next_retry_at` steuern per
+    Full-Jitter-Backoff, wann der naechste Versuch faellig ist. Erst nach
+    Erschoepfen von `max_archival_attempts` wechselt `status` auf das neue,
+    echte Terminalstatus `failed_permanent`."""
 
     __tablename__ = "archival_transfer"
 
@@ -28,6 +36,8 @@ class ArchivalTransfer(Base):
     storage_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     copied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -43,11 +53,13 @@ class ArchivalTransfer(Base):
 class CaseArchivalTransfer(Base):
     """Resumable Zustandsmaschine fuer die XDOMEA-Aussonderung einer
     geschlossenen Umlaufmappe (5.6, seit P7-S3b): `pending -> locked ->
-    packaged -> verified -> released` (+ `failed`) - kein `dehydrated`-Status
-    wie bei `ArchivalTransfer`, da ein Case keinen eigenen Live-Inhalt
-    besitzt, der entfernt werden koennte (nur Referenzen auf Dokumente mit
-    eigenem, unabhaengigem Lebenszyklus). Gleiches Poll-Loop-Idiom wie
-    `ArchivalTransfer` oben, siehe docs/services/archival-service.md."""
+    packaged -> verified -> released` (+ `failed_permanent`) - kein
+    `dehydrated`-Status wie bei `ArchivalTransfer`, da ein Case keinen
+    eigenen Live-Inhalt besitzt, der entfernt werden koennte (nur
+    Referenzen auf Dokumente mit eigenem, unabhaengigem Lebenszyklus).
+    Gleiches Poll-Loop-/Retry-Idiom wie `ArchivalTransfer` oben, siehe
+    docs/services/archival-service.md und Post-Roadmap Phase 20 Session 2
+    (ADR 0078)."""
 
     __tablename__ = "case_archival_transfer"
 
@@ -58,6 +70,8 @@ class CaseArchivalTransfer(Base):
     storage_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     packaged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

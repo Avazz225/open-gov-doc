@@ -196,6 +196,7 @@ async def run_case_transfers_tick(
     storage_client: StorageClient,
     keystore: KeyStore,
     encryption_enabled: bool,
+    max_attempts: int,
 ) -> None:
     async with session_factory() as session:
         await discover_due_case_transfers(session, case_client)
@@ -225,6 +226,9 @@ async def run_case_transfers_tick(
                         failure_session, transfer.id
                     )
                     await repository.mark_failed(
-                        failure_session, failed_transfer, error_message=str(exc)
+                        failure_session,
+                        failed_transfer,
+                        error_message=str(exc),
+                        max_attempts=max_attempts,
                     )
                     await failure_session.commit()

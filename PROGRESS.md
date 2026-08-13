@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P20-S1 — `libs/dms-retry`: geteilte Backoff-/Jitter-Mathematik (Phase 20 Session 1, siehe [ADR 0077](docs/adr/0077-dms-retry-backoff-jitter-lib.md)): neue, sehr kleine Shared Lib mit `compute_backoff_seconds(attempt, *, base=1.0, cap=300.0, rng=None)` — "Full Jitter"-Exponentiell-Backoff nach der AWS-Standardformel, 0-indiziertes `attempt` passt direkt auf `storage-service`s bereits bestehendes `ObjectCopy.attempts`. Kein gemeinsamer Poll-Loop-Rahmen (bleibt bewusst leichtgewichtig dupliziert), nur die Zahlenformel ist geteilt. Noch kein Konsument — wird ab P20-S2 verwendet. 6 neue Unit-Tests, `uv lock` ausgeführt (unverändert). Phase 19 (Autorisierung & Identität, P19-S1 bis P19-S11) ist damit vollständig abgeschlossen, siehe die ausführliche P19-S11-Zusammenfassung unten.
+**Zuletzt abgeschlossen:** P20-S2 — archival-service: Retry/Backoff, `failed_permanent`, manueller Neustart (Phase 20 Session 2, siehe [ADR 0078](docs/adr/0078-archival-service-retry-backoff-failed-permanent.md)): bislang GAR KEIN Retry-Mechanismus — ein Fehlschlag setzte sofort das terminale `status="failed"`. Neue Felder `attempts`/`next_retry_at` auf `ArchivalTransfer`/`CaseArchivalTransfer`; `mark_failed` bleibt unterhalb von `max_archival_attempts` (Default 5) in der aktuellen Phase (nur `error_message`/`next_retry_at` per `compute_backoff_seconds` ändern sich), wechselt erst bei Erschöpfung auf das neue Terminalstatus `failed_permanent`. Neue `POST .../retry`-Endpunkte (beide Transfer-Arten, `archival.write`-gegated) setzen auf `pending` zurück. Ein einziges `mark_failed`/`reset_for_retry`-Funktionspaar bedient beide Transfer-Arten (bestehendes Duck-Typing-Muster beibehalten, ein anfänglicher Duplizierungsversuch wieder verworfen). Tests: archival-service 71 (vorher 56, +15). Vollständig live verifiziert (Image-Neubau + Neustart, Migration bestätigt, `failed_permanent → retry → pending`-Roundtrip für beide Transfer-Arten).
 
-**Nächste Session:** **P20-S2** (archival-service: `attempts`/`next_retry_at`/`failed_permanent` auf `ArchivalTransfer`/`CaseArchivalTransfer`, `run_active_transfers_tick` nutzt `compute_backoff_seconds`, neuer `POST /archival-transfers/{id}/retry`, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P20-S3** (notification-service: `attempts`/`next_retry_at`/`failed_permanent` auf `Notification`, neuer eigener Retry-Poll-Loop, da Zustellung heute synchron inline im NATS-Handler passiert, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -2019,6 +2019,55 @@ letzte Session von Phase 19:
 - Kein Live-Verifikationsschritt nötig — reine, zustandslose Bibliotheksfunktion ohne Service-Anbindung.
 - Doku: neues [ADR 0077](docs/adr/0077-dms-retry-backoff-jitter-lib.md), `libs/README.md`,
   `libs/dms-retry/README.md` ergänzt.
+
+**P20-S2 — archival-service: Retry/Backoff, `failed_permanent`, manueller Neustart** (siehe
+[ADR 0078](docs/adr/0078-archival-service-retry-backoff-failed-permanent.md)):
+
+- **Bislang GAR KEIN Retry-Mechanismus**: ein technischer Fehlschlag setzte sofort `status="failed"`
+  (terminal) — der Transfer verschwand dauerhaft aus dem aktiven Satz, ohne automatische Wiederholung
+  und ohne manuelles Bedienelement für einen Neustart.
+- Neue Felder `attempts`/`next_retry_at` auf `ArchivalTransfer` UND `CaseArchivalTransfer`. `mark_failed`
+  verhält sich jetzt retry-bewusst: unterhalb von `Settings.max_archival_attempts` (Default 5, gleicher
+  Wert wie `storage-service.max_replication_attempts`) bleibt `status` in seiner aktuellen Phase (z. B.
+  `locked`/`copied`) — nur `attempts`/`error_message`/`next_retry_at` (per `compute_backoff_seconds` aus
+  `libs/dms-retry`, P20-S1) ändern sich. Erst bei Erschöpfung wechselt `status` auf das neue
+  Terminalstatus `failed_permanent`.
+- `list_active_transfers`/`list_active_case_transfers` filtern zusätzlich auf `next_retry_at IS NULL OR
+  next_retry_at <= now()` — ein Transfer mit offenem Backoff-Fenster wird übersprungen statt in jedem
+  Tick erneut sofort zu scheitern.
+- Neue Endpunkte `POST /archival-transfers/{id}/retry` und `POST /case-archival-transfers/{id}/retry`
+  (`archival.write`-gegated) — `409` außer bei `status="failed_permanent"`, sonst Rücksetzung auf
+  `pending`/`attempts=0`/`next_retry_at=null`/`error_message=null`. Neustart auf `pending` statt
+  Rekonstruktion der unterbrochenen Phase (bewusst einfacher — jede Phase holt ihre Eingaben ohnehin
+  frisch, ein kompletter Neudurchlauf ist idempotent).
+- **Ein einziges `mark_failed`/`reset_for_retry`-Funktionspaar bedient beide Transfer-Arten** — der
+  bestehende Code nutzte bereits dieselbe `mark_failed`-Funktion für `ArchivalTransfer` UND
+  `CaseArchivalTransfer` per Duck-Typing (identische Feldnamen, kein `isinstance`-Zweig); diese Session
+  behält dieses Muster bei, statt zwei Kopien anzulegen (ein anfänglicher Entwurf mit `mark_case_failed`/
+  `reset_case_for_retry` wurde deshalb wieder verworfen).
+- Ad-hoc-`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`-Migration im Lifespan für beide neuen Spalten auf
+  beiden Tabellen (gleiches Muster wie `document-service`s `dehydrated_at`, P19-S11) — `create_all` legt
+  nur neue Tabellen an, ändert aber keine bestehenden.
+- **Tests**: archival-service 71 (vorher 56, +15: Repository-Ebene — Backoff unterhalb/bei Erschöpfung
+  von `max_attempts`, `next_retry_at`-Filterung, `reset_for_retry`; Pipeline-Ebene — Transfer bleibt bei
+  Fehlschlag unterhalb `max_attempts` aktiv, erreicht `failed_permanent` bei `max_attempts=1`, gleiches
+  für `case_pipeline`; API-Ebene — beide neuen `retry`-Endpunkte inkl. `404`/`409`/`403`).
+- **Vollständig live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart, saubere
+  Migration per `\d archival.archival_transfer` bestätigt): `404` für unbekannten Transfer,
+  `failed_permanent → retry → pending`-Roundtrip für BEIDE Transfer-Arten — da der Standard-Poll-
+  Intervall (eine Stunde) eine natürliche Fälligkeits-Auslösung in einer Live-Sitzung unpraktikabel
+  macht, wurden die Testzeilen direkt in der DB auf `failed_permanent` gesetzt statt eine echte
+  Verifikation live scheitern zu lassen; erneuter Retry-Versuch auf einem bereits `pending`-Transfer
+  liefert korrekt `409`.
+- **Vorbestehende, unabhängige Testfixture-Race dabei entdeckt, NICHT behoben**: `test_api.py`s
+  `client`-Fixture ersetzt `app.state.document_client` erst NACH Start des Poll-Tasks (Lifespan-Timing)
+  — der allererste Tick kann dadurch kurzzeitig auf die echte `DocumentClient`-Instanz treffen. Sichtbar
+  geworden, weil diese Session über `POST /documents/{id}/archive-request` echte, sofort fällige
+  Testdokumente auf dem laufenden Stack anlegte (für die Retry-Live-Verifikation) — nach deren
+  Bereinigung (`PUT .../archived`) lief die Suite wieder sauber. Außerhalb des Sessionumfangs.
+- Doku: neues [ADR 0078](docs/adr/0078-archival-service-retry-backoff-failed-permanent.md),
+  `docs/services/archival-service.md` (Zustandsmaschinen-Tabellen, API-Tabelle, "Offene Punkte" als
+  behoben markiert) ergänzt.
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

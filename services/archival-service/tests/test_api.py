@@ -183,6 +183,47 @@ async def test_retrieve_returns_409_for_pending_transfer(client, session):
     assert response.status_code == 409
 
 
+async def test_retry_returns_404_for_unknown_transfer(client):
+    response = client.post("/archival-transfers/does-not-exist/retry")
+
+    assert response.status_code == 404
+
+
+async def test_retry_returns_409_for_still_active_transfer(client, session):
+    transfer = await repository.create_transfer(session, "doc-1")
+    await session.commit()
+
+    response = client.post(f"/archival-transfers/{transfer.id}/retry")
+
+    assert response.status_code == 409
+
+
+async def test_retry_resets_a_failed_permanent_transfer_to_pending(client, session):
+    transfer = await repository.create_transfer(session, "doc-1")
+    await repository.mark_failed(session, transfer, error_message="boom", max_attempts=1)
+    await session.commit()
+
+    response = client.post(f"/archival-transfers/{transfer.id}/retry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["attempts"] == 0
+    assert body["next_retry_at"] is None
+    assert body["error_message"] is None
+
+
+async def test_retry_without_write_permission_is_403(client, session, everyone_role_without):
+    transfer = await repository.create_transfer(session, "doc-1")
+    await repository.mark_failed(session, transfer, error_message="boom", max_attempts=1)
+    await session.commit()
+    everyone_role_without("archival.write")
+
+    response = client.post(f"/archival-transfers/{transfer.id}/retry")
+
+    assert response.status_code == 403
+
+
 async def test_retrieve_writes_back_to_live_target_and_marks_rehydrated(client, session):
     transfer = await repository.create_transfer(session, "doc-1")
     await repository.update_status(
@@ -333,6 +374,28 @@ async def test_list_and_get_case_archival_transfer_roundtrip(client, session):
     fetched = client.get(f"/case-archival-transfers/{transfer.id}")
     assert fetched.status_code == 200
     assert fetched.json()["case_id"] == "case-1"
+
+
+async def test_retry_case_transfer_returns_409_for_still_active_transfer(client, session):
+    transfer = await repository.create_case_transfer(session, "case-1")
+    await session.commit()
+
+    response = client.post(f"/case-archival-transfers/{transfer.id}/retry")
+
+    assert response.status_code == 409
+
+
+async def test_retry_case_transfer_resets_a_failed_permanent_transfer_to_pending(client, session):
+    transfer = await repository.create_case_transfer(session, "case-1")
+    await repository.mark_failed(session, transfer, error_message="boom", max_attempts=1)
+    await session.commit()
+
+    response = client.post(f"/case-archival-transfers/{transfer.id}/retry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["attempts"] == 0
 
 
 async def test_download_case_archival_package_requires_configured_role(client, session):
