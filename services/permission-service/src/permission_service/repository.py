@@ -70,12 +70,22 @@ async def list_roles(session: AsyncSession) -> list[Role]:
 async def update_role(
     session: AsyncSession, role_id: int, *, description: str, permissions: list[str]
 ) -> Role:
+    """Invalidiert seit Phase 19 Session 3 (ADR 0068) den Effective-
+    Permissions-Cache - vorher fehlte das hier (anders als bei jeder anderen
+    rechte-verändernden Operation in diesem Modul), unkritisch, solange
+    Rollen nur selten und ohne akute Sicherheitserwartung editiert wurden.
+    Mit der "everyone"-Gruppe (P19-S2/S3) editiert ein Admin diese Rolle
+    jetzt potenziell gezielt, um einem bereits gecachten Principal umgehend
+    eine Berechtigung zu entziehen - ohne Invalidierung hätte das bis zur
+    nächsten, unabhängigen Cache-Leerung (z. B. einer anderen Rollen-
+    zuweisung) keine Wirkung gezeigt."""
     role = await session.get(Role, role_id)
     if role is None:
         raise NotFoundError(f"role_id {role_id!r} unbekannt")
     role.description = description
     role.permissions = permissions
     await session.flush()
+    await invalidate_cache(session)
     return role
 
 

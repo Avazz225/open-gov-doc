@@ -18,6 +18,29 @@ async def test_create_role(session):
     assert role.permissions == ["read", "write"]
 
 
+async def test_update_role_invalidates_cache(session):
+    """Phase 19 Session 3 (ADR 0068): `update_role` invalidierte den
+    Effective-Permissions-Cache bislang nicht, anders als jede andere
+    rechte-verändernde Operation - ein bereits gecachter Principal hätte eine
+    per `PUT /roles/{id}` entzogene Berechtigung erst nach einer
+    unabhängigen, zufälligen Cache-Leerung verloren."""
+    role = await repository.create_role(session, "Viewer", "", ["read"])
+    await repository.create_role_assignment(
+        session,
+        principal_type="user",
+        principal_id="alice",
+        role_id=role.id,
+        resource_id=ROOT_RESOURCE_ID,
+    )
+    before = await repository.get_effective_permissions(session, "alice", ROOT_RESOURCE_ID)
+    assert before.permissions == ["read"]
+
+    await repository.update_role(session, role.id, description="", permissions=[])
+
+    after = await repository.get_effective_permissions(session, "alice", ROOT_RESOURCE_ID)
+    assert after.permissions == []
+
+
 async def test_role_assignment_at_root_is_inherited_everywhere(session):
     role = await repository.create_role(session, "Viewer", "", ["read"])
     await _add_child(session, "folder-a")

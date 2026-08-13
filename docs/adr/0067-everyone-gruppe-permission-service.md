@@ -23,7 +23,10 @@ Schema. Diese Session macht `principal_type="group"` für genau einen reserviert
 3. **`schemas.RoleAssignmentCreate`/`RoleAssignmentOut`s `principal_type`** von `str` auf
    `Literal["user", "group"]` verschärft — passt zum bereits etablierten `Literal`-Stil dieser Datei
    (`BatchCheckRequest.access_type`, `RoleAssignmentActionResult.status`) und macht "group" als echten,
-   validierten Wert statt eines reinen Kommentars sichtbar.
+   validierten Wert statt eines reinen Kommentars sichtbar. **Nachträglich korrigiert in P19-S3** (ADR
+   0068): `"service"` ist ein drittes, bereits produktiv genutztes `principal_type` (`config-service`,
+   `migration-service`) — das ursprüngliche `Literal["user", "group"]` war zu eng und hätte deren
+   Rollenzuweisungen abgelehnt, siehe ADR 0068 "Ein echter Bug gefunden".
 4. **`main.py`s Lifespan** ruft `ensure_everyone_role` direkt nach `ensure_domain_admin_roles` auf.
 
 ## Begründung

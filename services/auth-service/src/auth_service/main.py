@@ -481,17 +481,24 @@ def update_my_preferences(
     return payload
 
 
+async def _require_permission(user: dict, permission: str, message: str) -> None:
+    """Generischer Capability-Check gegen permission-service (Post-Roadmap
+    Phase 19 Session 3, ADR 0068) - `_require_user_management` unten bleibt
+    als benannter Spezialfall mit eigener Fehlermeldung bestehen, neue
+    Aufrufer (`lookup_user`/`search_directory`) nutzen diesen Helfer direkt."""
+    allowed = await app.state.permission_client.has_permission(user["sub"], permission)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
+
+
 async def _require_user_management(user: dict) -> None:
     """Retrofit (P6-S5, 4.6): Nutzerverwaltung ist seit P4-S3 ungated -
     Domäne "Nutzer-/Rechteverwaltung", durchgesetzt über einen echten
     Permission-Service-Check statt eines `X-DMS-Roles`-Stringvergleichs (die
     Rolle lebt systemeigen in permission-service, nicht in Keycloak)."""
-    allowed = await app.state.permission_client.has_permission(user["sub"], "admin.user_management")
-    if not allowed:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Fehlende Domain-Admin-Rolle 'Nutzer-/Rechteverwaltung'",
-        )
+    await _require_permission(
+        user, "admin.user_management", "Fehlende Domain-Admin-Rolle 'Nutzer-/Rechteverwaltung'"
+    )
 
 
 @app.get("/users", response_model=list[UserOut])
@@ -505,12 +512,17 @@ async def list_users(user: dict = Depends(get_current_user)) -> list[dict]:
 
 @app.get("/users/lookup", response_model=UserLookupOut)
 async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> dict:
-    """Exakte Namensauflösung für JEDEN authentifizierten Nutzer (2.5,
-    P14-S6) - bewusst OHNE `admin.user_management`-Gate wie `GET /users`
-    oben, siehe `admin_users.find_user_by_username`. `user`-Parameter dient
-    nur der Authentifizierungsprüfung (`Depends(get_current_user)` lehnt ein
-    fehlendes/ungültiges Token bereits selbst ab), wird inhaltlich nicht
-    gebraucht."""
+    """Exakte Namensauflösung (2.5, P14-S6) - bewusst OHNE
+    `admin.user_management`-Gate wie `GET /users` oben, siehe
+    `admin_users.find_user_by_username`. Seit Post-Roadmap Phase 19 Session 3
+    (ADR 0068) über die "everyone"-Gruppe aus permission-service gegated
+    (`users.lookup`, seit P19-S2 vorgeseedet) statt komplett offen zu sein -
+    am Ist-Verhalten ändert sich dadurch nichts (jeder authentifizierte
+    Principal ist implizit Mitglied), die Berechtigung ist jetzt aber
+    systemeigen admin-editierbar statt hartkodiert."""
+    await _require_permission(
+        user, "users.lookup", "Fehlende Berechtigung 'users.lookup' (everyone-Gruppe entzogen?)"
+    )
     match = admin_users.find_user_by_username(app.state.keycloak_admin, username)
     if match is None:
         raise HTTPException(status_code=404, detail=f"Nutzer {username!r} unbekannt")
@@ -520,8 +532,15 @@ async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> 
 @app.get("/users/directory", response_model=list[DirectoryEntryOut])
 async def search_directory(q: str, user: dict = Depends(get_current_user)) -> list[dict]:
     """Verzeichnis zum Auffinden anderer Mitarbeitender (2.5/4.4, P15-S4) -
-    lokal, immer verfügbar für jeden authentifizierten Nutzer (kein
-    `admin.user_management`-Gate, siehe `admin_users.search_users`)."""
+    kein `admin.user_management`-Gate, siehe `admin_users.search_users`. Seit
+    Post-Roadmap Phase 19 Session 3 (ADR 0068) über die "everyone"-Gruppe aus
+    permission-service gegated (`users.directory`, seit P19-S2 vorgeseedet)
+    statt komplett offen zu sein - gleiches Prinzip wie `lookup_user` oben."""
+    await _require_permission(
+        user,
+        "users.directory",
+        "Fehlende Berechtigung 'users.directory' (everyone-Gruppe entzogen?)",
+    )
     return admin_users.search_users(app.state.keycloak_admin, q)
 
 

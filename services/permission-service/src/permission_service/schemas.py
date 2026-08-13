@@ -31,7 +31,7 @@ class RoleOut(BaseModel):
 
 
 class RoleAssignmentCreate(BaseModel):
-    principal_type: Literal["user", "group"]
+    principal_type: Literal["user", "group", "service"]
     principal_id: str
     role_id: int
     resource_id: str
@@ -39,7 +39,7 @@ class RoleAssignmentCreate(BaseModel):
 
 class RoleAssignmentOut(BaseModel):
     id: int
-    principal_type: Literal["user", "group"]
+    principal_type: Literal["user", "group", "service"]
     principal_id: str
     role_id: int
     resource_id: str

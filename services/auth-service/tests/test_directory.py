@@ -54,7 +54,12 @@ def test_search_directory_finds_user_by_substring(client, domain_admin_auth_head
 
 def test_search_directory_available_to_regular_users_not_just_admins(client, test_user):
     """Lokal, immer verfügbar (2.5) - anders als `GET /users` bewusst OHNE
-    `admin.user_management`-Gate."""
+    `admin.user_management`-Gate. Seit P19-S3 über die "everyone"-Gruppe
+    geprüft (ADR 0068) statt komplett offen zu sein - da sie jedem
+    authentifizierten Principal implizit `users.directory` gewährt, ändert
+    sich am beobachtbaren Verhalten hier nichts (siehe
+    `test_search_directory_returns_403_without_users_directory_permission`
+    für den Negativfall)."""
     login = client.post(
         "/login", json={"username": test_user["username"], "password": test_user["password"]}
     ).json()
@@ -63,6 +68,23 @@ def test_search_directory_available_to_regular_users_not_just_admins(client, tes
     response = client.get("/users/directory", params={"q": test_user["username"]}, headers=headers)
 
     assert response.status_code == 200
+
+
+def test_search_directory_returns_403_without_users_directory_permission(
+    client, test_user, everyone_role_without
+):
+    """Beweist, dass P19-S3s Gate tatsächlich gegen permission-service prüft
+    (ADR 0068): entzieht der "everyone"-Rolle gezielt `users.directory` für
+    die Dauer dieses Tests."""
+    everyone_role_without("users.directory")
+    login = client.post(
+        "/login", json={"username": test_user["username"], "password": test_user["password"]}
+    ).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+
+    response = client.get("/users/directory", params={"q": test_user["username"]}, headers=headers)
+
+    assert response.status_code == 403
 
 
 def test_directory_federation_status_disabled_by_default(client):

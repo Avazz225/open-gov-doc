@@ -43,10 +43,11 @@ def list_users(admin: KeycloakAdmin) -> list[dict]:
 
 
 def search_users(admin: KeycloakAdmin, query: str) -> list[dict]:
-    """Verzeichnis-Suche (2.5/4.4, P15-S4) - jeder authentifizierte Nutzer
-    darf andere Mitarbeitende auffinden, anders als `list_users()` bewusst
+    """Verzeichnis-Suche (2.5/4.4, P15-S4) - anders als `list_users()` bewusst
     OHNE `admin.user_management`-Gate (siehe `find_user_by_username` für
-    dasselbe Muster). Nutzt Keycloaks eingebauten `search`-Query-Parameter
+    dasselbe Muster), seit P19-S3 aber über die "everyone"-Gruppe aus
+    permission-service gegated statt komplett offen (`main.py.search_
+    directory`). Nutzt Keycloaks eingebauten `search`-Query-Parameter
     statt eines eigenen Filter-Mechanismus - identisches Verhalten wie die
     Nutzersuche im Keycloak-eigenen Admin-Konsolen-UI. Per Live-Verifikation
     (P15-S4) bestätigt: kein echtes Teilstring-/Infix-Matching, sondern ein
@@ -59,14 +60,15 @@ def search_users(admin: KeycloakAdmin, query: str) -> list[dict]:
 
 def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
     """Exakte Namenssuche für `GET /users/lookup` (2.5, P14-S6) - anders als
-    `list_users()` bewusst OHNE `admin.user_management`-Gate: jeder
-    authentifizierte Nutzer darf einen einzelnen, exakt benannten Account
-    auflösen (nötig, um z. B. jemanden per Username in einen Teamspace
-    einzuladen - `X-DMS-Principal` ist die Keycloak-`sub`-UUID, kein
-    Nutzer kennt die UUID einer anderen Person auswendig). Liefert deshalb
-    auch bewusst nur `id`/`username` zurück, keine E-Mail/Namen/Freigabestatus
-    wie `list_users()` - keine allgemeine Verzeichnis-Funktion, siehe
-    `docs/services/auth-service.md`."""
+    `list_users()` bewusst OHNE `admin.user_management`-Gate, seit P19-S3
+    aber über die "everyone"-Gruppe aus permission-service gegated statt
+    komplett offen (`main.py.lookup_user`): ein einzelner, exakt benannter
+    Account darf aufgelöst werden (nötig, um z. B. jemanden per Username in
+    einen Teamspace einzuladen - `X-DMS-Principal` ist die Keycloak-`sub`-
+    UUID, kein Nutzer kennt die UUID einer anderen Person auswendig). Liefert
+    deshalb auch bewusst nur `id`/`username` zurück, keine E-Mail/Namen/
+    Freigabestatus wie `list_users()` - keine allgemeine Verzeichnis-
+    Funktion, siehe `docs/services/auth-service.md`."""
     matches = admin.get_users(query={"username": username, "exact": True})
     if not matches:
         return None

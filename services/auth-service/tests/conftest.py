@@ -150,6 +150,38 @@ def role_assignment_immediate():
 
 
 @pytest.fixture
+def everyone_role_without():
+    """Post-Roadmap Phase 19 Session 3 (ADR 0068) - erlaubt Tests, gezielt zu
+    beweisen, dass `GET /users/lookup`/`GET /users/directory` tatsächlich
+    gegen die "everyone"-Rolle (P19-S2, ADR 0067) geprüft werden, nicht nur
+    unbedingt durchlaufen: entfernt eine Berechtigung temporär aus der
+    geseedeten "everyone"-Rolle, stellt die ursprüngliche Liste danach
+    wieder her. `update_role` invalidiert seit dieser Session den Effective-
+    Permissions-Cache (siehe `permission_service.repository.update_role`) -
+    ohne diesen Fix hätte diese Fixture keine sofortige Wirkung."""
+    with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        everyone = next(r for r in roles if r["name"] == "everyone")
+        original_permissions = list(everyone["permissions"])
+
+        def _remove(permission: str) -> None:
+            pc.put(
+                f"/roles/{everyone['id']}",
+                json={
+                    "description": everyone["description"],
+                    "permissions": [p for p in original_permissions if p != permission],
+                },
+            ).raise_for_status()
+
+        yield _remove
+
+        pc.put(
+            f"/roles/{everyone['id']}",
+            json={"description": everyone["description"], "permissions": original_permissions},
+        ).raise_for_status()
+
+
+@pytest.fixture
 def keycloak_admin():
     admin = KeycloakAdmin(
         server_url=settings.keycloak_base_url,
