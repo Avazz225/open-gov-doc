@@ -4,7 +4,9 @@
 
 **Zuletzt abgeschlossen:** P17-S3 — eGov-Konfigurationspaket Teil 2 (14.2), **letzte Session der Phase 17 UND der gesamten Session-Roadmap (107/107)**: bei der Umsetzung ein echter Befund, der die P17-S0-Annahme korrigierte — von den drei in 14.2 für die Vier-Augen-Vorbelegung genannten Aktionstypen hatten "Berechtigungsänderung" und "Konfigurationsimport" keinerlei tatsächliche Durchsetzung im Code; beide echt nachgerüstet (`permission-service`s `POST /role-assignments` und `config-service`s `POST /config/import` prüfen jetzt `permission.role_assignment.create`/`config.import` über den bestehenden generischen Vier-Augen-Mechanismus, 4.3 — neues `RoleAssignmentActionResult`/`ImportActionResult`-Status-Envelope, `config-service` bekam dafür seinen ersten NATS-Konsumenten überhaupt). Drei BPMN-Prozessvorlagen (`egov_freigabe`/`egov_kenntnisnahme`/`egov_aufgabe`) live verifiziert, Geschäftskalender `DE-Bund` + 16 vollständige Landeskalender (reale Termine 2026/2027, Gauß'sche Osterformel), zwei erweiterte Admin-Rollen (`Registratur/Aktenverwaltung`, `Amtsleitung`), `realm_roles: ["dms-poststelle"]`. Zwei echte Bugs bei der Regression gefunden/behoben (fehlende `DMS_NATS_URL` für `config-service` in `infra/docker-compose.yml`; `config-service` fälschlich in `scripts/run-tests.sh`s `CONSUMER_SERVICES`). Vollständig live über die echte `/config-packages/`-Seite angewendet, inkl. beider Vier-Augen-Roundtrips bis zum Schluss durchgespielt. `manifest.version` `0.1.0`→`1.0.0`. Details siehe [ADR 0060](docs/adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md), `packages/egov/README.md` und "eGov-Konfigurationspaket Teil 2 (Phase 17, P17-S3)" unten. `graphify dms/ --update` im Anschluss ausgeführt (Phasenabschluss).
 
-**Nächste Session:** **P18-S1** (Phase 18 — Auth-Entkopplung von Keycloak: lokale technische Konten + eigener Token-Issuer). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Zuletzt abgeschlossen:** P18-S1 — Lokale technische Konten + eigener Token-Issuer (erste Session der neuen Phase 18, siehe [ADR 0063](docs/adr/0063-auth-entkopplung-lokale-technische-konten-dual-issuer-jwt.md)): neues `TechnicalAccount`-Model, eigenes RSA-Schlüsselpaar (`LocalSigningKey`, Singleton) + `GET /.well-known/jwks.json`, `local_token_issuer.mint_token()` mit identischem Claim-Shape wie Keycloak, neuer `MultiIssuerTokenValidator` in `libs/dms-auth-client`. Rein additive Infrastruktur, live verifiziert, keine funktionale Änderung für Endnutzer — Migration von Superuser/Domain-Admins folgt in P18-S2/S3.
+
+**Nächste Session:** **P18-S2** (Superuser auf lokale Konten migrieren: `POST /login` erkennt ein technisches Superuser-Konto und authentifiziert lokal, Break-Glass-Aktivierung setzt `TechnicalAccount.enabled`/`expires_at` statt eines Keycloak-Attributs — behebt dabei ersatzlos den seit P6-S6 bekannten Bug, dass der Superuser nicht interaktiv einloggen kann. Muss außerdem `gateway-service`s eigenen `TokenValidator` auf `MultiIssuerTokenValidator` umstellen, sonst scheitert ein frisch eingeloggter Superuser am Gateway). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -1307,6 +1309,55 @@ drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbe
   entstand eine neue Multi-Session-Roadmap **Phase 18–26** (`IMPLEMENTATION_PLAN.md`), plus ein neues
   eigenständiges Ziel (Helm-Charts für k8s/OCP). `graphify update .` folgt direkt im Anschluss an
   diesen Eintrag, dann Start von Phase 18.
+
+### Phase 18 — Auth-Entkopplung von Keycloak (P18-S1)
+
+- **Auftrag**: Superuser-Break-Glass und Domain-Admin-Konten sollen künftig unabhängig von Keycloaks
+  Erreichbarkeit funktionieren — Nutzer-Direktive nach der "Offene Punkte"-Triage vom 2026-08-13 ("der
+  Superuser soll gar nicht im Keycloak leben, der soll nur in der App leben"). P18-S1 legt die
+  Infrastruktur, ohne `POST /login`/Break-Glass bereits umzustellen.
+- **`TechnicalAccount`** (neues Model, `auth`-Schema): künftiger Speicherort für Superuser-/Domain-
+  Admin-Konten, `password_hash` per `bcrypt` — erstes selbst gehashtes Passwort in diesem Service
+  (bislang übernahm Keycloak das vollständig).
+- **`LocalSigningKey`** (Singleton-Zeile, gleiches Muster wie `FederationIdentity`): eigenes
+  RSA-2048-Schlüsselpaar, idempotent beim ersten Zugriff erzeugt, wiederverwendet die bereits
+  vorhandene `federation_crypto.generate_keypair()` (keine neue Krypto-Duplikation innerhalb desselben
+  Service). Stabiler `kid` über Neustarts hinweg, live per echtem `docker compose restart` bestätigt.
+- **`GET /.well-known/jwks.json`** + **`local_token_issuer.mint_token()`**: liefert/stellt Tokens mit
+  identischem Claim-Shape wie Keycloak aus (`sub`/`preferred_username`/`realm_access.roles`/`aud`),
+  damit kein Downstream-Konsument etwas über die Herkunft wissen muss.
+- **Neuer `MultiIssuerTokenValidator` in `libs/dms-auth-client`**: delegiert an eine von mehreren
+  `TokenValidator`-Instanzen, ausgewählt über den `iss`-Claim (reines Duck-Typing, `make_current_user_
+  dependency` bemerkt den Unterschied nicht). `auth-service`s eigener `_validator` ist seit dieser
+  Session ein Verbund aus Keycloak- und lokalem Validator, über einen `_LazyValidator`-Wrapper verzögert
+  (der lokale Schlüssel braucht einen DB-Zugriff, der erst im Lifespan verfügbar ist, `get_current_user`
+  muss aber schon beim Modul-Import als fertige Dependency existieren).
+- **Recherche vor der Umsetzung bestätigte einen schmaleren Umfang als befürchtet**: nur `auth-service`
+  und `gateway-service` instanziieren `TokenValidator` überhaupt direkt (per Grep bestätigt) — alle
+  anderen ~30 Services konsumieren ausschließlich die vom Gateway weitergereichten `X-DMS-*`-Header,
+  nicht selbst validierte Tokens. Die Multi-Issuer-Umstellung betrifft dadurch nur zwei Stellen, nicht
+  den gesamten Service-Katalog.
+- **Tests**: `libs/dms-auth-client` 12 (vorher 8, +4 neue `MultiIssuerTokenValidator`-Tests), auth-service
+  81 (vorher 76, +5 neue: Hash/Verify-Roundtrip, Signierschlüssel-Idempotenz über einen echten
+  Neustart-Zyklus zweier sequenzieller `TestClient`-Kontexte, Mint-Token-Validierung gegen das eigene
+  JWKS, JWKS-Endpunkt-Konsistenz, lokal ausgestelltes Token wird von `GET /me` akzeptiert). `ruff
+  check`/`ruff format --check` clean.
+- **Ein echter Bug in der eigenen Testarbeit gefunden und behoben**: der erste Anlauf für den
+  Idempotenz-Test rief `ensure_signing_key` per `asyncio.run()` außerhalb des von `TestClient`
+  verwalteten Event-Loops auf — asyncpg-Verbindungen sind an genau einen Loop gebunden, das schlug mit
+  `RuntimeError: ... attached to a different loop` fehl. Behoben durch zwei echte, sequenzielle
+  `TestClient`-Kontexte (simuliert einen tatsächlichen Neustart) statt eines manuellen Zweitaufrufs.
+- **Vollständig live gegen den echten laufenden Stack verifiziert**: `GET /.well-known/jwks.json`
+  liefert einen validen JWKS-Eintrag, ein bestehender Keycloak-Login (`users-admin`) funktioniert über
+  `GET /me` unverändert, `kid` bleibt über einen echten `docker compose restart auth-service` hinweg
+  identisch (`local-1` vor und nach dem Neustart).
+- Doku: neues [ADR 0063](docs/adr/0063-auth-entkopplung-lokale-technische-konten-dual-issuer-jwt.md),
+  `docs/services/auth-service.md` (neuer Abschnitt "Auth-Entkopplung von Keycloak"),
+  `libs/dms-auth-client/README.md` aktualisiert.
+- **Bekannte, dokumentierte Lücke bis P18-S2**: `gateway-service`s eigener `TokenValidator` ist noch
+  nicht auf Multi-Issuer umgestellt — unkritisch, solange `POST /login` noch keine lokalen Tokens
+  ausstellt, muss aber vor Abschluss von P18-S2 nachgezogen werden, sonst scheitert ein frisch
+  eingeloggter Superuser am Gateway.
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

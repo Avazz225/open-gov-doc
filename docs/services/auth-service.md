@@ -3,7 +3,7 @@
 **Verantwortung:** Schlanker OIDC-Broker vor Keycloak — hält Client-Secret und Admin-Zugang, Aufrufer sehen nur Login/Refresh/Token-Validierung (Konzept 4.4). Keine eigene IAM-Logik, keine eigene Nutzertabelle.
 
 **Konzept-Referenz:** 4.4/2.5 (Kontakte, seit P15-S4)/7.4 (föderierte Kontaktsuche, seit P15-S4)/14.1 (Realm-Rollen für Konfigurationspakete, seit P17-S1)
-**Eigenes Postgres-Schema:** `auth` (seit P15-S4, `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche; seit dem Ad-hoc-Post-Roadmap-SSO-Feature zusätzlich `sso_config`, ebenfalls eine Singleton-Zeile, siehe "SSO/automatischer Login" unten). Bis P15-S4 war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
+**Eigenes Postgres-Schema:** `auth` (seit P15-S4, `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche; seit dem Ad-hoc-Post-Roadmap-SSO-Feature zusätzlich `sso_config`, ebenfalls eine Singleton-Zeile; seit Phase 18 zusätzlich `local_signing_key` (Singleton) und `technical_account`, siehe "Auth-Entkopplung von Keycloak" unten). Bis P15-S4 war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
 
 ## API
 
@@ -29,6 +29,7 @@
 | `GET` | `/realm-roles` | **Seit P17-S1** (14.1): aktuelle Keycloak-Realm-Rollen, gefiltert um Keycloak-Built-ins (`offline_access`, `uma_authorization`, `default-roles-*`) — ungegatet, liefert nur Namen (identisches Vertrauensmodell wie `permission-service`s `GET /roles`) |
 | `POST` | `/realm-roles` | **Seit P17-S1**: legt die übergebenen Realm-Rollen idempotent an (`{names: [...]}`, `create_realm_role(..., skip_exists=True)`) — verlangt `X-DMS-Principal`-Header mit `admin.user_management`-Berechtigung (Service-zu-Service, kein Keycloak-JWT-Endpunkt), sonst `403`. Weist die Rolle niemandem zu, siehe "Realm-Rollen-Verwaltung" unten |
 | `GET` | `/healthz` | Eigener Health-Check |
+| `GET` | `/.well-known/jwks.json` | **Seit Phase 18** (ADR 0063): öffentlicher Schlüssel für Tokens lokaler technischer Konten, gleiches Format wie Keycloaks JWKS. Ungegatet |
 | `GET` | `/oidc/authorize?redirect_uri=&state=` | **Ad-hoc Post-Roadmap** (SSO, siehe ADR 0062): prüft `redirect_uri` gegen `sso_redirect_uri_allowed_origins` (400 sonst, Open-Redirect-Absicherung), liefert `{authorization_url}` — der Client navigiert selbst dorthin. Öffentlich (Login-Einstiegspunkt) |
 | `POST` | `/oidc/callback` | `{code, redirect_uri}` → tauscht den Code serverseitig gegen Tokens, liefert dieselbe `TokenResponse`-Form wie `/login`. Prüft Not-Shutdown ERST NACH dem Austausch (Benutzername vorher unbekannt) — siehe ADR 0062. Öffentlich |
 | `GET` | `/sso-config` | `{enabled, updated_at}` — ob SSO installationsweit aktiv ist. Ungegatet, `login/page.tsx` fragt dies vor dem Formular ab |
@@ -67,6 +68,34 @@ Ein periodischer Poll-Loop (`_superuser_poll_loop`, `superuser_poll_interval_sec
 ## Not-Shutdown (4.8, seit P6-S6)
 
 `POST /login` liest den vom Gateway auf jedem proxied Request injizierten `X-DMS-Maintenance-Active`-Header (Default `"false"`, falls das Login direkt am Service statt über das Gateway aufgerufen wird — dann ist der Wartungsmodus faktisch nie wirksam, siehe `docs/services/gateway-service.md`): ist er `"true"` und der angefragte `username` ungleich `superuser.SUPERUSER_USERNAME`, wird der Login mit `503` abgelehnt, **bevor** überhaupt ein Password-Grant gegen Keycloak versucht wird — wörtliche Umsetzung von "neue Logins außer für den Superuser werden abgelehnt" (4.8). Der Superuser-Login selbst wird dadurch nicht automatisch erfolgreich — ein falsches Passwort liefert weiterhin `401`, der Header entscheidet nur, ob überhaupt versucht wird. Vollständige Architekturbegründung (Gateway als Durchsetzungspunkt, Header-Broadcast-Muster) in [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
+
+## Auth-Entkopplung von Keycloak (Post-Roadmap Phase 18, Session 1, siehe ADR 0063)
+
+Superuser-Break-Glass und Domain-Admin-Konten sollen künftig unabhängig von Keycloaks Erreichbarkeit
+funktionieren (Nutzer-Direktive: "der Superuser soll gar nicht im Keycloak leben"). Diese erste Session
+legt die Infrastruktur, ohne `POST /login`/Break-Glass bereits umzustellen (folgt in Session 2/3):
+
+- **`TechnicalAccount`** (neues Model, `auth`-Schema) — künftiger Speicherort für Superuser-/Domain-
+  Admin-Konten, `password_hash` per `bcrypt` (erstes selbst gehashtes Passwort in diesem Service).
+- **`LocalSigningKey`** (Singleton-Zeile, gleiches Muster wie `FederationIdentity`) — eigenes
+  RSA-2048-Schlüsselpaar, idempotent beim ersten Zugriff erzeugt (`local_token_issuer.
+  ensure_signing_key`), stabiler `kid` über Neustarts hinweg.
+- **`GET /.well-known/jwks.json`** — liefert den öffentlichen Schlüssel im selben JWKS-Format wie
+  Keycloaks `/protocol/openid-connect/certs`, ungegatet.
+- **`local_token_issuer.mint_token()`** — stellt Tokens mit identischem Claim-Shape wie Keycloak aus
+  (`sub`/`preferred_username`/`realm_access.roles`/`aud`).
+- **`_validator` ist seit dieser Session ein `MultiIssuerTokenValidator`** (neu in
+  `libs/dms-auth-client`, wählt über den `iss`-Claim) aus Keycloak- und lokalem Validator — vollständig
+  additiv, bestehende Keycloak-Logins bleiben unverändert gültig. Ein `_LazyValidator`-Wrapper verzögert
+  den Zugriff auf `app.state.combined_validator` bis zum ersten Request, da der lokale Signierschlüssel
+  erst nach einem DB-Zugriff im Lifespan verfügbar ist.
+
+**Noch keine funktionale Änderung für Endnutzer**: `POST /login` stellt weiterhin ausschließlich
+Keycloak-Tokens aus. `gateway-service`s eigener `TokenValidator` ist noch nicht auf Multi-Issuer
+umgestellt — unkritisch, solange keine lokalen Tokens tatsächlich ausgestellt werden, muss aber vor
+Abschluss von Session 2 nachgezogen werden. Live verifiziert: `GET /.well-known/jwks.json` liefert einen
+validen JWKS-Eintrag, ein bestehender Keycloak-Login funktioniert unverändert, `kid` bleibt über einen
+echten Container-Neustart hinweg stabil.
 
 ## SSO/automatischer Login (Ad-hoc Post-Roadmap-Feature, siehe ADR 0062)
 

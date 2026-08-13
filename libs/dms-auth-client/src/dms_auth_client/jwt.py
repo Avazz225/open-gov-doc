@@ -50,6 +50,10 @@ class TokenValidator:
         self._fetched_at = time.monotonic()
         return self._jwks
 
+    @property
+    def issuer(self) -> str:
+        return self._issuer
+
     def validate(self, token: str) -> dict:
         jwks = self._get_jwks()
         try:
@@ -71,3 +75,31 @@ class TokenValidator:
             )
         except JWTError as exc:
             raise InvalidTokenError("Token-Validierung fehlgeschlagen") from exc
+
+
+class MultiIssuerTokenValidator:
+    """SSO/Auth-Entkopplung (Post-Roadmap-Feature, Phase 18) - delegiert an eine
+    von mehreren `TokenValidator`-Instanzen, ausgewählt über den `iss`-Claim
+    des jeweiligen Tokens. Grund: `auth-service` kann seit Phase 18 zusätzlich
+    zu Keycloak selbst Tokens für technische Konten (Superuser/Domain-Admins)
+    ausstellen (eigener Issuer, eigenes JWKS) - Downstream-Konsumenten
+    (`make_current_user_dependency`) sollen davon nichts wissen müssen, daher
+    dieselbe `.validate(token) -> dict`-Schnittstelle wie `TokenValidator`
+    selbst (reines Duck-Typing, kein gemeinsamer Basistyp nötig)."""
+
+    def __init__(self, validators: list[TokenValidator]) -> None:
+        if not validators:
+            raise ValueError("Mindestens ein TokenValidator muss angegeben werden")
+        self._by_issuer = {v.issuer: v for v in validators}
+
+    def validate(self, token: str) -> dict:
+        try:
+            claims = jwt.get_unverified_claims(token)
+        except JWTError as exc:
+            raise InvalidTokenError("Ungültiger Token-Payload") from exc
+
+        issuer = claims.get("iss")
+        validator = self._by_issuer.get(issuer)
+        if validator is None:
+            raise InvalidTokenError(f"Unbekannter Issuer: {issuer!r}")
+        return validator.validate(token)

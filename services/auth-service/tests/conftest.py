@@ -42,6 +42,8 @@ async def _clean_tables():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE auth.federation_identity"))
         await conn.execute(text("TRUNCATE auth.sso_config"))
+        await conn.execute(text("TRUNCATE auth.technical_account"))
+        await conn.execute(text("TRUNCATE auth.local_signing_key"))
     await eng.dispose()
     yield
 

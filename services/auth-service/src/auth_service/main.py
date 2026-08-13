@@ -7,7 +7,11 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from dms_auth_client import TokenValidator, make_current_user_dependency
+from dms_auth_client import (
+    MultiIssuerTokenValidator,
+    TokenValidator,
+    make_current_user_dependency,
+)
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -21,6 +25,7 @@ from auth_service import (
     directory_federation,
     federation_crypto,
     keycloak_client,
+    local_token_issuer,
     superuser,
 )
 from auth_service.admin_users import UserAlreadyExistsError, UserNotFoundError, build_admin_client
@@ -154,6 +159,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = make_session_factory(engine)
     app.state.federation_hub_client = await _ensure_federation_identity(app.state.session_factory)
 
+    # Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063):
+    # der lokale Signierschlüssel braucht einen DB-Zugriff, ist also erst ab
+    # hier (nach dem Engine-Setup oben) verfügbar - `_LazyValidator` (unten)
+    # verzögert den eigentlichen Zugriff auf `app.state.combined_validator`
+    # bis zum ersten echten Request, sodass `get_current_user` trotzdem schon
+    # beim Modul-Import als fertige Dependency existieren kann.
+    signing_key = await local_token_issuer.ensure_signing_key(app.state.session_factory)
+    app.state.local_signing_key = signing_key
+    app.state.combined_validator = MultiIssuerTokenValidator(
+        [
+            _keycloak_validator,
+            TokenValidator(
+                issuer=local_token_issuer.LOCAL_ISSUER,
+                audience=settings.keycloak_client_id,
+                jwks=local_token_issuer.build_jwks(signing_key.public_key_pem, signing_key.kid),
+            ),
+        ]
+    )
+
     # Best-Effort (P6-S5, seit P6-S6 für zwei Domänen statt einer): der
     # Permission Service könnte beim eigenen Start noch nicht erreichbar sein
     # - kein Retry-Loop, heilt beim nächsten Neustart (gleiches Prinzip wie
@@ -223,12 +247,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
 
 _issuer = f"{settings.keycloak_base_url}/realms/{settings.keycloak_realm}"
-_validator = TokenValidator(
+_keycloak_validator = TokenValidator(
     issuer=_issuer,
     audience=settings.keycloak_client_id,
     jwks_url=f"{_issuer}/protocol/openid-connect/certs",
 )
-get_current_user = make_current_user_dependency(_validator)
+
+
+class _LazyValidator:
+    """Auth-Entkopplung (Phase 18): `app.state.combined_validator` existiert
+    erst nach dem Lifespan-Start (braucht einen DB-Zugriff für den lokalen
+    Signierschlüssel, siehe `lifespan()`) - dieser Wrapper verzögert den
+    eigentlichen Zugriff bis zum ersten tatsächlichen Request.
+    `make_current_user_dependency` selbst bekommt trotzdem wie gewohnt ein
+    sofort verfügbares Objekt mit `.validate()` (reines Duck-Typing)."""
+
+    def validate(self, token: str) -> dict:
+        return app.state.combined_validator.validate(token)
+
+
+get_current_user = make_current_user_dependency(_LazyValidator())
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -246,6 +284,17 @@ async def publish_event(event_type: str, payload: dict, actor: str | None = None
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/.well-known/jwks.json")
+def get_local_jwks() -> dict:
+    """Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
+    0063) - JWKS für Tokens technischer Konten (Superuser/Domain-Admins),
+    analog zu Keycloaks `/protocol/openid-connect/certs`. Ungegatet wie jeder
+    JWKS-Endpunkt (öffentlicher Schlüssel, keine sensiblen Daten)."""
+    return local_token_issuer.build_jwks(
+        app.state.local_signing_key.public_key_pem, app.state.local_signing_key.kid
+    )
 
 
 @app.post("/login", response_model=TokenResponse)
@@ -632,7 +681,7 @@ async def oidc_callback(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     if x_dms_maintenance_active.lower() == "true":
-        claims = _validator.validate(tokens["access_token"])
+        claims = _keycloak_validator.validate(tokens["access_token"])
         if claims.get("preferred_username") != superuser.SUPERUSER_USERNAME:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

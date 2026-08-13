@@ -46,3 +46,45 @@ class SsoConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LocalSigningKey(Base):
+    """Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
+    0063) - eigenes RSA-Schlüsselpaar für Tokens technischer Konten
+    (Superuser/Domain-Admins), unabhängig von Keycloak ausgestellt.
+    Singleton-Zeile (`id=1`), gleiches Muster wie `FederationIdentity` oben.
+    `kid` ist der `kid`-Claim im Token-Header - stabil über Neustarts hinweg
+    (kein neuer Schlüssel bei jedem Start), sonst würden bereits
+    ausgestellte, noch gültige Tokens plötzlich keinen passenden Schlüssel
+    mehr im JWKS finden."""
+
+    __tablename__ = "local_signing_key"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kid: Mapped[str] = mapped_column(String(64))
+    private_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TechnicalAccount(Base):
+    """Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
+    0063) - Superuser- und Domain-Admin-Konten leben ab dieser Phase
+    ausschließlich hier, nicht mehr als Keycloak-Nutzerkonten. `password_hash`
+    ist ein bcrypt-Hash (erstes Mal, dass dieser Service selbst ein Passwort
+    hasht - bislang übernahm Keycloak das vollständig). `role_name` ist die
+    an `permission-service` zu übermittelnde Rolle (z. B. `domain-admin-
+    users`), identisch zum bisherigen Keycloak-Konten-Muster.
+    `enabled`/`expires_at` tragen weiterhin die Break-Glass-Semantik für den
+    Superuser (4.6) - jetzt rein app-seitig, ohne Keycloak-Attribut."""
+
+    __tablename__ = "technical_account"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(128))
+    account_type: Mapped[str] = mapped_column(String(32))
+    role_name: Mapped[str] = mapped_column(String(128))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
