@@ -142,9 +142,21 @@ class WorkflowServiceClient:
 
 class PermissionServiceClient:
     ROOT_RESOURCE_ID = "root"
+    # Self-Gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
+    # `PUT /roles` verlangen seither `admin.user_management`. config-service
+    # weist sich diese Capability bereits an seinem eigenen Bootstrap zu
+    # (`main.py._REQUIRED_ROLE_NAMES`, u. a. "domain-admin-users") - dieser
+    # Client sandte bislang aber (anders als seine Geschwister-Clients in
+    # dieser Datei) keinen `X-DMS-Principal`-Header, wäre also trotz
+    # gehaltener Berechtigung an der neuen Prüfung gescheitert.
+    _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
 
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30.0,
+            headers={"X-DMS-Principal": self._CONFIG_ADMIN_PRINCIPAL_ID},
+        )
 
     async def close(self) -> None:
         await self._client.aclose()

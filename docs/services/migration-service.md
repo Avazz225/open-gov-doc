@@ -83,6 +83,16 @@ Thread blockieren. Beim Selbst-Loopback (siehe unten) führt das zu einem **echt
 blockierende Aufruf wartet auf eine Antwort von genau dem Thread, den er selbst blockiert — real
 aufgetreten (`httpx.ReadTimeout`) und über `asyncio.to_thread()` behoben.
 
+## permission-service-Gating (seit Post-Roadmap Phase 19 Session 6, ADR 0071)
+
+`permission-service`s `POST`/`PUT /roles` und `POST`/`DELETE /scope-locks` verlangen seither
+`admin.user_management`. `LocalDmsClient` (`dms_client.py`) sendet dafür jetzt einen
+`X-DMS-Principal: migration-service`-Header (vorher keiner) — betrifft `acquire_scope_lock`/
+`release_scope_lock` UND `apply_role_assignment`s Get-or-Create der Zielrolle. `main.py`s
+`_ensure_config_admin_permission()` bootstrapped sich dafür seither zusätzlich zur bisherigen
+`domain-admin-config`-Rolle (`admin.object_config`) auch `domain-admin-users`
+(`admin.user_management`) — `_REQUIRED_ROLE_NAMES = ("domain-admin-config", "domain-admin-users")`.
+
 ## Bewusste Grenzen
 
 - **Selbst-Loopback statt echter Zwei-Installationen-Test**: ein zweiter unabhängiger Stack ist im

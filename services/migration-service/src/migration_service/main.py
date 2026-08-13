@@ -67,40 +67,53 @@ def license_gate(action: str):
 
 _CONFIG_ADMIN_PRINCIPAL_ID = "migration-service"
 
+# Seit Post-Roadmap Phase 19 Session 6 (ADR 0071, permission-service
+# Self-Gating) zusätzlich "domain-admin-users" (`admin.user_management`) -
+# `LocalDmsClient` ruft seither auch `POST`/`PUT /roles` und `POST`/
+# `DELETE /scope-locks` auf, beide verlangen diese Capability. "domain-admin-
+# config" bleibt weiterhin nötig für `workflow-service`s
+# `POST /process-definitions`.
+_REQUIRED_ROLE_NAMES = ("domain-admin-config", "domain-admin-users")
+
 
 async def _ensure_config_admin_permission() -> None:
     """Bootstrap statt manueller Admin-Vorarbeit: `workflow-service`s
     `POST /process-definitions` verlangt die Domain-Admin-Capability
-    `admin.object_config` (P6-S6-Retrofit) - `domain-admin-config` ist eine der
-    von `permission-service` standardmäßig mitgelieferten Rollen (4.6), migration-
-    service weist sie sich selbst idempotent zu (gleiches Bootstrap-Muster wie
-    `workflow-service`s eigener Test-Fixture `_grant_config_admin_permission`,
-    hier aber als echter Anwendungs-Startupschritt statt nur im Test)."""
+    `admin.object_config` (P6-S6-Retrofit), `permission-service`s eigene
+    `POST`/`PUT /roles`+`POST`/`DELETE /scope-locks` verlangen seit P19-S6
+    `admin.user_management` - beide Rollen sind unter den von
+    `permission-service` standardmäßig mitgelieferten Rollen (4.6),
+    migration-service weist sie sich selbst idempotent zu (gleiches
+    Bootstrap-Muster wie `workflow-service`s eigener Test-Fixture
+    `_grant_config_admin_permission`, hier aber als echter
+    Anwendungs-Startupschritt statt nur im Test)."""
     async with httpx.AsyncClient(
         base_url=settings.permission_service_base_url, timeout=10.0
     ) as client:
         roles = (await client.get("/roles")).json()
-        role = next((r for r in roles if r["name"] == "domain-admin-config"), None)
-        if role is None:
-            logger.warning("migration_service_domain_admin_config_role_missing")
-            return
         existing = (
             await client.get(
                 "/role-assignments", params={"principal_id": _CONFIG_ADMIN_PRINCIPAL_ID}
             )
         ).json()
-        if any(a["role_id"] == role["id"] for a in existing):
-            return
-        response = await client.post(
-            "/role-assignments",
-            json={
-                "principal_type": "service",
-                "principal_id": _CONFIG_ADMIN_PRINCIPAL_ID,
-                "role_id": role["id"],
-                "resource_id": "root",
-            },
-        )
-        response.raise_for_status()
+        existing_role_ids = {a["role_id"] for a in existing}
+        for role_name in _REQUIRED_ROLE_NAMES:
+            role = next((r for r in roles if r["name"] == role_name), None)
+            if role is None:
+                logger.warning("migration_service_domain_admin_role_missing: %r", role_name)
+                continue
+            if role["id"] in existing_role_ids:
+                continue
+            response = await client.post(
+                "/role-assignments",
+                json={
+                    "principal_type": "service",
+                    "principal_id": _CONFIG_ADMIN_PRINCIPAL_ID,
+                    "role_id": role["id"],
+                    "resource_id": "root",
+                },
+            )
+            response.raise_for_status()
 
 
 async def _start_transfer(

@@ -17,6 +17,25 @@ def client():
         yield c
 
 
+def _grant_scope_lock_permission(client, principal_id: str) -> None:
+    """Self-Gating (Post-Roadmap Phase 19 Session 6, ADR 0071): `POST`/
+    `DELETE /scope-locks` verlangen seither `admin.user_management` für den
+    im Body übergebenen `locked_by`/`released_by`. Weist die bereits
+    vorgeseedete "domain-admin-users"-Rolle zu, analog zu
+    `test_api.py`s `role_management_headers`."""
+    roles = client.get("/roles").json()
+    role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": principal_id,
+            "role_id": role_id,
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+
 @pytest.fixture
 async def consumer():
     bus = NatsEventBusClient(NATS_URL, ensure_stream=False)
@@ -40,6 +59,7 @@ async def _collect_one(consumer, subject: str):
 
 
 async def test_create_scope_lock_publishes_event(client, consumer):
+    _grant_scope_lock_permission(client, "admin")
     received, got_message = await _collect_one(consumer, "permission.scope_lock.created")
 
     response = client.post(
@@ -59,6 +79,8 @@ async def test_create_scope_lock_publishes_event(client, consumer):
 
 
 async def test_release_scope_lock_publishes_event(client, consumer):
+    _grant_scope_lock_permission(client, "admin")
+    _grant_scope_lock_permission(client, "admin2")
     lock = client.post(
         "/scope-locks", json={"resource_id": ROOT_RESOURCE_ID, "locked_by": "admin"}
     ).json()["scope_lock"]

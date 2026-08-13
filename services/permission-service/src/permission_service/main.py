@@ -171,8 +171,30 @@ def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
 
 
+async def _require_role_management(session: AsyncSession, x_dms_principal: str) -> None:
+    """Self-Gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
+    `PUT /roles` waren seit jeher ungegatet (ADR 0023 nannte explizit nur
+    `POST /role-assignments` als Henne-Ei-Fall, Rollen-*Anlage* selbst hängt
+    an keinem Bootstrap-Pfad, siehe ADR 0071 "Begründung"). `RoleCreate`/
+    `RoleUpdate` haben kein Akteur-Feld (anders als `ScopeLockCreate.locked_
+    by`/`.released_by` unten) - `X-DMS-Principal` ist hier die einzige
+    Identitätsquelle, gleiches Muster wie `auth-service`s `_require_service_
+    user_management`/`case-service`s `_require_case_permission`."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        await repository.require_capability(session, x_dms_principal, "admin.user_management")
+    except repository.MissingRequiredPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @app.post("/roles", response_model=RoleOut)
-async def create_role(payload: RoleCreate, session: AsyncSession = Depends(get_session)) -> RoleOut:
+async def create_role(
+    payload: RoleCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RoleOut:
+    await _require_role_management(session, x_dms_principal)
     role = await repository.create_role(
         session, payload.name, payload.description, payload.permissions
     )
@@ -187,11 +209,16 @@ async def list_roles(session: AsyncSession = Depends(get_session)) -> list[RoleO
 
 @app.put("/roles/{role_id}", response_model=RoleOut)
 async def update_role(
-    role_id: int, payload: RoleUpdate, session: AsyncSession = Depends(get_session)
+    role_id: int,
+    payload: RoleUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> RoleOut:
     """Seit P12-S3 (7.3) - Grundlage für den Konfigurationsimport (`config-
     service`), der eine bereits vorhandene Rolle (Abgleich per `name`)
-    aktualisieren statt sie zu duplizieren erwarten muss."""
+    aktualisieren statt sie zu duplizieren erwarten muss. Seit P19-S6
+    gegated, siehe `_require_role_management`."""
+    await _require_role_management(session, x_dms_principal)
     try:
         role = await repository.update_role(
             session, role_id, description=payload.description, permissions=payload.permissions
@@ -507,6 +534,18 @@ async def reject_approval_request(
 async def create_scope_lock(
     payload: ScopeLockCreate, session: AsyncSession = Depends(get_session)
 ) -> ScopeLockActionResult:
+    """Self-Gating seit P19-S6 (ADR 0071): Baseline-Capability-Prüfung LÄUFT
+    VOR dem optionalen Vier-Augen-Zweig unten - ohne diese Reihenfolge könnte
+    ein Principal ohne jede Berechtigung trotzdem einen offenen
+    Genehmigungsantrag auslösen. `payload.locked_by` ist bereits die
+    etablierte Akteur-Quelle für den Vier-Augen-Zweig hier (`initiated_by`),
+    dieselbe Quelle wird für die neue Prüfung wiederverwendet statt eines
+    zusätzlichen `X-DMS-Principal`-Headers."""
+    try:
+        await repository.require_capability(session, payload.locked_by, "admin.user_management")
+    except repository.MissingRequiredPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     config = await repository.get_approval_config(session, "permission.scope_lock.create")
     if config.requires_approval:
         request = await _request_approval(
@@ -553,6 +592,13 @@ async def create_scope_lock(
 async def release_scope_lock(
     lock_id: int, payload: ScopeLockRelease, session: AsyncSession = Depends(get_session)
 ) -> ScopeLockActionResult:
+    """Self-Gating seit P19-S6 (ADR 0071) - siehe `create_scope_lock` oben
+    für die Begründung von Reihenfolge und Akteur-Quelle."""
+    try:
+        await repository.require_capability(session, payload.released_by, "admin.user_management")
+    except repository.MissingRequiredPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     config = await repository.get_approval_config(session, "permission.scope_lock.release")
     if config.requires_approval:
         request = await _request_approval(

@@ -48,13 +48,22 @@ class LocalDmsClient:
     Installation - ein Objekt statt zweier separater, da beide Rollen
     (Quelle liest, Ziel schreibt) beide Aspekte brauchen."""
 
+    # Self-Gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
+    # `PUT /roles` und `POST`/`DELETE /scope-locks` verlangen seither
+    # `admin.user_management`. migration-service weist sich diese Capability
+    # zusätzlich zu `admin.object_config` an seinem eigenen Bootstrap zu
+    # (siehe `main.py._ensure_config_admin_permission`).
+    _PRINCIPAL_ID = "migration-service"
+
     def __init__(self, settings: Settings) -> None:
         self.tree = DmsTreeClient(
             document_service_base_url=settings.document_service_base_url,
             folder_service_base_url=settings.folder_service_base_url,
         )
         self._permissions = httpx.Client(
-            base_url=settings.permission_service_base_url, timeout=30.0
+            base_url=settings.permission_service_base_url,
+            timeout=30.0,
+            headers={"X-DMS-Principal": self._PRINCIPAL_ID},
         )
 
     def close(self) -> None:

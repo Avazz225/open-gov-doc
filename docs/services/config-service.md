@@ -141,7 +141,11 @@ ist eine Erweiterung derselben Verantwortung. Da Sensor-Konfigurations-Schreibzu
 (P17-S1, `auth-service`s neues `POST /realm-roles`) verlangen, bootstrapped sich `config-service`
 beim Start selbst **drei** Rollen (`domain-admin-config`, `domain-admin-monitoring`,
 `domain-admin-users`) — idempotente Selbstzuweisung, identisches Muster wie `migration-service`s
-`_ensure_config_admin_permission()` (P12-S2).
+`_ensure_config_admin_permission()` (P12-S2). Seit Post-Roadmap Phase 19 Session 6 sendet
+`clients.py`s `PermissionServiceClient` außerdem einen `X-DMS-Principal: config-service`-Header (der
+Client hielt `admin.user_management` bereits über `domain-admin-users`, sandte aber keinen Header) —
+nötig, da `permission-service`s eigenes `POST`/`PUT /roles` seither dieselbe Capability verlangt
+([ADR 0071](../adr/0071-permission-service-self-gating.md)).
 
 ## Schema-Versionierung
 
