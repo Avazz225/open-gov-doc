@@ -91,7 +91,7 @@ def _federated_return_task_bpmn() -> str:
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-DMS-Principal": "workflow-service-tests"}) as c:
         yield c
 
 

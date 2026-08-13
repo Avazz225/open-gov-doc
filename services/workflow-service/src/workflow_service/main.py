@@ -531,8 +531,12 @@ async def _require_object_config(x_dms_principal: str) -> None:
     verlangt die Domain-Admin-Capability `admin.object_config` (dieselbe
     Rolle "Objekttyp-/Workflow-Konfiguration" aus P6-S5, jetzt zum ersten Mal
     tatsächlich durchgesetzt inkl. echtem technischen Konto `config-admin`).
-    Instanzstart/Task-Abschluss bleiben bewusst für jeden authentifizierten
-    Principal offen (normale Fachnutzung), siehe P6-S6-Rückfrage-Entscheidung."""
+    Instanzstart/Task-Abschluss brauchten dagegen ursprünglich (P6-S6-
+    Rückfrage-Entscheidung) keine Domain-Admin-Rolle - seit Post-Roadmap
+    Phase 19 Session 9 (ADR 0074) prüfen sie stattdessen `workflow.write`,
+    siehe `_require_workflow_permission` unten (RBAC statt Admin-Domäne,
+    kein Widerspruch zur ursprünglichen Entscheidung "keine Domain-Admin-
+    Rolle noetig")."""
     allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
         x_dms_principal, "admin.object_config"
     )
@@ -541,6 +545,28 @@ async def _require_object_config(x_dms_principal: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Fehlende Domain-Admin-Rolle 'Objekttyp-/Workflow-Konfiguration'",
         )
+
+
+async def _require_workflow_permission(x_dms_principal: str, *, access_type: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 9, ADR 0074) - Instanzstart/
+    Task-Abschluss waren bislang bewusst für jeden authentifizierten
+    Principal offen (P6-S6-Rückfrage-Entscheidung, siehe `_require_object_
+    config` oben) - diese Session macht daraus eine echte, admin-editierbare
+    RBAC-Prüfung (`workflow.write`) statt eines hartkodiert offenen Pfads,
+    exakt das bereits in P19-S5/S7/S8 etablierte Muster. Die "everyone"-
+    Gruppe (ADR 0067) gewährt `workflow.write` standardmäßig - erhält das
+    bisherige De-facto-offene Verhalten ("normale Fachnutzung soll keine
+    Domain-Admin-Rolle brauchen"), macht es aber admin-editierbar."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission="workflow.write",
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Fehlende Berechtigung 'workflow.write'")
 
 
 async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
@@ -847,9 +873,11 @@ async def start_instance(
     process_definition_id: int,
     payload: ProcessInstanceCreate,
     x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
     try:
         instance = await repository.start_instance(
             session,
@@ -1101,6 +1129,7 @@ async def complete_task(
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
     await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
     try:
         await _require_valid_signature_if_needed(session, instance_id, task_id, payload)
         await _reject_manual_federated_completion(session, instance_id, task_id)

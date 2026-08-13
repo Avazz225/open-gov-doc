@@ -14,7 +14,7 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-DMS-Principal": "workflow-service-tests"}) as c:
         yield c
 
 
@@ -565,6 +565,7 @@ def test_complete_task_on_behalf_of_without_principal_header_returns_401(
     response = client.post(
         f"/instances/{instance['id']}/tasks/{task['id']}/complete",
         json={"completed_by": "bob", "on_behalf_of_principal_id": "alice"},
+        headers={"X-DMS-Principal": ""},
     )
 
     assert response.status_code == 401
@@ -886,7 +887,9 @@ def test_retry_instance_resumes_after_a_failed_connector_call(
     # Exception zu Debug-Zwecken direkt an den Aufrufer durch, statt sie (wie ein
     # echter uvicorn-Prozess) als reguläre 500-Antwort zurückzugeben - genau diese
     # reale 500-Antwort will dieser Test aber tatsächlich sehen und weiterverarbeiten.
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with TestClient(
+        app, raise_server_exceptions=False, headers={"X-DMS-Principal": "workflow-service-tests"}
+    ) as client:
         attempts = {"count": 0}
 
         def stub(request: httpx.Request) -> httpx.Response:

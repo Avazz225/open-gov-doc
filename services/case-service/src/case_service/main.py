@@ -205,6 +205,7 @@ async def create_case(
             created_by=payload.created_by,
             business_key=case_id,
             initial_data=payload.initial_data,
+            x_dms_principal=x_dms_principal,
         )
     except ProcessDefinitionUnknownError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -21,7 +21,13 @@ class WorkflowClient:
         created_by: str,
         business_key: str,
         initial_data: dict,
+        x_dms_principal: str,
     ) -> dict:
+        """`x_dms_principal` (Post-Roadmap Phase 19 Session 9, ADR 0074):
+        `POST .../instances` verlangt seither `workflow.write` - anders als
+        `created_by` (ein ungeprüftes Body-Feld, s. u.) ist dies der bereits
+        von `_require_case_permission` verifizierte Aufrufer aus dem
+        eingehenden Request-Header."""
         response = await self._client.post(
             f"/process-definitions/{process_definition_id}/instances",
             json={
@@ -29,6 +35,7 @@ class WorkflowClient:
                 "business_key": business_key,
                 "initial_data": initial_data,
             },
+            headers={"X-DMS-Principal": x_dms_principal},
         )
         if response.status_code == 404:
             raise ProcessDefinitionUnknownError(

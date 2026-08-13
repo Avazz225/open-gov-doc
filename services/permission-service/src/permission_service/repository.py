@@ -205,6 +205,11 @@ EVERYONE_ROLE_PERMISSIONS: list[str] = [
     "ocr.write",
     "rendering.read",
     "rendering.write",
+    # Post-Roadmap Phase 19 Session 9 (ADR 0074): Workflow-Instanzstart/
+    # Task-Abschluss waren zuvor eine bewusste, hartkodierte "für jeden
+    # authentifizierten Principal offen"-Entscheidung (P6-S6) - "everyone"
+    # erhält dieses Verhalten, macht es aber admin-editierbar.
+    "workflow.write",
 ]
 
 
