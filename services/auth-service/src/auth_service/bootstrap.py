@@ -42,42 +42,19 @@ DOMAIN_ADMIN_USERS_USERNAME = "users-admin"
 DOMAIN_ADMIN_CONFIG_USERNAME = "config-admin"
 
 # Technische Konten je Domäne, für die diese Session bereits eine echte
-# Durchsetzung verdrahtet (`(username, systemeigene Permission-Service-Rolle,
-# Nachname für die Keycloak-Pflichtfelder)`) - `users-admin`/"Nutzer-/
-# Rechteverwaltung" seit P6-S5, `config-admin`/"Objekttyp-/Workflow-
-# Konfiguration" seit P6-S6 (Workflow-Definitionen/Script-Task-Upload). Die
-# übrigen 5 in `permission_service.repository.DOMAIN_ADMIN_ROLES` geseedeten
-# Domänen bekommen bewusst noch kein Konto (siehe dortige Begründung).
-DOMAIN_ADMIN_ACCOUNTS: list[tuple[str, str, str]] = [
-    (DOMAIN_ADMIN_USERS_USERNAME, "domain-admin-users", "Nutzerverwaltung"),
-    (DOMAIN_ADMIN_CONFIG_USERNAME, "domain-admin-config", "Workflow-Konfiguration"),
+# Durchsetzung verdrahtet (`(username, systemeigene Permission-Service-Rolle)`)
+# - `users-admin`/"Nutzer-/Rechteverwaltung" seit P6-S5, `config-admin`/
+# "Objekttyp-/Workflow-Konfiguration" seit P6-S6 (Workflow-Definitionen/
+# Script-Task-Upload). Die übrigen 5 in
+# `permission_service.repository.DOMAIN_ADMIN_ROLES` geseedeten Domänen
+# bekommen bewusst noch kein Konto (siehe dortige Begründung). Seit P18-S3
+# leben diese Konten als `TechnicalAccount` in der eigenen DB statt in
+# Keycloak (siehe `domain_admins.py`) - daher kein Nachname-Feld mehr, das war
+# reine Keycloak-Profil-Pflicht.
+DOMAIN_ADMIN_ACCOUNTS: list[tuple[str, str]] = [
+    (DOMAIN_ADMIN_USERS_USERNAME, "domain-admin-users"),
+    (DOMAIN_ADMIN_CONFIG_USERNAME, "domain-admin-config"),
 ]
-
-
-def _ensure_domain_admin_accounts(admin: KeycloakAdmin) -> None:
-    """Technische Konten für die aktuell durchgesetzten Domänen (4.6, seit
-    P6-S5). Username=Passwort nach dem Muster ``<domain>-admin``, vom
-    Betreiber zu ändern. Die zugehörigen Rollen leben bewusst NICHT in
-    Keycloak, sondern systemeigen im Permission Service (siehe
-    `permission_client.py`) - dieser Schritt legt nur die Konten an; die
-    Rollenzuweisung erfolgt separat (async, gegen den Permission Service) im
-    Lifespan von `main.py`, da `KeycloakAdmin` synchron ist, ein HTTP-Aufruf
-    gegen einen anderen Service aber nicht."""
-    for username, _role_name, last_name in DOMAIN_ADMIN_ACCOUNTS:
-        if admin.get_users(query={"username": username, "exact": True}):
-            continue
-        admin.create_user(
-            payload={
-                "username": username,
-                "email": f"{username}@system.local",
-                "enabled": True,
-                "emailVerified": True,
-                "firstName": "Domain-Admin",
-                "lastName": last_name,
-                "credentials": [{"type": "password", "value": username, "temporary": False}],
-            },
-            exist_ok=True,
-        )
 
 
 _KERBEROS_FLOW_ALIAS = "dms-browser-kerberos"
@@ -224,6 +201,5 @@ def ensure_realm_and_client(settings: Settings) -> None:
     )
     _ensure_theme_attribute(admin)
     _ensure_dms_admin_role(admin)
-    _ensure_domain_admin_accounts(admin)
     _ensure_client_updated(admin, settings)
     _ensure_kerberos(admin, settings)

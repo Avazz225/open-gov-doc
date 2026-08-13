@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth_service import (
     admin_users,
     directory_federation,
+    domain_admins,
     federation_crypto,
     keycloak_client,
     local_token_issuer,
@@ -188,14 +189,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # neben den Signierschlüssel oben).
     await superuser.ensure_superuser_account(app.state.session_factory)
 
+    # Auth-Entkopplung von Keycloak (Phase 18, ADR 0065): Domain-Admin-Konten
+    # leben seit dieser Session ebenfalls als `TechnicalAccount`-Zeilen statt
+    # Keycloak-Konten - Anlage direkt hier, neben dem Superuser oben, statt in
+    # `bootstrap.ensure_realm_and_client` (rein Keycloak-fokussiert).
+    for username, role_name in DOMAIN_ADMIN_ACCOUNTS:
+        await domain_admins.ensure_domain_admin_account(
+            app.state.session_factory, username=username, role_name=role_name
+        )
+
     # Best-Effort (P6-S5, seit P6-S6 für zwei Domänen statt einer): der
     # Permission Service könnte beim eigenen Start noch nicht erreichbar sein
     # - kein Retry-Loop, heilt beim nächsten Neustart (gleiches Prinzip wie
     # SubjectNotFoundError in structure_consumer.py).
-    known_users = admin_users.list_users(app.state.keycloak_admin)
-    for username, role_name, _last_name in DOMAIN_ADMIN_ACCOUNTS:
+    for username, role_name in DOMAIN_ADMIN_ACCOUNTS:
         try:
-            account_id = next(u["id"] for u in known_users if u["username"] == username)
+            account_id = await domain_admins.get_technical_account_id(
+                app.state.session_factory, username
+            )
+            if account_id is None:
+                raise RuntimeError(f"Technisches Konto {username!r} wurde nicht angelegt")
             await app.state.permission_client.ensure_role_assignment(
                 principal_id=account_id, role_name=role_name
             )

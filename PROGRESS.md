@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P18-S2 — Superuser-Migration auf lokale Tokens + Gateway-Multi-Issuer (Phase 18, siehe [ADR 0064](docs/adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): `superuser.py` vollständig auf async/`TechnicalAccount` umgestellt, `bootstrap.py`s Keycloak-Anteil entfernt, `POST /login`/`POST /refresh` erkennen technische Konten, `gateway-service`s eigener `TokenValidator` ebenfalls auf `MultiIssuerTokenValidator` umgestellt. Behebt den seit P6-S6 bekannten Superuser-Login-Bug ersatzlos. Zwei echte Bugs bei der Testentwicklung gefunden (fehlendes `ALTER TABLE` nach nachträglicher Nullable-Änderung ohne Alembic; fehlender `jti`-Claim führte zu byte-identischen Tokens bei zwei Ausstellungen innerhalb derselben Sekunde). Vollständig live über das echte Gateway verifiziert.
+**Zuletzt abgeschlossen:** P18-S3 — Domain-Admin-Migration auf lokale technische Konten (Phase 18, letzte Session, siehe [ADR 0065](docs/adr/0065-domain-admin-migration-lokale-technische-konten.md)): `users-admin`/`config-admin` als `TechnicalAccount`-Zeilen statt Keycloak-Konten (neues `domain_admins.py`, strukturell analog zu `superuser.py`), `bootstrap.py`s verbliebener Keycloak-Anteil entfernt. Echtes Testinfrastruktur-Problem gefunden und behoben: `_clean_tables` leerte `technical_account` bislang vor jedem Test, wodurch Domain-Admin-Konten bei jedem Testlauf eine neue `principal_id` bekamen und die (auf dieser Installation Vier-Augen-pflichtige) Rollenzuweisung nie eine bereits genehmigte Zuweisung wiederfinden konnte — behoben über eine neue session-weite Bootstrap-Fixture (genehmigt die allererste Zuweisung der Session einmalig) plus gezieltes `DELETE` statt `TRUNCATE` (nur Nicht-Domain-Admin-Konten pro Test zurückgesetzt). Vollständig live über das echte Gateway verifiziert (nach Neubau des `auth-service`-Images: `iss`-Claim beider Konten zeigt `dms-auth-service-local`, `GET /users`/`GET /me` über das Gateway funktionieren). **Phase 18 (Auth-Entkopplung von Keycloak) damit vollständig abgeschlossen** — Superuser und Domain-Admins hängen beide nicht mehr an Keycloak. `graphify update .` nachgeholt.
 
-**Nächste Session:** **P18-S3** (Domain-Admin-Konten `users-admin`/`config-admin` auf `TechnicalAccount` migrieren, letzte Session der Phase 18 — danach `graphify update .`, Phase 18 abgeschlossen). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P19-S1** (`libs/dms-permission-client` — konsolidiert die siebenfach duplizierte `PermissionServiceClient`-Klasse in ein Shared-Package, erste Session der neuen Phase 19 "Autorisierung & Identität", siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -1308,7 +1308,7 @@ drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbe
   eigenständiges Ziel (Helm-Charts für k8s/OCP). `graphify update .` folgt direkt im Anschluss an
   diesen Eintrag, dann Start von Phase 18.
 
-### Phase 18 — Auth-Entkopplung von Keycloak (P18-S1, P18-S2)
+### Phase 18 — Auth-Entkopplung von Keycloak (P18-S1, P18-S2, P18-S3) — abgeschlossen
 
 - **Auftrag**: Superuser-Break-Glass und Domain-Admin-Konten sollen künftig unabhängig von Keycloaks
   Erreichbarkeit funktionieren — Nutzer-Direktive nach der "Offene Punkte"-Triage vom 2026-08-13 ("der
@@ -1406,9 +1406,67 @@ drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbe
 - Doku: neues [ADR 0064](docs/adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md),
   `docs/services/auth-service.md`/`gateway-service.md` aktualisiert (inkl. Markierung des seit P6-S6
   bekannten Superuser-Login-Bugs als ersatzlos behoben).
-- **Nächster Schritt**: P18-S3 migriert die Domain-Admin-Konten (`users-admin`/`config-admin`) auf
-  dasselbe `TechnicalAccount`-Muster — letzte Session der Phase 18, danach `graphify update .`
-  (Phasenabschluss).
+
+**P18-S3 — Domain-Admin-Migration auf lokale technische Konten** (siehe [ADR 0065](docs/adr/0065-domain-admin-migration-lokale-technische-konten.md)), letzte Session der Phase 18:
+
+- **Neues `domain_admins.py`-Modul**: `ensure_domain_admin_account`/`get_technical_account_id`,
+  strukturell fast identisch zu `superuser.py`, zwei Unterschiede: `enabled=True` sofort (kein
+  Break-Glass) und mehrere, über `role_name` unterscheidbare Konten statt eines Singletons.
+- **`bootstrap.py`s `_ensure_domain_admin_accounts(admin: KeycloakAdmin)` entfernt**, `DOMAIN_ADMIN_
+  ACCOUNTS` von `list[tuple[username, role_name, last_name]]` auf `list[tuple[username, role_name]]`
+  vereinfacht (`last_name` war reine Keycloak-Profil-Pflicht). `main.py`s Lifespan-Rollenzuweisungs-
+  schleife strukturell unverändert, nur die `principal_id`-Quelle wechselt von
+  `admin_users.list_users(keycloak_admin)` auf `domain_admins.get_technical_account_id(...)`.
+- **`POST /login`/`POST /refresh` brauchten KEINE Änderung** — die seit P18-S2 bestehende
+  Verzweigungslogik kennt nur "technisches Konto ja/nein", nicht den `account_type`; die
+  `notification-service`/`signature-service`-Selbstauthentifizierung als `users-admin` (generisches
+  `POST /login`) ist davon vollständig transparent unberührt (vorab per Grep über alle Services
+  bestätigt).
+- **Ein echtes Testinfrastruktur-Problem gefunden und behoben** (kein Bug in der Produktionslogik
+  selbst): `_clean_tables` leerte `auth.technical_account` bislang vor JEDEM Test. Für den Superuser
+  unkritisch (`role_name=None`, keine Rollenzuweisung), für Domain-Admins fatal — die reale
+  Testinstallation hat `permission.role_assignment.create` Vier-Augen-pflichtig konfiguriert, und
+  `PermissionServiceClient.ensure_role_assignment` dedupliziert über `(principal_id, role_id,
+  resource_id)`. Bekam `principal_id` bei jedem Testlauf eine neue Auto-Increment-ID (Zeile wurde
+  jedes Mal frisch angelegt), konnte nie eine bereits genehmigte Zuweisung wiedergefunden werden —
+  jeder Testlauf hing auf einem neuen, unbeantworteten Genehmigungsantrag fest (beim alten
+  Keycloak-Konto trat das nicht auf, dessen UUID blieb über die ganze Session stabil). Ein erster
+  Lösungsversuch über Fixture-Parameterreihenfolge (`def domain_admin_auth_headers(role_assignment_
+  immediate, client)`) schlug fehl — pytest garantiert bei zwei unabhängigen Fixtures KEINE
+  Ausführungsreihenfolge nach Deklaration, entscheidend ist die Reihenfolge, in der die TESTFUNKTION
+  ihre Fixtures anfordert (viele Tests fordern `client` vor `domain_admin_auth_headers` an). Behoben
+  durch zwei Änderungen: `_clean_tables` löscht `technical_account`-Zeilen jetzt nur noch mit
+  `account_type != 'domain-admin'` (Domain-Admin-Zeilen bleiben über die Session stabil), plus eine
+  neue session-weite `autouse`-Fixture `_bootstrap_domain_admin_role_assignments`, die die
+  Genehmigungspflicht einmalig für einen Wegwerf-`TestClient(app)`-Start aussetzt (genau das, was eine
+  echte Reviewer-UI-Genehmigung einmalig täte).
+- **Tests**: auth-service 90 (vorher 88, +4 neue `test_domain_admins.py`, 2 obsolete Keycloak-basierte
+  Bootstrap-Tests entfernt). `ruff check`/`ruff format --check` clean. gateway-service, `dms-auth-client`,
+  cmis-connector, notification-service, signature-service, workflow-service unverändert grün.
+  webdav-connector: 13 Fehlschläge, aber ausschließlich der bereits dokumentierte, vorbestehende
+  PROPFIND-Timeout-Flake (438 angesammelte Test-Artefakte, `httpx.ReadTimeout`) — kein Auth-Bezug (kein
+  einziger 401 im Log), bewusst nicht behoben (würde reale Daten auf der laufenden Installation löschen).
+- **Vollständig live gegen den echten laufenden Stack verifiziert**: reiner Container-Restart (ohne
+  Image-Neubau) reicht NICHT, um Code-Änderungen zu übernehmen — `docker compose build auth-service`
+  nötig. Nach Neubau: `iss`-Claim frisch ausgestellter `users-admin`-/`config-admin`-Tokens zeigt
+  `dms-auth-service-local` statt der Keycloak-Realm-URL. Da `permission.role_assignment.create` auch auf
+  der echten Dev-Installation Vier-Augen-pflichtig ist, hing die allererste Zuweisung erwartungsgemäß auf
+  "pending" — manuell über `POST /approval-requests/{id}/approve` genehmigt (der Schritt, den die
+  Reviewer-UI in der Praxis automatisiert) und `auth-service` neu gestartet: `GET /users` mit
+  `users-admin`-Token über das Gateway → `200`, `GET /me` mit `config-admin`-Token über das Gateway →
+  `200` mit `realm_roles: ["domain-admin-config"]`.
+- **Alte Keycloak-Konten für `users-admin`/`config-admin` bleiben als Karteileichen bestehen** — `POST
+  /login` findet das `TechnicalAccount` zuerst, erreicht den Keycloak-Fallback nie mehr. Kein
+  automatisiertes Aufräumen (kein Datenverlust-Risiko), manuelle Bereinigung über die Keycloak-
+  Admin-Console möglich, aber nicht erforderlich.
+- Doku: neues [ADR 0065](docs/adr/0065-domain-admin-migration-lokale-technische-konten.md),
+  `docs/services/auth-service.md` aktualisiert (API-Tabelle, "Realm-/Client-Bootstrap",
+  "Domänengetrennte Admin-Rollen", "Auth-Entkopplung von Keycloak" — Live-Verifikationsabsatz war für
+  `users-admin` nach dieser Session stale und wurde korrigiert).
+- **Phase 18 (Auth-Entkopplung von Keycloak) damit vollständig abgeschlossen** — Superuser UND
+  Domain-Admins leben unabhängig von Keycloaks Erreichbarkeit. Löst das Henne-Ei-Problem aus ADR 0023
+  für P19-S6 (permission-service self-gating braucht ein technisches Konto, das nicht an Keycloak
+  hängt). `graphify update .` nachgeholt (Phasenabschluss).
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

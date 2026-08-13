@@ -9,7 +9,7 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/login` | `{username, password}` → Password-Grant gegen Keycloak, liefert Access-/Refresh-Token. **Seit P6-S6**: liest `X-DMS-Maintenance-Active` (vom Gateway injiziert, 4.8) — ist Wartungsmodus aktiv und `username` ungleich dem Superuser-Konto, `503` statt Login. **Seit Phase 18 Session 2**: erkennt technische Konten (`technical_account`-Tabellen-Lookup) vor dem Keycloak-Pfad und authentifiziert diese lokal (bcrypt), siehe "Auth-Entkopplung von Keycloak" unten |
+| `POST` | `/login` | `{username, password}` → Password-Grant gegen Keycloak, liefert Access-/Refresh-Token. **Seit P6-S6**: liest `X-DMS-Maintenance-Active` (vom Gateway injiziert, 4.8) — ist Wartungsmodus aktiv und `username` ungleich dem Superuser-Konto, `503` statt Login. **Seit Phase 18 Session 2/3**: erkennt technische Konten (`technical_account`-Tabellen-Lookup) vor dem Keycloak-Pfad und authentifiziert diese lokal (bcrypt) — seit Session 2 der Superuser, seit Session 3 zusätzlich beide Domain-Admin-Konten, siehe "Auth-Entkopplung von Keycloak" unten |
 | `POST` | `/refresh` | `{refresh_token}` → neue Tokens. **Seit Phase 18 Session 2**: erkennt lokal ausgestellte Refresh-Tokens am `iss`-Claim und stellt ein frisches Paar ohne Keycloak-Beteiligung aus |
 | `GET` | `/me` | Bearer-Token validieren (JWKS, zustandslos, keine Rückfrage bei Keycloak), normalisierte Identität zurückgeben |
 | `GET` | `/users` | Nutzer auflisten (seit P4-S3, Grundlage der Admin-UI-Nutzerverwaltung) — liest direkt aus Keycloak. **Seit P6-S5 gegated**: erfordert die Capability `admin.user_management` (Domäne "Nutzer-/Rechteverwaltung", 4.6), sonst `403` |
@@ -45,7 +45,11 @@ Bei jedem Start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
 - Deklariertes User-Profile-Attribut `dms_theme` (seit P4-S6, siehe unten) — ohne diese Deklaration verwirft Keycloaks Declarative User Profile das Attribut bei jedem `update_user`-Aufruf stillschweigend
 - Realm-Rolle `dms-admin` (seit **P5e-S2**, `create_realm_role(..., skip_exists=True)`) — erste im System tatsächlich ausgewertete Rolle, siehe `docs/services/document-service.md` "Kennzeichengenerator" (privilegierte Änderung von `attributes["Kennzeichen"]`)
 - ~~Deklariertes User-Profile-Attribut `dms_superuser_expires_at`~~ / ~~Superuser-Konto hier angelegt~~ — **seit Phase 18 Session 2 entfernt** ([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): der Superuser lebt nicht mehr in Keycloak, seine idempotente Anlage passiert jetzt async in `main.py`s Lifespan (`superuser.ensure_superuser_account`, DB-basiert), nicht mehr hier in diesem synchronen, rein Keycloak-fokussierten Bootstrap-Schritt.
-- Technische Domain-Admin-Konten (seit **P6-S5**, `enabled=True`, Liste `DOMAIN_ADMIN_ACCOUNTS` statt Einzelkonstante seit **P6-S6**): `users-admin`/`users-admin` (Domäne "Nutzer-/Rechteverwaltung") und seit P6-S6 zusätzlich `config-admin`/`config-admin` (Domäne "Workflow-Konfiguration", 4.6/4.8-Retrofit, siehe `docs/services/workflow-service.md`) — nach Anlage folgt für jedes Konto (best-effort, siehe unten) eine Rollenzuweisung gegen `permission-service`. **Weiterhin Keycloak-Konten** bis Phase 18 Session 3 (Auth-Entkopplung betrifft bislang nur den Superuser).
+- ~~Technische Domain-Admin-Konten hier angelegt~~ — **seit Phase 18 Session 3 entfernt**
+  ([ADR 0065](../adr/0065-domain-admin-migration-lokale-technische-konten.md)): `users-admin`/
+  `config-admin` leben nicht mehr in Keycloak, ihre idempotente Anlage passiert jetzt async in
+  `main.py`s Lifespan (`domain_admins.ensure_domain_admin_account`, DB-basiert), direkt neben dem
+  Superuser, nicht mehr hier in diesem synchronen, rein Keycloak-fokussierten Bootstrap-Schritt.
 - **Seit Ad-hoc-Post-Roadmap-SSO-Feature**: `_ensure_client_updated` (läuft bei JEDEM Start, nicht nur bei Ersteinrichtung) aktiviert `standardFlowEnabled` und registriert die Redirect-URIs (`{origin}/login/callback/` je `sso_redirect_uri_allowed_origins`) — behebt die unten genannte `skip_exists`-Lücke für genau diese beiden Felder. `_ensure_kerberos` (bedingt, nur wenn `kerberos_enabled` und alle drei Kerberos-Settings gesetzt sind) richtet zusätzlich Kerberos/SPNEGO ein, siehe "SSO/automatischer Login" unten und [ADR 0062](../adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md).
 
 **Bekannte Grenze**: `skip_exists=True` verhindert weiterhin, dass eine spätere Änderung der übrigen Client-Konfiguration (z. B. neue Mapper) auf einen bereits bestehenden Client nachgezogen wird — für Dev/Test unkritisch, für Produktivbetrieb bei Konfigurationsänderungen zu beachten. Nur `standardFlowEnabled`/`redirectUris` sind seit dem SSO-Feature davon ausgenommen (siehe oben).
@@ -56,7 +60,7 @@ Cross-UI-Theming (Hell/Dunkel/Hoher-Kontrast/Automatisch, User-UI und Admin-UI) 
 
 ## Domänengetrennte Admin-Rollen (4.6, seit P6-S5)
 
-Domain-Admin-"Rollen" sind bewusst **keine Keycloak-Realm-Rollen** (anders als `dms-admin`), sondern systemeigene `Role`-Zeilen in `permission-service` (siehe `docs/services/permission-service.md`) — `auth-service` erzeugt nur die zugehörigen **technischen Konten** und weist ihnen die Rolle per HTTP-Aufruf gegen `permission-service` zu (`permission_client.py`, `PermissionServiceClient.ensure_role_assignment`). Vollständige Architekturbegründung siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Diese Session legt nur `users-admin` (Domäne "Nutzer-/Rechteverwaltung") tatsächlich an; die Rollenzuweisung erfolgt best-effort beim Lifespan-Start — ist `permission-service` noch nicht erreichbar, wird sie übersprungen und beim nächsten Neustart erneut versucht (kein Retry-Loop).
+Domain-Admin-"Rollen" sind bewusst **keine Keycloak-Realm-Rollen** (anders als `dms-admin`), sondern systemeigene `Role`-Zeilen in `permission-service` (siehe `docs/services/permission-service.md`) — `auth-service` erzeugt nur die zugehörigen **technischen Konten** und weist ihnen die Rolle per HTTP-Aufruf gegen `permission-service` zu (`permission_client.py`, `PermissionServiceClient.ensure_role_assignment`). Vollständige Architekturbegründung siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Aktuell tatsächlich angelegt: `users-admin` (Domäne "Nutzer-/Rechteverwaltung") und `config-admin` (Domäne "Workflow-Konfiguration", seit P6-S6) — **seit Phase 18 Session 3 als `TechnicalAccount`-Zeilen statt Keycloak-Konten** ([ADR 0065](../adr/0065-domain-admin-migration-lokale-technische-konten.md)), siehe "Auth-Entkopplung von Keycloak" unten. Die Rollenzuweisung erfolgt weiterhin best-effort beim Lifespan-Start — ist `permission-service` noch nicht erreichbar (oder die Zuweisung auf dieser Installation Vier-Augen-pflichtig und noch nicht genehmigt), wird sie übersprungen und beim nächsten Neustart erneut versucht (kein Retry-Loop).
 
 ## Superuser Break-Glass (4.6, seit P6-S5, seit Phase 18 Session 2 lokal statt Keycloak)
 
@@ -87,14 +91,18 @@ haben könnte.
 
 `POST /login` liest den vom Gateway auf jedem proxied Request injizierten `X-DMS-Maintenance-Active`-Header (Default `"false"`, falls das Login direkt am Service statt über das Gateway aufgerufen wird — dann ist der Wartungsmodus faktisch nie wirksam, siehe `docs/services/gateway-service.md`): ist er `"true"` und der angefragte `username` ungleich `superuser.SUPERUSER_USERNAME`, wird der Login mit `503` abgelehnt, **bevor** überhaupt ein Password-Grant gegen Keycloak versucht wird — wörtliche Umsetzung von "neue Logins außer für den Superuser werden abgelehnt" (4.8). Der Superuser-Login selbst wird dadurch nicht automatisch erfolgreich — ein falsches Passwort liefert weiterhin `401`, der Header entscheidet nur, ob überhaupt versucht wird. Vollständige Architekturbegründung (Gateway als Durchsetzungspunkt, Header-Broadcast-Muster) in [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-## Auth-Entkopplung von Keycloak (Post-Roadmap Phase 18, siehe ADR 0063/0064)
+## Auth-Entkopplung von Keycloak (Post-Roadmap Phase 18, siehe ADR 0063/0064/0065)
 
-Superuser-Break-Glass und (ab Session 3) Domain-Admin-Konten funktionieren unabhängig von Keycloaks
-Erreichbarkeit (Nutzer-Direktive: "der Superuser soll gar nicht im Keycloak leben").
+Superuser-Break-Glass und Domain-Admin-Konten (`users-admin`/`config-admin`) funktionieren seit
+Phase 18 vollständig unabhängig von Keycloaks Erreichbarkeit (Nutzer-Direktive: "der Superuser soll gar
+nicht im Keycloak leben, das Selbe gilt für die Domänen-Admins").
 
 - **`TechnicalAccount`** (Model, `auth`-Schema) — Speicherort für Superuser-/Domain-Admin-Konten,
   `password_hash` per `bcrypt` (erstes selbst gehashtes Passwort in diesem Service). `role_name`
-  nullable — `NULL` für den Superuser (Sonderrechte laufen über direkten Namensvergleich, nicht RBAC).
+  nullable — `NULL` für den Superuser (Sonderrechte laufen über direkten Namensvergleich, nicht RBAC),
+  gesetzt (`domain-admin-users`/`domain-admin-config`) für die beiden Domain-Admin-Konten
+  (`domain_admins.py`, seit Session 3, strukturell fast identisch zu `superuser.py`: `enabled=True`
+  sofort statt Break-Glass, sonst gleiches idempotentes Anlage-Muster).
 - **`LocalSigningKey`** (Singleton-Zeile, gleiches Muster wie `FederationIdentity`) — eigenes
   RSA-2048-Schlüsselpaar, idempotent beim ersten Zugriff erzeugt, stabiler `kid` über Neustarts hinweg.
 - **`GET /.well-known/jwks.json`** — liefert den öffentlichen Schlüssel im selben JWKS-Format wie
@@ -117,13 +125,20 @@ Erreichbarkeit (Nutzer-Direktive: "der Superuser soll gar nicht im Keycloak lebe
   frisch lokal eingeloggter Superuser an jedem proxied Aufruf mit 401 scheitern, obwohl `auth-service`
   sein eigenes Token korrekt validiert.
 
-**Vollständig live gegen den echten laufenden Stack verifiziert** (nicht nur automatisierte Tests):
-kompletter Kreislauf über das echte Gateway — Login vor Aktivierung (401) → Aktivierung → Login über das
-Gateway (200) → `GET /me` über das Gateway (200, beweist Gateways eigene Multi-Issuer-Umstellung) → ein
-Aufruf gegen `document-service` mit demselben Token über das Gateway wird durchgelassen (422 wegen eines
-fachlichen Pflichtfelds, nicht 401 — beweist systemweite Akzeptanz) → `POST /refresh` über das Gateway
-(200) → Deaktivierung → nachfolgender Refresh (401). Ein regulärer Keycloak-Login (`users-admin`) über
-dasselbe Gateway funktioniert unverändert.
+**Vollständig live gegen den echten laufenden Stack verifiziert** (nicht nur automatisierte Tests, Session
+2, Superuser): kompletter Kreislauf über das echte Gateway — Login vor Aktivierung (401) → Aktivierung →
+Login über das Gateway (200) → `GET /me` über das Gateway (200, beweist Gateways eigene
+Multi-Issuer-Umstellung) → ein Aufruf gegen `document-service` mit demselben Token über das Gateway wird
+durchgelassen (422 wegen eines fachlichen Pflichtfelds, nicht 401 — beweist systemweite Akzeptanz) →
+`POST /refresh` über das Gateway (200) → Deaktivierung → nachfolgender Refresh (401).
+
+**Session 3 (Domain-Admins) ebenfalls live verifiziert**: nach Neubau des `auth-service`-Images zeigte
+der `iss`-Claim frisch ausgestellter `users-admin`-/`config-admin`-Tokens `dms-auth-service-local` statt
+der Keycloak-Realm-URL — beide Konten sind damit tatsächlich lokal, nicht mehr über Keycloak. `GET /users`
+mit `users-admin`-Token über das Gateway → 200, `GET /me` mit `config-admin`-Token über das Gateway → 200
+mit `realm_roles: ["domain-admin-config"]`. Die alten Keycloak-Konten für beide Benutzernamen bleiben als
+ungenutzte Karteileichen bestehen (`/login` findet das `TechnicalAccount` zuerst und erreicht den
+Keycloak-Fallback nie mehr) — kein automatisiertes Aufräumen, siehe ADR 0065 "Konsequenzen".
 
 ## SSO/automatischer Login (Ad-hoc Post-Roadmap-Feature, siehe ADR 0062)
 

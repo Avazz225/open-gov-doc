@@ -34,6 +34,39 @@ def _bootstrap():
     ensure_realm_and_client(settings)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _bootstrap_domain_admin_role_assignments(_bootstrap):
+    """Auth-Entkopplung von Keycloak (Phase 18, ADR 0065): Domain-Admin-Konten
+    und ihre Rollenzuweisungen entstehen seit P18-S3 in `main.py`s async
+    Lifespan statt in `ensure_realm_and_client` oben - anders als das
+    frühere Keycloak-Konto (dessen UUID über die gesamte Testsession stabil
+    blieb, da `keycloak_admin`-Fixtures nie zwischen Tests aufräumten) bekäme
+    `TechnicalAccount.id` sonst bei JEDEM `client`-Fixture-Aufruf eine neue
+    Zeile (`technical_account` wird bewusst NICHT mehr pro Test geleert,
+    siehe `_clean_tables` unten) - ist `permission.role_assignment.create`
+    auf dieser Installation Vier-Augen-pflichtig (reale, bereits angewendete
+    Konfiguration), bliebe die allererste Zuweisung sonst für immer auf
+    "pending" hängen, da kein Testlauf sie je genehmigt. Dieser Fixture
+    umgeht die Genehmigungspflicht EINMALIG, für den allerersten Lifespan-
+    Start der gesamten Session (ein Wegwerf-`TestClient(app)`), exakt das,
+    was die Reviewer-UI in einer echten Installation manuell täte."""
+    with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
+        config = pc.get("/approval-config/permission.role_assignment.create")
+        originally_required = config.status_code == 200 and config.json()["requires_approval"]
+        if originally_required:
+            pc.put(
+                "/approval-config/permission.role_assignment.create",
+                json={"requires_approval": False},
+            )
+        with TestClient(app):
+            pass
+        if originally_required:
+            pc.put(
+                "/approval-config/permission.role_assignment.create",
+                json={"requires_approval": True},
+            )
+
+
 @pytest.fixture(autouse=True)
 async def _clean_tables():
     eng = build_engine(DSN)
@@ -42,8 +75,15 @@ async def _clean_tables():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE auth.federation_identity"))
         await conn.execute(text("TRUNCATE auth.sso_config"))
-        await conn.execute(text("TRUNCATE auth.technical_account"))
         await conn.execute(text("TRUNCATE auth.local_signing_key"))
+        # Nur Nicht-Domain-Admin-Konten (aktuell also der Superuser) werden
+        # pro Test zurückgesetzt - Domain-Admin-Zeilen bleiben bewusst über
+        # die gesamte Session stabil, siehe
+        # `_bootstrap_domain_admin_role_assignments` oben. Reine
+        # `TRUNCATE` kennt kein `WHERE`, daher `DELETE`.
+        await conn.execute(
+            text("DELETE FROM auth.technical_account WHERE account_type != 'domain-admin'")
+        )
     await eng.dispose()
     yield
 
@@ -70,7 +110,11 @@ def domain_admin_auth_headers(client) -> dict[str, str]:
     """Login als das technische `users-admin`-Konto (4.6, P6-S5) - für alle
     Tests, die `/users` (jetzt hinter der Domäne "Nutzer-/Rechteverwaltung"
     gegated) aufrufen. Setzt voraus, dass `permission-service` erreichbar ist
-    (echte Rollenzuweisung beim App-Start, kein Mocking)."""
+    (echte Rollenzuweisung beim App-Start, kein Mocking) - die Rollen-
+    zuweisung selbst ist bereits durch
+    `_bootstrap_domain_admin_role_assignments` (session-weit, einmalig)
+    sichergestellt, `technical_account` bleibt seit P18-S3 absichtlich über
+    die gesamte Session stabil (siehe dortiger Docstring)."""
     response = client.post(
         "/login",
         json={"username": DOMAIN_ADMIN_USERS_USERNAME, "password": DOMAIN_ADMIN_USERS_USERNAME},
