@@ -1331,6 +1331,10 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       DMS_KEYCLOAK_CLIENT_ID: dms-api
+      # Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - JWKS lokaler
+      # technischer Konten (Superuser/Domain-Admins), siehe
+      # `_build_token_validator` in main.py.
+      DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-600}
       DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
       # Vom Browser aus erreichbare Frontend-Origins (CORS) - bei geänderten

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from dms_auth_client import (
+    InvalidTokenError,
     MultiIssuerTokenValidator,
     TokenValidator,
     make_current_user_dependency,
@@ -17,7 +18,7 @@ from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_service import (
@@ -34,7 +35,7 @@ from auth_service.consumer import start_consuming
 from auth_service.directory_federation import CONTACT_DIRECTORY_CAPABILITY
 from auth_service.federation_hub_client import FederationHubClient
 from auth_service.keycloak_client import InvalidCredentialsError
-from auth_service.models import Base, FederationIdentity, SsoConfig
+from auth_service.models import Base, FederationIdentity, SsoConfig, TechnicalAccount
 from auth_service.permission_client import PermissionServiceClient
 from auth_service.schemas import (
     DirectoryEntryOut,
@@ -70,10 +71,11 @@ _SSO_CONFIG_ID = 1
 async def _superuser_poll_loop() -> None:
     """Erzwingt die Zeitbefristung der Break-Glass-Aktivierung (4.6) - gleiches
     Poll- statt Push-Prinzip wie workflow-services SLA-Zeitüberwachung
-    (ADR 0020), hier auf ein Keycloak-Attribut statt eine DB-Zeile angewandt."""
+    (ADR 0020), seit Phase 18 (ADR 0063) auf eine `technical_account`-Zeile
+    statt eines Keycloak-Attributs angewandt."""
     while True:
         try:
-            if superuser.deactivate_if_expired(app.state.keycloak_admin):
+            if await superuser.deactivate_if_expired(app.state.session_factory):
                 await publish_event(
                     "auth.superuser.deactivated",
                     {"reason": "expired"},
@@ -178,6 +180,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ]
     )
 
+    # Auth-Entkopplung von Keycloak (Phase 18, ADR 0063): der Superuser lebt
+    # seit dieser Session als `TechnicalAccount`-Zeile statt eines
+    # Keycloak-Kontos - idempotente Anlage direkt hier statt in
+    # `bootstrap.ensure_realm_and_client` (die dortige Funktion ist synchron
+    # und rein Keycloak-fokussiert, ein DB-Zugriff passt strukturell besser
+    # neben den Signierschlüssel oben).
+    await superuser.ensure_superuser_account(app.state.session_factory)
+
     # Best-Effort (P6-S5, seit P6-S6 für zwei Domänen statt einer): der
     # Permission Service könnte beim eigenen Start noch nicht erreichbar sein
     # - kein Retry-Loop, heilt beim nächsten Neustart (gleiches Prinzip wie
@@ -211,7 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await start_consuming(
         consumer_bus,
         settings.subjects,
-        app.state.keycloak_admin,
+        app.state.session_factory,
         activation_minutes=settings.superuser_activation_minutes,
         publish_event=publish_event,
     )
@@ -297,23 +307,91 @@ def get_local_jwks() -> dict:
     )
 
 
+def _mint_technical_account_tokens(account: TechnicalAccount) -> TokenResponse:
+    """Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - baut dieselbe
+    `TokenResponse`-Form wie ein Keycloak-Login, nur mit lokal signierten
+    Tokens. `role_name` (falls gesetzt, z. B. künftig für Domain-Admins) wird
+    als einzige Rolle in `realm_access.roles` getragen - der Superuser selbst
+    hat keine Rolle (`role_name=None`), seine Sonderrechte laufen über den
+    direkten Namensvergleich (`SUPERUSER_USERNAME`) an mehreren Stellen im
+    System, nicht über RBAC."""
+    signing_key = app.state.local_signing_key
+    roles = [account.role_name] if account.role_name else []
+    access_token = local_token_issuer.mint_token(
+        private_key_pem=signing_key.private_key_pem,
+        kid=signing_key.kid,
+        audience=settings.keycloak_client_id,
+        subject=str(account.id),
+        username=account.username,
+        roles=roles,
+        expires_in_seconds=settings.local_access_token_ttl_seconds,
+    )
+    refresh_token = local_token_issuer.mint_token(
+        private_key_pem=signing_key.private_key_pem,
+        kid=signing_key.kid,
+        audience=settings.keycloak_client_id,
+        subject=str(account.id),
+        username=account.username,
+        roles=roles,
+        expires_in_seconds=settings.local_refresh_token_ttl_seconds,
+    )
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=settings.local_access_token_ttl_seconds,
+        token_type="bearer",
+    )
+
+
+async def _login_technical_account(account: TechnicalAccount, password: str) -> TokenResponse:
+    # Bewusst dieselbe generische Fehlermeldung für falsches Passwort UND für
+    # ein (noch) nicht aktiviertes/abgelaufenes Konto - unterscheidbare
+    # Meldungen würden verraten, ob ein Konto existiert bzw. ob es nur derzeit
+    # deaktiviert ist (identisches Prinzip wie zuvor Keycloaks eigene, ebenso
+    # opake Fehlermeldung für ein deaktiviertes Konto).
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültige Anmeldedaten"
+    )
+    if not local_token_issuer.verify_password(password, account.password_hash):
+        raise invalid
+    if not account.enabled:
+        raise invalid
+    if account.expires_at is not None and account.expires_at < datetime.now(UTC):
+        raise invalid
+    return _mint_technical_account_tokens(account)
+
+
 @app.post("/login", response_model=TokenResponse)
 async def login(
     payload: LoginRequest,
     x_dms_maintenance_active: str = Header(default="false"),
+    session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     """Not-Shutdown (4.8, P6-S6): das Gateway broadcastet den Wartungsmodus-
     Status auf jedem durchgelassenen Request per Header, statt dass jeder
     Backend-Service selbst bei `permission-service` pollen muss (siehe ADR
     0024). Ist der Wartungsmodus aktiv, werden neue Logins außer für den
     Superuser abgelehnt - der Superuser-Login funktioniert unabhängig davon
-    ohnehin nur, wenn das Konto zuvor per Break-Glass (4.6) aktiviert wurde."""
+    ohnehin nur, wenn das Konto zuvor per Break-Glass (4.6) aktiviert wurde.
+
+    Auth-Entkopplung von Keycloak (Phase 18, ADR 0063): passt der Benutzername
+    auf ein `TechnicalAccount` (aktuell nur der Superuser, Domain-Admins
+    folgen in P18-S3), authentifiziert dieser Endpunkt lokal statt gegen
+    Keycloak weiterzuleiten - Keycloaks Erreichbarkeit spielt für den
+    Superuser-Login damit keine Rolle mehr."""
     maintenance_active = x_dms_maintenance_active.lower() == "true"
     if maintenance_active and payload.username != superuser.SUPERUSER_USERNAME:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Systemweite Notfallsperre aktiv - Login nur für den Superuser möglich",
         )
+
+    technical_account = await session.scalar(
+        select(TechnicalAccount).where(TechnicalAccount.username == payload.username)
+    )
+    if technical_account is not None:
+        return await _login_technical_account(technical_account, payload.password)
+
     try:
         tokens = await keycloak_client.login(settings, payload.username, payload.password)
     except InvalidCredentialsError as exc:
@@ -321,8 +399,37 @@ async def login(
     return TokenResponse(**tokens)
 
 
+async def _refresh_technical_account_token(
+    refresh_token_value: str, session: AsyncSession
+) -> TokenResponse:
+    """Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - Gegenstück zu
+    `keycloak_client.refresh` für lokal ausgestellte Refresh-Tokens: kein
+    echtes Keycloak-Refresh-Grant möglich (rein lokale Konten haben keine
+    Keycloak-Session), stattdessen erneute Signaturprüfung über den bereits
+    vorhandenen `combined_validator` und ein frisches Token-Paar, sofern das
+    zugrundeliegende Konto weiterhin aktiv ist."""
+    try:
+        claims = app.state.combined_validator.validate(refresh_token_value)
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültiges Refresh-Token"
+        ) from exc
+    account = await session.get(TechnicalAccount, int(claims["sub"]))
+    if account is None or not account.enabled:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Konto nicht aktiv")
+    if account.expires_at is not None and account.expires_at < datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Aktivierung abgelaufen"
+        )
+    return _mint_technical_account_tokens(account)
+
+
 @app.post("/refresh", response_model=TokenResponse)
-async def refresh_token(payload: RefreshRequest) -> TokenResponse:
+async def refresh_token(
+    payload: RefreshRequest, session: AsyncSession = Depends(get_session)
+) -> TokenResponse:
+    if local_token_issuer.is_local_token(payload.refresh_token):
+        return await _refresh_technical_account_token(payload.refresh_token, session)
     try:
         tokens = await keycloak_client.refresh(settings, payload.refresh_token)
     except InvalidCredentialsError as exc:
@@ -583,19 +690,19 @@ async def ensure_realm_roles(
 
 
 @app.get("/superuser/status", response_model=SuperuserStatus)
-def get_superuser_status() -> SuperuserStatus:
+async def get_superuser_status() -> SuperuserStatus:
     """Break-Glass-Status (4.6) für die Admin-UI-Banner-Anzeige - Aktivierung
     selbst läuft über den bereits bestehenden generischen Approval-Flow des
     Permission Service (`POST /approval-requests` mit
     `action_type="auth.superuser.activate"`), nicht über einen Endpunkt hier."""
     try:
-        active, expires_at = superuser.get_status(app.state.keycloak_admin)
+        active, expires_at = await superuser.get_status(app.state.session_factory)
     except superuser.SuperuserNotConfiguredError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return SuperuserStatus(
         active=active,
         expires_at=expires_at.isoformat() if expires_at else None,
-        principal_id=superuser.get_principal_id(app.state.keycloak_admin),
+        principal_id=await superuser.get_principal_id(app.state.session_factory),
     )
 
 
@@ -604,7 +711,7 @@ async def deactivate_superuser() -> None:
     """Vorzeitiges, freiwilliges Beenden der Aktivierung (4.6) - ergänzt den
     automatischen Ablauf über den Poll-Loop."""
     try:
-        superuser.deactivate(app.state.keycloak_admin)
+        await superuser.deactivate(app.state.session_factory)
     except superuser.SuperuserNotConfiguredError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     # Kein authentifizierter Aufrufer-Kontext an diesem Endpunkt - das
@@ -613,7 +720,7 @@ async def deactivate_superuser() -> None:
     await publish_event(
         "auth.superuser.deactivated",
         {"reason": "manual"},
-        actor=superuser.get_principal_id(app.state.keycloak_admin),
+        actor=await superuser.get_principal_id(app.state.session_factory),
     )
 
 

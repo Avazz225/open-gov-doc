@@ -11,6 +11,16 @@ class Settings(BaseServiceSettings):
     keycloak_realm: str = "dms"
     keycloak_client_id: str = "dms-api"
 
+    # Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
+    # 0063): `auth-service` kann seit Phase 18 zusätzlich zu Keycloak selbst
+    # Tokens für lokale technische Konten (Superuser, künftig Domain-Admins)
+    # ausstellen - das Gateway muss deren JWKS zusätzlich kennen, um solche
+    # Tokens zu validieren, siehe `_build_token_validator`. Direkte Adresse
+    # (wie bei jedem anderen Ost-West-Aufruf dieses Projekts), keine
+    # Registry-Auflösung nötig, da `TokenValidator` das JWKS nur lazy beim
+    # ersten tatsächlich zu validierenden lokalen Token abruft.
+    auth_service_base_url: str = "http://localhost:8003"
+
     # Browser-Frontends (user-ui/admin-ui, Konzept 8) laufen auf einer anderen
     # Origin als das Gateway - ohne CORS-Freigabe scheitert bereits der
     # Preflight-OPTIONS-Request mit 405, bevor der eigentliche Request

@@ -1,3 +1,4 @@
+import secrets
 import time
 from datetime import UTC, datetime
 
@@ -72,7 +73,12 @@ def mint_token(
     unterschiedlicher Gültigkeitsdauer) ist Sache des Aufrufers (`POST
     /login`, Phase 18 Session 2) - kein echtes Keycloak-Refresh-Grant, da
     rein lokale Konten keine Keycloak-Session besitzen, gegen die refresht
-    werden könnte."""
+    werden könnte. Trägt einen `jti` (registrierter JWT-Claim für genau
+    diesen Zweck) - ohne ihn wären zwei innerhalb derselben Sekunde
+    ausgestellte Tokens für dasselbe Konto (z. B. Login direkt gefolgt von
+    Refresh) byte-identisch, da `iat`/`exp` nur Sekundenauflösung haben und
+    alle übrigen Claims sich nicht unterscheiden - real bei der
+    Testentwicklung dieser Session aufgetreten."""
     now = int(time.time())
     claims = {
         "iss": LOCAL_ISSUER,
@@ -82,10 +88,27 @@ def mint_token(
         "realm_access": {"roles": roles},
         "iat": now,
         "exp": now + expires_in_seconds,
+        "jti": secrets.token_urlsafe(16),
     }
     return jwt.encode(
         claims, private_key_pem.decode("ascii"), algorithm="RS256", headers={"kid": kid}
     )
+
+
+def is_local_token(token: str) -> bool:
+    """Peekt den `iss`-Claim OHNE Signaturprüfung, um `POST /refresh` zu
+    entscheiden, ob ein Token lokal (`local_token_issuer`) oder von Keycloak
+    ausgestellt wurde - reine Weichenstellung, welcher der beiden Refresh-
+    Pfade zuständig ist; die eigentliche Signaturprüfung passiert erst
+    danach (`MultiIssuerTokenValidator`/Keycloaks Token-Endpunkt). Liefert
+    `False` bei jedem unparsbaren Token (fällt dann auf den bisherigen
+    Keycloak-Pfad zurück, dessen Fehlerverhalten für kaputte Tokens bereits
+    etabliert ist)."""
+    try:
+        claims = jwt.get_unverified_claims(token)
+    except Exception:
+        return False
+    return claims.get("iss") == LOCAL_ISSUER
 
 
 def hash_password(password: str) -> str:

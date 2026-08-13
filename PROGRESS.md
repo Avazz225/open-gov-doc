@@ -2,11 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P17-S3 — eGov-Konfigurationspaket Teil 2 (14.2), **letzte Session der Phase 17 UND der gesamten Session-Roadmap (107/107)**: bei der Umsetzung ein echter Befund, der die P17-S0-Annahme korrigierte — von den drei in 14.2 für die Vier-Augen-Vorbelegung genannten Aktionstypen hatten "Berechtigungsänderung" und "Konfigurationsimport" keinerlei tatsächliche Durchsetzung im Code; beide echt nachgerüstet (`permission-service`s `POST /role-assignments` und `config-service`s `POST /config/import` prüfen jetzt `permission.role_assignment.create`/`config.import` über den bestehenden generischen Vier-Augen-Mechanismus, 4.3 — neues `RoleAssignmentActionResult`/`ImportActionResult`-Status-Envelope, `config-service` bekam dafür seinen ersten NATS-Konsumenten überhaupt). Drei BPMN-Prozessvorlagen (`egov_freigabe`/`egov_kenntnisnahme`/`egov_aufgabe`) live verifiziert, Geschäftskalender `DE-Bund` + 16 vollständige Landeskalender (reale Termine 2026/2027, Gauß'sche Osterformel), zwei erweiterte Admin-Rollen (`Registratur/Aktenverwaltung`, `Amtsleitung`), `realm_roles: ["dms-poststelle"]`. Zwei echte Bugs bei der Regression gefunden/behoben (fehlende `DMS_NATS_URL` für `config-service` in `infra/docker-compose.yml`; `config-service` fälschlich in `scripts/run-tests.sh`s `CONSUMER_SERVICES`). Vollständig live über die echte `/config-packages/`-Seite angewendet, inkl. beider Vier-Augen-Roundtrips bis zum Schluss durchgespielt. `manifest.version` `0.1.0`→`1.0.0`. Details siehe [ADR 0060](docs/adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md), `packages/egov/README.md` und "eGov-Konfigurationspaket Teil 2 (Phase 17, P17-S3)" unten. `graphify dms/ --update` im Anschluss ausgeführt (Phasenabschluss).
+**Zuletzt abgeschlossen:** P18-S2 — Superuser-Migration auf lokale Tokens + Gateway-Multi-Issuer (Phase 18, siehe [ADR 0064](docs/adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): `superuser.py` vollständig auf async/`TechnicalAccount` umgestellt, `bootstrap.py`s Keycloak-Anteil entfernt, `POST /login`/`POST /refresh` erkennen technische Konten, `gateway-service`s eigener `TokenValidator` ebenfalls auf `MultiIssuerTokenValidator` umgestellt. Behebt den seit P6-S6 bekannten Superuser-Login-Bug ersatzlos. Zwei echte Bugs bei der Testentwicklung gefunden (fehlendes `ALTER TABLE` nach nachträglicher Nullable-Änderung ohne Alembic; fehlender `jti`-Claim führte zu byte-identischen Tokens bei zwei Ausstellungen innerhalb derselben Sekunde). Vollständig live über das echte Gateway verifiziert.
 
-**Zuletzt abgeschlossen:** P18-S1 — Lokale technische Konten + eigener Token-Issuer (erste Session der neuen Phase 18, siehe [ADR 0063](docs/adr/0063-auth-entkopplung-lokale-technische-konten-dual-issuer-jwt.md)): neues `TechnicalAccount`-Model, eigenes RSA-Schlüsselpaar (`LocalSigningKey`, Singleton) + `GET /.well-known/jwks.json`, `local_token_issuer.mint_token()` mit identischem Claim-Shape wie Keycloak, neuer `MultiIssuerTokenValidator` in `libs/dms-auth-client`. Rein additive Infrastruktur, live verifiziert, keine funktionale Änderung für Endnutzer — Migration von Superuser/Domain-Admins folgt in P18-S2/S3.
-
-**Nächste Session:** **P18-S2** (Superuser auf lokale Konten migrieren: `POST /login` erkennt ein technisches Superuser-Konto und authentifiziert lokal, Break-Glass-Aktivierung setzt `TechnicalAccount.enabled`/`expires_at` statt eines Keycloak-Attributs — behebt dabei ersatzlos den seit P6-S6 bekannten Bug, dass der Superuser nicht interaktiv einloggen kann. Muss außerdem `gateway-service`s eigenen `TokenValidator` auf `MultiIssuerTokenValidator` umstellen, sonst scheitert ein frisch eingeloggter Superuser am Gateway). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P18-S3** (Domain-Admin-Konten `users-admin`/`config-admin` auf `TechnicalAccount` migrieren, letzte Session der Phase 18 — danach `graphify update .`, Phase 18 abgeschlossen). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -1310,7 +1308,7 @@ drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbe
   eigenständiges Ziel (Helm-Charts für k8s/OCP). `graphify update .` folgt direkt im Anschluss an
   diesen Eintrag, dann Start von Phase 18.
 
-### Phase 18 — Auth-Entkopplung von Keycloak (P18-S1)
+### Phase 18 — Auth-Entkopplung von Keycloak (P18-S1, P18-S2)
 
 - **Auftrag**: Superuser-Break-Glass und Domain-Admin-Konten sollen künftig unabhängig von Keycloaks
   Erreichbarkeit funktionieren — Nutzer-Direktive nach der "Offene Punkte"-Triage vom 2026-08-13 ("der
@@ -1358,6 +1356,59 @@ drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbe
   nicht auf Multi-Issuer umgestellt — unkritisch, solange `POST /login` noch keine lokalen Tokens
   ausstellt, muss aber vor Abschluss von P18-S2 nachgezogen werden, sonst scheitert ein frisch
   eingeloggter Superuser am Gateway.
+
+**P18-S2 — Superuser-Migration auf lokale Tokens + Gateway-Multi-Issuer** (siehe [ADR 0064](docs/adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)):
+
+- **`superuser.py` vollständig auf async/`TechnicalAccount` umgestellt**: alle Funktionen
+  (`ensure_superuser_account`, `activate`, `deactivate`, `get_status`, `get_principal_id`,
+  `deactivate_if_expired`) nehmen jetzt einen `session_factory` statt `KeycloakAdmin` entgegen. Poll-Loop,
+  NATS-Konsument (`consumer.py`) und `/superuser/*`-Endpunkte entsprechend angepasst — strukturell
+  unverändert, nur die Datenquelle wechselt.
+- **`bootstrap.py`s Keycloak-Anteil entfernt**: `_ensure_superuser_expires_at_attribute` und der
+  `superuser.ensure_superuser_account(admin)`-Aufruf fallen weg — Kontoanlage passiert jetzt in
+  `main.py`s async Lifespan, direkt neben dem lokalen Signierschlüssel aus P18-S1.
+- **`POST /login` erkennt technische Konten**: Benutzername-Lookup in `technical_account` vor dem
+  Keycloak-Password-Grant; Treffer → bcrypt-Passwortprüfung + `enabled`/`expires_at`-Prüfung (dieselbe
+  generische 401-Fehlermeldung für falsches Passwort UND deaktiviertes/abgelaufenes Konto, verrät nichts
+  über Kontoexistenz). **`POST /refresh` erkennt lokale Tokens** über den `iss`-Claim
+  (`local_token_issuer.is_local_token`, reines Peeken ohne Signaturprüfung) und stellt ein frisches
+  Token-Paar aus, ohne Keycloaks Refresh-Grant zu versuchen.
+- **`gateway-service`s eigener `TokenValidator` ebenfalls auf `MultiIssuerTokenValidator` umgestellt**
+  (neue `DMS_AUTH_SERVICE_BASE_URL`-Einstellung, zeigt auf `auth-service`s JWKS) — ohne diese Umstellung
+  hätte ein frisch lokal eingeloggter Superuser an jedem proxied Aufruf mit 401 scheitern müssen, obwohl
+  `auth-service` sein eigenes Token korrekt validiert. Der lokale Issuer-String ist als Konstante in
+  `gateway_service/main.py` dupliziert (kein gemeinsames `libs/`-Paket kennt ihn).
+- **Zwei echte Bugs bei der Testentwicklung gefunden und behoben** (keiner davon in der ursprünglichen
+  P18-S1-Logik, beide erst durch die neuen P18-S2-Tests sichtbar geworden):
+  1. `NotNullViolationError` beim ersten Testlauf — `technical_account.role_name` wurde nachträglich von
+     `Mapped[str]` auf `Mapped[str | None]` geändert (der Superuser selbst braucht keine
+     permission-service-Rolle), aber die Tabelle existierte bereits (aus P18-S1s Live-Verifikation) mit
+     der alten `NOT NULL`-Constraint. Dieses Projekt arbeitet ohne Alembic (nur `create_all`) —
+     `create_all` ändert Spalten-Constraints bestehender Tabellen nicht. Manuelles
+     `ALTER TABLE auth.technical_account ALTER COLUMN role_name DROP NOT NULL` in Test- UND Dev-Datenbank
+     nötig, um beide wieder in Einklang mit dem Model zu bringen.
+  2. `mint_token()` erzeugte bei zwei Ausstellungen für dasselbe Konto innerhalb derselben Sekunde (z. B.
+     Login direkt gefolgt von Refresh im selben Test) byte-identische Tokens — `iat`/`exp` haben nur
+     Sekundenauflösung, alle übrigen Claims (`sub`/`username`/`roles`/`aud`) waren ohnehin gleich. Fix:
+     `jti` (registrierter JWT-Claim, `secrets.token_urlsafe(16)`) ergänzt.
+- **Tests**: auth-service 88 (vorher 81, +7 neue End-to-End-Login-Tests in `test_local_superuser_login.py`
+  sowie `test_consumer.py`/`test_superuser.py`/`test_bootstrap.py` auf die neue async/DB-Signatur
+  umgestellt), gateway-service weiterhin 22 (unverändert, Tests stubben `app.state.token_validator`
+  direkt). `ruff check`/`ruff format --check` clean.
+- **Vollständig live gegen den echten laufenden Stack verifiziert, über das echte Gateway (nicht nur
+  direkt gegen `auth-service`)**: Login vor Aktivierung → `401`; Aktivierung; Login über
+  `localhost:8009` (Gateway) → `200` mit gültigem Token-Paar; `GET /me` über das Gateway mit dem lokalen
+  Token → `200` (beweist Gateways eigene Multi-Issuer-Umstellung); ein Aufruf gegen `document-service`
+  mit demselben Token über das Gateway wurde durchgelassen (`422` wegen eines fachlichen Pflichtfelds,
+  nicht `401` — beweist systemweite Akzeptanz der Identität); `POST /refresh` über das Gateway → `200`
+  mit frischem Paar; Deaktivierung → nachfolgender Refresh → `401`. Ein regulärer Keycloak-Login
+  (`users-admin`) über dasselbe Gateway funktioniert unverändert.
+- Doku: neues [ADR 0064](docs/adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md),
+  `docs/services/auth-service.md`/`gateway-service.md` aktualisiert (inkl. Markierung des seit P6-S6
+  bekannten Superuser-Login-Bugs als ersatzlos behoben).
+- **Nächster Schritt**: P18-S3 migriert die Domain-Admin-Konten (`users-admin`/`config-admin`) auf
+  dasselbe `TechnicalAccount`-Muster — letzte Session der Phase 18, danach `graphify update .`
+  (Phasenabschluss).
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

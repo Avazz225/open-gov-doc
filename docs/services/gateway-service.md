@@ -26,8 +26,18 @@ Ziel → `503`. Downstream nicht erreichbar → `502`.
 
 ## Auth-Validierung
 
-JWT-Prüfung gegen Keycloak-JWKS (wie im Auth Service, 4.4), zentral für alle
-proxied Requests — mit Ausnahme der in `settings.public_routes` gelisteten
+JWT-Prüfung, zentral für alle proxied Requests. **Seit Phase 18 Session 2**
+([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)):
+`app.state.token_validator` ist ein `MultiIssuerTokenValidator` (neu in
+`libs/dms-auth-client`) aus zwei `TokenValidator`-Instanzen — Keycloak-JWKS
+(wie zuvor) und `auth-service`s `/.well-known/jwks.json` (neue
+`DMS_AUTH_SERVICE_BASE_URL`-Einstellung, direkte Ost-West-Adresse) für
+Tokens lokaler technischer Konten (Superuser, künftig Domain-Admins). Ohne
+diese Umstellung würde ein frisch lokal eingeloggter Superuser an jedem
+proxied Aufruf mit `401` scheitern, obwohl `auth-service` sein eigenes Token
+korrekt validiert — live verifiziert (`GET /me` und ein `document-service`-
+Aufruf mit einem lokal ausgestellten Token, beide über das echte Gateway,
+wurden korrekt durchgelassen). Mit Ausnahme der in `settings.public_routes` gelisteten
 Routen (Default: `auth-service:login`, `auth-service:refresh`, da man dafür
 erst einen Token braucht; seit P6-S9 zusätzlich die beiden Federation-Hub-
 Inbound-Endpunkte; seit P13-S2 zusätzlich vier Routen für den unabhängig

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from dms_auth_client import InvalidTokenError, TokenValidator
+from dms_auth_client import InvalidTokenError, MultiIssuerTokenValidator, TokenValidator
 from dms_common import configure_logging
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,13 +20,27 @@ logger = logging.getLogger(__name__)
 _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
 
-def _build_token_validator(settings: Settings) -> TokenValidator:
+# Auth-Entkopplung von Keycloak (Phase 18, ADR 0063): muss exakt
+# `auth_service.local_token_issuer.LOCAL_ISSUER` entsprechen. Bewusst als
+# eigener String dupliziert statt einer neuen Shared-Lib-Konstante - kein
+# `libs/`-Paket kennt diesen Wert bisher, `gateway-service` importiert (wie
+# jeder andere Service) ohnehin keinen Code aus `auth-service` selbst.
+_LOCAL_TOKEN_ISSUER = "dms-auth-service-local"
+
+
+def _build_token_validator(settings: Settings) -> MultiIssuerTokenValidator:
     issuer = f"{settings.keycloak_base_url}/realms/{settings.keycloak_realm}"
-    return TokenValidator(
+    keycloak_validator = TokenValidator(
         issuer=issuer,
         audience=settings.keycloak_client_id,
         jwks_url=f"{issuer}/protocol/openid-connect/certs",
     )
+    local_validator = TokenValidator(
+        issuer=_LOCAL_TOKEN_ISSUER,
+        audience=settings.keycloak_client_id,
+        jwks_url=f"{settings.auth_service_base_url}/.well-known/jwks.json",
+    )
+    return MultiIssuerTokenValidator([keycloak_validator, local_validator])
 
 
 @asynccontextmanager

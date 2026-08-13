@@ -62,3 +62,12 @@ class Settings(BaseServiceSettings):
     # services `cors_allowed_origins`. Bewusst nur user-ui in dieser Session
     # (siehe ADR) - weitere Frontends folgen bei Bedarf demselben Muster.
     sso_redirect_uri_allowed_origins: list[str] = ["http://localhost:3000"]
+
+    # Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063):
+    # Gültigkeitsdauer von Tokens lokaler technischer Konten (Superuser,
+    # künftig Domain-Admins) - unabhängig von `superuser_activation_minutes`
+    # oben, das die Break-Glass-AKTIVIERUNG befristet (wie lange `enabled=
+    # True` bleibt), nicht die Lebensdauer eines einzelnen Tokens. Werte
+    # orientieren sich an Keycloaks eigenen Standard-Token-Laufzeiten.
+    local_access_token_ttl_seconds: int = 300
+    local_refresh_token_ttl_seconds: int = 1800

@@ -9,15 +9,15 @@
 
 | Methode | Pfad | Beschreibung |
 |---|---|---|
-| `POST` | `/login` | `{username, password}` → Password-Grant gegen Keycloak, liefert Access-/Refresh-Token. **Seit P6-S6**: liest `X-DMS-Maintenance-Active` (vom Gateway injiziert, 4.8) — ist Wartungsmodus aktiv und `username` ungleich dem Superuser-Konto, `503` statt Login |
-| `POST` | `/refresh` | `{refresh_token}` → neue Tokens |
+| `POST` | `/login` | `{username, password}` → Password-Grant gegen Keycloak, liefert Access-/Refresh-Token. **Seit P6-S6**: liest `X-DMS-Maintenance-Active` (vom Gateway injiziert, 4.8) — ist Wartungsmodus aktiv und `username` ungleich dem Superuser-Konto, `503` statt Login. **Seit Phase 18 Session 2**: erkennt technische Konten (`technical_account`-Tabellen-Lookup) vor dem Keycloak-Pfad und authentifiziert diese lokal (bcrypt), siehe "Auth-Entkopplung von Keycloak" unten |
+| `POST` | `/refresh` | `{refresh_token}` → neue Tokens. **Seit Phase 18 Session 2**: erkennt lokal ausgestellte Refresh-Tokens am `iss`-Claim und stellt ein frisches Paar ohne Keycloak-Beteiligung aus |
 | `GET` | `/me` | Bearer-Token validieren (JWKS, zustandslos, keine Rückfrage bei Keycloak), normalisierte Identität zurückgeben |
 | `GET` | `/users` | Nutzer auflisten (seit P4-S3, Grundlage der Admin-UI-Nutzerverwaltung) — liest direkt aus Keycloak. **Seit P6-S5 gegated**: erfordert die Capability `admin.user_management` (Domäne "Nutzer-/Rechteverwaltung", 4.6), sonst `403` |
 | `POST` | `/users` | Nutzer anlegen (`username`, `email`, `password`, `first_name`, `last_name`) — 409 bei bereits vergebenem Benutzernamen. Gegated wie `GET /users` |
 | `DELETE` | `/users/{id}` | Nutzer löschen — 404 bei unbekannter `id`. Gegated wie `GET /users` |
 | `GET` | `/me/preferences` | Theme-Präferenz des angemeldeten Kontos (`{theme}`, Default `"auto"`) — seit P4-S6 |
 | `PUT` | `/me/preferences` | Theme-Präferenz setzen (`{theme}` ∈ `light`/`dark`/`high-contrast`/`auto`, sonst 422) — seit P4-S6 |
-| `GET` | `/superuser/status` | Break-Glass-Status (4.6, seit P6-S5): `{active, expires_at}`, seit **P6-S6** zusätzlich `principal_id` (Keycloak-`id` des Superuser-Kontos, für den Not-Shutdown-Aufheben-Check des Permission Service, 4.8) — 404, falls das Superuser-Konto noch nicht angelegt wurde |
+| `GET` | `/superuser/status` | Break-Glass-Status (4.6, seit P6-S5): `{active, expires_at}`, seit **P6-S6** zusätzlich `principal_id` (seit Phase 18 Session 2 die `TechnicalAccount.id`, zuvor die Keycloak-`id`, für den Not-Shutdown-Aufheben-Check des Permission Service, 4.8) — 404, falls das Superuser-Konto noch nicht angelegt wurde |
 | `POST` | `/superuser/deactivate` | Vorzeitige, freiwillige Deaktivierung (seit P6-S5) — ergänzt die automatische Ablauf-Erzwingung über den Poll-Loop |
 | `GET` | `/users/lookup` | Exakte Namensauflösung (`?username=`) — liefert nur `{id, username}` zurück, `404` bei unbekanntem Namen. Neu in P14-S6, für `teamspace-service`s Einladen-per-Nutzername (2.5): erfordert lediglich `Depends(get_current_user)` (jeder gültige Token), bewusst NICHT hinter `admin.user_management` wie `GET /users` oben — jede Person, nicht nur Domain-Admins, soll andere zu einem Team-Arbeitsbereich einladen können. Siehe [ADR 0043](../adr/0043-teamspace-service-membership-and-permission-integration.md) |
 | `GET` | `/users/count` | Interner Aufruf von `license-service` (9.1 "benannte Accounts"-Modell, seit P9-S1) — ungegatet, da kein Service einen echten Keycloak-Bearer-Token für `Depends(get_current_user)` besitzt |
@@ -44,9 +44,8 @@ Bei jedem Start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
 - Audience-Mapper, damit `aud` im Access-Token `dms-api` statt nur `account` enthält (Keycloak-Default ohne Mapper)
 - Deklariertes User-Profile-Attribut `dms_theme` (seit P4-S6, siehe unten) — ohne diese Deklaration verwirft Keycloaks Declarative User Profile das Attribut bei jedem `update_user`-Aufruf stillschweigend
 - Realm-Rolle `dms-admin` (seit **P5e-S2**, `create_realm_role(..., skip_exists=True)`) — erste im System tatsächlich ausgewertete Rolle, siehe `docs/services/document-service.md` "Kennzeichengenerator" (privilegierte Änderung von `attributes["Kennzeichen"]`)
-- Deklariertes User-Profile-Attribut `dms_superuser_expires_at` (seit **P6-S5**, gleiches Deklarationsmuster wie `dms_theme`) — Break-Glass-Ablaufzeitpunkt (4.6, siehe unten)
-- Superuser-Konto (seit **P6-S5**, Username `superuser`) — idempotent angelegt mit `enabled=False`, siehe "Superuser Break-Glass" unten
-- Technische Domain-Admin-Konten (seit **P6-S5**, `enabled=True`, Liste `DOMAIN_ADMIN_ACCOUNTS` statt Einzelkonstante seit **P6-S6**): `users-admin`/`users-admin` (Domäne "Nutzer-/Rechteverwaltung") und seit P6-S6 zusätzlich `config-admin`/`config-admin` (Domäne "Workflow-Konfiguration", 4.6/4.8-Retrofit, siehe `docs/services/workflow-service.md`) — nach Anlage folgt für jedes Konto (best-effort, siehe unten) eine Rollenzuweisung gegen `permission-service`
+- ~~Deklariertes User-Profile-Attribut `dms_superuser_expires_at`~~ / ~~Superuser-Konto hier angelegt~~ — **seit Phase 18 Session 2 entfernt** ([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): der Superuser lebt nicht mehr in Keycloak, seine idempotente Anlage passiert jetzt async in `main.py`s Lifespan (`superuser.ensure_superuser_account`, DB-basiert), nicht mehr hier in diesem synchronen, rein Keycloak-fokussierten Bootstrap-Schritt.
+- Technische Domain-Admin-Konten (seit **P6-S5**, `enabled=True`, Liste `DOMAIN_ADMIN_ACCOUNTS` statt Einzelkonstante seit **P6-S6**): `users-admin`/`users-admin` (Domäne "Nutzer-/Rechteverwaltung") und seit P6-S6 zusätzlich `config-admin`/`config-admin` (Domäne "Workflow-Konfiguration", 4.6/4.8-Retrofit, siehe `docs/services/workflow-service.md`) — nach Anlage folgt für jedes Konto (best-effort, siehe unten) eine Rollenzuweisung gegen `permission-service`. **Weiterhin Keycloak-Konten** bis Phase 18 Session 3 (Auth-Entkopplung betrifft bislang nur den Superuser).
 - **Seit Ad-hoc-Post-Roadmap-SSO-Feature**: `_ensure_client_updated` (läuft bei JEDEM Start, nicht nur bei Ersteinrichtung) aktiviert `standardFlowEnabled` und registriert die Redirect-URIs (`{origin}/login/callback/` je `sso_redirect_uri_allowed_origins`) — behebt die unten genannte `skip_exists`-Lücke für genau diese beiden Felder. `_ensure_kerberos` (bedingt, nur wenn `kerberos_enabled` und alle drei Kerberos-Settings gesetzt sind) richtet zusätzlich Kerberos/SPNEGO ein, siehe "SSO/automatischer Login" unten und [ADR 0062](../adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md).
 
 **Bekannte Grenze**: `skip_exists=True` verhindert weiterhin, dass eine spätere Änderung der übrigen Client-Konfiguration (z. B. neue Mapper) auf einen bereits bestehenden Client nachgezogen wird — für Dev/Test unkritisch, für Produktivbetrieb bei Konfigurationsänderungen zu beachten. Nur `standardFlowEnabled`/`redirectUris` sind seit dem SSO-Feature davon ausgenommen (siehe oben).
@@ -59,43 +58,72 @@ Cross-UI-Theming (Hell/Dunkel/Hoher-Kontrast/Automatisch, User-UI und Admin-UI) 
 
 Domain-Admin-"Rollen" sind bewusst **keine Keycloak-Realm-Rollen** (anders als `dms-admin`), sondern systemeigene `Role`-Zeilen in `permission-service` (siehe `docs/services/permission-service.md`) — `auth-service` erzeugt nur die zugehörigen **technischen Konten** und weist ihnen die Rolle per HTTP-Aufruf gegen `permission-service` zu (`permission_client.py`, `PermissionServiceClient.ensure_role_assignment`). Vollständige Architekturbegründung siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Diese Session legt nur `users-admin` (Domäne "Nutzer-/Rechteverwaltung") tatsächlich an; die Rollenzuweisung erfolgt best-effort beim Lifespan-Start — ist `permission-service` noch nicht erreichbar, wird sie übersprungen und beim nächsten Neustart erneut versucht (kein Retry-Loop).
 
-## Superuser Break-Glass (4.6, seit P6-S5)
+## Superuser Break-Glass (4.6, seit P6-S5, seit Phase 18 Session 2 lokal statt Keycloak)
 
-Ein einzelnes, standardmäßig deaktiviertes (`enabled=False`) Keycloak-Konto `superuser`. Reaktivierung läuft **ausschließlich** über den generischen Vier-Augen-Mechanismus des Permission Service (P6-S4, ADR 0022): `POST /approval-requests` mit `action_type="auth.superuser.activate"` gegen `permission-service`, das für diesen Aktionstyp beim eigenen Start `requires_approval=True` und `required_permission="breakglass.approve"` vorbelegt (strenger als die "irgendeine zweite Person"-Regel aus 4.3 — Initiator *und* Genehmiger müssen die Rolle `breakglass-approver` halten). Nach Genehmigung konsumiert `auth-service` (**erster NATS-Konsument dieses Service überhaupt**, `consumer.py`) das publizierte `permission.approval.approved` und aktiviert das Konto: `enabled=True` + `dms_superuser_expires_at`-Attribut (`activated_at + superuser_activation_minutes`, Default 30 min) — publiziert danach `auth.superuser.activated`.
+Ein einzelnes, standardmäßig deaktiviertes (`enabled=False`) Konto `superuser`. **Seit Phase 18 Session 2**
+([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)) eine `TechnicalAccount`-
+Zeile im eigenen `auth`-Schema statt eines Keycloak-Nutzerkontos — Break-Glass funktioniert dadurch
+unabhängig von Keycloaks Erreichbarkeit, der eigentliche Zweck eines Notfallmechanismus. Reaktivierung
+läuft weiterhin **ausschließlich** über den generischen Vier-Augen-Mechanismus des Permission Service
+(P6-S4, ADR 0022): `POST /approval-requests` mit `action_type="auth.superuser.activate"` gegen
+`permission-service`, das für diesen Aktionstyp beim eigenen Start `requires_approval=True` und
+`required_permission="breakglass.approve"` vorbelegt (strenger als die "irgendeine zweite Person"-Regel
+aus 4.3 — Initiator *und* Genehmiger müssen die Rolle `breakglass-approver` halten). Nach Genehmigung
+konsumiert `auth-service` (**erster NATS-Konsument dieses Service überhaupt**, `consumer.py`) das
+publizierte `permission.approval.approved` und aktiviert das Konto: `enabled=True` +
+`expires_at`-Spalte (`activated_at + superuser_activation_minutes`, Default 30 min, jetzt eine echte
+DB-Spalte statt eines Keycloak-Attributs) — publiziert danach `auth.superuser.activated`.
 
 Ein periodischer Poll-Loop (`_superuser_poll_loop`, `superuser_poll_interval_seconds`, Default 30s — exakt dasselbe Muster wie workflow-services SLA-Zeitüberwachung, [ADR 0020](../adr/0020-sla-timer-polling.md)) deaktiviert abgelaufene Aktivierungen automatisch und publiziert `auth.superuser.deactivated` (`reason="expired"`, oder `"manual"` bei `POST /superuser/deactivate`). **Bewusste Vereinfachung** (siehe ADR 0023): ein einziger absoluter Ablauf-Zeitstempel statt separater Gesamtdauer- und rollierender 10-Minuten-Inaktivitäts-Timer.
+
+`POST /login` erkennt den Superuser-Benutzernamen über einen `technical_account`-Tabellen-Lookup und
+authentifiziert lokal (bcrypt-Passwortprüfung + `enabled`/`expires_at`-Prüfung), statt einen
+Keycloak-Password-Grant zu versuchen — der seit P6-S6 bekannte, nie behobene Bug ("Superuser-Konto kann
+nicht interaktiv einloggen", fehlende Pflichtfelder an einem historisch unvollständig angelegten
+Keycloak-Konto) ist damit ersatzlos verschwunden, es gibt kein Keycloak-Konto mehr, das diesen Zustand
+haben könnte.
 
 ## Not-Shutdown (4.8, seit P6-S6)
 
 `POST /login` liest den vom Gateway auf jedem proxied Request injizierten `X-DMS-Maintenance-Active`-Header (Default `"false"`, falls das Login direkt am Service statt über das Gateway aufgerufen wird — dann ist der Wartungsmodus faktisch nie wirksam, siehe `docs/services/gateway-service.md`): ist er `"true"` und der angefragte `username` ungleich `superuser.SUPERUSER_USERNAME`, wird der Login mit `503` abgelehnt, **bevor** überhaupt ein Password-Grant gegen Keycloak versucht wird — wörtliche Umsetzung von "neue Logins außer für den Superuser werden abgelehnt" (4.8). Der Superuser-Login selbst wird dadurch nicht automatisch erfolgreich — ein falsches Passwort liefert weiterhin `401`, der Header entscheidet nur, ob überhaupt versucht wird. Vollständige Architekturbegründung (Gateway als Durchsetzungspunkt, Header-Broadcast-Muster) in [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-## Auth-Entkopplung von Keycloak (Post-Roadmap Phase 18, Session 1, siehe ADR 0063)
+## Auth-Entkopplung von Keycloak (Post-Roadmap Phase 18, siehe ADR 0063/0064)
 
-Superuser-Break-Glass und Domain-Admin-Konten sollen künftig unabhängig von Keycloaks Erreichbarkeit
-funktionieren (Nutzer-Direktive: "der Superuser soll gar nicht im Keycloak leben"). Diese erste Session
-legt die Infrastruktur, ohne `POST /login`/Break-Glass bereits umzustellen (folgt in Session 2/3):
+Superuser-Break-Glass und (ab Session 3) Domain-Admin-Konten funktionieren unabhängig von Keycloaks
+Erreichbarkeit (Nutzer-Direktive: "der Superuser soll gar nicht im Keycloak leben").
 
-- **`TechnicalAccount`** (neues Model, `auth`-Schema) — künftiger Speicherort für Superuser-/Domain-
-  Admin-Konten, `password_hash` per `bcrypt` (erstes selbst gehashtes Passwort in diesem Service).
+- **`TechnicalAccount`** (Model, `auth`-Schema) — Speicherort für Superuser-/Domain-Admin-Konten,
+  `password_hash` per `bcrypt` (erstes selbst gehashtes Passwort in diesem Service). `role_name`
+  nullable — `NULL` für den Superuser (Sonderrechte laufen über direkten Namensvergleich, nicht RBAC).
 - **`LocalSigningKey`** (Singleton-Zeile, gleiches Muster wie `FederationIdentity`) — eigenes
-  RSA-2048-Schlüsselpaar, idempotent beim ersten Zugriff erzeugt (`local_token_issuer.
-  ensure_signing_key`), stabiler `kid` über Neustarts hinweg.
+  RSA-2048-Schlüsselpaar, idempotent beim ersten Zugriff erzeugt, stabiler `kid` über Neustarts hinweg.
 - **`GET /.well-known/jwks.json`** — liefert den öffentlichen Schlüssel im selben JWKS-Format wie
   Keycloaks `/protocol/openid-connect/certs`, ungegatet.
 - **`local_token_issuer.mint_token()`** — stellt Tokens mit identischem Claim-Shape wie Keycloak aus
-  (`sub`/`preferred_username`/`realm_access.roles`/`aud`).
-- **`_validator` ist seit dieser Session ein `MultiIssuerTokenValidator`** (neu in
-  `libs/dms-auth-client`, wählt über den `iss`-Claim) aus Keycloak- und lokalem Validator — vollständig
-  additiv, bestehende Keycloak-Logins bleiben unverändert gültig. Ein `_LazyValidator`-Wrapper verzögert
-  den Zugriff auf `app.state.combined_validator` bis zum ersten Request, da der lokale Signierschlüssel
-  erst nach einem DB-Zugriff im Lifespan verfügbar ist.
+  (`sub`/`preferred_username`/`realm_access.roles`/`aud`), plus `jti` (verhindert byte-identische Tokens
+  bei zwei Ausstellungen für dasselbe Konto innerhalb derselben Sekunde, z. B. Login direkt gefolgt von
+  Refresh — real bei der Testentwicklung aufgetreten).
+- **`_validator` ist ein `MultiIssuerTokenValidator`** (neu in `libs/dms-auth-client`, wählt über den
+  `iss`-Claim) aus Keycloak- und lokalem Validator — vollständig additiv, bestehende Keycloak-Logins
+  bleiben unverändert gültig. Ein `_LazyValidator`-Wrapper verzögert den Zugriff auf
+  `app.state.combined_validator` bis zum ersten Request, da der lokale Signierschlüssel erst nach einem
+  DB-Zugriff im Lifespan verfügbar ist.
+- **`POST /login`/`POST /refresh` erkennen technische Konten**: `/login` prüft den Benutzernamen gegen
+  `technical_account`, bevor ein Keycloak-Password-Grant versucht wird; `/refresh` peekt den `iss`-Claim
+  des präsentierten Refresh-Tokens (`local_token_issuer.is_local_token`) und verzweigt entsprechend.
+  Beide Pfade liefern dieselbe `TokenResponse`-Form, unabhängig von der Quelle.
+- **`gateway-service`s eigener `TokenValidator` ist ebenfalls ein `MultiIssuerTokenValidator`** (neue
+  `DMS_AUTH_SERVICE_BASE_URL`-Einstellung für die zweite JWKS-Quelle) — ohne diese Umstellung würde ein
+  frisch lokal eingeloggter Superuser an jedem proxied Aufruf mit 401 scheitern, obwohl `auth-service`
+  sein eigenes Token korrekt validiert.
 
-**Noch keine funktionale Änderung für Endnutzer**: `POST /login` stellt weiterhin ausschließlich
-Keycloak-Tokens aus. `gateway-service`s eigener `TokenValidator` ist noch nicht auf Multi-Issuer
-umgestellt — unkritisch, solange keine lokalen Tokens tatsächlich ausgestellt werden, muss aber vor
-Abschluss von Session 2 nachgezogen werden. Live verifiziert: `GET /.well-known/jwks.json` liefert einen
-validen JWKS-Eintrag, ein bestehender Keycloak-Login funktioniert unverändert, `kid` bleibt über einen
-echten Container-Neustart hinweg stabil.
+**Vollständig live gegen den echten laufenden Stack verifiziert** (nicht nur automatisierte Tests):
+kompletter Kreislauf über das echte Gateway — Login vor Aktivierung (401) → Aktivierung → Login über das
+Gateway (200) → `GET /me` über das Gateway (200, beweist Gateways eigene Multi-Issuer-Umstellung) → ein
+Aufruf gegen `document-service` mit demselben Token über das Gateway wird durchgelassen (422 wegen eines
+fachlichen Pflichtfelds, nicht 401 — beweist systemweite Akzeptanz) → `POST /refresh` über das Gateway
+(200) → Deaktivierung → nachfolgender Refresh (401). Ein regulärer Keycloak-Login (`users-admin`) über
+dasselbe Gateway funktioniert unverändert.
 
 ## SSO/automatischer Login (Ad-hoc Post-Roadmap-Feature, siehe ADR 0062)
 
@@ -164,5 +192,5 @@ neue Rolle idempotent an — zweiter Aufruf mit demselben Namen scheitert nicht,
 - **5 der 7 Domain-Admin-Rollen aus 4.6 ohne zugeordnetes technisches Konto** (seit P6-S5/S6): `domain-admin-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs` existieren nur als `Role`-Zeile in `permission-service`, ohne Keycloak-Konto und ohne dass irgendein Endpunkt sie prüft — folgt jeweils mit der künftigen Retrofit-Session der betreffenden Domäne. `domain-admin-config` ist seit **P6-S6** durchgesetzt (`config-admin`-Konto, `workflow-service`s Prozessdefinitions-Endpunkte).
 - **Keine erhöhte Auditierungspriorität während einer aktiven Superuser-Session** (4.6, seit P6-S5): `audit-service` konsumiert die Break-Glass-Lifecycle-Events (`auth.>`) mit normaler Priorität; Fremdaktionen, die *während* der Aktivierung in anderen Services ausgeführt werden, sind nicht gesondert markiert.
 - **Keine rollierende Inaktivitäts-Deaktivierung** (4.6, seit P6-S5): ein einziger absoluter Ablauf-Zeitstempel statt getrennter Gesamtdauer-/10-Minuten-Inaktivitäts-Timer, siehe ADR 0023.
-- **Bug entdeckt bei P6-S6, nicht behoben (P6-S5-Code)**: das Superuser-Konto kann in der aktuellen Live-Umgebung nicht interaktiv einloggen (`POST /login` liefert `401`/"Account is not fully set up" direkt von Keycloak). Ursache: `firstName`/`lastName`/`email` fehlen am Keycloak-Konto — Keycloaks Declarative User Profile verlangt diese Felder im "user"-Kontext, `ensure_superuser_account`s Idempotenz-Guard (`if admin.get_users(...): return`) zieht sie nie nach, falls das Konto einmal (z. B. durch einen frühen Testlauf während der P6-S5-Entwicklung mit unvollständiger Payload) ohne sie angelegt wurde. Der Break-Glass-**Aktivierungsfluss** selbst (Approval-Mechanismus, `enabled`-Flag, Ablauf-Attribut) ist davon unberührt — nur ein tatsächlicher interaktiver Login als `superuser` schlägt fehl. Fix müsste `ensure_superuser_account` idempotent auf fehlende Felder prüfen und sie per `update_user` nachziehen, statt bei Existenz sofort zurückzukehren — nicht Teil dieser Session (P6-S6), da außerhalb ihres Scopes; für eine künftige Session vorgemerkt.
+- ~~**Bug entdeckt bei P6-S6, nicht behoben (P6-S5-Code)**: das Superuser-Konto kann in der aktuellen Live-Umgebung nicht interaktiv einloggen (`POST /login` liefert `401`/"Account is not fully set up" direkt von Keycloak). Ursache: `firstName`/`lastName`/`email` fehlen am Keycloak-Konto...~~ — **seit Phase 18 Session 2 ersatzlos verschwunden** ([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): der Superuser ist kein Keycloak-Konto mehr, es gibt kein Declarative-User-Profile-Pflichtfeld-Problem mehr, das diesen Zustand verursachen könnte.
 - **`GET /users/lookup` ist ein Existenz-Oracle** (seit P14-S6): jeder authentifizierte Nutzer kann herausfinden, ob ein bestimmter Nutzername existiert — bewusst so belassen (interne Verwaltungssoftware, bekannte Nutzerpopulation), aber eine dokumentierte Abweichung vom vorherigen Zustand (Nutzerverzeichnis komplett hinter `admin.user_management`). Siehe [ADR 0043](../adr/0043-teamspace-service-membership-and-permission-integration.md).

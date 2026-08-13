@@ -17,8 +17,8 @@ def _approved_event(action_type: str, payload: dict | None = None) -> bytes:
     return event.to_bytes()
 
 
-async def test_approved_activation_enables_superuser_and_publishes(keycloak_admin):
-    superuser.ensure_superuser_account(keycloak_admin)
+async def test_approved_activation_enables_superuser_and_publishes(session_factory):
+    await superuser.ensure_superuser_account(session_factory)
     try:
         published = []
 
@@ -26,28 +26,28 @@ async def test_approved_activation_enables_superuser_and_publishes(keycloak_admi
             published.append((event_type, payload))
 
         handler = consumer.make_handler(
-            keycloak_admin, activation_minutes=30, publish_event=fake_publish
+            session_factory, activation_minutes=30, publish_event=fake_publish
         )
 
         await handler(_approved_event("auth.superuser.activate"))
 
-        active, _ = superuser.get_status(keycloak_admin)
+        active, _ = await superuser.get_status(session_factory)
         assert active is True
         assert len(published) == 1
         assert published[0][0] == "auth.superuser.activated"
         assert published[0][1]["request_id"] == "req-1"
     finally:
-        superuser.deactivate(keycloak_admin)
+        await superuser.deactivate(session_factory)
 
 
-async def test_unrelated_action_type_is_ignored(keycloak_admin):
+async def test_unrelated_action_type_is_ignored(session_factory):
     published = []
 
     async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        keycloak_admin, activation_minutes=30, publish_event=fake_publish
+        session_factory, activation_minutes=30, publish_event=fake_publish
     )
 
     await handler(_approved_event("permission.scope_lock.create"))
@@ -55,27 +55,21 @@ async def test_unrelated_action_type_is_ignored(keycloak_admin):
     assert published == []
 
 
-async def test_missing_superuser_account_is_logged_not_raised(keycloak_admin):
+async def test_missing_superuser_account_is_logged_not_raised(session_factory):
     """Regression (gleiches Prinzip wie P6-S4s KeyError-Lehre): ein Konsument
     darf nie an unerwartetem Zustand crashen, sonst bleibt die NATS-Nachricht
-    unbestätigt und wird endlos erneut zugestellt."""
-    existing = keycloak_admin.get_users(
-        query={"username": superuser.SUPERUSER_USERNAME, "exact": True}
-    )
-    for user in existing:
-        keycloak_admin.delete_user(user["id"])
-
+    unbestätigt und wird endlos erneut zugestellt. `_clean_tables` (conftest,
+    autouse) hat `technical_account` bereits geleert - kein Konto existiert
+    zu Beginn dieses Tests."""
     published = []
 
     async def fake_publish(event_type, payload, actor=None):
         published.append((event_type, payload))
 
     handler = consumer.make_handler(
-        keycloak_admin, activation_minutes=30, publish_event=fake_publish
+        session_factory, activation_minutes=30, publish_event=fake_publish
     )
 
     await handler(_approved_event("auth.superuser.activate"))  # darf nicht raisen
 
     assert published == []
-
-    superuser.ensure_superuser_account(keycloak_admin)

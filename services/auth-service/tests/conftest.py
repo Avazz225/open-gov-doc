@@ -3,7 +3,7 @@ import uuid
 
 import httpx
 import pytest
-from dms_db_base import build_engine
+from dms_db_base import build_engine, make_session_factory
 from sqlalchemy import text
 
 DSN = os.environ.get(
@@ -52,6 +52,17 @@ async def _clean_tables():
 def client():
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+async def session_factory():
+    """Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - für Tests, die
+    `superuser.py`/`local_token_issuer.py` direkt gegen die DB testen wollen,
+    ohne den vollen FastAPI-Lifespan über `client` zu durchlaufen (z. B.
+    `test_consumer.py`, das den NATS-Konsumenten isoliert testet)."""
+    eng = build_engine(DSN)
+    yield make_session_factory(eng)
+    await eng.dispose()
 
 
 @pytest.fixture

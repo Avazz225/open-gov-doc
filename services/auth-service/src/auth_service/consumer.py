@@ -2,7 +2,6 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
-from keycloak import KeycloakAdmin
 
 from auth_service import superuser
 
@@ -10,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_handler(
-    admin: KeycloakAdmin,
+    session_factory,
     *,
     activation_minutes: int,
     publish_event: Callable[[str, dict], Awaitable[None]],
@@ -18,7 +17,9 @@ def make_handler(
     """Erster Konsument dieses Service überhaupt (P6-S5, 4.6): führt die
     Break-Glass-Aktivierung erst nach Genehmigung aus, exakt dasselbe
     Selbst-/Fremd-Konsum-Prinzip wie in ADR 0022 - dieser Service konsumiert
-    sein eigenes, ihm zugeordnetes `action_type`, ignoriert alle anderen."""
+    sein eigenes, ihm zugeordnetes `action_type`, ignoriert alle anderen.
+    `session_factory` statt `KeycloakAdmin` seit Phase 18 (ADR 0063) - der
+    Superuser lebt seither als DB-Zeile, nicht mehr als Keycloak-Konto."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -26,7 +27,9 @@ def make_handler(
             return
         request_id = event.payload.get("request_id")
         try:
-            expires_at = superuser.activate(admin, activation_minutes=activation_minutes)
+            expires_at = await superuser.activate(
+                session_factory, activation_minutes=activation_minutes
+            )
         except superuser.SuperuserNotConfiguredError:
             logger.warning(
                 "Genehmigte Break-Glass-Aktivierung konnte nicht ausgeführt werden - "
@@ -49,13 +52,13 @@ def make_handler(
 async def start_consuming(
     bus: NatsEventBusClient,
     subjects: list[str],
-    admin: KeycloakAdmin,
+    session_factory,
     *,
     activation_minutes: int,
     publish_event: Callable[[str, dict], Awaitable[None]],
 ) -> None:
     handler = make_handler(
-        admin, activation_minutes=activation_minutes, publish_event=publish_event
+        session_factory, activation_minutes=activation_minutes, publish_event=publish_event
     )
     for subject in subjects:
         try:

@@ -74,9 +74,13 @@ class TechnicalAccount(Base):
     ist ein bcrypt-Hash (erstes Mal, dass dieser Service selbst ein Passwort
     hasht - bislang übernahm Keycloak das vollständig). `role_name` ist die
     an `permission-service` zu übermittelnde Rolle (z. B. `domain-admin-
-    users`), identisch zum bisherigen Keycloak-Konten-Muster.
-    `enabled`/`expires_at` tragen weiterhin die Break-Glass-Semantik für den
-    Superuser (4.6) - jetzt rein app-seitig, ohne Keycloak-Attribut."""
+    users`), identisch zum bisherigen Keycloak-Konten-Muster - `NULL` für den
+    Superuser (P18-S2), dessen Sonderrechte nicht über eine permission-
+    service-Rolle laufen, sondern über direkten Namensvergleich an mehreren
+    Stellen im System (z. B. Not-Shutdown, query-services `_is_active_
+    superuser`). `enabled`/`expires_at` tragen weiterhin die Break-Glass-
+    Semantik für den Superuser (4.6) - jetzt rein app-seitig, ohne
+    Keycloak-Attribut."""
 
     __tablename__ = "technical_account"
 
@@ -84,7 +88,7 @@ class TechnicalAccount(Base):
     username: Mapped[str] = mapped_column(String(128), unique=True)
     password_hash: Mapped[str] = mapped_column(String(128))
     account_type: Mapped[str] = mapped_column(String(32))
-    role_name: Mapped[str] = mapped_column(String(128))
+    role_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -1,97 +1,114 @@
 from datetime import UTC, datetime, timedelta
 
-from keycloak import KeycloakAdmin
+from sqlalchemy import select
+
+from auth_service.local_token_issuer import hash_password
+from auth_service.models import TechnicalAccount
 
 SUPERUSER_USERNAME = "superuser"
-EXPIRES_AT_ATTRIBUTE = "dms_superuser_expires_at"
 
 
 class SuperuserNotConfiguredError(Exception):
     pass
 
 
-def ensure_superuser_account(admin: KeycloakAdmin) -> None:
+async def ensure_superuser_account(session_factory) -> None:
     """Break-Glass-Konto (4.6): idempotent angelegt, **immer** `enabled=False`
     nach Ersteinrichtung - Reaktivierung geschieht ausschließlich über
     `activate()` unten (Konsument des genehmigten Vier-Augen-Requests, siehe
-    `consumer.py`), nie durch direktes Keycloak-Update von Hand vorgesehen.
-    Default-Passwort = Username, wie bei den Domain-Admin-Konten - sollte vom
-    Betreiber geändert werden."""
-    if admin.get_users(query={"username": SUPERUSER_USERNAME, "exact": True}):
-        return
-    admin.create_user(
-        payload={
-            "username": SUPERUSER_USERNAME,
-            "email": f"{SUPERUSER_USERNAME}@system.local",
-            "enabled": False,
-            "emailVerified": True,
-            "firstName": "Superuser",
-            "lastName": "Break-Glass",
-            "credentials": [{"type": "password", "value": SUPERUSER_USERNAME, "temporary": False}],
-        },
-        exist_ok=True,
+    `consumer.py`), nie durch direktes Update von Hand vorgesehen.
+    Default-Passwort = Username, wie zuvor beim Keycloak-Konto - sollte vom
+    Betreiber geändert werden (noch kein Passwort-Änderungs-Endpunkt, siehe
+    "Offene Punkte").
+
+    Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063):
+    lebt seit dieser Session als `TechnicalAccount`-Zeile statt eines
+    Keycloak-Nutzerkontos - Break-Glass funktioniert dadurch unabhängig von
+    Keycloaks Erreichbarkeit, der eigentliche Zweck eines
+    Notfallmechanismus."""
+    async with session_factory() as session:
+        existing = await session.scalar(
+            select(TechnicalAccount).where(TechnicalAccount.username == SUPERUSER_USERNAME)
+        )
+        if existing is not None:
+            return
+        session.add(
+            TechnicalAccount(
+                username=SUPERUSER_USERNAME,
+                password_hash=hash_password(SUPERUSER_USERNAME),
+                account_type="superuser",
+                role_name=None,
+                enabled=False,
+                expires_at=None,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+
+async def _get_superuser_account(session) -> TechnicalAccount:
+    account = await session.scalar(
+        select(TechnicalAccount).where(TechnicalAccount.username == SUPERUSER_USERNAME)
     )
-
-
-def _get_superuser_id(admin: KeycloakAdmin) -> str:
-    users = admin.get_users(query={"username": SUPERUSER_USERNAME, "exact": True})
-    if not users:
+    if account is None:
         raise SuperuserNotConfiguredError("Superuser-Konto wurde noch nicht angelegt")
-    return users[0]["id"]
+    return account
 
 
-def activate(admin: KeycloakAdmin, *, activation_minutes: int) -> datetime:
+async def activate(session_factory, *, activation_minutes: int) -> datetime:
     """Aktiviert das Konto zeitlich befristet (4.6) - ein einziger absoluter
     Ablauf-Zeitstempel statt getrennter Gesamtdauer-/Inaktivitäts-Timer
-    (bewusste Vereinfachung, siehe ADR 0023), als Keycloak-Attribut abgelegt
-    statt in einer neuen Datenbank (gleiches Muster wie die Theme-Präferenz,
-    ADR 0009) - `auth-service` bleibt dadurch weiterhin zustandslos."""
-    user_id = _get_superuser_id(admin)
-    expires_at = datetime.now(UTC) + timedelta(minutes=activation_minutes)
-    raw = admin.get_user(user_id)
-    attributes = dict(raw.get("attributes", {}))
-    attributes[EXPIRES_AT_ATTRIBUTE] = [expires_at.isoformat()]
-    admin.update_user(user_id, {"enabled": True, "attributes": attributes})
-    return expires_at
+    (bewusste Vereinfachung, siehe ADR 0023), seit Phase 18 als Spalten der
+    eigenen `technical_account`-Zeile statt eines Keycloak-Attributs."""
+    async with session_factory() as session:
+        account = await _get_superuser_account(session)
+        expires_at = datetime.now(UTC) + timedelta(minutes=activation_minutes)
+        account.enabled = True
+        account.expires_at = expires_at
+        await session.commit()
+        return expires_at
 
 
-def deactivate(admin: KeycloakAdmin) -> None:
-    user_id = _get_superuser_id(admin)
-    raw = admin.get_user(user_id)
-    attributes = dict(raw.get("attributes", {}))
-    attributes.pop(EXPIRES_AT_ATTRIBUTE, None)
-    admin.update_user(user_id, {"enabled": False, "attributes": attributes})
+async def deactivate(session_factory) -> None:
+    async with session_factory() as session:
+        account = await _get_superuser_account(session)
+        account.enabled = False
+        account.expires_at = None
+        await session.commit()
 
 
-def get_status(admin: KeycloakAdmin) -> tuple[bool, datetime | None]:
-    """`(active, expires_at)` - `active` liest den tatsächlichen Keycloak-
-    `enabled`-Status, nicht nur den Zeitstempel, da `deactivate()`/der
-    Poll-Loop `enabled=False` setzen, sobald abgelaufen."""
-    user_id = _get_superuser_id(admin)
-    raw = admin.get_user(user_id)
-    values = raw.get("attributes", {}).get(EXPIRES_AT_ATTRIBUTE)
-    expires_at = datetime.fromisoformat(values[0]) if values else None
-    return bool(raw.get("enabled", False)), expires_at
+async def get_status(session_factory) -> tuple[bool, datetime | None]:
+    """`(active, expires_at)` - `active` liest den tatsächlichen `enabled`-
+    Wert, nicht nur den Zeitstempel, da `deactivate()`/der Poll-Loop
+    `enabled=False` setzen, sobald abgelaufen."""
+    async with session_factory() as session:
+        account = await _get_superuser_account(session)
+        return account.enabled, account.expires_at
 
 
-def get_principal_id(admin: KeycloakAdmin) -> str | None:
-    """Keycloak-`sub` des Superuser-Kontos - nötig, damit `permission-service`
-    (4.8, P6-S6) prüfen kann, ob ein `POST /maintenance-mode/lift`-Aufrufer
-    tatsächlich der aktive Superuser ist. `None`, falls das Konto (z. B. in
-    einer frischen Testumgebung) noch nicht angelegt wurde, statt zu werfen -
-    der Aufrufer behandelt das wie "kein aktiver Superuser"."""
-    users = admin.get_users(query={"username": SUPERUSER_USERNAME, "exact": True})
-    return users[0]["id"] if users else None
+async def get_principal_id(session_factory) -> str | None:
+    """Stabile ID des Superuser-Kontos (`TechnicalAccount.id` als String) -
+    nötig, damit `permission-service` (4.8, P6-S6) prüfen kann, ob ein
+    `POST /maintenance-mode/lift`-Aufrufer tatsächlich der aktive Superuser
+    ist (Vergleich gegen denselben Wert, der auch als `sub`-Claim in dessen
+    Tokens landet, siehe `main.py._login_technical_account`). `None`, falls
+    das Konto noch nicht angelegt wurde, statt zu werfen - der Aufrufer
+    behandelt das wie "kein aktiver Superuser"."""
+    async with session_factory() as session:
+        account = await session.scalar(
+            select(TechnicalAccount).where(TechnicalAccount.username == SUPERUSER_USERNAME)
+        )
+        return str(account.id) if account is not None else None
 
 
-def deactivate_if_expired(admin: KeycloakAdmin) -> bool:
+async def deactivate_if_expired(session_factory) -> bool:
     """Wird vom Poll-Loop (`main.py`) periodisch aufgerufen (ADR 0020-Muster) -
     gibt True zurück, wenn tatsächlich deaktiviert wurde (für den Event-Publish
     im Aufrufer)."""
-    active, expires_at = get_status(admin)
+    active, expires_at = await get_status(session_factory)
     if not active or expires_at is None:
         return False
     if datetime.now(UTC) < expires_at:
         return False
-    deactivate(admin)
+    await deactivate(session_factory)
     return True

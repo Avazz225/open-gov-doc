@@ -1,6 +1,5 @@
 from keycloak import KeycloakAdmin
 
-from auth_service import superuser
 from auth_service.settings import Settings
 
 
@@ -27,16 +26,6 @@ def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
     """Theme-Präferenz (8, P4-S6). Ohne diese Deklaration würde
     `admin_users.set_theme_preference` klaglos ins Leere laufen."""
     _declare_profile_attribute(admin, name="dms_theme", display_name="DMS Theme-Präferenz")
-
-
-def _ensure_superuser_expires_at_attribute(admin: KeycloakAdmin) -> None:
-    """Break-Glass-Ablaufzeitpunkt (4.6, P6-S5) - gleiches Deklarationsmuster
-    wie oben, sonst würde `superuser.activate()` klaglos ins Leere laufen."""
-    _declare_profile_attribute(
-        admin,
-        name=superuser.EXPIRES_AT_ATTRIBUTE,
-        display_name="DMS Superuser Break-Glass Ablaufzeitpunkt",
-    )
 
 
 def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
@@ -234,9 +223,7 @@ def ensure_realm_and_client(settings: Settings) -> None:
         skip_exists=True,
     )
     _ensure_theme_attribute(admin)
-    _ensure_superuser_expires_at_attribute(admin)
     _ensure_dms_admin_role(admin)
-    superuser.ensure_superuser_account(admin)
     _ensure_domain_admin_accounts(admin)
     _ensure_client_updated(admin, settings)
     _ensure_kerberos(admin, settings)
