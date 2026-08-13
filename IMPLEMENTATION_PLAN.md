@@ -371,7 +371,7 @@ storage-service hat bereits fast das Zielmuster (`ObjectCopy.attempts`, `max_rep
 
 | Session | Deliverable |
 |---|---|
-| P20-S1 | Shared Backoff-Mathematik (`compute_backoff_seconds`, Exponential + Full-Jitter). Kein gemeinsamer Poll-Loop-Rahmen — Poll-Loops bleiben bewusst leichtgewichtig dupliziert (gleiches Idiom wie `_sla_poll_loop`/`_superuser_poll_loop`). |
+| P20-S1 | ✅ Neue Shared Lib `libs/dms-retry` mit `compute_backoff_seconds(attempt, *, base=1.0, cap=300.0, rng=None)` — "Full Jitter"-Exponentiell-Backoff nach der AWS-Standardformel (`random(0, min(cap, base*2**attempt))`), 0-indiziertes `attempt` passt direkt auf `ObjectCopy.attempts`. Kein gemeinsamer Poll-Loop-Rahmen — Poll-Loops bleiben bewusst leichtgewichtig dupliziert (gleiches Idiom wie `_sla_poll_loop`/`_superuser_poll_loop`); nur die Zahlenformel ist geteilt. Noch kein Konsument in dieser Session — wird ab P20-S2 verwendet. 6 neue Unit-Tests (Grenzfälle, Determinismus mit geseedetem `rng`, negativer `attempt`). `uv lock` ausgeführt (unverändert, da noch kein Konsument). Details siehe [ADR 0077](docs/adr/0077-dms-retry-backoff-jitter-lib.md). |
 | P20-S2 | archival-service: `attempts`/`next_retry_at`/`failed_permanent` auf `ArchivalTransfer`/`CaseArchivalTransfer`, `POST /archival-transfers/{id}/retry` für Admin-UI. |
 | P20-S3 | notification-service: gleiches Muster, neuer eigener Retry-Poll-Loop (Zustellung läuft heute synchron im NATS-Handler). |
 | P20-S4 | rendering-service & ocr-service: gleiches Muster auf `Rendition`/`OcrResult`. |
