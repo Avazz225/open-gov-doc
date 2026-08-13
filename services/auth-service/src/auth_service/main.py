@@ -655,6 +655,27 @@ async def create_user(payload: UserCreate, user: dict = Depends(get_current_user
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@app.get("/users/{user_id}", response_model=UserLookupOut)
+async def get_user(user_id: str, user: dict = Depends(get_current_user)) -> dict:
+    """Rückwärts-Identitätsauflösung (Post-Roadmap Phase 19 Session 4, ADR
+    0069) - Gegenstück zu `GET /users/lookup` oben (Name → UUID): `teamspace-
+    service`s Mitgliederlisten und `permission-service`s Delegationen kennen
+    nur die rohe `principal_id`-UUID, kein Frontend konnte sie bislang in
+    einen Nutzernamen auflösen. Gleiches Gate wie `lookup_user`
+    (`users.lookup`, "everyone"-Gruppe) - dieselbe Vertrauensstufe, nur die
+    Suchrichtung ist umgekehrt. **Muss nach allen statischen `/users/...`-
+    Routen (`/users/lookup`, `/users/directory`, `/users/count`, ...)
+    registriert sein** - FastAPI matcht Pfade in Registrierungsreihenfolge,
+    ein früher registriertes `/users/{user_id}` würde sie sonst verdecken."""
+    await _require_permission(
+        user, "users.lookup", "Fehlende Berechtigung 'users.lookup' (everyone-Gruppe entzogen?)"
+    )
+    match = admin_users.find_user_by_id(app.state.keycloak_admin, user_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail=f"Nutzer {user_id!r} unbekannt")
+    return match
+
+
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(user_id: str, user: dict = Depends(get_current_user)) -> None:
     await _require_user_management(user)

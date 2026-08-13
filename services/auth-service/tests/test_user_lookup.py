@@ -79,3 +79,55 @@ def test_lookup_user_returns_403_without_users_lookup_permission(
     )
 
     assert response.status_code == 403
+
+
+def test_get_user_by_id_requires_authentication(client):
+    response = client.get("/users/does-not-matter")
+    assert response.status_code == 401
+
+
+def test_get_user_by_id_works_for_a_regular_authenticated_user(client, domain_admin_auth_headers):
+    """Rückwärts-Identitätsauflösung (P19-S4, ADR 0069) - Gegenstück zu
+    `GET /users/lookup`, gleiches Gate (`users.lookup` über die "everyone"-
+    Gruppe)."""
+    caller_payload = _user_payload()
+    target_payload = _user_payload()
+    caller = client.post("/users", json=caller_payload, headers=domain_admin_auth_headers).json()
+    target = client.post("/users", json=target_payload, headers=domain_admin_auth_headers).json()
+
+    caller_login = client.post(
+        "/login",
+        json={"username": caller_payload["username"], "password": caller_payload["password"]},
+    ).json()
+    caller_headers = {"Authorization": f"Bearer {caller_login['access_token']}"}
+
+    response = client.get(f"/users/{target['id']}", headers=caller_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"id": target["id"], "username": target_payload["username"]}
+    assert set(response.json().keys()) == {"id", "username"}
+
+    client.delete(f"/users/{caller['id']}", headers=domain_admin_auth_headers)
+    client.delete(f"/users/{target['id']}", headers=domain_admin_auth_headers)
+
+
+def test_get_user_by_id_returns_404_for_unknown_id(client, domain_admin_auth_headers):
+    response = client.get(
+        f"/users/{uuid.uuid4()}",
+        headers=domain_admin_auth_headers,
+    )
+    assert response.status_code == 404
+
+
+def test_get_user_by_id_returns_403_without_users_lookup_permission(
+    client, test_user, everyone_role_without
+):
+    everyone_role_without("users.lookup")
+    login = client.post(
+        "/login", json={"username": test_user["username"], "password": test_user["password"]}
+    ).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+
+    response = client.get(f"/users/{uuid.uuid4()}", headers=headers)
+
+    assert response.status_code == 403

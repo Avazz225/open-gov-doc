@@ -9,6 +9,7 @@ const listActiveDelegationsForDeputyMock = vi.fn();
 const createDelegationMock = vi.fn();
 const revokeDelegationMock = vi.fn();
 const lookupUserByUsernameMock = vi.fn();
+const lookupUserByIdMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -20,6 +21,7 @@ vi.mock("@/lib/api", async () => {
     createDelegation: (...args: unknown[]) => createDelegationMock(...args),
     revokeDelegation: (...args: unknown[]) => revokeDelegationMock(...args),
     lookupUserByUsername: (...args: unknown[]) => lookupUserByUsernameMock(...args),
+    lookupUserById: (...args: unknown[]) => lookupUserByIdMock(...args),
   };
 });
 
@@ -41,9 +43,15 @@ describe("DelegationsPane", () => {
     createDelegationMock.mockReset();
     revokeDelegationMock.mockReset();
     lookupUserByUsernameMock.mockReset();
+    lookupUserByIdMock.mockReset();
 
     listMyDelegationsMock.mockResolvedValue([]);
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
+    // Standardmäßig nicht auflösbar (P19-S4) - `usePrincipalNames` fällt in
+    // diesem Fall auf die rohe principal_id zurück, bestehende Tests bleiben
+    // dadurch unverändert gültig; ein dedizierter Test unten prüft die
+    // tatsächliche Namensauflösung.
+    lookupUserByIdMock.mockRejectedValue(new Error("not mocked"));
   });
 
   it("shows empty states when no delegations exist in either direction", async () => {
@@ -174,5 +182,29 @@ describe("DelegationsPane", () => {
     await user.click(screen.getByText("Widerrufen"));
 
     await waitFor(() => expect(revokeDelegationMock).toHaveBeenCalledWith("token-123", "d1"));
+  });
+
+  it("resolves a raw principal_id to a username (P19-S4)", async () => {
+    listMyDelegationsMock.mockResolvedValue([
+      {
+        id: "d1",
+        delegator_principal_id: "alice-sub",
+        deputy_principal_id: "bob-sub",
+        starts_at: farFutureStart,
+        ends_at: farFutureEnd,
+        scope_object_type_ids: null,
+        scope_process_definition_ids: null,
+        scope_folder_resource_ids: null,
+        created_at: farFutureStart,
+        revoked_at: null,
+        revoked_by: null,
+      },
+    ]);
+    lookupUserByIdMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+
+    renderPane();
+
+    expect(await screen.findByText(/^bob —/)).toBeInTheDocument();
+    expect(screen.queryByText(/bob-sub/)).not.toBeInTheDocument();
   });
 });

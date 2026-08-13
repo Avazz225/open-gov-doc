@@ -1,5 +1,5 @@
 from keycloak import KeycloakAdmin
-from keycloak.exceptions import KeycloakDeleteError, KeycloakPostError
+from keycloak.exceptions import KeycloakDeleteError, KeycloakGetError, KeycloakPostError
 
 from auth_service.settings import Settings
 
@@ -73,6 +73,24 @@ def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
     if not matches:
         return None
     return _to_user_dict(matches[0])
+
+
+def find_user_by_id(admin: KeycloakAdmin, user_id: str) -> dict | None:
+    """Rückwärts-Identitätsauflösung für `GET /users/{user_id}` (Post-Roadmap
+    Phase 19 Session 4, ADR 0069) - Gegenstück zu `find_user_by_username`
+    oben: `X-DMS-Principal`/`delegator_principal_id`/`principal_id` u. ä. sind
+    überall im System die Keycloak-`sub`-UUID, kein Nutzer kennt sie
+    auswendig - Frontends zeigten diese UUIDs bislang roh an (Delegationen,
+    Teamspace-Mitgliederlisten), mangels einer Rückwärtsauflösung. Liefert
+    bewusst nur `id`/`username` zurück, gleiches Muster wie
+    `find_user_by_username` - keine allgemeine Verzeichnis-Funktion."""
+    try:
+        raw = admin.get_user(user_id)
+    except KeycloakGetError as exc:
+        if exc.response_code == 404:
+            return None
+        raise
+    return _to_user_dict(raw)
 
 
 def create_user(

@@ -15,6 +15,7 @@
 | `GET` | `/users` | Nutzer auflisten (seit P4-S3, Grundlage der Admin-UI-Nutzerverwaltung) — liest direkt aus Keycloak. **Seit P6-S5 gegated**: erfordert die Capability `admin.user_management` (Domäne "Nutzer-/Rechteverwaltung", 4.6), sonst `403` |
 | `POST` | `/users` | Nutzer anlegen (`username`, `email`, `password`, `first_name`, `last_name`) — 409 bei bereits vergebenem Benutzernamen. Gegated wie `GET /users` |
 | `DELETE` | `/users/{id}` | Nutzer löschen — 404 bei unbekannter `id`. Gegated wie `GET /users` |
+| `GET` | `/users/{id}` | **Seit P19-S4** (ADR 0069): Rückwärts-Identitätsauflösung, Gegenstück zu `GET /users/lookup` — liefert nur `{id, username}`, `404` bei unbekannter `id`. Gleiches Gate wie `GET /users/lookup` (`users.lookup` über die "everyone"-Gruppe). Muss nach allen statischen `/users/...`-Pfaden registriert sein (Registrierungsreihenfolge, siehe ADR 0069) |
 | `GET` | `/me/preferences` | Theme-Präferenz des angemeldeten Kontos (`{theme}`, Default `"auto"`) — seit P4-S6 |
 | `PUT` | `/me/preferences` | Theme-Präferenz setzen (`{theme}` ∈ `light`/`dark`/`high-contrast`/`auto`, sonst 422) — seit P4-S6 |
 | `GET` | `/superuser/status` | Break-Glass-Status (4.6, seit P6-S5): `{active, expires_at}`, seit **P6-S6** zusätzlich `principal_id` (seit Phase 18 Session 2 die `TechnicalAccount.id`, zuvor die Keycloak-`id`, für den Not-Shutdown-Aufheben-Check des Permission Service, 4.8) — 404, falls das Superuser-Konto noch nicht angelegt wurde |

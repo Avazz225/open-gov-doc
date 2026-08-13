@@ -1473,6 +1473,21 @@ export async function lookupUserByUsername(
   return response.json();
 }
 
+// Rückwärts-Identitätsauflösung (Post-Roadmap Phase 19 Session 4, ADR 0069) -
+// Gegenstück zu lookupUserByUsername: Delegationen/Teamspace-Mitgliederlisten
+// kennen nur die rohe principal_id-UUID, dieser Aufruf übersetzt sie zurück
+// in einen Nutzernamen zur Anzeige. Gleiches Gate wie die Vorwärtsauflösung
+// (`users.lookup` über die "everyone"-Gruppe in permission-service).
+export async function lookupUserById(token: string, userId: string): Promise<UserLookup> {
+  const response = await request(
+    "auth-service",
+    `users/${encodeURIComponent(userId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 // Team-Arbeitsbereich "Teamspace" (2.5, P14-S6) - selbstverwalteter,
 // dauerhafter Gruppenbereich (Ordner/Dokumente/Termine/Kontakte), neuer
 // `teamspace-service`. Eigenes, von der übrigen RBAC unabhängiges

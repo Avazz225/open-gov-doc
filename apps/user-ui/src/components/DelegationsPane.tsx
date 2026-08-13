@@ -11,6 +11,7 @@ import {
   revokeDelegation,
   type Delegation,
 } from "@/lib/api";
+import { usePrincipalNames } from "@/lib/usePrincipalNames";
 
 function toDateTimeInputValue(daysFromNow: number): string {
   const date = new Date();
@@ -71,6 +72,13 @@ export function DelegationsPane({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Rückwärts-Identitätsauflösung (P19-S4, ADR 0069) - zeigt Namen statt
+  // roher principal_id-UUIDs in beiden Listen unten.
+  const principalNames = usePrincipalNames(token, [
+    ...myDelegations.map((d) => d.deputy_principal_id),
+    ...deputyFor.map((d) => d.delegator_principal_id),
+  ]);
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
@@ -148,7 +156,8 @@ export function DelegationsPane({
           {myDelegations.map((delegation) => (
             <li className="entry-row" key={delegation.id}>
               <span className="entry-name">
-                {delegation.deputy_principal_id} —{" "}
+                {principalNames[delegation.deputy_principal_id] ?? delegation.deputy_principal_id}{" "}
+                —{" "}
                 {new Date(delegation.starts_at).toLocaleString()} –{" "}
                 {new Date(delegation.ends_at).toLocaleString()}
                 {delegation.revoked_at
@@ -178,7 +187,9 @@ export function DelegationsPane({
           {deputyFor.map((delegation) => (
             <li className="entry-row" key={delegation.id}>
               <span className="entry-name">
-                {delegation.delegator_principal_id} —{" "}
+                {principalNames[delegation.delegator_principal_id] ??
+                  delegation.delegator_principal_id}{" "}
+                —{" "}
                 {t("delegations.deputyForUntil", {
                   date: new Date(delegation.ends_at).toLocaleString(),
                 })}

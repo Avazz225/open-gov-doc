@@ -22,6 +22,7 @@ import {
   type TeamspaceContact,
   type TeamspaceMember,
 } from "@/lib/api";
+import { usePrincipalNames } from "@/lib/usePrincipalNames";
 
 // Team-Arbeitsbereich "Teamspace" (2.5, P14-S6) - selbstverwalteter,
 // dauerhafter Gruppenbereich. Master-Detail-Ansicht: links die Liste der
@@ -59,6 +60,12 @@ export function TeamspacesPane({
 
   const currentMember = members.find((m) => m.principal_id === currentPrincipalId) ?? null;
   const canManage = currentMember?.can_manage_members ?? false;
+  // Rückwärts-Identitätsauflösung (P19-S4, ADR 0069) - zeigt Namen statt
+  // roher principal_id-UUIDs in der Mitgliederliste unten.
+  const principalNames = usePrincipalNames(
+    token,
+    members.map((m) => m.principal_id)
+  );
 
   const reloadTeamspaces = useCallback(async () => {
     if (!token) return;
@@ -296,7 +303,7 @@ export function TeamspacesPane({
             {members.map((member) => (
               <li className="entry-row" key={member.id}>
                 <span className="entry-name">
-                  {member.principal_id}
+                  {principalNames[member.principal_id] ?? member.principal_id}
                   {member.can_manage_members ? ` (${t("teamspaces.manager")})` : ""}
                 </span>
                 {canManage && member.principal_id !== currentPrincipalId && (

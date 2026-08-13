@@ -17,6 +17,7 @@ const listTeamspaceContactsMock = vi.fn();
 const createTeamspaceContactMock = vi.fn();
 const deleteTeamspaceContactMock = vi.fn();
 const lookupUserByUsernameMock = vi.fn();
+const lookupUserByIdMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -35,6 +36,7 @@ vi.mock("@/lib/api", async () => {
     createTeamspaceContact: (...args: unknown[]) => createTeamspaceContactMock(...args),
     deleteTeamspaceContact: (...args: unknown[]) => deleteTeamspaceContactMock(...args),
     lookupUserByUsername: (...args: unknown[]) => lookupUserByUsernameMock(...args),
+    lookupUserById: (...args: unknown[]) => lookupUserByIdMock(...args),
   };
 });
 
@@ -80,10 +82,16 @@ describe("TeamspacesPane", () => {
     createTeamspaceContactMock.mockReset();
     deleteTeamspaceContactMock.mockReset();
     lookupUserByUsernameMock.mockReset();
+    lookupUserByIdMock.mockReset();
 
     listTeamspaceMembersMock.mockResolvedValue([ALICE_MEMBER]);
     listTeamspaceAppointmentsMock.mockResolvedValue([]);
     listTeamspaceContactsMock.mockResolvedValue([]);
+    // Standardmäßig nicht auflösbar (P19-S4) - `usePrincipalNames` fällt in
+    // diesem Fall auf die rohe principal_id zurück, bestehende Tests bleiben
+    // dadurch unverändert gültig; ein dedizierter Test unten prüft die
+    // tatsächliche Namensauflösung.
+    lookupUserByIdMock.mockRejectedValue(new Error("not mocked"));
   });
 
   it("shows an empty-state message when there are no teamspaces", async () => {
@@ -236,5 +244,19 @@ describe("TeamspacesPane", () => {
 
     expect(screen.queryByText("Team-Arbeitsbereich löschen")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Nutzername")).not.toBeInTheDocument();
+  });
+
+  it("resolves a raw principal_id to a username (P19-S4)", async () => {
+    listTeamspacesMock.mockResolvedValue([TEAMSPACE]);
+    lookupUserByIdMock.mockResolvedValue({ id: "alice-sub", username: "alice" });
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Projekt X");
+    await user.click(screen.getByText("Öffnen"));
+
+    expect(await screen.findByText("alice (Verwaltung)")).toBeInTheDocument();
+    expect(screen.queryByText("alice-sub (Verwaltung)")).not.toBeInTheDocument();
   });
 });
