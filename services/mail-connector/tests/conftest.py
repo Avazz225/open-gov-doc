@@ -76,6 +76,10 @@ def real_case_id(workflow_admin_headers: dict[str, str]) -> str:
             "process_definition_id": process_definition_id,
             "created_by": "alice",
         },
+        # RBAC (P19-S5, ADR 0070) - case-service verlangt seither
+        # X-DMS-Principal; die "everyone"-Gruppe gewährt case.write per
+        # Default, ein beliebiger nicht-leerer Principal genügt.
+        headers={"X-DMS-Principal": "mail-connector-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]

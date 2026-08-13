@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.workflow_client = WorkflowClient(settings.workflow_service_base_url)
     app.state.document_client = DocumentClient(settings.document_service_base_url)
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     # Producer (eigener Stream "case", `case.created`/`.document.added`/
     # `.document.removed`/`.closed`) UND Konsument (`workflow.instance.completed`)
@@ -105,6 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.workflow_client.close()
     await app.state.document_client.close()
     await app.state.object_type_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -127,6 +130,29 @@ async def publish_event(
         actor=actor,
     )
     await app.state.producer.publish(event_type, event.to_bytes())
+
+
+async def _require_case_permission(x_dms_principal: str, *, access_type: str) -> None:
+    """RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service hatte
+    zuvor GAR KEINE Berechtigungsprüfung. Prüft `case.read`/`case.write` an
+    der Wurzelressource (`root`), nicht an einer Umlaufmappen-eigenen
+    Ressource - case-service registriert (anders als folder-service) keine
+    eigenen Knoten im permission-service-Ressourcenbaum, siehe ADR 0070
+    "Begründung". Erster Konsument von `libs/dms-permission-client` (P19-S1)
+    überhaupt. Die "everyone"-Gruppe (ADR 0067) gewährt `case.read`/
+    `case.write` standardmäßig jedem authentifizierten Principal - erhält
+    das bisherige De-facto-offene Verhalten, macht es aber admin-editierbar."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    permission = "case.read" if access_type == "read" else "case.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
 
 
 async def _resolve_reference(session: AsyncSession, case, reference) -> CaseDocumentReferenceOut:
@@ -159,7 +185,12 @@ def healthz() -> dict:
 
 
 @app.post("/cases", response_model=CaseOut, status_code=status.HTTP_201_CREATED)
-async def create_case(payload: CaseCreate, session: AsyncSession = Depends(get_session)) -> CaseOut:
+async def create_case(
+    payload: CaseCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> CaseOut:
+    await _require_case_permission(x_dms_principal, access_type="write")
     if payload.object_type_id is not None:
         errors = await app.state.object_type_client.validate(
             payload.object_type_id, name=payload.name, attributes=payload.attributes
@@ -209,19 +240,24 @@ async def create_case(payload: CaseCreate, session: AsyncSession = Depends(get_s
 async def list_cases(
     status: str | None = None,
     object_type_id: int | None = None,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
+    await _require_case_permission(x_dms_principal, access_type="read")
     return await repository.list_cases(session, status=status, object_type_id=object_type_id)
 
 
 @app.get("/cases/by-vorgangsnummer", response_model=list[CaseOut])
 async def list_cases_by_vorgangsnummer(
-    value: str, session: AsyncSession = Depends(get_session)
+    value: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
     """Für den neuen `mail-connector` (2.5/3.3, P15-S3) - vor
     `/cases/{case_id}` registriert, damit `"by-vorgangsnummer"` nicht als
     `{case_id}` interpretiert wird (gleiche Route-Reihenfolge-Regel wie
     `/cases/due-for-archival` unten)."""
+    await _require_case_permission(x_dms_principal, access_type="read")
     return await repository.list_cases_by_vorgangsnummer(session, value)
 
 
@@ -232,12 +268,23 @@ async def list_cases_due_for_archival(
     """Interner Aufruf von `archival-service` (5.6, seit P7-S3b) - vor
     `/cases/{case_id}` registriert, damit `"due-for-archival"` nicht als
     `{case_id}` interpretiert wird (gleiche Route-Reihenfolge-Regel wie
-    `/documents/deleted` in document-service)."""
+    `/documents/deleted` in document-service). Bewusst UNGEGATET (Post-
+    Roadmap Phase 19 Session 5, ADR 0070) - reiner Maschine-zu-Maschine-
+    Rückruf ohne menschlichen Principal, `archival-service` sendet dafür
+    aktuell keinerlei Identitäts-Header. Gleiche, bereits vorbestehende
+    Lücke wie `document-service`s analoges `PUT /documents/{id}/archived`
+    (ebenfalls ungegatet) - eine allgemeine Service-zu-Service-Authentisierung
+    ist eine größere, projektweite Entscheidung außerhalb dieser Session."""
     return await repository.list_due_for_archival(session)
 
 
 @app.get("/cases/{case_id}", response_model=CaseOut)
-async def get_case(case_id: str, session: AsyncSession = Depends(get_session)) -> CaseOut:
+async def get_case(
+    case_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> CaseOut:
+    await _require_case_permission(x_dms_principal, access_type="read")
     try:
         return await repository.get_case(session, case_id)
     except repository.NotFoundError as exc:
@@ -250,8 +297,12 @@ async def get_case(case_id: str, session: AsyncSession = Depends(get_session)) -
     status_code=status.HTTP_201_CREATED,
 )
 async def add_case_document(
-    case_id: str, payload: CaseDocumentAdd, session: AsyncSession = Depends(get_session)
+    case_id: str,
+    payload: CaseDocumentAdd,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
+    await _require_case_permission(x_dms_principal, access_type="write")
     document = await app.state.document_client.get(payload.document_id)
     if document is None:
         raise HTTPException(
@@ -281,8 +332,10 @@ async def remove_case_document(
     case_id: str,
     document_id: str,
     payload: CaseDocumentRemove,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
+    await _require_case_permission(x_dms_principal, access_type="write")
     try:
         reference = await repository.remove_document_reference(
             session, case_id, document_id, removed_by=payload.removed_by
@@ -304,8 +357,11 @@ async def remove_case_document(
 
 @app.get("/cases/{case_id}/documents", response_model=list[CaseDocumentReferenceOut])
 async def list_case_documents(
-    case_id: str, session: AsyncSession = Depends(get_session)
+    case_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[CaseDocumentReferenceOut]:
+    await _require_case_permission(x_dms_principal, access_type="read")
     try:
         case = await repository.get_case(session, case_id)
         references = await repository.list_document_references(session, case_id)
@@ -316,10 +372,14 @@ async def list_case_documents(
 
 @app.post("/cases/{case_id}/archive-request", response_model=CaseOut)
 async def request_case_archive(
-    case_id: str, session: AsyncSession = Depends(get_session)
+    case_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
     """Manueller Aussonderungs-Trigger (5.6, seit P7-S3b) - `409`, wenn die
-    Umlaufmappe noch nicht abgeschlossen ist."""
+    Umlaufmappe noch nicht abgeschlossen ist. Menschliche Aktion (anders als
+    `PUT .../archived` unten), daher seit P19-S5 gegated."""
+    await _require_case_permission(x_dms_principal, access_type="write")
     try:
         case = await repository.request_archive(session, case_id)
     except repository.NotFoundError as exc:
@@ -332,8 +392,11 @@ async def request_case_archive(
 
 @app.get("/cases/{case_id}/archive-status", response_model=CaseArchiveStatusOut)
 async def get_case_archive_status(
-    case_id: str, session: AsyncSession = Depends(get_session)
+    case_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> CaseArchiveStatusOut:
+    await _require_case_permission(x_dms_principal, access_type="read")
     try:
         case = await repository.get_case(session, case_id)
     except repository.NotFoundError as exc:
@@ -346,7 +409,10 @@ async def get_case_archive_status(
 @app.put("/cases/{case_id}/archived", response_model=CaseOut)
 async def mark_case_archived(case_id: str, session: AsyncSession = Depends(get_session)) -> CaseOut:
     """Interner Rueckruf von `archival-service`, sobald das XDOMEA-Paket
-    verifiziert ist (5.6, seit P7-S3b)."""
+    verifiziert ist (5.6, seit P7-S3b). Bewusst UNGEGATET (Post-Roadmap
+    Phase 19 Session 5, ADR 0070) - gleiche Begründung wie
+    `GET /cases/due-for-archival` oben: reiner Maschine-zu-Maschine-Rückruf,
+    `archival-service` sendet dafür keinen `X-DMS-Principal`."""
     try:
         case = await repository.mark_archived(session, case_id)
     except repository.NotFoundError as exc:
@@ -360,15 +426,20 @@ async def mark_case_archived(case_id: str, session: AsyncSession = Depends(get_s
 
 @app.get("/case-archival-config", response_model=CaseArchivalConfigOut)
 async def get_case_archival_config(
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseArchivalConfigOut:
+    await _require_case_permission(x_dms_principal, access_type="read")
     return await repository.get_archival_config(session)
 
 
 @app.put("/case-archival-config", response_model=CaseArchivalConfigOut)
 async def update_case_archival_config(
-    payload: CaseArchivalConfigIn, session: AsyncSession = Depends(get_session)
+    payload: CaseArchivalConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> CaseArchivalConfigOut:
+    await _require_case_permission(x_dms_principal, access_type="write")
     config = await repository.update_archival_config(
         session,
         default_archive_after_days_closed=payload.default_archive_after_days_closed,
@@ -380,15 +451,20 @@ async def update_case_archival_config(
 
 @app.get("/case-number-config", response_model=CaseNumberConfigOut)
 async def get_case_number_config(
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseNumberConfigOut:
+    await _require_case_permission(x_dms_principal, access_type="read")
     return await repository.get_case_number_config(session)
 
 
 @app.put("/case-number-config", response_model=CaseNumberConfigOut)
 async def update_case_number_config(
-    payload: CaseNumberConfigIn, session: AsyncSession = Depends(get_session)
+    payload: CaseNumberConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> CaseNumberConfigOut:
+    await _require_case_permission(x_dms_principal, access_type="write")
     try:
         config = await repository.update_case_number_format(session, format=payload.format)
     except repository.InvalidFieldError as exc:

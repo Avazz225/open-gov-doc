@@ -95,16 +95,24 @@ def _real_document_with_kennzeichen() -> tuple[str, str]:
     return document["id"], unique_kennzeichen
 
 
+# RBAC (P19-S5, ADR 0070) - case-service verlangt seither X-DMS-Principal;
+# die "everyone"-Gruppe gewährt case.read per Default, ein beliebiger
+# nicht-leerer Principal genügt.
+_CASE_TEST_HEADERS = {"X-DMS-Principal": "mail-connector-tests"}
+
+
 async def _get_case(case_id: str) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as c:
-        response = await c.get(f"http://localhost:8016/cases/{case_id}")
+        response = await c.get(f"http://localhost:8016/cases/{case_id}", headers=_CASE_TEST_HEADERS)
         response.raise_for_status()
         return response.json()
 
 
 async def _get_case_documents(case_id: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=30.0) as c:
-        response = await c.get(f"http://localhost:8016/cases/{case_id}/documents")
+        response = await c.get(
+            f"http://localhost:8016/cases/{case_id}/documents", headers=_CASE_TEST_HEADERS
+        )
         response.raise_for_status()
         return response.json()
 

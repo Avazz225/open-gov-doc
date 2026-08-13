@@ -163,7 +163,25 @@ EVERYONE_ROLE_NAME = "everyone"
 EVERYONE_ROLE_DESCRIPTION = (
     "Jeder authentifizierte Principal (implizite Mitgliedschaft, keine Zuweisung pro Konto nötig)"
 )
-EVERYONE_ROLE_PERMISSIONS: list[str] = ["users.lookup", "users.directory"]
+# Seit Phase 19 Session 5 (ADR 0070) zusätzlich `case.read`/`case.write` -
+# case-service hatte zuvor GAR KEINE Berechtigungsprüfung, diese Erweiterung
+# erhält das bisherige De-facto-offene Verhalten, macht es aber admin-
+# editierbar statt hartkodiert (gleiches Prinzip wie users.lookup/directory
+# in P19-S3). WICHTIG: `ensure_everyone_role` unten aktualisiert eine BEREITS
+# angelegte Rolle nicht automatisch (kein Alembic-artiges Migrations-
+# Mechanismus in diesem Projekt, siehe `ensure_domain_admin_roles` mit
+# derselben Einschränkung) - auf einer bereits laufenden Installation muss
+# diese Erweiterung einmalig manuell per `PUT /roles/{id}` nachgezogen
+# werden (wie es ein echter Admin täte), sonst gilt sie nur für Instanzen,
+# die "everyone" noch nicht besitzen. Bewusst NICHT self-healing: ein Admin
+# könnte sonst eine gezielte Entziehung (z. B. ADR 0068s users.lookup-
+# Beispiel) bei jedem Neustart ungewollt rückgängig gemacht bekommen.
+EVERYONE_ROLE_PERMISSIONS: list[str] = [
+    "users.lookup",
+    "users.directory",
+    "case.read",
+    "case.write",
+]
 
 
 async def ensure_everyone_role(session: AsyncSession) -> None:

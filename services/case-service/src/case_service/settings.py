@@ -12,6 +12,9 @@ class Settings(BaseServiceSettings):
     workflow_service_base_url: str = "http://localhost:8014"
     document_service_base_url: str = "http://localhost:8006"
     object_type_service_base_url: str = "http://localhost:8007"
+    # RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service hatte
+    # bislang gar keine Berechtigungsprüfung.
+    permission_service_base_url: str = "http://localhost:8004"
 
     # Welche Subjects case-service konsumiert (2.3): nur der Abschluss einer
     # Prozessinstanz löst den Abschluss-Snapshot einer Umlaufmappe aus -

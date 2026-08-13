@@ -56,7 +56,7 @@ Keine `POST`-Route zum manuellen Anlegen eines Transfers — Auslösung läuft �
 - **rendering-service** (`RenderingClient`): `GET /renditions?document_id=&version_number=` (client-seitig auf `rendition_type == "pdf_archive"` gefiltert — kein serverseitiger Filterparameter auf rendering-service-Seite), `GET /renditions/{id}/content`.
 - **storage-service** (`StorageClient`): `PUT`/`GET /objects/{key}/archive-copy`, `GET .../archive-copy/verify`, `DELETE /objects/{key}/live-copies`, `PUT /objects/{key}` (Live-Ziel-Schreiben bei der Rückholung).
 - **object-type-service** (`ObjectTypeClient`): `GET /object-types/{id}` — nur für `archive_encryption_enabled`.
-- **case-service** (`CaseClient`, seit P7-S3b): `GET .../due-for-archival`, `GET .../{id}`, `GET .../{id}/documents` (Dokumentreferenzen inkl. fixiertem `snapshot_version_number`), `PUT .../{id}/archived`, `GET .../case-archival-config` (installationsweite Verschlüsselungs-Konfiguration).
+- **case-service** (`CaseClient`, seit P7-S3b): `GET .../due-for-archival`, `GET .../{id}`, `GET .../{id}/documents` (Dokumentreferenzen inkl. fixiertem `snapshot_version_number`), `PUT .../{id}/archived`, `GET .../case-archival-config` (installationsweite Verschlüsselungs-Konfiguration). **Seit P19-S5** (case-service-RBAC, [ADR 0070](../adr/0070-case-service-rbac.md)) senden `get_case`/`list_document_references`/`get_archival_config` einen synthetischen `X-DMS-Principal: system:archival-service`-Header (case-service prüft seither `case.read`) — `list_due_for_archival`/`mark_archived` bleiben ohne Header, case-service lässt diese beiden bewusst ungegatet.
 
 ## XDOMEA-Aussonderung für Umlaufmappen (5.6, seit P7-S3b)
 

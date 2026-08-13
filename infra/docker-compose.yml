@@ -653,6 +653,7 @@ services:
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://case-service:8000
     ports:
@@ -667,6 +668,8 @@ services:
       document-service:
         condition: service_started
       object-type-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net

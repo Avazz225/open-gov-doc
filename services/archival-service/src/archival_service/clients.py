@@ -143,7 +143,20 @@ class CaseClient:
     """Duenner HTTP-Client gegen case-service (5.6, seit P7-S3b) - fuer die
     XDOMEA-Aussonderung von Umlaufmappen. case-service bleibt alleinige
     Autoritaet fuer Case-Lebenszyklusfelder, gleiches Prinzip wie
-    `DocumentClient` gegenueber document-service."""
+    `DocumentClient` gegenueber document-service.
+
+    RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070): case-service prueft
+    seit dieser Session `case.read`/`case.write` und verlangt dafuer einen
+    `X-DMS-Principal`-Header. Die lesenden Aufrufe hier (`get_case`,
+    `list_document_references`, `get_archival_config`) laufen als reiner
+    Maschine-zu-Maschine-Aufruf ohne menschlichen Principal - synthetischer
+    Identifikator nach demselben "system:<Service>"-Muster wie an anderer
+    Stelle im Projekt (z. B. `actor="system:archival-service"` bei
+    publizierten Events). `list_due_for_archival`/`mark_archived` bleiben
+    bewusst ohne Header - case-service laesst genau diese beiden Endpunkte
+    unveraendert ungegatet (siehe dortige Docstrings)."""
+
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:archival-service"}
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -154,12 +167,16 @@ class CaseClient:
         return response.json()
 
     async def get_case(self, case_id: str) -> dict:
-        response = await self._client.get(f"/cases/{case_id}")
+        response = await self._client.get(
+            f"/cases/{case_id}", headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
         response.raise_for_status()
         return response.json()
 
     async def list_document_references(self, case_id: str) -> list[dict]:
-        response = await self._client.get(f"/cases/{case_id}/documents")
+        response = await self._client.get(
+            f"/cases/{case_id}/documents", headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
         response.raise_for_status()
         return response.json()
 
@@ -169,7 +186,9 @@ class CaseClient:
         return response.json()
 
     async def get_archival_config(self) -> dict:
-        response = await self._client.get("/case-archival-config")
+        response = await self._client.get(
+            "/case-archival-config", headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
         response.raise_for_status()
         return response.json()
 

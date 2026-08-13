@@ -128,7 +128,12 @@ Mitglied, unabhängig von seiner eigenen `principal_id`. Der Vererbungsalgorithm
   `auth-service` seit P14-S6/P15-S4 hartkodiert offenen Endpunkten (`GET /users/lookup`, `GET
   /users/directory`, bislang ohne jede RBAC-Prüfung). **Diese Session ändert `auth-service` selbst noch
   nicht** — die eigentliche Umstellung der beiden Endpunkte auf eine echte `has_permission`-Prüfung folgt
-  in P19-S3.
+  in P19-S3. **Seit P19-S5** ([ADR 0070](../adr/0070-case-service-rbac.md)) zusätzlich `case.read`/
+  `case.write` — `case-service` hatte zuvor gar keine Berechtigungsprüfung, die Erweiterung erhält das
+  bisherige De-facto-offene Verhalten. **Wichtig für künftige Erweiterungen dieser Liste**:
+  `ensure_everyone_role` aktualisiert eine bereits angelegte "everyone"-Rolle NICHT automatisch (kein
+  Migrationsmechanismus, siehe dortiger Docstring) — auf einer bereits laufenden Installation muss eine
+  neue Berechtigung einmalig manuell per `PUT /roles/{id}` nachgezogen werden.
 - **Kein vollständiges Gruppenverwaltungssystem**: `"everyone"` ist die einzige reservierte
   Gruppen-Kennung, keine benutzerdefinierten Gruppen mit eigener Mitgliederverwaltung. Echte
   Gruppenmitgliedschaft (z. B. "Nutzer X ist Mitglied von AD-Gruppe Y") bleibt weiterhin ungelöst, siehe

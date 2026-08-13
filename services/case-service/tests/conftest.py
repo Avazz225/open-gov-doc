@@ -24,6 +24,7 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 os.environ["DMS_WORKFLOW_SERVICE_BASE_URL"] = WORKFLOW_SERVICE_URL
 os.environ["DMS_DOCUMENT_SERVICE_BASE_URL"] = DOCUMENT_SERVICE_URL
 os.environ["DMS_OBJECT_TYPE_SERVICE_BASE_URL"] = OBJECT_TYPE_SERVICE_URL
+os.environ["DMS_PERMISSION_SERVICE_BASE_URL"] = PERMISSION_SERVICE_URL
 
 # Fester Principal statt uuid4() je Testlauf, damit die Rollenzuweisung
 # idempotent bleibt (Unique-Constraint auf permission-service-Seite) - echter
@@ -38,6 +39,48 @@ CONFIG_ADMIN_PRINCIPAL_ID = "case-service-test-config-admin"
 @pytest.fixture
 def workflow_admin_headers() -> dict[str, str]:
     return {"X-DMS-Principal": CONFIG_ADMIN_PRINCIPAL_ID}
+
+
+# RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service prüft seit
+# dieser Session `case.read`/`case.write` gegen permission-service. Die
+# "everyone"-Gruppe (ADR 0067) gewährt beides standardmäßig jedem
+# authentifizierten Principal - kein spezielles Rollen-Setup für den
+# Positivfall nötig, nur ein nicht-leerer `X-DMS-Principal`.
+CASE_TEST_PRINCIPAL_ID = "case-service-tests"
+
+
+@pytest.fixture
+def case_headers() -> dict[str, str]:
+    return {"X-DMS-Principal": CASE_TEST_PRINCIPAL_ID}
+
+
+@pytest.fixture
+def everyone_role_without():
+    """Entfernt eine Berechtigung temporär aus der geseedeten "everyone"-
+    Rolle, um den Negativpfad (fehlende Berechtigung -> 403) zu beweisen -
+    stellt die ursprüngliche Liste danach wieder her. Gleiches Muster wie
+    `auth-service/tests/conftest.py::everyone_role_without`, hier dupliziert
+    statt geteilt (beide Services unabhängig testbar, Projektkonvention)."""
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        everyone = next(r for r in roles if r["name"] == "everyone")
+        original_permissions = list(everyone["permissions"])
+
+        def _remove(permission: str) -> None:
+            pc.put(
+                f"/roles/{everyone['id']}",
+                json={
+                    "description": everyone["description"],
+                    "permissions": [p for p in original_permissions if p != permission],
+                },
+            ).raise_for_status()
+
+        yield _remove
+
+        pc.put(
+            f"/roles/{everyone['id']}",
+            json={"description": everyone["description"], "permissions": original_permissions},
+        ).raise_for_status()
 
 
 @pytest.fixture(scope="session", autouse=True)
