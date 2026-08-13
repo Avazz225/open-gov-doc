@@ -10,3 +10,4 @@ Wird in P0-S2 angelegt:
 - `dms-auth-client/` — OIDC/JWT-Validierung gegen Keycloak (Konzept 4.4)
 - `dms-constraint-engine/` — zustandslose Objekttyp-Validierung (Konzept 2.2/4.5, seit P3-S3, siehe [ADR 0003](../docs/adr/0003-constraint-engine-as-library.md))
 - `dms-registry-client/` — Selbst-Registrierung eines Service bei der Registry inkl. Heartbeat (Konzept 3.2a, seit P4-S1)
+- `dms-permission-client/` — HTTP-Client gegen `permission-service` (RBAC-Prüfung, Rollenzuweisung), konsolidiert die zuvor je Service duplizierte `PermissionServiceClient`-Klasse (Post-Roadmap Phase 19 Session 1)
