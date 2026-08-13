@@ -427,7 +427,9 @@
     "pageOption": "Seite {number}",
     "ocrNeedsReview": "OCR-Text hat geringe Erkennungssicherheit – bitte prüfen",
     "ocrTextExtractLabel": "Erkannter Text (OCR)",
-    "openInOffice": "In {app} öffnen"
+    "openInOffice": "In {app} öffnen",
+    "downloadErrorDehydrated": "Dieser Inhalt wurde archiviert und ausgesondert. Bitte zuerst über die Rückholung (Archiv) anfordern.",
+    "downloadErrorGeneric": "Download fehlgeschlagen. Bitte später erneut versuchen."
   },
   "search": {
     "paneLabel": "Suche",

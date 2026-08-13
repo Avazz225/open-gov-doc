@@ -16,6 +16,35 @@ def test_extract_candidates_ignores_plain_words():
     assert candidates == []
 
 
+def test_build_candidate_pattern_matches_full_attribute_based_kennzeichen():
+    pattern = matching.build_candidate_pattern(["{Federführung}-{YYYY}-{Laufende_Nummer}"])
+    assert matching.extract_candidates("Az: IT-2026-042 bitte prüfen", pattern=pattern) == [
+        "IT-2026-042"
+    ]
+
+
+def test_build_candidate_pattern_falls_back_without_formats():
+    pattern = matching.build_candidate_pattern([])
+    assert pattern is matching._FALLBACK_CANDIDATE_RE
+
+
+def test_build_candidate_pattern_prefers_longer_format_over_shorter_prefix_compatible_one():
+    """Regressionstest für einen live in Post-Roadmap Phase 19 Session 11
+    gefundenen Bug: Pythons `re`-Alternation ist "erste passende Alternative
+    gewinnt", kein längster-Treffer-Matching wie POSIX. Eine alphabetische
+    Formatsortierung hätte `{Federführung}-{Laufende_Nummer}` (kürzer, ohne
+    Jahr) vor `{Federführung}-{YYYY}-{Laufende_Nummer}` (länger, mit Jahr)
+    einsortiert und einen echten Kandidaten wie `IT-2026-042` fälschlich
+    bereits nach `IT-2026` abgeschnitten. `build_candidate_pattern` sortiert
+    daher nach absteigender Formatlänge, nicht alphabetisch."""
+    pattern = matching.build_candidate_pattern(
+        ["{Federführung}-{Laufende_Nummer}", "{Federführung}-{YYYY}-{Laufende_Nummer}"]
+    )
+    assert matching.extract_candidates("Az: IT-2026-042 bitte prüfen", pattern=pattern) == [
+        "IT-2026-042"
+    ]
+
+
 class _FakeDocumentClient:
     def __init__(self, hits: dict[str, list[dict]]):
         self._hits = hits

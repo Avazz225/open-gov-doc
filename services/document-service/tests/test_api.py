@@ -225,6 +225,31 @@ def test_download_content_returns_404_instead_of_crashing_if_object_missing(clie
     assert response_by_version.status_code == 404
 
 
+def test_download_content_returns_409_if_dehydrated(client):
+    """Post-Roadmap Phase 19 Session 11: ein ausgesonderter Dokumentinhalt
+    liegt nicht mehr im Storage Service (archival-service hat ihn entfernt) -
+    ein generisches 404 wäre hier irreführend (klingt nach einem Datenfehler
+    statt einer erwarteten Aussonderung), daher ein eigenes 409 VOR dem
+    Storage-Aufruf."""
+    document_id = upload(client, content=b"wird ausgesondert").json()["id"]
+
+    dehydrated = client.put(f"/documents/{document_id}/dehydrated")
+    assert dehydrated.status_code == 200
+
+    response = client.get(f"/documents/{document_id}/content")
+    assert response.status_code == 409
+
+    response_by_version = client.get(f"/documents/{document_id}/versions/1/content")
+    assert response_by_version.status_code == 409
+
+    rehydrated = client.put(f"/documents/{document_id}/rehydrated")
+    assert rehydrated.status_code == 200
+
+    response_after_rehydrate = client.get(f"/documents/{document_id}/content")
+    assert response_after_rehydrate.status_code == 200
+    assert response_after_rehydrate.content == b"wird ausgesondert"
+
+
 def test_get_unknown_document_returns_404(client):
     response = client.get("/documents/does-not-exist")
     assert response.status_code == 404

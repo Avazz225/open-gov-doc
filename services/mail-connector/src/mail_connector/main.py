@@ -22,6 +22,7 @@ from mail_connector.backends import RawIncomingMessage, build_backend
 from mail_connector.case_client import CaseClient
 from mail_connector.document_client import DocumentClient
 from mail_connector.models import Base
+from mail_connector.object_type_client import ObjectTypeClient
 from mail_connector.schemas import (
     AssignRequest,
     ConfirmMatchRequest,
@@ -99,10 +100,18 @@ def _safe_filename(name: str) -> str:
 async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> None:
     from_address, subject, received_at, body_text, attachment_parts = _parse_message(raw.raw_bytes)
 
+    # Kandidaten-Muster frisch je Nachricht statt einmalig beim Start
+    # zwischengespeichert (Post-Roadmap Phase 19 Session 11) - Posteingang
+    # ist realistisch niedrigfrequent (Poststelle-Betrieb), ein zusätzlicher
+    # Cross-Service-Aufruf je NEU eingehender Nachricht (nicht je Kandidat)
+    # ist vertretbar und hält neu angelegte Objekttypen/geänderte Formate
+    # sofort wirksam, ohne einen Neustart abzuwarten.
+    candidate_pattern = await _load_candidate_pattern()
     match = await matching.resolve_match(
         f"{subject}\n{body_text}",
         document_client=app.state.documents,
         case_client=app.state.cases,
+        pattern=candidate_pattern,
     )
     message = await repository.create_inbound_message(
         session,
@@ -154,6 +163,52 @@ async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> Non
             "match_type": message.match_type,
         },
     )
+
+
+async def _load_candidate_pattern() -> "re.Pattern[str]":
+    """Post-Roadmap Phase 19 Session 11 - liest die tatsächlich
+    konfigurierten `kennzeichen_format`-Werte (object-type-service, je
+    Objekttyp) und das globale `case_number_config.format` (case-service)
+    und baut daraus das Kandidaten-Muster (matching.build_candidate_
+    pattern). Best-Effort, aufgerufen je neu eingehender Nachricht (siehe
+    `_ingest_message`), nicht einmalig beim Start - Posteingang ist
+    niedrigfrequent genug, dass ein neu angelegter Objekttyp/geändertes
+    Format ohne Neustart sofort wirksam wird. Schlägt ein Service fehl,
+    bleibt es für diese eine Nachricht beim generischen Rückfall-Muster.
+    Bewusst EIGENE, kurzlebige Clients statt der langlebigen `app.state.*`-
+    Instanzen: Letztere sind an den Event-Loop gebunden, in dem sie beim
+    Lifespan-Start erzeugt wurden - ein direkter Testaufruf von
+    `_ingest_message()` (an `TestClient`s eigenem Request-Dispatch vorbei,
+    siehe `tests/test_api.py::_ingest`) läuft in einem ANDEREN Loop
+    (pytest-asyncio) und würde beim ersten Zugriff mit "bound to a
+    different event loop" fehlschlagen - dasselbe bereits andernorts im
+    Projekt dokumentierte asyncpg/pytest-asyncio-Muster, hier für httpx."""
+    formats: list[str] = []
+    object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
+    try:
+        formats.extend(await object_type_client.list_kennzeichen_formats())
+    except Exception:
+        logger.warning(
+            "kennzeichen_format-Abfrage bei object-type-service fehlgeschlagen - "
+            "Kandidaten-Muster nutzt insoweit den generischen Rückfall."
+        )
+    finally:
+        await object_type_client.close()
+
+    case_client = CaseClient(settings.case_service_base_url)
+    try:
+        number_config = await case_client.get_number_config()
+        if number_config.get("format"):
+            formats.append(number_config["format"])
+    except Exception:
+        logger.warning(
+            "case_number_config-Abfrage bei case-service fehlgeschlagen - "
+            "Kandidaten-Muster nutzt insoweit den generischen Rückfall."
+        )
+    finally:
+        await case_client.close()
+
+    return matching.build_candidate_pattern(formats)
 
 
 async def _poll_loop(session_factory) -> None:

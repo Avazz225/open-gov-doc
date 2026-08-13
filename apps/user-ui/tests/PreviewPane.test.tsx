@@ -1,8 +1,10 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "@/components/PreviewPane";
 import { I18nProvider } from "@/i18n";
 import type { DocumentSummary, DocumentVersion, RenditionSummary } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 
 const listDocumentVersionsMock = vi.fn();
 const listRenditionsMock = vi.fn();
@@ -305,6 +307,49 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.docx");
     expect(await within(previewPane).findByText("Vertragsinhalt als Text")).toBeInTheDocument();
     expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "substitute-1");
+  });
+
+  it("zeigt bei einem fehlgeschlagenen Download (409, ausgesondert) eine Fehlermeldung mit Rückholungs-Hinweis statt stillschweigend nichts zu tun", async () => {
+    const doc = makeDocument({ title: "archiviert.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock
+      .mockResolvedValueOnce(new Blob(["%PDF-1.4"], { type: "application/pdf" }))
+      .mockRejectedValueOnce(new ApiError(409, "Dokumentinhalt wurde ausgesondert"));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: archiviert.pdf");
+    await within(previewPane).findByTitle("archiviert.pdf");
+    expect(within(previewPane).queryByRole("alert")).not.toBeInTheDocument();
+
+    await user.click(within(previewPane).getByText("Herunterladen"));
+
+    expect(
+      await within(previewPane).findByText(
+        "Dieser Inhalt wurde archiviert und ausgesondert. Bitte zuerst über die Rückholung (Archiv) anfordern."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("zeigt bei einem generischen Download-Fehler die generische Fallback-Meldung", async () => {
+    const doc = makeDocument({ title: "kaputt.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock
+      .mockResolvedValueOnce(new Blob(["%PDF-1.4"], { type: "application/pdf" }))
+      .mockRejectedValueOnce(new Error("Netzwerkfehler"));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: kaputt.pdf");
+    await within(previewPane).findByTitle("kaputt.pdf");
+
+    await user.click(within(previewPane).getByText("Herunterladen"));
+
+    expect(
+      await within(previewPane).findByText("Download fehlgeschlagen. Bitte später erneut versuchen.")
+    ).toBeInTheDocument();
   });
 
   it("zeigt text/plain unverändert als Plain-Text-Vorschau", async () => {

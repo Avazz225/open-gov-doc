@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
+  ApiError,
   type DocumentSummary,
   type DocumentVersion,
   type OcrResultSummary,
@@ -92,6 +93,7 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   const [ocrResult, setOcrResult] = useState<OcrResultSummary | null>(null);
   const [renditions, setRenditions] = useState<RenditionSummary[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgRenderedHeight, setImgRenderedHeight] = useState(0);
 
@@ -151,6 +153,7 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     setHtmlContent(null);
     setOcrResult(null);
     setRenditions([]);
+    setDownloadError(null);
     setSelectedPage(1);
 
     async function load() {
@@ -364,12 +367,21 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   async function handleDownload() {
     if (!accessToken || !activeDocument) return;
     const version = selectedVersion ?? activeDocument.current_version_number;
+    setDownloadError(null);
     try {
       const blob = await downloadDocumentVersion(accessToken, activeDocument.id, version);
       triggerBrowserDownload(blob, activeDocument.title);
-    } catch {
-      // Download-Fehler an dieser Stelle bewusst nicht separat behandelt -
-      // die Explorer-Spalte zeigt bereits einen globalen Fehlerbereich.
+    } catch (error) {
+      // Post-Roadmap Phase 19 Session 11: vorher komplett stillschweigend
+      // fehlgeschlagen - insbesondere bei ausgesonderten (dehydrierten)
+      // Dokumenten (409, siehe document-service) wirkte das wie ein Klick
+      // ins Leere. 409 bekommt eine gezielte Meldung mit Rückholungs-Hinweis,
+      // alles andere die generische Fallback-Meldung.
+      setDownloadError(
+        error instanceof ApiError && error.status === 409
+          ? t("preview.downloadErrorDehydrated")
+          : t("preview.downloadErrorGeneric")
+      );
     }
   }
 
@@ -521,6 +533,12 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
 
       {ocrResult?.status === "needs_review" && (
         <p className="ocr-review-hint">⚠ {t("preview.ocrNeedsReview")}</p>
+      )}
+
+      {downloadError && (
+        <p className="error-text" role="alert">
+          {downloadError}
+        </p>
       )}
 
       <button type="button" onClick={handleDownload}>

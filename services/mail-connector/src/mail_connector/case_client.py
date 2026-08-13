@@ -37,6 +37,15 @@ class CaseClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_number_config(self) -> dict:
+        """Post-Roadmap Phase 19 Session 11 - liefert `CaseNumberConfig.
+        format` (2.5, ein globaler `{Platzhalter}`-Formatstring), aus dem
+        `matching.py` das tatsächlich konfigurierte Kandidaten-Muster
+        ableitet, statt eines fest kodierten generischen Musters."""
+        response = await self._client.get("/case-number-config", headers=_SYSTEM_PRINCIPAL_HEADERS)
+        response.raise_for_status()
+        return response.json()
+
     async def add_document_reference(
         self, case_id: str, *, document_id: str, added_by: str
     ) -> None:

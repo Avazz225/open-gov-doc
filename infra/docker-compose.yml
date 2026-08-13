@@ -1080,6 +1080,10 @@ services:
       DMS_VIRUS_SCAN_SERVICE_BASE_URL: http://virus-scan-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
+      # Formatabgeleitetes Kandidaten-Muster (Post-Roadmap Phase 19 Session 11,
+      # siehe ADR 0076) - ohne diese Variable fällt der Client im Container auf
+      # den Lokal-Dev-Default (`localhost:8007`) zurück, der dort ins Leere zeigt.
+      DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       # Posteingang/Postausgang (2.5/3.3, P15-S3): mailpits eigener POP3-
       # Server dient als Selbst-Loopback-Quelle (siehe dortiger Kommentar) -
       # Zugangsdaten müssen zu `infra/mailpit-pop3-auth` passen.
@@ -1108,6 +1112,8 @@ services:
       document-service:
         condition: service_started
       case-service:
+        condition: service_started
+      object-type-service:
         condition: service_started
     networks:
       - dms-net

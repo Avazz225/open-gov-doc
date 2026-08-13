@@ -1952,9 +1952,15 @@ async def download_current_content(
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     try:
+        document = await repository.get_document(session, document_id)
         version = await repository.get_current_version(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if document.dehydrated_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
+        )
     try:
         data = await app.state.storage.download(version.storage_object_key)
     except ObjectNotFoundError as exc:
@@ -1981,9 +1987,15 @@ async def download_version_content(
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     try:
+        document = await repository.get_document(session, document_id)
         version = await repository.get_version(session, document_id, version_number)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if document.dehydrated_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
+        )
     try:
         data = await app.state.storage.download(version.storage_object_key)
     except ObjectNotFoundError as exc:

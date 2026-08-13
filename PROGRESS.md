@@ -1928,6 +1928,66 @@ drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbe
   `folder-service.md`/`user-ui.md` (API-Tabellen, "Offene Punkte" als behoben markiert),
   `docs/services/permission-service.md` (Domain-Admin-Rollen-Tabelle) ergänzt.
 
+**P19-S11 — Drei kleine, isolierte Fixes** (siehe [ADR 0076](docs/adr/0076-root-folder-mail-regex-dehydration-409.md)),
+letzte Session von Phase 19:
+
+- **`folder-service`: `root` als geschützter Sonderordner.** `PROTECTED_FOLDER_IDS` enthielt bislang nur
+  `inbox`/`outbox` — `root` konnte umbenannt, verschoben, hart gelöscht oder in den Papierkorb verschoben
+  werden. Jetzt Teil derselben `frozenset`, durchläuft automatisch dieselben drei bestehenden
+  `409`-Prüfungen (`update_folder`, `hard_delete_folder`, `trash_folder`) — keine neue Prüf-Logik nötig.
+- **`mail-connector`: Kandidaten-Erkennung aus den tatsächlich konfigurierten Formaten.** Neue
+  `build_candidate_pattern(formats)` (`matching.py`) leitet das Kandidaten-Regex direkt aus
+  `object-type-service`s `kennzeichen_format` und `case-service`s `CaseNumberConfig.format` ab (erste
+  Format→Regex-Rückumwandlung im Projekt) — pro eingehender Nachricht frisch geladen, mit Rückfall auf
+  das alte generische Muster bei Cross-Service-Fehlschlag. Frische, kurzlebige
+  `ObjectTypeClient`/`CaseClient`-Instanzen je Nachricht statt Wiederverwendung aus `app.state` — ein
+  langlebiger, an die Lifespan-Event-Loop gebundener Client führte in Tests, die `_ingest_message()`
+  direkt aufrufen (unter pytest-asyncios eigener Event-Loop), zu `RuntimeError: ... bound to a different
+  event loop`.
+- **`document-service`: `409` statt `404` bei dehydriertem Dokumentinhalt.** `GET /documents/{id}/content`
+  und `.../versions/{n}/content` prüfen `document.dehydrated_at` VOR dem Storage-Aufruf und liefern `409`
+  mit Rückhol-Hinweis — vorher ein generisches `404`, identisch zu einer echten Dateninkonsistenz (siehe
+  `test_download_content_returns_404_instead_of_crashing_if_object_missing`). `apps/user-ui`s
+  `PreviewPane.tsx` behandelte einen fehlgeschlagenen Download bislang komplett stillschweigend (leeres
+  `catch`) — neuer `downloadError`-Zustand zeigt jetzt eine gezielte `409`-Meldung mit Rückhol-Hinweis
+  bzw. eine generische Fallback-Meldung für jeden anderen Fehler.
+- **Testdaten-Fix in `mail-connector`**: `_real_document_with_kennzeichen()`s Testhelfer generierte einen
+  hex-basierten `unique_kennzeichen`-Suffix, der nicht mehr zur neuen, strengeren `Laufende_Nummer → \d+`-
+  Regex passte (ein echter, systemgenerierter Kennzeichen-Suffix ist ohnehin immer numerisch) — auf ein
+  numerisches Suffix umgestellt.
+- **Zwei echte Bugs bei der Live-Verifikation gefunden und behoben** (erst sichtbar, weil diese Session
+  zum ersten Mal einen echten SMTP→POP3-Roundtrip mit einem installationsspezifisch vom Default
+  abweichenden Format durchspielte): (1) `infra/docker-compose.yml`s `mail-connector`-Block hatte kein
+  `DMS_OBJECT_TYPE_SERVICE_BASE_URL` — fiel im Container auf den ins Leere zeigenden Lokal-Dev-Default
+  zurück, das Kandidaten-Muster nutzte dadurch still den generischen Rückfall (funktional unauffällig
+  für die Default-Formate, aber die neue Fähigkeit dieser Session blieb wirkungslos). (2)
+  `build_candidate_pattern` sortierte Formate alphabetisch statt nach Länge — Pythons `re`-Alternation
+  ist "erste passende Alternative gewinnt", kein längster-Treffer-Matching wie POSIX; mit drei live
+  konfigurierten Formaten sortierte die alphabetische Reihenfolge ein kürzeres, Jahr-loses Format vor ein
+  längeres, wodurch ein echter Kandidat fälschlich vorzeitig abgeschnitten wurde. Behoben durch Sortierung
+  nach absteigender Formatlänge, drei neue gezielte Unit-Tests in `test_matching.py`.
+- **Vorbestehende, unabhängige Testinfrastruktur-Flakiness identifiziert, NICHT behoben**: ein sporadisch
+  fehlschlagender mail-connector-Test (`test_confirm_match_creates_document_in_matched_folder`,
+  "different event loop" bei einem langlebigen `app.state.virus_scan`-Client) — außerhalb des
+  Sessionumfangs, per mehrfachem Isolationslauf als bereits vor dieser Session bestehend bestätigt.
+- **Tests**: `folder-service` 120 (vorher 116, +4: Umbenennen/Verschieben/Hart-Löschen/Papierkorb für
+  `root`). `mail-connector` 33 (vorher 30, +3: `build_candidate_pattern`-Unit-Tests inkl. Regressionstest
+  für den Sortierungs-Bug). `document-service` 234 (vorher 233, +1). `apps/user-ui`: 171 Tests (vorher
+  169, +2), `tsc`/`eslint`/`next build` clean.
+- **Vollständig live gegen den echten laufenden Stack verifiziert** (nach Image-Neubau von
+  `folder-service`/`mail-connector`/`document-service` + Neustart, `mail-connector` zweimal wegen der
+  beiden oben beschriebenen Bugfixes): `root`-Umbenennung/-Verschiebung/-Hart-Löschung/-Papierkorb
+  liefert jeweils `409`; ein echter SMTP→POP3-Roundtrip gegen `mailpit` mit einem live über
+  `document-service` erzeugten, attributbasierten Kennzeichen (`P19S11Z-2026-005`, Objekttyp "Akte")
+  wird nach beiden Bugfixes korrekt als `status="proposed_match"` mit passendem `document_id` erkannt;
+  ein dehydriertes Dokument liefert `409` mit Rückhol-Hinweis statt `404`, nach Rehydrierung wieder `200`.
+- Doku: neues [ADR 0076](docs/adr/0076-root-folder-mail-regex-dehydration-409.md), `docs/services/
+  folder-service.md`/`mail-connector.md`/`document-service.md` ("Offene Punkte" als behoben markiert),
+  `docs/services/user-ui.md` (neuer "Download-Fehleranzeige"-Abschnitt) ergänzt.
+
+**Phase 19 — Autorisierung & Identität ist damit vollständig abgeschlossen** (P19-S1 bis P19-S11, siehe
+`IMPLEMENTATION_PLAN.md`).
+
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.
 - **P6-S4 in P6-S4/S5/S6 aufgeteilt**: ursprünglich ein Sammel-Session für Vier-Augen-Mechanismus (4.3) + Break-Glass (4.6) + Not-Shutdown (4.8) UND Nachhol-Termin für sechs bereits ungesicherte Stellen — zu viel für eine Session. Neuer Zuschnitt und **provisorische** Zuordnung der sechs Alt-Fälle siehe `IMPLEMENTATION_PLAN.md` Phase 6; zu bestätigen/anzupassen bei jeweiligem Sessionstart. Alte P6-S5 (Signature)→P6-S7, alte P6-S6 (Process Designer)→P6-S8.

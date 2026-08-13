@@ -79,11 +79,15 @@ def _real_document_with_kennzeichen() -> tuple[str, str]:
     # stattdessen über die bereits bestehende admin-gegatete Kennzeichen-
     # Änderung gesetzt (siehe document-service's `test_update_kennzeichen_
     # with_admin_role_succeeds`).
-    # Ein einzelner Bindestrich, damit der generische Kandidaten-Regex
-    # (`matching._CANDIDATE_RE`) den gesamten Wert als EIN Token erkennt -
-    # ein zusätzlicher Bindestrich würde stattdessen in zwei kürzere
-    # Kandidaten zerfallen.
-    unique_kennzeichen = f"2026-{uuid.uuid4().hex[:8]}"
+    # Ein einzelner Bindestrich, damit der Kandidaten-Regex den gesamten Wert
+    # als EIN Token erkennt - ein zusätzlicher Bindestrich würde stattdessen
+    # in zwei kürzere Kandidaten zerfallen. Seit Post-Roadmap Phase 19
+    # Session 11 wird das Kandidaten-Muster aus dem tatsächlich
+    # konfigurierten `kennzeichen_format` abgeleitet (`{YYYY}-{Laufende_
+    # Nummer}` hier) - `Laufende_Nummer` ist dabei stets rein numerisch
+    # (`_render_kennzeichen`s `f"{n:03d}"`), daher rein numerische Ziffern
+    # statt eines Hex-Suffixes für den Eindeutigkeits-Anteil.
+    unique_kennzeichen = f"2026-{uuid.uuid4().int % 10**8:08d}"
     attributes = {**document["attributes"], "Kennzeichen": unique_kennzeichen}
     patch = httpx.patch(
         f"{DOCUMENT_SERVICE_URL}/documents/{document['id']}",

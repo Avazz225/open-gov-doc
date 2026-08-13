@@ -18,6 +18,10 @@ class Settings(BaseServiceSettings):
     virus_scan_service_base_url: str = "http://localhost:8010"
     document_service_base_url: str = "http://localhost:8006"
     case_service_base_url: str = "http://localhost:8016"
+    # Post-Roadmap Phase 19 Session 11 - Kandidaten-Muster wird aus den
+    # tatsächlich konfigurierten `kennzeichen_format`-Werten abgeleitet
+    # (matching.py), statt fest kodiert zu sein.
+    object_type_service_base_url: str = "http://localhost:8007"
 
     # Austauschbares Abhol-Protokoll nach demselben Plugin-Prinzip wie die
     # Storage-Backends/Virenscan-Engines (3.3/3.6/10.3) - aktuell nur "pop3"

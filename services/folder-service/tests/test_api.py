@@ -71,6 +71,27 @@ def test_outbox_folder_cannot_be_trashed(client):
     assert response.status_code == 409
 
 
+def test_root_folder_cannot_be_renamed(client):
+    response = client.patch("/folders/root", json={"name": "Umbenannt"})
+    assert response.status_code == 409
+
+
+def test_root_folder_cannot_be_moved(client):
+    new_parent = client.post("/folders", json={"name": "Ziel", "created_by": "alice"}).json()
+    response = client.patch("/folders/root", json={"parent_id": new_parent["id"]})
+    assert response.status_code == 409
+
+
+def test_root_folder_cannot_be_hard_deleted(client):
+    response = client.delete("/folders/root")
+    assert response.status_code == 409
+
+
+def test_root_folder_cannot_be_trashed(client):
+    response = client.post("/folders/root/trash", json={"deleted_by": "alice"})
+    assert response.status_code == 409
+
+
 def test_attribute_only_patch_on_inbox_still_allowed(client):
     """Der Schutz gilt gezielt Name/Elternteil (2.5) - eine reine
     Attribut-Änderung (kein `name`/`parent_id` im Payload) bleibt möglich."""
