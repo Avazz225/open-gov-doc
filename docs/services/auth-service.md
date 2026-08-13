@@ -3,7 +3,7 @@
 **Verantwortung:** Schlanker OIDC-Broker vor Keycloak — hält Client-Secret und Admin-Zugang, Aufrufer sehen nur Login/Refresh/Token-Validierung (Konzept 4.4). Keine eigene IAM-Logik, keine eigene Nutzertabelle.
 
 **Konzept-Referenz:** 4.4/2.5 (Kontakte, seit P15-S4)/7.4 (föderierte Kontaktsuche, seit P15-S4)/14.1 (Realm-Rollen für Konfigurationspakete, seit P17-S1)
-**Eigenes Postgres-Schema:** `auth` (seit P15-S4, nur `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche, siehe unten). Bis dahin war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
+**Eigenes Postgres-Schema:** `auth` (seit P15-S4, `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche; seit dem Ad-hoc-Post-Roadmap-SSO-Feature zusätzlich `sso_config`, ebenfalls eine Singleton-Zeile, siehe "SSO/automatischer Login" unten). Bis P15-S4 war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
 
 ## API
 
@@ -29,6 +29,11 @@
 | `GET` | `/realm-roles` | **Seit P17-S1** (14.1): aktuelle Keycloak-Realm-Rollen, gefiltert um Keycloak-Built-ins (`offline_access`, `uma_authorization`, `default-roles-*`) — ungegatet, liefert nur Namen (identisches Vertrauensmodell wie `permission-service`s `GET /roles`) |
 | `POST` | `/realm-roles` | **Seit P17-S1**: legt die übergebenen Realm-Rollen idempotent an (`{names: [...]}`, `create_realm_role(..., skip_exists=True)`) — verlangt `X-DMS-Principal`-Header mit `admin.user_management`-Berechtigung (Service-zu-Service, kein Keycloak-JWT-Endpunkt), sonst `403`. Weist die Rolle niemandem zu, siehe "Realm-Rollen-Verwaltung" unten |
 | `GET` | `/healthz` | Eigener Health-Check |
+| `GET` | `/oidc/authorize?redirect_uri=&state=` | **Ad-hoc Post-Roadmap** (SSO, siehe ADR 0062): prüft `redirect_uri` gegen `sso_redirect_uri_allowed_origins` (400 sonst, Open-Redirect-Absicherung), liefert `{authorization_url}` — der Client navigiert selbst dorthin. Öffentlich (Login-Einstiegspunkt) |
+| `POST` | `/oidc/callback` | `{code, redirect_uri}` → tauscht den Code serverseitig gegen Tokens, liefert dieselbe `TokenResponse`-Form wie `/login`. Prüft Not-Shutdown ERST NACH dem Austausch (Benutzername vorher unbekannt) — siehe ADR 0062. Öffentlich |
+| `GET` | `/sso-config` | `{enabled, updated_at}` — ob SSO installationsweit aktiv ist. Ungegatet, `login/page.tsx` fragt dies vor dem Formular ab |
+| `PUT` | `/sso-config` | `{enabled}` setzen — gegated auf `admin.user_management`, gleiche Domäne wie Nutzerverwaltung |
+| `POST` | `/logout` | `{refresh_token}` → beendet die Sitzung wirklich auf Keycloak-Seite (`.../protocol/openid-connect/logout`) — vorher gab es keinen serverseitigen Logout-Mechanismus |
 
 ## Realm-/Client-Bootstrap
 
@@ -41,8 +46,9 @@ Bei jedem Start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
 - Deklariertes User-Profile-Attribut `dms_superuser_expires_at` (seit **P6-S5**, gleiches Deklarationsmuster wie `dms_theme`) — Break-Glass-Ablaufzeitpunkt (4.6, siehe unten)
 - Superuser-Konto (seit **P6-S5**, Username `superuser`) — idempotent angelegt mit `enabled=False`, siehe "Superuser Break-Glass" unten
 - Technische Domain-Admin-Konten (seit **P6-S5**, `enabled=True`, Liste `DOMAIN_ADMIN_ACCOUNTS` statt Einzelkonstante seit **P6-S6**): `users-admin`/`users-admin` (Domäne "Nutzer-/Rechteverwaltung") und seit P6-S6 zusätzlich `config-admin`/`config-admin` (Domäne "Workflow-Konfiguration", 4.6/4.8-Retrofit, siehe `docs/services/workflow-service.md`) — nach Anlage folgt für jedes Konto (best-effort, siehe unten) eine Rollenzuweisung gegen `permission-service`
+- **Seit Ad-hoc-Post-Roadmap-SSO-Feature**: `_ensure_client_updated` (läuft bei JEDEM Start, nicht nur bei Ersteinrichtung) aktiviert `standardFlowEnabled` und registriert die Redirect-URIs (`{origin}/login/callback/` je `sso_redirect_uri_allowed_origins`) — behebt die unten genannte `skip_exists`-Lücke für genau diese beiden Felder. `_ensure_kerberos` (bedingt, nur wenn `kerberos_enabled` und alle drei Kerberos-Settings gesetzt sind) richtet zusätzlich Kerberos/SPNEGO ein, siehe "SSO/automatischer Login" unten und [ADR 0062](../adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md).
 
-**Bekannte Grenze**: `skip_exists=True` verhindert, dass eine spätere Änderung der Client-Konfiguration (z. B. neue Mapper) auf einen bereits bestehenden Client nachgezogen wird — für Dev/Test unkritisch, für Produktivbetrieb bei Konfigurationsänderungen zu beachten.
+**Bekannte Grenze**: `skip_exists=True` verhindert weiterhin, dass eine spätere Änderung der übrigen Client-Konfiguration (z. B. neue Mapper) auf einen bereits bestehenden Client nachgezogen wird — für Dev/Test unkritisch, für Produktivbetrieb bei Konfigurationsänderungen zu beachten. Nur `standardFlowEnabled`/`redirectUris` sind seit dem SSO-Feature davon ausgenommen (siehe oben).
 
 ## Theme-Präferenz (Konzept 8, seit P4-S6)
 
@@ -61,6 +67,16 @@ Ein periodischer Poll-Loop (`_superuser_poll_loop`, `superuser_poll_interval_sec
 ## Not-Shutdown (4.8, seit P6-S6)
 
 `POST /login` liest den vom Gateway auf jedem proxied Request injizierten `X-DMS-Maintenance-Active`-Header (Default `"false"`, falls das Login direkt am Service statt über das Gateway aufgerufen wird — dann ist der Wartungsmodus faktisch nie wirksam, siehe `docs/services/gateway-service.md`): ist er `"true"` und der angefragte `username` ungleich `superuser.SUPERUSER_USERNAME`, wird der Login mit `503` abgelehnt, **bevor** überhaupt ein Password-Grant gegen Keycloak versucht wird — wörtliche Umsetzung von "neue Logins außer für den Superuser werden abgelehnt" (4.8). Der Superuser-Login selbst wird dadurch nicht automatisch erfolgreich — ein falsches Passwort liefert weiterhin `401`, der Header entscheidet nur, ob überhaupt versucht wird. Vollständige Architekturbegründung (Gateway als Durchsetzungspunkt, Header-Broadcast-Muster) in [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
+
+## SSO/automatischer Login (Ad-hoc Post-Roadmap-Feature, siehe ADR 0062)
+
+Optional, installationsweit aktivierbar über `GET/PUT /sso-config` (Singleton-Zeile, gleiches Muster wie `document-service`s `ShareLinkConfig`). Ist SSO aktiv, leitet `user-ui`s `login/page.tsx` VOR dem Anzeigen des Passwort-Formulars zu Keycloaks eigener Login-Seite um (`GET /oidc/authorize`, Antwort enthält nur die URL, der Client navigiert selbst dorthin). Besitzt der Rechner ein gültiges Kerberos-Ticket UND ist Kerberos konfiguriert (siehe unten), meldet Keycloaks SPNEGO-Mechanismus automatisch an; andernfalls zeigt Keycloak selbst sein gehostetes Formular — reiner Fallback, kein Bruch. `POST /oidc/callback` tauscht den Code serverseitig gegen Tokens (`dms-api` ist confidential, kein PKCE nötig, nur `state` als CSRF-/Replay-Schutz) und liefert dieselbe `TokenResponse`-Form wie `/login`.
+
+**Kerberos/SPNEGO** (`_ensure_kerberos`, bedingt auf `kerberos_enabled`+`kerberos_realm`+`kerberos_server_principal`+`kerberos_keytab_path`): dupliziert Keycloaks eingebauten `browser`-Flow (bringt eine standardmäßig deaktivierte `auth-spnego`-Ausführung bereits mit) zu `dms-browser-kerberos`, aktiviert die SPNEGO-Ausführung (`requirement=ALTERNATIVE`), verweist den Realm per `browserFlow` darauf und legt eine Kerberos-User-Federation-Komponente an.
+
+**`POST /logout`** ist neu — vorher gab es keinen serverseitigen Session-Abbau, "Abmelden" löschte nur lokale Tokens. Ruft Keycloaks `.../protocol/openid-connect/logout` mit dem Refresh-Token auf, ohne das würde ein SPNEGO-fähiger Browser sich beim nächsten Besuch sofort wieder automatisch anmelden.
+
+**Nicht in dieser Sandbox live verifizierbar**: das eigentliche automatische Einloggen über ein echtes Kerberos-Ticket (kein Domain-Controller/KDC vorhanden) — dokumentierte, mit dem Nutzer abgestimmte Grenze. Vollständig verifizierbar und getestet: Bootstrap-Idempotenz, sauberes Überspringen ohne Kerberos-Konfiguration, der komplette Redirect+Callback-Fluss über Keycloaks eigenes Formular sowie `/logout`.
 
 ## Events
 
@@ -112,7 +128,7 @@ neue Rolle idempotent an — zweiter Aufruf mit demselben Namen scheitert nicht,
 ## Offene Punkte
 
 - **AD-Gruppe → interne Rolle Mapping** (Konzept 4.4): Keycloak deckt lokale + LDAP/AD-föderierte Nutzer bereits nativ ab, aber die konfigurierbare Mapping-Regelengine (AD-Gruppe → DMS-Rolle) ist nicht implementiert. Rollenzuweisung/-auswertung ist Aufgabe des Permission Service (4.1, P2-S2); `/me` liefert aktuell nur Keycloaks rohe `realm_access.roles`.
-- **Issuer-Hostname-Konsistenz**: Der Auth Service spricht Keycloak intern über `DMS_KEYCLOAK_BASE_URL` (im Compose-Netz `http://keycloak:8080`) an; ausgestellte Tokens tragen entsprechend `iss=http://keycloak:8080/realms/dms`. Sobald ein browserbasierter Redirect-Flow (`standardFlowEnabled`) hinzukommt, muss die vom Browser sichtbare Keycloak-URL (`http://localhost:8080`) und die interne Service-zu-Service-URL konsistent gehalten werden (Keycloak-Hostname-Konfiguration) — für die aktuelle reine Password-Grant-Nutzung nicht relevant, da immer derselbe interne Pfad verwendet wird.
+- **Issuer-Hostname-Konsistenz — teilweise gelöst seit dem Ad-hoc-Post-Roadmap-SSO-Feature**: Der Auth Service spricht Keycloak intern über `DMS_KEYCLOAK_BASE_URL` (im Compose-Netz `http://keycloak:8080`) an; ausgestellte Tokens tragen entsprechend `iss=http://keycloak:8080/realms/dms`. Mit dem neuen browserbasierten Redirect-Flow (`standardFlowEnabled`, seit dem SSO-Feature) wurde genau die hier vorhergesagte Konsequenz real: `GET /oidc/authorize` liefert eine URL, zu der der Browser navigiert — mit der internen `http://keycloak:8080` wäre das für den Browser nicht auflösbar gewesen. Behoben über eine neue, separate `keycloak_public_base_url`-Einstellung (`DMS_KEYCLOAK_PUBLIC_BASE_URL`, im Compose-Stack `http://localhost:8080`), die nur `_authorization_endpoint` (in `keycloak_client.py`) verwendet — Token-/Logout-Endpunkte bleiben auf der internen URL, da sie ausschließlich serverseitig aus `auth-service` heraus aufgerufen werden. `iss` im Token selbst bleibt weiterhin die interne URL (Keycloaks eigene `frontendUrl`-Konfiguration wäre der vollständige Fix dafür, hier bewusst nicht angefasst, da `TokenValidator` bereits konsistent gegen denselben internen Issuer prüft).
 - **SAML 2.0** (Konzept 4.4, für ADFS-Alt-Föderationen) nicht Teil dieser Session.
 - **`/users`-Endpunkte seit P6-S5 gegated** (siehe oben) — löst den vormaligen offenen Punkt für diesen Service. Die Zuweisung von `admin.user_management` an *weitere* Principals (z. B. echte Menschen zusätzlich zum technischen `users-admin`-Konto) läuft über die jetzt selbst gegatete Nutzer-/Rechteverwaltungs-Admin-UI-Seite (`POST /role-assignments` gegen `permission-service`).
 - **Keine Rollenzuweisungs-API/-UI für Keycloak-Realm-Rollen** (seit P5e-S2, seit P17-S1 nur teilweise gelöst): `dms-admin`/`dms-poststelle` etc. sind Keycloak-Realm-Rollen, kein systemeigenes `permission-service`-Konstrukt (anders als die Domain-Admin-Rollen aus P6-S5). Seit P17-S1 existiert immerhin ein genereller **Anlege**-Weg (`POST /realm-roles`, z. B. aus einem Konfigurationspaket) — die **Zuweisung** an konkrete Nutzer bleibt aber weiterhin ausschließlich über die Keycloak Admin Console, keine API/UI dafür in diesem Projekt.

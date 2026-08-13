@@ -41,11 +41,16 @@ Bis P16-S1 waren alle drei Content-Spalten über `Splitter`-Ziehgriffe größenv
 
 ## Anbindung an das Backend
 
-Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine direkten Aufrufe einzelner Backend-Services:
+Fast ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`) — **eine Ausnahme seit dem Ad-hoc-Post-Roadmap-Office-Feature**: der Office-URI-Handler navigiert direkt zu `webdav-connector` (eigene Buildzeit-Adresse `NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL`, siehe "Office-Direktbearbeitung" unten), kein WebDAV-Proxying über den Gateway vorgesehen:
 
 | Aktion | Gateway-Aufruf |
 |---|---|
 | Anmelden | `POST /api/auth-service/login` (öffentliche Route, kein Token nötig) |
+| SSO-Konfiguration abfragen | `GET /api/auth-service/sso-config` (öffentliche Route) — siehe "SSO/automatischer Login" unten |
+| SSO-Redirect-URL beziehen | `GET /api/auth-service/oidc/authorize?redirect_uri=&state=` (öffentliche Route) |
+| SSO-Code gegen Tokens tauschen | `POST /api/auth-service/oidc/callback` (öffentliche Route) |
+| Abmelden (serverseitige Sitzung) | `POST /api/auth-service/logout` |
+| Edit-Token für Office-Direktbearbeitung anfordern | `POST /api/document-service/documents/{id}/webdav-edit-tokens` |
 | Identität nach Login | `GET /api/auth-service/me` |
 | Ordner-Navigation | `GET /api/folder-service/folders/{id}/children` (Start: `root`) |
 | Ordner anlegen/umbenennen/löschen | `POST /api/folder-service/folders`, `PATCH /api/folder-service/folders/{id}` (seit P4-S4 in der UI verdrahtet); Löschen ruft seit **P7-S1b** `POST /api/folder-service/folders/{id}/trash` statt `DELETE .../folders/{id}` (regulärer Papierkorb-Weg) |
@@ -86,6 +91,16 @@ Ausschließlich über das API-Gateway (3.5, `/api/{service_type}/{path}`), keine
 
 `src/lib/auth-context.tsx`: Access-/Refresh-Token im `localStorage` (`dms.tokens`), proaktiver Refresh kurz vor Ablauf (`setTimeout` basierend auf `expires_in`). Bekannte, bewusste Vereinfachung dieses Grundgerüsts: kein httpOnly-Cookie, siehe ADR 0006 "Offene Punkte"/Konsequenzen.
 
+## SSO/automatischer Login (Ad-hoc Post-Roadmap-Feature, siehe ADR 0062)
+
+`app/login/page.tsx` fragt vor dem Rendern des Passwort-Formulars `GET sso-config` ab; ist SSO installationsweit aktiv (und noch kein `?ssoError=1`-Parameter gesetzt, um eine Redirect-Endlosschleife nach einem bereits fehlgeschlagenen Anlauf zu vermeiden), wird der Browser sofort — ohne das Formular je anzuzeigen — zu einer über `GET oidc/authorize` bezogenen Keycloak-URL weitergeleitet. Ein vor dem Redirect in `sessionStorage` hinterlegter `state`-Wert (`dms.sso.state`) dient als CSRF-/Replay-Schutz.
+
+Neue `app/login/callback/page.tsx`: liest `code`/`state` aus der URL, vergleicht `state` gegen den hinterlegten Wert, ruft `POST oidc/callback` und übernimmt die Session über `auth-context.tsx`s jetzt öffentlich gemachte `applySession()` (bisher intern, genutzt vom regulären Formular-Login) — kein duplizierter Token-Speicherpfad. Bei jedem Fehler zurück zu `/login?ssoError=1`. Eigenständige Client-Page statt Middleware/SSR, da `user-ui` statisch exportiert wird (kein Server für einen serverseitigen Redirect-Callback, siehe Konzept 8).
+
+`logout()` in `auth-context.tsx` ruft zusätzlich (best-effort, blockiert den lokalen Logout nicht bei einem Netzwerkfehler) den neuen `POST /logout`-Endpunkt — ohne das würde ein SPNEGO-fähiger Browser sich beim nächsten Besuch sofort wieder automatisch anmelden, da Keycloaks eigene SSO-Sitzung sonst bestehen bliebe.
+
+**Nicht in dieser Sandbox verifizierbar**: das eigentliche automatische Einloggen über ein echtes Kerberos-Ticket (kein Domain-Controller hier vorhanden). Das bestehende Passwort-Formular bleibt vollständig als Fallback erhalten — kein Nutzer wird durch die Konfiguration ausgesperrt.
+
 ## Vorschau (2.4/3.9, seit P5-S2 an den Rendering Service, seit P5-S3 zusätzlich an den OCR Service angebunden, seit P5d-S2 zusätzlich clientseitige Text-Direktanzeige, seit einem Bugfixing-Durchgang nach P7-S0 zusätzlich `substitute_text`-Renditions-Anzeige + Mehrseiten-Navigation, seit einem weiteren Nutzer-Feedback-Durchgang native Bild-/PDF-/HTML-Vorschau + Word-ähnliche Ansicht für Office-Dokumente, seit einem OCR-Nutzer-Feedback-Durchgang engine-abhängige PDF-Weiche + separater Bild-Textextrakt)
 
 `components/PreviewPane.tsx` lädt beim Öffnen eines Dokuments (`useEffect`, Abhängigkeit `activeDocument?.id`) zunächst die Versionsliste (`listDocumentVersions()`) und setzt die Auswahl auf `current_version_number`; ein zweiter Effekt (Abhängigkeit `[activeDocument?.id, selectedVersion, versions]`) entscheidet anhand des `content_type` der ausgewählten Version (aus derselben Versionsliste, seit P5d-S1 serverseitig gesniffter Wert statt Client-Header):
@@ -107,6 +122,14 @@ Beide Bild-Pfade (OCR-Seitenbild wie natives Bild) zeigen das Ergebnis als `<img
 **Seitenauswahl bei mehrseitigen PDFs** (Bugfix nach Nutzer-Feedback: zuvor wurde unabhängig von der tatsächlichen Seitenzahl immer nur `ocrResult.pages[0]` angezeigt, da der OCR Service selbst nur Seite 1 verarbeitete, siehe `docs/services/ocr-service.md`): hat `ocrResult.pages.length > 1`, erscheint ein `<select>` analog zur Versionsauswahl ("Seite auswählen"); die Auswahl setzt nur `selectedPage`, der zweite Effekt oben lädt daraufhin gezielt nur das neue Seitenbild nach.
 
 Renditions/OCR-Ergebnisse sind bewusst ein Zusatznutzen, kein Blocker (2.4/3.9): existiert nichts Passendes (falsches Format, Verarbeitung noch nicht abgeschlossen, Ladefehler), fällt die Spalte auf einen Hinweistext zurück — der Download-Button (jetzt versionsbewusst, `downloadDocumentVersion()`) bleibt in jedem Fall nutzbar. Absichtlich einfach gehalten: kein Polling auf eine noch nicht fertige Verarbeitung (erneutes Öffnen/Versionswechsel holt den aktuellen Stand nach).
+
+## Office-Direktbearbeitung (Ad-hoc Post-Roadmap-Feature, siehe ADR 0061)
+
+Neben dem Download-Button erscheint in `PreviewPane` für Word-/Excel-/PowerPoint-Dokumente (`officeLaunchInfo(currentContentType)` in `src/lib/api.ts` — Content-Type→Schema/Extension/Label-Zuordnung) ein "In {App} öffnen"-Button. Klick darauf fordert einen kurzlebigen `WebdavEditToken` bei `document-service` an (`createWebdavEditToken()`) und navigiert den Browser zu `officeLaunchUrl()`s Ergebnis — einer Office-URI-Schema-Adresse (`ms-word:ofe|u|...`/`ms-excel:ofe|u|...`/`ms-powerpoint:ofe|u|...`) mit dem Token als Basic-Auth-Userinfo direkt in der URL (`https://<token>:@<webdav-connector-host>/webdav/by-id/<document-id>.<ext>`), sodass das lokal installierte Office-Programm die Datei ohne Zwischenschritt/Passwort-Dialog per WebDAV öffnet.
+
+`webdav-connector` ist der einzige über `api.ts` angesprochene Dienst, der NICHT über den Gateway läuft (kein WebDAV-Proxying vorgesehen) — braucht daher eine eigene Buildzeit-Adresse (`NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL`, analog `NEXT_PUBLIC_GATEWAY_BASE_URL`).
+
+**Nicht in dieser Sandbox verifizierbar**: der eigentliche Office-Start und ob der Zugangsdaten-Dialog dadurch zuverlässig unterdrückt wird (kein Windows/Office hier vorhanden) — dieselbe Sandbox-Grenze wie bei `apps/office-addin` (ADR 0045), hier bewusst dokumentiert statt stillschweigend vorausgesetzt.
 
 ## Suche (3.7, neu seit P5-S4)
 

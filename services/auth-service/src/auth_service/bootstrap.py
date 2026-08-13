@@ -91,6 +91,98 @@ def _ensure_domain_admin_accounts(admin: KeycloakAdmin) -> None:
         )
 
 
+_KERBEROS_FLOW_ALIAS = "dms-browser-kerberos"
+_KERBEROS_COMPONENT_NAME = "dms-kerberos"
+
+
+def _ensure_client_updated(admin: KeycloakAdmin, settings: Settings) -> None:
+    """SSO/automatischer Login (Post-Roadmap-Feature) - behebt die oben
+    dokumentierte `skip_exists`-Lücke für die SSO-relevanten Client-Felder:
+    läuft bei JEDEM Start (nicht nur bei Ersteinrichtung), aktiviert den
+    Authorization-Code-Flow (`standardFlowEnabled`) und registriert die
+    Redirect-URIs der erlaubten Frontends. Läuft UNABHÄNGIG von Kerberos -
+    das ist genau der Teil, der den Redirect-zu-Keycloaks-eigenem-Formular-
+    Fallback ermöglicht, auch ohne Kerberos konfiguriert."""
+    client_uuid = admin.get_client_id(settings.keycloak_client_id)
+    if client_uuid is None:
+        return
+    redirect_uris = [
+        f"{origin}/login/callback/" for origin in settings.sso_redirect_uri_allowed_origins
+    ]
+    admin.update_client(
+        client_uuid, payload={"standardFlowEnabled": True, "redirectUris": redirect_uris}
+    )
+
+
+def _ensure_kerberos(admin: KeycloakAdmin, settings: Settings) -> None:
+    """Kerberos/SPNEGO-Realmkonfiguration (Post-Roadmap-Feature, SSO) - läuft
+    NUR, wenn alle drei Kerberos-Einstellungen gesetzt sind (fehlt eine,
+    bleibt SSO auf den reinen OIDC-Redirect-zu-Keycloaks-Formular-Fallback
+    beschränkt, siehe `_ensure_client_updated` - keine KDC/Keytab-Pflicht für
+    eine frische/sandbox-artige Installation). Keycloaks eingebauter
+    `browser`-Flow bringt eine `auth-spnego`-Ausführung bereits mit (nur
+    standardmäßig deaktiviert) - `copy_authentication_flow` dupliziert den
+    kompletten Flow inkl. dieser deaktivierten Ausführung (identisch zu
+    Keycloak-Admin-Console-"Duplizieren"), hier wird sie nur aktiviert statt
+    neu angelegt (`create_authentication_flow_execution` hätte sonst eine
+    zweite, doppelte Kerberos-Stufe erzeugt)."""
+    if not (
+        settings.kerberos_enabled
+        and settings.kerberos_realm
+        and settings.kerberos_server_principal
+        and settings.kerberos_keytab_path
+    ):
+        return
+
+    existing_flows = admin.get_authentication_flows()
+    if not any(flow.get("alias") == _KERBEROS_FLOW_ALIAS for flow in existing_flows):
+        admin.copy_authentication_flow(
+            payload={"newName": _KERBEROS_FLOW_ALIAS}, flow_alias="browser"
+        )
+
+    executions = admin.get_authentication_flow_executions(_KERBEROS_FLOW_ALIAS)
+    kerberos_execution = next((e for e in executions if e.get("providerId") == "auth-spnego"), None)
+    if kerberos_execution is not None and kerberos_execution.get("requirement") != "ALTERNATIVE":
+        kerberos_execution["requirement"] = "ALTERNATIVE"
+        admin.update_authentication_flow_executions(kerberos_execution, _KERBEROS_FLOW_ALIAS)
+
+    admin.update_realm(settings.keycloak_realm, payload={"browserFlow": _KERBEROS_FLOW_ALIAS})
+
+    # Keycloaks `RealmRepresentation.id` ist (anders als bei Clients, die
+    # eine separate interne UUID haben) für den Realm selbst identisch zum
+    # Realm-Namen - `parentId` eines Realm-weiten Components ist deshalb
+    # direkt `settings.keycloak_realm`, keine zusätzliche Auflösung nötig.
+    existing_components = admin.get_components(
+        query={
+            "parent": settings.keycloak_realm,
+            "type": "org.keycloak.storage.UserStorageProvider",
+        }
+    )
+    if not any(c.get("name") == _KERBEROS_COMPONENT_NAME for c in existing_components):
+        admin.create_component(
+            {
+                "name": _KERBEROS_COMPONENT_NAME,
+                "providerId": "kerberos",
+                "providerType": "org.keycloak.storage.UserStorageProvider",
+                "parentId": settings.keycloak_realm,
+                # Keycloaks Component-Config ist `Map<String, List<String>>` -
+                # jeder Wert MUSS eine Einzelelement-Liste sein, kein nackter
+                # String.
+                "config": {
+                    "kerberosRealm": [settings.kerberos_realm],
+                    "serverPrincipal": [settings.kerberos_server_principal],
+                    "keyTab": [settings.kerberos_keytab_path],
+                    "debug": ["false"],
+                    "allowPasswordAuthentication": ["false"],
+                    "editMode": ["UNSYNCED"],
+                    "updateProfileFirstLogin": ["false"],
+                    "useKerberosForPasswordAuthentication": ["false"],
+                    "cachePolicy": ["DEFAULT"],
+                },
+            }
+        )
+
+
 def ensure_realm_and_client(settings: Settings) -> None:
     """Idempotente Ersteinrichtung (analog zum `CREATE SCHEMA IF NOT EXISTS`-Muster
     der übrigen Services): legt Realm und OIDC-Client an, falls sie noch nicht
@@ -146,3 +238,5 @@ def ensure_realm_and_client(settings: Settings) -> None:
     _ensure_dms_admin_role(admin)
     superuser.ensure_superuser_account(admin)
     _ensure_domain_admin_accounts(admin)
+    _ensure_client_updated(admin, settings)
+    _ensure_kerberos(admin, settings)

@@ -337,6 +337,118 @@ Nachträglich eingeschoben (Nutzerwunsch, bei der P13-S0-Planfreigabe): bewusst 
 
 **107 Sessions insgesamt** (**Korrektur bei P14-S3s Doku-Audit**: eine direkte Nachzählung der tatsächlichen Tabellenzeilen ergab 107 statt der zuvor fortgeschriebenen 95 — die einzelnen "+N"-Zwischenschritte unten wurden über viele Sessions hinweg von Hand mitgeführt und sind an dieser Stelle nicht mehr lückenlos rekonstruierbar; die Zeilen selbst sind die verlässliche Quelle, nicht die fortgeschriebene Summe. **Seit P13-S0 um vier weitere Sessions ergänzt**: +4 Phase 17 `P17-S0`–`S3` Vorkonfigurierte Konfigurationspakete inkl. eGov-Konfigurationspaket — Nutzerwunsch bei der P13-S0-Planfreigabe, damit eine frische Installation direkt als einsatzbereites eGov-DMS mit sinnvollen, veränderbaren Standardeinstellungen nutzbar ist; **seit P12b-S1 um zehn weitere Sessions ergänzt**: +1 `P13-S2b` Flotten-Update-Orchestrierung — Nutzerwunsch, das DMS soll gegenüber der Marktreferenz generell mindestens gleichwertig, wo möglich besser sein, hier konkret bei unterbrechungsfreien Updates angewendet; +6 `P14-S4`–`S9` (DMN-Entscheidungstabellen, regionale Geschäftskalender, Team-Arbeitsbereich, erweiterte Volltextsuche, Office-Integration in zwei Teilen für MS Office und LibreOffice/OpenOffice) — Nutzerentscheidung bei der P12b-S1-Planfreigabe, mehrere zunächst als niedrig priorisierte 12.2-Kandidaten eingestufte Punkte in den verbindlichen Kernumfang zu übernehmen; +3 `P14-S10`–`S12` (öffentlicher Freigabelink mit globalem Abschalter, Stellvertretung/Delegation, Sammelbearbeitung von Metadaten) — auf Nutzerwunsch vertiefte zweite Vollständigkeitsprüfung gegen alle sechs P12b-S1-Recherchequellen, nicht nur die zuerst herausgegriffenen Punkte, siehe `PROGRESS.md`; ursprünglich 43, seit P4-S3 um P4-S4/S5/S6 und P6-S6 [jetzt P6-S8, siehe unten] ergänzt — direktes Nutzer-Feedback nach dem ersten echten Browser-Test des MVP; seit P5-S4 um Phase 5b (P5b-S1–S6) ergänzt — nachträglicher Ausbauwunsch nach Abschluss der Verarbeitungs-Phase; seit P5b-S6 um Phase 5c (P5c-S1/S2) ergänzt — Konsolidierungsrunde offener Punkte; seit P5c-S2 um Phase 5d (P5d-S1/S2) ergänzt — Nutzer-Feedback zu Vorschau-Lücken/OCR-Kostenkontrolle/Format-Governance/Upload-UX; seit P5d-S2 um Phase 5e (P5e-S1–S3) ergänzt — Nutzerwunsch nach einem konfigurierbaren Kennzeichengenerator (Aktenzeichen); seit P5e um Phase 15 (P15-S1–S6, Sonderbereiche/2.5) und Phase 16 (P16-S1, flexibler Arbeitsbereich) ergänzt — konzeptionelle Erweiterung um Sonderbereiche und ein VS-Code-artiges Arbeitsbereich-Layout; **seit P6-S2 um 12 weitere Sessions ergänzt** (Roadmap-Vorausplanung, siehe `PROGRESS.md` "Roadmap-Vorausplanung nach P6-S2"): die ursprüngliche P6-S4 wurde in P6-S4/S5/S6 aufgeteilt (+2, ehemalige Signature/Process-Designer-Sessions rücken auf P6-S7/S8), und jede Phase ab Phase 7 bekam eine neue Kickoff-Planungssession `PN-S0` vorangestellt (+10, siehe "Session-Roadmap"-Hinweis oben) — davon 12 bis zum MVP-Meilenstein (P4-S3); **seit P6-S8 um eine weitere Session ergänzt** (+1, `P6-S9` Federation Hub Grundgerüst, vorgezogen von P13-S3/S4 — Nutzerwunsch bei der P6-S8-Planfreigabe nach externen Swimlanes/Handover, siehe `PROGRESS.md`); **seit P7-S3 um eine weitere Session ergänzt** (+1, `P7-S3b` XDOMEA für Umlaufmappen, abgespalten von P7-S3 nach Plan-Rückfrage zugunsten des größeren PDF/A-Konvertierungsumfangs für Dokumente — gleiches Splitting-Präzedenzmuster wie P6-S4→S4/S5/S6, siehe `PROGRESS.md`); **seit P8-S2 um eine weitere Session ergänzt** (+1, `P8-S2b` Admin-UI-Anbindung des Manipulationsmodus, abgespalten von P8-S2 nach eigener Scope-Entscheidung während der Planung — gleiches Splitting-Präzedenzmuster wie P7-S1→S1/S1b, siehe `PROGRESS.md`).
 
+### Phase 18 — Auth-Entkopplung von Keycloak (Superuser & Domain-Admins)
+
+Superuser-Break-Glass und Domain-Admin-Konten hängen heute vollständig an echten Keycloak-Nutzerkonten (`auth_service/superuser.py`, `bootstrap.py`s `DOMAIN_ADMIN_ACCOUNTS`) — ist Keycloak nicht erreichbar, ist auch das Not-Shutdown-Break-Glass nicht nutzbar, ein Widerspruch zum eigentlichen Zweck von Break-Glass. Ausgelöst durch Nutzer-Direktive nach der "Offene Punkte"-Triage vom 2026-08-13. Diese Konten sollen künftig ausschließlich in `auth-service`s eigener Datenbank leben, unabhängig von Keycloak — Voraussetzung für Phase 19s `permission-service`-Self-Gating (Henne-Ei-Problem aus ADR 0023).
+
+| Session | Deliverable |
+|---|---|
+| P18-S1 | Lokale technische Konten + eigener Token-Issuer: neues `TechnicalAccount`-Model (`auth`-Schema), eigenes RSA-Schlüsselpaar + `GET /.well-known/jwks.json`, Token-Minting mit identischem Claim-Shape wie Keycloak. `libs/dms-auth-client`s `TokenValidator` auf Multi-Issuer erweitert (Keycloak-Realm + eigener Issuer, Auswahl über `iss`-Claim). |
+| P18-S2 | Superuser auf lokale Konten migriert: `POST /login` authentifiziert ein technisches Superuser-Konto lokal statt gegen Keycloak; Break-Glass-Aktivierung (`consumer.py`) setzt `TechnicalAccount.enabled`/`expires_at` in eigener DB. Behebt nebenbei den seit P6-S6 bekannten, nie gefixten Bug (Superuser-Login schlägt mangels `firstName`/`lastName`/`email` am Keycloak-Konto fehl) ersatzlos. |
+| P18-S3 | Domain-Admin-Konten (`users-admin`/`config-admin` + neue Domänen aus Phase 19) auf `TechnicalAccount` migriert. Neues ADR (nächste freie Nummer nach 0062) dokumentiert Dual-Issuer-Entscheidung. |
+
+### Phase 19 — Autorisierung & Identität
+
+Größter Einzelblock der "Offene Punkte"-Triage: ungegatete Endpunkte über mehrere Services bekommen echte `permission-service`-Prüfungen; ein "everyone"-Gruppenkonzept ersetzt bewusst offene Existenz-Oracles; UUID→Name-Rückwärtsauflösung schließt Anzeige-Lücken in Delegationen/Teamspaces.
+
+| Session | Deliverable |
+|---|---|
+| P19-S1 | Neue Shared Lib `libs/dms-permission-client` — konsolidiert die siebenfach duplizierte `PermissionServiceClient`-Klasse (document-service, search-service, auth-service, workflow-service, config-service, teamspace-service, query-service). Bestehende Duplikate bleiben vorerst bestehen, neue Konsumenten unten nutzen die Shared Lib direkt. |
+| P19-S2 | "everyone"-Gruppe in permission-service: `principal_type="group"` wird von Schema-Deko zu echter Funktion, `_collect_effective_roles` bekommt Gruppen-Erweiterungspfad, Bootstrap seedet eine "everyone"-Rolle mit den heute faktisch offenen Berechtigungen. |
+| P19-S3 | `GET /users/lookup` + Verzeichnis über "everyone"-Rolle gegated statt komplett offen. |
+| P19-S4 | Rückwärts-Identitätsauflösung: neuer UUID→Name-Endpunkt in auth-service, genutzt von `DelegationsPane.tsx`/`TeamspacesPane.tsx` statt roher `principal_id`. |
+| P19-S5 | case-service RBAC: alle Endpunkte bekommen `check_read`/`check_write`, insbesondere instanzverändernde (`PUT .../archived`, `POST .../archive-request`). |
+| P19-S6 | permission-service self-gating: `POST /roles`, `PUT /roles/{id}`, Bereichssperren bekommen echte Berechtigungsprüfung; Bootstrap-Aufrufe der Phase-18-Domain-Admin-Konten sind davon ausdrücklich ausgenommen (löst das Henne-Ei-Problem aus ADR 0023). |
+| P19-S7 | Archiv-/Bericht-/Forensik-Gating: archival-service, reporting-service, query-services `/forensic-trace`. |
+| P19-S8 | OCR/Rendering/Virenscan-Gating, analog zum bereits bestehenden `virus-scan-service`-Muster (`_has_quarantine_role`), auf echte permission-service-Prüfung gehoben. |
+| P19-S9 | Workflow-Instanzstart & Task-Abschluss gegated. |
+| P19-S10 | Legal Hold gegated: document-service/folder-service backend-seitig, user-ui `RetentionPanel`/`FolderRetentionModal` frontend-seitig. |
+| P19-S11 | Kleine isolierte Fixes: `root`-Ordner-Schutz (folder-service `PROTECTED_FOLDER_IDS`), mail-connector-Kandidaten-Regex aus konfigurierten Kennzeichen-/Vorgangsnummer-Formaten abgeleitet, document-service liefert `409` statt `404` bei dehydriertem Dokumentinhalt (inkl. user-ui-Meldung). |
+
+### Phase 20 — Resilienz: Retry, Backoff, Permanent-Failed
+
+storage-service hat bereits fast das Zielmuster (`ObjectCopy.attempts`, `max_replication_attempts=5`, Status `failed_permanent`, `replication.py`) — nur ohne Backoff/Jitter. Wird auf vier weitere Services verallgemeinert.
+
+| Session | Deliverable |
+|---|---|
+| P20-S1 | Shared Backoff-Mathematik (`compute_backoff_seconds`, Exponential + Full-Jitter). Kein gemeinsamer Poll-Loop-Rahmen — Poll-Loops bleiben bewusst leichtgewichtig dupliziert (gleiches Idiom wie `_sla_poll_loop`/`_superuser_poll_loop`). |
+| P20-S2 | archival-service: `attempts`/`next_retry_at`/`failed_permanent` auf `ArchivalTransfer`/`CaseArchivalTransfer`, `POST /archival-transfers/{id}/retry` für Admin-UI. |
+| P20-S3 | notification-service: gleiches Muster, neuer eigener Retry-Poll-Loop (Zustellung läuft heute synchron im NATS-Handler). |
+| P20-S4 | rendering-service & ocr-service: gleiches Muster auf `Rendition`/`OcrResult`. |
+| P20-S5 | federation-hub-service: `Handover`-Zustellung von rein synchron auf "sofortiger Versuch + Retry-Poll-Loop bei Fehlschlag" umgestellt. |
+| P20-S6 | storage-service-Replikation/-Verifikation als k8s-CronJob (Teil des Helm-Charts, Phase 26) statt rein manuell zu triggern; Jitter aus P20-S1 nachgerüstet. |
+| P20-S7 | Admin-UI: "Permanent fehlgeschlagen"-Sichtbarkeit + "Erneut versuchen"-Bedienelement in `ArchivalTransfersView` und den übrigen betroffenen Admin-Sichten. |
+
+### Phase 21 — Sicherheitshärtung
+
+| Session | Deliverable |
+|---|---|
+| P21-S1 | Schlüssel-Rotation für `fleet-management-service`s API-Key und `license-service`s Signierschlüssel (Vorbild: `workflow-service`s `POST /federation/rotate-key`, ADR 0039). |
+| P21-S2 | mTLS/echte Installations-Identität für federation-hub-service (Client-Zertifikate ergänzen die bestehende Signatur-Authentisierung aus ADR 0028/0039; Vorbild signature-services interne CA, ADR 0025). |
+| P21-S3 | HTML-Vorschau-Sandbox härten: `user-ui`s `PreviewPane` filtert externe Subressourcen-Referenzen serverseitig beim Ausliefern (Platzhalter "Blockierte externe Anfrage") statt sie unbehandelt zu lassen. |
+| P21-S4 | BPMN-Import-Review-Gate: `POST /process-definitions` bekommt einen neuen Vier-Augen-Aktionstyp über den bereits bestehenden Approval-Mechanismus, bevor ein Upload instanzstartfähig wird. |
+
+### Phase 22 — Admin-UI-Ausbau
+
+Alle Sessions folgen dem etablierten Seiten-Muster (`<RequireAuth><RequireCapability><AdminShell>`) und dem CRUD-Stil von `UserManagement.tsx`.
+
+| Session | Deliverable |
+|---|---|
+| P22-S1 | "Jetzt aussondern"-Button in `ArchivalTransfersView.tsx`. |
+| P22-S2 | Gruppen-Verwaltung in `UserManagement.tsx`, nutzt Phase 19s "everyone"-Gruppen-Infrastruktur. |
+| P22-S3 | Generische Vier-Augen-Einstellungsseite (Toggle je `action_type` über `PUT /approval-config/{action_type}`). |
+| P22-S4 | Reject-Grund-Feld in `reviewer-ui`s `ApprovalList.tsx` statt `window.prompt`. |
+| P22-S5 | Teamspaces-Admin-Übersicht (neuer admin-facing teamspace-service-Endpunkt + admin-ui-Seite). |
+| P22-S6 | Connector-Konfigurationsseiten für signature-service/storage-service (neue Backend-Config-Endpunkte + UI nach `ocr-settings`/`storage-guard`-Vorbild). |
+| P22-S7 | OCR-/Speicher-Ziel-Set editierbar (Erweiterung derselben zwei Seiten aus P22-S6). |
+
+### Phase 23 — Frontend-UX (User-UI)
+
+| Session | Deliverable |
+|---|---|
+| P23-S1 | Versionshistorie zeigt `is_conflict`/`comment` (bereits im `DocumentVersion`-Typ vorhanden) als Badge/Tooltip. |
+| P23-S2 | Automatischer View-Wechsel beim Öffnen eines Suchtreffers. |
+| P23-S3 | Polling (5–10s) für nicht fertige Renditions/OCR-Ergebnisse. |
+| P23-S4 | Ordner-Verschieben per Drag & Drop (Backend `PATCH /folders/{id}` unterstützt das bereits). |
+| P23-S5 | Favoriten-Marker auch in `FolderTree.tsx`. |
+| P23-S6 | Responsive-Breakpoint der Formular-Layouts auf CSS-Container-Queries statt Fensterbreite. |
+| P23-S7 | `SignaturesPanel` löst Neuladen der Versionsliste in `PreviewPane` nach erfolgreicher Signatur aus (geteilter Zustand auf `DocumentWorkspace`-Ebene). |
+| P23-S8 | Rechtsklick-Kontextmenü auch in `FolderTree.tsx` (bestehende `ContextMenu`-Komponente wiederverwendet). |
+
+### Phase 24 — Feature-Vervollständigung
+
+Vier große, unabhängige Einzel-Features.
+
+| Session | Deliverable |
+|---|---|
+| P24-S1 | Azure-Blob-Storage-Backend (storage-service, Konzept 1a). |
+| P24-S2 | AD-Gruppe → interne Rolle Mapping-Regelengine (auth-service/permission-service). |
+| P24-S3 | IMAP/Graph-API-Mailbox-Backend (mail-connectors bereits vorbereitetes `MailboxBackend`-Interface) + Datei-Anhänge im Postausgang. |
+| P24-S4 | Container-Orchestrierungs-Adapter für plugin-orchestration-service (Zielsystem ab Phase 26 real vorhanden). |
+
+### Phase 25 — Workflow-/Gateway-Härtung
+
+| Session | Deliverable |
+|---|---|
+| P25-S1 | Race-Condition-sichere Versionsvergabe in workflow-service (`SELECT ... FOR UPDATE` statt ungesperrtem `MAX(version)+1`). |
+| P25-S2 | Rollback-Endpunkt `POST /process-definitions/{id}/restore` (legt alten Inhalt als neue aktuelle Version an, kein In-Place-Edit). |
+| P25-S3 | Gateway-Rate-Limiting auf Redis umgestellt (neue Infra-Abhängigkeit) für horizontale Gateway-Skalierung. |
+| P25-S4 | Workload-bewusste Instanzauswahl (`InstanceResolver.pick()`, wenigste offene Anfragen statt `random.choice`, rein In-Process). |
+
+### Phase 26 — Helm-Charts für k8s/OCP
+
+`infra/k8s/` ist aktuell nur ein Platzhalter-README. Architekturentscheidung: **ein** Helm-Chart mit werte-getriebener `services:`-Map statt 34 einzelnen, fast identischen Chart-Templates.
+
+| Session | Deliverable |
+|---|---|
+| P26-S1 | `values.yaml`-Grundgerüst: `resources.baseline` (Requests/Limits) als Default, `services.<name>.resources` überschreibt selektiv, ein Eintrag je der ~34 Container aus `infra/docker-compose.yml`. |
+| P26-S2 | Generische Deployment-/Service-/ConfigMap-Templates für alle zustandslosen FastAPI-Services. |
+| P26-S3 | Zustandsbehaftete Infrastruktur (Postgres/NATS/MinIO/Keycloak) als Deployments+PVC im selben Chart (bewusste v1-Entscheidung, keine externen Subcharts). |
+| P26-S4 | CronJob-Template für Storage-Replikation/-Verifikation (siehe P20-S6). |
+| P26-S5 | Frontend-Apps (Next.js) als Deployments, Build-Args über `values.yaml`. Verifikation über `helm lint` + `helm template` je Session, kein echtes Cluster-Deployment gefordert. Neues ADR dokumentiert die Chart-Architektur-Entscheidung. |
+
+**Neue Sessions seit P17-S3**: +26 (Phasen 18–26) — nach vollständiger Triage der aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste durch den Nutzer, plus neues eigenständiges Ziel (Helm-Charts für k8s/OCP). Nicht in dieser Roadmap (vom Nutzer explizit nicht priorisiert): SAML 2.0, i18n-Sprachumschaltung, Rate-Limiting speziell für Freigabelink-/Edit-Tokens, Deep-Paging-Stabilität unter Rechtefilterung.
+
 ## PROGRESS.md — Resume-Mechanismus
 
 `dms/PROGRESS.md` wird als erste Amtshandlung in P0-S1 angelegt und ist der Einstiegspunkt für jede neue Session:

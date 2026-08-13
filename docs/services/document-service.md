@@ -256,6 +256,12 @@ Zeitlich begrenzter, unauthentifizierter Lesezugriff auf genau ein Dokument, per
 
 **Widerruf** (`DELETE /share-links/{token}`) ist nur der erzeugenden Person oder `X-DMS-Roles: dms-admin` (konfigurierbar, `share_link_revoke_admin_role`) erlaubt, idempotent.
 
+## Office-Direktbearbeitung: WebDAV-Edit-Token (Ad-hoc Post-Roadmap, siehe ADR 0061)
+
+Kurzlebiger (`webdav_edit_token_ttl_hours`, Default 8h), dokumentgescopter `WebdavEditToken` — strukturell an `ShareLink` angelehnt (`token` als PK), aber zusätzlich mit `principal_id` (die Identität, die `webdav-connector` beim Check-in als Sperrinhaber verwendet). Ausstellung (`POST /documents/{id}/webdav-edit-tokens`) verlangt `document.write` (`check_write`, neu in `permission_client.py`), nicht nur `document.read` — ein Edit-Token gewährt Schreibzugriff, nicht nur Lesezugriff wie ein Freigabelink. `GET /documents/{id}/webdav-edit-tokens` listet aktive Tokens (Grundlage für eine später nachrüstbare Widerrufs-UI, noch nicht gebaut). `DELETE /webdav-edit-tokens/{token}` ist wie beim Freigabelink nur der erzeugenden Person oder Admin-Rolle erlaubt.
+
+`GET /internal/webdav-edit-tokens/{token}` ist rein Ost-West (kein Gateway, kein `X-DMS-Principal`, `webdav-connector` ruft `document_service_base_url` direkt) und löst ein Token zu `{document_id, principal_id}` auf oder liefert 404/410 bei Ablauf/Widerruf/unbekanntem Token. Erneute Rechteprüfung während einer laufenden Bearbeitungssitzung erfolgt bewusst NICHT — nur bei Ausstellung geprüft, gleiche Einschränkungskategorie wie beim Freigabelink.
+
 ## Offene Punkte
 
 - **Kennzeichen-Anzeige im Frontend** (vor dem Dateinamen, global oder je Objekttyp überschreibbar) noch nicht angebunden — folgt mit P5e-S3.

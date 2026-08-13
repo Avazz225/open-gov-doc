@@ -48,6 +48,23 @@ def _actor(environ: dict) -> str:
     return environ.get("wsgidav.auth.user_name") or _DEFAULT_ACTOR
 
 
+_BY_ID_PREFIX = "by-id/"
+
+
+def _parse_by_id_path(path: str) -> str | None:
+    """Office-Direktbearbeitung (Post-Roadmap-Feature): `/webdav/by-id/
+    <document-id>.<ext>` statt eines Ordnerpfads - `document-id` ist ein
+    punktloses `uuid4()` (siehe document-service), das Splitten auf den
+    LETZTEN Punkt trennt also zuverlässig die rein kosmetische `.ext`-Endung
+    ab. Liefert `None`, wenn der Pfad kein `by-id/...`-Pfad ist (normaler
+    ordnerpfadbasierter Zugriff bleibt komplett unverändert)."""
+    trimmed = path.strip("/")
+    if not trimmed.startswith(_BY_ID_PREFIX):
+        return None
+    raw = trimmed[len(_BY_ID_PREFIX) :]
+    return raw.rsplit(".", 1)[0] if "." in raw else raw
+
+
 def _split_dest_path(dest_path: str) -> tuple[str, str]:
     """Zerlegt einen WebDAV-Zielpfad (aus dem `Destination`-Header, von
     wsgidav bereits auf den reinen Ressourcenpfad reduziert) in
@@ -57,6 +74,24 @@ def _split_dest_path(dest_path: str) -> tuple[str, str]:
         return "", trimmed
     parent, name = trimmed.rsplit("/", 1)
     return parent, name
+
+
+class _ByIdVirtualCollection(DAVCollection):
+    """Office-Direktbearbeitung (Post-Roadmap-Feature): rein synthetische
+    Kollektion für den `by-id/`-Namensraum selbst (kein echter `TreeFolder`).
+    Nötig, weil wsgidavs `do_PUT`-Handler VOR jedem Schreibzugriff den
+    Elternpfad des Ziels auflöst und `is_collection` darauf prüft
+    (`request_server.py`, "PUT parent must be a collection") - ohne diese
+    Klasse würde `get_resource_inst("by-id")` (der von wsgidav berechnete
+    Elternpfad von `by-id/<document-id>.<ext>`) ins Leere laufen (kein realer
+    Ordner dieses Namens), und jedes Einchecken einer neuen Version über den
+    Office-Direktbearbeitungs-Pfad würde mit `409` fehlschlagen. Nicht
+    durchsuchbar (`get_member_names` liefert bewusst nichts) - die einzige
+    unterstützte Zugriffsart ist `by-id/<document-id>.<ext>` direkt, nie eine
+    Auflistung des Namensraums."""
+
+    def get_member_names(self) -> list[str]:
+        return []
 
 
 class DmsDavFolder(DAVCollection):
@@ -280,6 +315,28 @@ class DmsDavProvider(DAVProvider):
 
     def get_resource_inst(self, path: str, environ: dict):
         self.check_license("read")
+        if path.strip("/") == "by-id":
+            # wsgidavs `do_PUT`-Handler löst vor jedem Schreibzugriff den
+            # Elternpfad des Ziels auf und prüft `is_collection` - für
+            # `by-id/<document-id>.<ext>` ist das genau dieser bare
+            # Namensraum-Pfad, siehe `_ByIdVirtualCollection`-Docstring.
+            return _ByIdVirtualCollection(path, environ)
+        by_id = _parse_by_id_path(path)
+        if by_id is not None:
+            # Office-Direktbearbeitung (Post-Roadmap-Feature): direkte
+            # ID-Auflösung statt des ansonsten üblichen ordnerpfadbasierten
+            # `resolve_path()`-Baumdurchlaufs (O(Tiefe) HTTP-Aufrufe) - die
+            # Start-URL kennt nur die Dokument-ID, keinen Ordnerpfad. Die
+            # `.ext`-Endung im Pfad dient nur der lokalen Dateityp-Erkennung
+            # von Office selbst und wird hier verworfen (der echte
+            # Content-Type kommt weiterhin aus den Dokumentmetadaten).
+            try:
+                node = self.tree.get_document(by_id)
+            except PathNotFoundError:
+                return None
+            return DmsDavDocument(
+                path, environ, folder_id=node.folder_id, filename=node.title, document=node
+            )
         try:
             node = self.tree.resolve_path(path)
         except PathNotFoundError:

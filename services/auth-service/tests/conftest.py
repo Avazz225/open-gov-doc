@@ -1,6 +1,7 @@
 import os
 import uuid
 
+import httpx
 import pytest
 from dms_db_base import build_engine
 from sqlalchemy import text
@@ -40,6 +41,7 @@ async def _clean_tables():
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS auth"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("TRUNCATE auth.federation_identity"))
+        await conn.execute(text("TRUNCATE auth.sso_config"))
     await eng.dispose()
     yield
 
@@ -62,6 +64,32 @@ def domain_admin_auth_headers(client) -> dict[str, str]:
     )
     response.raise_for_status()
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def role_assignment_immediate():
+    """Setzt `permission.role_assignment.create`s Vier-Augen-Pflicht (14.2,
+    ADR 0060 "Berechtigungsänderung") für die Dauer eines Tests aus und
+    stellt den ursprünglichen Wert danach wieder her. Diese laufende
+    Installation kann diese Aktion echt Vier-Augen-pflichtig konfiguriert
+    haben (z. B. durch ein bereits angewendetes Konfigurationspaket) - Tests,
+    die eine Rollenzuweisung sofort wirksam brauchen, dürfen diese reale
+    Installationseinstellung nicht dauerhaft überschreiben, nur für ihre
+    eigene Laufzeit aussetzen."""
+    with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
+        config = pc.get("/approval-config/permission.role_assignment.create")
+        originally_required = config.status_code == 200 and config.json()["requires_approval"]
+        if originally_required:
+            pc.put(
+                "/approval-config/permission.role_assignment.create",
+                json={"requires_approval": False},
+            )
+        yield
+        if originally_required:
+            pc.put(
+                "/approval-config/permission.role_assignment.create",
+                json={"requires_approval": True},
+            )
 
 
 @pytest.fixture

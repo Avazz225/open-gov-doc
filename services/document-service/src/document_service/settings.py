@@ -77,6 +77,13 @@ class Settings(BaseServiceSettings):
     # `governance_bypass_role`, auch wenn der Default identisch ist.
     share_link_revoke_admin_role: str = "dms-admin"
 
+    # Office-Direktbearbeitung (Post-Roadmap-Feature, WebDAV-Edit-Token):
+    # bewusst großzügiger als ein Freigabelink bemessen (Stunden statt
+    # Minuten) - eine Office-Bearbeitungssitzung stellt über die gesamte
+    # Öffnungsdauer hinweg WebDAV-Anfragen (Sperren/Lesen/Zwischenspeichern/
+    # Entsperren), nicht nur einmalig beim Start.
+    webdav_edit_token_ttl_hours: float = 8.0
+
     # Papierkorb-Familie (2.5, P15-S1): endgültiges Löschen aus dem Papierkorb
     # ist zwei domänengetrennten Admin-Rollen vorbehalten (4.6, gleiches
     # Setting-Muster wie oben) - eine reguläre und eine engere für als

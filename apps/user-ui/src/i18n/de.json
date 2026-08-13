@@ -23,7 +23,9 @@
     "password": "Passwort",
     "submit": "Anmelden",
     "submitting": "Melde an...",
-    "error": "Anmeldung fehlgeschlagen"
+    "error": "Anmeldung fehlgeschlagen",
+    "ssoRedirecting": "Weiterleitung zur Anmeldung...",
+    "ssoError": "Automatische Anmeldung fehlgeschlagen - bitte mit Benutzername/Passwort anmelden."
   },
   "share": {
     "heading": "Freigegebenes Dokument",
@@ -423,7 +425,8 @@
     "pageSelectLabel": "Seite auswählen",
     "pageOption": "Seite {number}",
     "ocrNeedsReview": "OCR-Text hat geringe Erkennungssicherheit – bitte prüfen",
-    "ocrTextExtractLabel": "Erkannter Text (OCR)"
+    "ocrTextExtractLabel": "Erkannter Text (OCR)",
+    "openInOffice": "In {app} öffnen"
   },
   "search": {
     "paneLabel": "Suche",

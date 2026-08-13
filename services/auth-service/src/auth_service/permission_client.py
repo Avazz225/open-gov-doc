@@ -49,6 +49,20 @@ class PermissionServiceClient:
             },
         )
         response.raise_for_status()
+        # Seit P17-S3 liefert `POST /role-assignments` immer 2xx, auch wenn
+        # `permission.role_assignment.create` auf dieser Installation
+        # Vier-Augen-pflichtig ist ("Berechtigungsänderung", ADR 0060) - die
+        # Zuweisung selbst existiert dann noch NICHT, nur ein offener
+        # Genehmigungsantrag. Ohne diese Prüfung würde die Methode fälschlich
+        # Erfolg melden - der Aufrufer in `main.py`s Lifespan fängt
+        # `Exception` bereits ab und protokolliert einen Retry beim nächsten
+        # Neustart, exakt das richtige Verhalten für diesen Fall.
+        if response.json()["status"] != "created":
+            raise RoleAssignmentPendingApprovalError(
+                f"Rollenzuweisung für {principal_id!r}/{role_name!r} wartet auf Genehmigung "
+                "(permission.role_assignment.create ist auf dieser Installation Vier-Augen-"
+                "pflichtig) - noch nicht wirksam"
+            )
 
     async def has_permission(self, principal_id: str, permission: str) -> bool:
         response = await self._client.get(
@@ -62,4 +76,8 @@ class PermissionServiceClient:
 
 
 class RoleNotFoundError(Exception):
+    pass
+
+
+class RoleAssignmentPendingApprovalError(Exception):
     pass

@@ -1,4 +1,4 @@
-import { GATEWAY_BASE_URL } from "./config";
+import { GATEWAY_BASE_URL, WEBDAV_CONNECTOR_BASE_URL } from "./config";
 
 export class ApiError extends Error {
   status: number;
@@ -65,6 +65,43 @@ export async function refreshToken(refresh_token: string): Promise<TokenResponse
     body: JSON.stringify({ refresh_token }),
   });
   return response.json();
+}
+
+// SSO/automatischer Login (Post-Roadmap-Feature)
+
+export interface SsoConfig {
+  enabled: boolean;
+}
+
+export async function getSsoConfig(): Promise<SsoConfig> {
+  const response = await request("auth-service", "sso-config");
+  return response.json();
+}
+
+export async function oidcAuthorize(redirectUri: string, state: string): Promise<string> {
+  const response = await request(
+    "auth-service",
+    `oidc/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`
+  );
+  const body = (await response.json()) as { authorization_url: string };
+  return body.authorization_url;
+}
+
+export async function oidcCallback(code: string, redirectUri: string): Promise<TokenResponse> {
+  const response = await request("auth-service", "oidc/callback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
+  });
+  return response.json();
+}
+
+export async function logoutSession(refresh_token: string): Promise<void> {
+  await request("auth-service", "logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token }),
+  });
 }
 
 export interface CurrentUser {
@@ -1743,6 +1780,69 @@ export function publicShareLinkContentUrl(shareToken: string): string {
   return `${GATEWAY_BASE_URL}/api/document-service/public/share-links/content?token=${encodeURIComponent(
     shareToken
   )}`;
+}
+
+// Office-Direktbearbeitung (Post-Roadmap-Feature): Word/Excel/PowerPoint
+// direkt aus dem Browser heraus starten, über das Office-URI-Schema
+// (`ms-word:ofe|u|<url>` usw.) gegen webdav-connector. Content-Type→
+// Schema/Extension-Zuordnung existiert im Projekt bislang nirgends, wird
+// nur hier gebraucht.
+const OFFICE_LAUNCH_MAP: Record<string, { scheme: string; ext: string; label: string }> = {
+  "application/msword": { scheme: "ms-word", ext: "doc", label: "Word" },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+    scheme: "ms-word",
+    ext: "docx",
+    label: "Word",
+  },
+  "application/vnd.ms-excel": { scheme: "ms-excel", ext: "xls", label: "Excel" },
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+    scheme: "ms-excel",
+    ext: "xlsx",
+    label: "Excel",
+  },
+  "application/vnd.ms-powerpoint": { scheme: "ms-powerpoint", ext: "ppt", label: "PowerPoint" },
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+    scheme: "ms-powerpoint",
+    ext: "pptx",
+    label: "PowerPoint",
+  },
+};
+
+export function officeLaunchInfo(
+  contentType: string | null | undefined
+): { scheme: string; ext: string; label: string } | null {
+  if (!contentType) return null;
+  return OFFICE_LAUNCH_MAP[contentType] ?? null;
+}
+
+export interface WebdavEditToken {
+  token: string;
+  expires_at: string;
+}
+
+export async function createWebdavEditToken(
+  token: string,
+  documentId: string
+): Promise<WebdavEditToken> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/webdav-edit-tokens`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+// Bettet das Edit-Token als Basic-Auth-"Benutzername" mit leerem Passwort in
+// die URL ein - `DmsAuthDomainController` unterscheidet daran ein Edit-Token
+// von einem echten WebDAV-Mount (der immer ein echtes Passwort sendet), ohne
+// das Token-Format selbst kennen zu müssen.
+export function officeLaunchUrl(webdavToken: string, documentId: string, ext: string): string {
+  const host = new URL(WEBDAV_CONNECTOR_BASE_URL).host;
+  const protocol = new URL(WEBDAV_CONNECTOR_BASE_URL).protocol;
+  return `${protocol}//${encodeURIComponent(webdavToken)}:@${host}/webdav/by-id/${encodeURIComponent(
+    documentId
+  )}.${ext}`;
 }
 
 // Stellvertretung bei Abwesenheit (4.4a, P14-S11) - selbstverwaltete,

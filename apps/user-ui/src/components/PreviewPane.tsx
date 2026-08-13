@@ -7,12 +7,15 @@ import {
   type DocumentVersion,
   type OcrResultSummary,
   type RenditionSummary,
+  createWebdavEditToken,
   downloadDocumentVersion,
   downloadOcrPageImage,
   downloadRenditionContent,
   listDocumentVersions,
   listOcrResults,
   listRenditions,
+  officeLaunchInfo,
+  officeLaunchUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -370,6 +373,24 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
     }
   }
 
+  // Office-Direktbearbeitung (Post-Roadmap-Feature): Word/Excel/PowerPoint
+  // direkt aus dem Browser heraus zum Bearbeiten öffnen, über das
+  // Office-URI-Schema gegen webdav-connector - kein Passwort-Dialog, da ein
+  // kurzlebiges, dokumentgescoptes Token in der Start-URL steckt.
+  async function handleOfficeLaunch() {
+    if (!accessToken || !activeDocument) return;
+    const launch = officeLaunchInfo(currentContentType);
+    if (!launch) return;
+    try {
+      const { token: webdavToken } = await createWebdavEditToken(accessToken, activeDocument.id);
+      const url = officeLaunchUrl(webdavToken, activeDocument.id, launch.ext);
+      window.location.href = `${launch.scheme}:ofe|u|${url}`;
+    } catch {
+      // Bewusst kein separater Fehlerbereich - gleiches Muster wie
+      // handleDownload oben.
+    }
+  }
+
   if (!activeDocument) {
     return (
       <section className="preview-pane" aria-label={t("preview.paneLabel")}>
@@ -505,6 +526,11 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       <button type="button" onClick={handleDownload}>
         {t("folderBrowser.download")}
       </button>
+      {officeLaunchInfo(currentContentType) && (
+        <button type="button" onClick={handleOfficeLaunch}>
+          {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}
+        </button>
+      )}
     </section>
   );
 }

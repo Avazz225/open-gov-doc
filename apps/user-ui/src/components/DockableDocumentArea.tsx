@@ -14,6 +14,7 @@ import {
   DockviewApi,
   DockviewReact,
   DockviewReadyEvent,
+  type DockviewTheme,
   type IDockviewPanelProps,
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
@@ -131,6 +132,19 @@ const PANEL_COMPONENTS = {
   metadata: MetadataPanelContent,
   previewEmpty: PreviewEmptyContent,
   documentPreview: DocumentPreviewContent,
+};
+
+// Ohne eigenes `theme` fällt dockview-core auf sein eingebautes `themeAbyss`-
+// Preset zurück, dessen CSS-Klasse dieselben `--dv-*`-Variablen erneut mit
+// fest verdrahteten dunklen Werten belegt - das überschreibt die eigentlich
+// theme-fähige `--dv-*`→`--dms-*`-Zuordnung in globals.css innerhalb des
+// gesamten dockview-Hosts, unabhängig vom aktuellen `data-theme` (Bug: der
+// Arbeitsbereich blieb dadurch immer dunkel). Ein Theme-Objekt ohne eigene,
+// irgendwo definierte CSS-Klasse setzt keine eigenen `--dv-*`-Werte, sodass
+// die bereits vorhandene `:root`-Zuordnung ungehindert durchgereicht wird.
+const DMS_DOCKVIEW_THEME: DockviewTheme = {
+  name: "dms",
+  className: "dms-dockview-theme",
 };
 
 export interface DockableDocumentAreaProps {
@@ -429,7 +443,11 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
         </div>
         <WorkspaceContext.Provider value={contextValue}>
           <div className="dockable-document-area-host">
-            <DockviewReact components={PANEL_COMPONENTS} onReady={onReady} />
+            <DockviewReact
+              components={PANEL_COMPONENTS}
+              onReady={onReady}
+              theme={DMS_DOCKVIEW_THEME}
+            />
           </div>
         </WorkspaceContext.Provider>
       </div>

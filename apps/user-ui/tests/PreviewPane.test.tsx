@@ -18,6 +18,9 @@ vi.mock("@/lib/api", () => ({
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
   downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
+  officeLaunchInfo: vi.fn().mockReturnValue(null),
+  createWebdavEditToken: vi.fn(),
+  officeLaunchUrl: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

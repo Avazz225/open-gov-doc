@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, LargeBinary, String
+from sqlalchemy import Boolean, DateTime, Integer, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("auth")
@@ -32,3 +32,17 @@ class FederationIdentity(Base):
     private_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
     public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SsoConfig(Base):
+    """SSO/automatischer Login (Post-Roadmap-Feature) - installationsweiter
+    Schalter, gleiches Einzelzeilen-Muster wie document-services
+    `ShareLinkConfig`. `enabled=False` (Default) bedeutet: `login/page.tsx`
+    zeigt weiterhin unverändert das Passwort-Formular, keine automatische
+    Weiterleitung zu Keycloak."""
+
+    __tablename__ = "sso_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

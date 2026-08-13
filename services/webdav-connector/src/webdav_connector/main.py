@@ -57,6 +57,11 @@ _wsgidav_config = {
     # durchgereicht) - kein offizieller wsgidav-Schlüssel, aber der
     # dokumentierte Weg, eigene Provider-/DC-Parameter durchzureichen.
     "dms_auth_service_base_url": settings.auth_service_base_url,
+    # Office-Direktbearbeitung (Post-Roadmap-Feature): `DmsAuthDomainController`
+    # löst WebDAV-Edit-Tokens direkt (Ost-West, kein Gateway) gegen
+    # document-service auf, dasselbe Prinzip wie der `dms_auth_service_base_url`-
+    # Schlüssel oben, nur für einen anderen Aufrufer.
+    "dms_document_service_base_url": settings.document_service_base_url,
     # In-Prozess-Lock-Manager (RFC 4918 LOCK/UNLOCK, Opaque-Tokens, Timeouts,
     # If-Header-Prüfung) - ausreichend für eine einzelne Instanz, gleiches
     # Prinzip wie gateway-services `RateLimiter` (ADR 0005). Siehe

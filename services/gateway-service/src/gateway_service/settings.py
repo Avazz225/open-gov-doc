@@ -70,6 +70,12 @@ class Settings(BaseServiceSettings):
         "config-service:config/fleet-import",
         "document-service:public/share-links",
         "document-service:public/share-links/content",
+        # SSO/automatischer Login (Post-Roadmap-Feature): der Login-
+        # Einstiegspunkt selbst und der Code-Austausch-Rückweg - an dieser
+        # Stelle existiert noch kein DMS-Token, das der Bearer-Check prüfen
+        # könnte.
+        "auth-service:oidc/authorize",
+        "auth-service:oidc/callback",
     ]
 
     # Not-Shutdown (4.8, P6-S6): während aktivem Wartungsmodus werden alle
@@ -83,6 +89,12 @@ class Settings(BaseServiceSettings):
         "auth-service:refresh",
         "auth-service:me",
         "auth-service:superuser/status",
+        # SSO/automatischer Login (Post-Roadmap-Feature): gleiche Begründung
+        # wie bei "auth-service:login" oben - auch während aktivem
+        # Wartungsmodus muss sich zumindest der Superuser anmelden können,
+        # unabhängig davon, über welchen der beiden Login-Wege.
+        "auth-service:oidc/authorize",
+        "auth-service:oidc/callback",
         "permission-service:maintenance-mode",
         "permission-service:maintenance-mode/lift",
     ]

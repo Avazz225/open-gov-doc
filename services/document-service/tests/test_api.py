@@ -34,31 +34,76 @@ def _create_object_type(*, is_classified: bool = False) -> int:
     return response.json()["id"]
 
 
+def _grant_root_permission(principal_id: str, permission: str, role_prefix: str) -> None:
+    """Gemeinsamer Kern von `_grant_document_read`/`_grant_document_write` -
+    vergibt `permission` auf `root` für `principal_id` (4.2a). `POST
+    /role-assignments` liefert seit P17-S3 einen Status-Envelope
+    (`RoleAssignmentActionResult`) statt der Zuweisung direkt, IMMER mit
+    `201` (auch bei `status="pending_approval"`) - `raise_for_status()`
+    allein reicht seither nicht mehr. Ist `permission.role_assignment.
+    create` auf dieser laufenden Installation echt Vier-Augen-pflichtig
+    (z. B. durch ein zuvor angewendetes Konfigurationspaket, siehe ADR 0060
+    "Berechtigungsänderung"), wird die Pflicht nur für die Dauer dieses
+    Grants ausgesetzt und danach auf ihren ursprünglichen Wert
+    zurückgesetzt - Testhelfer dürfen eine echte, bewusst aktivierte
+    Installationseinstellung nicht dauerhaft überschreiben."""
+    config = httpx.get(
+        f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
+        timeout=30.0,
+    )
+    originally_required = config.status_code == 200 and config.json()["requires_approval"]
+    if originally_required:
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
+            json={"requires_approval": False},
+            timeout=30.0,
+        )
+    try:
+        role = httpx.post(
+            f"{PERMISSION_SERVICE_URL}/roles",
+            json={
+                "name": f"{role_prefix}-{uuid.uuid4().hex[:8]}",
+                "permissions": [permission],
+            },
+            timeout=30.0,
+        )
+        role.raise_for_status()
+        assignment = httpx.post(
+            f"{PERMISSION_SERVICE_URL}/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": principal_id,
+                "role_id": role.json()["id"],
+                "resource_id": "root",
+            },
+            timeout=30.0,
+        )
+        assignment.raise_for_status()
+        assert assignment.json()["status"] == "created", (
+            f"Rollenzuweisung wurde nicht sofort wirksam: {assignment.json()}"
+        )
+    finally:
+        if originally_required:
+            httpx.put(
+                f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
+                json={"requires_approval": True},
+                timeout=30.0,
+            )
+
+
 def _grant_document_read(principal_id: str) -> None:
     """Vergibt `document.read` auf `root` für `principal_id` (4.2a) - gleiches
     Muster wie search-service's `_grant_root_read`. Dokumente, die über den
     `upload()`-Helfer ohne `folder_id` angelegt werden, prüfen intern gegen
     die Ressource `"root"` (siehe main.py's Freigabelink-Endpunkte)."""
-    role = httpx.post(
-        f"{PERMISSION_SERVICE_URL}/roles",
-        json={
-            "name": f"share-link-test-role-{uuid.uuid4().hex[:8]}",
-            "permissions": ["document.read"],
-        },
-        timeout=30.0,
-    )
-    role.raise_for_status()
-    assignment = httpx.post(
-        f"{PERMISSION_SERVICE_URL}/role-assignments",
-        json={
-            "principal_type": "user",
-            "principal_id": principal_id,
-            "role_id": role.json()["id"],
-            "resource_id": "root",
-        },
-        timeout=30.0,
-    )
-    assignment.raise_for_status()
+    _grant_root_permission(principal_id, "document.read", "share-link-test-role")
+
+
+def _grant_document_write(principal_id: str) -> None:
+    """Office-Direktbearbeitung (Post-Roadmap-Feature) - Gegenstück zu
+    `_grant_document_read` mit `document.write` statt `document.read`, da
+    ein WebDAV-Edit-Token echte Bearbeitungsfähigkeit gewährt."""
+    _grant_root_permission(principal_id, "document.write", "webdav-edit-token-test-role")
 
 
 # Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
@@ -1625,6 +1670,145 @@ def test_public_share_link_returns_404_when_feature_disabled(client):
         assert response.status_code == 404
     finally:
         client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
+
+
+def test_create_webdav_edit_token_requires_principal_header(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/webdav-edit-tokens")
+    assert response.status_code == 401
+
+
+def test_create_webdav_edit_token_returns_404_for_unknown_document(client):
+    response = client.post(
+        "/documents/does-not-exist/webdav-edit-tokens", headers={"X-DMS-Principal": "alice"}
+    )
+    assert response.status_code == 404
+
+
+def test_create_webdav_edit_token_requires_write_permission(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/webdav-edit-tokens",
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_create_webdav_edit_token_succeeds_and_publishes_event(client, monkeypatch):
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert len(body["token"]) >= 32
+    # `principal_id` wird bewusst NICHT an den Client zurückgegeben.
+    assert "principal_id" not in body
+
+    created_events = [e for e in published if e.event_type == "document.webdav_edit_token.created"]
+    assert len(created_events) == 1
+
+
+def test_list_webdav_edit_tokens_requires_write_permission(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.get(
+        f"/documents/{document_id}/webdav-edit-tokens",
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_list_webdav_edit_tokens_returns_all_tokens_for_the_document(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    document_id = upload(client).json()["id"]
+
+    client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    )
+    client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    )
+
+    response = client.get(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    # Der Listen-Endpunkt setzt echte Schreibrechte voraus - hier DARF
+    # `principal_id` sichtbar sein (anders als beim Ausstellungs-Endpunkt).
+    assert all(item["principal_id"] == principal for item in response.json())
+
+
+def test_revoke_webdav_edit_token_requires_creator_or_admin_role(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    ).json()["token"]
+
+    forbidden = client.delete(
+        f"/webdav-edit-tokens/{token}", headers={"X-DMS-Principal": "someone-else"}
+    )
+    assert forbidden.status_code == 403
+
+    admin = client.delete(
+        f"/webdav-edit-tokens/{token}",
+        headers={"X-DMS-Principal": "an-admin", "X-DMS-Roles": "dms-admin"},
+    )
+    assert admin.status_code == 204
+
+
+def test_revoke_webdav_edit_token_unknown_token_returns_404(client):
+    response = client.delete(
+        "/webdav-edit-tokens/does-not-exist", headers={"X-DMS-Principal": "alice"}
+    )
+    assert response.status_code == 404
+
+
+def test_resolve_webdav_edit_token_returns_document_and_principal(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    ).json()["token"]
+
+    response = client.get(f"/internal/webdav-edit-tokens/{token}")
+    assert response.status_code == 200
+    assert response.json() == {"document_id": document_id, "principal_id": principal}
+
+
+def test_resolve_webdav_edit_token_unknown_token_returns_404(client):
+    response = client.get("/internal/webdav-edit-tokens/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_resolve_webdav_edit_token_revoked_returns_410(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_write(principal)
+    document_id = upload(client).json()["id"]
+    token = client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": principal}
+    ).json()["token"]
+    client.delete(f"/webdav-edit-tokens/{token}", headers={"X-DMS-Principal": principal})
+
+    response = client.get(f"/internal/webdav-edit-tokens/{token}")
+    assert response.status_code == 410
 
 
 def test_archive_endpoints_return_404_for_unknown_document(client):

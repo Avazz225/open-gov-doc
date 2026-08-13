@@ -308,3 +308,31 @@ class ShareLink(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class WebdavEditToken(Base):
+    """Kurzlebiges, auf genau ein Dokument gescoptes Token für die
+    Office-Direktbearbeitung aus dem Browser (Post-Roadmap-Feature, Office-
+    URI-Schema `ms-word:ofe|u|<url>` gegen `webdav-connector`) - strukturell
+    fast identisch zu `ShareLink` (`token` ist wieder PK UND der in der
+    Start-URL verwendete Wert, `secrets.token_urlsafe`), aber anders als
+    `ShareLink` NICHT rein lesend: `principal_id` ist die Identität, die
+    `webdav-connector`s `DmsAuthDomainController` bei erfolgreicher Auflösung
+    als `environ["wsgidav.auth.user_name"]` einsetzt und die dadurch beim
+    späteren Check-in (`POST /documents/{id}/versions`) als `created_by`/
+    Sperrinhaber verwendet wird - ein Freigabelink braucht das nie, da er nie
+    schreibt. `expires_at` ist bewusst großzügiger bemessen als bei
+    `ShareLink` (Stunden statt Minuten, siehe `settings.
+    webdav_edit_token_ttl_hours`), da eine Office-Bearbeitungssitzung über
+    die gesamte Dauer hinweg WebDAV-Anfragen stellt (Sperren/Lesen/
+    Zwischenspeichern/Entsperren), nicht nur beim Öffnen."""
+
+    __tablename__ = "webdav_edit_token"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(128), index=True)
+    principal_id: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)

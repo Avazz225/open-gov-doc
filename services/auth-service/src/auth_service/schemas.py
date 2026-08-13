@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -19,6 +20,34 @@ class TokenResponse(BaseModel):
     refresh_token: str
     expires_in: int
     token_type: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class OidcAuthorizeOut(BaseModel):
+    """SSO/automatischer Login (Post-Roadmap-Feature) - der Client navigiert
+    selbst zu dieser URL, kein serverseitiger 307-Redirect (konsistent mit
+    dem übrigen "Service liefert Daten, Client navigiert"-Stil dieses
+    Projekts)."""
+
+    authorization_url: str
+
+
+class OidcCallbackRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+class SsoConfigIn(BaseModel):
+    enabled: bool = False
+
+
+class SsoConfigOut(SsoConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
 
 
 class UserCreate(BaseModel):

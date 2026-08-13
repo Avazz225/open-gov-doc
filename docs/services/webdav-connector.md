@@ -42,6 +42,15 @@ wsgidavs echter `do_PUT`-Handler (`request_server.py`) ruft `fileobj.close()` au
 
 `DmsAuthDomainController` (`wsgidav.dc.base_dc.BaseDomainController`) bildet WebDAV-Basic-Auth (das, was Explorer/Finder/Word beim Verbinden mit einem Netzlaufwerk senden) auf `auth-service`s bestehendes `POST /login` ab — kein zweiter, connector-eigener Nutzerspeicher. Bewusst nicht anonym erreichbar: anders als die übrigen Backend-Services (deren Ports laut ADR 0005 nur aus Entwickler-Komfort direkt offen sind, echte Nutzung läuft über das authentifizierende Gateway) ist ein WebDAV-Connector sein eigener, direkt von externen Programmen angesprochener Endpunkt — ohne echte Authentifizierung hier wäre jedes Dokument für jeden mit Netzwerkzugriff lesbar/schreibbar. Digest-Auth ist deaktiviert (Basic über TLS-Termination in der Zielumgebung gilt als ausreichend).
 
+## Office-Direktbearbeitung: `by-id`-Pfad + Edit-Token (Ad-hoc Post-Roadmap, siehe ADR 0061)
+
+Zwei additive Ergänzungen, ohne den bestehenden pfadbasierten Fluss zu ändern:
+
+- **`DmsDavProvider.get_resource_inst()`** erkennt Pfade mit Präfix `by-id/` (z. B. `by-id/<document-id>.docx`) VOR dem üblichen `resolve_path()`-Baumdurchlauf und löst sie direkt über `self.tree.get_document(document_id)` auf — O(1) statt O(Baumtiefe). Die `.ext`-Endung ist rein kosmetisch (Office' Dateityperkennung beim Öffnen) und wird serverseitig verworfen.
+- **`DmsAuthDomainController.basic_auth_user()`** behandelt ein leeres Passwort als Zeichen dafür, dass der übergebene Benutzername ein `document-service`-`WebdavEditToken` ist, nicht ein echter Benutzername: löst es gegen `GET /internal/webdav-edit-tokens/{token}` auf (Ost-West, direkt gegen `document_service_base_url`, kein Umweg über `/login`) und überschreibt `environ["wsgidav.auth.user_name"]` mit der aufgelösten `principal_id` — nicht das rohe Token stehen lassen, sonst würde ein späterer Check-in fälschlich das Token statt der echten Identität als Sperrinhaber verwenden. Der bestehende Benutzername+Passwort-Zweig (echter Netzlaufwerk-Mount) bleibt unverändert.
+
+Zusammen ergeben beide die Zieladresse für den Office-URI-Handler (`user-ui`): `https://<token>:@<host>/webdav/by-id/<document-id>.<ext>`.
+
 ## Lizenzierung (3.3, P9-S2-Muster)
 
 Konzept 3.3 nennt Connectoren wörtlich als Beispiel für lizenzierbare Komponenten. `registry-service`s `licensable_components` enthält `"webdav-connector": "demo"` (identisches Muster wie `workflow-service`, siehe `docs/services/registry-service.md`). Da der eigentliche WebDAV-Verkehr nicht über FastAPI-Routen läuft (kein `Depends()`-Gate möglich), prüft `DmsDavProvider.check_license(action)` direkt in den wsgidav-Callback-Methoden: `"unlicensed"` blockiert jeden Zugriff (`get_resource_inst`), `"demo"` blockiert nur Schreiboperationen (`create_collection`, `end_write`, `handle_delete`, `handle_move` — jeweils auf Ordner und Dokument).

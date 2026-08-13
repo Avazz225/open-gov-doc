@@ -267,6 +267,11 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
+      # SSO/automatischer Login (Post-Roadmap-Feature): `GET /oidc/authorize`
+      # liefert eine URL, zu der der BROWSER navigiert - der interne
+      # Compose-Hostname `keycloak` ist dafuer nicht aufloesbar, der Browser
+      # braucht den extern gemappten Port (siehe `KEYCLOAK_PORT` oben).
+      DMS_KEYCLOAK_PUBLIC_BASE_URL: http://localhost:${KEYCLOAK_PORT:-8080}
       DMS_KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       DMS_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
       DMS_KEYCLOAK_CLIENT_SECRET: ${AUTH_SERVICE_CLIENT_SECRET:-dms-api-dev-secret}
@@ -1351,6 +1356,10 @@ services:
         # Vom Browser aus erreichbare Adresse des Gateways (nicht die interne
         # Compose-DNS) - der Build brennt sie fest ein, siehe apps/user-ui/README.md.
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${USER_UI_GATEWAY_BASE_URL:-http://localhost:8009}
+        # Office-Direktbearbeitung (Post-Roadmap-Feature): vom Browser aus
+        # erreichbare Adresse von webdav-connector - der Browser spricht
+        # diesen Dienst für die Office-URI-Schema-Start-URL direkt an.
+        NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL: ${USER_UI_WEBDAV_CONNECTOR_BASE_URL:-http://localhost:8027}
     restart: unless-stopped
     ports:
       - "${USER_UI_PORT:-3000}:80"

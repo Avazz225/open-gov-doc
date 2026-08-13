@@ -312,3 +312,39 @@ class PublicShareLinkOut(BaseModel):
     content_type: str | None
     size_bytes: int
     expires_at: datetime
+
+
+class WebdavEditTokenOut(BaseModel):
+    """Office-Direktbearbeitung (Post-Roadmap-Feature) - liefert bewusst
+    NICHT `principal_id` an den Client zurück (der Client kennt seine eigene
+    Identität bereits über `X-DMS-Principal`, das Token selbst ist die
+    einzige Information, die `webdav-connector` später braucht)."""
+
+    token: str
+    expires_at: datetime
+
+
+class WebdavEditTokenSummary(BaseModel):
+    """Für die Liste aktiver/vergangener Tokens (`GET .../webdav-edit-tokens`)
+    - anders als `WebdavEditTokenOut` hier das volle Bild inkl. `principal_id`,
+    da dieser Endpunkt bereits eine bestehende Schreibberechtigung voraussetzt
+    (kein öffentlicher/token-basierter Zugriff wie bei den Freigabelinks)."""
+
+    model_config = {"from_attributes": True}
+
+    token: str
+    document_id: str
+    principal_id: str
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    revoked_by: str | None
+
+
+class WebdavEditTokenResolveOut(BaseModel):
+    """Nur für den internen (Ost-West, kein Gateway) Aufruf von
+    `webdav-connector` gedacht - siehe `GET /internal/webdav-edit-tokens/
+    {token}`."""
+
+    document_id: str
+    principal_id: str

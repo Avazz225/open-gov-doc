@@ -5,6 +5,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 from dms_auth_client import TokenValidator, make_current_user_dependency
 from dms_common import configure_logging
@@ -28,7 +29,7 @@ from auth_service.consumer import start_consuming
 from auth_service.directory_federation import CONTACT_DIRECTORY_CAPABILITY
 from auth_service.federation_hub_client import FederationHubClient
 from auth_service.keycloak_client import InvalidCredentialsError
-from auth_service.models import Base, FederationIdentity
+from auth_service.models import Base, FederationIdentity, SsoConfig
 from auth_service.permission_client import PermissionServiceClient
 from auth_service.schemas import (
     DirectoryEntryOut,
@@ -36,9 +37,14 @@ from auth_service.schemas import (
     DirectorySearchRequest,
     FederatedDirectoryEntryOut,
     LoginRequest,
+    LogoutRequest,
+    OidcAuthorizeOut,
+    OidcCallbackRequest,
     RealmRoleOut,
     RealmRolesRequest,
     RefreshRequest,
+    SsoConfigIn,
+    SsoConfigOut,
     SuperuserStatus,
     ThemePreference,
     TokenResponse,
@@ -53,6 +59,7 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 _FEDERATION_IDENTITY_ID = 1
+_SSO_CONFIG_ID = 1
 
 
 async def _superuser_poll_loop() -> None:
@@ -559,3 +566,113 @@ async def deactivate_superuser() -> None:
         {"reason": "manual"},
         actor=superuser.get_principal_id(app.state.keycloak_admin),
     )
+
+
+# --- SSO/automatischer Login (Post-Roadmap-Feature, Kerberos/SPNEGO über
+# Keycloak) --------------------------------------------------------------
+
+
+async def _get_or_create_sso_config(session: AsyncSession) -> SsoConfig:
+    config = await session.get(SsoConfig, _SSO_CONFIG_ID)
+    if config is None:
+        config = SsoConfig(id=_SSO_CONFIG_ID, enabled=False, updated_at=datetime.now(UTC))
+        session.add(config)
+        await session.flush()
+    return config
+
+
+def _redirect_uri_origin_allowed(redirect_uri: str) -> bool:
+    """Open-Redirect-Absicherung für `GET /oidc/authorize`/`POST /oidc/
+    callback` - `redirect_uri` kommt vom Client, muss also gegen eine feste
+    Allow-Liste geprüft werden, exakt gleiches Prinzip wie gateway-services
+    `cors_allowed_origins`."""
+    parsed = urlparse(redirect_uri)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    return origin in settings.sso_redirect_uri_allowed_origins
+
+
+@app.get("/oidc/authorize", response_model=OidcAuthorizeOut)
+async def oidc_authorize(redirect_uri: str, state: str) -> OidcAuthorizeOut:
+    """SSO/automatischer Login - der Login-Einstiegspunkt selbst, daher
+    öffentlich (kein DMS-Token existiert an dieser Stelle noch). Liefert nur
+    die URL zurück, der Client navigiert selbst dorthin (kein serverseitiger
+    Redirect, konsistent mit dem übrigen Service-Stil dieses Projekts)."""
+    if not _redirect_uri_origin_allowed(redirect_uri):
+        raise HTTPException(status_code=400, detail="redirect_uri nicht erlaubt")
+    state_param = state or str(uuid.uuid4())
+    return OidcAuthorizeOut(
+        authorization_url=keycloak_client.authorization_url(
+            settings, redirect_uri=redirect_uri, state=state_param
+        )
+    )
+
+
+@app.post("/oidc/callback", response_model=TokenResponse)
+async def oidc_callback(
+    payload: OidcCallbackRequest, x_dms_maintenance_active: str = Header(default="false")
+) -> TokenResponse:
+    """Tauscht den von Keycloaks Redirect gelieferten `code` serverseitig
+    gegen Tokens - identisches Antwortformat wie `POST /login`, damit sich am
+    Frontend-Token-Speichermechanismus nichts ändern muss. Öffentlich wie
+    `/oidc/authorize` (der Aufrufer hat noch kein DMS-Token).
+
+    Gleiche Not-Shutdown-Sperre wie `POST /login` (4.8) - dort wird VOR dem
+    eigentlichen Login geprüft, hier erst DANACH (der Benutzername ist vor
+    dem Code-Austausch nicht bekannt): ist der Wartungsmodus aktiv und der
+    Token gehört nicht dem Superuser, werden die frisch ausgestellten Tokens
+    verworfen statt zurückgegeben - sonst würde SSO die Sperre umgehen, die
+    der Formular-Login bereits durchsetzt."""
+    if not _redirect_uri_origin_allowed(payload.redirect_uri):
+        raise HTTPException(status_code=400, detail="redirect_uri nicht erlaubt")
+    try:
+        tokens = await keycloak_client.exchange_code(
+            settings, code=payload.code, redirect_uri=payload.redirect_uri
+        )
+    except InvalidCredentialsError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    if x_dms_maintenance_active.lower() == "true":
+        claims = _validator.validate(tokens["access_token"])
+        if claims.get("preferred_username") != superuser.SUPERUSER_USERNAME:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Systemweite Notfallsperre aktiv - Login nur für den Superuser möglich",
+            )
+    return TokenResponse(**tokens)
+
+
+@app.get("/sso-config", response_model=SsoConfigOut)
+async def get_sso_config(session: AsyncSession = Depends(get_session)) -> SsoConfigOut:
+    """Ungegatet wie `GET /share-link-config` bei document-service - reine
+    Information, ob SSO aktiv ist, keine sensiblen Daten. `login/page.tsx`
+    fragt dies VOR dem Anzeigen des Passwort-Formulars ab."""
+    config = await _get_or_create_sso_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/sso-config", response_model=SsoConfigOut)
+async def put_sso_config(
+    payload: SsoConfigIn,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> SsoConfigOut:
+    """Anders als `GET` gegated - ein An-/Ausschalten von SSO ist
+    sicherheitsrelevant (`admin.user_management`, gleiche Domäne wie
+    Nutzerverwaltung selbst)."""
+    await _require_user_management(user)
+    config = await _get_or_create_sso_config(session)
+    config.enabled = payload.enabled
+    config.updated_at = datetime.now(UTC)
+    await session.commit()
+    return config
+
+
+@app.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(payload: LogoutRequest) -> None:
+    """Beendet die Sitzung wirklich auf Keycloak-Seite (siehe
+    `keycloak_client.end_session`-Docstring) - ohne diesen Endpunkt gab es
+    bislang GAR KEINEN Logout-Mechanismus, "Abmelden" löschte nur lokale
+    Tokens. Best-effort aus Sicht des Frontends (`auth-context.tsx`s
+    `logout()` blockiert den lokalen Logout nicht bei einem Fehler hier)."""
+    await keycloak_client.end_session(settings, payload.refresh_token)

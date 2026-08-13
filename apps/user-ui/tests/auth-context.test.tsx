@@ -9,6 +9,7 @@ vi.mock("@/lib/api", () => ({
   login: (...args: unknown[]) => loginMock(...args),
   getCurrentUser: (...args: unknown[]) => getCurrentUserMock(...args),
   refreshToken: vi.fn(),
+  logoutSession: vi.fn().mockResolvedValue(undefined),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {

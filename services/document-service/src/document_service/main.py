@@ -76,6 +76,9 @@ from document_service.schemas import (
     TrashResult,
     UploadConfigIn,
     UploadConfigOut,
+    WebdavEditTokenOut,
+    WebdavEditTokenResolveOut,
+    WebdavEditTokenSummary,
 )
 from document_service.settings import Settings
 from document_service.storage_client import (
@@ -1705,6 +1708,140 @@ async def revoke_share_link_endpoint(
     await session.commit()
     await publish_event(
         "document.share_link.revoked", link.document_id, {"token": token}, actor=x_dms_principal
+    )
+
+
+# --- Office-Direktbearbeitung (Post-Roadmap-Feature, WebDAV-Edit-Token) -----
+# `ms-word:ofe|u|<url>`/`ms-excel:ofe|u|<url>`/`ms-powerpoint:ofe|u|<url>`
+# gegen `webdav-connector` - strukturell an den Freigabelink-Block oben
+# angelehnt, aber NICHT rein lesend (siehe `check_write` statt `check_read`)
+# und mit deutlich großzügigerer Gültigkeitsdauer (siehe settings.py).
+
+
+@app.post(
+    "/documents/{document_id}/webdav-edit-tokens",
+    response_model=WebdavEditTokenOut,
+    status_code=201,
+)
+async def create_webdav_edit_token(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> WebdavEditTokenOut:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # Schreibrecht, nicht nur Leserecht - dieses Token gewährt tatsächliche
+    # Bearbeitungsfähigkeit (Check-in per WebDAV-PUT), anders als ein
+    # Freigabelink.
+    allowed = await app.state.permission_client.check_write(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Schreibrecht auf dieses Dokument")
+
+    expires_at = datetime.now(UTC) + timedelta(hours=settings.webdav_edit_token_ttl_hours)
+    edit_token = await repository.create_webdav_edit_token(
+        session, document_id=document_id, principal_id=x_dms_principal, expires_at=expires_at
+    )
+    await session.commit()
+    await publish_event(
+        "document.webdav_edit_token.created",
+        document_id,
+        {"token": edit_token.token, "expires_at": edit_token.expires_at.isoformat()},
+        actor=x_dms_principal,
+    )
+    return edit_token
+
+
+@app.get("/documents/{document_id}/webdav-edit-tokens", response_model=list[WebdavEditTokenSummary])
+async def list_webdav_edit_tokens(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[WebdavEditTokenSummary]:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    allowed = await app.state.permission_client.check_write(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Schreibrecht auf dieses Dokument")
+
+    tokens = await repository.list_webdav_edit_tokens_for_document(session, document_id)
+    await session.commit()
+    return tokens
+
+
+@app.delete("/webdav-edit-tokens/{token}", status_code=204)
+async def revoke_webdav_edit_token_endpoint(
+    token: str,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    edit_token = await repository.get_webdav_edit_token(session, token)
+    if edit_token is None:
+        raise HTTPException(status_code=404, detail=f"WebDAV-Edit-Token {token!r} unbekannt")
+    if edit_token.principal_id != x_dms_principal and not _has_share_link_admin_role(x_dms_roles):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur die anfordernde Person oder eine Admin-Rolle darf dieses Token widerrufen",
+        )
+
+    await repository.revoke_webdav_edit_token(session, token, revoked_by=x_dms_principal)
+    await session.commit()
+    await publish_event(
+        "document.webdav_edit_token.revoked",
+        edit_token.document_id,
+        {"token": token},
+        actor=x_dms_principal,
+    )
+
+
+@app.get(
+    "/internal/webdav-edit-tokens/{token}",
+    response_model=WebdavEditTokenResolveOut,
+)
+async def resolve_webdav_edit_token(
+    token: str, session: AsyncSession = Depends(get_session)
+) -> WebdavEditTokenResolveOut:
+    """Rein Ost-West: wird von `webdav-connector`s `DmsAuthDomainController`
+    direkt gegen `document_service_base_url` aufgerufen (kein Gateway, kein
+    `X-DMS-Principal` - das Token selbst IST hier die Authentisierung).
+    Erneute Rechteprüfung bewusst nicht nötig (nur bei Ausstellung geprüft,
+    siehe ADR) - hier wird nur Ablauf/Widerruf sowie die fortgesetzte
+    Existenz des Dokuments geprüft."""
+    edit_token = await repository.get_webdav_edit_token(session, token)
+    if edit_token is None:
+        raise HTTPException(status_code=404, detail="WebDAV-Edit-Token unbekannt")
+    if not repository.is_webdav_edit_token_active(edit_token, datetime.now(UTC)):
+        detail = (
+            "WebDAV-Edit-Token widerrufen"
+            if edit_token.revoked_at
+            else "WebDAV-Edit-Token abgelaufen"
+        )
+        raise HTTPException(status_code=410, detail=detail)
+    try:
+        await repository.get_document(session, edit_token.document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Dokument nicht mehr vorhanden") from exc
+    return WebdavEditTokenResolveOut(
+        document_id=edit_token.document_id, principal_id=edit_token.principal_id
     )
 
 

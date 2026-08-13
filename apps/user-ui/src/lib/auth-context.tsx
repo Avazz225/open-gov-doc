@@ -9,7 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, getCurrentUser, login as apiLogin, refreshToken as apiRefresh } from "./api";
+import {
+  ApiError,
+  getCurrentUser,
+  login as apiLogin,
+  logoutSession,
+  refreshToken as apiRefresh,
+} from "./api";
 import type { CurrentUser, TokenResponse } from "./api";
 
 const STORAGE_KEY = "dms.tokens";
@@ -59,6 +65,11 @@ interface AuthContextValue {
   accessToken: string | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
+  // SSO/automatischer Login (Post-Roadmap-Feature): `login/callback/page.tsx`
+  // übernimmt damit eine per `POST /oidc/callback` erhaltene Session über
+  // denselben Speicherpfad wie ein regulärer Formular-Login, statt ihn zu
+  // duplizieren.
+  applySession: (response: TokenResponse) => Promise<void>;
   logout: () => void;
 }
 
@@ -97,8 +108,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // SSO/automatischer Login (Post-Roadmap-Feature): beendet zusätzlich die
+    // Sitzung wirklich auf Keycloak-Seite (best-effort, blockiert den
+    // lokalen Logout nicht bei einem Netzwerkfehler) - ohne das würde ein
+    // SPNEGO-fähiger Browser sich beim nächsten Besuch sofort wieder
+    // automatisch anmelden, da Keycloaks eigene SSO-Sitzung unangetastet
+    // bliebe.
+    if (tokens) {
+      logoutSession(tokens.refreshToken).catch(() => {
+        // Bewusst ignoriert - siehe Kommentar oben.
+      });
+    }
     clearSession();
-  }, [clearSession]);
+  }, [clearSession, tokens]);
 
   // Proaktiver Refresh statt reaktiv auf 401 zu warten - einfacher für dieses
   // Grundgerüst, da nur ein einziger, vorhersagbarer Ablaufzeitpunkt je
@@ -138,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     accessToken: tokens?.accessToken ?? null,
     isLoading,
     login,
+    applySession,
     logout,
   };
 

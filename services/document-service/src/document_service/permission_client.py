@@ -28,5 +28,22 @@ class PermissionServiceClient:
         response.raise_for_status()
         return bool(response.json()["allowed"])
 
+    async def check_write(self, *, principal_id: str, resource_id: str) -> bool:
+        """Office-Direktbearbeitung (Post-Roadmap-Feature): ein WebDAV-Edit-
+        Token gewährt tatsächliche Schreibrechte, nicht nur Lesezugriff wie
+        ein Freigabelink - deshalb hier `access_type="write"` statt
+        `check_read`s `"read"`."""
+        response = await self._client.get(
+            "/check",
+            params={
+                "principal_id": principal_id,
+                "resource_id": resource_id,
+                "permission": "document.write",
+                "access_type": "write",
+            },
+        )
+        response.raise_for_status()
+        return bool(response.json()["allowed"])
+
     async def close(self) -> None:
         await self._client.aclose()

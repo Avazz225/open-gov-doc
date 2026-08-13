@@ -14,7 +14,7 @@ async def client():
     await c.close()
 
 
-async def test_has_permission_reflects_domain_admin_users_role(client):
+async def test_has_permission_reflects_domain_admin_users_role(client, role_assignment_immediate):
     """Echter Aufruf gegen den laufenden `permission-service` (kein Mocking,
     gleiches Prinzip wie P6-S4s Cross-Service-Tests) - `domain-admin-users`
     wird von `permission-service` selbst beim Start geseedet (P6-S5)."""
@@ -29,7 +29,7 @@ async def test_has_permission_reflects_domain_admin_users_role(client):
     assert after is True
 
 
-async def test_ensure_role_assignment_is_idempotent(client):
+async def test_ensure_role_assignment_is_idempotent(client, role_assignment_immediate):
     principal_id = f"test-{uuid.uuid4().hex[:8]}"
 
     await client.ensure_role_assignment(principal_id=principal_id, role_name="domain-admin-users")

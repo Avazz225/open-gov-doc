@@ -18,6 +18,7 @@ from document_service.models import (
     ShareLinkConfig,
     TrashConfig,
     UploadConfig,
+    WebdavEditToken,
 )
 
 _UPLOAD_CONFIG_ID = 1
@@ -962,3 +963,53 @@ async def revoke_share_link(session: AsyncSession, token: str, *, revoked_by: st
 
 def is_share_link_active(link: ShareLink, now: datetime) -> bool:
     return link.revoked_at is None and link.expires_at > now
+
+
+# --- Office-Direktbearbeitung (Post-Roadmap-Feature, WebDAV-Edit-Token) -----
+
+
+async def create_webdav_edit_token(
+    session: AsyncSession, *, document_id: str, principal_id: str, expires_at: datetime
+) -> WebdavEditToken:
+    token = WebdavEditToken(
+        token=secrets.token_urlsafe(32),
+        document_id=document_id,
+        principal_id=principal_id,
+        created_at=datetime.now(UTC),
+        expires_at=expires_at,
+    )
+    session.add(token)
+    await session.flush()
+    return token
+
+
+async def list_webdav_edit_tokens_for_document(
+    session: AsyncSession, document_id: str
+) -> list[WebdavEditToken]:
+    result = await session.execute(
+        select(WebdavEditToken)
+        .where(WebdavEditToken.document_id == document_id)
+        .order_by(WebdavEditToken.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_webdav_edit_token(session: AsyncSession, token: str) -> WebdavEditToken | None:
+    return await session.get(WebdavEditToken, token)
+
+
+async def revoke_webdav_edit_token(
+    session: AsyncSession, token: str, *, revoked_by: str
+) -> WebdavEditToken:
+    edit_token = await get_webdav_edit_token(session, token)
+    if edit_token is None:
+        raise NotFoundError(f"WebDAV-Edit-Token {token!r} unbekannt")
+    if edit_token.revoked_at is None:
+        edit_token.revoked_at = datetime.now(UTC)
+        edit_token.revoked_by = revoked_by
+        await session.flush()
+    return edit_token
+
+
+def is_webdav_edit_token_active(token: WebdavEditToken, now: datetime) -> bool:
+    return token.revoked_at is None and token.expires_at > now

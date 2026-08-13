@@ -36,6 +36,10 @@ betriebenen `fleet-management-service` — `registry-service:installation`,
 `config-service:config/fleet-import` (**bis P17-S1**: `config-service:
 config/import`, siehe "Korrektur" unten), siehe
 [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md);
+seit dem Ad-hoc-Post-Roadmap-SSO-Feature zusätzlich `auth-service:oidc/authorize` und
+`auth-service:oidc/callback` (der Login-Einstiegspunkt selbst, gleiche Begründung wie
+`login`/`refresh` — kein Token vorhanden, bevor die Anmeldung überhaupt stattgefunden hat; beide auch
+in `maintenance_mode_allowed_routes`, siehe [ADR 0062](../adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md));
 seit P14-S10 zusätzlich `document-service:public/share-links` und
 `document-service:public/share-links/content` für den öffentlichen
 Freigabelink (4.2a) — anonyme Betrachter besitzen keinen Bearer-Token dieser

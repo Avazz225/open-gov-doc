@@ -13,14 +13,15 @@ REALM_ROLES_TEST_PRINCIPAL = "auth-service-realm-roles-tests"
 
 
 @pytest.fixture
-def authorized_principal():
+def authorized_principal(role_assignment_immediate):
     with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
         roles = pc.get("/roles").json()
         role = next(r for r in roles if r["name"] == "domain-admin-users")
         # Seit P17-S3 (4.3/14.2) liefert `POST /role-assignments` das
-        # gegatete `RoleAssignmentActionResult` - ohne aktivierte
-        # Genehmigungspflicht (Default) bleibt `role_assignment` sofort
-        # gesetzt, siehe permission_service/schemas.py.
+        # gegatete `RoleAssignmentActionResult` - `role_assignment_immediate`
+        # setzt die Genehmigungspflicht für diesen Test aus, damit
+        # `role_assignment` hier garantiert sofort gesetzt ist (statt nur
+        # `pending_approval`), siehe permission_service/schemas.py.
         assignment = pc.post(
             "/role-assignments",
             json={

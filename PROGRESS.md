@@ -4,7 +4,7 @@
 
 **Zuletzt abgeschlossen:** P17-S3 — eGov-Konfigurationspaket Teil 2 (14.2), **letzte Session der Phase 17 UND der gesamten Session-Roadmap (107/107)**: bei der Umsetzung ein echter Befund, der die P17-S0-Annahme korrigierte — von den drei in 14.2 für die Vier-Augen-Vorbelegung genannten Aktionstypen hatten "Berechtigungsänderung" und "Konfigurationsimport" keinerlei tatsächliche Durchsetzung im Code; beide echt nachgerüstet (`permission-service`s `POST /role-assignments` und `config-service`s `POST /config/import` prüfen jetzt `permission.role_assignment.create`/`config.import` über den bestehenden generischen Vier-Augen-Mechanismus, 4.3 — neues `RoleAssignmentActionResult`/`ImportActionResult`-Status-Envelope, `config-service` bekam dafür seinen ersten NATS-Konsumenten überhaupt). Drei BPMN-Prozessvorlagen (`egov_freigabe`/`egov_kenntnisnahme`/`egov_aufgabe`) live verifiziert, Geschäftskalender `DE-Bund` + 16 vollständige Landeskalender (reale Termine 2026/2027, Gauß'sche Osterformel), zwei erweiterte Admin-Rollen (`Registratur/Aktenverwaltung`, `Amtsleitung`), `realm_roles: ["dms-poststelle"]`. Zwei echte Bugs bei der Regression gefunden/behoben (fehlende `DMS_NATS_URL` für `config-service` in `infra/docker-compose.yml`; `config-service` fälschlich in `scripts/run-tests.sh`s `CONSUMER_SERVICES`). Vollständig live über die echte `/config-packages/`-Seite angewendet, inkl. beider Vier-Augen-Roundtrips bis zum Schluss durchgespielt. `manifest.version` `0.1.0`→`1.0.0`. Details siehe [ADR 0060](docs/adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md), `packages/egov/README.md` und "eGov-Konfigurationspaket Teil 2 (Phase 17, P17-S3)" unten. `graphify dms/ --update` im Anschluss ausgeführt (Phasenabschluss).
 
-**Nächste Session:** Keine — die in `IMPLEMENTATION_PLAN.md` definierte Session-Roadmap ist mit P17-S3 vollständig abgeschlossen (alle 107 Sessions, Phasen 0–17). Etwaige weitere Arbeit (neue Konfigurationspakete außerhalb des eGov-Pakets, 14.3-Kandidaten, vom Nutzer neu priorisierte Erweiterungen) bräuchte eine neue, hier noch nicht existierende Phase — kein automatischer Nachfolger.
+**Nächste Session:** **P18-S1** (Phase 18 — Auth-Entkopplung von Keycloak: lokale technische Konten + eigener Token-Issuer). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -1162,6 +1162,151 @@ Nutzer-Feedback zur Dokumentenvorschau (2.4/3.7), keine reguläre `PN-SN`-Sessio
 - **Vollständig live gegen den gebauten Stack verifiziert**: vollständiges `packages/egov/config.json` über die echte `/config-packages/`-Seite (Gateway, echter `config-admin`-Login) angewendet — 4 Objekttypen aktualisiert, 3 Workflows angelegt, 17 Geschäftskalender angelegt, 2 Rollen angelegt, 5 Vier-Augen-Konfigurationen aktiviert, `dms-poststelle` bestätigt. Beide neu gegateten Aktionstypen end-to-end durchgespielt: `config.import` (winziges Test-Dokument → `pending_approval` → `POST .../approve` als zweiter Principal → Konsument wendet an, per Realm-Rollen-Abfrage bestätigt) und `permission.role_assignment.create` (Zuweisung → `pending_approval` → Genehmigung → Konsument legt an, per `GET /role-assignments` bestätigt). Alle für die Verifikation angelegten Testartefakte (Test-Realm-Rolle direkt über die Keycloak-Admin-API entfernt, da `auth-service` keinen `DELETE`-Endpunkt für Realm-Rollen anbietet — bekannte, hier nicht behobene Lücke; Test-Rollenzuweisung über den regulären `DELETE /role-assignments/{id}`-Endpunkt) wieder entfernt; die eigentlichen Paketinhalte (Rollen/Kalender/Workflows/`dms-poststelle`/aktivierte Vier-Augen-Konfiguration) bleiben bewusst bestehen — sie sind das tatsächliche Ergebnis der Paketanwendung auf dieser Installation, kein Testartefakt.
 - Doku: neuer [ADR 0060](docs/adr/0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md), `packages/egov/README.md` (Teil-2-Abschnitt), `docs/services/permission-service.md` (`POST /role-assignments`-Gating), `docs/services/config-service.md` (`config.import`-Gating + neuer Konsument), `docs/services/admin-ui.md` (Testzahl-Update), `IMPLEMENTATION_PLAN.md` (P17-S3-Zeile ✅ mit Befund, **Roadmap vollständig**).
 - `graphify dms/ --update` im Anschluss ausgeführt (Phasenabschluss — letzte Phase der gesamten Roadmap).
+
+### Post-Roadmap: graphify-Vollneuaufbau + User-UI-Bugfixes (2026-08-11, nach P17-S3)
+
+Die Session-Roadmap ist mit P17-S3 vollständig abgeschlossen (107/107) - die folgenden Punkte sind
+kein nummerierter Plan-Eintrag mehr, sondern direktes Nutzer-Feedback nach Abschluss.
+
+- **`graphify dms/`-Vollneuaufbau statt `--update`** (Nutzerwunsch: die inkrementellen Updates wurden
+  als möglicherweise nicht sauber gelaufen eingeschätzt): kompletter Neubau ergab **10173 Knoten,
+  19815 Kanten, 670 Communities** — netto -410 Knoten gegenüber dem vorherigen (inkrementell
+  gewachsenen) Graphen, Shrink-Guard bewusst mit `force=True` übergangen (exakt der vom Guard selbst
+  als legitim beschriebene Fall: "Run a full rebuild to be safe"). **Zwei echte Abdeckungslücken
+  gefunden und geschlossen** (Nutzerhinweis "ich sehe aktuell nur Doku"/"packages, scripts etc."):
+  `packages/egov/config.json` wurde zwar als `code` erkannt, aber vom Struktur-Parser mangels
+  JSON-Grammatik mit 0 Knoten extrahiert; alle 21 `.bpmn`/`.dmn`-Dateien im Projekt (eGov-Prozessvorlagen,
+  Migration-Service-Ressourcen, workflow-service-Testfixtures) wurden von `detect()` in **keiner**
+  Kategorie erfasst (weder `code` noch `document`). Beide manuell als dritten Semantik-Chunk an einen
+  Subagenten gegeben (BPMN/DMN/JSON als Dokumentinhalt behandelt, da graphifys Struktur-Parser diese
+  Formate nicht kennt) — 100 zusätzliche Knoten/99 Kanten/3 Hyperedges, u. a. die drei eGov-Umlaufmappen-
+  Vorlagen als zusammengehörige `umlaufmappen_muster`-Hyperedge sowie `packages/egov/config.json`s
+  Manifest/Objekttypen/Rollen/Kalender/Vier-Augen-Konfiguration einzeln modelliert. 670 Communities
+  wurden mangels praktikabler Einzel-Handbenennung programmatisch aus dem dominanten Quellpfad je
+  Community benannt (z. B. "services → permission-service → core") statt einzeln gelesen benannt zu
+  werden — bewusste Abweichung vom üblichen Label-Schritt bei dieser Korpusgröße. Health-Check zeigte
+  3690 "dangling"-Kanten, geprüft und als harmlos bestätigt (fast ausschließlich `imports`-Kanten zu
+  externen Bibliotheken wie `httpx`/`pytest`/`sqlalchemy`/`react`, für die nie eigene Knoten vorgesehen
+  sind, keine Korruption).
+- **Drei vom Nutzer gemeldete User-UI-Bugs gefunden und behoben** (alle drei auf dieselbe P16-S1-
+  Regression zurückgeführt: `ExplorerPane`/`MetadataPanel`/`PreviewPane`/`SearchPane` wurden beim
+  Umstieg auf `dockview-react`-Panels nie mit einer eigenen Höhe versehen):
+  1. **Explorer-Liste scrollt nicht**: `.explorer-pane` hatte `overflow-y: auto`, aber keine `height`
+     - da dockviews Panel-Host-Kette (`.dv-content-container` → `div.dv-react-part`) kein Flex/Grid
+     ist, blieb `height: auto` (sizing-to-content), wodurch die Box immer so groß wie ihr Inhalt war
+     und `overflow-y` nie griff; der Überschuss wurde stattdessen von dockviews eigenem
+     `.dv-groupview { overflow: hidden }` unsichtbar abgeschnitten.
+  2. **Popups/Modals erscheinen hinter Systembereichen**: `.modal-backdrop` hatte gar keinen
+     `z-index` (verlor damit gegen dockviews eigenes Chrome, das Werte bis `9999` nutzt), `.context-menu`
+     (`100`) und `.icon-rail-popover` (`10`) lagen ebenfalls darunter.
+  3. **PDF-Vorschau resized nicht in der Höhe**: `.preview-pdf-frame`s `<embed>` hatte `height: 100%`,
+     aber die Elternbox `.preview-pane` hatte (wie `.explorer-pane`) keine definierte Höhe — die
+     Prozent-Kette lief ins Leere, das Embed fiel auf `min-height: 480px` zurück, unabhängig von der
+     tatsächlichen Panel-Größe.
+  - **Fix**: `.explorer-pane, .metadata-panel, .preview-pane, .search-pane { height: 100%; }` ergänzt
+    (behebt 1 und 3 zugleich, da beide auf derselben fehlenden definierten Höhe beruhen);
+    `.icon-rail-popover`/`.context-menu`/`.modal-backdrop` auf `z-index: 10000`/`10001`/`10002`
+    angehoben (sicher über dockviews Maximalwert `9999`).
+  - **Live per Playwright-in-Docker gegen den neu gebauten `user-ui`-Container verifiziert** (kein
+    Browser nativ in dieser Umgebung verfügbar, gleiches Muster wie frühere Sessions): Scroll-Test
+    zeigte `scrollHeight` 20774px vs. `clientHeight` 752px und tatsächliche Bewegung nach
+    Mausrad-Scroll (`scrollTop` 0→2000, sichtbar andere Liste im Screenshot); Kontextmenü- und
+    Aufbewahrungs-Modal-Screenshot zeigten beide korrekt über der gesamten UI liegend (Modal-Backdrop
+    blockierte nachweislich Klicks auf dahinterliegende Elemente); PDF-Vorschau bei 900px- und
+    1300px-Viewporthöhe zeigte exakt die erwartete Embed-Höhe (482px bzw. 544px, beide Werte passend
+    zur `min-height: 480px`-Untergrenze bzw. zur tatsächlich verfügbaren Panel-Höhe nachgerechnet).
+    Testartefakt (hochgeladenes PDF) danach über den regulären `DELETE /documents/{id}`-Endpunkt
+    entfernt. Volle `npm run typecheck`/`lint`/`test`/`build` für `user-ui` clean (167 Tests, keine
+    Regression).
+- `graphify update .` nach den CSS-Fixes erneut ausgeführt (AST-only, kein API-Kosten, kein
+  Phasenabschluss mehr nötig — die "nur am Phasenende"-Regel galt für die inzwischen abgeschlossene
+  Roadmap, nicht für künftige Ad-hoc-Änderungen).
+
+### Post-Roadmap: Office-Direktbearbeitung + SSO/Kerberos-Login (2026-08-13, nach dem User-UI-Bugfixing)
+
+Direkte Fortsetzung des vorherigen Post-Roadmap-Punkts: vier weitere vom Nutzer gemeldete offene Punkte,
+drei davon reine Statusklärung, zwei echte neue Features (Details/Architekturbegründung in
+[ADR 0061](docs/adr/0061-office-direktbearbeitung-webdav-edit-token-in-start-url.md) und
+[ADR 0062](docs/adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md)).
+
+- **Theme-Switch im Arbeitsbereich blieb im Dark Mode** — echter Bug, behoben:
+  `DockableDocumentArea.tsx`s `<DockviewReact>` bekam nie ein `theme`-Prop, fiel auf dockviews
+  eingebautes `themeAbyss`-Preset zurück, das dieselben `--dv-*`-Variablen erneut hart-dunkel
+  überschrieb, die `globals.css` bereits theme-fähig auf `--dms-*` mappt. Fix: eigenes,
+  klassenloses `DMS_DOCKVIEW_THEME`-Objekt übergeben.
+- **Versionshistorie/Ersatzdarstellungen über die Metadaten** — bereits vollständig vorhanden
+  (`PreviewPane.tsx`: Versionsauswahl, `listRenditions()`, automatische Office→PDF-Konvertierung),
+  kein Implementierungsbedarf.
+- **Feature A — Office-Direktbearbeitung** (Word/Excel/PowerPoint direkt aus dem Browser öffnen):
+  neuer `WebdavEditToken` (`document-service`, strukturell an `ShareLink` angelehnt, aber
+  `document.write`-pflichtig statt nur lesend) + `by-id/`-Pfadauflösung in `webdav-connector`
+  (O(1) statt des üblichen O(Tiefe)-Pfad-Walks) + Token-als-Benutzername-Auflösung in
+  `DmsAuthDomainController.basic_auth_user`. **Echter Bug bei der Live-Verifikation gefunden und
+  behoben**: das Einchecken einer neuen Version über den `by-id`-Pfad schlug mit `409 PUT parent
+  must be a collection` fehl — wsgidavs `do_PUT`-Handler löst vor jedem Schreibzugriff den
+  Elternpfad des Ziels auf und prüft `is_collection`; für `by-id/<document-id>.<ext>` ist das der
+  bare `by-id`-Namensraum-Pfad selbst, für den es keinen echten `TreeFolder` gibt. Behoben mit
+  einer neuen `_ByIdVirtualCollection` (rein synthetische `DAVCollection`, nicht durchsuchbar) in
+  `dav_provider.py`. Dieser Bug wäre von der bereits existierenden `test_by_id_put_with_edit_token_
+  checks_in_a_new_version` erkannt worden, hätte die Testsuite ihn erreicht — sie scheiterte
+  stattdessen an einem bereits länger bekannten, unabhängigen `ReadTimeout`-Flake (s. u.), bevor die
+  eigentliche Assertion je lief. Per direktem `curl`-Roundtrip gegen den echten laufenden Stack
+  (Token ausstellen → GET über `by-id` → PUT neue Version → Version-Nummer/-Inhalt bestätigt →
+  Testartefakt über den regulären `DELETE`-Endpunkt entfernt) sowie isoliert per
+  `pytest -k by_id` (4/4 grün, umgeht die Root-Listing-Bremse) verifiziert.
+- **Feature B — SSO/automatischer Login** (Kerberos/SPNEGO über Keycloak, optional): neuer
+  OIDC-Redirect-Login-Pfad (`GET /oidc/authorize`/`POST /oidc/callback`, `GET/PUT /sso-config`,
+  `POST /logout`) plus optionale Kerberos-Realmkonfiguration beim Bootstrap
+  (`_ensure_client_updated`/`_ensure_kerberos`). Bestehendes Passwort-Formular bleibt vollständiger
+  Fallback. **Zwei echte Bugs selbst gefunden und behoben, bevor sie in Produktion sichtbar
+  geworden wären**: (1) `auth_service/schemas.py` nutzte `datetime` in `SsoConfigOut`, ohne es zu
+  importieren — hätte den Service-Start mit `NameError` zum Absturz gebracht. (2) `GET
+  /oidc/authorize` baute die Browser-Redirect-URL aus der internen Docker-Compose-Adresse
+  (`DMS_KEYCLOAK_BASE_URL=http://keycloak:8080`) — für den tatsächlichen Browser nicht auflösbar.
+  Neue, separate `keycloak_public_base_url`-Einstellung (`DMS_KEYCLOAK_PUBLIC_BASE_URL`, im
+  Compose-Stack `http://localhost:8080`) nur für `_authorization_endpoint`, Token-/Logout-Endpunkte
+  bleiben auf der internen URL. Live per `curl` bestätigt: `authorization_url` zeigt jetzt korrekt
+  auf `localhost:8080`.
+- **Ebenfalls beim Fixen der Regression gefunden (nicht durch die neuen Features selbst verursacht,
+  aber durch sie erstmals sichtbar geworden)**: `permission.role_assignment.create` ist auf dieser
+  Installation seit der P17-S3-eGov-Paket-Live-Verifikation echt Vier-Augen-pflichtig — die
+  Testhelfer `_grant_document_read`/`_grant_document_write` (document-service, webdav-connector)
+  sowie `auth_service.permission_client.PermissionServiceClient.ensure_role_assignment`
+  (Produktionscode, genutzt bei jedem Service-Start für die Domain-Admin-Rollenzuweisung) prüften
+  die `POST /role-assignments`-Antwort nie auf `status != "created"` — ein `pending_approval` wurde
+  stillschweigend als Erfolg behandelt. Behoben: Testhelfer setzen die Genehmigungspflicht für ihre
+  Laufzeit aus und stellen den ursprünglichen Wert danach wieder her (nicht dauerhaft überschreiben);
+  `ensure_role_assignment` wirft jetzt bei `pending_approval`, der bereits bestehende
+  `try/except Exception`-Aufrufer in `main.py`s Lifespan loggt das als Warnung und versucht es beim
+  nächsten Neustart erneut — exakt das dort bereits dokumentierte Verhalten.
+- **Tests**: document-service 232 (vorher 218, +14 für WebdavEditToken), webdav-connector +4 neue
+  `by_id`-Tests (isoliert grün, volle Suite weiterhin vom u. g. Flake betroffen), auth-service 76
+  (vorher 73, u. a. Bootstrap-Idempotenz/Kerberos-Skip/Kerberos-Aktivierung, SSO-Redirect-Roundtrip
+  gegen Keycloaks eigenes Formular, `/sso-config`-Roundtrip, `/logout`-Session-Invalidierung),
+  gateway-service 22 unverändert grün. `ruff check`/`ruff format --check` clean. User-UI: 167 Tests
+  clean (`tsc --noEmit`/`eslint .`/`next build` ebenfalls clean) — die neuen `api.ts`-Exporte
+  (`officeLaunchInfo`, `logoutSession` u. a.) fehlten zunächst in mehreren bestehenden
+  `vi.mock("@/lib/api")`-Testfixtures (`auth-context.test.tsx`, `PreviewPane.test.tsx`,
+  `document-workspace.test.tsx`) und wurden ergänzt.
+- **Bekannter, nicht behobener, session-fremder Flake erneut beobachtet und verschärft**:
+  `webdav-connector`s pfadbasierte Tests (PROPFIND gegen die WebDAV-Wurzel) scheitern inzwischen
+  **deterministisch**, nicht mehr nur gelegentlich — die Wurzel hat sich über die gesamte
+  Projekthistorie auf 438 Kinder angesammelt (nie aufgeräumte Testartefakte früherer
+  Live-Verifikationen), ein `PROPFIND` dauert dadurch ~67s (document-service liefert Datei-Metadaten
+  nur pro Dokument einzeln nach, siehe `docs/services/webdav-connector.md`), länger als jeder
+  vernünftige Client-Timeout. Nicht behoben (Löschen realer, wenn auch alter Testdaten auf der
+  laufenden Installation wäre eine destruktive Aktion ohne Nutzerfreigabe) — für eine spätere Session
+  vorgemerkt, betrifft NICHT Feature As eigenen `by-id`-Pfad (O(1), umgeht die Root-Auflistung
+  komplett).
+- Doku: neue [ADR 0061](docs/adr/0061-office-direktbearbeitung-webdav-edit-token-in-start-url.md)/
+  [ADR 0062](docs/adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md),
+  `docs/services/document-service.md`/`webdav-connector.md`/`auth-service.md`/`gateway-service.md`/
+  `user-ui.md` aktualisiert (inkl. beider gefundener Bugs).
+- **Direkt im Anschluss**: Nutzer ließ sich eine konsolidierte Liste aller "Offene Punkte" aus 35
+  Servicedokus zusammenstellen (als Artefakt präsentiert) und triagierte sie vollständig — daraus
+  entstand eine neue Multi-Session-Roadmap **Phase 18–26** (`IMPLEMENTATION_PLAN.md`), plus ein neues
+  eigenständiges Ziel (Helm-Charts für k8s/OCP). `graphify update .` folgt direkt im Anschluss an
+  diesen Eintrag, dann Start von Phase 18.
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

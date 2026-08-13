@@ -24,6 +24,12 @@ class DmsAuthDomainController(BaseDomainController):
     def __init__(self, wsgidav_app, config) -> None:
         super().__init__(wsgidav_app, config)
         self._auth_client = httpx.Client(base_url=config["dms_auth_service_base_url"], timeout=10.0)
+        # Office-Direktbearbeitung (Post-Roadmap-Feature): eigener,
+        # synchroner Client gegen document-service, direkt (Ost-West, kein
+        # Gateway) - derselbe Aufrufweg, den `DmsTreeClient` bereits nutzt.
+        self._document_client = httpx.Client(
+            base_url=config["dms_document_service_base_url"], timeout=10.0
+        )
 
     def get_domain_realm(self, path_info, environ):
         return "DMS"
@@ -38,7 +44,36 @@ class DmsAuthDomainController(BaseDomainController):
         # brächte hier keinen echten Zusatznutzen, nur mehr Komplexität.
         return False
 
+    def _resolve_edit_token(self, token: str) -> str | None:
+        """Office-Direktbearbeitung (Post-Roadmap-Feature): löst ein
+        WebDAV-Edit-Token zur echten Identität auf (`principal_id`), die dann
+        als `environ["wsgidav.auth.user_name"]` einsetzt wird - NICHT das
+        rohe Token selbst, sonst würde ein späterer Check-in fälschlich das
+        Token statt der echten Identität als `created_by`/Sperrinhaber
+        verwenden."""
+        try:
+            response = self._document_client.get(f"/internal/webdav-edit-tokens/{token}")
+        except httpx.HTTPError:
+            logger.warning("webdav_edit_token_resolution_backend_unreachable")
+            return None
+        if response.status_code != 200:
+            return None
+        return response.json()["principal_id"]
+
     def basic_auth_user(self, realm, user_name, password, environ):
+        # Office-Direktbearbeitung (Post-Roadmap-Feature): die Start-URL
+        # bettet ein Edit-Token als Basic-Auth-"Benutzername" mit leerem
+        # Passwort ein (`https://<token>:@<host>/webdav/by-id/...`) - ein
+        # echter WebDAV-Mount sendet dagegen immer ein echtes Passwort. Leeres
+        # Passwort ist damit ein sicheres Unterscheidungsmerkmal, ohne das
+        # Token-Format selbst kennen/parsen zu müssen.
+        if not password:
+            principal_id = self._resolve_edit_token(user_name)
+            if principal_id is None:
+                return False
+            environ["wsgidav.auth.user_name"] = principal_id
+            return True
+
         try:
             response = self._auth_client.post(
                 "/login", json={"username": user_name, "password": password}
