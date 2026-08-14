@@ -412,8 +412,8 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   }
 
   const ocrPage = ocrResult?.pages.find((p) => p.page_number === selectedPage);
-  const currentContentType =
-    versions.find((v) => v.version_number === selectedVersion)?.content_type ?? null;
+  const currentVersionMeta = versions.find((v) => v.version_number === selectedVersion);
+  const currentContentType = currentVersionMeta?.content_type ?? null;
 
   // Seit P16-S1 (dockbarer Arbeitsbereich) kann mehr als eine `PreviewPane`
   // gleichzeitig im DOM stehen (ein Panel je geöffnetem Dokument, "mehrere
@@ -429,19 +429,39 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       <h2 className="pane-heading">{activeDocument.title}</h2>
 
       {versions.length > 1 && (
-        <label className="version-select">
-          {t("preview.versionSelectLabel")}
-          <select
-            value={selectedVersion ?? activeDocument.current_version_number}
-            onChange={(event) => setSelectedVersion(Number(event.target.value))}
-          >
-            {versions.map((version) => (
-              <option key={version.version_number} value={version.version_number}>
-                {t("preview.versionOption", { number: version.version_number })}
-              </option>
-            ))}
-          </select>
-        </label>
+        <>
+          <label className="version-select">
+            {t("preview.versionSelectLabel")}
+            <select
+              value={selectedVersion ?? activeDocument.current_version_number}
+              onChange={(event) => setSelectedVersion(Number(event.target.value))}
+            >
+              {versions.map((version) => (
+                <option
+                  key={version.version_number}
+                  value={version.version_number}
+                  title={version.comment ?? undefined}
+                >
+                  {t("preview.versionOption", { number: version.version_number })}
+                  {version.is_conflict ? ` ${t("preview.versionConflictMarker")}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {currentVersionMeta?.is_conflict && (
+            <span
+              className="badge down version-conflict-badge"
+              title={t("preview.versionConflictTooltip")}
+            >
+              {t("preview.versionConflictBadge")}
+            </span>
+          )}
+          {currentVersionMeta?.comment && (
+            <span className="version-comment" title={currentVersionMeta.comment}>
+              {t("preview.versionCommentLabel", { comment: currentVersionMeta.comment })}
+            </span>
+          )}
+        </>
       )}
 
       {ocrResult && ocrResult.pages.length > 1 && (

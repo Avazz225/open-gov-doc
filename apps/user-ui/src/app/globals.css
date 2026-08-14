@@ -18,6 +18,7 @@
   --dms-accent-bg: rgba(37, 99, 235, 0.15);
   --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
   --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
   --dms-surface: canvas;
   --dms-surface-fg: canvastext;
 
@@ -75,6 +76,7 @@
     --dms-accent-bg: rgba(96, 165, 250, 0.2);
     --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
     --dms-danger: #f87171;
+    --dms-danger-bg: #f8717133;
   }
 }
 
@@ -86,6 +88,7 @@
   --dms-accent-bg: rgba(37, 99, 235, 0.15);
   --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
   --dms-danger: #b91c1c;
+  --dms-danger-bg: #b91c1c33;
 }
 
 :root[data-theme="dark"] {
@@ -96,6 +99,7 @@
   --dms-accent-bg: rgba(96, 165, 250, 0.2);
   --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
   --dms-danger: #f87171;
+  --dms-danger-bg: #f8717133;
 }
 
 /* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
@@ -108,8 +112,13 @@
   --dms-accent-bg: #ffff00;
   --dms-accent-bg-strong: #ffff00;
   --dms-danger: #ff6b6b;
+  --dms-danger-bg: #000000;
   --dms-surface: #000000;
   --dms-surface-fg: #ffffff;
+}
+
+:root[data-theme="high-contrast"] .badge.down {
+  border: 1px solid currentColor;
 }
 
 :root[data-theme="high-contrast"] .icon-rail-active {
@@ -459,6 +468,37 @@ body {
   display: block;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
+}
+
+/* Sichtbarkeit von is_conflict/comment je Version (P23-S1, Konzept-Feld war
+   im DocumentVersion-Typ bereits vorhanden, aber im UI unsichtbar) - bewusst
+   kein Diff-Viewer, nur ein Badge/Tooltip für die bereits geladenen Felder. */
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+.badge.down {
+  background: var(--dms-danger-bg);
+  color: var(--dms-danger);
+}
+
+.version-conflict-badge {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.version-comment {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .ocr-review-hint {

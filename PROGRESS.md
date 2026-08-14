@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P22-S7 — Speicher-Ziel-Metadaten live editierbar (Phase 22 Session 7, letzte Session der Phase, siehe [ADR 0092](docs/adr/0092-storage-target-metadata-editable.md)): Scope per Rückfrage geklärt (Plan-Wortlaut "OCR-/Speicher-Ziel-Set" war mehrdeutig — "Ziel-Set" ist ausschließlich ein storage-service-Konzept) — nur `object_lock_mode`/`role` je bereits konfiguriertem Ziel, keine Zugangsdaten/Struktur-CRUD. Neue, sparse Tabelle `target_override`; neuer `PUT /guard-status/{target_id}/config` (`404` unbekannt, `422` falls kein reguläres Ziel mehr übrig bliebe — echter, beim Implementieren gefundener Absturz-Schutz). Neue `_compute_target_state()` merged Env-Var-Ziele mit DB-Overrides, schreibt bei Start UND jedem `PUT` in `app.state` zurück (Live-Reload ohne dass jeder Lesezugriff selbst aus der DB liest — bewusst anderes Muster als P22-S6s `OperationalConfig`). `admin-ui`s `StorageGuard.tsx` bekommt zwei Checkbox-Spalten statt der bisherigen rein lesenden "Object Lock"-Spalte. **Proaktiver Testinfrastruktur-Fund**: `storage-service`s Teardown-Fixture fehlte für `operational_config`/`target_override`, ergänzt. Tests: `storage-service` 122 (vorher 117, +5); `admin-ui` 204 (vorher 201, +3). Live gegen den echten Stack verifiziert (Image-Neubau + Neustart): `422` beim Versuch, das einzige reguläre Ziel zu archivieren; ein Objekt mit `retain_until` VOR Aktivierung von `object_lock_mode=governance` hochgeladen, danach live gesperrt (`403` beim Löschversuch) ohne Neustart. **Phase 22 (Admin-UI-Ausbau) damit vollständig abgeschlossen.**
+**Zuletzt abgeschlossen:** P23-S1 — Versionshistorie zeigt `is_conflict`/`comment` als Badge/Tooltip (erste Session der neuen Phase 23, Details siehe unten unter "Phase 23 — Frontend-UX (User-UI)"). Reine Frontend-Sichtbarkeit bereits vorhandener Backend-Felder, kein neues ADR. Tests: `user-ui` 172 (vorher 171, +1). Zwischendurch: Phase-22-Grenz-`graphify update` (semantische Neuextraktion der 32 seit P21-S4 geänderten/neuen Dokumentdateien, Graph jetzt 12211 Knoten/22333 Kanten/1103 Communities — dabei einen echten Shrink-Guard-Fund gemacht und korrigiert, siehe "Tooling & Testing" unten).
 
-**Nächste Session:** **P23-S1** (Versionshistorie zeigt `is_conflict`/`comment` als Badge/Tooltip neben jeder Version in `PreviewPane.tsx` — kein voller Diff-Viewer, nur Sichtbarkeit bereits vorhandener Felder, erste Session der neuen **Phase 23 (Frontend-UX User-UI)**, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P23-S2** (Automatischer View-Wechsel beim Öffnen eines Suchtreffers, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -2858,6 +2858,75 @@ neue Architekturentscheidung):
   "Offene Punkte"-Bullets), `docs/services/admin-ui.md` ("Speicher-Wächter"-Sektion aktualisiert,
   Backend-Anbindungstabelle, Tests-Sektion) ergänzt.
 - **Phase 22 (Admin-UI-Ausbau) damit vollständig abgeschlossen.**
+
+### Phasengrenz-`graphify update` (nach Phase 22, vor Phase 23)
+
+Nach Abschluss von Phase 22 (letzte Session P22-S7) wie in `CLAUDE.md`/Projekt-Konvention üblich der volle
+`/graphify --update`-Skill-Flow ausgeführt (nicht die reine `graphify update .`-CLI, die nur den
+Code-/AST-Anteil abdeckt) — 32 seit P21-S4 neue/geänderte Dokumentdateien (`IMPLEMENTATION_PLAN.md`,
+`PROGRESS.md`, ADRs 0079–0092, 16 editierte `docs/services/*.md`) brauchten frische semantische
+Extraktion.
+
+- **Zwei parallele Extraktions-Subagenten** (je 16 Dateien) lieferten zusammen 198 neue Knoten/298 Kanten;
+  gemergt mit dem Cache der 164 unveränderten Dokumentdateien (574 Knoten) und den unveränderten
+  Code-Knoten aus der vorherigen `graphify update .`-CLI-Ausführung (12350 Knoten Ausgangsbasis).
+- **Echter Shrink-Guard-Fund**: der erste `build_merge()`-Versuch (mit dem VOLLEN Cache+Neu-Set als
+  `new_chunks`) hätte 1261 Knoten aus Dateien gelöscht, die GAR NICHT Teil der 32 geänderten Dateien
+  waren (z. B. `auth-service.md`, `archival-service.md`, ~30 weitere) — Ursache: `build_merge`s
+  Replace-on-Re-Extract-Logik löscht jeden `source_file`, der IRGENDWO im übergebenen `new_chunks`-Set
+  vorkommt, aus dem Basisgraphen; da das übergebene Set versehentlich den GESAMTEN gecachten
+  Dokumentkorpus enthielt (nicht nur das echte Delta), wurden auch unveränderte Dateien "ersetzt" — mit
+  einem Neu-Extraktionsergebnis, das nur die 32 tatsächlich geänderten Dateien abdeckte. Der eingebaute
+  `to_json`-Shrink-Guard (`#479`) hat das korrekt blockiert, BEVOR `graph.json` beschädigt wurde. Fix:
+  nur das echte 32-Datei-Delta (aus den beiden Chunk-Dateien direkt, vor dem Cache-Merge) als
+  `new_chunks` übergeben.
+- **Zweiter, kleinerer Fund**: `PROGRESS.md` (2966 Zeilen/930KB) und `IMPLEMENTATION_PLAN.md` (465
+  Zeilen/214KB) wurden vom ersten Extraktions-Subagenten per `grep`-Stichprobe statt Volltext-Lesen
+  bearbeitet (beide Dateien überschritten das Lesefenster) — dadurch wären 82 bzw. 41 bestehende
+  Phasen-/Sessions-Knoten (Phase 1–19) beim Replace stillschweigend verloren gegangen. Ein gezielter
+  Nachextraktions-Durchlauf (paginiertes Lesen der kompletten Dateien) lieferte 245 Knoten/407 Kanten mit
+  vollständiger Phase-0-bis-26-Abdeckung, dedupliziert gegen die bereits vorhandenen `implementation_plan_
+  phase22_admin_ui_expansion`-Knoten-ID statt sie zu duplizieren.
+- **Ergebnis nach Korrektur**: 12211 Knoten/22333 Kanten/1103 Communities (netto −139 gegenüber der
+  Ausgangsbasis — plausibel: Konsolidierung durch frische Extraktion der 32 Dateien, aufgewogen durch die
+  245 neu gewonnenen Phasen-/Sessions-Knoten, abzüglich 20 echter Dedup-Kollisionen). Graph-Health-Check
+  sauber (keine dangling/missing/collapsed Edges). Alle 1103 bestehenden Community-Labels blieben gültig
+  (keine neue Community entstanden).
+- **Lehre**: bei `build_merge()` in einem `--update`-Lauf IMMER nur das echte Neu-Extraktions-Delta als
+  `new_chunks` übergeben, niemals den (Cache+Neu)-Merge — sonst dropt die Replace-on-Re-Extract-Logik
+  auch unveränderte Dateien. Der `to_json`-Shrink-Guard ist die letzte Verteidigungslinie und hat hier
+  echten Datenverlust verhindert, bevor er geschah.
+
+### Phase 23 — Frontend-UX (User-UI) (P23-S1, ...)
+
+**P23-S1 — Versionshistorie zeigt `is_conflict`/`comment` als Badge/Tooltip** (erste Session der neuen
+Phase 23, kein neues ADR — reine additive Sichtbarkeit bereits vorhandener Backend-Felder):
+
+- `DocumentVersion.is_conflict`/`.comment` existierten seit P5-S3 im Typ (`apps/user-ui/src/lib/api.ts`)
+  und wurden vom Backend bereits korrekt geliefert, waren im UI aber komplett unsichtbar (dokumentierter
+  "Offener Punkt" in `docs/services/user-ui.md`, jetzt geschlossen).
+- `PreviewPane.tsx`s Versionsauswahl: jede `<option>` bekommt bei `is_conflict` ein `⚠`-Suffix im Label
+  sowie (immer) `comment` als natives `title`-Tooltip. Zusätzlich zeigt ein `.badge.down`-Element
+  ("Konflikt") und ein sichtbarer Kommentar-Text unterhalb des `<select>` dieselben Felder der aktuell
+  gewählten Version — bewusst nicht nur beim Hover sichtbar.
+- **Layout-Falle gefunden und korrigiert**: die Badge-/Kommentar-`<span>`s waren zunächst INNERHALB des
+  `<label>` der Versionsauswahl verschachtelt — dadurch übernahm die implizite Label-Assoziation ihren
+  Text in den Accessible Name des `<select>`, ein `getByLabelText("Version auswählen")`-Test schlug
+  prompt fehl. Fix: Badge/Kommentar als Geschwister-Elemente NACH dem `<label>` gerendert statt darin.
+- Neues `--dms-danger-bg`-Token (alle vier Theme-Blöcke: hell, dunkel, explizit hell/dunkel, hoher
+  Kontrast) sowie `.badge`/`.badge.down`-Klassen in `user-ui`s `globals.css` — 1:1 aus `admin-ui`s
+  bereits bestehendem `.badge.ok`/`.badge.down`-Muster übernommen, inklusive des dortigen
+  Hoher-Kontrast-Sonderfalls (solide statt transparente Fläche + `border: 1px solid currentColor`, da
+  transparente Akzentflächen dort schlecht lesbar sind).
+- **Kein Backend-Code geändert** — die zugrunde liegenden Felder wurden bereits vor dieser Session
+  korrekt geliefert, daher keine curl-Verifikation gegen den echten Stack nötig. Kein interaktiver
+  Browser-Test (kein Browser/Playwright in dieser Entwicklungsumgebung verfügbar, projektweit etablierte
+  Praxis) — stattdessen die tatsächliche DOM-Struktur (Badge/Tooltip/Options-Markup, inkl. Wechsel beim
+  Versionswechsel) über einen neuen `PreviewPane.test.tsx`-Fall (jsdom) verifiziert.
+- **Tests**: `user-ui` 172 (vorher 171, +1). `tsc`/`eslint` sauber (ein vorbestehender, unveränderter
+  `<img>`-Lint-Hinweis an anderer Stelle in derselben Datei).
+- Doku: `docs/services/user-ui.md` ("Versionsauswahl zeigt `is_conflict`/`comment`"-Absatz ergänzt,
+  "Offene Punkte"-Eintrag geschlossen, Tests-Sektion aktualisiert), `IMPLEMENTATION_PLAN.md` (P23-S1 ✅).
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

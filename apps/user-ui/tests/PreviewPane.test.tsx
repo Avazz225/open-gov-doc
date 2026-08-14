@@ -352,6 +352,33 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     ).toBeInTheDocument();
   });
 
+  it("zeigt für eine Konfliktversion ein Badge und für einen Kommentar Text mit Tooltip (P23-S1)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf", current_version_number: 2 });
+    listDocumentVersionsMock.mockResolvedValue([
+      makeVersion({ version_number: 1, comment: "Erste Fassung" }),
+      makeVersion({ version_number: 2, is_conflict: true, comment: "Konflikt beim Check-in" }),
+    ]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    expect(within(previewPane).getByText("Konflikt")).toBeInTheDocument();
+    expect(within(previewPane).getByText("Kommentar: Konflikt beim Check-in")).toBeInTheDocument();
+
+    const select = within(previewPane).getByLabelText("Version auswählen");
+    const conflictOption = within(select).getByText(/Version 2/) as HTMLOptionElement;
+    expect(conflictOption).toHaveAttribute("title", "Konflikt beim Check-in");
+
+    await user.selectOptions(select, "1");
+
+    expect(within(previewPane).queryByText("Konflikt")).not.toBeInTheDocument();
+    expect(within(previewPane).getByText("Kommentar: Erste Fassung")).toBeInTheDocument();
+  });
+
   it("zeigt text/plain unverändert als Plain-Text-Vorschau", async () => {
     const doc = makeDocument({ title: "notiz.txt" });
     listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "text/plain" })]);
