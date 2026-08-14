@@ -121,11 +121,28 @@ Env-Vars für jeden Eintrag in services.<name>.dependsOnServices — pro
 Eintrag "foo-service" wird DMS_FOO_SERVICE_BASE_URL=http://<fullname>-foo-service:8000
 gesetzt (Pendant zu den einzeln in infra/docker-compose.yml gepflegten
 DMS_<X>_SERVICE_BASE_URL-Zeilen). Erwartet dict "root" $ "deps" $svc.dependsOnServices.
+
+Seit P26-S2: ein Eintrag darf statt eines bloßen String auch ein Dict
+{name: <service-key>, envVar: <ENV_VAR_NAME>} sein, für die kleine
+Minderheit an Services, deren infra/docker-compose.yml-Env-Var-Name NICHT
+dem Standardmuster DMS_<KEY>_BASE_URL folgt (historisch gewachsene
+Compose-Namen, z. B. auth-service/workflow-service ->
+DMS_INSTALLATION_GATEWAY_BASE_URL statt DMS_GATEWAY_SERVICE_BASE_URL für
+gateway-service, oder DMS_FEDERATION_HUB_BASE_URL statt
+DMS_FEDERATION_HUB_SERVICE_BASE_URL für federation-hub-service) - siehe
+services.auth-service/workflow-service in values.yaml für reale Beispiele.
+Der berechnete URL-Wert (http://<fullname>-<service-key>:8000) ist in beiden
+Formen identisch, nur der emittierte Env-Var-NAME unterscheidet sich.
 */}}
 {{- define "dms.dependsOnServicesEnv" -}}
 {{- range .deps }}
+{{- if kindIs "map" . }}
+- name: {{ .envVar }}
+  value: {{ printf "http://%s-%s:8000" (include "dms.fullname" $.root) .name | quote }}
+{{- else }}
 - name: {{ printf "DMS_%s_BASE_URL" (. | replace "-" "_" | upper) }}
   value: {{ printf "http://%s-%s:8000" (include "dms.fullname" $.root) . | quote }}
+{{- end }}
 {{- end -}}
 {{- end -}}
 

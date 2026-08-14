@@ -1,4 +1,4 @@
-# values.yaml — DMS Helm-Chart (Phase 26, P26-S1)
+# values.yaml — DMS Helm-Chart (Phase 26, P26-S1 + P26-S2)
 #
 # EIN Chart für alle Container aus infra/docker-compose.yml. Statt eines
 # Templates pro Service (34+ fast identische Kopien) iterieren die
@@ -7,11 +7,18 @@
 # map"). Neue Services werden hinzugefügt, indem hier ein neuer Eintrag unter
 # `services:` erscheint — nie durch ein neues Template.
 #
-# Diese Session (P26-S1) baut nur das Grundgerüst + 4 reale Beispiel-Einträge
-# (registry-service, gateway-service, document-service, storage-service) zum
-# Beweis, dass die Templates echt rendern. Die übrigen ~28 Services aus
-# infra/docker-compose.yml folgen in P26-S2 (zustandslose FastAPI-Services)
-# nach demselben Muster — einfach weitere `services.<name>:`-Blöcke ergänzen.
+# P26-S1 baute das Grundgerüst + 4 reale Beispiel-Einträge (registry-service,
+# gateway-service, document-service, storage-service) zum Beweis, dass die
+# Templates echt rendern. P26-S2 (diese Session) ergänzt die übrigen ~28
+# zustandslosen FastAPI-Services aus infra/docker-compose.yml nach demselben
+# Muster — kein neues Template, nur weitere `services.<name>:`-Blöcke.
+# Ausgenommen bleiben (siehe IMPLEMENTATION_PLAN.md P26-S3/S4/S5):
+# postgres/keycloak/nats/minio/azurite/mailpit/redis/prometheus/grafana
+# (zustandsbehaftete Infrastruktur, P26-S3), postgres-wal-archive-init (Job,
+# kein Deployment — siehe offener Punkt im P26-S2-Report), das
+# Storage-Replikations-CronJob-Äquivalent (P26-S4) sowie die Next.js-Frontend-
+# Apps user-ui/admin-ui/process-designer/reviewer-ui/migration-console/
+# office-addin (P26-S5).
 
 global:
   # Installationsweite Identität (Konzept 3a) — entspricht DMS_INSTALLATION_ID
@@ -183,16 +190,753 @@ services:
     env:
       DMS_GOVERNANCE_BYPASS_ROLE: "dms-admin"
 
-  # Die übrigen ~28 Container aus infra/docker-compose.yml (audit-service,
-  # auth-service, permission-service, virus-scan-service, rendering-service,
-  # ocr-service, search-service, workflow-service, notification-service,
-  # case-service, signature-service, federation-hub-service, favorite-service,
-  # reporting-service, archival-service, query-service, license-service,
-  # plugin-orchestration-service, monitoring-service, webdav-connector,
-  # cmis-connector, mail-connector, migration-service, config-service,
-  # fleet-management-service, teamspace-service, object-type-service,
-  # folder-service, ...) folgen in P26-S2 als weitere Einträge nach exakt
-  # diesem Muster — KEIN neues Template nötig, nur ein neuer Map-Eintrag.
+  # ---------------------------------------------------------------------
+  # Ab hier: die ~28 Services aus P26-S2 (zustandslose FastAPI-Services,
+  # infra/docker-compose.yml Zeilen ~287-1409), in derselben Reihenfolge wie
+  # dort. Env-Var-Namen/Cross-Service-Abhängigkeiten sind 1:1 aus den
+  # jeweiligen `environment:`-Blöcken in infra/docker-compose.yml plus den
+  # zugehörigen services/<name>/src/*/settings.py-Defaults übernommen (nicht
+  # geraten) — wo ein settings.py-Default bereits mit dem
+  # infra/docker-compose.yml-Wert übereinstimmt, wird die Zeile hier bewusst
+  # NICHT dupliziert (schlankes values.yaml, gleiche Praxis wie
+  # registry-service oben). Autoscaling ist nur für die 4 Services aktiv, die
+  # den P26-S2-Session-Report als "busy/horizontal skalierbar" begründet
+  # (virus-scan-, rendering-, ocr-, search-service) — alle anderen bleiben
+  # beim P26-S1-Baseline-Muster (1 Replica, autoscaling/PDB aus).
+  # ---------------------------------------------------------------------
+
+  # Audit-Log/Löschregister-Ledger (Konzept 5.2a/10.4) - reiner Consumer +
+  # eigenes Postgres-Schema, keine Cross-Service-BASE_URL-Abhängigkeiten
+  # jenseits von dms.baseEnv (Registry/Self-Address/Postgres/NATS).
+  # OFFENER PUNKT: infra/docker-compose.yml mountet für diesen Service ein
+  # eigenes deletion-ledger-data-Volume (Löschregister-Ledger) - das
+  # generische deployment.yaml-Template unterstützt aktuell keine
+  # volumeMounts/PVCs (bewusst nicht in dieser Session nachgerüstet, siehe
+  # Session-Report) - ohne PVC verliert audit-service dieses Ledger bei
+  # jedem Pod-Neustart. Nachzuholen in P26-S3 zusammen mit den übrigen
+  # PVC-gestützten Komponenten.
+  audit-service:
+    enabled: true
+    image:
+      repository: dms/audit-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~287 (Host-Mapping 8002)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    env: {}
+
+  # SSO/Keycloak-Frontend + föderierte Kontaktsuche (Konzept 2.5/4.4/7.4).
+  # usesKeycloak für DMS_KEYCLOAK_BASE_URL; keycloak_client_secret/
+  # keycloak_admin_username/keycloak_admin_password-Defaults in settings.py
+  # decken sich bereits mit infra/docker-compose.yml (dms-api-dev-secret/
+  # admin/admin_dev_only) - hier bewusst nicht dupliziert.
+  # dependsOnServices nutzt für federation-hub-service/gateway-service die
+  # seit dieser Session (P26-S2) erweiterte dict-Form (siehe _helpers.tpl),
+  # weil deren infra/docker-compose.yml-Env-Var-Namen
+  # (DMS_FEDERATION_HUB_BASE_URL/DMS_INSTALLATION_GATEWAY_BASE_URL) vom
+  # Standardmuster DMS_<KEY>_BASE_URL abweichen.
+  auth-service:
+    enabled: true
+    image:
+      repository: dms/auth-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~317 (Host-Mapping 8003)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    usesKeycloak: true
+    dependsOnServices:
+      - permission-service
+      - name: federation-hub-service
+        envVar: DMS_FEDERATION_HUB_BASE_URL
+      - name: gateway-service
+        envVar: DMS_INSTALLATION_GATEWAY_BASE_URL
+    env:
+      # settings.py-Default für keycloak_public_base_url ist None (SSO-
+      # Browser-Redirect-Flow aus) - infra/docker-compose.yml aktiviert ihn
+      # dev-typisch mit der extern gemappten Keycloak-Adresse. In diesem
+      # Chart existiert noch keine reale OCP-Route für Keycloak (P26-S3 baut
+      # das echte Keycloak-Deployment) - Platzhalter, gleiches offene
+      # Problem wie bei gateway-service (CORS/Route, siehe dessen Kommentar
+      # oben).
+      DMS_KEYCLOAK_PUBLIC_BASE_URL: "http://localhost:8080"
+      # settings.py-Default ist False (föderierte Kontaktsuche ist laut
+      # Konzept 2.5 wörtlich opt-in) - infra/docker-compose.yml schaltet sie
+      # dev-typisch für den Selbst-Loopback-Smoke-Test scharf, hier zur
+      # Parität ebenso.
+      DMS_FEDERATED_DIRECTORY_ENABLED: "true"
+
+  permission-service:
+    enabled: true
+    image:
+      repository: dms/permission-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~364 (Host-Mapping 8004)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - auth-service
+    env: {}
+
+  # Teil der Upload-Hotpath-Pipeline (document-service ruft synchron auf) -
+  # skaliert deshalb horizontal mit (eine der P26-S2-Autoscaling-Auswahlen,
+  # siehe Session-Report). scan_engine-Default in settings.py ist bereits
+  # "eicar" (deckungsgleich mit infra/docker-compose.yml) - keine explizite
+  # env-Zeile nötig.
+  virus-scan-service:
+    enabled: true
+    image:
+      repository: dms/virus-scan-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~500 (Host-Mapping 8010)
+    replicas: 2
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    dependsOnServices:
+      - storage-service
+      - document-service
+      - permission-service
+    env: {}
+
+  # LibreOffice-headless-Konvertierung (docs/services/rendering-service.md)
+  # ist CPU-/Speicher-lastiger als der Standard-FastAPI-Service (soffice
+  # läuft als eigener Subprozess je Konvertierung) - resources-Override statt
+  # reinem Baseline-Fallback. Horizontal skalierbar (keine lokale
+  # Zustandshaltung, jede Konvertierung bekommt ein isoliertes
+  # UserInstallation-Profil, siehe docs) - eine der P26-S2-Autoscaling-
+  # Auswahlen.
+  rendering-service:
+    enabled: true
+    image:
+      repository: dms/rendering-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~537 (Host-Mapping 8011)
+    replicas: 2
+    resources:
+      memory:
+        requests: 512Mi
+        limits: 1Gi
+      cpu:
+        requests: 300m
+        limits: 1000m
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    dependsOnServices:
+      - storage-service
+      - document-service
+      - ocr-service
+      - permission-service
+    env: {}
+
+  # Tesseract-OCR (docs/services/ocr-service.md) ist CPU-lastig je
+  # Seite/Bild - resources-Override. Optionaler Dienst (Compose-Profil
+  # "ocr", laut .env.example standardmäßig aktiv) - hier wie jeder andere
+  # Service einfach über `enabled` gesteuert, kein eigenes Profil-Äquivalent
+  # in diesem Chart nötig. Horizontal skalierbar (jede Extraktion ist
+  # unabhängig), aber ohne HA-Anspruch im Leerlauf -> minReplicas 1 statt 2
+  # und PDB aus (ein Single-Replica-PDB mit minAvailable:1 würde
+  # Node-Drains blockieren, gleiches Prinzip wie registry-service/
+  # storage-service oben).
+  ocr-service:
+    enabled: true
+    image:
+      repository: dms/ocr-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~578 (Host-Mapping 8012)
+    replicas: 1
+    resources:
+      memory:
+        requests: 384Mi
+        limits: 768Mi
+      cpu:
+        requests: 300m
+        limits: 1200m
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 80
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - storage-service
+      - document-service
+      - permission-service
+    env: {}
+
+  # Postgres-FTS/Trigram-Suche (docs/services/search-service.md) - die
+  # eigentliche Rechenlast liegt serverseitig im (gebündelten) Postgres,
+  # nicht in diesem Service selbst; trotzdem ein moderater Memory-Override
+  # für Connection-Pooling/Query-Aufbau bei paralleler Last. Klassischer
+  # horizontal skalierbarer Lesepfad (zustandslos, kein lokaler Cache lt.
+  # Konzept 2.4) - eine der P26-S2-Autoscaling-Auswahlen.
+  search-service:
+    enabled: true
+    image:
+      repository: dms/search-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~610 (Host-Mapping 8013)
+    replicas: 2
+    resources:
+      memory:
+        requests: 192Mi
+        limits: 384Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    dependsOnServices:
+      - document-service
+      - folder-service
+      - object-type-service
+      - permission-service
+      - ocr-service
+      - rendering-service
+    env: {}
+
+  # sla_poll_interval_seconds/federation_process_type_map-Defaults in
+  # settings.py decken sich bereits mit infra/docker-compose.yml (30 / "{}")
+  # - keine expliziten env-Zeilen nötig. dependsOnServices nutzt für
+  # federation-hub-service/gateway-service dieselbe dict-Form wie
+  # auth-service oben, gleicher Grund (Compose-Env-Var-Name weicht vom
+  # DMS_<KEY>_BASE_URL-Muster ab).
+  workflow-service:
+    enabled: true
+    image:
+      repository: dms/workflow-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~648 (Host-Mapping 8014)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - permission-service
+      - signature-service
+      - name: federation-hub-service
+        envVar: DMS_FEDERATION_HUB_BASE_URL
+      - name: gateway-service
+        envVar: DMS_INSTALLATION_GATEWAY_BASE_URL
+    env: {}
+
+  # smtp_host/smtp_port-Defaults in settings.py sind bereits "mailpit"/1025
+  # (deckungsgleich mit infra/docker-compose.yml) - keine expliziten
+  # env-Zeilen nötig. "mailpit" bleibt bis P26-S3 (baut das echte
+  # Mailpit-Deployment) ein reiner Compose-Hostname ohne k8s-Entsprechung in
+  # diesem Chart - offener Punkt, siehe Session-Report (gleiches Problem bei
+  # mail-connector unten).
+  notification-service:
+    enabled: true
+    image:
+      repository: dms/notification-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~687 (Host-Mapping 8015)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - auth-service
+    env: {}
+
+  case-service:
+    enabled: true
+    image:
+      repository: dms/case-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~716 (Host-Mapping 8016)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - workflow-service
+      - document-service
+      - object-type-service
+      - permission-service
+    env: {}
+
+  signature-service:
+    enabled: true
+    image:
+      repository: dms/signature-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~750 (Host-Mapping 8017)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - document-service
+      - object-type-service
+      - auth-service
+    env: {}
+
+  # Bewusst KEIN interner Service dieser Installation (siehe
+  # docs/services/federation-hub-service.md, ADR 0028) - kein
+  # DMS_REGISTRY_SERVICE_BASE_URL/DMS_SELF_ADDRESS-Bedarf, kein
+  # dependsOnServices. Nur der lokalen Entwicklung halber trotzdem als
+  # Chart-Service mitgeliefert (Parität zu infra/docker-compose.yml). Die
+  # generischen dms.baseEnv-Felder (u. a. DMS_NATS_URL/
+  # DMS_REGISTRY_SERVICE_BASE_URL) werden trotzdem injiziert, da das
+  # generische Template dafür keinen Opt-out kennt - unschädlich, da
+  # BaseServiceSettings mit extra="ignore" unbekannte Felder klaglos
+  # verwirft (siehe libs/dms-common/src/dms_common/settings.py) und dieser
+  # Service sie schlicht nicht liest.
+  federation-hub-service:
+    enabled: true
+    image:
+      repository: dms/federation-hub-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~788 (Host-Mapping 8018)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    env: {}
+
+  favorite-service:
+    enabled: true
+    image:
+      repository: dms/favorite-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~805 (Host-Mapping 8019)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    env: {}
+
+  # DMS_GATEWAY_BASE_URL (settings.py-Default bereits "http://localhost:8009",
+  # deckungsgleich mit infra/docker-compose.yml) ist bewusst NICHT die
+  # interne Cluster-Adresse, sondern die von außen (z. B. aus einer
+  # Berichts-E-Mail heraus) erreichbare Gateway-Adresse - derselbe noch
+  # fehlende OCP-Route-Baustein wie bei gateway-service selbst (siehe dessen
+  # Kommentar oben). Deshalb hier bewusst NICHT über dependsOnServices (das
+  # würde die von außen nicht erreichbare interne Cluster-DNS-Adresse
+  # einsetzen) - der Compose-Paritäts-Default bleibt unverändert bestehen,
+  # bis eine echte Route existiert (offener Punkt, siehe Session-Report).
+  reporting-service:
+    enabled: true
+    image:
+      repository: dms/reporting-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~827 (Host-Mapping 8020)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - workflow-service
+      - audit-service
+      - storage-service
+      - notification-service
+      - permission-service
+    env: {}
+
+  archival-service:
+    enabled: true
+    image:
+      repository: dms/archival-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~869 (Host-Mapping 8021)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - document-service
+      - rendering-service
+      - storage-service
+      - object-type-service
+      - case-service
+      - permission-service
+    env:
+      # settings.py-Default für archive_encryption_key ist None (AES-256-GCM
+      # ohne Schlüssel nicht funktionsfähig) - infra/docker-compose.yml setzt
+      # denselben Dev-/Test-Schlüssel wie hier (ADR 0029, NUR für lokale
+      # Entwicklung, siehe dortiger Kommentar zu KeyStore-Plugins).
+      DMS_ARCHIVE_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
+  # dry_run_secret/query_parser_plugin_module-Defaults in settings.py decken
+  # sich bereits mit infra/docker-compose.yml - keine expliziten env-Zeilen
+  # nötig (ADR 0031: pglast-Parser-Plugin bewusst nicht mitgeliefert,
+  # GPL-Lizenz).
+  query-service:
+    enabled: true
+    image:
+      repository: dms/query-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~914 (Host-Mapping 8022)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - audit-service
+      - document-service
+      - object-type-service
+      - permission-service
+      - auth-service
+    env: {}
+
+  license-service:
+    enabled: true
+    image:
+      repository: dms/license-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~960 (Host-Mapping 8023)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - storage-service
+      - document-service
+      - auth-service
+      - permission-service
+    env:
+      # BaseServiceSettings-Default für fleet_agent_api_key ist None (Fleet-
+      # Zugriff aus, 3a: "komplett optionaler, separater Baustein") -
+      # infra/docker-compose.yml aktiviert ihn dev-typisch mit demselben Wert
+      # wie config-service unten (ein fleet-management-service provisioniert
+      # beide Wege über dieselbe Installation).
+      DMS_FLEET_AGENT_API_KEY: "dev-fleet-agent-key"
+
+  plugin-orchestration-service:
+    enabled: true
+    image:
+      repository: dms/plugin-orchestration-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1010 (Host-Mapping 8024)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - auth-service
+      - permission-service
+    env: {}
+
+  monitoring-service:
+    enabled: true
+    image:
+      repository: dms/monitoring-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1040 (Host-Mapping 8026)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - auth-service
+      - permission-service
+    env: {}
+
+  # Reiner Protokoll-Übersetzer ohne eigenes Postgres-/NATS-Schema (3.3,
+  # P12-S1) - die generischen dms.baseEnv-Felder DMS_POSTGRES_DSN/
+  # DMS_NATS_URL werden trotzdem injiziert (kein Opt-out im generischen
+  # Template, siehe federation-hub-service-Kommentar oben) und schlicht
+  # ignoriert (settings.py dieses Service kennt diese Felder gar nicht).
+  webdav-connector:
+    enabled: true
+    image:
+      repository: dms/webdav-connector
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1073 (Host-Mapping 8027)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - document-service
+      - folder-service
+      - auth-service
+    env: {}
+
+  # Gleiches Muster wie webdav-connector oben (3.3, P12-S4): reiner
+  # Übersetzer, kein eigenes Postgres-/NATS-Schema.
+  cmis-connector:
+    enabled: true
+    image:
+      repository: dms/cmis-connector
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1103 (Host-Mapping 8030)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - document-service
+      - folder-service
+      - auth-service
+    env: {}
+
+  mail-connector:
+    enabled: true
+    image:
+      repository: dms/mail-connector
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1134 (Host-Mapping 8033)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - storage-service
+      - virus-scan-service
+      - document-service
+      - case-service
+      - object-type-service
+    env:
+      # settings.py-Default für pop3_host ist "localhost" (funktioniert nur
+      # gegen einen Host-lokalen Mailserver) - infra/docker-compose.yml
+      # überschreibt auf den Compose-Hostnamen "mailpit". smtp_host/
+      # pop3_port/-_username/-_password/poststelle_role-Defaults in
+      # settings.py decken sich bereits mit infra/docker-compose.yml, keine
+      # weiteren Zeilen nötig. "mailpit" bleibt bis P26-S3 (baut das echte
+      # Mailpit-Deployment) ein reiner Compose-Hostname ohne k8s-Entsprechung
+      # in diesem Chart (offener Punkt, siehe Session-Report).
+      DMS_POP3_HOST: "mailpit"
+
+  migration-service:
+    enabled: true
+    image:
+      repository: dms/migration-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1186 (Host-Mapping 8028)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - document-service
+      - folder-service
+      - permission-service
+      - workflow-service
+    env: {}
+
+  config-service:
+    enabled: true
+    image:
+      repository: dms/config-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1222 (Host-Mapping 8029)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - object-type-service
+      - workflow-service
+      - permission-service
+      - monitoring-service
+      - auth-service
+    env:
+      # Siehe license-service oben, derselbe Wert/dieselbe Begründung.
+      DMS_FLEET_AGENT_API_KEY: "dev-fleet-agent-key"
+
+  # Bewusst KEIN interner Service einer einzelnen Installation (3a, ADR 0028
+  # analog federation-hub-service) - kein DMS_INSTALLATION_ID/
+  # DMS_REGISTRY_SERVICE_BASE_URL-Bedarf, kein dependsOnServices, nur der
+  # lokalen Entwicklung halber mitgeliefert. Gleiches "generische
+  # dms.baseEnv-Felder werden dennoch injiziert und ignoriert"-Prinzip wie
+  # bei federation-hub-service oben.
+  fleet-management-service:
+    enabled: true
+    image:
+      repository: dms/fleet-management-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1269 (Host-Mapping 8031)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    env: {}
+
+  teamspace-service:
+    enabled: true
+    image:
+      repository: dms/teamspace-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1289 (Host-Mapping 8032)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - folder-service
+      - permission-service
+    env: {}
+
+  object-type-service:
+    enabled: true
+    image:
+      repository: dms/object-type-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1355 (Host-Mapping 8007)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    env: {}
+
+  folder-service:
+    enabled: true
+    image:
+      repository: dms/folder-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1374 (Host-Mapping 8008)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    dependsOnServices:
+      - object-type-service
+      - permission-service
+    env: {}
 
 # ---------------------------------------------------------------------------
 # Zustandsbehaftete Infrastruktur: postgresql / keycloak / minio (NUR diese

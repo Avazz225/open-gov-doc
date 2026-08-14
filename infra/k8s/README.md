@@ -71,7 +71,18 @@ tar xzf helm.tar.gz
 ## Stand
 
 P26-S1 (Grundgerüst + 4 Beispiel-Services: `registry-service`,
-`gateway-service`, `document-service`, `storage-service`). Die übrigen ~28
-Services (P26-S2), zustandsbehaftete Infrastruktur als echte
-Deployments+PVC (P26-S3), Storage-Replikations-CronJob (P26-S4) und
+`gateway-service`, `document-service`, `storage-service`). P26-S2 hat die
+übrigen 28 zustandslosen FastAPI-Services aus `infra/docker-compose.yml`
+ergänzt (`services:` hat jetzt 32 Einträge) — dieselben Templates, keine
+neuen. Autoscaling ist zusätzlich zu `document-service` (P26-S1) für
+`virus-scan-service`, `rendering-service`, `ocr-service` und
+`search-service` aktiv (Begründung siehe P26-S2-Session-Report/
+`PROGRESS.md`); PDB zusätzlich zu `gateway-service`/`document-service` für
+`virus-scan-service`, `rendering-service`, `search-service`.
+`templates/_helpers.tpl`s `dms.dependsOnServicesEnv` unterstützt seit P26-S2
+neben einfachen Service-Namen auch `{name, envVar}`-Einträge, für die kleine
+Minderheit an Services, deren `infra/docker-compose.yml`-Env-Var-Name vom
+Standardmuster `DMS_<KEY>_BASE_URL` abweicht (siehe `auth-service`/
+`workflow-service` in `values.yaml`). Zustandsbehaftete Infrastruktur als
+echte Deployments+PVC (P26-S3), Storage-Replikations-CronJob (P26-S4) und
 Frontend-Apps (P26-S5) folgen in den nächsten Sessions dieser Phase.
