@@ -1,0 +1,77 @@
+{{/*
+CronJob, der storage-service's echten Replikations-Retry-Endpunkt
+(`POST /replication/process-pending`, services/storage-service/src/
+storage_service/main.py Zeile 561) periodisch von außen auslöst (P26-S4).
+storage-service läuft bewusst OHNE eigenen In-Prozess-Scheduler dafür (ADR
+0004: expliziter Endpunkt statt In-Prozess-Hintergrundtask) — dieser CronJob
+ist der seit Post-Roadmap Phase 20 Session 6 (siehe PROGRESS.md P20-S6)
+angekündigte externe Träger.
+
+Nur EIN CronJob, kein zweiter für Objekt-Fixity-Verifikation — siehe
+values.yaml storageCronJob-Blockkommentar sowie ADR 0101: der reale
+Verifikations-Endpunkt `GET /object-verify/{key:path}/all` braucht einen
+konkreten Objekt-`key` (verifiziert alle ZIELE eines Objekts, nicht alle
+Objekte des Stores) und lässt sich deshalb nicht blind periodisch aufrufen,
+ohne einen neuen storage-service-Endpunkt zu erfinden.
+
+Lightweight curl-Image statt des vollen storage-service-Images (siehe
+values.yaml storageCronJob.image-Kommentar) — der Container macht nichts
+weiter als einen einzelnen authentifizierten HTTP-POST.
+*/}}
+{{- if .Values.storageCronJob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "dms.fullname" . }}-storage-replication
+  labels:
+    {{- include "dms.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage-replication-cronjob
+spec:
+  schedule: {{ .Values.storageCronJob.replication.schedule | quote }}
+  # Verhindert überlappende Läufe gegen dieselbe storage-service-Instanz
+  # (die Retry-Queue selbst ist zwar idempotent, aber zwei gleichzeitige
+  # Batches würden sich unnötig um dieselben "pending"-Zeilen bewerben).
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.storageCronJob.replication.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.storageCronJob.replication.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # Bricht einen hängenden Lauf (z. B. storage-service oder ein
+      # Redundanz-Ziel nicht erreichbar) hart ab, statt unbegrenzt zu warten.
+      activeDeadlineSeconds: {{ .Values.storageCronJob.replication.activeDeadlineSeconds }}
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "dms.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: storage-replication-cronjob
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trigger-replication
+              image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.storageCronJob.image.repository .Values.storageCronJob.image.tag | quote }}
+              imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  curl -sS -f --connect-timeout 5 --max-time 60 --retry 2 --retry-delay 3 \
+                    -X POST \
+                    -H "X-DMS-Principal: ${PRINCIPAL}" \
+                    "${STORAGE_BASE_URL}/replication/process-pending?limit=${LIMIT}"
+              env:
+                - name: STORAGE_BASE_URL
+                  value: {{ include "dms.storageServiceBaseUrl" . | quote }}
+                - name: LIMIT
+                  value: {{ .Values.storageCronJob.replication.limit | quote }}
+                - name: PRINCIPAL
+                  value: {{ .Values.storageCronJob.principalHeader | quote }}
+              resources:
+                requests:
+                  memory: {{ .Values.storageCronJob.resources.memory.requests | quote }}
+                  cpu: {{ .Values.storageCronJob.resources.cpu.requests | quote }}
+                limits:
+                  memory: {{ .Values.storageCronJob.resources.memory.limits | quote }}
+                  cpu: {{ .Values.storageCronJob.resources.cpu.limits | quote }}
+{{- end }}

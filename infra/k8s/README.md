@@ -28,6 +28,7 @@ infra/k8s/dms/
     ├── minio.yaml           # bundled MinIO: PVC+Deployment+Service (P26-S3)
     ├── nats.yaml            # bundled NATS (bundled-only): PVC+Deployment+Service (P26-S3)
     ├── redis.yaml           # bundled Redis (bundled-only): Deployment+Service (P26-S3)
+    ├── storage-cronjob.yaml  # CronJob: externer Trigger für storage-service-Replikation (P26-S4, ADR 0101)
     └── NOTES.txt
 ```
 
@@ -103,6 +104,24 @@ tar xzf helm.tar.gz
 - **`services.<name>.usesRedis`** (P26-S3, analog `usesKeycloak`): injiziert
   `DMS_REDIS_URL` (bundled-only, `dms.redisUrl`-Helper) — aktuell nur bei
   `gateway-service` gesetzt (Rate-Limiting, ADR 0097).
+- **`storageCronJob`** (P26-S4, ADR 0101): `enabled` steuert, ob
+  `templates/storage-cronjob.yaml` einen `CronJob` rendert, der periodisch
+  `POST /replication/process-pending` gegen `storage-service`s In-Cluster-
+  Service-DNS aufruft (`dms.storageServiceBaseUrl`-Helfer, gleiche
+  URL-Formel wie `dms.dependsOnServicesEnv`) — der in ADR 0004/PROGRESS.md
+  P20-S6 angekündigte externe Träger für die Replikations-Retry-Queue.
+  `replication.schedule`/`.limit`/`.activeDeadlineSeconds`/
+  `.{successful,failed}JobsHistoryLimit` sind konfigurierbar, `image.*`
+  wählt ein leichtgewichtiges `curlimages/curl`-Utility-Image statt des
+  vollen `storage-service`-Images. `principalHeader` setzt einen
+  `X-DMS-Principal`-Header (Service-zu-Service-Konvention, aktuell von
+  `storage-service` nicht erzwungen, siehe ADR 0101). `verification.enabled`
+  ist ein bewusst UNVERDRAHTETER Platzhalter (kein Template nutzt ihn) — der
+  reale `GET /object-verify/{key}/all`-Endpunkt verifiziert nur ein
+  einzelnes, per Pfad-Parameter übergebenes Objekt, kein Bulk-/Listen-
+  Endpunkt für "alle Objekte" existiert aktuell in `storage-service` (siehe
+  ADR 0101 für die volle Begründung und einen Gestaltungsvorschlag für eine
+  künftige Session).
 
 ## Stand
 
@@ -127,6 +146,14 @@ Konventionen oben) und den seit P26-S1 dokumentierten Secrets-Gap behoben
 (ADR 0100). `helm template` rendert jetzt 37 Deployments (32 zustandslose
 Services + 5 Infrastruktur-Komponenten), 3 PersistentVolumeClaims (Postgres/
 MinIO/NATS — Keycloak/Redis bewusst ohne, siehe jeweiliger `values.yaml`-
-Kommentar) und 3 generierte Secrets im Default-Fall. Storage-Replikations-
-CronJob (P26-S4) und Frontend-Apps (P26-S5) folgen in den nächsten Sessions
-dieser Phase.
+Kommentar) und 3 generierte Secrets im Default-Fall.
+
+P26-S4 hat den Storage-Replikations-CronJob ergänzt (`templates/
+storage-cronjob.yaml`, siehe ADR 0101) — `helm template` rendert jetzt
+zusätzlich 1 `CronJob` (37 Deployments/Services etc. unverändert). Bewusst
+nur EIN CronJob statt der im Phase-Briefing angenommenen zwei: der reale
+Verifikations-Endpunkt (`GET /object-verify/{key}/all`) braucht einen
+konkreten Objekt-`key` und lässt sich nicht blind periodisch "für alle
+Objekte" aufrufen — siehe ADR 0101 für Details und einen Vorschlag für eine
+künftige `storage-service`-Erweiterung, die das nachrüsten würde. Frontend-
+Apps (P26-S5) folgen als letzte Session dieser Phase.

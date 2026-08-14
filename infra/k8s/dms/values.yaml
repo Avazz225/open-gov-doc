@@ -1177,3 +1177,83 @@ storageService:
       region: us-east-1
   writeStrategy: primary_async
   quorumCount: 1
+
+# ---------------------------------------------------------------------------
+# storageCronJob (P26-S4) — externer periodischer Auslöser für den
+# storage-service-Endpunkt, den der Service laut ADR 0004 bewusst NICHT
+# selbst per In-Prozess-Hintergrundtask ausführt (siehe PROGRESS.md P20-S6:
+# "storage-service als k8s CronJob statt extern zu triggern", explizit auf
+# diese Session verschoben). Siehe ADR 0101 für die vollständige
+# Begründung/Herleitung dieses gesamten Blocks.
+#
+# WICHTIG — Abweichung vom Session-Briefing: es gibt hier bewusst nur EINEN
+# funktionsfähigen CronJob (Replikation), nicht zwei. Der zweite im Briefing
+# angenommene Endpunkt (`GET /object-verify/{key:path}/all`,
+# services/storage-service/src/storage_service/main.py Zeile 523) verifiziert
+# laut echtem Code (und docs/services/storage-service.md) alle konfigurierten
+# ZIELE **eines einzelnen, per Pfad-Parameter übergebenen** Objekt-`key` —
+# NICHT "alle Objekte im Store". storage-service hat aktuell keinen Endpunkt,
+# der Objektschlüssel auflistet oder eine Charge noch nicht verifizierter
+# Objekte liefert (kein Fixity-Pendant zu `list_pending_copies`/
+# `POST /replication/process-pending`) — ein blind von außen aufgerufener
+# periodischer "verifiziere alles"-CronJob lässt sich damit gegen die
+# TATSÄCHLICHE API nicht bauen, ohne einen neuen storage-service-Endpunkt zu
+# erfinden (out of scope für eine reine Helm-Chart-Session). `verification`
+# unten bleibt deshalb ein bewusst UNVERDRAHTETER Platzhalter (kein Template
+# liest ihn) für eine künftige storage-service-Session, die einen echten
+# Bulk-Verify-Endpunkt baut (siehe ADR 0101 "Konsequenzen" für einen
+# Gestaltungsvorschlag, analog zur Full-Jitter-Backoff-Retry-Queue aus
+# ADR 0082).
+# ---------------------------------------------------------------------------
+storageCronJob:
+  enabled: true
+  image:
+    # Leichtgewichtiges Utility-Image für zwei HTTP-Aufrufe statt des vollen
+    # storage-service-Images (siehe ADR 0101) — keine bestehende Projekt-
+    # Konvention für ein solches Utility-Image gefunden (infra/docker-
+    # compose.yml nutzt curl/wget nur innerhalb der Service-Images selbst für
+    # Healthchecks, kein eigener Utility-Container), daher das gängige,
+    # offizielle minimale curl-Image gewählt.
+    repository: curlimages/curl
+    tag: "8.10.1"
+  # Utility-Container braucht deutlich weniger als resources.baseline (dafür
+  # gedacht für einen echten FastAPI-Prozess) — eigener, kleinerer Block statt
+  # Baseline-Fallback.
+  resources:
+    memory:
+      requests: 32Mi
+      limits: 64Mi
+    cpu:
+      requests: 25m
+      limits: 100m
+  # Service-zu-Service-Prinzip-Header, gleiches Muster wie archival-services
+  # `_SYSTEM_PRINCIPAL_HEADERS`/workflow-services X-DMS-Principal-Prüfung
+  # (services/archival-service/src/archival_service/clients.py,
+  # services/workflow-service/src/workflow_service/main.py) — storage-service
+  # verlangt ihn AKTUELL NICHT für `/replication/process-pending` (main.py
+  # Zeile 561-564 hat weder `Header(...)` noch `Depends(...)` für Auth, anders
+  # als z. B. `DELETE /objects/{key}`s optionaler X-DMS-Roles-Governance-
+  # Bypass) — wird trotzdem mitgesendet (kostet nichts, konsistent mit dem
+  # projektweiten Muster, zukunftssicher falls storage-service diesen
+  # Endpunkt später gated, siehe ADR 0101).
+  principalHeader: "system:storage-replication-cronjob"
+  replication:
+    # Alle 15 Minuten — die Retry-Queue selbst hat seit ADR 0082 bereits
+    # Full-Jitter-Backoff (next_retry_at), ein CronJob-Intervall muss also
+    # nicht besonders eng sein, um Thundering-Herd-Effekte zu vermeiden; 15
+    # Minuten hält "pending"-Kopien trotzdem in überschaubarer Zeit aktuell.
+    schedule: "*/15 * * * *"
+    # Siehe POST /replication/process-pending?limit=100 (main.py Zeile 563) -
+    # identisch zum Endpunkt-eigenen Default, hier explizit statt implizit,
+    # damit values.yaml der alleinige Konfigurationsort bleibt.
+    limit: 100
+    # Deutlich über dem erwarteten Laufzeitbedarf (ein Retry-Batch aus
+    # höchstens `limit` Kopien), verhindert aber einen unbegrenzt hängenden
+    # Job bei einem tot geglaubten Ziel-Backend.
+    activeDeadlineSeconds: 180
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3
+  verification:
+    # Siehe Erklärung im Blockkommentar oben — bewusst kein Template dahinter,
+    # reiner dokumentierter Platzhalter für eine spätere Session.
+    enabled: false

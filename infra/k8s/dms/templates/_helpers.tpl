@@ -293,3 +293,16 @@ enthält.
 - name: DMS_QUORUM_COUNT
   value: {{ .Values.storageService.quorumCount | quote }}
 {{- end -}}
+
+{{/*
+storage-service-Basis-URL für templates/storage-cronjob.yaml (P26-S4) —
+exakt dieselbe Formel wie dms.dependsOnServicesEnv
+(http://<fullname>-<service-key>:8000), hier als eigener Helfer, weil der
+CronJob (anders als ein services:-Eintrag) nicht über dependsOnServices
+eingebunden ist, sondern seine Ziel-URL direkt braucht. storage-service läuft
+in diesem Chart immer auf Port 8000 (siehe services.storage-service.port in
+values.yaml, wie jeder andere FastAPI-Service).
+*/}}
+{{- define "dms.storageServiceBaseUrl" -}}
+http://{{ include "dms.fullname" . }}-storage-service:8000
+{{- end -}}
