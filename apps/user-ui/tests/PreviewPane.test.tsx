@@ -379,6 +379,91 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(within(previewPane).getByText("Kommentar: Erste Fassung")).toBeInTheDocument();
   });
 
+  it("pollt eine noch nicht fertige pdf_archive-Rendition und zeigt die formatierte Ansicht, sobald sie bereit ist (P23-S3)", async () => {
+    vi.useFakeTimers();
+    try {
+      const doc = makeDocument({ title: "vertrag.docx" });
+      listDocumentVersionsMock.mockResolvedValue([
+        makeVersion({
+          content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+      ]);
+      // Erster Poll-Durchlauf: rendering-service hat noch keine Rendition-Zeile
+      // angelegt (Verarbeitung läuft noch) - erst der zweite liefert sie fertig.
+      listRenditionsMock
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([
+          makeRendition({ id: "pdf-archive-1", rendition_type: "pdf_archive" }),
+        ]);
+      downloadRenditionContentMock.mockResolvedValue(
+        new Blob(["%PDF-1.4"], { type: "application/pdf" })
+      );
+
+      renderPreview(doc);
+      for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+
+      const previewPane = screen.getByLabelText("Vorschau: vertrag.docx");
+      expect(listRenditionsMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(7_000);
+      for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+
+      expect(listRenditionsMock).toHaveBeenCalledTimes(2);
+      const embed = previewPane.querySelector("embed");
+      expect(embed).toHaveAttribute("title", "vertrag.docx");
+      expect(downloadRenditionContentMock).toHaveBeenCalledWith("token-123", "pdf-archive-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pollt im Hintergrund auf ein noch nicht fertiges OCR-Ergebnis, ohne die bereits sichtbare native PDF-Ansicht zu unterbrechen (P23-S3)", async () => {
+    vi.useFakeTimers();
+    try {
+      const doc = makeDocument({ title: "scan.pdf" });
+      listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+      downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+      listOcrResultsMock.mockResolvedValueOnce([]).mockResolvedValue([
+        {
+          id: "ocr-1",
+          document_id: "d1",
+          version_number: 1,
+          status: "ready",
+          engine: "tesseract",
+          average_confidence: 92.0,
+          full_text: "Hallo",
+          pages: [{ page_number: 1, width: 200, height: 100, words: [] }],
+          error_message: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      downloadOcrPageImageMock.mockResolvedValue(new Blob(["fake-png"], { type: "image/png" }));
+
+      renderPreview(doc);
+      for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+
+      const previewPane = screen.getByLabelText("Vorschau: scan.pdf");
+      // Natives PDF-Embed erscheint sofort, ohne auf OCR zu warten.
+      const embed = previewPane.querySelector("embed");
+      expect(embed).toHaveAttribute("title", "scan.pdf");
+      expect(downloadOcrPageImageMock).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(7_000);
+      for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+
+      // OCR wurde inzwischen fertig (engine "tesseract") - die Vorschau
+      // wechselt jetzt korrekt vom nativen PDF-Embed auf das
+      // Seitenbild-mit-Wort-Overlay (gleiches Verhalten wie beim initialen
+      // Laden mit bereits fertigem OCR-Ergebnis).
+      expect(downloadOcrPageImageMock).toHaveBeenCalled();
+      expect(within(previewPane).getByRole("img")).toBeInTheDocument();
+      expect(previewPane.querySelector("embed")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("zeigt text/plain unverändert als Plain-Text-Vorschau", async () => {
     const doc = makeDocument({ title: "notiz.txt" });
     listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "text/plain" })]);

@@ -40,6 +40,21 @@ type PreviewKind = "loading" | "image" | "text" | "html" | "pdf" | "none";
 // zuverlässiger als ein vom Client geratener Wert.
 const MAX_PREVIEW_CHARS = 200_000;
 
+// Polling für noch nicht fertige Renditions/OCR-Ergebnisse (P23-S3,
+// Nutzerwunsch) - `rendering-service`/`ocr-service` legen ihre Zeilen erst
+// beim Abschluss der Verarbeitung an (kein eigener "pending"-Status in der
+// API, siehe RenditionSummary/OcrResultSummary), ein noch nicht fertiges
+// Ergebnis ist also am Fehlen der Zeile erkennbar, nicht an ihrem Status.
+// Bewusst mit einer Obergrenze (statt endlosem Polling): ein Format ohne
+// unterstützte Rendition (z. B. Office-Format mit deaktivierter OCR) würde
+// sonst für immer weiterfragen.
+const RENDITION_POLL_INTERVAL_MS = 7_000;
+const RENDITION_POLL_MAX_ATTEMPTS = 8; // ~56s Gesamtfenster
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isTextPreviewable(contentType: string | null): boolean {
   if (!contentType) return false;
   return contentType.startsWith("text/") || contentType === "application/json";
@@ -190,38 +205,54 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
         return;
       }
 
+      // Bild- und PDF-Quellen erwarten hier keine Rendition (eigener,
+      // direkterer Rohbyte-Zweig weiter unten) - nur für alles andere (v.a.
+      // Office-/Textformate) wird auf `pdf_archive`/`substitute_text`
+      // gewartet, ggf. per Polling (P23-S3, siehe RENDITION_POLL_* oben):
+      // `rendering-service` legt die Rendition-Zeile erst NACH Abschluss der
+      // LibreOffice-Konvertierung an, ein direkt nach dem Upload noch leeres
+      // Ergebnis heißt "noch in Arbeit", nicht "wird nie kommen".
+      const expectsOfficeRendition =
+        !contentType?.startsWith("image/") && contentType !== "application/pdf";
       let fetchedRenditions: RenditionSummary[] = [];
-      try {
-        fetchedRenditions = await listRenditions(accessToken, activeDocument.id, selectedVersion);
-      } catch {
-        fetchedRenditions = [];
+      let pdfArchive: RenditionSummary | undefined;
+      let substitute: RenditionSummary | undefined;
+      for (let attempt = 0; attempt <= RENDITION_POLL_MAX_ATTEMPTS; attempt++) {
+        try {
+          fetchedRenditions = await listRenditions(accessToken, activeDocument.id, selectedVersion);
+        } catch {
+          fetchedRenditions = [];
+        }
+        if (cancelled) return;
+        setRenditions(fetchedRenditions);
+
+        pdfArchive = expectsOfficeRendition
+          ? findReadyRendition(fetchedRenditions, "pdf_archive")
+          : undefined;
+        substitute = pdfArchive ? undefined : findReadyRendition(fetchedRenditions, "substitute_text");
+
+        if (pdfArchive || substitute || !expectsOfficeRendition) break;
+        if (attempt === RENDITION_POLL_MAX_ATTEMPTS) break;
+        await sleep(RENDITION_POLL_INTERVAL_MS);
+        if (cancelled) return;
       }
-      if (cancelled) return;
-      setRenditions(fetchedRenditions);
 
       // Word-ähnliche A4-Ansicht (2.4, Nutzer-Feedback): rendering-service
       // konvertiert Office-/Textformate bereits automatisch per LibreOffice
       // in ein echtes, paginiertes PDF (pdf_archive-Rendition, ursprünglich
       // nur als Archivkopie gedacht) - das ist bereits die gewünschte
       // formatierte Ansicht, hier nur erstmals als Vorschau konsumiert.
-      // Bild- und PDF-Quellen ausgenommen: PdfArchiveRenderer konvertiert
-      // auch Bilder zu PDF (hier soll aber "Bild als Bild" gezeigt werden),
-      // und ein bereits-PDF würde nur redundant zu sich selbst re-getaggt -
-      // beide haben unten ihren eigenen, direkteren Rohbyte-Zweig.
-      if (!contentType?.startsWith("image/") && contentType !== "application/pdf") {
-        const pdfArchive = findReadyRendition(fetchedRenditions, "pdf_archive");
-        if (pdfArchive) {
-          try {
-            const blob = await downloadRenditionContent(accessToken, pdfArchive.id);
-            if (cancelled) return;
-            objectUrl = URL.createObjectURL(blob);
-            setPdfUrl(objectUrl);
-            setPreviewKind("pdf");
-          } catch {
-            if (!cancelled) setPreviewKind("none");
-          }
-          return;
+      if (pdfArchive) {
+        try {
+          const blob = await downloadRenditionContent(accessToken, pdfArchive.id);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setPdfUrl(objectUrl);
+          setPreviewKind("pdf");
+        } catch {
+          if (!cancelled) setPreviewKind("none");
         }
+        return;
       }
 
       // Ersatzdarstellung als Text (DOCX/PPTX/ODS, 2.4) - der
@@ -229,7 +260,6 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       // statt eines Thumbnails; ohne diesen Zweig blieb die Vorschau für
       // diese Formate leer, obwohl die Rendition längst existierte
       // (Nutzer-Feedback).
-      const substitute = findReadyRendition(fetchedRenditions, "substitute_text");
       if (substitute) {
         try {
           const blob = await downloadRenditionContent(accessToken, substitute.id);
@@ -246,15 +276,51 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       }
 
       let ocr: OcrResultSummary | null = null;
+      let ocrStillProcessing = false;
       try {
         const results = await listOcrResults(accessToken, activeDocument.id, selectedVersion);
         ocr = results.find((r) => r.status === "ready" || r.status === "needs_review") ?? null;
+        // Genau wie bei Renditions legt der OCR Service seine Zeile erst nach
+        // Abschluss der Verarbeitung an - für PDFs/Bilder (die einzigen
+        // OCR-fähigen Formate) heißt ein leeres Ergebnis "noch in Arbeit",
+        // nicht "wird nie kommen" (P23-S3). Nur relevant, wenn noch kein
+        // OCR-Ergebnis gefunden wurde - ein bereits vorhandenes (ready/
+        // needs_review) braucht kein Nachladen mehr.
+        ocrStillProcessing =
+          !ocr &&
+          (contentType === "application/pdf" || !!contentType?.startsWith("image/")) &&
+          results.every((r) => r.status !== "failed");
       } catch {
         // OCR ist ein Zusatznutzen (3.9) - ein Ladefehler blendet nur das
         // Text-Overlay aus, das Thumbnail wird trotzdem versucht.
         ocr = null;
       }
       if (cancelled) return;
+      if (ocrStillProcessing) {
+        // Läuft im Hintergrund weiter, NACHDEM die native PDF-/Bild-Ansicht
+        // unten bereits angezeigt wurde (Nutzer sieht sofort etwas) - erst
+        // bei Erfolg wird `ocrResult` gesetzt, das Overlay erscheint dann
+        // nachträglich, ohne die bereits sichtbare Vorschau zu unterbrechen.
+        void (async () => {
+          for (let attempt = 0; attempt < RENDITION_POLL_MAX_ATTEMPTS; attempt++) {
+            await sleep(RENDITION_POLL_INTERVAL_MS);
+            if (cancelled || !accessToken || selectedVersion === null) return;
+            let results: OcrResultSummary[] = [];
+            try {
+              results = await listOcrResults(accessToken, activeDocument.id, selectedVersion);
+            } catch {
+              return;
+            }
+            if (cancelled) return;
+            const ready = results.find((r) => r.status === "ready" || r.status === "needs_review");
+            if (ready) {
+              setOcrResult(ready);
+              return;
+            }
+            if (results.some((r) => r.status === "failed")) return;
+          }
+        })();
+      }
       // PDFs: das Seitenbild-Overlay bleibt nur Fallback für echte Scans ohne
       // Textlayer (engine "tesseract") - hat OCR bereits einen echten
       // Textlayer eingebettet (engine "native_text_layer", siehe ocr-service
