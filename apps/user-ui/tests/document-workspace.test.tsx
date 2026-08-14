@@ -34,6 +34,7 @@ const downloadDocumentMock = vi.fn();
 const uploadDocumentMock = vi.fn();
 const createFolderMock = vi.fn();
 const renameFolderMock = vi.fn();
+const moveFolderMock = vi.fn();
 const deleteFolderMock = vi.fn();
 const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
@@ -88,6 +89,7 @@ vi.mock("@/lib/api", () => ({
   uploadDocument: (...args: unknown[]) => uploadDocumentMock(...args),
   createFolder: (...args: unknown[]) => createFolderMock(...args),
   renameFolder: (...args: unknown[]) => renameFolderMock(...args),
+  moveFolder: (...args: unknown[]) => moveFolderMock(...args),
   deleteFolder: (...args: unknown[]) => deleteFolderMock(...args),
   trashFolder: (...args: unknown[]) => trashFolderMock(...args),
   restoreFolder: (...args: unknown[]) => restoreFolderMock(...args),
@@ -189,6 +191,7 @@ describe("DocumentWorkspace", () => {
     uploadDocumentMock.mockReset();
     createFolderMock.mockReset();
     renameFolderMock.mockReset();
+    moveFolderMock.mockReset();
     deleteFolderMock.mockReset();
     getObjectTypeMock.mockReset();
     updateDocumentMetadataMock.mockReset();
@@ -302,6 +305,94 @@ describe("DocumentWorkspace", () => {
     expect(await screen.findByText(/Verträge/)).toBeInTheDocument();
     expect(screen.getByText(/Rechnung.pdf/)).toBeInTheDocument();
     expect(listChildFoldersMock).toHaveBeenCalledWith("token-123", "root");
+  });
+
+  it("moves a folder via drag-and-drop onto another folder in the list view (P23-S4)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+      { id: "f2", name: "Rechnungen", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    moveFolderMock.mockResolvedValue({ id: "f1", name: "Verträge", parent_id: "f2" });
+
+    renderWorkspace();
+
+    const sourceRow = (await screen.findByText(/Verträge/)).closest("li");
+    const targetRow = screen.getByText(/Rechnungen/).closest("li");
+    expect(sourceRow).toBeTruthy();
+    expect(targetRow).toBeTruthy();
+
+    fireEvent.dragStart(sourceRow!);
+    fireEvent.dragOver(targetRow!);
+    fireEvent.drop(targetRow!);
+
+    await waitFor(() => expect(moveFolderMock).toHaveBeenCalledWith("token-123", "f1", "f2"));
+    // Verschieben lädt den aktuellen Ordner neu, genau wie Umbenennen/Löschen.
+    await waitFor(() => expect(listChildFoldersMock.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("ignores dropping a folder onto itself instead of calling moveFolder (P23-S4)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+
+    renderWorkspace();
+
+    const row = (await screen.findByText(/Verträge/)).closest("li");
+    fireEvent.dragStart(row!);
+    fireEvent.dragOver(row!);
+    fireEvent.drop(row!);
+
+    expect(moveFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("moves a folder via drag-and-drop in the tree view, but refuses to drop it onto its own descendant (P23-S4)", async () => {
+    listChildFoldersMock.mockImplementation(async (_token: string, folderId: string) => {
+      if (folderId === "root") {
+        return [{ id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} }];
+      }
+      if (folderId === "f1") {
+        return [{ id: "f1a", name: "Unterordner", parent_id: "f1", object_type_id: null, attributes: {} }];
+      }
+      return [];
+    });
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    moveFolderMock.mockResolvedValue({ id: "f1a", name: "Unterordner", parent_id: "root" });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Baum"));
+    await user.click(await screen.findByLabelText("Verträge aufklappen"));
+    // Die Drag&Drop-Handler hängen in FolderTree am `<span class="tree-row">`
+    // (nicht am `<li>` - das würde als Ziel-Element im Test nichts bewirken,
+    // da DOM-Events nicht in Kind-Elemente hinein propagieren), daher
+    // `.closest("span.tree-row")` statt "li" wie in der Listenansicht oben.
+    const childRow = (await screen.findByText(/Unterordner/)).closest("span.tree-row");
+    const parentRow = screen.getByText(/Verträge/).closest("span.tree-row");
+    expect(childRow).toBeTruthy();
+    expect(parentRow).toBeTruthy();
+
+    // Ungültig: der Elternordner ("Verträge") kann nicht in seinen eigenen,
+    // im Baum sichtbaren Nachfahren ("Unterordner") verschoben werden.
+    fireEvent.dragStart(parentRow!);
+    fireEvent.dragOver(childRow!);
+    fireEvent.drop(childRow!);
+    expect(moveFolderMock).not.toHaveBeenCalled();
+
+    // Gültig: der Nachfahre ("Unterordner") kann auf die Wurzel verschoben werden.
+    // `within(...)`, da "Start" sowohl im Breadcrumb als auch als Wurzelzeile
+    // des Baums erscheint - die Wurzelzeile selbst ist kein <li> (nur
+    // Kind-Ordner sind das), daher .closest("span.tree-row") statt "li".
+    const treeContainer = screen.getByLabelText("Ordner-Baumansicht");
+    const rootRow = within(treeContainer).getByText(/Start/).closest("span.tree-row");
+    expect(rootRow).toBeTruthy();
+    fireEvent.dragStart(childRow!);
+    fireEvent.dragOver(rootRow!);
+    fireEvent.drop(rootRow!);
+
+    await waitFor(() => expect(moveFolderMock).toHaveBeenCalledWith("token-123", "f1a", "root"));
   });
 
   it("navigates into a subfolder and updates the breadcrumb", async () => {

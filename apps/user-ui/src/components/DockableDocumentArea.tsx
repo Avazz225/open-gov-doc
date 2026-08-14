@@ -68,6 +68,7 @@ interface WorkspaceContextValue {
   onOpenDocument: (doc: DocumentSummary) => void;
   onCreateFolder: (name: string, objectTypeId?: number) => Promise<boolean>;
   onRenameFolder: (folderId: string, name: string) => Promise<boolean>;
+  onMoveFolder: (folderId: string, newParentId: string) => Promise<boolean>;
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
   onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
@@ -102,6 +103,7 @@ function ExplorerPanelContent() {
       onOpenDocument={ctx.onOpenDocument}
       onCreateFolder={ctx.onCreateFolder}
       onRenameFolder={ctx.onRenameFolder}
+      onMoveFolder={ctx.onMoveFolder}
       onDeleteFolder={ctx.onDeleteFolder}
       onDeleteDocument={ctx.onDeleteDocument}
       token={ctx.token}
@@ -159,6 +161,7 @@ export interface DockableDocumentAreaProps {
   onBreadcrumbClick: (index: number) => void;
   onCreateFolder: (name: string, objectTypeId?: number) => Promise<boolean>;
   onRenameFolder: (folderId: string, name: string) => Promise<boolean>;
+  onMoveFolder: (folderId: string, newParentId: string) => Promise<boolean>;
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
   onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
@@ -185,6 +188,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       onBreadcrumbClick,
       onCreateFolder,
       onRenameFolder,
+      onMoveFolder,
       onDeleteFolder,
       onDeleteDocument,
       token,
@@ -423,6 +427,7 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       onOpenDocument: openDocument,
       onCreateFolder,
       onRenameFolder,
+      onMoveFolder,
       onDeleteFolder,
       onDeleteDocument,
       token,

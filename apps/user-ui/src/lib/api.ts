@@ -198,6 +198,28 @@ export async function renameFolder(token: string, folderId: string, name: string
   return response.json();
 }
 
+// Ordner-Verschieben per Drag & Drop (8, P23-S4) - eigene Funktion statt
+// Wiederverwendung von `renameFolder`, da semantisch ein anderer Vorgang
+// (Elternordner statt Name) - der Endpunkt selbst existierte bereits vorher
+// unverändert (`FolderUpdate.parent_id`), nur ohne Frontend-Anbindung.
+export async function moveFolder(
+  token: string,
+  folderId: string,
+  newParentId: string
+): Promise<Folder> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_id: newParentId }),
+    },
+    token
+  );
+  return response.json();
+}
+
 // Sammelbearbeitung von Metadaten (8, P14-S12) - Ordner-Pendant zu
 // `updateDocumentMetadata`, bislang gab es dafür keine eigene Funktion (nur
 // `renameFolder`, das ausschließlich `name` setzt). Gleiche Full-Replace-

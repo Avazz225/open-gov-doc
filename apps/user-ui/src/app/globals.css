@@ -573,6 +573,14 @@ body {
   padding: 0.2rem 0;
 }
 
+/* Ordner-Verschieben per Drag & Drop (8, P23-S4) - siehe .entry-row-drag-over
+   (ExplorerPane-Listenansicht) für dieselbe visuelle Sprache. */
+.tree-row-drag-over {
+  background: var(--dms-accent-bg);
+  outline: 2px dashed var(--dms-accent);
+  outline-offset: -2px;
+}
+
 .tree-toggle {
   background: none;
   border: none;
@@ -674,6 +682,15 @@ body {
   justify-content: space-between;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--dms-border);
+}
+
+/* Ordner-Verschieben per Drag & Drop (8, P23-S4) - gleiche visuelle Sprache
+   wie dockviews eigener Drag-Over-Indikator (`--dv-drag-over-*`, siehe
+   globals.css oben), damit "hier fallenlassen" app-weit konsistent aussieht. */
+.entry-row-drag-over {
+  background: var(--dms-accent-bg);
+  outline: 2px dashed var(--dms-accent);
+  outline-offset: -2px;
 }
 
 .entry-row button.entry-name {

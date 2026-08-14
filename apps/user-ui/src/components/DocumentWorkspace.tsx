@@ -10,6 +10,7 @@ import {
   getFolder as apiGetFolder,
   listChildFolders,
   listDocumentsInFolder,
+  moveFolder as apiMoveFolder,
   renameFolder as apiRenameFolder,
   trashDocument as apiTrashDocument,
   trashFolder as apiTrashFolder,
@@ -166,6 +167,21 @@ export function DocumentWorkspace() {
     }
   }
 
+  // Ordner-Verschieben per Drag & Drop (8, P23-S4) - der Endpunkt existierte
+  // bereits (siehe `handleRenameFolder` oben, gleicher PATCH-Endpunkt, nur ein
+  // anderes Feld), hier nur erstmals aus der UI heraus aufgerufen.
+  async function handleMoveFolder(folderId: string, newParentId: string): Promise<boolean> {
+    if (!accessToken) return false;
+    try {
+      await apiMoveFolder(accessToken, folderId, newParentId);
+      await load(currentFolder.id);
+      return true;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("explorer.moveFolderError"));
+      return false;
+    }
+  }
+
   async function handleDeleteFolder(folderId: string): Promise<"trashed" | "pending_approval" | false> {
     if (!accessToken) return false;
     try {
@@ -275,6 +291,7 @@ export function DocumentWorkspace() {
           onBreadcrumbClick={goToBreadcrumb}
           onCreateFolder={handleCreateFolder}
           onRenameFolder={handleRenameFolder}
+          onMoveFolder={handleMoveFolder}
           onDeleteFolder={handleDeleteFolder}
           onDeleteDocument={handleDeleteDocument}
           token={accessToken ?? ""}

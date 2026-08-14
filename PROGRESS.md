@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P23-S3 — Polling (7s) für nicht fertige Renditions/OCR-Ergebnisse in `PreviewPane.tsx`. Kein eigener "pending"-Status in der Backend-API — "noch nicht fertig" heißt "Zeile fehlt noch", nicht "Status ist pending". Zwei unabhängige, auf 8 Versuche (~56s) begrenzte Poll-Schleifen (Renditions vor der Anzeige, OCR im Hintergrund nach bereits sichtbarer nativer Ansicht). Kein ADR, kein Backend-Code geändert. Tests: `user-ui` 174 (vorher 172, +2, `vi.useFakeTimers()`-basiert). Details siehe unten unter "Phase 23 — Frontend-UX (User-UI)".
+**Zuletzt abgeschlossen:** P23-S4 — Ordner-Verschieben per Drag & Drop in `ExplorerPane`/`FolderTree`. Backend unverändert (`PATCH /folders/{id}` existierte bereits), neue `moveFolder()`-API-Funktion + native Drag-Handler in beiden Ansichten. **Beim Implementieren gefundene, live per curl bestätigte Backend-Lücke**: `folder-service` prüft beim Verschieben nur "nicht sein eigener direkter Elternordner", kein tieferer Zyklen-Check — ein erzwungener Zyklus macht beide beteiligten Ordner unlöschbar. Client-seitiger Schutz in `FolderTree` deckt nur den im Baum sichtbaren Teilbaum ab, als Backend-Offener-Punkt dokumentiert statt in dieser Frontend-Session gefixt. Tests: `user-ui` 177 (vorher 174, +3). Details siehe unten unter "Phase 23 — Frontend-UX (User-UI)".
 
-**Nächste Session:** **P23-S4** (Ordner-Verschieben per Drag & Drop, Backend `PATCH /folders/{id}` unterstützt das bereits, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P23-S5** (Favoriten-Marker auch in `FolderTree.tsx`, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -2996,6 +2996,54 @@ Implementierungsdetail-Erweiterung einer bereits bestehenden Komponente, `Previe
 - Doku: `docs/services/user-ui.md` (neuer "Polling auf noch nicht fertige Renditions/OCR-Ergebnisse"-
   Absatz, "Offene Punkte"-Eintrag geschlossen, Tests-Sektion aktualisiert), `IMPLEMENTATION_PLAN.md`
   (P23-S3 ✅).
+
+**P23-S4 — Ordner-Verschieben per Drag & Drop in `ExplorerPane`/`FolderTree`** (kein neues ADR —
+Implementierungsdetail einer bestehenden Komponente, kein neuer Endpunkt):
+
+- **Backend unverändert**: `PATCH /folders/{id}` akzeptierte `parent_id` bereits (`FolderUpdate.parent_id`,
+  verifiziert vor Beginn der Implementierung) — nur neue `moveFolder()`-Funktion in `lib/api.ts` (analog
+  zu `renameFolder()`, gleicher Endpunkt, anderes Feld) und ein neuer `handleMoveFolder()`-Handler in
+  `DocumentWorkspace.tsx`, durch `DockableDocumentArea`s Workspace-Context bis zu `ExplorerPane`/
+  `FolderTree` durchgereicht (gleiches Muster wie `onRenameFolder`).
+- **Native HTML5-Drag-&-Drop** in beiden Ansichten: jede Ordnerzeile `draggable`, `onDragStart` merkt
+  sich die gezogene Ordner-ID in lokalem State (bewusst **kein** `dataTransfer`-Payload — der ist im
+  `dragover`-Event ohnehin nicht lesbar, nur im `drop`-Event, ein State ist einfacher). Drop auf eine
+  andere Ordnerzeile (`ExplorerPane`-Liste) bzw. auf eine andere Zeile ODER die Wurzelzeile
+  (`FolderTree`-Baum) ruft `moveFolder()` auf. Neue `.entry-row-drag-over`/`.tree-row-drag-over`-CSS-
+  Klassen für visuelles Feedback (gleiche Optik wie dockviews eigener Drag-Over-Indikator).
+- **Beim Implementieren gefundene, live per curl bestätigte Backend-Lücke**: `folder-service`s
+  `repository.update_folder` prüft beim Verschieben nur `new_parent_id == folder_id` ("nicht sein eigener
+  direkter Elternordner") — **keine tiefere Zyklenprüfung**. Ein erzwungener zweigliedriger Zyklus (Ordner
+  A per `PATCH` in B verschoben, danach B per `PATCH` in A verschoben) wurde live reproduziert: beide
+  Ordner werden danach unlöschbar (die Nicht-leer-Prüfung sieht in jedem den jeweils anderen als Kind) —
+  musste durch einen dritten `PATCH` (einen der beiden zurück auf `root`) aufgelöst werden, bevor Aufräumen
+  möglich war. Client-seitiger Schutz in `FolderTree` (Ziel darf keine im Baum aktuell sichtbare
+  Nachfahren-ID des gezogenen Ordners sein, Prüfung über die beim Rendern ohnehin mitgeführte
+  Vorfahrenkette) verhindert das nur für den im Baum geladenen/sichtbaren Teil, nicht für direkte
+  API-Aufrufe oder unsichtbare Tree-Teile. Bewusst NICHT in dieser Session behoben (reiner
+  Frontend-Sessionsumfang laut Plan) — als neuer Offener Punkt in `docs/services/folder-service.md`
+  dokumentiert, inkl. Lösungsskizze (Vorfahrenkette des neuen Elternordners bis zur Wurzel serverseitig
+  durchlaufen und ablehnen, falls der zu verschiebende Ordner darin vorkommt).
+- **Tests**: `user-ui` 177 (vorher 174, +3) — `document-workspace.test.tsx` bekam drei neue Fälle mit
+  `fireEvent.dragStart`/`.dragOver`/`.drop` (jsdom hat kein natives Drag-&-Drop, aber die Komponente selbst
+  ist ebenfalls nur auf synthetische React-Events angewiesen, kein `dataTransfer`-Zugriff nötig):
+  Verschieben in der Listenansicht ruft `moveFolder()` mit den korrekten IDs auf und lädt neu; Drop auf
+  sich selbst ruft `moveFolder()` NICHT auf; in der Baumansicht wird ein Drop des Elternordners auf seinen
+  eigenen aufgeklappten Nachfahren verweigert, ein Drop des Nachfahren auf die Wurzelzeile funktioniert.
+  **Testinfrastruktur-Fund**: `.closest("li")` scheiterte zunächst in der Baumansicht — die Drag-Handler
+  hängen dort am inneren `<span class="tree-row">`, nicht am `<li>` (DOM-Events propagieren nicht in
+  Kind-Elemente hinein, ein `fireEvent` auf dem `<li>` erreicht Handler am Kind-`<span>` also nie); Fix:
+  `.closest("span.tree-row")` statt `"li"` für die Baumansicht (in der Listenansicht hängen dieselben
+  Handler direkt am `<li>`, dort war `.closest("li")` von Anfang an richtig).
+- Kein Backend-Code geändert (die entdeckte Lücke wurde bewusst nicht gefixt, siehe oben) — Live-
+  Verifikation trotzdem sinnvoll, da die UI den Endpunkt erstmals aus dem Frontend heraus aufruft: per
+  curl gegen den echten laufenden `folder-service` zwei Testordner angelegt, `moveFolder()`s exakter
+  `PATCH`-Aufruf bestätigte die erwartete `parent_id`-Änderung, die Zyklus-Lücke reproduziert und wieder
+  aufgelöst, beide Testordner danach gelöscht. Kein interaktiver Browser-Test (projektweit etablierte
+  Praxis).
+- Doku: `docs/services/user-ui.md` (neuer "Ordner-Verschieben per Drag & Drop"-Absatz, Backend-
+  Anbindungstabelle, Tests-Sektion aktualisiert), `docs/services/folder-service.md` (neuer Offener Punkt
+  zur Zyklenprüfung), `IMPLEMENTATION_PLAN.md` (P23-S4 ✅).
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

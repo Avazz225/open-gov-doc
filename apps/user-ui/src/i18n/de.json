@@ -92,6 +92,7 @@
     "toggleUpload": "Hochladen",
     "createFolderError": "Ordner konnte nicht angelegt werden",
     "renameFolderError": "Ordner konnte nicht umbenannt werden",
+    "moveFolderError": "Ordner konnte nicht verschoben werden",
     "deleteFolderError": "Ordner konnte nicht gelöscht werden (ggf. nicht leer)",
     "viewModeLabel": "Ansicht",
     "viewModeList": "Liste",

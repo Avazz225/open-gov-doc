@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useI18n } from "@/i18n";
 import {
   addFavorite,
@@ -61,6 +68,7 @@ export function ExplorerPane({
   onOpenDocument,
   onCreateFolder,
   onRenameFolder,
+  onMoveFolder,
   onDeleteFolder,
   onDeleteDocument,
   token,
@@ -79,6 +87,7 @@ export function ExplorerPane({
   onOpenDocument: (doc: DocumentSummary) => void;
   onCreateFolder: (name: string, objectTypeId?: number) => Promise<boolean>;
   onRenameFolder: (folderId: string, name: string) => Promise<boolean>;
+  onMoveFolder: (folderId: string, newParentId: string) => Promise<boolean>;
   onDeleteFolder: (folderId: string) => Promise<"trashed" | "pending_approval" | false>;
   onDeleteDocument: (documentId: string) => Promise<"trashed" | "pending_approval" | false>;
   token: string;
@@ -123,10 +132,41 @@ export function ExplorerPane({
   // gerade nicht mehr sichtbare Objekte verweist.
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  // Ordner-Verschieben per Drag & Drop (8, P23-S4). `draggedFolderId` merkt
+  // sich den gezogenen Ordner (auch für den Drop-Handler selbst nötig -
+  // `dataTransfer` ist im `dragover`-Event aus Sicherheitsgründen nicht
+  // lesbar, nur im `drop`-Event); `dragOverFolderId` steuert nur die
+  // visuelle Rückmeldung, welche Zeile aktuell als Ziel gilt.
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedKeys(new Set());
   }, [currentFolderId, showTrash]);
+
+  function handleFolderDragStart(folderId: string) {
+    setDraggedFolderId(folderId);
+  }
+
+  function handleFolderDragEnd() {
+    setDraggedFolderId(null);
+    setDragOverFolderId(null);
+  }
+
+  function handleFolderDragOver(event: ReactDragEvent, targetFolderId: string) {
+    if (!draggedFolderId || draggedFolderId === targetFolderId) return;
+    event.preventDefault();
+    setDragOverFolderId(targetFolderId);
+  }
+
+  async function handleFolderDrop(event: ReactDragEvent, targetFolderId: string) {
+    event.preventDefault();
+    setDragOverFolderId(null);
+    const folderId = draggedFolderId;
+    setDraggedFolderId(null);
+    if (!folderId || folderId === targetFolderId) return;
+    await onMoveFolder(folderId, targetFolderId);
+  }
 
   function toggleSelected(kind: "folder" | "document", id: string) {
     const key = `${kind}:${id}`;
@@ -576,6 +616,7 @@ export function ExplorerPane({
           kennzeichenShowByDefault={kennzeichenShowByDefault}
           onOpenDocument={onOpenDocument}
           onNavigateToFolder={onNavigateToFolder}
+          onMoveFolder={onMoveFolder}
         />
       ) : isLoading ? (
         <p>{t("common.loading")}</p>
@@ -587,9 +628,17 @@ export function ExplorerPane({
           <ul className="entry-list">
             {folders.map((folder) => (
               <li
-                className="entry-row"
+                className={
+                  "entry-row" + (dragOverFolderId === folder.id ? " entry-row-drag-over" : "")
+                }
                 key={folder.id}
+                draggable
                 onContextMenu={(e) => openFolderContextMenu(e, folder)}
+                onDragStart={() => handleFolderDragStart(folder.id)}
+                onDragEnd={handleFolderDragEnd}
+                onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                onDragLeave={() => setDragOverFolderId((prev) => (prev === folder.id ? null : prev))}
+                onDrop={(e) => handleFolderDrop(e, folder.id)}
               >
                 <input
                   type="checkbox"
