@@ -17,6 +17,7 @@ from federation_hub_service import repository
 from federation_hub_service.crypto_utils import sign_body
 from federation_hub_service.models import Base, Handover, Installation
 from federation_hub_service.schemas import (
+    CaCertificateOut,
     HandoverCreate,
     HandoverOut,
     HandoverResultSubmit,
@@ -92,14 +93,49 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
             )
         )
+        # Post-Roadmap Phase 21 Session 2 (ADR 0085): Zertifikatsebene über der
+        # bestehenden Signaturprüfung, siehe models.py-Docstrings.
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.hub_identity "
+                "ADD COLUMN IF NOT EXISTS ca_certificate_pem BYTEA"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.installation "
+                "ADD COLUMN IF NOT EXISTS certificate_pem TEXT"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.installation "
+                "ADD COLUMN IF NOT EXISTS certificate_not_after TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
     async with app.state.session_factory() as session:
         identity = await repository.get_or_create_hub_identity(session)
+        # Nachhol-Migration (ADR 0085): Installationen, die vor dieser Session
+        # registriert wurden, haben noch kein Zertifikat - wird hier einmalig
+        # nachgeholt, damit `authenticate_signed_request`s Bestandsschutz-
+        # Ausnahme in der Praxis nicht dauerhaft in Anspruch genommen wird.
+        installations_without_certificate = await repository.list_installations_without_certificate(
+            session
+        )
+        for installation in installations_without_certificate:
+            await repository.issue_or_renew_installation_certificate(
+                session,
+                installation,
+                ca_certificate_pem=identity.ca_certificate_pem,
+                ca_private_key_pem=identity.private_key_pem,
+            )
         await session.commit()
         app.state.hub_private_key_pem = identity.private_key_pem
         app.state.hub_public_key_pem = identity.public_key_pem
+        app.state.hub_ca_certificate_pem = identity.ca_certificate_pem
 
     # Ein einzelner geteilter Client für alle ausgehenden Zustellungen an
     # Installations-Callback-URLs - austauschbar in Tests (`app.state.http_client
@@ -156,6 +192,18 @@ def get_public_key() -> PublicKeyOut:
     return PublicKeyOut(public_key_pem=app.state.hub_public_key_pem.decode("utf-8"))
 
 
+@app.get("/ca-certificate", response_model=CaCertificateOut)
+def get_ca_certificate() -> CaCertificateOut:
+    """Selbstsigniertes Root-CA-Zertifikat des Hub (Post-Roadmap Phase 21
+    Session 2, ADR 0085) - Installationen können es analog zu `GET
+    /public-key` beim ersten Kontakt abrufen und pinnen (Trust-on-First-Use,
+    Certificate-Pinning-Äquivalent), um damit spätere, vom Hub ausgestellte
+    Installations-Zertifikate lokal nachzuvollziehen. Rein informativ für den
+    Hub selbst - die eigentliche Zertifikatsprüfung passiert serverseitig in
+    `authenticate_signed_request`, nicht hier."""
+    return CaCertificateOut(ca_certificate_pem=app.state.hub_ca_certificate_pem.decode("utf-8"))
+
+
 @app.post("/installations", response_model=InstallationOut, status_code=status.HTTP_201_CREATED)
 async def register_installation(
     request: Request,
@@ -177,6 +225,17 @@ async def register_installation(
         )
     except repository.UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    # Post-Roadmap Phase 21 Session 2 (ADR 0085): sowohl bei Neuanlage als auch
+    # bei einer regulären Re-Registrierung neu ausgestellt (`public_key_pem`
+    # selbst ändert sich bei einer Re-Registrierung zwar nicht, siehe
+    # `register_or_update_installation`, ein frisches Zertifikat schadet aber
+    # nicht und hält die Gültigkeitsfrist konsistent aktuell).
+    await repository.issue_or_renew_installation_certificate(
+        session,
+        installation,
+        ca_certificate_pem=app.state.hub_ca_certificate_pem,
+        ca_private_key_pem=app.state.hub_private_key_pem,
+    )
     await session.commit()
     return installation
 
@@ -230,6 +289,14 @@ async def rotate_installation_key(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    # Post-Roadmap Phase 21 Session 2 (ADR 0085): MUSS neu ausgestellt werden -
+    # das vorherige Zertifikat band den jetzt abgelösten alten Schlüssel.
+    await repository.issue_or_renew_installation_certificate(
+        session,
+        installation,
+        ca_certificate_pem=app.state.hub_ca_certificate_pem,
+        ca_private_key_pem=app.state.hub_private_key_pem,
+    )
     await session.commit()
     return installation
 
@@ -349,7 +416,11 @@ async def _authenticate(
 ) -> Installation:
     try:
         return await repository.authenticate_signed_request(
-            session, installation_id=installation_id, body=body, signature=signature
+            session,
+            installation_id=installation_id,
+            body=body,
+            signature=signature,
+            hub_ca_certificate_pem=app.state.hub_ca_certificate_pem,
         )
     except repository.UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc

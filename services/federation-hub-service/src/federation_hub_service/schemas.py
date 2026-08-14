@@ -39,6 +39,11 @@ class InstallationOut(BaseModel):
     updated_at: datetime
     revoked_at: datetime | None = None
     revoked_reason: str | None = None
+    # Seit Post-Roadmap Phase 21 Session 2 (ADR 0085) - nicht geheim (enthält
+    # nur den ohnehin öffentlichen Schlüssel + Hub-Signatur), daher unbedenklich
+    # mit ausgegeben, anders als ein privater Schlüssel/API-Key.
+    certificate_pem: str | None = None
+    certificate_not_after: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -91,3 +96,7 @@ class HandoverResultSubmit(BaseModel):
 
 class PublicKeyOut(BaseModel):
     public_key_pem: str
+
+
+class CaCertificateOut(BaseModel):
+    ca_certificate_pem: str

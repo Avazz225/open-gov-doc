@@ -15,13 +15,27 @@ class HubIdentity(Base):
     Nachricht (``X-Federation-Hub-Signature``), sodass die empfangende
     Installation echt verifizieren kann, dass die Zustellung tatsächlich vom
     Hub stammt - ohne dass irgendwo ein geteiltes Geheimnis im Klartext
-    gespeichert werden müsste (siehe ADR 0028)."""
+    gespeichert werden müsste (siehe ADR 0028).
+
+    ``ca_certificate_pem`` (seit Post-Roadmap Phase 21 Session 2, ADR 0085) -
+    dasselbe Schlüsselpaar zusätzlich als selbstsigniertes X.509-Root-CA-
+    Zertifikat verpackt (analog `signature-service`s `InternalCa`, ADR 0025) -
+    KEIN separates Schlüsselpaar, nur eine zusätzliche Zertifikatshülle um
+    denselben privaten Schlüssel. Damit kann der Hub jeder Installation ein
+    von ihm signiertes, zeitlich begrenztes Zertifikat ausstellen
+    (`Installation.certificate_pem`), statt nur einen rohen, unbegrenzt
+    gültigen öffentlichen Schlüssel zu speichern. Bewusst KEIN echtes
+    Transport-mTLS (siehe ADR 0039 "Kein Ort für eine echte PKI in diesem
+    Projekt" - dessen Begründung unverändert gilt, kein Service dieses Repos
+    terminiert TLS selbst) - die Zertifikatsprüfung passiert weiterhin auf
+    Anwendungsebene, zusätzlich zur bestehenden Signaturprüfung."""
 
     __tablename__ = "hub_identity"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     private_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
     public_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    ca_certificate_pem: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -42,7 +56,26 @@ class Installation(Base):
     nicht mehr stillschweigend. ``revoked_at``/``revoked_reason`` erlauben
     einem Hub-Betreiber, eine kompromittierte Installation sofort zu sperren
     (``POST /installations/{id}/revoke``), unabhängig davon, ob die
-    Installation selbst noch signieren kann."""
+    Installation selbst noch signieren kann.
+
+    ``certificate_pem`` (seit Post-Roadmap Phase 21 Session 2, ADR 0085) - ein
+    vom Hub ausgestelltes, zeitlich begrenztes X.509-Zertifikat, das
+    ``public_key_pem`` bindet (Certificate-Pinning-Äquivalent: die
+    Installation UND jeder Dritte kann anhand der Hub-CA prüfen, dass genau
+    dieser Schlüssel zu genau dieser ``id`` gehört, mit einer klaren
+    Gültigkeitsgrenze statt unbegrenzter Gültigkeit). `authenticate_signed_
+    request` verifiziert bei jeder Anfrage die vollständige Kette bis zur
+    Hub-CA UND das Gültigkeitsfenster erneut aus den Zertifikats-Bytes selbst
+    (`crypto_utils.verify_installation_certificate`) - ``certificate_not_after``
+    ist nur ein daraus abgeleiteter, denormalisierter Anzeigewert (Admin-UI/
+    Migrationserkennung), keine eigenständige Sicherheitsprüfung. Beide Felder
+    werden bei Registrierung und bei jeder Schlüsselrotation neu gesetzt (der
+    alte Schlüssel würde sonst ein Zertifikat für einen nicht mehr aktuellen
+    Schlüssel behalten). ``NULL`` bei Installationen, die vor dieser Session
+    registriert wurden UND noch nicht rotiert/neu ausgestellt wurden -
+    `authenticate_signed_request` überspringt die Zertifikatsprüfung in
+    diesem Fall (Bestandsschutz), verlangt aber weiterhin die bereits
+    bestehende Signaturprüfung."""
 
     __tablename__ = "installation"
 
@@ -58,6 +91,10 @@ class Installation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    certificate_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    certificate_not_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Handover(Base):

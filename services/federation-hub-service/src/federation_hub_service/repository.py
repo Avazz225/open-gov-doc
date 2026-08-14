@@ -30,20 +30,59 @@ async def get_or_create_hub_identity(session: AsyncSession) -> HubIdentity:
     Signaturschlüsselpaar des Hub wird beim allerersten Start generiert und
     danach idempotent wiederverwendet - ein Neustart darf keinen neuen
     Schlüssel erzeugen, sonst könnten bereits registrierte Installationen den
-    (dann anderen) öffentlichen Schlüssel nicht mehr verifizieren."""
+    (dann anderen) öffentlichen Schlüssel nicht mehr verifizieren.
+
+    Seit Post-Roadmap Phase 21 Session 2 (ADR 0085) wird zusätzlich
+    ``ca_certificate_pem`` sichergestellt - bei einem frisch erzeugten
+    Schlüsselpaar sofort, bei einer bereits VOR dieser Session bestehenden
+    Zeile (Migration, ``ca_certificate_pem IS NULL``) lazily nachgeholt, ohne
+    das Schlüsselpaar selbst zu verändern (reine Zertifikatshülle um den
+    bereits vorhandenen Schlüssel, siehe `crypto_utils.generate_ca_certificate`)."""
     identity = await session.get(HubIdentity, _HUB_IDENTITY_ID)
-    if identity is not None:
+    if identity is None:
+        private_pem, public_pem = crypto_utils.generate_hub_keypair()
+        ca_certificate_pem = crypto_utils.generate_ca_certificate(private_pem, public_pem)
+        identity = HubIdentity(
+            id=_HUB_IDENTITY_ID,
+            private_key_pem=private_pem,
+            public_key_pem=public_pem,
+            ca_certificate_pem=ca_certificate_pem,
+            created_at=datetime.now(UTC),
+        )
+        session.add(identity)
+        await session.flush()
         return identity
-    private_pem, public_pem = crypto_utils.generate_hub_keypair()
-    identity = HubIdentity(
-        id=_HUB_IDENTITY_ID,
-        private_key_pem=private_pem,
-        public_key_pem=public_pem,
-        created_at=datetime.now(UTC),
-    )
-    session.add(identity)
-    await session.flush()
+    if identity.ca_certificate_pem is None:
+        identity.ca_certificate_pem = crypto_utils.generate_ca_certificate(
+            identity.private_key_pem, identity.public_key_pem
+        )
+        await session.flush()
     return identity
+
+
+async def issue_or_renew_installation_certificate(
+    session: AsyncSession,
+    installation: Installation,
+    *,
+    ca_certificate_pem: bytes,
+    ca_private_key_pem: bytes,
+) -> None:
+    """Stellt ein neues, von der Hub-CA signiertes Zertifikat für
+    ``installation.public_key_pem`` aus (Post-Roadmap Phase 21 Session 2,
+    ADR 0085) - aufgerufen bei Registrierung, Schlüsselrotation, und beim
+    Nachholen für Alt-Installationen ohne Zertifikat (siehe `main.lifespan`).
+    MUSS nach jeder Änderung von ``public_key_pem`` erneut aufgerufen werden -
+    ein Zertifikat für den ALTEN Schlüssel wäre nach einer Rotation nicht mehr
+    zutreffend."""
+    certificate_pem, not_valid_after = crypto_utils.issue_installation_certificate(
+        ca_certificate_pem,
+        ca_private_key_pem,
+        installation_id=installation.id,
+        installation_public_key_pem=installation.public_key_pem,
+    )
+    installation.certificate_pem = certificate_pem
+    installation.certificate_not_after = not_valid_after
+    await session.flush()
 
 
 async def register_or_update_installation(
@@ -181,13 +220,37 @@ async def list_installations(session: AsyncSession) -> list[Installation]:
     return list(result.scalars().all())
 
 
+async def list_installations_without_certificate(session: AsyncSession) -> list[Installation]:
+    """Nachhol-Migration (ADR 0085) - Installationen, die vor Post-Roadmap
+    Phase 21 Session 2 registriert wurden, siehe `main.lifespan`."""
+    result = await session.execute(
+        select(Installation).where(Installation.certificate_pem.is_(None))
+    )
+    return list(result.scalars().all())
+
+
 async def authenticate_signed_request(
-    session: AsyncSession, *, installation_id: str, body: bytes, signature: str
+    session: AsyncSession,
+    *,
+    installation_id: str,
+    body: bytes,
+    signature: str,
+    hub_ca_certificate_pem: bytes | None = None,
 ) -> Installation:
     """Zentrale Verifikation für jede signierte Installations-Anfrage
     (`POST /handovers`, `.../result`) - Gegenstück zu `_verify_hub_signature`
     auf der Installationsseite (`workflow_service.main`), nur in umgekehrter
-    Richtung."""
+    Richtung. Seit Post-Roadmap Phase 21 Session 2 (ADR 0085) zusätzlich zur
+    Signaturprüfung eine echte Zertifikatsprüfung (Kette bis zur Hub-CA UND
+    Gültigkeitsfenster, siehe `crypto_utils.verify_installation_certificate`)
+    - bewusst ZUSÄTZLICH, nicht als Ersatz: die Signaturprüfung bleibt die
+    eigentliche Besitz-Beweisführung, das Zertifikat gibt ihr eine geprüfte
+    Herkunft und eine Gültigkeitsgrenze. Installationen ohne Zertifikat
+    (``certificate_pem IS NULL``, Alt-Zeilen vor dieser Session, siehe
+    `main.lifespan`) oder ein Aufrufer ohne ``hub_ca_certificate_pem``
+    (z. B. ein Test, der diesen Parameter bewusst weglässt) überspringen
+    diese zusätzliche Prüfung (Bestandsschutz) - in der Praxis sollte das
+    nach dem Nachhol-Migrationsschritt nicht mehr vorkommen."""
     if not installation_id or not signature:
         raise UnauthorizedError("Fehlende Installations-Signatur")
     installation = await session.get(Installation, installation_id)
@@ -197,6 +260,17 @@ async def authenticate_signed_request(
         raise UnauthorizedError("Installation wurde widerrufen")
     if not crypto_utils.verify_body(installation.public_key_pem, body, signature):
         raise UnauthorizedError("Ungültige Installations-Signatur")
+    if installation.certificate_pem is not None and hub_ca_certificate_pem is not None:
+        if not crypto_utils.verify_installation_certificate(
+            hub_ca_certificate_pem,
+            installation.certificate_pem,
+            installation_id=installation.id,
+            installation_public_key_pem=installation.public_key_pem,
+        ):
+            raise UnauthorizedError(
+                "Installations-Zertifikat ungültig oder abgelaufen - "
+                "Schlüsselrotation stellt ein neues aus"
+            )
     return installation
 
 

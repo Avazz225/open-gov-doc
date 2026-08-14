@@ -91,6 +91,37 @@ def test_public_key_is_stable_across_requests(client):
     assert "BEGIN PUBLIC KEY" in first
 
 
+def test_ca_certificate_endpoint_returns_a_valid_self_signed_certificate(client):
+    """Post-Roadmap Phase 21 Session 2 (ADR 0085) - Certificate-Pinning-
+    Äquivalent zu `GET /public-key`: Installationen können dieses Zertifikat
+    beim ersten Kontakt abrufen und pinnen."""
+    from cryptography import x509
+
+    response = client.get("/ca-certificate")
+    assert response.status_code == 200
+    ca_certificate_pem = response.json()["ca_certificate_pem"]
+    assert "BEGIN CERTIFICATE" in ca_certificate_pem
+    ca_cert = x509.load_pem_x509_certificate(ca_certificate_pem.encode("utf-8"))
+    assert ca_cert.issuer == ca_cert.subject
+    ca_cert.verify_directly_issued_by(ca_cert)
+
+    second_response = client.get("/ca-certificate")
+    assert second_response.json()["ca_certificate_pem"] == ca_certificate_pem
+
+
+def test_register_installation_response_includes_a_valid_certificate(client):
+    from cryptography import x509
+
+    installation, _ = register_installation(client)
+    assert installation["certificate_pem"] is not None
+    assert installation["certificate_not_after"] is not None
+
+    ca_certificate_pem = client.get("/ca-certificate").json()["ca_certificate_pem"]
+    ca_cert = x509.load_pem_x509_certificate(ca_certificate_pem.encode("utf-8"))
+    cert = x509.load_pem_x509_certificate(installation["certificate_pem"].encode("utf-8"))
+    cert.verify_directly_issued_by(ca_cert)
+
+
 def test_register_with_non_numeric_version_returns_422(client):
     """P13-S3-Fund: vor dieser Validierung wurde ein nicht-numerischer
     `version`-String klaglos gespeichert und ließ erst eine spätere, völlig
@@ -202,6 +233,25 @@ def test_rotate_key_requires_signature_from_current_key(client):
     )
     assert response.status_code == 200
     assert response.json()["public_key_pem"] == new_public_pem
+
+
+def test_rotate_key_reissues_a_certificate_bound_to_the_new_key(client):
+    """Post-Roadmap Phase 21 Session 2 (ADR 0085) - ein Zertifikat für den
+    ALTEN Schlüssel wäre nach der Rotation nicht mehr zutreffend."""
+    installation, private_pem = register_installation(client)
+    original_certificate_pem = installation["certificate_pem"]
+    _, new_public_pem = _generate_keypair()
+
+    response = _signed_post(
+        client,
+        f"/installations/{installation['id']}/rotate-key",
+        {"new_public_key_pem": new_public_pem},
+        private_pem,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["certificate_pem"] is not None
+    assert body["certificate_pem"] != original_certificate_pem
 
 
 def test_rotate_key_then_old_key_no_longer_authorizes(client):
