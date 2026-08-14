@@ -7,8 +7,12 @@ from dms_auth_client import TokenValidator
 from fastapi.testclient import TestClient
 from gateway_service.main import app
 from gateway_service.rate_limiter import RateLimiter
+from redis import asyncio as redis
 
 REGISTRY_URL = os.environ.get("TEST_REGISTRY_SERVICE_URL", "http://localhost:8001")
+# Echter Redis (seit P25-S3, siehe test_rate_limiter.py) statt eines
+# in-process Dicts - dieselbe Instanz wie jeder andere Testlauf.
+REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/0")
 # audit-service ist Teil der Standard-Compose-Umgebung und dient hier nur als
 # real erreichbares Ziel, um echtes Proxying zu verifizieren (kein Mock).
 REAL_TARGET_URL = os.environ.get("TEST_AUDIT_SERVICE_URL", "http://localhost:8002")
@@ -20,13 +24,27 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 
 
 @pytest.fixture
-def client(jwks, issuer, audience):
+async def client(jwks, issuer, audience):
+    # Redis wird in diesem Projekt ausschließlich vom Rate Limiter des
+    # Gateways genutzt (P25-S3) - vor jedem Test flushen hält den geteilten
+    # Zähler isoliert, auch wenn dieselbe Test-Identität (Client-IP
+    # "testclient" bzw. `sub` "user-123" aus `make_token`) über mehrere
+    # Testfunktionen und mehrere komplette Testläufe hinweg wiederverwendet
+    # wird - anders als beim alten in-process `dict`, das bei jeder neuen
+    # `RateLimiter()`-Instanz automatisch leer startete (siehe
+    # test_rate_limiter.py für den direkten Redis-Store-Test).
+    redis_client = redis.from_url(REDIS_URL)
+    await redis_client.flushdb()
+    await redis_client.aclose()
+
     with TestClient(app) as c:
         # Ersetzt den gegen echtes Keycloak konfigurierten Validator durch einen,
         # der dieselbe echte JWT-Prüflogik gegen lokale Test-Schlüssel ausführt
         # (siehe conftest.py) - kein echter Keycloak in diesem Testlauf nötig.
         app.state.token_validator = TokenValidator(issuer=issuer, audience=audience, jwks=jwks)
-        app.state.rate_limiter = RateLimiter(max_requests=120, window_seconds=60.0)
+        app.state.rate_limiter = RateLimiter(
+            redis_url=REDIS_URL, max_requests=120, window_seconds=60.0
+        )
         yield c
 
 
@@ -264,7 +282,7 @@ def test_maintenance_mode_allows_allowlisted_routes(client):
 
 
 def test_rate_limit_returns_429_after_threshold(client):
-    app.state.rate_limiter = RateLimiter(max_requests=2, window_seconds=60.0)
+    app.state.rate_limiter = RateLimiter(redis_url=REDIS_URL, max_requests=2, window_seconds=60.0)
 
     responses = [
         client.post("/api/auth-service/login", json={"username": "x", "password": "y"})
@@ -273,3 +291,26 @@ def test_rate_limit_returns_429_after_threshold(client):
 
     assert responses[-1].status_code == 429
     assert responses[-1].json()["detail"] == "Rate limit überschritten"
+
+
+async def test_rate_limit_state_survives_gateway_process_restart():
+    """Kernpunkt von P25-S3 (siehe ADR 0097): der Zähler lebt in Redis, nicht
+    im Gateway-Prozess - eine frische `RateLimiter`-Instanz (steht hier für
+    einen neu gestarteten Gateway-Container/eine neue Replika) sieht den
+    bereits von einer vorherigen Instanz verbrauchten Zähler weiter, statt
+    bei 0 neu anzufangen."""
+    redis_client = redis.from_url(REDIS_URL)
+    await redis_client.flushdb()
+    await redis_client.aclose()
+
+    key = "restart-test-client"
+    first_process_limiter = RateLimiter(redis_url=REDIS_URL, max_requests=2, window_seconds=60.0)
+    assert await first_process_limiter.allow(key) is True
+    assert await first_process_limiter.allow(key) is True
+    await first_process_limiter.aclose()
+
+    # Steht für den Neustart: komplett neue Instanz, kein geteilter
+    # Python-Zustand mit der Instanz oben.
+    second_process_limiter = RateLimiter(redis_url=REDIS_URL, max_requests=2, window_seconds=60.0)
+    assert await second_process_limiter.allow(key) is False
+    await second_process_limiter.aclose()

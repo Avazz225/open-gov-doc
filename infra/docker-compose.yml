@@ -218,6 +218,29 @@ services:
     networks:
       - dms-net
 
+  # Geteilter Store fürs Gateway-Rate-Limiting (3.5, seit P25-S3, ADR 0097) -
+  # einziger Konsument aktuell `gateway-service`. Ermöglicht horizontale
+  # Skalierung des Gateways: alle Instanzen sehen denselben Sliding-Window-
+  # Zähler je Client, statt (wie zuvor, ADR 0005) jeweils ihr eigenes,
+  # unabhängiges In-Prozess-Limit zu führen. Kein Volume und Persistenz
+  # bewusst abgeschaltet (`--save ""`, kein AOF) - die Rate-Limit-Daten sind
+  # rein transient (TTL je Client-Key, siehe `RateLimiter`), ein Neustart von
+  # Redis selbst setzt das Limit unschädlich zurück, anders als z. B. NATS
+  # JetStream oder Postgres.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dms-net
+
   registry-service:
     build:
       context: ..
@@ -1402,6 +1425,9 @@ services:
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-600}
       DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
+      # Geteilter Rate-Limit-Store (seit P25-S3, ADR 0097) - interne Compose-DNS,
+      # siehe redis-Service oben.
+      DMS_REDIS_URL: redis://redis:6379/0
       # Vom Browser aus erreichbare Frontend-Origins (CORS) - bei geänderten
       # <APP>_PORT-Werten entsprechend mit anpassen. Enthielt vor P14-S2
       # PROCESS_DESIGNER_PORT (3002) nicht (real gefundene, mit aufgeräumte
@@ -1413,6 +1439,8 @@ services:
       registry-service:
         condition: service_started
       keycloak:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - dms-net

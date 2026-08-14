@@ -1,5 +1,7 @@
 import random
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -61,6 +63,15 @@ class InstanceResolver:
         self._registry_base_url = registry_base_url.rstrip("/")
         self._cache_ttl = cache_ttl_seconds
         self._cache: dict[str, tuple[float, list[dict]]] = {}
+        # Workload-bewusste Auswahl (P25-S4): Zähler offener Anfragen je
+        # Instanz-Adresse, rein in-process (siehe `pick()`/`reserve()`/
+        # `release()` unten). Bewusst NICHT wie der Rate Limiter (P25-S3,
+        # ADR 0097) über Redis geteilt - dieser Zähler soll die tatsächlich
+        # gerade von DIESER Gateway-Replika offenen Requests je Ziel
+        # widerspiegeln, nicht einen installationsweiten Wert. Bei mehreren
+        # Gateway-Replikas sieht jede Replika nur ihre eigene Teilmenge der
+        # Last, siehe docs/services/gateway-service.md.
+        self._open_requests: dict[str, int] = {}
 
     async def resolve(self, service_type: str) -> list[dict]:
         now = time.monotonic()
@@ -85,7 +96,50 @@ class InstanceResolver:
         return instances
 
     def pick(self, instances: list[dict]) -> dict:
-        return random.choice(instances)
+        """Wählt die Instanz mit den wenigsten aktuell offenen Anfragen
+        (P25-S4) statt wie zuvor rein zufällig (ADR 0005). Instanzen ohne
+        bisherige Reservierung zählen als 0. Tie-Break bei mehreren Instanzen
+        mit demselben Minimum: zufällig unter den Minimum-Kandidaten statt
+        z. B. immer der ersten in der Liste - insbesondere beim Start (alle
+        Zähler 0) würde "erste in der Liste" sonst jede Anfrage an dieselbe
+        Instanz schicken, bis diese als Erste einen offenen Request hat, statt
+        die Last von Anfang an gleichmäßig zu streuen.
+        """
+        min_open = min(self._open_requests.get(i["address"], 0) for i in instances)
+        candidates = [i for i in instances if self._open_requests.get(i["address"], 0) == min_open]
+        return random.choice(candidates)
+
+    def reserve(self, instance: dict) -> None:
+        """Erhöht den Zähler offener Anfragen für `instance` um eins - vor
+        dem eigentlichen Upstream-Aufruf zu rufen, siehe `reserved_instance()`
+        unten für die empfohlene Verwendung (deckt auch Exceptions ab)."""
+        address = instance["address"]
+        self._open_requests[address] = self._open_requests.get(address, 0) + 1
+
+    def release(self, instance: dict) -> None:
+        """Gegenstück zu `reserve()` - nach Abschluss (Erfolg ODER Exception)
+        des Upstream-Aufrufs zu rufen. `max(0, ...)` als Schutz gegen ein
+        Unterlaufen unter 0 bei einem unerwarteten Reserve/Release-Ungleich-
+        gewicht, statt dass der Zähler dauerhaft negativ bliebe."""
+        address = instance["address"]
+        self._open_requests[address] = max(0, self._open_requests.get(address, 0) - 1)
+
+    @asynccontextmanager
+    async def reserved_instance(self, instances: list[dict]) -> AsyncIterator[dict]:
+        """Wählt eine Instanz (`pick()`) und hält sie für die Dauer des
+        `with`-Blocks als "offen" reserviert - `release()` läuft in einem
+        `finally`, deckt also auch den Fall ab, dass der eigentliche Upstream-
+        Aufruf mit einer Exception abbricht (z. B. `httpx.HTTPError`). Ohne
+        dieses `finally` würde ein fehlschlagender Upstream-Aufruf seinen
+        reservierten Slot dauerhaft belegt lassen ("Leak"), wodurch diese
+        Instanz fälschlich dauerhaft als ausgelastet gilt und nie wieder
+        bevorzugt ausgewählt würde."""
+        instance = self.pick(instances)
+        self.reserve(instance)
+        try:
+            yield instance
+        finally:
+            self.release(instance)
 
 
 class MaintenanceStateClient:

@@ -15,14 +15,61 @@
 ## Routing
 
 Fragt `GET {registry-service}/instances/{service_type}` ab (Cache-TTL
-`instance_cache_ttl_seconds`, Default 5s), wählt zufällig eine gesunde,
-**nicht draining** Instanz (Drain-Mechanismus, 10.5/3.8, P10-S2 — eine
+`instance_cache_ttl_seconds`, Default 5s), wählt unter den gesunden,
+**nicht draining** Instanzen (Drain-Mechanismus, 10.5/3.8, P10-S2 — eine
 `status="draining"`-Instanz bleibt erreichbar, bekommt aber keine neuen
-Anfragen mehr, siehe `docs/services/registry-service.md`) und reicht
-Methode, Query-String, Body und Header (minus Hop-by-Hop-Header:
-`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Host`, ...) unverändert an
-`{instance.address}/{path}` weiter. Kein registriertes/gesundes/aktives
-Ziel → `503`. Downstream nicht erreichbar → `502`.
+Anfragen mehr, siehe `docs/services/registry-service.md`) eine aus (siehe
+"Instanzauswahl / Load Balancing" unten) und reicht Methode, Query-String,
+Body und Header (minus Hop-by-Hop-Header: `Connection`, `Keep-Alive`,
+`Transfer-Encoding`, `Host`, ...) unverändert an `{instance.address}/{path}`
+weiter. Kein registriertes/gesundes/aktives Ziel → `503`. Downstream nicht
+erreichbar → `502`.
+
+## Instanzauswahl / Load Balancing
+
+**Seit P25-S4 workload-bewusst statt zufällig** (vorher `random.choice`,
+ADR 0005; Designentscheidung siehe [ADR 0098](../adr/0098-gateway-workload-aware-instance-selection-per-replica.md)):
+`InstanceResolver.pick()` wählt unter den vom Registry-Aufruf
+gelieferten Kandidaten die Instanz mit den **wenigsten aktuell offenen
+Anfragen** (Instanzen ohne bisherige Reservierung zählen als 0). `proxy()`
+reserviert die gewählte Instanz für die Dauer des Upstream-Aufrufs über
+`resolver.reserved_instance(instances)` — ein Async-Context-Manager, der
+`pick()` aufruft, den Zähler vor dem eigentlichen `http_client.request(...)`
+erhöht und ihn in einem `finally` wieder freigibt, also **auch wenn der
+Upstream-Aufruf mit einer `httpx.HTTPError` fehlschlägt** (kein dauerhaftes
+Leaken eines reservierten Slots). Wer den Zähler außerhalb dieses
+Context-Managers manuell steuern will, kann alternativ die beiden
+darunterliegenden Methoden `reserve(instance)`/`release(instance)` direkt
+verwenden.
+
+**Tie-Break bei mehreren Instanzen mit demselben Minimum**: zufällig unter
+den Minimum-Kandidaten, nicht z. B. immer die erste Instanz der Liste —
+insbesondere im Ruhezustand (alle Zähler bei 0, etwa direkt nach dem Start)
+würde "erste in der Liste" sonst jede Anfrage an dieselbe Instanz schicken,
+bis diese als Erste einen offenen Request hätte, statt die Last von Anfang
+an gleichmäßig zu streuen.
+
+**Wichtig: rein pro Gateway-Replika, kein clusterweiter Wert.** Der Zähler
+offener Anfragen lebt ausschließlich im Prozessspeicher der jeweiligen
+`InstanceResolver`-Instanz (`dict[str, int]`, Schlüssel = Instanz-Adresse) —
+bei mehreren horizontal skalierten Gateway-Replikas hinter einem Load
+Balancer sieht jede Replika nur die Requests, die SIE SELBST gerade an eine
+Zielinstanz weiterleitet, nicht die Summe über alle Replikas hinweg. Das ist
+eine bewusste Designentscheidung dieser Session, **kein Versehen** — und ein
+gewollter Kontrast zum direkt benachbarten P25-S3 (siehe "Rate Limiting"
+oben): dort wurde der Zähler bewusst nach Redis verlegt, weil ein rein
+lokaler Rate-Limit-Zähler ein Client umgehen könnte, indem er Anfragen über
+mehrere Replikas verteilt (ein echtes Sicherheitsproblem). Bei der
+Lastverteilung fehlt dieser Umgehungs-Anreiz — im schlimmsten Fall sind die
+Instanz-Auswahlen mehrerer Replikas untereinander etwas weniger optimal
+abgestimmt, was die Last spürbar, aber nicht sicherheitsrelevant ungleich
+verteilt. Eine echte clusterweite Sicht (z. B. ebenfalls über Redis, mit
+`INCR`/`DECR` je Instanz-Adresse) wäre möglich, wurde hier aber bewusst NICHT
+umgesetzt: der zusätzliche Redis-Roundtrip auf jedem einzelnen proxied
+Request (zwei zusätzliche Netzwerk-Hops pro Anfrage, vor UND nach dem
+eigentlichen Upstream-Aufruf) steht in keinem praktischen Verhältnis zum
+Nutzen bei einem Wert, der ohnehin nur eine Heuristik zur Lastverteilung ist,
+nicht eine harte Zugriffsschranke wie beim Rate Limiting.
 
 ## Auth-Validierung
 
@@ -109,11 +156,45 @@ Die Browser-Frontends (`user-ui`, `admin-ui`) laufen auf einer anderen Origin al
 
 ## Rate Limiting
 
-In-Prozess-Sliding-Window je Client (`sub`-Claim bei authentifizierten,
-sonst Client-IP), `rate_limit_max_requests`/`rate_limit_window_seconds`
-(Default **600/60s**, siehe unten). Gilt auch für öffentliche Routen (Login-Schutz). Bei
-Überschreitung `429`. Rein lokaler Zähler, keine geteilte Zählung über
-mehrere Gateway-Instanzen hinweg — dokumentierte Grenze, siehe ADR 0005.
+Sliding-Window je Client (`sub`-Claim bei authentifizierten, sonst Client-IP),
+`rate_limit_max_requests`/`rate_limit_window_seconds` (Default **600/60s**,
+siehe unten). Gilt auch für öffentliche Routen (Login-Schutz). Bei
+Überschreitung `429`.
+
+**Seit P25-S3 ([ADR 0097](../adr/0097-gateway-rate-limiting-redis-sliding-window.md))
+geteilter Redis-Store statt in-process `dict`**: ursprünglich (ADR 0005) ein
+rein lokaler Zähler ohne geteilte Zählung über mehrere Gateway-Instanzen
+hinweg — bei horizontaler Skalierung des Gateways (mehrere Replikas hinter
+einem Load Balancer) hätte ein Client das Limit durch Verteilung seiner
+Anfragen über mehrere Replikas faktisch vervielfachen können. `RateLimiter`
+speichert den Zähler jetzt in Redis (neue `redis_url`-Einstellung, neuer
+`redis`-Service in `infra/docker-compose.yml`, Default `redis://redis:6379/0`
+in der Compose-Umgebung) — alle Gateway-Instanzen sehen denselben Zähler je
+Client-Schlüssel. `allow()` ist entsprechend `async` (Redis-Zugriffe sind
+inhärent asynchron), der einzige Aufrufer in `proxy()` ruft ihn mit `await`
+auf.
+
+**Sliding Window via Sorted Set statt Fixed Window**: umgesetzt über ein
+Redis Sorted Set pro Client-Schlüssel (`ZADD`/`ZREMRANGEBYSCORE`/`ZCARD` in
+einer MULTI/EXEC-Transaktion), nicht über die einfachere Fixed-Window-
+Variante (`INCR`+`EXPIRE`). Ein Fixed-Window lässt an der Fensterkante
+kurzzeitig bis zu `2 × max_requests` durch (Ende von Fenster N und Anfang von
+Fenster N+1 fallen für einen Client zeitlich zusammen) — für einen
+Login-Schutz eine reale Schwäche. Der Sorted-Set-Ansatz bildet die
+ursprüngliche `deque`-Semantik nahezu 1:1 nach; der Preis ist ein
+Sorted-Set-Member pro Request statt eines einzelnen Zählers, bei den hier
+üblichen Fenstern vernachlässigbar. Details/Alternativen-Abwägung siehe
+ADR 0097.
+
+Redis ist in diesem Stack bewusst ohne Persistenz betrieben (`--save ""`,
+kein AOF, kein Volume) — die Rate-Limit-Daten sind rein transient (TTL je
+Client-Key), ein Neustart von Redis selbst setzt das Limit unschädlich
+zurück. Live verifiziert (P25-S3): das Limit auf 3 Requests/120s gesenkt,
+vierte Anfrage lieferte `429`; anschließend den `gateway-service`-Container
+neu gestartet (frischer Prozess, neue `RateLimiter`-Instanz) — die
+unmittelbar folgende Anfrage desselben Clients lieferte weiterhin `429`,
+belegt also, dass der Zähler tatsächlich in Redis lebt und nicht in einem
+neuen In-Prozess-Cache landet.
 
 **Default nach Nutzer-Feedback von 120 auf 600 angehoben**: der ursprüngliche Default (120
 Requests/60s) löste bei ganz normaler interaktiver Nutzung sehr schnell `429` aus — kein Bug in
@@ -165,7 +246,14 @@ Noch keine — folgt in Phase 11.
   veröffentlicht (Entwickler-Komfort) — ein echtes Netzwerk-Perimeter, das
   Backends ausschließlich über das Gateway erreichbar macht, ist ein späterer
   Deployment-Schritt.
-- Rate Limiting ohne geteilten Store (siehe ADR 0005) — Redis o. Ä. erst bei
-  horizontaler Gateway-Skalierung nötig.
-- Kein Least-Connections-/Latenz-bewusstes Load Balancing, nur zufällige
-  Instanzauswahl unter mehreren gesunden Kandidaten.
+- Seit P25-S4 zwar Least-Open-Connections-Auswahl statt zufälliger
+  Instanzauswahl (siehe "Instanzauswahl / Load Balancing" oben), aber
+  weiterhin **nicht latenz-bewusst** — eine Instanz, die zwar wenige offene
+  Anfragen, aber eine hohe Antwortzeit hat, wird dadurch nicht erkannt/
+  gemieden. Der Zähler ist außerdem rein pro Gateway-Replika (kein
+  clusterweiter Wert, bewusst so — siehe oben), anders als der seit P25-S3
+  über Redis geteilte Rate-Limit-Zähler.
+- Redis läuft im gebündelten Dev-/Test-Stack ohne Auth/TLS (dev-only, gleiche
+  Haltung wie Postgres/NATS/MinIO in diesem Stack) — eine echte Installation
+  müsste eigene Zugangsdaten/Netzwerksegmentierung für den `redis`-Dienst
+  vorsehen, das ist hier nicht modelliert.

@@ -54,6 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cache_ttl_seconds=settings.instance_cache_ttl_seconds,
     )
     app.state.rate_limiter = RateLimiter(
+        redis_url=settings.redis_url,
         max_requests=settings.rate_limit_max_requests,
         window_seconds=settings.rate_limit_window_seconds,
     )
@@ -141,7 +142,7 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
             "X-DMS-Roles": ",".join(claims.get("realm_access", {}).get("roles", [])),
         }
 
-    if not request.app.state.rate_limiter.allow(rate_limit_key):
+    if not await request.app.state.rate_limiter.allow(rate_limit_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit überschritten"
         )
@@ -153,7 +154,6 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Kein aktiver Dienst für service_type={service_type!r} registriert",
         )
-    instance = resolver.pick(instances)
 
     body = await request.body()
     headers = filter_headers(request.headers)
@@ -163,18 +163,24 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     # permission-service aufzubauen (z. B. auth-service `POST /login`).
     headers["X-DMS-Maintenance-Active"] = "true" if maintenance_active else "false"
 
-    try:
-        upstream_response = await request.app.state.http_client.request(
-            request.method,
-            f"{instance['address'].rstrip('/')}/{path}",
-            params=request.query_params,
-            headers=headers,
-            content=body,
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Upstream-Fehler: {exc}"
-        ) from exc
+    # Workload-bewusste Instanzauswahl (P25-S4): `reserved_instance()` wählt
+    # die Instanz mit den wenigsten aktuell offenen Anfragen und hält den
+    # Zähler für die gesamte Dauer des Upstream-Aufrufs offen - das
+    # `finally` in `reserved_instance()` gibt den Slot auch bei einer
+    # `httpx.HTTPError` unten wieder frei, kein dauerhaftes Leaken.
+    async with resolver.reserved_instance(instances) as instance:
+        try:
+            upstream_response = await request.app.state.http_client.request(
+                request.method,
+                f"{instance['address'].rstrip('/')}/{path}",
+                params=request.query_params,
+                headers=headers,
+                content=body,
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Upstream-Fehler: {exc}"
+            ) from exc
 
     return Response(
         content=upstream_response.content,

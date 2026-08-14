@@ -122,4 +122,11 @@ class Settings(BaseServiceSettings):
     rate_limit_max_requests: int = 600
     rate_limit_window_seconds: float = 60.0
 
+    # Geteilter Store fürs Rate Limiting (seit P25-S3, ADR 0097) - ersetzt den
+    # ursprünglichen in-process `dict` (ADR 0005), damit mehrere horizontal
+    # skalierte Gateway-Instanzen denselben Zähler je Client sehen. Zeigt
+    # standardmäßig auf den neuen `redis`-Service in
+    # `infra/docker-compose.yml` (interne Compose-DNS).
+    redis_url: str = "redis://localhost:6379/0"
+
     upstream_timeout_seconds: float = 30.0
