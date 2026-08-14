@@ -36,6 +36,11 @@ const GROUPS: NavGroup[] = [
         requiresCapability: "admin.object_config",
       },
       { href: "/registry/", labelKey: "nav.registry" },
+      {
+        href: "/teamspaces/",
+        labelKey: "nav.teamspacesAdmin",
+        requiresCapability: "admin.teamspace_management",
+      },
     ],
   },
   {

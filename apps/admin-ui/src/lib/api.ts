@@ -1948,3 +1948,24 @@ export async function importConfig(
   );
   return response.json();
 }
+
+// Teamspaces-Admin-Übersicht (Post-Roadmap Phase 22 Session 5) - erste
+// Admin-UI-Anbindung von `teamspace-service` überhaupt. `GET /admin/teamspaces`
+// ist gegated (`admin.teamspace_management`, neue Domäne "domain-admin-
+// teamspaces") - anders als `GET /teamspaces` (dort nach Mitgliedschaft
+// gefiltert, hier installationsweit alle).
+export interface TeamspaceAdmin {
+  id: string;
+  name: string;
+  description: string;
+  root_folder_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+}
+
+export async function listAllTeamspaces(token: string): Promise<TeamspaceAdmin[]> {
+  const response = await request("teamspace-service", "admin/teamspaces", {}, token);
+  return response.json();
+}

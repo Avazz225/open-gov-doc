@@ -96,6 +96,58 @@ def test_list_teamspaces_only_shows_member_of(client):
     assert "Bob-Space" not in names
 
 
+def _grant_teamspace_admin_permission(principal: str) -> None:
+    """Weist `principal` real gegen den live laufenden `permission-service`
+    die vorgeseedete `domain-admin-teamspaces`-Rolle
+    (`admin.teamspace_management`) an der Wurzelressource zu - identisches
+    Muster wie die übrigen `_grant_*_permission`-Testhelfer in diesem
+    Projekt (z. B. `workflow-service`s `conftest.py`)."""
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+        roles = permission_client.get("/roles").json()
+        role = next(r for r in roles if r["name"] == "domain-admin-teamspaces")
+        permission_client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": principal,
+                "role_id": role["id"],
+                "resource_id": "root",
+            },
+        )
+
+
+def test_list_all_teamspaces_without_principal_is_forbidden(client):
+    response = client.get("/admin/teamspaces")
+    assert response.status_code == 403
+
+
+def test_list_all_teamspaces_without_capability_is_forbidden(client):
+    response = client.get("/admin/teamspaces", headers=_headers("mallory"))
+    assert response.status_code == 403
+
+
+def test_list_all_teamspaces_shows_every_teamspace_with_member_count(client):
+    _grant_teamspace_admin_permission("dana")
+    _create_teamspace(client, name="Alice-Admin-Space", principal="alice")
+    bob_teamspace = _create_teamspace(client, name="Bob-Admin-Space", principal="bob")
+    client.post(
+        f"/teamspaces/{bob_teamspace['id']}/members",
+        json={"principal_id": "carol"},
+        headers=_headers("bob"),
+    )
+
+    response = client.get("/admin/teamspaces", headers=_headers("dana"))
+    assert response.status_code == 200
+    by_name = {t["name"]: t for t in response.json()}
+
+    # "dana" ist selbst Mitglied von KEINEM der beiden Teamspaces - die
+    # Übersicht zeigt trotzdem beide, anders als `GET /teamspaces`.
+    assert "Alice-Admin-Space" in by_name
+    assert "Bob-Admin-Space" in by_name
+    assert by_name["Alice-Admin-Space"]["member_count"] == 1
+    assert by_name["Bob-Admin-Space"]["member_count"] == 2
+
+
 def test_invite_member_by_non_manager_is_forbidden(client):
     teamspace = _create_teamspace(client)
     client.post(

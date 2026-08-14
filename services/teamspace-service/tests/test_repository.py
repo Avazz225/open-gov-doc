@@ -37,6 +37,27 @@ async def test_list_teamspaces_for_principal_only_shows_member_of(session):
     assert [t.id for t in alice_teamspaces] == [ts1.id]
 
 
+async def test_list_all_teamspaces_with_member_counts_includes_non_membership(session):
+    ts1 = await repository.create_teamspace(
+        session, name="A", description="", root_folder_id="f1", created_by="alice"
+    )
+    ts2 = await repository.create_teamspace(
+        session, name="B", description="", root_folder_id="f2", created_by="bob"
+    )
+    await repository.add_member(
+        session, ts2.id, principal_id="carol", can_manage_members=False, invited_by="bob"
+    )
+
+    rows = await repository.list_all_teamspaces_with_member_counts(session)
+    counts = {teamspace.id: count for teamspace, count in rows}
+
+    # "dana" ist in keinem der beiden Teamspaces Mitglied - die Funktion
+    # filtert trotzdem nicht nach einem anfragenden Principal (anders als
+    # `list_teamspaces_for_principal`), beide Zeilen sind vorhanden.
+    assert counts[ts1.id] == 1
+    assert counts[ts2.id] == 2
+
+
 async def test_delete_teamspace_removes_members_appointments_contacts(session):
     teamspace = await repository.create_teamspace(
         session, name="A", description="", root_folder_id="f1", created_by="alice"

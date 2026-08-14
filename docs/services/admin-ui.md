@@ -17,6 +17,7 @@
 | `/users/` | Nutzer anlegen/löschen, Rollen anlegen, Rollenzuweisungen anlegen/entfernen — seit **Post-Roadmap Phase 22 Session 2** zusätzlich Gruppen anlegen/löschen + Mitgliederverwaltung, siehe unten |
 | `/object-types/` | Objekttypen anlegen/bearbeiten/löschen über einen geführten Formular-Assistenten (`ObjectTypeEditor`, seit P5b-S3, seit P5e-S3 inkl. Kennzeichengenerator-Format/Anzeige-Override, seit **P6-S7** inkl. Mindest-Signaturniveau, 3.10, seit **P7-S3** inkl. Aussonderungs-Frist/Verschlüsselung, 5.6) + Formular-Layout-Designer (`LayoutDesigner`, 2.2b) |
 | `/registry/` | Alle bei der Registry registrierten Instanzen inkl. Health-Status |
+| `/teamspaces/` | Teamspaces-Admin-Übersicht (`TeamspacesAdmin`, 2.5, seit **Post-Roadmap Phase 22 Session 5**, [ADR 0090](../adr/0090-teamspaces-admin-overview.md)) — installationsweite Statustabelle aller Teamspaces gegen `teamspace-service`s neuen `GET /admin/teamspaces`, hinter der Capability `admin.teamspace_management` (`RequireCapability` UND gegateter Sidebar-Eintrag, echte serverseitige Durchsetzung), siehe unten |
 | `/installations/` | Installationsliste verwalten (anlegen/löschen/wechseln) — seit P4-S5 |
 | `/ocr-settings/` | Maximale Wortobergrenze/Verarbeitungs-Batch-Size/Content-Type-Positivliste des OCR Service (`OcrSettings`, seit P5b-S5, Positivliste seit P5d-S1) |
 | `/upload-settings/` | Format-Whitelist des Document Service (`UploadSettings`, seit P5d-S1) |
@@ -81,6 +82,18 @@ Vier-Augen-Mechanismus (4.3) selbst, bislang nur per `curl`/direktem HTTP-Aufruf
   ADR 0089 für die vollständige Begründung, insbesondere die Blast-Radius-Analyse über acht betroffene
   Testsuiten), ein clientseitiges Capability-Gate würde eine serverseitig nicht existierende Durchsetzung
   vortäuschen — gleiche Disziplin wie bei `ArchivalTransfersView`s ungegatetem Rückholen-Button.
+
+## Teamspaces-Admin-Übersicht (Post-Roadmap Phase 22 Session 5, [ADR 0090](../adr/0090-teamspaces-admin-overview.md))
+
+Erste Admin-UI-Anbindung von `teamspace-service` überhaupt. `TeamspacesAdmin.tsx` (`/teamspaces/`) —
+reine Statustabelle (Name, Beschreibung, Angelegt von, Mitgliederzahl, Angelegt am) gegen den neuen
+`GET /api/teamspace-service/admin/teamspaces` — installationsweit, unabhängig von der eigenen
+Mitgliedschaft (anders als `GET /teamspaces`, das nach Mitgliedschaft filtert und in dieser App nirgends
+verwendet wird). Bewusst **keine** administrativen Aktionen (Löschen/Mitgliederverwaltung) — Teamspaces
+bleiben Selbstverwaltung (2.5), diese Seite ist reine Sichtbarkeit für eine Aufsichtsrolle. Anders als
+`/approval-settings/` (P22-S3, dort bewusst ungegatet) hat dieser Endpunkt eine echte serverseitige
+Durchsetzung (`admin.teamspace_management`) — die Seite ist deshalb konsequent sowohl per
+`RequireCapability` als auch per gegatetem Sidebar-Eintrag geschützt, wie `/users/`.
 
 ## Layout (P4-S5, Nutzer-Feedback nach dem ersten echten Browser-Test des MVP)
 
@@ -216,6 +229,7 @@ Ausschließlich über das API-Gateway der jeweils **aktiven Installation** (3.5,
 | Login/Identität | `POST /api/auth-service/login`, `GET /api/auth-service/me` |
 | Nutzer | `GET/POST /api/auth-service/users`, `DELETE /api/auth-service/users/{id}` |
 | Rollen | `GET/POST /api/permission-service/roles` |
+| Teamspaces-Admin-Übersicht (seit **Post-Roadmap Phase 22 Session 5**) | `GET /api/teamspace-service/admin/teamspaces` |
 | Gruppen (seit **Post-Roadmap Phase 22 Session 2**) | `GET/POST /api/permission-service/groups`, `DELETE .../{id}`, `GET/POST /api/permission-service/groups/{id}/members`, `DELETE .../{id}/members/{principal_id}` |
 | Rollenzuweisungen | `GET/POST /api/permission-service/role-assignments`, `DELETE .../{id}` |
 | Vier-Augen-Einstellungen (seit **Post-Roadmap Phase 22 Session 3**) | `GET /api/permission-service/approval-config`, `PUT .../{action_type}` |
@@ -254,7 +268,12 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **185 Tests** — seit **Post-Roadmap Phase 22 Session 3** (siehe
+- `npm test` (Vitest + Testing Library, **191 Tests** — seit **Post-Roadmap Phase 22 Session 5** (siehe
+  "Teamspaces-Admin-Übersicht" oben): neue Testdatei `teamspaces-admin.test.tsx` (4 Tests: Auflisten
+  inkl. Teamspaces, in denen der Aufrufer selbst kein Mitglied ist, Leerzustand, Unreachable-Zustand,
+  Fehleranzeige bei fehlender Capability) für die neue `TeamspacesAdmin`, plus zwei neue
+  `admin-sidebar.test.tsx`-Tests für die Capability-Gatung des neuen Sidebar-Eintrags
+  "Team-Arbeitsbereiche"; davor 185 — seit **Post-Roadmap Phase 22 Session 3** (siehe
   "Vier-Augen-Einstellungen" oben): neue Testdatei `approval-settings.test.tsx` (6 Tests: Leerzustand,
   Unreachable-Zustand, Auflisten sortiert inkl. `required_permission`/Status, Umschalten inkl. Erhalt von
   `required_permission`, Anlegen eines neuen Aktionstyps, Fehleranzeige beim Umschalten) für die neue

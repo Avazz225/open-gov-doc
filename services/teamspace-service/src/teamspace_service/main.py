@@ -15,6 +15,7 @@ from teamspace_service import repository
 from teamspace_service.clients import FolderServiceClient, PermissionServiceClient
 from teamspace_service.models import Base, TeamspaceMember
 from teamspace_service.schemas import (
+    TeamspaceAdminOut,
     TeamspaceAppointmentCreate,
     TeamspaceAppointmentOut,
     TeamspaceContactCreate,
@@ -159,6 +160,37 @@ async def list_teamspaces(
     if not x_dms_principal:
         raise HTTPException(status_code=403, detail="X-DMS-Principal fehlt")
     return await repository.list_teamspaces_for_principal(session, x_dms_principal)
+
+
+@app.get("/admin/teamspaces", response_model=list[TeamspaceAdminOut])
+async def list_all_teamspaces(
+    x_dms_principal: str = Header(default=""), session: AsyncSession = Depends(get_session)
+) -> list[TeamspaceAdminOut]:
+    """Installationsweite Übersicht (Post-Roadmap Phase 22 Session 5,
+    Admin-UI) - anders als `GET /teamspaces` NICHT nach Mitgliedschaft
+    gefiltert, daher eine echte `permission-service`-Rechteprüfung statt
+    der sonst in diesem Service üblichen `_require_member`/`_require_
+    manager`-Prüfung gegen die eigene `teamspace_member`-Tabelle."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=403, detail="X-DMS-Principal fehlt")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.teamspace_management"
+    ):
+        raise HTTPException(status_code=403, detail="admin.teamspace_management erforderlich")
+    rows = await repository.list_all_teamspaces_with_member_counts(session)
+    return [
+        TeamspaceAdminOut(
+            id=teamspace.id,
+            name=teamspace.name,
+            description=teamspace.description,
+            root_folder_id=teamspace.root_folder_id,
+            created_by=teamspace.created_by,
+            created_at=teamspace.created_at,
+            updated_at=teamspace.updated_at,
+            member_count=member_count,
+        )
+        for teamspace, member_count in rows
+    ]
 
 
 @app.get("/teamspaces/{teamspace_id}", response_model=TeamspaceOut)

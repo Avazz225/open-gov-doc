@@ -43,6 +43,7 @@
     "kennzeichenSettings": "Kennzeichen-Einstellungen",
     "configPackages": "Konfigurationspakete",
     "registry": "Registry",
+    "teamspacesAdmin": "Team-Arbeitsbereiche",
     "installations": "Installationsverwaltung",
     "ocrSettings": "OCR-Einstellungen",
     "uploadSettings": "Format-Whitelist",
@@ -109,6 +110,17 @@
     "addMemberError": "Mitglied hinzufügen fehlgeschlagen",
     "removeMember": "Entfernen",
     "removeMemberError": "Mitglied entfernen fehlgeschlagen"
+  },
+  "teamspacesAdmin": {
+    "pageTitle": "Team-Arbeitsbereiche",
+    "hint": "Installationsweite Übersicht über alle Teamspaces (2.5) - unabhängig von der eigenen Mitgliedschaft. Anlegen/Löschen/Mitgliederverwaltung bleibt Selbstverwaltung, hier nur Sichtbarkeit.",
+    "unreachable": "Teamspace Service nicht erreichbar.",
+    "empty": "Noch keine Teamspaces.",
+    "name": "Name",
+    "description": "Beschreibung",
+    "createdBy": "Angelegt von",
+    "memberCount": "Mitglieder",
+    "createdAt": "Angelegt am"
   },
   "approvalSettings": {
     "pageTitle": "Vier-Augen-Einstellungen",

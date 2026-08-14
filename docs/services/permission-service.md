@@ -84,7 +84,7 @@ Generischer, pro Aktionstyp konfigurierbarer Freigabe-Mechanismus — siehe [ADR
 
 ## Domänengetrennte Admin-Rollen (4.6, seit P6-S5)
 
-Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründung in [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). `repository.ensure_domain_admin_roles` seedet bei jedem Start idempotent 9 `Role`-Zeilen (falls nicht bereits vorhanden, per Name geprüft):
+Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründung in [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). `repository.ensure_domain_admin_roles` seedet bei jedem Start idempotent alle `DOMAIN_ADMIN_ROLES`-Zeilen (falls nicht bereits vorhanden, per Name geprüft):
 
 | Rolle | Capability | Zugeordnetes technisches Konto |
 |---|---|---|
@@ -100,6 +100,7 @@ Systemeigen (nicht Keycloak-Realm-Rollen) — vollständige Architekturbegründu
 | `domain-admin-emergency` | `system.not_shutdown.trigger` | keins (seit **P6-S6**, echte Menschen, manuell zugewiesen — siehe "Not-Shutdown" unten) |
 | `domain-admin-virus-scan` | `admin.quarantine` | keins (seit **Post-Roadmap Phase 19 Session 8**, [ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md) — Durchsetzung direkt in `virus-scan-service`, ersetzt dessen vorheriges reines `X-DMS-Roles`-Gate) |
 | `domain-admin-legal-hold` | `admin.legal_hold` | keins (seit **Post-Roadmap Phase 19 Session 10**, [ADR 0075](../adr/0075-legal-hold-rbac.md) — Durchsetzung in `document-service`/`folder-service`, `user-ui`s `RetentionPanel`/`FolderRetentionModal` blenden den Aktionsbutton entsprechend ein) |
+| `domain-admin-teamspaces` | `admin.teamspace_management` | keins (seit **Post-Roadmap Phase 22 Session 5**, [ADR 0090](../adr/0090-teamspaces-admin-overview.md) — Durchsetzung direkt in `teamspace-service`s neuem `GET /admin/teamspaces`, `admin-ui`s neue `/teamspaces/`-Seite) |
 
 `domain-admin-users` und (seit **P6-S6**) `domain-admin-config` haben ein eigenes technisches Keycloak-Konto (`auth-service`s `/users` bzw. `workflow-service`s Prozessdefinitions-Endpunkte, Admin-UI-Gating). `domain-admin-query-console`/`-manipulate` (seit **P8-S1**/**P8-S2**) sowie **seit P9-S1** `domain-admin-license` sind ebenfalls tatsächlich durchgesetzt, aber **ohne** eigenes technisches Konto — der jeweilige Service prüft die Rollenzuweisung direkt über `GET /effective-permissions/{principal}/root`, kein dediziertes Konto nötig (siehe `docs/services/query-service.md`/`docs/services/license-service.md`). Die übrigen sind vordefiniert ("standardmäßig mitgeliefert", 4.6), aber ohne Konto/Enforcement. `breakglass-approver` und (seit P6-S6) `domain-admin-emergency` bekommen bewusst kein automatisches Konto — die Vier-Augen-Regel aus 4.6 bzw. die Auslöse-Berechtigung aus 4.8 verlangt eine echte, individuell zurechenbare Person, keine geteilte Technik-Identität; Zuweisung an konkrete Menschen läuft über die bestehende, selbst gegatete `POST /role-assignments`-Nutzung in der Admin-UI.
 

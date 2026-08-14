@@ -5,7 +5,7 @@ durchgängigen Muster dieses Projekts (z. B. `workflow-service`,
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from teamspace_service.models import (
@@ -72,6 +72,26 @@ async def list_teamspaces_for_principal(
         .order_by(Teamspace.name)
     )
     return list(result.scalars().all())
+
+
+async def list_all_teamspaces_with_member_counts(
+    session: AsyncSession,
+) -> list[tuple[Teamspace, int]]:
+    """Installationsweite Übersicht (Post-Roadmap Phase 22 Session 5) -
+    anders als `list_teamspaces_for_principal` NICHT nach Mitgliedschaft
+    gefiltert, daher auf `main.py`-Ebene über `admin.teamspace_management`
+    gegated statt (wie die übrigen Endpunkte dieses Service) über die
+    eigene `teamspace_member`-Tabelle. `outerjoin`, damit ein Teamspace
+    grundsätzlich nie ohne Mitglied auftauchen könnte (siehe
+    `create_teamspace`), die Zählung aber auch bei einer künftig doch
+    leeren Mitgliederliste nicht stillschweigend die ganze Zeile ausließe."""
+    result = await session.execute(
+        select(Teamspace, func.count(TeamspaceMember.principal_id))
+        .outerjoin(TeamspaceMember, TeamspaceMember.teamspace_id == Teamspace.id)
+        .group_by(Teamspace.id)
+        .order_by(Teamspace.name)
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def delete_teamspace(session: AsyncSession, teamspace_id: str) -> None:

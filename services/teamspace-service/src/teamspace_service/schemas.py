@@ -20,6 +20,22 @@ class TeamspaceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TeamspaceAdminOut(BaseModel):
+    """Installationsweite Übersicht (Post-Roadmap Phase 22 Session 5) -
+    identisch zu `TeamspaceOut`, zusätzlich `member_count` statt einer
+    vollständigen Mitgliederliste (für einen reinen Übersichts-Endpunkt
+    ausreichend, spart eine zweite, gegatete Mitglieder-Route)."""
+
+    id: str
+    name: str
+    description: str
+    root_folder_id: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    member_count: int
+
+
 class TeamspaceMemberInvite(BaseModel):
     principal_id: str
     can_manage_members: bool = False

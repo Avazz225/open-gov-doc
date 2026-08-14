@@ -85,4 +85,20 @@ describe("AdminSidebar", () => {
 
     expect(screen.getByText("Query-Konsole")).toBeInTheDocument();
   });
+
+  it("hides the teamspaces entry without the admin.teamspace_management capability (Post-Roadmap Phase 22 Session 5)", () => {
+    mockPermissions = [];
+
+    renderSidebar();
+
+    expect(screen.queryByText("Team-Arbeitsbereiche")).not.toBeInTheDocument();
+  });
+
+  it("shows the teamspaces entry with the admin.teamspace_management capability", () => {
+    mockPermissions = ["admin.teamspace_management"];
+
+    renderSidebar();
+
+    expect(screen.getByText("Team-Arbeitsbereiche")).toBeInTheDocument();
+  });
 });

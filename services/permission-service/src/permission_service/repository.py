@@ -153,6 +153,13 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # gegensätzlich sind (Hold verhindert Löschung, Deletion-Admin führt sie
     # aus) - siehe ADR 0075 "Begründung".
     ("domain-admin-legal-hold", "Legal-Hold-Verwaltung", ["admin.legal_hold"]),
+    # Post-Roadmap Phase 22 Session 5: `teamspace-service`s neuer
+    # installationsweiter Übersichts-Endpunkt (`GET /admin/teamspaces`,
+    # zeigt ALLE Teamspaces, nicht nur die des anfragenden Principals wie
+    # `GET /teamspaces`) ist die erste Stelle in diesem Service, die eine
+    # echte Rechteprüfung braucht - Teamspaces selbst bleiben weiterhin
+    # selbstverwaltet (2.5, kein Capability-Gate für Anlegen/Beitreten).
+    ("domain-admin-teamspaces", "Teamspace-Aufsicht", ["admin.teamspace_management"]),
 ]
 
 

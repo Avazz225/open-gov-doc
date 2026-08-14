@@ -16,6 +16,7 @@
 |---|---|---|
 | `POST` | `/teamspaces` | Anlegen (`name`, `description`) — jeder authentifizierte Principal darf, kein Capability-Gate. Legt automatisch einen `folder-service`-Wurzelordner an und macht die anlegende Person zum ersten Mitglied (`can_manage_members=true`) |
 | `GET` | `/teamspaces` | Nur Teamspaces, in denen der Aufrufer Mitglied ist |
+| `GET` | `/admin/teamspaces` | Installationsweite Übersicht (seit **Post-Roadmap Phase 22 Session 5**, [ADR 0090](../adr/0090-teamspaces-admin-overview.md)) — ALLE Teamspaces inkl. `member_count`, unabhängig von der eigenen Mitgliedschaft. `403` ohne `X-DMS-Principal`/ohne die Capability `admin.teamspace_management`, siehe unten |
 | `GET` | `/teamspaces/{id}` | Detail — `404` unbekannt, `403` kein Mitglied |
 | `DELETE` | `/teamspaces/{id}` | Löscht nur die Teamspace-Metadaten (Mitglieder/Termine/Kontakte), der Wurzelordner bleibt bestehen — `403` ohne `can_manage_members` |
 | `POST` | `/teamspaces/{id}/members` | Einladen (`principal_id`, `can_manage_members`) — `403` ohne `can_manage_members`, `409` bei bereits bestehender Mitgliedschaft. Legt zusätzlich die `permission-service`-Rollenzuweisung an |
@@ -48,6 +49,21 @@ Jeder gegatete Endpunkt verlangt den Header `X-DMS-Principal` (vom Gateway aus d
 
 Einladen verlangt, einen eingetippten Nutzernamen in die tatsächlich maßgebliche Keycloak-`sub`-UUID aufzulösen (`X-DMS-Principal`/`RoleAssignment.principal_id`). Das bestehende `GET /users` in `auth-service` ist hinter `admin.user_management` gegated - für Teamspace ungeeignet, da jede Person einladen können soll. Neuer, schmalerer Endpunkt `GET /users/lookup?username=` (siehe `docs/services/auth-service.md`): exakte Namenssuche, jeder authentifizierte Nutzer, liefert nur `{id, username}` zurück (kein allgemeines Personenverzeichnis).
 
+## Installationsweite Admin-Übersicht (Post-Roadmap Phase 22 Session 5, [ADR 0090](../adr/0090-teamspaces-admin-overview.md))
+
+`GET /admin/teamspaces` — anders als `GET /teamspaces` (mitgliedschaftsgefiltert,
+`repository.list_teamspaces_for_principal`) liefert dieser Endpunkt **alle** Teamspaces
+(`repository.list_all_teamspaces_with_member_counts`, `outerjoin` + `GROUP BY` statt eines Filters),
+inkl. `member_count` je Zeile statt einer vollständigen Mitgliederliste (eine vollständige Liste würde
+`GET /teamspaces/{id}/members` erfordern, das `_require_member` verlangt — für einen reinen
+Admin-Übersichts-Endpunkt unverhältnismäßig). Gegated über eine neue `PermissionServiceClient.
+has_permission()`-Prüfung (`admin.teamspace_management`, neue vorgeseedete Domäne
+`domain-admin-teamspaces` bei `permission-service`, siehe dortige Doku "Domänengetrennte Admin-Rollen")
+— erste echte Rechteprüfung in diesem Service (die übrigen Endpunkte prüfen ausschließlich gegen die
+eigene `teamspace_member`-Tabelle, `_require_member`/`_require_manager`, kein Cross-Service-Aufruf für
+Autorisierung). Teamspaces selbst bleiben unverändert selbstverwaltet (2.5) — kein Capability-Gate für
+Anlegen/Beitreten, nur diese neue Übersicht.
+
 ## user-ui-Integration
 
 Neue `TeamspacesPane.tsx` (Icon-Rail-Eintrag 👥) — Master-Detail-Ansicht: Liste der eigenen Teamspaces + Neuanlage-Formular links, Mitglieder/Termine/Kontakte + "Ordner öffnen" (navigiert in den regulären Dokumenten-Explorer, `root_folder_id` wird dafür einmalig über `GET /folders/{id}` aufgelöst, gleiches Prinzip wie beim Öffnen eines favorisierten Ordners, P7-S1d) im Detailbereich rechts. Einladen ruft zunächst `lookupUserByUsername()` auf, dann `inviteTeamspaceMember()` mit der aufgelösten UUID.
@@ -73,7 +89,7 @@ Bewusst keine Termin-/Kontakt-Ereignisse — die Mitgliedschaftsereignisse sind 
 
 ## Tests
 
-- `uv run pytest services/teamspace-service/tests`: Repository (Anlegen inkl. Ersteller als erstes Mitglied, Duplikat-Ablehnung, kaskadierendes Löschen von Mitgliedern/Terminen/Kontakten beim Löschen eines Teamspace, Mitglieder-/Termin-/Kontakt-CRUD, `NotFoundError`-Fälle inkl. teamspace-übergreifender Verwechslung). API (läuft gegen den echten, laufenden `folder-service`/`permission-service`, kein Mocking): Neuanlage legt einen echten Ordner an und gewährt der anlegenden Person eine echte `permission-service`-Rollenzuweisung, Mitgliedschaftsprüfung (`403` für Nicht-Mitglieder), Einladen/Entfernen inkl. `permission-service`-Verankerung (Zuweisung entsteht/verschwindet tatsächlich), Selbst-Entfernen ohne `can_manage_members` möglich, Entfernen anderer verlangt es, Termine/Kontakte-CRUD. **41 Tests, alle grün.**
+- `uv run pytest services/teamspace-service/tests`: Repository (Anlegen inkl. Ersteller als erstes Mitglied, Duplikat-Ablehnung, kaskadierendes Löschen von Mitgliedern/Terminen/Kontakten beim Löschen eines Teamspace, Mitglieder-/Termin-/Kontakt-CRUD, `NotFoundError`-Fälle inkl. teamspace-übergreifender Verwechslung). API (läuft gegen den echten, laufenden `folder-service`/`permission-service`, kein Mocking): Neuanlage legt einen echten Ordner an und gewährt der anlegenden Person eine echte `permission-service`-Rollenzuweisung, Mitgliedschaftsprüfung (`403` für Nicht-Mitglieder), Einladen/Entfernen inkl. `permission-service`-Verankerung (Zuweisung entsteht/verschwindet tatsächlich), Selbst-Entfernen ohne `can_manage_members` möglich, Entfernen anderer verlangt es, Termine/Kontakte-CRUD. **45 Tests seit Post-Roadmap Phase 22 Session 5** (vorher 41, +4: `GET /admin/teamspaces` ohne Principal/ohne Capability → je `403`, ein Ende-zu-Ende-Test über zwei Teamspaces mit unterschiedlichen Erstellern bestätigt, dass ein Nicht-Mitglied mit der Capability beide inkl. korrekter Mitgliederzahl sieht, plus ein Repository-Unit-Test für `list_all_teamspaces_with_member_counts`).
 - **Live-Verifikation dieser Session**: `docker compose up -d --build teamspace-service` gegen den vollständigen Stack, Selbst-Registrierung bei `registry-service` bestätigt (`GET /instances/teamspace-service`), Gateway-Routing bestätigt (`POST /api/teamspace-service/teamspaces` ohne Token → `401`, beweist korrekte Auflösung über den generischen `/api/{service_type}/...`-Proxy).
 - **Echte Ende-zu-Ende-Browser-Verifikation** (ephemerer Playwright-Container, siehe `docs/services/user-ui.md` "Team-Arbeitsbereiche"-Abschnitt für den dabei gefundenen Netzwerk-Stolperstein): Login → Teamspace anlegen → Detail öffnen → Mitglied per Nutzername einladen (löst korrekt über `GET /users/lookup` auf) → Termin/Kontakt anlegen → Ordner öffnen wechselt in den Dokumenten-Explorer → als eingeladenes, nicht-verwaltungsberechtigtes Mitglied eingeloggt bestätigt: Löschen-/Einladen-Aktionen sind unsichtbar, "Verlassen" funktioniert → Löschen als Verwaltungsmitglied entfernt den Teamspace. Keine Konsolenfehler. Dabei ein UI-Bug gefunden und behoben (`user-ui`s Löschen-Buttons für Termine/Kontakte zeigten "common.delete" statt "Löschen" — fehlender i18n-Schlüssel).
 
@@ -84,4 +100,4 @@ Bewusst keine Termin-/Kontakt-Ereignisse — die Mitgliedschaftsereignisse sind 
 - **`permission-service`-Verankerung ist nicht die primäre Durchsetzung** — nur `search-service` prüft sie heute tatsächlich. Ein direkter `folder-service`/`document-service`-Zugriff auf den Teamspace-Ordner ist NICHT durch die Teamspace-Mitgliedschaft geschützt (bereits projektweit dokumentierte Lücke, hier nicht neu, nur nicht geschlossen).
 - **Löschen entfernt nur Teamspace-Metadaten, nicht den Wurzelordner** — bewusste Grenze, echte Ordnerlöschung wäre ein eigenständiges Feature (Aufbewahrung, Vier-Augen, 5.2).
 - **`GET /users/lookup` ist ein Existenz-Oracle** — jeder authentifizierte Nutzer kann herausfinden, ob ein bestimmter Nutzername existiert. Für eine interne Verwaltungssoftware mit bekannter Nutzerpopulation als unkritisch eingestuft.
-- **Kein Admin-UI-Zugang** — Teamspaces sind ein reines Endnutzer-Feature in `user-ui`, keine Verwaltungssicht in `admin-ui` (z. B. "alle Teamspaces einer Installation auflisten") vorgesehen.
+- ~~Kein Admin-UI-Zugang — Teamspaces sind ein reines Endnutzer-Feature in `user-ui`, keine Verwaltungssicht in `admin-ui` (z. B. "alle Teamspaces einer Installation auflisten") vorgesehen~~ — **behoben in Post-Roadmap Phase 22 Session 5** ([ADR 0090](../adr/0090-teamspaces-admin-overview.md)): neuer `GET /admin/teamspaces`-Endpunkt + neue `admin-ui`-Seite `/teamspaces/`, gegated über die neue Capability `admin.teamspace_management`. Weiterhin reine Sichtbarkeit — keine administrativen Aktionen (Löschen/Mitgliederverwaltung) von der Admin-UI aus, das bleibt Selbstverwaltung.

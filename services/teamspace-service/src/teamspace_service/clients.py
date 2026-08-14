@@ -97,6 +97,16 @@ class PermissionServiceClient:
         )
         response.raise_for_status()
 
+    async def has_permission(self, principal_id: str, permission: str) -> bool:
+        """Post-Roadmap Phase 22 Session 5 - Domain-Admin-Capability-Prüfung
+        (`admin.teamspace_management`) für die neue installationsweite
+        Teamspace-Übersicht, gleiches Muster wie `document_service.
+        permission_client.PermissionServiceClient.has_permission`: globale
+        Rolle an der Wurzelressource, keine ressourcenskalierte Prüfung."""
+        response = await self._client.get(f"/effective-permissions/{principal_id}/root")
+        response.raise_for_status()
+        return permission in response.json()["permissions"]
+
     async def revoke_resource_access(self, *, principal_id: str, resource_id: str) -> None:
         role_id = await self._ensure_role()
         response = await self._client.get(
