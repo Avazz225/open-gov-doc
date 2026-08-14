@@ -607,7 +607,14 @@ body {
 }
 
 /* Formular-Layouts (2.2b, P5b-S4): gemeinsames Zeilen/Spalten-Grid für
-   Metadaten-Panel, Suchmaske und Upload-Dialog, siehe LayoutFormFields.tsx. */
+   Metadaten-Panel, Suchmaske und Upload-Dialog, siehe LayoutFormFields.tsx.
+   `container-type: inline-size` macht diesen Wrapper zum Bezugsrahmen für die
+   dort erzeugte `@container`-Regel (P23-S6) - misst die tatsächliche Breite
+   dieses Panels statt der Fensterbreite. */
+.layout-grid-container {
+  container-type: inline-size;
+}
+
 .layout-grid {
   display: flex;
   flex-direction: column;
