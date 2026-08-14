@@ -32,10 +32,10 @@
 | `POST` | `/documents/cascade-restore` | Gegenstück zu `cascade-trash` (`via_folder_id`) — stellt nur die dadurch kaskadiert gelöschten Dokumente wieder her |
 | `POST` | `/documents/count-active` | Interner Aufruf von `folder-service` (`folder_ids`) — Nicht-leer-Prüfung vor einer Ordner-Zwangslöschung |
 | `GET` | `/documents/count-active-total` | Interner Aufruf von `license-service` (9.1, seit P9-S1) — installationsweite Dokumentenzahl ohne Ordnerfilter, für die Nutzungsprüfung |
-| `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (5.4b), siehe unten |
+| `GET` | `/documents/{id}/content` | Inhalt der aktuellen Hauptversion. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (5.4b), siehe unten. Seit **Post-Roadmap Phase 21 Session 3** ([ADR 0086](../adr/0086-html-preview-external-subresource-blocking.md)): bei `content_type="text/html"` werden externe `src`/`href`-Referenzen vor der Auslieferung entfernt, siehe "HTML-Vorschau-Härtung" unten |
 | `GET` | `/documents/{id}/versions` | Alle Versionen inkl. Konfliktkopien (2.1a: nichts wird je verworfen) |
 | `GET` | `/documents/{id}/versions/{n}` | Metadaten einer konkreten Version |
-| `GET` | `/documents/{id}/versions/{n}/content` | Inhalt einer konkreten Version. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (`version_number` im Payload) |
+| `GET` | `/documents/{id}/versions/{n}/content` | Inhalt einer konkreten Version. Seit **P7-S2c**: publiziert bei Erfolg optional `document.downloaded` (`version_number` im Payload). Seit **P21-S3** dieselbe HTML-Neutralisierung wie oben |
 | `POST` | `/documents/{id}/versions` | Check-in (multipart: `file`, `expected_base_version_number`, `created_by`, optional `comment`) — siehe Konflikterkennung unten. Gleiches Virenscan-Gating wie beim Anlegen |
 | `GET` | `/documents/{id}/lock` | Aktuelle Sperre oder `null` |
 | `POST` | `/documents/{id}/lock` | Sperre setzen (`locked_by`, `session_id`, optional `timeout_seconds`) — 409 bei Fremdsperre |
@@ -117,6 +117,14 @@ erlaubt, den erkannten Content-Type gegen eine feste Liste zu prüfen - ein
 nicht gelistetes Format wird mit `400` abgelehnt, bevor Inhalt/Metadaten
 geschrieben werden. Leere Liste (Default) = keine Einschränkung, identisches
 Verhalten zu vor P5d-S1.
+
+## HTML-Vorschau-Härtung (Post-Roadmap Phase 21 Session 3, [ADR 0086](../adr/0086-html-preview-external-subresource-blocking.md))
+
+`user-ui`s `PreviewPane` rendert HTML-Dokumente über ein `sandbox=""`-iframe mit `srcDoc` (kein `src` auf eine eigene Origin) - `sandbox=""` blockiert Skriptausführung/Top-Navigation/Formulare, aber NICHT das normale Nachladen von Subressourcen (Bilder, Stylesheets, ...), und ein CSP-Header wirkt bei `srcDoc`-Inhalten ohne eigene Origin nur eingeschränkt. Statt eines CSP-Headers neutralisiert `document-service` externe Referenzen deshalb **serverseitig, an der Quelle**: `download_current_content`/`download_version_content` prüfen `content_type == "text/html"` (sniffing-basiert, siehe oben - nicht der ungeprüfte Client-Header) und rufen bei Treffer `html_preview_guard.rewrite_external_references` auf, bevor der Inhalt ausgeliefert wird.
+
+Die Funktion parst mit `BeautifulSoup`/`html.parser` (neue Abhängigkeit, kein bestehendes HTML-Parsing-Tool im Projekt bislang - `lxml` existiert nur für XML/BPMN in anderen Services) und entfernt jede `src`/`href`-Referenz, die nicht `data:`/`mailto:`/`tel:` oder ein reiner Fragment-Anker (`#...`) ist - attribut-getrieben, kein hartkodiertes Tag-Set (erfasst automatisch `img`/`script`/`iframe`/`link`/`a`/`audio`/`video`/`source`/`track`/`embed`/`frame` und ungewöhnliche Tags gleichermaßen). Relative Pfade werden ebenfalls blockiert, da ein `srcDoc`-Inhalt keine sichere, auflösbare Basis-URL hat. Direkt nach jeder entfernten Referenz wird eine sichtbare Markierung (`[Blockierte externe Anfrage: <ursprüngliche-URL>]`) eingefügt - die im Plan geforderte Sichtbarkeit im gerenderten Dokument, statt einer stillschweigenden Entfernung. Ein vorhandenes `<meta charset>` wird auf `utf-8` normalisiert (die Funktion liefert immer UTF-8-Bytes zurück, unabhängig vom ursprünglich deklarierten Encoding).
+
+**Bewusst NICHT abgedeckt** (der Plan nennt ausdrücklich nur `src`/`href`): `srcset` (responsive Bilder), `poster` (Video-Vorschaubild), `background` (veraltetes `<body background>`), sowie `url(...)` innerhalb von `style`-Attributen/`<style>`-Blöcken (CSS-Hintergrundbilder/-Fonts). Eine künftige Session könnte das schließen, falls sich ein reales Leck darüber zeigt.
 
 ## Virenscan vor Freigabe (10.3, seit P5-S1)
 

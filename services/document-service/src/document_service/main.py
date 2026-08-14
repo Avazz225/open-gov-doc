@@ -31,6 +31,7 @@ from document_service.approval_client import ApprovalClient
 from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
+from document_service.html_preview_guard import rewrite_external_references
 from document_service.license_client import LicenseLimitClient
 from document_service.models import Base, Document
 from document_service.object_type_client import MissingKennzeichenAttributeError, ObjectTypeClient
@@ -111,6 +112,16 @@ def _has_kennzeichen_admin_role(x_dms_roles: str) -> bool:
 def _has_quarantine_release_role(x_dms_roles: str) -> bool:
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     return settings.quarantine_release_admin_role in roles
+
+
+def _is_html_content_type(content_type: str | None) -> bool:
+    """Post-Roadmap Phase 21 Session 3 (ADR 0086) - entscheidet, ob
+    `rewrite_external_references` vor der Auslieferung greifen muss.
+    Parametersuffixe (``; charset=...``) werden abgeschnitten, `python-magic`
+    liefert sie zwar üblicherweise nicht mit, sicherheitshalber trotzdem."""
+    if not content_type:
+        return False
+    return content_type.split(";", 1)[0].strip().lower() == "text/html"
 
 
 async def _should_log_document_access(
@@ -1967,6 +1978,8 @@ async def download_current_content(
         raise HTTPException(
             status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
         ) from exc
+    if _is_html_content_type(version.content_type):
+        data = rewrite_external_references(data)
     if await _should_log_document_access(session, "downloaded", x_dms_roles):
         await publish_event(
             "document.downloaded",
@@ -2002,6 +2015,8 @@ async def download_version_content(
         raise HTTPException(
             status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
         ) from exc
+    if _is_html_content_type(version.content_type):
+        data = rewrite_external_references(data)
     if await _should_log_document_access(session, "downloaded", x_dms_roles):
         await publish_event(
             "document.downloaded",

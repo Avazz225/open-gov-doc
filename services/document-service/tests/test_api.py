@@ -250,6 +250,55 @@ def test_download_content_returns_409_if_dehydrated(client):
     assert response_after_rehydrate.content == b"wird ausgesondert"
 
 
+def test_download_content_rewrites_external_references_in_html_documents(client):
+    """Post-Roadmap Phase 21 Session 3 (ADR 0086): `user-ui`s HTML-Vorschau
+    rendert über ein `sandbox=""`-`srcDoc`-iframe, das externe Subressourcen-
+    Requests NICHT selbst blockiert - `download_current_content`/
+    `download_version_content` neutralisieren sie deshalb serverseitig."""
+    html = (
+        b'<html><body><img src="https://tracker.example/pixel.gif" alt="x">'
+        b'<img src="data:image/png;base64,AAAA" alt="ok"></body></html>'
+    )
+    files = {"file": ("preview.html", html, "text/html")}
+    response = client.post(
+        "/documents", data={"title": "HTML-Dokument", "created_by": "alice"}, files=files
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+
+    for path in (
+        f"/documents/{document_id}/content",
+        f"/documents/{document_id}/versions/1/content",
+    ):
+        download = client.get(path)
+        assert download.status_code == 200
+        body = download.content.decode("utf-8")
+        assert b'src="https://tracker.example/pixel.gif"'.decode() not in body
+        assert "Blockierte externe Anfrage: https://tracker.example/pixel.gif" in body
+        # data: URIs sind bereits vollständig im Dokument eingebettet - kein
+        # Netzwerk-Request, bleiben deshalb unverändert erhalten.
+        assert 'src="data:image/png;base64,AAAA"' in body
+
+
+def test_download_content_leaves_non_html_content_byte_identical(client):
+    """Regressionsschutz: die neue HTML-Umschreibung darf keinen anderen
+    Content-Type betreffen (siehe auch `test_download_current_content_
+    roundtrips_bytes` oben, hier zusätzlich mit einem Inhalt, der zufällig
+    wie ein HTML-Fragment aussieht, aber als anderer Content-Type hochgeladen
+    wurde)."""
+    content = b"<img src='https://example.test/pixel.gif'>"
+    files = {"file": ("notiz.txt", content, "text/plain")}
+    response = client.post(
+        "/documents", data={"title": "Textnotiz", "created_by": "alice"}, files=files
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+
+    download = client.get(f"/documents/{document_id}/content")
+    assert download.status_code == 200
+    assert download.content == content
+
+
 def test_get_unknown_document_returns_404(client):
     response = client.get("/documents/does-not-exist")
     assert response.status_code == 404
