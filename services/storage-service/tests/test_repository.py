@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from storage_service import repository
@@ -151,6 +152,26 @@ async def test_list_pending_copies_excludes_ok_and_permanent(session):
     backend_ids_for_key = {c.backend_id for c in pending if c.object_key == key}
     assert backend_ids_for_key == {"s3"}
     assert all(c.object_key != other_key for c in pending)
+
+
+async def test_list_pending_copies_excludes_not_yet_due_backoff(session):
+    """Post-Roadmap Phase 20 Session 6 (ADR 0082): eine `failed`-Zeile mit
+    einem noch in der Zukunft liegenden `next_retry_at` ist NICHT fällig -
+    eine ohne gesetztes `next_retry_at` (NULL, frisch oder noch nie
+    fehlgeschlagen) bleibt dagegen immer sofort fällig."""
+    key = _key()
+    await _make_metadata(session, key)
+    not_due = await repository.record_copy(session, key, "s3", status="failed")
+    not_due.next_retry_at = datetime.now(UTC) + timedelta(minutes=5)
+    other_key = _key()
+    await _make_metadata(session, other_key)
+    await repository.record_copy(session, other_key, "s3", status="failed")
+    await session.flush()
+
+    pending = await repository.list_pending_copies(session, limit=100)
+
+    assert other_key in {c.object_key for c in pending}
+    assert key not in {c.object_key for c in pending}
 
 
 async def test_delete_copy_removes_single_backend_row(session):

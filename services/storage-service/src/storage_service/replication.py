@@ -2,8 +2,9 @@ import asyncio
 import contextlib
 import hashlib
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
+from dms_retry import compute_backoff_seconds
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from storage_service import repository
@@ -231,6 +232,16 @@ async def verify_all_copies(
     return results
 
 
+def _next_retry_at(attempts: int) -> datetime:
+    """Full-Jitter-Backoff (`libs/dms-retry`, seit Post-Roadmap Phase 20
+    Session 6, ADR 0082) - gleiche Formel wie an den vier anderen
+    Resilienz-Stellen dieser Phase. ``attempts`` ist bereits die NEUE,
+    inkrementierte Zählung (1-indiziert), `compute_backoff_seconds` erwartet
+    einen 0-indizierten Versuchszähler."""
+    delay = compute_backoff_seconds(attempts - 1)
+    return datetime.now(UTC) + timedelta(seconds=delay)
+
+
 async def process_pending(
     session: AsyncSession,
     *,
@@ -249,6 +260,7 @@ async def process_pending(
         source = await repository.get_any_ok_copy(session, copy.object_key)
         if source is None:
             failed += 1
+            new_attempts = copy.attempts + 1
             await repository.record_copy(
                 session,
                 copy.object_key,
@@ -256,6 +268,7 @@ async def process_pending(
                 status="failed",
                 last_error="keine bestätigte Quellkopie zum Replizieren gefunden",
                 increment_attempt=True,
+                next_retry_at=_next_retry_at(new_attempts),
             )
             continue
 
@@ -273,6 +286,7 @@ async def process_pending(
             if new_attempts >= max_attempts:
                 permanently_failed += 1
                 status = "failed_permanent"
+                next_retry_at = None
                 logger.error(
                     "Replikation dauerhaft fehlgeschlagen: object_key=%s backend_id=%s "
                     "attempts=%s error=%s",
@@ -284,6 +298,7 @@ async def process_pending(
             else:
                 failed += 1
                 status = "failed"
+                next_retry_at = _next_retry_at(new_attempts)
             await repository.record_copy(
                 session,
                 copy.object_key,
@@ -291,6 +306,7 @@ async def process_pending(
                 status=status,
                 last_error=str(exc),
                 increment_attempt=True,
+                next_retry_at=next_retry_at,
             )
             continue
 

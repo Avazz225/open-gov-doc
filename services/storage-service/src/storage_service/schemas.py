@@ -28,6 +28,7 @@ class ObjectCopyOut(BaseModel):
     checksum_sha256: str | None
     attempts: int
     last_error: str | None
+    next_retry_at: datetime | None
     retention_until: datetime | None
     created_at: datetime
     updated_at: datetime

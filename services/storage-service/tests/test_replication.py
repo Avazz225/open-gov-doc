@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from storage_service import replication, repository
@@ -314,16 +315,74 @@ async def test_process_pending_marks_permanently_failed_after_max_attempts(sessi
 
     for _ in range(2):
         await replication.process_pending(session, backends=backends, max_attempts=2, limit=100)
+        # Post-Roadmap Phase 20 Session 6 (ADR 0082): ein Fehlschlag setzt
+        # jetzt ein per Full-Jitter-Backoff in die nahe Zukunft gesetztes
+        # `next_retry_at` - fuer einen deterministischen Test ohne echte
+        # Wartezeit direkt in die Vergangenheit zurueckgesetzt, damit der
+        # naechste `process_pending`-Lauf die Zeile sofort wieder aufgreift.
+        copy_b = await repository.get_copy(session, key, "b")
+        if copy_b.next_retry_at is not None:
+            copy_b.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.flush()
 
     copy_b = await repository.get_copy(session, key, "b")
     assert copy_b.status == "failed_permanent"
     assert copy_b.attempts == 2
+    assert copy_b.next_retry_at is None
 
     # ein weiterer Lauf darf die dauerhaft fehlgeschlagene Kopie nicht mehr aufgreifen
     result = await replication.process_pending(
         session, backends=backends, max_attempts=2, limit=100
     )
     assert result["processed"] == 0
+
+
+async def test_process_pending_sets_next_retry_at_and_skips_not_yet_due_copy(session):
+    """Post-Roadmap Phase 20 Session 6 (ADR 0082): ein Fehlschlag setzt jetzt
+    ein per Full-Jitter-Backoff in die Zukunft gesetztes `next_retry_at` -
+    ein sofort folgender zweiter `process_pending`-Lauf darf die Zeile noch
+    NICHT wieder aufgreifen (anders als vor dieser Session, wo jeder Aufruf
+    jede `failed`-Zeile unbedingt erneut versuchte)."""
+    key = _key()
+    await _make_metadata(session, key, "x")
+    await repository.record_copy(session, key, "b", status="pending")
+
+    first = await replication.process_pending(
+        session, backends={"b": _AlwaysFailingBackend()}, max_attempts=5, limit=100
+    )
+    assert first["processed"] == 1
+    copy_b = await repository.get_copy(session, key, "b")
+    assert copy_b.status == "failed"
+    assert copy_b.attempts == 1
+    assert copy_b.next_retry_at is not None
+    assert copy_b.next_retry_at > datetime.now(UTC)
+
+    second = await replication.process_pending(
+        session, backends={"b": _AlwaysFailingBackend()}, max_attempts=5, limit=100
+    )
+    assert second["processed"] == 0
+    copy_b = await repository.get_copy(session, key, "b")
+    assert copy_b.attempts == 1
+
+
+async def test_process_pending_retries_once_backoff_has_elapsed(session):
+    key = _key()
+    await _make_metadata(session, key, "x")
+    await repository.record_copy(session, key, "b", status="pending")
+
+    await replication.process_pending(
+        session, backends={"b": _AlwaysFailingBackend()}, max_attempts=5, limit=100
+    )
+    copy_b = await repository.get_copy(session, key, "b")
+    copy_b.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+
+    result = await replication.process_pending(
+        session, backends={"b": _AlwaysFailingBackend()}, max_attempts=5, limit=100
+    )
+    assert result["processed"] == 1
+    copy_b = await repository.get_copy(session, key, "b")
+    assert copy_b.attempts == 2
 
 
 async def test_process_pending_without_ok_source_is_reported_failed(session):

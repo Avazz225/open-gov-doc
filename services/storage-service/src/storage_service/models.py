@@ -31,7 +31,14 @@ class ObjectCopy(Base):
     für Lesezugriffs-Fallback, Fixity-Checks je Kopie und die Retry-Queue bei
     asynchroner Replikation. ``status``: ``pending`` (noch nicht repliziert),
     ``ok``, ``failed`` (nächster process-pending-Lauf versucht es erneut) oder
-    ``failed_permanent`` (max_replication_attempts erreicht, siehe Settings)."""
+    ``failed_permanent`` (max_replication_attempts erreicht, siehe Settings).
+    ``next_retry_at`` (seit Post-Roadmap Phase 20 Session 6, ADR 0082): der
+    ursprüngliche `process-pending`-Endpunkt griff jede `failed`-Zeile bei
+    JEDEM Aufruf sofort erneut auf, ohne jede Wartezeit - `libs/dms-retry`s
+    Full-Jitter-Backoff (gleiche Formel wie bei den vier anderen
+    Resilienz-Stellen dieser Phase) verzögert jetzt den nächsten
+    berechtigten Versuch; `NULL` bedeutet sofort fällig (neue Zeile oder noch
+    kein Fehlschlag)."""
 
     __tablename__ = "object_copy"
 
@@ -43,6 +50,7 @@ class ObjectCopy(Base):
     checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Aufbewahrung/WORM (5.1/5.2a, seit P7-S1): steht diese Kopie noch unter
     # einer in der Zukunft liegenden Frist, blockiert `retention_guard` ihre
     # Löschung - unabhängig vom Backend-Typ (auch `local`, das kein echtes

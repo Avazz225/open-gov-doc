@@ -121,6 +121,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ"
             )
         )
+        # Full-Jitter-Backoff für die Retry-Queue (Post-Roadmap Phase 20
+        # Session 6, ADR 0082) - gleiches Ad-hoc-Migrationsmuster.
+        await conn.execute(
+            text(
+                "ALTER TABLE storage.object_copy "
+                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 

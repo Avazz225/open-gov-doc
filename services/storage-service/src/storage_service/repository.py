@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from storage_service.models import BackendIdentity, GuardConfig, ObjectCopy, ObjectMetadata
@@ -65,12 +65,18 @@ async def record_copy(
     last_error: str | None = None,
     increment_attempt: bool = False,
     retention_until: datetime | None = None,
+    next_retry_at: datetime | None = None,
 ) -> ObjectCopy:
     """Legt eine Zeile in ``object_copy`` an oder aktualisiert sie (3.6) -
     ein Aufruf pro (object_key, backend_id) je Schreib-/Replikations-/
     Fixity-Versuch. ``retention_until`` (5.1/5.2a, seit P7-S1) wird nur bei
     explizit gesetztem Wert übernommen - ein bereits gesetzter Wert bleibt
-    bei Aufrufen ohne dieses Argument (Fixity-Checks, Fehlerfälle) erhalten."""
+    bei Aufrufen ohne dieses Argument (Fixity-Checks, Fehlerfälle) erhalten.
+    ``next_retry_at`` (seit Post-Roadmap Phase 20 Session 6, ADR 0082) wird
+    dagegen wie ``last_error`` UNBEDINGT gesetzt (Default `None`) - ein
+    erfolgreicher oder frischer Schreibversuch braucht keine verbleibende
+    Backoff-Wartezeit, ein evtl. zuvor gesetzter Wert muss also verschwinden,
+    nicht erhalten bleiben."""
     now = datetime.now(UTC)
     existing = await session.get(ObjectCopy, (object_key, backend_id))
     if existing is None:
@@ -87,6 +93,7 @@ async def record_copy(
         existing.attempts += 1
     if retention_until is not None:
         existing.retention_until = retention_until
+    existing.next_retry_at = next_retry_at
     existing.updated_at = now
 
     await session.flush()
@@ -113,9 +120,18 @@ async def list_copies(session: AsyncSession, object_key: str) -> list[ObjectCopy
 
 async def list_pending_copies(session: AsyncSession, *, limit: int) -> list[ObjectCopy]:
     """Retry-Queue (3.6): alle Kopien, die noch nicht erfolgreich repliziert
-    sind und noch nicht als dauerhaft fehlgeschlagen gelten."""
+    sind, noch nicht als dauerhaft fehlgeschlagen gelten, und (seit
+    Post-Roadmap Phase 20 Session 6, ADR 0082) deren Full-Jitter-Backoff
+    bereits abgelaufen ist - ``next_retry_at IS NULL`` (neue Zeile, noch nie
+    fehlgeschlagen) zählt dabei immer als sofort fällig."""
+    now = datetime.now(UTC)
     result = await session.execute(
-        select(ObjectCopy).where(ObjectCopy.status.in_(["pending", "failed"])).limit(limit)
+        select(ObjectCopy)
+        .where(
+            ObjectCopy.status.in_(["pending", "failed"]),
+            or_(ObjectCopy.next_retry_at.is_(None), ObjectCopy.next_retry_at <= now),
+        )
+        .limit(limit)
     )
     return list(result.scalars().all())
 

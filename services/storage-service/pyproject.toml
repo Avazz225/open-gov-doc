@@ -10,12 +10,14 @@ dependencies = [
     "dms-common",
     "dms-db-base",
     "dms-registry-client",
+    "dms-retry",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-db-base = { workspace = true }
 dms-registry-client = { workspace = true }
+dms-retry = { workspace = true }
 
 [dependency-groups]
 dev = ["httpx>=0.27"]
