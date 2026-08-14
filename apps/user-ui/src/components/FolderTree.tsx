@@ -32,6 +32,7 @@ export function FolderTree({
   folderIcons,
   documentTypeById,
   kennzeichenShowByDefault,
+  favoriteKeys,
   onOpenDocument,
   onNavigateToFolder,
   onMoveFolder,
@@ -41,6 +42,7 @@ export function FolderTree({
   folderIcons: Record<number, string | null>;
   documentTypeById: Record<number, ObjectType>;
   kennzeichenShowByDefault: boolean;
+  favoriteKeys: Set<string>;
   onOpenDocument: (doc: DocumentSummary) => void;
   onNavigateToFolder: (path: Folder[]) => void;
   onMoveFolder: (folderId: string, newParentId: string) => Promise<boolean>;
@@ -210,6 +212,7 @@ export function FolderTree({
                   {isExpanded ? "▾" : "▸"}
                 </button>
                 <button type="button" className="entry-name" onClick={() => selectFolder(childPath)}>
+                  {favoriteKeys.has(`folder:${folder.id}`) && "⭐ "}
                   {icon} {folder.name}
                 </button>
               </span>
@@ -222,6 +225,7 @@ export function FolderTree({
             <span className="tree-row">
               <span className="tree-toggle-spacer" aria-hidden="true" />
               <button type="button" className="entry-name" onClick={() => onOpenDocument(doc)}>
+                {favoriteKeys.has(`document:${doc.id}`) && "⭐ "}
                 📄 {formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault)}
               </button>
             </span>

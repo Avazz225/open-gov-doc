@@ -617,6 +617,7 @@ export function ExplorerPane({
           onOpenDocument={onOpenDocument}
           onNavigateToFolder={onNavigateToFolder}
           onMoveFolder={onMoveFolder}
+          favoriteKeys={favoriteKeys}
         />
       ) : isLoading ? (
         <p>{t("common.loading")}</p>

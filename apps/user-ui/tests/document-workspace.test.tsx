@@ -395,6 +395,42 @@ describe("DocumentWorkspace", () => {
     await waitFor(() => expect(moveFolderMock).toHaveBeenCalledWith("token-123", "f1a", "root"));
   });
 
+  it("shows the ⭐ favorite marker for a folder and a document in the tree view (P23-S5)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listFavoritesMock.mockResolvedValue([
+      {
+        id: "fav-1",
+        user_id: "alice",
+        object_type: "folder",
+        object_id: "f1",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "fav-2",
+        user_id: "alice",
+        object_type: "document",
+        object_id: "d1",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Baum"));
+
+    const treeContainer = await screen.findByLabelText("Ordner-Baumansicht");
+    await waitFor(() => {
+      const folderButton = within(treeContainer).getByText(/Verträge/).closest("button");
+      expect(folderButton?.textContent).toContain("⭐");
+    });
+    const documentButton = within(treeContainer).getByText(/Rechnung\.pdf/).closest("button");
+    expect(documentButton?.textContent).toContain("⭐");
+  });
+
   it("navigates into a subfolder and updates the breadcrumb", async () => {
     listChildFoldersMock.mockImplementation(async (_token: string, folderId: string) => {
       if (folderId === "root") {
