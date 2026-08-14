@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P23-S8 — Rechtsklick-Kontextmenü auch in `FolderTree.tsx` (letzte Session der Phase 23, siehe unten unter "Phase 23 — Frontend-UX (User-UI)"). Keine Logik-Duplikation: `ExplorerPane` reicht seine bestehenden `openFolderContextMenu`/`openDocumentContextMenu`-Funktionen als Props durch, `FolderTree` verdrahtet nur `onContextMenu`. Kein ADR, kein Backend-Code. Tests: `user-ui` 183 (vorher 181, +2). **Phase 23 (Frontend-UX User-UI) damit vollständig abgeschlossen.**
+**Zuletzt abgeschlossen:** Phase 24 (Feature-Vervollständigung) — alle vier Sessions **parallel per Agent-Dispatch** bearbeitet (Nutzerhinweis: die vier Sessions sind voneinander unabhängig). P24-S1 Azure-Blob-Backend (storage-service), P24-S2 AD-Gruppe→Rolle-Mapping (auth-service), P24-S3 IMAP-Mailbox-Backend + Postausgang-Anhänge (mail-connector), P24-S4 echter Kubernetes-Scheduler-Adapter (plugin-orchestration-service) — Details siehe unten unter "Phase 24 — Feature-Vervollständigung". **Phase 24 damit vollständig abgeschlossen.**
 
-**Nächste Session:** **P24-S1** (Azure-Blob-Storage-Backend für `storage-service`, erste Session der neuen **Phase 24 — Feature-Vervollständigung**, siehe `IMPLEMENTATION_PLAN.md`). Die vier Phase-24-Sessions (P24-S1 Azure-Blob-Backend, P24-S2 AD-Gruppe→Rolle-Mapping, P24-S3 IMAP/Graph-Mailbox-Backend, P24-S4 Container-Orchestrierungs-Adapter) sind laut Nutzerhinweis voneinander unabhängig und werden parallel per Agent-Dispatch bearbeitet statt nacheinander. Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P25-S1** (Race-Condition-sichere Versionsvergabe für `workflow-service`s `create_process_definition`, erste Session der neuen **Phase 25 — Workflow-/Gateway-Härtung**, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -3167,6 +3167,159 @@ sich beim Umsetzen als bereits erledigt bzw. anders modelliert heraus als der Pl
 (P23-S2 bereits seit P16-S1 implementiert; P23-S3s "pending/processing"-Status existiert in der
 Backend-API gar nicht, das eigentliche Nutzerziel wurde trotzdem erreicht) — beides wurde durch kurze
 Code-Recherche vor der Implementierung gefunden statt durch nachträgliche Fehlschläge.
+
+### Phase 24 — Feature-Vervollständigung (P24-S1, ...)
+
+**Vier voneinander unabhängige Sessions, auf Nutzerhinweis parallel per Agent-Dispatch bearbeitet** statt
+nacheinander — jeder Subagent bekam eine vollständige, in sich geschlossene Aufgabenbeschreibung (inkl.
+vorab recherchiertem Kontext zu den jeweils betroffenen Interfaces/Dateien), durfte NUR seinen eigenen
+Service/App anfassen, NICHT `IMPLEMENTATION_PLAN.md`/`PROGRESS.md` editieren und NICHT committen — die
+Integration in die geteilten Dokumente sowie alle vier Commits liefen erst danach, sequenziell, um
+Race-Conditions auf denselben Dateien zu vermeiden. Nach Abschluss aller vier: Testsuiten aller vier
+Services unabhängig nachverifiziert (`scripts/run-tests.sh auth-service mail-connector
+plugin-orchestration-service storage-service`) — alle vier Zählungen bestätigten sich exakt
+(105/41/43/134), `ruff check` reines repo-weit sauber, die `ruff format`-Warnung betraf ausschließlich
+vorbestehende, unveränderte Dateien in `federation-hub-service`/`license-service` (keine der vier
+Sessions).
+
+**P24-S1 — Azure-Blob-Backend für `storage-service`** (Konzept 1a, kein neues ADR):
+
+- `AzureBlobBackend` (`azure-storage-blob`, `aio`-Client, Connection-String-Auth statt `azure-identity`/
+  AAD) als dritte `StorageBackend`-Implementierung neben `local`/`s3`, `build_backend()`/
+  `BackendTargetConfig` (`type="azure"`, `connection_string`+`container`) analog zu `s3` erweitert.
+- Azurite (Microsofts lokaler Azure-Storage-Emulator) neu in `infra/docker-compose.yml`
+  (`mcr.microsoft.com/azure-storage/azurite:3.30.0`, `--skipApiVersionCheck` gegen SDK/Image-
+  Versionsdrift bei `x-ms-version`).
+- **`lock_until`/`bypass_governance` bewusst dokumentierter No-Op**: Azurite unterstützt keine
+  Immutability-Policies — ein ungetesteter Schutz wäre vorgetäuscht. Gleiche Haltung wie beim
+  `local`-Backend (ADR 0030), deshalb kein neues ADR, nur Cross-Reference in Code-Docstring/Settings-
+  Kommentar/`docs/services/storage-service.md`.
+- **Tests**: `storage-service` 134 (vorher 122, +12) gegen echtes Azurite, kein Mocking — Roundtrip,
+  Prüfsumme, `exists`, idempotentes Löschen, `ObjectNotFoundError`, No-Op-Verhalten von `lock_until`.
+- **Live-Verifikation**: echter Upload/Download/Fixity-Check/Löschung über die reguläre HTTP-API gegen
+  ein testweises `type=azure`-Ziel. **Dabei gefundenes, vermiedenes Risiko**: das Ziel zunächst als
+  SEKUNDÄRES Ziel hinzuzufügen löste das bestehende Rebalancing-Feature aus und seedete 30.410
+  `pending`-Zeilen für JEDES bereits existierende Objekt der geteilten Dev-Datenbank (echte Daten
+  paralleler Sessions) — `process-pending` wurde bewusst NICHT ausgeführt (hätte versucht, echte
+  Produktionsdaten in den Wegwerf-Azurite-Container zu kopieren), stattdessen das Ziel stattdessen als
+  PRIMÄR für ein einzelnes neues Testobjekt konfiguriert, danach die 30.410 fälschlich geseedeten Zeilen
+  per SQL wieder entfernt und per Zählung gegen den Vorzustand verifiziert. Konkreter, gelebter Beleg für
+  die bereits bekannte Lücke "kein sauberes Entfernen eines Ziels" (jetzt in `docs/services/
+  storage-service.md` "Offene Punkte" mit diesem Vorfall belegt).
+- Doku: `docs/services/storage-service.md` (neue Backend-Sektion, WORM-Abschnitt, Tests, Offene Punkte).
+
+**P24-S2 — AD-Gruppe→Rolle-Mapping** (4.4, `auth-service`, siehe
+[ADR 0093](docs/adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md)):
+
+- Neue, eigene, schlanke Tabelle `ad_group_role_mapping` — bewusst GETRENNT von permission-services
+  admin-angelegten Gruppen (ADR 0088/Phase 22 — dort geht es um admin-verwaltete Mitgliedschaft, hier um
+  externe Keycloak-/AD-Gruppenclaims, dynamisch aus dem Token gelesen statt in einer Mitgliedschafts-
+  tabelle synchronisiert). `GET`/`POST`/`DELETE /ad-group-mappings`, gegated auf `admin.user_management`.
+- **Keycloak trug Gruppenmitgliedschaften bislang gar nicht in den Access-Token ein** — neuer
+  `bootstrap._ensure_groups_mapper()` ergänzt bei JEDEM Start idempotent einen
+  `oidc-group-membership-mapper` (`full.path=false`), gleiches Muster wie das bereits bestehende
+  `_ensure_client_updated` (nötig, weil `skip_exists=True` bei der Client-Erstellung einen bereits
+  existierenden Client nie retrofitten würde).
+- `GET /me` merged die aus dem `groups`-Claim abgeleiteten Rollen dynamisch (kein Caching, keine
+  Mitgliedschafts-Synchronisierung) in dasselbe `realm_roles`-Feld wie Keycloaks direkt zugewiesene
+  Rollen. Audit läuft über den bestehenden `auth.>`-Event-Stream (`audit-service` konsumiert ihn bereits
+  seit P6-S5), kein neuer Mechanismus.
+- **Bewusster, in ADR 0093 dokumentierter Scope-Cut** gegenüber dem vollen Konzept-4.4-Umfang: nur
+  einfache 1:1-Zuordnung (ein AD-Gruppenname → eine interne Rolle), KEINE zusammengesetzten Regeln
+  (Gruppe UND Attribut, mehrere Gruppen → eine Rolle über UND-Logik), kein Freigabe-Schritt vor
+  Wirksamkeit (Speichern = sofort live, bleibt aber gegated + auditiert), kein Sync-Intervall, noch kein
+  Teil von config-services JSON-Konfigurationsexport (7.3) — eine Zuordnung lässt sich also noch nicht
+  zwischen Installationen übertragen. Alle vier Punkte explizit als "Offene Punkte" dokumentiert.
+- **Tests**: `auth-service` 105 (vorher 96, +9), dreimal hintereinander ausgeführt (einmal mit `--build`),
+  neue Tabelle korrekt in `conftest.py`s Truncate-Liste ergänzt (kein Wiederholungsfund des
+  projektweiten Testisolations-Bugs, da diesmal proaktiv beim Schreiben der Tests mitbedacht).
+- **Vollständig live gegen den echten laufenden Stack verifiziert**: `auth-service` neu gebaut/gestartet,
+  Mapping per curl angelegt, ECHTE Keycloak-Gruppe + echter Nutzer angelegt und der Gruppe zugeordnet,
+  `GET /me` zeigte die gemappte Rolle neben den Keycloak-nativen Rollen; Löschen der Zuordnung entfernte
+  sie beim nächsten `/me`-Aufruf; Audit-Events (Anlage + Löschung) in `audit-service`s Hash-Chain mit
+  korrektem Akteur/Payload bestätigt. Alle Testartefakte (Keycloak-Nutzer, -Gruppe, Mapping-Zeile)
+  aufgeräumt.
+- Doku: `docs/services/auth-service.md` (neue API-Zeilen, neue Sektion, Bootstrap/Events, Offene Punkte,
+  Tests-Sektion), neues [ADR 0093](docs/adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md).
+
+**P24-S3 — IMAP-Mailbox-Backend + Postausgang-Anhänge** (`mail-connector`, siehe
+[ADR 0095](docs/adr/0095-imap-backend-mocked-imaplib.md)):
+
+- **Scope-Entscheidung**: der Plan-Titel nannte "IMAP/Graph-API" — Microsoft Graph (Exchange/O365) ist ein
+  eigenständiges, deutlich größeres Vorhaben (externe OAuth2-App-Registrierung, Token-Refresh,
+  Graph-REST statt IMAP/POP3-Semantik) und passt nicht in dieselbe Session wie IMAP + Postausgang-
+  Anhänge. Bewusst nur IMAP gebaut, Graph als "Offener Punkt" dokumentiert — `MailboxBackend`-Interface
+  unterstützt es bereits nach demselben Muster wie `Pop3Backend`/`ImapBackend`.
+- **`ImapBackend`** (`backends/imap_backend.py`): `imaplib` (Standardbibliothek), gleiches
+  `asyncio.to_thread`-Muster wie `Pop3Backend`. UID-basierter Befehlssatz (`UID SEARCH`/`UID FETCH` mit
+  `BODY.PEEK[]`, RFC 3501) statt Sequenznummern; `select(..., readonly=True)` + `BODY.PEEK[]` vermeiden
+  serverseitige `\Seen`-Seiteneffekte (gleiche Zurückhaltung wie POP3s bewusst unterlassenes `dele()`).
+  Da eine bloße IMAP-UID nur innerhalb derselben `UIDVALIDITY`-Epoche stabil ist, ist die an
+  `repository.get_by_source_uid` weitergereichte `source_uid` zusammengesetzt (`{uidvalidity}:{uid}`).
+  Neue Settings `DMS_IMAP_HOST`/`_PORT`/`_USERNAME`/`_PASSWORD`/`_USE_TLS`/`_MAILBOX` (Default `INBOX`).
+- **Kein IMAP-Selbst-Loopback in mailpit**: `docker run axllent/mailpit:v1.30.6 --help` bestätigte, dass
+  mailpit anders als beim POP3-Fall keinen eigenen IMAP-Server mitbringt. `test_imap_backend.py` mockt
+  deshalb an der `imaplib`-Grenze (RFC-3501-getreue Fake-Antworten) statt gegen einen echten Server zu
+  laufen — vollständige Begründung + verworfene Alternativen in [ADR 0095](docs/adr/0095-imap-backend-mocked-imaplib.md).
+- **Postausgang-Anhänge**: `POST /outbound` hängt bei gesetzter `related_document_id` den aktuellen
+  Inhalt des referenzierten Dokuments an. `DocumentClient.get_current_version()` neu — `DocumentOut`
+  selbst trägt keine Datei-Metadaten (die liegen bei document-service pro Version auf
+  `DocumentVersionOut`), daher zwei Aufrufe intern. Unbekannte `related_document_id` → `400`, geprüft VOR
+  dem SMTP-Versandversuch.
+- **Tests**: `mail-connector` 41 (vorher 30, +11), zweimal hintereinander ausgeführt, keine
+  Isolationslecks.
+- **Live gegen den echten Stack verifiziert** (Image-Neubau + Neustart): Postausgang-Anhang mit einem
+  echten hochgeladenen Testdokument versendet, mailpit bestätigte Dateiname/Content-Type/Bytes exakt;
+  IMAP-Empfang gegen einen temporären, NICHT in `infra/docker-compose.yml` eingetragenen `greenmail`-
+  Container (`docker run`, an `dms-net` angehängt, danach entfernt) — eine per SMTP eingelieferte
+  Testnachricht wurde vom Connector (per `docker compose run` mit `DMS_INBOUND_PROTOCOL=imap` gestartet)
+  über eine echte IMAP-Verbindung abgeholt und korrekt ingested. Alle Testdaten aufgeräumt, der reguläre
+  `mail-connector-1`-Container läuft unverändert mit POP3-Default weiter.
+- Doku: `docs/services/mail-connector.md` (Abhol-Protokoll-Sektion, neue Postausgang-Anhang-Sektion,
+  Tests-Sektion, Offene Punkte), neues [ADR 0095](docs/adr/0095-imap-backend-mocked-imaplib.md).
+
+**P24-S4 — Container-Orchestrierungs-Adapter für `plugin-orchestration-service`** (letzte Session der
+Phase 24, siehe [ADR 0094](docs/adr/0094-plugin-orchestration-kubernetes-scheduler-adapter.md)):
+
+- **Scoping-Korrektur gegenüber dem Plan-Wortlaut**: das bereits bestehende Interface (`SchedulerAdapter`,
+  `platform_scheduler.py`) ist rein platzierungs-BERATEND (`try_place(cpu_cores, ram_mb) -> node_id |
+  None`), kein Container-Lifecycle-API (kein Start/Stopp/Skalieren) — dieser Dienst hat so etwas noch nie
+  selbst gemacht, seine Aufgabe ist zu entscheiden, WELCHER Knoten geeignet wäre, nicht das Ausführen dort
+  selbst zu übernehmen. `KubernetesSchedulerAdapter` implementiert deshalb genau diese
+  Platzierungsberatung, kein Lifecycle-Management.
+- Listet Cluster-Knoten über `CoreV1Api.list_node()` (In-Cluster-Config — die einzig sinnvolle
+  Authentifizierungsart, da der Adapter laut `detect_platform_scheduler()`s bereits bestehender
+  `KUBERNETES_SERVICE_HOST`-Erkennung ohnehin nur innerhalb eines echten Pods aktiviert wird), optionales
+  Label-Scoping über neue Settings `kubernetes_node_label_selector`, filtert cordoned/not-ready Knoten,
+  prüft `cpu_cores`/`ram_mb` gegen `status.allocatable`.
+- **Bewusste, in ADR 0094 dokumentierte Vereinfachung**: KEINE Buchhaltung über tatsächlich durch bereits
+  laufende Pods verbrauchte Kapazität — nur die statische `allocatable`-Kapazität je Knoten. Da
+  `decide_placement()` der Rückgabe ohne eigene Nachprüfung vertraut, ist das ein real dokumentiertes
+  Risiko für diese erste Version, keine stillschweigend übergangene Lücke. Tie-Break bei mehreren
+  passenden Knoten: meiste frei allokierbare RAM-Kapazität gewinnt (verteilt Last, reduziert das Risiko
+  aus der obigen Lücke), `node_id` als deterministischer zweiter Tie-Break.
+- **Tests**: `plugin-orchestration-service` 43 (vorher 33, +10) — neue, den `kubernetes`-Client direkt an
+  der API-Grenze mockende Testdatei (echte `V1Node`-Modellobjekte, nicht die für `decide_placement()`
+  bereits bestehende `FakeSchedulerAdapter` — die hätte nichts über die reale Implementierung bewiesen).
+- **Ehrlich benannte Live-Verifikationslücke**: kein echtes Kubernetes-Cluster in dieser
+  Entwicklungsumgebung verfügbar (bestätigt — dieses Projekt hat aktuell ausschließlich Docker Compose
+  als reales Deploy-Ziel, Phase 26 wird selbst mit fertigen Helm-Charts explizit kein echtes
+  Cluster-Deployment verlangen). Als bestmöglicher Ersatz: Compose-Regressionstest (Service startet
+  weiterhin fehlerfrei, `NullSchedulerAdapter` bleibt bei fehlendem `KUBERNETES_SERVICE_HOST` aktiv, kein
+  Verhaltensunterschied zum Vorzustand) plus ein eigenständiges, nicht zu pytest gehörendes
+  Sanity-Skript gegen einen gemockten Client (4 Testszenarien: Kapazitäts-Treffer mit Tie-Break,
+  Kapazitäts-Fehlschlag → `None`, cordoned/not-ready korrekt ausgeschlossen, Label-Selector-
+  Weiterreichung) — alle fünf Szenarien liefen wie erwartet.
+- Doku: `docs/services/plugin-orchestration-service.md` (neuer Adapter, Aktivierungsbedingung,
+  Vereinfachungen, ehrlich benannte Test-Einschränkung), neues
+  [ADR 0094](docs/adr/0094-plugin-orchestration-kubernetes-scheduler-adapter.md).
+
+**Phase 24 (Feature-Vervollständigung) damit vollständig abgeschlossen** — alle vier Sessions umgesetzt,
+drei davon mit einem neuen ADR (0093/0094/0095 — die drei parallelen Subagenten stießen dabei kollisions-
+frei auf dieselbe "höchste existierende Nummer war 0092"-Ausgangslage und wählten sich selbstständig,
+ohne Koordination untereinander, in der Reihenfolge ihrer jeweiligen Fertigstellung die nächsten freien
+Nummern — bei der Integration verifiziert, dass am Ende keine echte Kollision/kein Duplikat auf der
+Festplatte übrig blieb).
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.
