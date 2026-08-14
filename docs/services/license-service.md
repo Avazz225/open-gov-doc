@@ -7,7 +7,7 @@
 
 ## Architekturentscheidungen
 
-- **Signaturverfahren: JWT/RS256, statisch eingebetteter öffentlicher Schlüssel** ([ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)) — Wiederverwendung von `python-jose[cryptography]`, das bereits über `libs/dms-auth-client`s `TokenValidator` (Keycloak-JWT-Verifikation) in jedem Service-Container vorhanden ist. Kein JWKS-Fetch, keine Rotation in dieser Ausbaustufe.
+- **Signaturverfahren: JWT/RS256, statisch eingebetteter öffentlicher Schlüssel** ([ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)) — Wiederverwendung von `python-jose[cryptography]`, das bereits über `libs/dms-auth-client`s `TokenValidator` (Keycloak-JWT-Verifikation) in jedem Service-Container vorhanden ist. Kein JWKS-Fetch in dieser Ausbaustufe. **Seit Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)) unterstützt `license_verifier.decode()` einen optionalen zweiten Kandidatenschlüssel (`settings.license_previous_public_key_pem`) — Grundlage für eine Übergangsfrist bei einem Lizenzgeber-Schlüsselwechsel, siehe unten.
 - **Nur eine ungültige Signatur führt zum Ablehnen des Uploads (`400`)** — eine signaturgültige, aber bereits abgelaufene Lizenz wird trotzdem gespeichert und über `GET /license/status` als ungültig/abgelaufen angezeigt. Bildet die reale Situation ab ("das ist die aktuell installierte Lizenz, sie ist nur abgelaufen") statt eines Sonderfalls beim Hochladen.
 - **Vier Konzept-9.1-Dimensionen als JWT-Claims**: `user_model` (`"concurrent"|"named"`), `max_users`, `storage_limit_gb`, `document_limit`, `licensed_components` — jede `null`-Wertig = "unlimited" (Konzept 9.1 wörtlich).
 - **Installations-Bindung seit P13-S1** (3a, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md) Nachtrag): optionales `installation_id`-Claim, geprüft gegen `settings.installation_id` (`dms_common.BaseServiceSettings`, `DMS_INSTALLATION_ID` - ein Wert für die ganze Installation). Fehlt das Claim, wird nichts geprüft (Rückwärtskompatibilität mit älteren Lizenzdateien); ist es gesetzt und weicht ab, gilt die Lizenz als ungültig (`invalid_reason="Lizenz wurde fuer eine andere Installation ausgestellt"`), selbst bei gültiger Signatur/Gültigkeitsdauer. Verhindert das unveränderte Kopieren einer für eine andere Installation ausgestellten Lizenzdatei.
@@ -42,11 +42,21 @@ Wie jeder andere Service über `dms-registry-client` (3.2a) — unabhängig von 
 
 ## Tests
 
-`services/license-service/tests/` — 31 Tests (seit P13-S1, vorher 25): `test_license_verifier.py` (Signaturprüfung, inkl. abgelaufenes-aber-signaturgültiges Token), `test_usage.py` (Dimension-Grenzwert-Logik inkl. "unlimited", seit P13-S1 zusätzlich Installations-Bindung: fehlendes Claim/übereinstimmend/abweichend), `test_poll_loop.py` (Flankenerkennung, seit P13-S1 zusätzlich Installations-Mismatch-Event), `test_api.py` (Upload-Gate, Statusendpunkt inkl. "keine Lizenz installiert", seit P13-S1 zusätzlich end-to-end Installations-Bindung).
+`services/license-service/tests/` — 37 Tests (vorher 32, +5 seit **Post-Roadmap Phase 21 Session 1**,
+[ADR 0084](../adr/0084-fleet-license-key-rotation.md), alle in `test_license_verifier.py`: Fallback auf
+den vorherigen Schlüssel während einer Übergangsfrist, Bevorzugung des aktuellen Schlüssels ohne
+Fallback-Notwendigkeit, Fehlschlag wenn weder aktueller noch vorheriger Schlüssel passt, unverändertes
+Verhalten ohne konfigurierten vorherigen Schlüssel), davor 31 (seit P13-S1, vorher 25):
+`test_license_verifier.py` (Signaturprüfung, inkl. abgelaufenes-aber-signaturgültiges Token),
+`test_usage.py` (Dimension-Grenzwert-Logik inkl. "unlimited", seit P13-S1 zusätzlich
+Installations-Bindung: fehlendes Claim/übereinstimmend/abweichend), `test_poll_loop.py`
+(Flankenerkennung, seit P13-S1 zusätzlich Installations-Mismatch-Event), `test_api.py` (Upload-Gate,
+Statusendpunkt inkl. "keine Lizenz installiert", seit P13-S1 zusätzlich end-to-end
+Installations-Bindung).
 
 ## Offene Punkte
 
-- Keine Schlüsselrotation/kein JWKS (ADR 0032) — ein kompromittierter privater Schlüssel erfordert ein neues `license-service`-Release mit neuem öffentlichen Schlüssel.
+- ~~Keine Schlüsselrotation~~ — **teilweise behoben in Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)): `license_previous_public_key_pem` erlaubt eine Übergangsfrist, in der sowohl der neue als auch der vorherige öffentliche Verifikationsschlüssel akzeptiert werden. **Kein JWKS** bleibt bewusst so (ADR 0032) — ein kompromittierter PRIVATER Schlüssel liegt beim Lizenzgeber, nicht in diesem Service, und erfordert weiterhin einen neuen, dort ausgestellten öffentlichen Schlüssel (der Betreiber trägt ihn dann über die beiden Settings ein, kein neues `license-service`-Release nötig).
 - ~~Installations-ID nicht durchgesetzt~~ — seit P13-S1 geschlossen, siehe "Installations-Bindung" oben.
 - "Applikationskomponenten"-Dimension (`licensed_components`) wird seit P9-S2 durchgesetzt, aber nur für `workflow-service` — die einzige heute real existierende licensierbare Komponente (CMIS-Connector/Migration-Service kommen erst in Phase 12).
 - Nutzungslimit-Blockade (9.3) bislang nur für die Dokumentenzahl umgesetzt (`document-service`s `POST /documents`) — Speicher-/Nutzerlimits verhindern aktuell keine Neuanlagen, nur die Statusanzeige/Events erfassen sie.

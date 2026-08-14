@@ -100,6 +100,48 @@ def test_delete_unknown_installation_returns_404(client):
     assert response.status_code == 404
 
 
+def test_rotate_key_generates_a_new_value_by_default(client):
+    """Post-Roadmap Phase 21 Session 1 (ADR 0084)."""
+    created = _register(client)
+    response = client.post(f"/installations/{created['id']}/rotate-key", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == created["id"]
+    assert body["fleet_agent_api_key"]
+    assert body["fleet_agent_api_key"] != FLEET_KEY
+
+
+def test_rotate_key_accepts_an_operator_supplied_value(client):
+    created = _register(client)
+    response = client.post(
+        f"/installations/{created['id']}/rotate-key",
+        json={"fleet_agent_api_key": "already-set-on-the-installation"},
+    )
+    assert response.status_code == 200
+    assert response.json()["fleet_agent_api_key"] == "already-set-on-the-installation"
+
+
+def test_rotate_key_updates_the_key_used_for_outgoing_calls(client):
+    """Bestätigt, dass die Rotation tatsächlich den Wert ersetzt, den
+    `_agent_client` für ausgehende Aufrufe präsentiert - nicht nur die
+    API-Antwort."""
+    created = _register(client)
+    rotate_response = client.post(
+        f"/installations/{created['id']}/rotate-key",
+        json={"fleet_agent_api_key": FLEET_KEY},
+    )
+    assert rotate_response.status_code == 200
+
+    status_response = client.get(f"/installations/{created['id']}/status")
+    assert status_response.status_code == 200
+    assert status_response.json()["reachable"] is True
+
+
+def test_rotate_key_unknown_installation_returns_404(client):
+    response = client.post("/installations/does-not-exist/rotate-key", json={})
+    assert response.status_code == 404
+
+
 def test_get_installation_status_reachable(client):
     created = _register(client)
     response = client.get(f"/installations/{created['id']}/status")

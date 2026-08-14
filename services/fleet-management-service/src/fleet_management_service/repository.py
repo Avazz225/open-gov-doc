@@ -68,6 +68,26 @@ async def delete_managed_installation(session: AsyncSession, installation_id: st
     await session.flush()
 
 
+async def rotate_managed_installation_key(
+    session: AsyncSession, installation_id: str, *, new_api_key: str | None = None
+) -> tuple[ManagedInstallation, str]:
+    """Schluesselrotation (Post-Roadmap Phase 21 Session 1, ADR 0084) - ein
+    atomarer Ersetzungsvorgang ohne Uebergangsfenster (gleiches Muster wie
+    `federation-hub-service.repository.rotate_installation_key`, ADR 0039:
+    kein zeitbasiertes "beide Schluessel kurz gueltig", sondern ein
+    unmittelbarer Austausch). Anders als dort gibt es hier aber keine
+    Live-Rueckkopplung zur Zielinstallation (die verifiziert nur gegen ihren
+    eigenen, statisch per `DMS_FLEET_AGENT_API_KEY`-Env-Var konfigurierten
+    Wert) - der Betreiber muss die Installation manuell auf den neuen Wert
+    umstellen, siehe `main.py`s Endpunkt-Docstring."""
+    installation = await get_managed_installation(session, installation_id)
+    api_key = new_api_key or generate_api_key()
+    installation.fleet_agent_api_key = api_key
+    installation.updated_at = datetime.now(UTC)
+    await session.flush()
+    return installation, api_key
+
+
 # --- Flotten-Update-Orchestrierung (3a-Erweiterung, P13-S2b) ----------------
 
 

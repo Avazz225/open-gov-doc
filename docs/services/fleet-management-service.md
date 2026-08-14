@@ -56,6 +56,7 @@ Siehe [ADR 0038](../adr/0038-fleet-update-orchestration-external-gates-not-remot
 | `POST` | `/installations` | Verwaltete Installation registrieren - `fleet_agent_api_key` optional (sonst generiert), nur in dieser Antwort im Klartext enthalten |
 | `GET` | `/installations` | Liste aller verwalteten Installationen, ohne Schlüssel |
 | `DELETE` | `/installations/{id}` | Verwaltete Installation entfernen |
+| `POST` | `/installations/{id}/rotate-key` | Schlüsselrotation (seit **Post-Roadmap Phase 21 Session 1**, [ADR 0084](../adr/0084-fleet-license-key-rotation.md)) - ersetzt `fleet_agent_api_key` sofort, optionaler Body-Wert (sonst generiert), nur in dieser Antwort im Klartext enthalten; aktualisiert NUR diese Seite, siehe "Offene Punkte" |
 | `GET` | `/installations/{id}/status` | Live-Statusabruf einer Installation (Identität + Lizenzstatus über deren Gateway) - `reachable=false` statt Exception bei Netzwerk-/Auth-Fehlern |
 | `GET` | `/installations/status` | Statusabruf aller verwalteten Installationen, parallel (`asyncio.gather`) |
 | `POST` | `/installations/{id}/license` | Lizenztoken an die Ziel-Installation weiterreichen (`POST .../license` über deren Gateway) |
@@ -82,11 +83,22 @@ Keine - dieser Service gehört zu keiner einzelnen Installation, daher kein `dms
 
 ## Tests
 
-`services/fleet-management-service/tests/` - 26 Tests (seit P13-S2b, vorher 13), In-Prozess-`TestClient` gegen einen ASGI-Stub der Ziel-Installation (`httpx.ASGITransport`, gleiches Muster wie `federation-hub-service`): Installations-CRUD inkl. Schlüssel-nur-einmal-Ausgabe, Status-Abruf (erreichbar/nicht erreichbar), Aggregation über mehrere Installationen, Lizenz-Push, Provisionierung, 404-Fälle, sowie (P13-S2b) Gruppen-Mitgliedschaft, Plan-Validierung, Rollout-Auflösung (Gruppe/include/exclude, leerer Zielkreis), kompletter Rollout-Happy-Path über alle Schritttypen inkl. Vier-Augen, `recoverable_failed`→`retry`, `fatal_contract`→`acknowledge-fatal`, `verify` bei nicht erreichbarer Installation → `retry_later`, Ablehnung einer Freigabe. Die P13-S2-Fähigkeiten zusätzlich live gegen den laufenden Docker-Compose-Stack verifiziert (Selbst-Loopback).
+`services/fleet-management-service/tests/` - 30 Tests (vorher 26, +4 seit **Post-Roadmap Phase 21
+Session 1**, [ADR 0084](../adr/0084-fleet-license-key-rotation.md): Standardgenerierung eines neuen
+Schlüssels, Betreiber-vorgegebener Wert, tatsächliche Verwendung des neuen Werts bei einem ausgehenden
+Aufruf, `404` bei unbekannter Installation), davor 26 (seit P13-S2b, vorher 13), In-Prozess-`TestClient`
+gegen einen ASGI-Stub der Ziel-Installation (`httpx.ASGITransport`, gleiches Muster wie
+`federation-hub-service`): Installations-CRUD inkl. Schlüssel-nur-einmal-Ausgabe, Status-Abruf
+(erreichbar/nicht erreichbar), Aggregation über mehrere Installationen, Lizenz-Push, Provisionierung,
+404-Fälle, sowie (P13-S2b) Gruppen-Mitgliedschaft, Plan-Validierung, Rollout-Auflösung
+(Gruppe/include/exclude, leerer Zielkreis), kompletter Rollout-Happy-Path über alle Schritttypen inkl.
+Vier-Augen, `recoverable_failed`→`retry`, `fatal_contract`→`acknowledge-fatal`, `verify` bei nicht
+erreichbarer Installation → `retry_later`, Ablehnung einer Freigabe. Die P13-S2-Fähigkeiten zusätzlich
+live gegen den laufenden Docker-Compose-Stack verifiziert (Selbst-Loopback).
 
 ## Offene Punkte
 
-- Keine Schlüssel-Rotation (siehe ADR 0037) - ein kompromittierter `fleet_agent_api_key` erfordert manuelles Ändern auf beiden Seiten.
+- ~~Keine Schlüssel-Rotation~~ — **teilweise behoben in Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)): `POST /installations/{id}/rotate-key` ersetzt den gespeicherten Wert sofort. **Verbleibende, bewusst dokumentierte Grenze**: dieser Service PRÄSENTIERT den Schlüssel nur, verifiziert ihn nie selbst — die Zielinstallation prüft weiterhin gegen ihren eigenen, statisch per `DMS_FLEET_AGENT_API_KEY` konfigurierten Wert. Ein kompromittierter Schlüssel erfordert daher weiterhin ein manuelles Umstellen auf der Installationsseite (Env-Var + Neustart); der Rotationsendpunkt macht nur die Seite dieses Service selbst sicherer/einfacher zu bedienen, ersetzt aber nicht den zweiten, manuellen Schritt.
 - Keine Vorlagen-Bibliothek für `POST .../provision` - reiner Durchreicher. Seit P17-S1 kann das durchgereichte Dokument ein optionales `manifest` tragen (Konzept §14.1, `config-service`), aber das erste konkrete, kuratierte Paket (eGov, 14.2) ist erst P17-S2/S3 zugewiesen.
 - Keine proaktive Benachrichtigung bei Lizenzablauf/-überschreitung über die Fleet-Ebene - rein Pull-basiert (`GET .../status`), kein Push/Webhook von der verwalteten Installation zurück an diesen Service.
 - **`gate`-Schritte sind nicht ferngesteuert, nur bestätigt** (siehe ADR 0038) - `fleet-management-service` verifiziert nicht, dass eine Bereichssperre/ein Backup/ein Rolling Update tatsächlich stattgefunden hat, bevor `mark-done` den Schritt als erledigt markiert. Eine engere, aktions-/installationsspezifische Fernsteuerung bleibt ein möglicher, im Detail zu entwerfender Ausbauschritt.

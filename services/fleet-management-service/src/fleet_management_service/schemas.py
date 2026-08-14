@@ -30,6 +30,15 @@ class ManagedInstallationCreateOut(ManagedInstallationOut):
     fleet_agent_api_key: str
 
 
+class ManagedInstallationRotateKeyRequest(BaseModel):
+    # Optional, gleiche Flexibilität wie `ManagedInstallationCreate` oben:
+    # leer lassen und diesen Service einen neuen Wert erzeugen lassen (dann
+    # muss der Betreiber ihn umgekehrt auf die Installation übertragen), oder
+    # einen bereits auf der Installation gesetzten Wert hier eintragen (dann
+    # zieht dieser Service nur nach).
+    fleet_agent_api_key: str | None = None
+
+
 class InstallationStatusOut(BaseModel):
     """Aggregierter Überblick (3a: "grundlegende Health-Übersicht") - live
     abgefragt, nichts davon wird hier persistiert. ``reachable=False`` bei

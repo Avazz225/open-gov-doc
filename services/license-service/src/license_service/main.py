@@ -209,7 +209,11 @@ async def upload_license(
     await _require_license_permission(x_dms_principal, authorization)
 
     try:
-        claims = decode(payload.license_token, public_key_pem=settings.license_public_key_pem)
+        claims = decode(
+            payload.license_token,
+            public_key_pem=settings.license_public_key_pem,
+            previous_public_key_pem=settings.license_previous_public_key_pem,
+        )
     except InvalidLicenseError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -237,7 +241,11 @@ async def license_status(session: AsyncSession = Depends(get_session)) -> Licens
     if license_row is None:
         return await _status_out(None)
     try:
-        claims = decode(license_row.raw_token, public_key_pem=settings.license_public_key_pem)
+        claims = decode(
+            license_row.raw_token,
+            public_key_pem=settings.license_public_key_pem,
+            previous_public_key_pem=settings.license_previous_public_key_pem,
+        )
     except InvalidLicenseError:
         return LicenseStatusOut(
             installed=True, valid=False, invalid_reason="Lizenzsignatur ungueltig"

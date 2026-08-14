@@ -30,8 +30,17 @@ class Settings(BaseServiceSettings):
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
     # ADR 0032: RS256, statisch eingebetteter oeffentlicher Schluessel, kein
-    # JWKS/keine Rotation in dieser Ausbaustufe.
+    # JWKS in dieser Ausbaustufe.
     license_public_key_pem: str = _DEV_PUBLIC_KEY_PEM
+
+    # Schluesselrotation (seit Post-Roadmap Phase 21 Session 1, ADR 0084):
+    # `None` (Default) = keine laufende Rotation. Setzt ein Betreiber diesen
+    # Wert auf den VORHERIGEN oeffentlichen Schluessel, waehrend
+    # `license_public_key_pem` bereits den NEUEN traegt, bleiben unter dem
+    # alten Schluessel signierte, bereits installierte Lizenzen fuer eine
+    # Uebergangsfrist weiterhin gueltig (siehe `license_verifier.decode`).
+    # Wird nach Abschluss der Uebergangsfrist wieder auf `None` gesetzt.
+    license_previous_public_key_pem: str | None = None
 
     license_permission: str = "admin.license"
 

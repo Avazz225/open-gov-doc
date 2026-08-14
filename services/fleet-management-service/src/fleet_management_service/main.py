@@ -24,6 +24,7 @@ from fleet_management_service.schemas import (
     ManagedInstallationCreate,
     ManagedInstallationCreateOut,
     ManagedInstallationOut,
+    ManagedInstallationRotateKeyRequest,
     MarkDoneRequest,
     ProvisionRequest,
     RolloutCreate,
@@ -125,6 +126,43 @@ async def delete_installation(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+
+
+@app.post(
+    "/installations/{installation_id}/rotate-key",
+    response_model=ManagedInstallationCreateOut,
+)
+async def rotate_installation_key(
+    installation_id: str,
+    payload: ManagedInstallationRotateKeyRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ManagedInstallationCreateOut:
+    """Schlüsselrotation (Post-Roadmap Phase 21 Session 1, ADR 0084) - ersetzt
+    den gespeicherten `fleet_agent_api_key` sofort, ohne Übergangsfenster
+    (dieser Service PRÄSENTIERT den Schlüssel nur, verifiziert ihn nie selbst
+    - ein "beide Schlüssel kurz gültig"-Fenster wie bei `federation-hub-
+    service`s Installations-Rotation ergibt hier keinen Sinn). **Aktualisiert
+    nur die Seite dieses Service** - die Zielinstallation verifiziert weiterhin
+    gegen ihren eigenen, statisch konfigurierten `DMS_FLEET_AGENT_API_KEY`;
+    bis ein Betreiber sie manuell auf den hier zurückgegebenen neuen Wert
+    umstellt (und neu startet), schlagen ausgehende Aufrufe dieses Service an
+    die Installation mit `401`/`403` fehl. Der Klartext-Schlüssel wird - wie
+    bei der Anlage - nur in dieser einen Antwort zurückgegeben."""
+    try:
+        installation, api_key = await repository.rotate_managed_installation_key(
+            session, installation_id, new_api_key=payload.fleet_agent_api_key
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return ManagedInstallationCreateOut(
+        id=installation.id,
+        display_name=installation.display_name,
+        gateway_base_url=installation.gateway_base_url,
+        created_at=installation.created_at,
+        updated_at=installation.updated_at,
+        fleet_agent_api_key=api_key,
+    )
 
 
 async def _fetch_status(installation: ManagedInstallation) -> InstallationStatusOut:
