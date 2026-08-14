@@ -74,6 +74,11 @@
     "approveButton": "Freigeben",
     "rejectButton": "Ablehnen",
     "approveConfirm": "Diese Anfrage wirklich freigeben?",
-    "rejectReasonPrompt": "Begründung (optional):"
+    "rejectReasonDisplayLabel": "Begründung:",
+    "rejectFormLabel": "Ablehnung begründen",
+    "rejectReasonLabel": "Begründung (optional)",
+    "rejectReasonPlaceholder": "Grund für die Ablehnung...",
+    "rejectConfirm": "Ablehnung bestätigen",
+    "rejectCancel": "Abbrechen"
   }
 }

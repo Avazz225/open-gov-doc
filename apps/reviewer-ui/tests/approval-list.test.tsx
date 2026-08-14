@@ -52,16 +52,12 @@ const PENDING_REQUEST = {
   decided_at: null,
 };
 
-const promptMock = vi.fn<(message?: string) => string | null>();
-
 describe("ApprovalList", () => {
   beforeEach(() => {
     listApprovalRequestsMock.mockReset();
     approveRequestMock.mockReset();
     rejectRequestMock.mockReset();
-    promptMock.mockReset().mockReturnValue("");
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    window.prompt = promptMock;
   });
 
   it("defaults to showing only pending requests, spanning every action type", async () => {
@@ -108,14 +104,19 @@ describe("ApprovalList", () => {
     expect(listApprovalRequestsMock).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects a request with an optional reason", async () => {
+  it("opens an inline form and rejects a request with an optional reason", async () => {
     listApprovalRequestsMock.mockResolvedValue([PENDING_REQUEST]);
     rejectRequestMock.mockResolvedValue({ ...PENDING_REQUEST, status: "rejected" });
-    promptMock.mockReturnValue("nicht plausibel");
     renderList();
 
     await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Ablehnen" }));
+
+    const form = screen.getByRole("form", { name: "Ablehnung begründen" });
+    fireEvent.change(screen.getByLabelText("Begründung (optional)"), {
+      target: { value: "nicht plausibel" },
+    });
+    fireEvent.submit(form);
 
     await waitFor(() =>
       expect(rejectRequestMock).toHaveBeenCalledWith("token-123", "req-1", {
@@ -123,6 +124,36 @@ describe("ApprovalList", () => {
         reason: "nicht plausibel",
       })
     );
+  });
+
+  it("rejects a request without a reason when left blank", async () => {
+    listApprovalRequestsMock.mockResolvedValue([PENDING_REQUEST]);
+    rejectRequestMock.mockResolvedValue({ ...PENDING_REQUEST, status: "rejected" });
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Ablehnen" }));
+    fireEvent.submit(screen.getByRole("form", { name: "Ablehnung begründen" }));
+
+    await waitFor(() =>
+      expect(rejectRequestMock).toHaveBeenCalledWith("token-123", "req-1", {
+        rejectedBy: "alice",
+        reason: undefined,
+      })
+    );
+  });
+
+  it("cancels the inline reject form without calling the API", async () => {
+    listApprovalRequestsMock.mockResolvedValue([PENDING_REQUEST]);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("document.delete")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Ablehnen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+
+    expect(screen.queryByRole("form", { name: "Ablehnung begründen" })).not.toBeInTheDocument();
+    expect(rejectRequestMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Ablehnen" })).toBeInTheDocument();
   });
 
   it("does not offer approve/reject actions for an already-decided request", async () => {

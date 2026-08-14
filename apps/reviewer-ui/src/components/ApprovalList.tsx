@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
@@ -37,6 +37,11 @@ export function ApprovalList() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Post-Roadmap Phase 22 Session 4: `window.prompt` durch ein Inline-
+  // Formular ersetzt (kein natives Browser-Popup, konsistent zum übrigen
+  // Formularstil dieser App, testbar mit Testing Library).
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const reload = () => {
     if (!accessToken) return;
@@ -62,13 +67,29 @@ export function ApprovalList() {
     }
   }
 
-  async function handleReject(request: ApprovalRequest) {
+  function handleStartReject(requestId: string) {
+    setActionError(null);
+    setRejectReason("");
+    setRejectingId(requestId);
+  }
+
+  function handleCancelReject() {
+    setRejectingId(null);
+    setRejectReason("");
+  }
+
+  async function handleConfirmReject(event: FormEvent, request: ApprovalRequest) {
+    event.preventDefault();
     if (!accessToken || !user) return;
-    const reason = window.prompt(t("approvalList.rejectReasonPrompt")) ?? undefined;
     setActionError(null);
     setBusyId(request.id);
     try {
-      await rejectRequest(accessToken, request.id, { rejectedBy: user.username, reason });
+      await rejectRequest(accessToken, request.id, {
+        rejectedBy: user.username,
+        reason: rejectReason.trim() || undefined,
+      });
+      setRejectingId(null);
+      setRejectReason("");
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : t("common.actionError"));
@@ -142,7 +163,7 @@ export function ApprovalList() {
                           ? t("approvalList.detailsToggleHide")
                           : t("approvalList.detailsToggleShow")}
                       </button>
-                      {request.status === "pending" && (
+                      {request.status === "pending" && rejectingId !== request.id && (
                         <>
                           <button
                             type="button"
@@ -154,7 +175,7 @@ export function ApprovalList() {
                           <button
                             type="button"
                             disabled={busyId === request.id}
-                            onClick={() => handleReject(request)}
+                            onClick={() => handleStartReject(request.id)}
                           >
                             {t("approvalList.rejectButton")}
                           </button>
@@ -163,13 +184,41 @@ export function ApprovalList() {
                     </div>
                   </td>
                 </tr>
+                {rejectingId === request.id && (
+                  <tr className="detail-row">
+                    <td colSpan={5}>
+                      <form
+                        aria-label={t("approvalList.rejectFormLabel")}
+                        className="form-grid"
+                        onSubmit={(e) => handleConfirmReject(e, request)}
+                      >
+                        <label>
+                          {t("approvalList.rejectReasonLabel")}
+                          <input
+                            value={rejectReason}
+                            onChange={(e) => setRejectReason(e.target.value)}
+                            placeholder={t("approvalList.rejectReasonPlaceholder")}
+                          />
+                        </label>
+                        <div className="actions">
+                          <button type="submit" disabled={busyId === request.id}>
+                            {t("approvalList.rejectConfirm")}
+                          </button>
+                          <button type="button" onClick={handleCancelReject}>
+                            {t("approvalList.rejectCancel")}
+                          </button>
+                        </div>
+                      </form>
+                    </td>
+                  </tr>
+                )}
                 {expandedId === request.id && (
                   <tr className="detail-row">
                     <td colSpan={5}>
                       <pre>{JSON.stringify(request.payload, null, 2)}</pre>
                       {request.reason && (
                         <p>
-                          <strong>{t("approvalList.rejectReasonPrompt")}</strong> {request.reason}
+                          <strong>{t("approvalList.rejectReasonDisplayLabel")}</strong> {request.reason}
                         </p>
                       )}
                     </td>
