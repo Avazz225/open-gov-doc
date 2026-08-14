@@ -431,6 +431,59 @@ describe("DocumentWorkspace", () => {
     expect(documentButton?.textContent).toContain("⭐");
   });
 
+  it("reloads PreviewPane's version list after a successful signature, without reopening the document (P23-S7)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listRenditionsMock.mockResolvedValue([]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    // Erster Aufruf je Panel (PreviewPane, SignaturesPanel.isSignable) sieht
+    // nur Version 1 - alles danach (nach der Signatur) auch Version 2, um zu
+    // beweisen, dass PreviewPane tatsächlich neu lädt statt nur die Zeile
+    // erneut zu rendern.
+    const v1 = {
+      version_number: 1,
+      filename: "Rechnung.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1,
+      checksum_sha256: "x",
+      is_conflict: false,
+      based_on_version_number: null,
+      comment: null,
+      created_by: "alice",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const v2 = { ...v1, version_number: 2, comment: "PAdES-Signatur" };
+    listDocumentVersionsMock
+      .mockResolvedValueOnce([v1])
+      .mockResolvedValueOnce([v1])
+      .mockResolvedValue([v1, v2]);
+    createSignatureMock.mockResolvedValue({
+      id: 1,
+      document_id: "d1",
+      level: "ses",
+      signer_display_name: "alice",
+      signed_at: "2026-01-02T00:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+    const previewPane = await screen.findByLabelText("Vorschau: Rechnung.pdf");
+    // Nur eine Version bislang - Versionsauswahl noch nicht sichtbar.
+    expect(within(previewPane).queryByLabelText("Version auswählen")).not.toBeInTheDocument();
+
+    await user.click(await screen.findByText("Jetzt signieren"));
+
+    await waitFor(() => expect(createSignatureMock).toHaveBeenCalled());
+    // PreviewPane hat neu geladen (ohne dass das Dokument neu geöffnet wurde)
+    // und zeigt jetzt beide Versionen zur Auswahl.
+    await waitFor(() =>
+      expect(within(previewPane).getByLabelText("Version auswählen")).toBeInTheDocument()
+    );
+    expect(within(previewPane).getByText("Version 2")).toBeInTheDocument();
+  });
+
   it("navigates into a subfolder and updates the breadcrumb", async () => {
     listChildFoldersMock.mockImplementation(async (_token: string, folderId: string) => {
       if (folderId === "root") {

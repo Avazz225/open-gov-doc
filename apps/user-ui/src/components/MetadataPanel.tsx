@@ -40,9 +40,11 @@ function attributeInputType(attrType: string | undefined): string {
 export function MetadataPanel({
   document: activeDocument,
   onSaved,
+  onSigned,
 }: {
   document: DocumentSummary | null;
   onSaved: (updated: DocumentSummary) => void;
+  onSigned?: (documentId: string) => void;
 }) {
   const { accessToken, user } = useAuth();
   const { t } = useI18n();
@@ -171,7 +173,7 @@ export function MetadataPanel({
         </button>
       </form>
 
-      <SignaturesPanel document={activeDocument} />
+      <SignaturesPanel document={activeDocument} onSigned={onSigned} />
       <RetentionPanel document={activeDocument} />
     </section>
   );

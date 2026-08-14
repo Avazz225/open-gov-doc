@@ -29,7 +29,13 @@ const SIGNABLE_CONTENT_TYPE = "application/pdf";
 // der Niveau-Auswahl bewusst nicht wählbar - dieses Grundgerüst hat keinen
 // konfigurierten externen QTSP-Connector (siehe docs/services/
 // signature-service.md "Offene Punkte").
-export function SignaturesPanel({ document: activeDocument }: { document: DocumentSummary }) {
+export function SignaturesPanel({
+  document: activeDocument,
+  onSigned,
+}: {
+  document: DocumentSummary;
+  onSigned?: (documentId: string) => void;
+}) {
   const { accessToken, user } = useAuth();
   const { t } = useI18n();
   const [signatures, setSignatures] = useState<SignatureSummary[]>([]);
@@ -83,6 +89,10 @@ export function SignaturesPanel({ document: activeDocument }: { document: Docume
         signerPrincipalId: user.username,
       });
       setSignatures((prev) => [created, ...prev]);
+      // Die PAdES-Signatur erzeugt serverseitig eine neue Dokumentversion
+      // (ADR 0025) - PreviewPane weiß davon nichts, da beide Panels
+      // unabhängig voneinander gemountet sind (P23-S7).
+      onSigned?.(activeDocument.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("signatures.signError"));
     } finally {

@@ -78,6 +78,8 @@ interface WorkspaceContextValue {
   openDocumentsById: Map<string, DocumentSummary>;
   activeDocument: DocumentSummary | null;
   onMetadataSaved: (updated: DocumentSummary) => void;
+  versionBumps: Record<string, number>;
+  onDocumentVersionBump: (documentId: string) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -116,7 +118,13 @@ function ExplorerPanelContent() {
 
 function MetadataPanelContent() {
   const ctx = useWorkspaceContext();
-  return <MetadataPanel document={ctx.activeDocument} onSaved={ctx.onMetadataSaved} />;
+  return (
+    <MetadataPanel
+      document={ctx.activeDocument}
+      onSaved={ctx.onMetadataSaved}
+      onSigned={ctx.onDocumentVersionBump}
+    />
+  );
 }
 
 function PreviewEmptyContent() {
@@ -126,7 +134,8 @@ function PreviewEmptyContent() {
 function DocumentPreviewContent(props: IDockviewPanelProps<{ documentId: string }>) {
   const ctx = useWorkspaceContext();
   const doc = ctx.openDocumentsById.get(props.params.documentId) ?? null;
-  return <PreviewPane document={doc} />;
+  const versionBump = doc ? (ctx.versionBumps[doc.id] ?? 0) : 0;
+  return <PreviewPane document={doc} versionBump={versionBump} />;
 }
 
 const PANEL_COMPONENTS = {
@@ -172,6 +181,8 @@ export interface DockableDocumentAreaProps {
   onOpenDocument: (doc: DocumentSummary) => void;
   onCloseDocument: (documentId: string) => void;
   onMetadataSaved: (updated: DocumentSummary) => void;
+  versionBumps: Record<string, number>;
+  onDocumentVersionBump: (documentId: string) => void;
 }
 
 export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, DockableDocumentAreaProps>(
@@ -199,6 +210,8 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       onOpenDocument: propsOnOpenDocument,
       onCloseDocument,
       onMetadataSaved: propsOnMetadataSaved,
+      versionBumps,
+      onDocumentVersionBump,
     } = props;
 
     const { t } = useI18n();
@@ -437,6 +450,8 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       openDocumentsById,
       activeDocument,
       onMetadataSaved: handleMetadataSaved,
+      versionBumps,
+      onDocumentVersionBump,
     };
 
     return (

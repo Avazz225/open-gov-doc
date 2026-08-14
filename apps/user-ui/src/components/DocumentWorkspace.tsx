@@ -56,6 +56,20 @@ export function DocumentWorkspace() {
   const [openDocuments, setOpenDocuments] = useState<DocumentSummary[]>([]);
   const [view, setView] = useState<WorkspaceView>("documents");
   const dockableAreaRef = useRef<DockableDocumentAreaHandle>(null);
+  // Versions-Bump-Zähler je Dokument-ID (P23-S7): `SignaturesPanel` und
+  // `PreviewPane` sind unabhängig gemountete dockview-Geschwister
+  // (`MetadataPanelContent`/`DocumentPreviewContent` in
+  // `DockableDocumentArea.tsx`) - eine erfolgreiche Signatur erzeugt
+  // serverseitig eine neue Dokumentversion (ADR 0025), die `PreviewPane`s
+  // Versionsauswahl sonst erst nach erneutem Öffnen des Dokuments bemerkt
+  // hätte. Ein einfacher Zähler statt eines Booleans, damit mehrfaches
+  // Signieren desselben Dokuments jedes Mal erneut ein Nachladen auslöst
+  // (ein Boolean, der von `false` auf `true` gesetzt wird, würde beim
+  // zweiten Signieren keine Zustandsänderung mehr bewirken).
+  const [versionBumps, setVersionBumps] = useState<Record<string, number>>({});
+  const bumpDocumentVersion = useCallback((documentId: string) => {
+    setVersionBumps((prev) => ({ ...prev, [documentId]: (prev[documentId] ?? 0) + 1 }));
+  }, []);
 
   const currentFolder = trail[trail.length - 1];
 
@@ -302,6 +316,8 @@ export function DocumentWorkspace() {
           onOpenDocument={addOpenDocument}
           onCloseDocument={closeDocumentTab}
           onMetadataSaved={handleMetadataSaved}
+          versionBumps={versionBumps}
+          onDocumentVersionBump={bumpDocumentVersion}
         />
         {view !== "documents" && (
           <div className="main-area-single">

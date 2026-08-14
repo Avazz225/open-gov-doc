@@ -95,7 +95,18 @@ async function loadOcrOrThumbnailImage(
 // Zusatznutzen, kein Blocker: existiert (noch) keine (falsches Format,
 // Verarbeitung noch nicht abgeschlossen, Ladefehler), fällt die Spalte auf
 // einen Hinweistext zurück, der Download-Button bleibt in jedem Fall nutzbar.
-export function PreviewPane({ document: activeDocument }: { document: DocumentSummary | null }) {
+export function PreviewPane({
+  document: activeDocument,
+  versionBump = 0,
+}: {
+  document: DocumentSummary | null;
+  // Erhöht sich, wenn eine andere Komponente (aktuell nur `SignaturesPanel`,
+  // P23-S7) außerhalb dieses Panels eine neue Version desselben Dokuments
+  // erzeugt hat - löst ein Nachladen der Versionsliste aus, siehe Effekt
+  // unten. Default 0 für alle Aufrufstellen ohne eigenen Bump-Zustand
+  // (z. B. `PreviewEmptyContent`).
+  versionBump?: number;
+}) {
   const { accessToken } = useAuth();
   const { t } = useI18n();
   const [previewKind, setPreviewKind] = useState<PreviewKind>("none");
@@ -113,7 +124,10 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
   const [imgRenderedHeight, setImgRenderedHeight] = useState(0);
 
   // Versionsliste laden + Auswahl auf die aktuelle Version zurücksetzen,
-  // sobald ein anderes Dokument aktiv wird.
+  // sobald ein anderes Dokument aktiv wird - seit P23-S7 zusätzlich bei jedem
+  // `versionBump` (z. B. nach einer Signatur aus `SignaturesPanel`), damit
+  // eine extern erzeugte neue Version ohne erneutes Öffnen des Dokuments in
+  // der Auswahl auftaucht.
   useEffect(() => {
     if (!activeDocument) {
       setVersions([]);
@@ -135,7 +149,7 @@ export function PreviewPane({ document: activeDocument }: { document: DocumentSu
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, activeDocument?.id]);
+  }, [accessToken, activeDocument?.id, versionBump]);
 
   // Vorschau für die ausgewählte Version laden: entweder clientseitiger
   // Text-Direktanzeige (P5d-S2) oder das bisherige Vorschaubild + OCR-Ergebnis.
