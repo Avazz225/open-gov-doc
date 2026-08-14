@@ -20,7 +20,7 @@ from storage_service.backends import (
     resolve_archive_targets,
     resolve_targets,
 )
-from storage_service.models import Base
+from storage_service.models import Base, TargetOverride
 from storage_service.schemas import (
     FixityEntry,
     GuardConfigIn,
@@ -32,17 +32,48 @@ from storage_service.schemas import (
     OperationalConfigOut,
     ReplicationRunResult,
     StorageUsageEntry,
+    TargetConfigIn,
     VerifyResult,
 )
-from storage_service.settings import Settings
+from storage_service.settings import BackendTargetConfig, Settings
 
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 
+def _compute_target_state(
+    targets: list[BackendTargetConfig], overrides: dict[str, TargetOverride]
+) -> tuple[list[BackendTargetConfig], list[str], list[str], set[str]]:
+    """Merged die Env-Var-Ziele mit den in der DB gespeicherten
+    `TargetOverride`-Zeilen (Post-Roadmap Phase 22 Session 7, ADR 0092) -
+    Zugangsdaten/Struktur kommen unverändert aus `targets`, nur
+    `object_lock_mode`/`role` können überschrieben sein. Aufrufer (Startup
+    UND jeder `PUT /guard-status/{id}/config`) schreiben das Ergebnis direkt
+    in `app.state` zurück, damit der übrige Code weiterhin einfache
+    `app.state`-Lookups nutzt, ohne bei jedem einzelnen Request selbst neu
+    aus der DB zu lesen."""
+    effective = [
+        target.model_copy(
+            update={
+                "object_lock_mode": (
+                    overrides[target.id].object_lock_mode
+                    if target.id in overrides
+                    else target.object_lock_mode
+                ),
+                "role": overrides[target.id].role if target.id in overrides else target.role,
+            }
+        )
+        for target in targets
+    ]
+    target_ids = resolve_targets(effective)
+    archive_ids = resolve_archive_targets(effective)
+    lock_ids = {t.id for t in effective if t.object_lock_mode is not None}
+    return effective, target_ids, archive_ids, lock_ids
+
+
 def _validate_settings(settings: Settings) -> None:
-    targets = resolve_targets(settings)
+    targets = resolve_targets(settings.targets)
     if not targets:
         raise RuntimeError("Mindestens ein Ziel muss konfiguriert sein")
     if len(set(targets)) != len(targets):
@@ -127,24 +158,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Session 6, ADR 0082) - gleiches Ad-hoc-Migrationsmuster.
         await conn.execute(
             text(
-                "ALTER TABLE storage.object_copy "
-                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+                "ALTER TABLE storage.object_copy ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
             )
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
-    app.state.targets = resolve_targets(settings)
     # Aussonderung (5.6, seit P7-S3) - Archiv-Ziele sind NICHT Teil von
     # `app.state.targets` (reguläre Upload-Replikation), sondern nur über die
-    # neuen `.../archive-copy`-Endpunkte erreichbar.
-    app.state.archive_targets = resolve_archive_targets(settings)
+    # neuen `.../archive-copy`-Endpunkte erreichbar. Seit Post-Roadmap Phase
+    # 22 Session 7 (ADR 0092) werden `object_lock_mode`/`role` zusätzlich mit
+    # etwaigen `TargetOverride`-Zeilen gemergt, bevor diese vier Listen
+    # berechnet werden - siehe `_compute_target_state`.
+    async with app.state.session_factory() as session:
+        target_overrides = {o.target_id: o for o in await repository.list_target_overrides(session)}
+    (
+        app.state.target_configs,
+        app.state.targets,
+        app.state.archive_targets,
+        app.state.lock_target_ids,
+    ) = _compute_target_state(settings.targets, target_overrides)
     app.state.backends = build_backends(settings)
-    app.state.target_configs = settings.targets
-    # Ziele mit aktivem Governance-Mode (5.1/5.2a) - bekommen beim Schreiben
-    # echtes S3 Object Lock, alle anderen Ziele bleiben rein auf den
-    # Anwendungsschicht-Guard (`retention_guard.py`) angewiesen.
-    app.state.lock_target_ids = {t.id for t in settings.targets if t.object_lock_mode is not None}
     for backend in app.state.backends.values():
         if isinstance(backend, S3Backend):
             await backend.ensure_bucket()
@@ -192,7 +226,7 @@ async def _get_operational_config(session: AsyncSession):
 
 @app.get("/healthz")
 def healthz() -> dict:
-    targets = resolve_targets(settings)
+    targets = resolve_targets(settings.targets)
     return {
         "status": "ok",
         "service": settings.service_name,
@@ -617,13 +651,14 @@ async def reidentify_target(
 
     await session.commit()
     pending_counts = await repository.count_pending_copies_by_backend(session)
-    lock_modes = {t.id: t.object_lock_mode for t in app.state.target_configs}
+    configs = {t.id: t for t in app.state.target_configs}
     return GuardStatusEntry(
         target_id=target_id,
         device_id=identity.device_id,
         verified_at=identity.verified_at,
         pending_copies=pending_counts.get(target_id, 0),
-        object_lock_mode=lock_modes.get(target_id),
+        object_lock_mode=configs[target_id].object_lock_mode if target_id in configs else None,
+        role=configs[target_id].role if target_id in configs else None,
     )
 
 
@@ -635,14 +670,70 @@ async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list
     degradierten Start befindet sich noch in der Wiederherstellung."""
     identities = {i.target_id: i for i in await repository.list_backend_identities(session)}
     pending_counts = await repository.count_pending_copies_by_backend(session)
-    lock_modes = {t.id: t.object_lock_mode for t in app.state.target_configs}
+    configs = {t.id: t for t in app.state.target_configs}
     return [
         GuardStatusEntry(
             target_id=target_id,
             device_id=identities[target_id].device_id if target_id in identities else None,
             verified_at=identities[target_id].verified_at if target_id in identities else None,
             pending_copies=pending_counts.get(target_id, 0),
-            object_lock_mode=lock_modes.get(target_id),
+            object_lock_mode=configs[target_id].object_lock_mode if target_id in configs else None,
+            role=configs[target_id].role if target_id in configs else None,
         )
         for target_id in app.state.targets
     ]
+
+
+@app.put("/guard-status/{target_id}/config", response_model=GuardStatusEntry)
+async def put_target_config(
+    target_id: str, body: TargetConfigIn, session: AsyncSession = Depends(get_session)
+) -> GuardStatusEntry:
+    """Ziel-Metadaten live editieren (Post-Roadmap Phase 22 Session 7,
+    ADR 0092) - NUR `object_lock_mode`/`role` je bereits konfiguriertem Ziel
+    ("nur bestehende Einträge bearbeiten", gleiche Vorgabe wie P22-S6).
+    `404` bei unbekannter `target_id` (die Ziel-*Liste* selbst bleibt
+    env-var-only, keine neuen IDs über diesen Endpunkt). Schreibt das
+    Ergebnis sofort in `app.state` zurück (`_compute_target_state`), wirkt
+    also ohne Neustart auf jeden nachfolgenden Request."""
+    if target_id not in {t.id for t in settings.targets}:
+        raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
+
+    existing_overrides = {o.target_id: o for o in await repository.list_target_overrides(session)}
+    would_be_overrides = dict(existing_overrides)
+    would_be_overrides[target_id] = TargetOverride(
+        target_id=target_id, object_lock_mode=body.object_lock_mode, role=body.role
+    )
+    _, would_be_targets, _, _ = _compute_target_state(settings.targets, would_be_overrides)
+    if not would_be_targets:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"role={body.role!r} für {target_id!r} würde kein reguläres Ziel mehr übrig "
+                "lassen (mindestens eines muss außerhalb role=archive bleiben)"
+            ),
+        )
+
+    await repository.upsert_target_override(
+        session, target_id, object_lock_mode=body.object_lock_mode, role=body.role
+    )
+    await session.commit()
+
+    target_overrides = {o.target_id: o for o in await repository.list_target_overrides(session)}
+    (
+        app.state.target_configs,
+        app.state.targets,
+        app.state.archive_targets,
+        app.state.lock_target_ids,
+    ) = _compute_target_state(settings.targets, target_overrides)
+
+    identities = {i.target_id: i for i in await repository.list_backend_identities(session)}
+    pending_counts = await repository.count_pending_copies_by_backend(session)
+    configs = {t.id: t for t in app.state.target_configs}
+    return GuardStatusEntry(
+        target_id=target_id,
+        device_id=identities[target_id].device_id if target_id in identities else None,
+        verified_at=identities[target_id].verified_at if target_id in identities else None,
+        pending_copies=pending_counts.get(target_id, 0),
+        object_lock_mode=configs[target_id].object_lock_mode if target_id in configs else None,
+        role=configs[target_id].role if target_id in configs else None,
+    )

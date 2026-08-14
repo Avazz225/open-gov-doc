@@ -17,7 +17,7 @@ def test_resolve_targets_preserves_order(tmp_path):
         ]
     )
 
-    assert resolve_targets(settings) == ["primary", "secondary"]
+    assert resolve_targets(settings.targets) == ["primary", "secondary"]
 
 
 def test_resolve_targets_excludes_archive_role(tmp_path):
@@ -32,8 +32,8 @@ def test_resolve_targets_excludes_archive_role(tmp_path):
         ]
     )
 
-    assert resolve_targets(settings) == ["primary"]
-    assert resolve_archive_targets(settings) == ["archive"]
+    assert resolve_targets(settings.targets) == ["primary"]
+    assert resolve_archive_targets(settings.targets) == ["archive"]
 
 
 def test_resolve_archive_targets_empty_without_archive_role(tmp_path):
@@ -41,7 +41,7 @@ def test_resolve_archive_targets_empty_without_archive_role(tmp_path):
         targets=[BackendTargetConfig(id="primary", type="local", base_path=str(tmp_path / "a"))]
     )
 
-    assert resolve_archive_targets(settings) == []
+    assert resolve_archive_targets(settings.targets) == []
 
 
 def test_build_backends_supports_multiple_instances_of_the_same_type(tmp_path):

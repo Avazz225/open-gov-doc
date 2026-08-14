@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StorageGuard } from "@/components/StorageGuard";
 import { I18nProvider } from "@/i18n";
@@ -15,12 +15,14 @@ const getGuardConfigMock = vi.fn();
 const updateGuardConfigMock = vi.fn();
 const getGuardStatusMock = vi.fn();
 const reidentifyTargetMock = vi.fn();
+const updateTargetConfigMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getGuardConfig: (...args: unknown[]) => getGuardConfigMock(...args),
   updateGuardConfig: (...args: unknown[]) => updateGuardConfigMock(...args),
   getGuardStatus: (...args: unknown[]) => getGuardStatusMock(...args),
   reidentifyTarget: (...args: unknown[]) => reidentifyTargetMock(...args),
+  updateTargetConfig: (...args: unknown[]) => updateTargetConfigMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -51,6 +53,7 @@ describe("StorageGuard", () => {
     updateGuardConfigMock.mockReset();
     getGuardStatusMock.mockReset();
     reidentifyTargetMock.mockReset();
+    updateTargetConfigMock.mockReset();
   });
 
   it("shows target status including a resyncing badge for pending copies", async () => {
@@ -161,5 +164,123 @@ describe("StorageGuard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Datenträger-Wechsel akzeptieren" }));
 
     expect(reidentifyTargetMock).not.toHaveBeenCalled();
+  });
+
+  it("toggles the object lock mode for a target and reloads", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock
+      .mockResolvedValueOnce([
+        {
+          target_id: "local",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: null,
+          role: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          target_id: "local",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: "governance",
+          role: null,
+        },
+      ]);
+    updateTargetConfigMock.mockResolvedValue({});
+
+    renderStorageGuard();
+    await screen.findByText("local");
+    const row = screen.getByText("local").closest("tr")!;
+
+    fireEvent.click(within(row).getByLabelText("Governance-Mode"));
+
+    await waitFor(() =>
+      expect(updateTargetConfigMock).toHaveBeenCalledWith("token-123", "local", {
+        objectLockMode: "governance",
+        role: null,
+      })
+    );
+    await waitFor(() => expect(getGuardStatusMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("toggles the archive role for a target and reloads", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock
+      .mockResolvedValueOnce([
+        {
+          target_id: "archive",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: null,
+          role: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          target_id: "archive",
+          device_id: "abc123",
+          verified_at: "2026-01-01T00:00:00Z",
+          pending_copies: 0,
+          object_lock_mode: null,
+          role: "archive",
+        },
+      ]);
+    updateTargetConfigMock.mockResolvedValue({});
+
+    renderStorageGuard();
+    await screen.findByText("archive");
+    const row = screen.getByText("archive").closest("tr")!;
+
+    fireEvent.click(within(row).getByLabelText("role=archive"));
+
+    await waitFor(() =>
+      expect(updateTargetConfigMock).toHaveBeenCalledWith("token-123", "archive", {
+        objectLockMode: null,
+        role: "archive",
+      })
+    );
+  });
+
+  it("shows an error when saving target config fails", async () => {
+    getGuardConfigMock.mockResolvedValue({
+      allow_degraded_start: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getGuardStatusMock.mockResolvedValue([
+      {
+        target_id: "local",
+        device_id: "abc123",
+        verified_at: "2026-01-01T00:00:00Z",
+        pending_copies: 0,
+        object_lock_mode: null,
+        role: null,
+      },
+    ]);
+    const { ApiError } = await import("@/lib/api");
+    updateTargetConfigMock.mockRejectedValue(
+      new ApiError(422, "role='archive' für 'local' würde kein reguläres Ziel mehr übrig lassen")
+    );
+
+    renderStorageGuard();
+    await screen.findByText("local");
+    const row = screen.getByText("local").closest("tr")!;
+
+    fireEvent.click(within(row).getByLabelText("role=archive"));
+
+    expect(
+      await screen.findByText(
+        "role='archive' für 'local' würde kein reguläres Ziel mehr übrig lassen"
+      )
+    ).toBeInTheDocument();
   });
 });

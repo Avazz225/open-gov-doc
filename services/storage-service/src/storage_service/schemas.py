@@ -88,6 +88,17 @@ class GuardStatusEntry(BaseModel):
     device_id: str | None
     verified_at: datetime | None
     pending_copies: int
-    # Aufbewahrung/WORM (5.1/5.2a, seit P7-S1) - nur lesend, das Ziel-Set
-    # selbst bleibt reine Deployment-Konfiguration (kein Editor dafür).
+    # Aufbewahrung/WORM (5.1/5.2a, seit P7-S1). Seit Post-Roadmap Phase 22
+    # Session 7 (ADR 0092) live editierbar über `PUT /guard-status/{id}/config`
+    # (`TargetOverride`) - das Ziel-Set selbst (Zugangsdaten/Struktur) bleibt
+    # weiterhin reine Deployment-Konfiguration.
     object_lock_mode: str | None = None
+    role: str | None = None
+
+
+class TargetConfigIn(BaseModel):
+    """Post-Roadmap Phase 22 Session 7 (ADR 0092) - dieselben Literal-Werte
+    wie `BackendTargetConfig.object_lock_mode`/`.role` (`settings.py`)."""
+
+    object_lock_mode: Literal["governance"] | None = None
+    role: Literal["archive"] | None = None

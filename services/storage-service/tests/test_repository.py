@@ -296,3 +296,27 @@ async def test_update_guard_config_persists(session):
 
     fetched = await repository.get_guard_config(session)
     assert fetched.allow_degraded_start is True
+
+
+async def test_list_target_overrides_empty_without_any_upsert(session):
+    """Sparse (Post-Roadmap Phase 22 Session 7, ADR 0092) - anders als
+    `GuardConfig`/`OperationalConfig` gibt es hier keine Get-or-create-Zeile,
+    solange niemand einen Override gesetzt hat."""
+    assert await repository.list_target_overrides(session) == []
+
+
+async def test_upsert_target_override_creates_and_updates(session):
+    created = await repository.upsert_target_override(
+        session, "test-target", object_lock_mode="governance", role=None
+    )
+    assert created.object_lock_mode == "governance"
+    assert created.role is None
+
+    updated = await repository.upsert_target_override(
+        session, "test-target", object_lock_mode=None, role="archive"
+    )
+    assert updated.object_lock_mode is None
+    assert updated.role == "archive"
+
+    overrides = await repository.list_target_overrides(session)
+    assert [o.target_id for o in overrides] == ["test-target"]

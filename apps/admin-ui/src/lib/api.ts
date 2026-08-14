@@ -851,9 +851,10 @@ export interface GuardStatusEntry {
   device_id: string | null;
   verified_at: string | null;
   pending_copies: number;
-  // Aufbewahrung/WORM (5.1/5.2a, seit P7-S1) - nur lesend, siehe
-  // docs/adr/0030-storage-object-lock-governance-mode.md.
+  // Aufbewahrung/WORM (5.1/5.2a, seit P7-S1). Seit Post-Roadmap Phase 22
+  // Session 7 (ADR 0092) live editierbar über `updateTargetConfig()`.
   object_lock_mode: "governance" | null;
+  role: "archive" | null;
 }
 
 export async function getGuardStatus(token: string): Promise<GuardStatusEntry[]> {
@@ -866,6 +867,28 @@ export async function reidentifyTarget(token: string, targetId: string): Promise
     "storage-service",
     `guard-status/${encodeURIComponent(targetId)}/reidentify`,
     { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+// Ziel-Metadaten (Post-Roadmap Phase 22 Session 7, ADR 0092) - NUR
+// `object_lock_mode`/`role` je bereits konfiguriertem Ziel, wirkt ohne
+// Neustart des Storage Service. Das Ziel-Set selbst (Zugangsdaten/Struktur)
+// bleibt weiterhin env-var-only, siehe ADR 0091/0092 "Begründung".
+export async function updateTargetConfig(
+  token: string,
+  targetId: string,
+  params: { objectLockMode: "governance" | null; role: "archive" | null }
+): Promise<GuardStatusEntry> {
+  const response = await request(
+    "storage-service",
+    `guard-status/${encodeURIComponent(targetId)}/config`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ object_lock_mode: params.objectLockMode, role: params.role }),
+    },
     token
   );
   return response.json();

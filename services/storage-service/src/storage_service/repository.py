@@ -9,6 +9,7 @@ from storage_service.models import (
     ObjectCopy,
     ObjectMetadata,
     OperationalConfig,
+    TargetOverride,
 )
 
 _GUARD_CONFIG_ID = 1
@@ -326,3 +327,26 @@ async def update_operational_config(
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
+
+
+async def list_target_overrides(session: AsyncSession) -> list[TargetOverride]:
+    """Sparse (Post-Roadmap Phase 22 Session 7, ADR 0092) - nur Ziele mit
+    tatsächlich gesetztem Override haben eine Zeile, siehe `TargetOverride`-
+    Docstring. `main.py._compute_target_state()` ruft dies bei jedem
+    relevanten Schreibzugriff neu auf."""
+    result = await session.execute(select(TargetOverride))
+    return list(result.scalars().all())
+
+
+async def upsert_target_override(
+    session: AsyncSession, target_id: str, *, object_lock_mode: str | None, role: str | None
+) -> TargetOverride:
+    override = await session.get(TargetOverride, target_id)
+    if override is None:
+        override = TargetOverride(target_id=target_id, updated_at=datetime.now(UTC))
+        session.add(override)
+    override.object_lock_mode = object_lock_mode
+    override.role = role
+    override.updated_at = datetime.now(UTC)
+    await session.flush()
+    return override

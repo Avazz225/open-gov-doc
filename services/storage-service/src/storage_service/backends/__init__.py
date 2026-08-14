@@ -28,19 +28,26 @@ def build_backend(target: BackendTargetConfig) -> StorageBackend:
     raise ValueError(f"Unbekannter Backend-Typ: {target.type!r}")
 
 
-def resolve_targets(settings: Settings) -> list[str]:
+def resolve_targets(targets: list[BackendTargetConfig]) -> list[str]:
     """Liste der konfigurierten Ziel-`id`s, Primärziel zuerst (bestimmt auch
     die Lesepriorität, siehe ``replication.read_with_fallback``). Schließt
     seit P7-S3 (5.6) Ziele mit ``role="archive"`` aus - diese sind nicht
-    Teil der regulären Upload-Replikation, siehe ``resolve_archive_targets``."""
-    return [target.id for target in settings.targets if target.role != "archive"]
+    Teil der regulären Upload-Replikation, siehe ``resolve_archive_targets``.
+    Seit Post-Roadmap Phase 22 Session 7 (ADR 0092) nimmt diese Funktion
+    bewusst eine bereits aufgelöste `BackendTargetConfig`-Liste entgegen statt
+    `Settings` direkt zu lesen - Aufrufer übergeben je nach Kontext entweder
+    die strukturelle Env-Var-Liste (`settings.targets`, z. B. beim Bau der
+    Backend-Instanzen) oder die live mit `TargetOverride`-Zeilen gemergte
+    Liste (`main.py._compute_target_state`, für `role`-abhängiges Routing)."""
+    return [target.id for target in targets if target.role != "archive"]
 
 
-def resolve_archive_targets(settings: Settings) -> list[str]:
+def resolve_archive_targets(targets: list[BackendTargetConfig]) -> list[str]:
     """Liste der konfigurierten Archiv-Ziel-`id`s (5.6, seit P7-S3) - erhalten
     Inhalte ausschließlich über die `.../archive-copy`-Endpunkte, nicht über
-    die reguläre Upload-Replikation."""
-    return [target.id for target in settings.targets if target.role == "archive"]
+    die reguläre Upload-Replikation. Seit Post-Roadmap Phase 22 Session 7
+    ebenfalls auf eine übergebene Liste umgestellt, siehe `resolve_targets`."""
+    return [target.id for target in targets if target.role == "archive"]
 
 
 def build_backends(settings: Settings) -> dict[str, StorageBackend]:

@@ -129,7 +129,7 @@ Ersetzt den JSON-Freitext-Attribut-Editor aus P4-S3 durch zwei getrennte Bereich
 
 ## Speicher-Wächter (3.6, seit P5b-S6, [ADR 0017](../adr/0017-storage-device-identity-guard.md))
 
-`StorageGuard` (`/storage-guard/`) zeigt je konfiguriertem Ziel des Storage Service (`GET /api/storage-service/guard-status`) die zuletzt bestätigte Geräte-ID und einen Ampel-Badge für offene Nachreplikationen (`pending_copies > 0` → "wird nachrepliziert"), plus einen Admin-Override-Schalter (`GET`/`PUT /api/storage-service/guard-config`, `allow_degraded_start`). Wie bei `OcrSettings` gibt es **kein** Feld für das Ziel-Set selbst (Backends/Zugangsdaten sind reine Deployment-Konfiguration, `DMS_TARGETS`) und **keinen** Inline-Notfall-Schalter im Moment einer Startverweigerung — der Override ist eine proaktiv gesetzte Standing-Policy, die erst beim nächsten Neustart greift (Begründung: ADR 0017, derselbe Zero-Change-artige Deployment/Admin-UI-Split wie bei `ocrEnabled`, ADR 0016). Bei nicht erreichbarem Storage Service (z. B. weil ein Start gerade verweigert wurde) zeigt die Seite denselben erklärenden Leerzustand wie `OcrSettings`. **Seit P5c-S2**: jede Zeile hat zusätzlich einen Button "Datenträger-Wechsel akzeptieren" (`window.confirm`-Bestätigung, `POST /api/storage-service/guard-status/{target_id}/reidentify`) für den Korrekturmechanismus bei einem beabsichtigten, legitimen Geräte-Tausch — ersetzt die zuvor nötige direkte DB-Korrektur. **Seit P7-S1**: eine zusätzliche, rein lesende Spalte "Object Lock" zeigt je Ziel `object_lock_mode` (`governance` oder "—") — kein Editor dafür, das Ziel-Set bleibt wie bisher reine Deployment-Konfiguration (siehe ADR 0030).
+`StorageGuard` (`/storage-guard/`) zeigt je konfiguriertem Ziel des Storage Service (`GET /api/storage-service/guard-status`) die zuletzt bestätigte Geräte-ID und einen Ampel-Badge für offene Nachreplikationen (`pending_copies > 0` → "wird nachrepliziert"), plus einen Admin-Override-Schalter (`GET`/`PUT /api/storage-service/guard-config`, `allow_degraded_start`). Wie bei `OcrSettings` gibt es **kein** Feld für das Ziel-Set selbst (Backends/Zugangsdaten sind reine Deployment-Konfiguration, `DMS_TARGETS`) und **keinen** Inline-Notfall-Schalter im Moment einer Startverweigerung — der Override ist eine proaktiv gesetzte Standing-Policy, die erst beim nächsten Neustart greift (Begründung: ADR 0017, derselbe Zero-Change-artige Deployment/Admin-UI-Split wie bei `ocrEnabled`, ADR 0016). Bei nicht erreichbarem Storage Service (z. B. weil ein Start gerade verweigert wurde) zeigt die Seite denselben erklärenden Leerzustand wie `OcrSettings`. **Seit P5c-S2**: jede Zeile hat zusätzlich einen Button "Datenträger-Wechsel akzeptieren" (`window.confirm`-Bestätigung, `POST /api/storage-service/guard-status/{target_id}/reidentify`) für den Korrekturmechanismus bei einem beabsichtigten, legitimen Geräte-Tausch — ersetzt die zuvor nötige direkte DB-Korrektur. **Seit Post-Roadmap Phase 22 Session 7** ([ADR 0092](../adr/0092-storage-target-metadata-editable.md)): die zuvor rein lesende "Object Lock"-Spalte (seit P7-S1) ist jetzt eine Checkbox (`PUT /api/storage-service/guard-status/{target_id}/config`), plus eine neue zweite Checkbox-Spalte "Aussonderungs-Ziel" (`role=archive`) — ein Klick wirkt sofort, ohne Neustart. Weiterhin **kein** Editor für das Ziel-Set selbst (Zugangsdaten/Struktur bleiben Deployment-Konfiguration, siehe ADR 0091/0092 "Begründung").
 
 ## Betriebsparameter des Storage Service (3.6, Post-Roadmap Phase 22 Session 6, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md))
 
@@ -259,7 +259,7 @@ Ausschließlich über das API-Gateway der jeweils **aktiven Installation** (3.5,
 | Registry | `GET /api/registry-service/instances` |
 | Theme-Präferenz | `GET/PUT /api/auth-service/me/preferences` (seit P4-S6) |
 | OCR-Einstellungen | `GET/PUT /api/ocr-service/config` (seit P5b-S5) |
-| Speicher-Wächter | `GET/PUT /api/storage-service/guard-config`, `GET /api/storage-service/guard-status` (seit P5b-S6), `POST /api/storage-service/guard-status/{target_id}/reidentify` (seit P5c-S2) |
+| Speicher-Wächter | `GET/PUT /api/storage-service/guard-config`, `GET /api/storage-service/guard-status` (seit P5b-S6), `POST /api/storage-service/guard-status/{target_id}/reidentify` (seit P5c-S2), `PUT /api/storage-service/guard-status/{target_id}/config` (seit **Post-Roadmap Phase 22 Session 7**) |
 | Betriebsparameter (Storage, seit **Post-Roadmap Phase 22 Session 6**) | `GET/PUT /api/storage-service/operational-config` |
 | Signatur-Connectoren (seit **Post-Roadmap Phase 22 Session 6**) | `GET/PUT /api/signature-service/signature-config` |
 | Not-Shutdown / Wartungsmodus | `GET /api/permission-service/maintenance-mode` (seit P6-S6, `MaintenanceBanner` + `SuperuserBreakGlass`), `POST /api/permission-service/maintenance-mode/trigger`, `POST /api/permission-service/maintenance-mode/lift` (beide seit P6-S6, `SuperuserBreakGlass`) |
@@ -292,7 +292,10 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **201 Tests** — seit **Post-Roadmap Phase 22 Session 6** (siehe
+- `npm test` (Vitest + Testing Library, **204 Tests** — seit **Post-Roadmap Phase 22 Session 7** (siehe
+  "Speicher-Wächter" oben): `storage-guard.test.tsx` um drei Tests erweitert (Umschalten des
+  Object-Lock-Modus inkl. Reload, Umschalten der Aussonderungs-Rolle, Fehleranzeige bei `422`); davor
+  201 — seit **Post-Roadmap Phase 22 Session 6** (siehe
   "Betriebsparameter des Storage Service"/"Signatur-Connectoren" oben): neue Testdatei
   `storage-operational-config.test.tsx` (4 Tests: Laden/Anzeigen, Unreachable-Zustand, Speichern
   geänderter Werte, Fehleranzeige bei `422`) für `StorageOperationalConfig`, neue Testdatei

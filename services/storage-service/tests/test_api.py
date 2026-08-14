@@ -359,6 +359,60 @@ def test_upload_reads_operational_config_fresh_per_request(operational_config_cl
     assert copies[0]["status"] == "ok"
 
 
+@pytest.fixture
+def target_override_client(client):
+    """Wie `operational_config_client` oben - `target_override` ist ebenfalls
+    eine DB-Zeile ohne zwischen-Test-Truncate (Post-Roadmap Phase 22
+    Session 7, ADR 0092); setzt das einzige Testziel ("local") nach jedem
+    Test wieder auf "kein Override" zurück."""
+    yield client
+    client.put("/guard-status/local/config", json={"object_lock_mode": None, "role": None})
+
+
+def test_put_target_config_rejects_unknown_target(client):
+    response = client.put(
+        "/guard-status/does-not-exist/config",
+        json={"object_lock_mode": "governance", "role": None},
+    )
+    assert response.status_code == 404
+
+
+def test_put_target_config_rejects_leaving_zero_regular_targets(target_override_client):
+    """Nur ein Ziel ist im Testaufbau konfiguriert (`DMS_TARGETS`,
+    `conftest.py`) - `role="archive"` darauf würde die reguläre
+    Upload-Replikation ohne jedes Ziel zurücklassen (sonst ein `IndexError`
+    beim nächsten Upload statt eines sauberen Fehlers)."""
+    response = target_override_client.put(
+        "/guard-status/local/config", json={"object_lock_mode": None, "role": "archive"}
+    )
+    assert response.status_code == 422
+
+
+def test_put_target_config_takes_effect_without_restart(target_override_client):
+    """Kernverhalten dieser Session: `PUT .../config` wirkt sofort auf den
+    Aufbewahrungs-Guard (`retention_guard.py`), ganz ohne Neustart - ein
+    Objekt, das VOR dem Override mit `retain_until` hochgeladen wurde, ist
+    danach trotzdem unter Governance-Mode-Sperre (die Sperre wird beim
+    Löschversuch anhand des JETZT geltenden `object_lock_mode` ausgewertet)."""
+    key = _key()
+    retain_until = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    target_override_client.put(
+        f"/objects/{key}", content=b"payload", params={"retain_until": retain_until}
+    )
+
+    put_response = target_override_client.put(
+        "/guard-status/local/config", json={"object_lock_mode": "governance", "role": None}
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["object_lock_mode"] == "governance"
+
+    status_response = target_override_client.get("/guard-status")
+    assert status_response.json()[0]["object_lock_mode"] == "governance"
+
+    delete_response = target_override_client.delete(f"/objects/{key}")
+    assert delete_response.status_code == 403
+
+
 def test_guard_status_shows_verified_identity_after_startup(client):
     """Der Lifespan-Wächter (P5b-S6) läuft bei jedem `TestClient`-Start und
     prägt/bestätigt die Geräte-ID des einzigen konfigurierten Ziels - direkt

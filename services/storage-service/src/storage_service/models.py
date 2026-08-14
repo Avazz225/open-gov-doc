@@ -116,3 +116,25 @@ class OperationalConfig(Base):
     quorum_count: Mapped[int] = mapped_column(Integer)
     max_replication_attempts: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TargetOverride(Base):
+    """Admin-UI-editierbare Ziel-Metadaten je bereits konfiguriertem Backend
+    (3.6, Post-Roadmap Phase 22 Session 7, ADR 0092) - NUR `object_lock_mode`/
+    `role`, NICHT Zugangsdaten/Struktur (`id`/`type`/`base_path`/... bleiben
+    env-var-only, dieselbe Begründung wie bei `OperationalConfig`/ADR 0091:
+    neue Ziele brauchen echte Infrastruktur, keine Admin-UI-Aktion). Bewusst
+    **sparse** statt eines Singletons mit vollständiger Liste: nur Ziele mit
+    tatsächlich gesetztem Override haben überhaupt eine Zeile - fehlt eine,
+    gilt unverändert der Env-Var-Wert aus `Settings.targets`. `main.py`s
+    `_compute_target_state()` merged beide Quellen bei jedem Aufruf zu einer
+    effektiven Zielliste und schreibt das Ergebnis sofort in `app.state`
+    zurück (Live-Reload ohne Neustart, ohne dass jeder einzelne Lesezugriff
+    im restlichen Code selbst neu aus der DB lesen müsste)."""
+
+    __tablename__ = "target_override"
+
+    target_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    object_lock_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

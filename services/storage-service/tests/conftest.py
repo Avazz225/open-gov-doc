@@ -37,6 +37,15 @@ async def engine():
         await conn.execute(text("DELETE FROM storage.object_metadata"))
         await conn.execute(text("DELETE FROM storage.backend_identity"))
         await conn.execute(text("DELETE FROM storage.guard_config"))
+        # Post-Roadmap Phase 22 Session 6/7 (ADR 0091/0092) - ohne diese
+        # beiden Zeilen würden `test_repository.py`s direkte `session`-
+        # Fixture-Tests (anders als `test_api.py`s `client`-Fixture, die über
+        # Restore-Fixtures wie `operational_config_client` selbst aufräumt)
+        # Zustand zwischen unabhängigen Testläufen leaken - exakt das Muster,
+        # das in dieser Session bereits bei zwei anderen Services gefunden
+        # wurde (`permission-service`/`signature-service`).
+        await conn.execute(text("DELETE FROM storage.operational_config"))
+        await conn.execute(text("DELETE FROM storage.target_override"))
     await eng.dispose()
 
 

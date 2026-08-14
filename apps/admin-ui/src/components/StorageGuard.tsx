@@ -8,14 +8,18 @@ import {
   getGuardStatus,
   reidentifyTarget,
   updateGuardConfig,
+  updateTargetConfig,
   type GuardStatusEntry,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Kein Mehrfach-Ziele-Editor hier (Ziel-Set selbst ist Settings-JSON, kein
-// Admin-UI-Formular, siehe ADR 0017) - nur der Wächter-Status (Geräte-ID je
-// Ziel, offene Nachreplikation) und der Admin-Override, der einen
-// degradierten Start beim nächsten Neustart erlaubt.
+// Kein Editor für das Ziel-Set selbst (Zugangsdaten/Struktur bleiben
+// Settings-JSON, siehe ADR 0017/0091) - aber seit Post-Roadmap Phase 22
+// Session 7 (ADR 0092) echte Bearbeitung der Ziel-*Metadaten*
+// (Object-Lock-Modus, Aussonderungs-Rolle) je bereits konfiguriertem Ziel,
+// wirkt ohne Neustart. Plus: Wächter-Status (Geräte-ID je Ziel, offene
+// Nachreplikation) und der Admin-Override, der einen degradierten Start
+// beim nächsten Neustart erlaubt.
 export function StorageGuard() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -27,6 +31,7 @@ export function StorageGuard() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [allowDegradedStart, setAllowDegradedStart] = useState(false);
   const [reidentifyingTarget, setReidentifyingTarget] = useState<string | null>(null);
+  const [updatingTarget, setUpdatingTarget] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -70,6 +75,40 @@ export function StorageGuard() {
     }
   }
 
+  async function handleToggleObjectLockMode(entry: GuardStatusEntry) {
+    if (!accessToken) return;
+    setError(null);
+    setUpdatingTarget(entry.target_id);
+    try {
+      await updateTargetConfig(accessToken, entry.target_id, {
+        objectLockMode: entry.object_lock_mode === "governance" ? null : "governance",
+        role: entry.role,
+      });
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("storageGuard.targetConfigError"));
+    } finally {
+      setUpdatingTarget(null);
+    }
+  }
+
+  async function handleToggleArchiveRole(entry: GuardStatusEntry) {
+    if (!accessToken) return;
+    setError(null);
+    setUpdatingTarget(entry.target_id);
+    try {
+      await updateTargetConfig(accessToken, entry.target_id, {
+        objectLockMode: entry.object_lock_mode,
+        role: entry.role === "archive" ? null : "archive",
+      });
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("storageGuard.targetConfigError"));
+    } finally {
+      setUpdatingTarget(null);
+    }
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
@@ -104,6 +143,7 @@ export function StorageGuard() {
                 <th>{t("storageGuard.verifiedAt")}</th>
                 <th>{t("storageGuard.pendingCopies")}</th>
                 <th>{t("storageGuard.objectLockMode")}</th>
+                <th>{t("storageGuard.archiveRole")}</th>
                 <th />
               </tr>
             </thead>
@@ -121,9 +161,26 @@ export function StorageGuard() {
                     </span>
                   </td>
                   <td>
-                    {entry.object_lock_mode === "governance"
-                      ? t("storageGuard.objectLockModeGovernance")
-                      : t("storageGuard.objectLockModeNone")}
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={entry.object_lock_mode === "governance"}
+                        disabled={updatingTarget !== null}
+                        onChange={() => handleToggleObjectLockMode(entry)}
+                      />
+                      {t("storageGuard.objectLockModeGovernance")}
+                    </label>
+                  </td>
+                  <td>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={entry.role === "archive"}
+                        disabled={updatingTarget !== null}
+                        onChange={() => handleToggleArchiveRole(entry)}
+                      />
+                      {t("storageGuard.archiveRoleLabel")}
+                    </label>
                   </td>
                   <td>
                     <button

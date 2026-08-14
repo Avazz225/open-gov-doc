@@ -24,6 +24,7 @@
 | `PUT` | `/operational-config` | Aktualisiert die Betriebsparameter — wirkt **ohne Neustart**, `422` falls `write_strategy=quorum` mit dem gewählten `quorum_count` gegen die (strukturell fest bleibende) Zielanzahl nicht erfüllbar ist |
 | `GET` | `/guard-status` | Je konfiguriertem Ziel: zuletzt bestätigte Geräte-ID, Zeitpunkt, Anzahl noch nicht replizierter Kopien (Admin-UI-Statusblock) |
 | `POST` | `/guard-status/{target_id}/reidentify` | Akzeptiert einen beabsichtigten Datenträger-Wechsel zur Laufzeit (kein Neustart nötig), P5c-S2 |
+| `PUT` | `/guard-status/{target_id}/config` | Ziel-Metadaten live editieren (`object_lock_mode`, `role`, seit **Post-Roadmap Phase 22 Session 7**, [ADR 0092](../adr/0092-storage-target-metadata-editable.md)) — `404` bei unbekanntem Ziel, `422` falls die Änderung kein reguläres Ziel mehr übrig ließe. Wirkt ohne Neustart |
 | `PUT` | `/objects/{key:path}/archive-copy` | Schreibt **nur** auf die konfigurierten Archiv-Ziele (`role="archive"`, 5.6, seit P7-S3) — `503` ohne konfiguriertes Archiv-Ziel |
 | `GET` | `/objects/{key:path}/archive-copy` | Liest ausschließlich von Archiv-Zielen (Rückholung, seit P7-S3) — unabhängig vom Live-Zustand desselben Schlüssels |
 | `GET` | `/objects/{key:path}/archive-copy/verify` | Fixity-Check der Archiv-Kopie, gefiltert auf Archiv-Ziele (seit P7-S3) |
@@ -44,6 +45,7 @@ Beide sind unabhängig getestet: `LocalFilesystemBackend` gegen echtes Dateisyst
 - `object_metadata`: `object_key` (PK), `backend` (Ziel-`id` des Primärziels zum Zeitpunkt der Anlage/letzten Überschreibung — seit P5b-S6 eine Ziel-`id`, kein Backend-*Typ* mehr, siehe unten), `checksum_sha256`, `size_bytes`, `content_type`, `created_at`, `updated_at`.
 - `object_copy`: `object_key` + `backend_id` (zusammengesetzter PK, FK auf `object_metadata`), `status` (`pending`/`ok`/`failed`/`failed_permanent`), `checksum_sha256`, `attempts`, `last_error`, `next_retry_at` (nullable, seit **Post-Roadmap Phase 20 Session 6**, [ADR 0082](../adr/0082-storage-service-replication-jitter-retrofit.md) — Full-Jitter-Backoff, siehe unten), `retention_until` (Datum, nullable, seit P7-S1 — siehe "Object-Lock/WORM" unten), `created_at`, `updated_at` — eine Zeile je konfiguriertem Ziel und Objekt.
 - `backend_identity` (neu, P5b-S6): `target_id` (PK), `device_id`, `verified_at` — zuletzt bestätigte Geräte-ID je konfiguriertem Ziel, unabhängig vom Ziel selbst gespeichert (siehe "Datenträger-Wechsel-Wächter" unten).
+- `target_override` (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md)): `target_id` (PK), `object_lock_mode`, `role`, `updated_at` — sparse (nur Ziele mit tatsächlich gesetztem Override haben eine Zeile), siehe "Ziel-Metadaten" unten.
 - `guard_config` (neu, P5b-S6): einzelne Zeile mit fester `id=1`, `allow_degraded_start`, `updated_at` — gleiches Muster wie `ocr_config` (ocr-service, [ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md)).
 
 ## Ziel-Set: beliebig viele Backend-Instanzen (3.6, seit P5b-S6)
@@ -91,6 +93,29 @@ Schützt gegen einen versehentlich getauschten/zurückgesetzten Datenträger, de
 - `GET /guard-status` zeigt je Ziel die zuletzt bestätigte Geräte-ID/Zeitpunkt sowie die Anzahl noch offener Kopien — ein Ziel mit `pending_copies > 0` befindet sich noch in der Wiederherstellung.
 - **Korrekturmechanismus für beabsichtigte Datenträger-Wechsel** (seit **P5c-S2**): `POST /guard-status/{target_id}/reidentify` übernimmt eine bereits vorhandene Marker-Datei des neuen Geräts oder prägt (wie beim Erststart-Bootstrap) eine neue, aktualisiert `backend_identity` und setzt alle bisherigen Kopien des Ziels über `reset_copies_for_backend` auf `pending` zurück — funktional dieselbe Wiederherstellung wie beim automatischen degradierten Start, aber explizit vom Admin angestoßen und **ohne Neustart** (Admin-UI: Button "Datenträger-Wechsel akzeptieren" je Zeile in `/storage-guard/`). Ersetzt die zuvor nötige direkte Korrektur in der `backend_identity`-Tabelle.
 
+## Ziel-Metadaten live editierbar (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md))
+
+`PUT /guard-status/{target_id}/config` macht `object_lock_mode`/`role` je bereits konfiguriertem Ziel
+live editierbar — bewusst NUR diese beiden Metadatenfelder, NICHT das Ziel-Set selbst (Zugangsdaten/
+`id`/`type`/`base_path` bleiben env-var-only, gleiche Begründung wie bei `OperationalConfig`, ADR 0091:
+neue Ziele brauchen echte Infrastruktur, kein reiner Konfigurationswert). `404` bei unbekannter
+`target_id`. `422` falls die Änderung KEIN reguläres (nicht-archiviertes) Ziel mehr übrig ließe — ohne
+diese Prüfung könnte ein `role="archive"`-Override auf dem letzten regulären Ziel jeden folgenden Upload
+mit einem `IndexError` abstürzen lassen (`upload_object` verwendet `app.state.targets[0]` als
+Primärziel).
+
+`_compute_target_state()` (`main.py`) merged `Settings.targets` mit allen `target_override`-Zeilen
+(sparse, nur überschriebene Ziele haben eine Zeile) zu einer effektiven Ziel-Liste — aufgerufen beim
+Start UND bei jedem `PUT`, das Ergebnis wird sofort in `app.state.target_configs`/`.targets`/
+`.archive_targets`/`.lock_target_ids` zurückgeschrieben. Anders als `OperationalConfig` (P22-S6, bei
+jedem betroffenen Request frisch aus der DB gelesen) wird hier bewusst NICHT bei jedem einzelnen
+Lesezugriff neu aus der DB gelesen — `object_lock_mode`/`role` werden an zu vielen Stellen im Code
+gebraucht (Upload-/Archiv-Routing, Retention-Guard, Lock-Status-Anzeigen), ein `PUT`-Zeitpunkt-Refresh
+von `app.state` erreicht dasselbe Live-Reload-Ergebnis mit deutlich kleinerem Diff. **Bekannte Grenze**:
+bei mehreren horizontal skalierten Repliken sieht eine Replik ohne eigenen `PUT`/Neustart die Änderung
+nicht — für die aktuelle Single-Replik-Realität dieses Projekts unkritisch. Admin-UI: `/storage-guard/`
+(zwei neue Checkbox-Spalten statt der bisherigen rein lesenden "Object Lock"-Spalte).
+
 ## Archiv-Zielrolle (5.6, seit P7-S3)
 
 Aussonderung/Langzeitarchivierung (siehe `docs/services/archival-service.md`) braucht ein eigenes, ggf. günstigeres/anders redundantes Speicherziel getrennt von den Live-Zielen — statt eines separaten Speichersystems bekommt `BackendTargetConfig` ein neues optionales Feld `role: "archive" | null` (Default `null` = bestehendes Verhalten, normales Replikationsziel):
@@ -129,7 +154,15 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**117 Tests seit Post-Roadmap Phase 22 Session 6**
+- `uv run pytest services/storage-service/tests` (**122 Tests seit Post-Roadmap Phase 22 Session 7**
+  ([ADR 0092](../adr/0092-storage-target-metadata-editable.md)), vorher 117, +5: `PUT .../config` auf
+  unbekanntes Ziel → `404`, auf das einzige konfigurierte reguläre Testziel mit `role=archive` → `422`
+  ("kein reguläres Ziel mehr übrig"), ein Ende-zu-Ende-Test lädt ein Objekt mit `retain_until` hoch,
+  aktiviert danach `object_lock_mode=governance` live und bestätigt eine sofort blockierte Löschung ohne
+  Neustart zwischen Upload und Sperr-Aktivierung, plus zwei Repository-Unit-Tests für
+  `upsert_target_override`/`list_target_overrides`. `tests/conftest.py`s Teardown-Liste um
+  `operational_config`/`target_override` ergänzt (fehlte dort, echter Fund dieser Session); davor 117
+  Tests, 4 neu seit **Post-Roadmap Phase 22 Session 6**
   ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)), vorher 113, +4:
   `GET /operational-config` liefert die Env-Var-Defaults vor dem ersten `PUT`, `PUT` aktualisiert und
   persistiert, `PUT` mit unerfüllbarem `quorum_count` liefert `422`, ein echter Upload direkt nach einem
@@ -148,3 +181,5 @@ Noch keine — folgt in Phase 11.
 - **`local`-Backend ohne echtes WORM** (nur Anwendungsschicht-Guard, siehe ADR 0030) — wer manipulationssicheres WORM auf lokalem Storage braucht, muss ein S3-kompatibles Ziel mit `object_lock_mode=governance` einsetzen.
 - **`replication.py`s `process_pending` propagiert `retention_until` an `record_copy`, aber nicht `lock_until` an den Backend-`write()`-Aufruf bei nachgeholter Replikation** — relevant erst, sobald Nachreplikation regelmäßig für Governance-Ziele genutzt wird (dokumentiert in ADR 0030).
 - **Kein automatisches Bucket-Upgrade** für bereits produktiv genutzte Buckets ohne Object Lock (siehe ADR 0030) — nur neu angelegte Buckets erhalten `ObjectLockEnabledForBucket=True`.
+- **`PUT /guard-status/{id}/config`s Live-Reload (Post-Roadmap Phase 22 Session 7, ADR 0092) wirkt nur auf die eigene Prozessinstanz** — bei mehreren horizontal skalierten `storage-service`-Repliken sieht eine Replik ohne eigenen `PUT`-Aufruf/Neustart die Änderung nicht (kein geteilter Cache/Pub-Sub-Invalidierung). Für die aktuelle Single-Replik-Deployment-Realität unkritisch.
+- **`PUT /guard-status/{id}/config` validiert NICHT nach, ob eine `role`-Änderung den bereits über `PUT /operational-config` gesetzten `quorum_count` unerfüllbar macht** (ADR 0092) — nur die Prüfung "mindestens ein reguläres Ziel bleibt übrig" ist implementiert, die feinere Quorum-Konsistenzprüfung nicht.
