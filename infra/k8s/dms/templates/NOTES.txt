@@ -8,16 +8,22 @@ Aktive Services (services.<name>.enabled=true in values.yaml):
 {{- end }}
 
 Zustandsbehaftete Infrastruktur:
-  - postgresql: {{ if .Values.postgresql.enabled }}bundled (Chart-intern, P26-S3){{ else }}external ({{ .Values.postgresql.external.host }}:{{ .Values.postgresql.external.port }}){{ end }}
-  - keycloak:   {{ if .Values.keycloak.enabled }}bundled (Chart-intern, P26-S3){{ else }}external ({{ .Values.keycloak.external.baseUrl }}){{ end }}
-  - minio:      {{ if .Values.minio.enabled }}bundled (Chart-intern, P26-S3){{ else }}external ({{ .Values.minio.external.endpoint }}){{ end }}
-  - nats / redis: bundled-only, kein external-Umschalter (siehe values.yaml)
+  - postgresql: {{ if .Values.postgresql.enabled }}bundled ({{ include "dms.serviceFullname" (dict "root" $ "name" "postgresql") }}){{ else }}external ({{ .Values.postgresql.external.host }}:{{ .Values.postgresql.external.port }}){{ end }}
+  - keycloak:   {{ if .Values.keycloak.enabled }}bundled ({{ include "dms.serviceFullname" (dict "root" $ "name" "keycloak") }}){{ else }}external ({{ .Values.keycloak.external.baseUrl }}){{ end }}
+  - minio:      {{ if .Values.minio.enabled }}bundled ({{ include "dms.serviceFullname" (dict "root" $ "name" "minio") }}){{ else }}external ({{ .Values.minio.external.endpoint }}){{ end }}
+  - nats:       bundled ({{ include "dms.serviceFullname" (dict "root" $ "name" "nats") }}), kein external-Umschalter (siehe values.yaml)
+  - redis:      bundled ({{ include "dms.serviceFullname" (dict "root" $ "name" "redis") }}), kein external-Umschalter (siehe values.yaml)
 
-Hinweis: dieses Chart ist Stand P26-S1 (Phase 26, Session 1) nur das
-Grundgerüst mit 4 Beispiel-Services (registry-service, gateway-service,
-document-service, storage-service). Die übrigen ~28 Services aus
-infra/docker-compose.yml sowie die zustandsbehaftete Infrastruktur, das
-Storage-Replikations-CronJob und die Frontend-Apps folgen in P26-S2..S5.
-Kein reales Cluster-Deployment in dieser Phase erforderlich (siehe
+Secrets (P26-S3, siehe ADR 0100): Postgres-/Keycloak-/MinIO-Admin-Passwörter
+kommen aus einem Kubernetes-Secret, nie mehr als Klartext-Env-Wert — per
+Default aus values.yaml generiert (Dev-Komfort), oder via
+<component>.existingSecret auf ein bereits vorhandenes Secret verweisen
+(Produktionspfad).
+
+Hinweis: dieses Chart ist Stand P26-S3 (Phase 26, Session 3) — Grundgerüst +
+32 zustandslose FastAPI-Services (P26-S1/S2) plus die zustandsbehaftete
+Infrastruktur oben als echte Deployments+Service(+PVC) (P26-S3). Das
+Storage-Replikations-CronJob und die Frontend-Apps folgen in P26-S4/S5. Kein
+reales Cluster-Deployment in dieser Phase erforderlich (siehe
 IMPLEMENTATION_PLAN.md Phase 26) — Verifikation über `helm lint` /
 `helm template`.

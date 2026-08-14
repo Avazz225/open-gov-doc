@@ -1,4 +1,4 @@
-# values.yaml — DMS Helm-Chart (Phase 26, P26-S1 + P26-S2)
+# values.yaml — DMS Helm-Chart (Phase 26, P26-S1 + P26-S2 + P26-S3)
 #
 # EIN Chart für alle Container aus infra/docker-compose.yml. Statt eines
 # Templates pro Service (34+ fast identische Kopien) iterieren die
@@ -9,12 +9,19 @@
 #
 # P26-S1 baute das Grundgerüst + 4 reale Beispiel-Einträge (registry-service,
 # gateway-service, document-service, storage-service) zum Beweis, dass die
-# Templates echt rendern. P26-S2 (diese Session) ergänzt die übrigen ~28
-# zustandslosen FastAPI-Services aus infra/docker-compose.yml nach demselben
-# Muster — kein neues Template, nur weitere `services.<name>:`-Blöcke.
-# Ausgenommen bleiben (siehe IMPLEMENTATION_PLAN.md P26-S3/S4/S5):
-# postgres/keycloak/nats/minio/azurite/mailpit/redis/prometheus/grafana
-# (zustandsbehaftete Infrastruktur, P26-S3), postgres-wal-archive-init (Job,
+# Templates echt rendern. P26-S2 ergänzte die übrigen ~28 zustandslosen
+# FastAPI-Services aus infra/docker-compose.yml nach demselben Muster — kein
+# neues Template, nur weitere `services.<name>:`-Blöcke. P26-S3 (diese
+# Session) baute postgresql/keycloak/minio/nats/redis (unten, ab
+# "Zustandsbehaftete Infrastruktur") als echte Deployments+Service(+PVC) in
+# eigenen Templates (templates/postgresql.yaml usw. — strukturell zu
+# verschieden für den generischen services:-Mechanismus) plus einen echten
+# Secret-Mechanismus für deren Admin-Passwörter (ADR 0100).
+#
+# Weiterhin ausgenommen (kein Bestandteil von Phase 26, siehe
+# IMPLEMENTATION_PLAN.md P26-S3/S4/S5): azurite/mailpit/prometheus/grafana
+# (Dev-Emulator/Test-SMTP/Observability-Stack, kein im Session-Briefing
+# beauftragter Bestandteil dieser Phase), postgres-wal-archive-init (Job,
 # kein Deployment — siehe offener Punkt im P26-S2-Report), das
 # Storage-Replikations-CronJob-Äquivalent (P26-S4) sowie die Next.js-Frontend-
 # Apps user-ui/admin-ui/process-designer/reviewer-ui/migration-console/
@@ -127,6 +134,11 @@ services:
       enabled: true # aktiv in dieser Session, um templates/pdb.yaml zu exercisen
       minAvailable: 1
     usesKeycloak: true
+    # Seit P26-S3: geteilter Rate-Limit-Store (ADR 0097) - injiziert
+    # DMS_REDIS_URL via dms.redisUrl-Helper (bundled-only, siehe
+    # templates/redis.yaml). Einziger Service in diesem Chart mit
+    # usesRedis: true, siehe services/gateway-service/src/gateway_service/settings.py.
+    usesRedis: true
     env:
       DMS_KEYCLOAK_CLIENT_ID: "dms-api"
       # Reale OCP-Route (Ingress-Äquivalent) für den öffentlichen Zugriff auf
@@ -939,59 +951,186 @@ services:
     env: {}
 
 # ---------------------------------------------------------------------------
-# Zustandsbehaftete Infrastruktur: postgresql / keycloak / minio (NUR diese
-# drei, explizite Nutzervorgabe) bekommen einen enabled/external-Umschalter,
-# damit eine Installation wahlweise die im Chart gebündelte Instanz nutzt
-# ODER auf eine bereits vorhandene externe Instanz zeigt (z. B. verwaltete
-# RDS-Postgres, zentrales Keycloak, externes S3/MinIO). NATS und Redis bleiben
-# bewusst bundled-only OHNE diesen Umschalter (explizite Nutzerentscheidung,
-# siehe ADR) — für sie unten nur Verbindungsdaten der gebündelten Instanz.
+# Zustandsbehaftete Infrastruktur (P26-S3): postgresql / keycloak / minio (NUR
+# diese drei, explizite Nutzervorgabe) bekommen einen enabled/external-
+# Umschalter, damit eine Installation wahlweise die im Chart gebündelte
+# Instanz nutzt ODER auf eine bereits vorhandene externe Instanz zeigt (z. B.
+# verwaltete RDS-Postgres, zentrales Keycloak, externes S3/MinIO). NATS und
+# Redis bleiben bewusst bundled-only OHNE diesen Umschalter (explizite
+# Nutzerentscheidung, siehe ADR 0099) — für sie unten nur Verbindungsdaten der
+# gebündelten Instanz.
 #
-# WICHTIG für P26-S3: dies ist bislang nur die values.yaml-Formstruktur plus
-# die davon abgeleiteten Connection-Helper in templates/_helpers.tpl
-# (dms.postgresDsn / dms.keycloakBaseUrl). Die tatsächlichen Postgres-/
-# Keycloak-/MinIO-Deployment+PVC-Manifeste selbst baut P26-S3 noch — wenn
-# enabled=true, müssen deren Ressourcennamen exakt "<fullname>-postgresql" /
-# "<fullname>-keycloak" / "<fullname>-minio" lauten, damit die Helper hier
-# ohne Änderung weiter funktionieren.
+# Reale Deployment+Service(+PVC)-Manifeste seit dieser Session in
+# templates/postgresql.yaml / templates/keycloak.yaml / templates/minio.yaml /
+# templates/nats.yaml / templates/redis.yaml — eigene Templates statt des
+# generischen services:-Mechanismus oben, weil diese fünf strukturell zu
+# verschieden sind (Volumes, andere Image-Quellen/Healthchecks/Ports,
+# Secret-Verweise statt reiner Env-Werte). Ressourcennamen sind exakt
+# "<fullname>-postgresql" / "<fullname>-keycloak" / "<fullname>-minio" /
+# "<fullname>-nats" / "<fullname>-redis" (via dms.serviceFullname, wie beim
+# generischen Mechanismus) — damit funktionieren die seit P26-S1 bestehenden
+# Helper (dms.postgresDsn/dms.keycloakBaseUrl/dms.natsUrl) sowie die in
+# dieser Session neuen (dms.minioEndpoint/dms.redisUrl) unverändert.
+#
+# Secrets (P26-S3, siehe ADR 0100 "existingSecret-if-set-else-generate"):
+# jede Komponente mit einem Passwort bekommt ein `existingSecret`-Feld
+# (Standard-Helm-Konvention, siehe z. B. Bitnami-Charts). Leer (Default) =
+# templates/secrets.yaml generiert ein Secret aus dem Klartext-
+# `*.auth.password`/`*.admin.password`-Wert unten (Key-Namen siehe
+# templates/_helpers.tpl `dms.*SecretKey`) — reiner Dev-/Test-Komfort-Default
+# (Parität zum bestehenden Compose-Dev-Setup, wie schon seit P26-S1
+# dokumentiert), NICHT für Produktion gedacht. Gesetzt = dieses bereits
+# vorhandene Secret referenzieren, `*.auth.password` wird dann ignoriert —
+# produktiver Pfad: entweder `--set postgresql.existingSecret=...` (+ eigene,
+# separate values-Datei mit echten Passwörtern NICHT im Repo) oder ein vorab
+# per External-Secrets-Operator/Sealed-Secrets/manuell angelegtes Secret.
+# Die Deployments unten konsumieren das Passwort ausschließlich über
+# `valueFrom.secretKeyRef`, nie mehr als literalen Env-Wert.
 # ---------------------------------------------------------------------------
 postgresql:
   enabled: true
+  image:
+    repository: postgres
+    tag: 16-alpine
+  # Siehe Secrets-Erklärung oben — leer = generiertes Secret aus
+  # auth.password, gesetzt = dieses bereits vorhandene Secret referenzieren
+  # (erwartet Key "postgres-password", siehe dms.postgresSecretKey).
+  existingSecret: ""
   auth:
-    # Dev-Defaults analog infra/docker-compose.yml (POSTGRES_USER/_PASSWORD/_DB).
-    # Klartext-Passwort hier ist ein bewusster, dokumentierter v1-Kompromiss
-    # (Parität zum Compose-Dev-Setup) — P26-S3 sollte das echte Deployment auf
-    # ein Kubernetes-Secret umstellen, statt das Passwort weiter als Plain-Value
-    # durchzureichen.
+    # Dev-Default (Parität infra/docker-compose.yml POSTGRES_USER/_PASSWORD/_DB)
+    # - nur wirksam, solange existingSecret leer ist (siehe oben).
     username: dms
     password: dms_dev_only
     database: dms
+  persistence:
+    size: 5Gi
+    # leer = Cluster-Default-StorageClass
+    storageClassName: ""
+  resources:
+    memory:
+      requests: 256Mi
+      limits: 768Mi
+    cpu:
+      requests: 250m
+      limits: 1000m
   external:
     host: ""
     port: 5432
     database: ""
     username: ""
-    # Passwort bewusst NICHT hier — bei enabled=false per eigenem
-    # Secret-Verweis lösen (P26-S3), nicht als Klartext-Value.
+    # Pflichtfeld, sobald enabled=false — Name eines bereits vorhandenen
+    # Secrets mit Key "postgres-password" (siehe dms.postgresSecretName in
+    # templates/_helpers.tpl). Kein Klartext-Passwort-Feld hier (ADR 0100).
+    existingSecret: ""
 
 keycloak:
   enabled: true
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "25.0"
+  existingSecret: ""
+  admin:
+    # Dev-Default (Parität KEYCLOAK_ADMIN/_PASSWORD) - siehe Secrets-Erklärung
+    # oben.
+    username: admin
+    password: admin_dev_only
+  resources:
+    memory:
+      requests: 512Mi
+      limits: 1Gi
+    cpu:
+      requests: 250m
+      limits: 1000m
+  # KEIN eigener PersistentVolumeClaim (anders als Postgres/MinIO/NATS unten,
+  # bewusste P26-S3-Entscheidung): KC_DB=postgres (siehe
+  # infra/docker-compose.yml, Keycloak nutzt dieselbe Postgres-Instanz) - der
+  # gesamte fachliche Zustand (Realms/Clients/Users/Sessions) liegt im
+  # (bundled oder externen) Postgres, nicht in Keycloak selbst. Das in
+  # infra/docker-compose.yml gemountete keycloak-data-Volume
+  # (/opt/keycloak/data) enthält bei postgres-basiertem Betrieb nur
+  # Provider-/Theme-Erweiterungen und Transaktionslogs, keine fachlichen
+  # Daten - unschädlich verlierbar bei einem Pod-Neustart in dieser
+  # Single-Replica-v1-Bereitstellung.
   external:
     baseUrl: ""
     realm: "dms"
 
 minio:
   enabled: true
+  image:
+    repository: minio/minio
+    tag: RELEASE.2024-06-13T22-53-53Z
+  existingSecret: ""
+  auth:
+    # Dev-Default (Parität MINIO_ROOT_USER/_PASSWORD) - siehe Secrets-Erklärung
+    # oben.
+    rootUser: dms_minio
+    rootPassword: dms_minio_dev_only
+  persistence:
+    size: 10Gi
+    storageClassName: ""
+  resources:
+    memory:
+      requests: 256Mi
+      limits: 512Mi
+    cpu:
+      requests: 150m
+      limits: 500m
   external:
     endpoint: ""
     bucket: ""
-    # Zugangsdaten analog Postgres bewusst nicht hier — Secret-Verweis (P26-S3).
+    # Pflichtfeld, sobald enabled=false — Name eines bereits vorhandenen
+    # Secrets mit Key "root-password" (siehe dms.minioSecretName). Kein
+    # Klartext-Passwort-Feld hier (ADR 0100).
+    existingSecret: ""
 
-# Bundled-only, kein enabled/external-Escape-Hatch (siehe oben).
+# Bundled-only, kein enabled/external-Umschalter (explizite Nutzerentscheidung,
+# siehe ADR 0099). Kein Passwort/Secret nötig — NATS läuft hier ohne Auth,
+# analog infra/docker-compose.yml.
 nats:
+  image:
+    repository: nats
+    tag: 2.10-alpine
   port: 4222
+  monitorPort: 8222
+  persistence:
+    # JetStream (-js -sd /data, siehe infra/docker-compose.yml) persistiert
+    # Streams/Consumer-State auf Platte - anders als Redis unten ist ein
+    # Neustart-Datenverlust hier fachlich relevant (Event-Bus, Konzept 3.4),
+    # deshalb PVC.
+    size: 5Gi
+    storageClassName: ""
+  resources:
+    memory:
+      requests: 128Mi
+      limits: 384Mi
+    cpu:
+      requests: 100m
+      limits: 500m
+
+# Bundled-only, kein enabled/external-Umschalter (explizite Nutzerentscheidung,
+# siehe ADR 0099). Kein Passwort/Secret nötig — Redis läuft hier ohne Auth,
+# analog infra/docker-compose.yml.
 redis:
+  image:
+    repository: redis
+    tag: 7-alpine
   port: 6379
+  # KEIN PersistentVolumeClaim (anders als Postgres/MinIO/NATS oben): dient
+  # ausschließlich als Rate-Limit-Store für gateway-service (ADR 0097,
+  # Sorted-Set-Sliding-Window mit TTL je Client-Key) - rein transiente Daten,
+  # `--save ""`/kein AOF bereits in infra/docker-compose.yml bewusst
+  # abgeschaltet (siehe dortiger Kommentar/ADR 0097 "Kein
+  # Redis-Persistenz-Volume"). Ein Neustart setzt das Limit unschädlich
+  # zurück - kein fachlicher Grund für Festplatten-I/O, gleiche Begründung
+  # hier 1:1 übernommen.
+  resources:
+    memory:
+      requests: 64Mi
+      limits: 128Mi
+    cpu:
+      requests: 50m
+      limits: 200m
 
 # ---------------------------------------------------------------------------
 # storageService.targets — natives YAML-Äquivalent zu STORAGE_SERVICE_TARGETS
@@ -1009,6 +1148,20 @@ redis:
 # `DMS_TARGETS: ${STORAGE_SERVICE_TARGETS:-...}` in infra/docker-compose.yml).
 # `Settings` nutzt env_prefix "DMS_" + Feldname `targets` -> `DMS_TARGETS` ist
 # der einzige Name, den storage-service im Container tatsächlich liest.
+#
+# endpoint_url des secondary-s3-Ziels (P26-S3): "__DMS_MINIO_ENDPOINT__" ist
+# ein Platzhalter, den dms.storageServiceTargetsEnv (templates/_helpers.tpl)
+# beim Rendern per Text-Replace durch dms.minioEndpoint ersetzt (respektiert
+# minio.enabled bundled/external) — VORHER (P26-S1/S2) stand hier der reine
+# Compose-Hostname "http://minio:9000" fest eingebrannt, der in diesem Chart
+# gar nicht existiert(e); erst der reale templates/minio.yaml-Service dieser
+# Session hat den Bug sichtbar gemacht. access_key/secret_key bleiben
+# bewusst weiterhin Klartext-Dev-Defaults (deckungsgleich mit
+# minio.auth.rootUser/-rootPassword oben) — eine Secret-Anbindung dieser
+# storage-service-spezifischen Ziel-Liste ist ein offener Punkt für eine
+# spätere Session (siehe P26-S3-Session-Report), diese Session hat nur den
+# Postgres-/Keycloak-/MinIO-Admin-Secret-Pfad selbst gebaut (siehe ADR 0100),
+# nicht jeden nachgelagerten Konsumenten von MinIO-Zugangsdaten.
 # ---------------------------------------------------------------------------
 storageService:
   targets:
@@ -1017,7 +1170,7 @@ storageService:
       base_path: /data/storage
     - id: secondary-s3
       type: s3
-      endpoint_url: http://minio:9000
+      endpoint_url: "__DMS_MINIO_ENDPOINT__"
       access_key: dms_minio
       secret_key: dms_minio_dev_only
       bucket: dms-storage

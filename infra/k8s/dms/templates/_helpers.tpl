@@ -72,13 +72,87 @@ zurückkonvertiert werden müsste (unnötiger Umweg für einen einzeiligen
 Merge-Aufruf).
 */}}
 
-{{/* DMS_POSTGRES_DSN — respektiert postgresql.enabled (bundled) vs. external. */}}
-{{- define "dms.postgresDsn" -}}
+{{/*
+Postgres-Verbindungsfelder (Host/Port/Database/Username), respektieren
+postgresql.enabled (bundled, Service-DNS "<fullname>-postgresql", siehe
+templates/postgresql.yaml) vs. external (postgresql.external.*). Aufgeteilt
+in einzelne Helfer statt nur einem fertigen DSN-String, weil
+templates/keycloak.yaml dieselben Felder für KC_DB_URL/KC_DB_USERNAME
+braucht (Keycloak nutzt dieselbe Postgres-Instanz, siehe
+infra/docker-compose.yml-Kommentar dort) — DRY statt zweimal denselben
+bundled/external-Branch zu duplizieren.
+*/}}
+{{- define "dms.postgresHost" -}}
 {{- if .Values.postgresql.enabled -}}
-postgresql+asyncpg://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "dms.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}
+{{ include "dms.fullname" . }}-postgresql
 {{- else -}}
-postgresql+asyncpg://{{ .Values.postgresql.external.username }}:${DMS_POSTGRES_PASSWORD}@{{ .Values.postgresql.external.host }}:{{ .Values.postgresql.external.port }}/{{ .Values.postgresql.external.database }}
+{{ .Values.postgresql.external.host }}
 {{- end -}}
+{{- end -}}
+
+{{- define "dms.postgresPort" -}}
+{{- if .Values.postgresql.enabled -}}
+5432
+{{- else -}}
+{{ .Values.postgresql.external.port }}
+{{- end -}}
+{{- end -}}
+
+{{- define "dms.postgresDatabase" -}}
+{{- if .Values.postgresql.enabled -}}
+{{ .Values.postgresql.auth.database }}
+{{- else -}}
+{{ .Values.postgresql.external.database }}
+{{- end -}}
+{{- end -}}
+
+{{- define "dms.postgresUsername" -}}
+{{- if .Values.postgresql.enabled -}}
+{{ .Values.postgresql.auth.username }}
+{{- else -}}
+{{ .Values.postgresql.external.username }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Name/Key des Kubernetes-Secret, das das Postgres-Passwort liefert (P26-S3,
+siehe ADR 0100 "existingSecret-if-set-else-generate"). Bundled: entweder
+postgresql.existingSecret (bereits vorhandenes Secret, Produktionspfad) oder
+das von templates/secrets.yaml aus postgresql.auth.password generierte
+"<fullname>-postgresql-secret" (Dev-Default). External: MUSS
+postgresql.external.existingSecret gesetzt sein — dieses Chart kennt das
+Passwort einer externen Instanz nicht und generiert dafür nichts (siehe
+values.yaml-Kommentar).
+*/}}
+{{- define "dms.postgresSecretName" -}}
+{{- if .Values.postgresql.enabled -}}
+{{- .Values.postgresql.existingSecret | default (printf "%s-postgresql-secret" (include "dms.fullname" .)) -}}
+{{- else -}}
+{{- .Values.postgresql.external.existingSecret -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Fester Key-Name im Postgres-Secret — ein von diesem Chart generiertes
+UND ein per existingSecret referenziertes Secret müssen diesen Key liefern. */}}
+{{- define "dms.postgresSecretKey" -}}postgres-password{{- end -}}
+
+{{/*
+DMS_POSTGRES_DSN — das Passwort selbst kommt NICHT mehr als Klartext in
+diesen String (anders als vor P26-S3), sondern über die Kubernetes-eigene
+"$(VAR_NAME)"-Referenzsubstitution auf eine zuvor im selben Container-env
+definierte DMS_POSTGRES_PASSWORD (siehe dms.baseEnv unten, quellt per
+valueFrom.secretKeyRef aus dms.postgresSecretName) — Kubernetes löst
+$(VAR_NAME) zur Podstart-Zeit auf, wenn die referenzierte Variable vorher im
+selben env-Array steht (offizielles, dokumentiertes k8s-Muster für genau
+diesen Fall: einen zusammengesetzten Verbindungsstring aus einem
+Secret-Fragment bauen, ohne den ganzen String selbst als Secret pflegen zu
+müssen). Ersetzt den vorherigen "${DMS_POSTGRES_PASSWORD}"-Platzhalter aus
+P26-S1 (mit geschweiften Klammern von Helm nie aufgelöst UND von Kubernetes
+nicht als Referenz erkannt — reine Doku-Attrappe) durch einen tatsächlich
+funktionierenden Mechanismus.
+*/}}
+{{- define "dms.postgresDsn" -}}
+postgresql+asyncpg://{{ include "dms.postgresUsername" . }}:$(DMS_POSTGRES_PASSWORD)@{{ include "dms.postgresHost" . }}:{{ include "dms.postgresPort" . }}/{{ include "dms.postgresDatabase" . }}
 {{- end -}}
 
 {{/* DMS_NATS_URL — bundled-only, kein external-Escape-Hatch (siehe values.yaml). */}}
@@ -95,6 +169,44 @@ http://{{ include "dms.fullname" . }}-keycloak:8080
 {{- end -}}
 {{- end -}}
 
+{{/* Name/Key des Kubernetes-Secret mit dem Keycloak-Admin-Passwort (nur für
+die bundled Instanz relevant, siehe templates/keycloak.yaml — ein externes
+Keycloak verwaltet seine Admin-Zugangsdaten selbst, dieses Chart braucht sie
+dafür nicht). Gleiches existingSecret-Muster wie bei Postgres oben. */}}
+{{- define "dms.keycloakSecretName" -}}
+{{- .Values.keycloak.existingSecret | default (printf "%s-keycloak-secret" (include "dms.fullname" .)) -}}
+{{- end -}}
+{{- define "dms.keycloakSecretKey" -}}admin-password{{- end -}}
+
+{{/* DMS_MINIO_ENDPOINT / Platzhalter-Ziel für storageService.targets (P26-S3, neu) —
+respektiert minio.enabled (bundled) vs. external. */}}
+{{- define "dms.minioEndpoint" -}}
+{{- if .Values.minio.enabled -}}
+http://{{ include "dms.fullname" . }}-minio:9000
+{{- else -}}
+{{ .Values.minio.external.endpoint }}
+{{- end -}}
+{{- end -}}
+
+{{/* Name/Key des Kubernetes-Secret mit dem MinIO-Root-Passwort. Gleiches
+existingSecret-Muster wie bei Postgres oben (bundled: generiert oder
+existingSecret; external: MUSS minio.external.existingSecret gesetzt sein). */}}
+{{- define "dms.minioSecretName" -}}
+{{- if .Values.minio.enabled -}}
+{{- .Values.minio.existingSecret | default (printf "%s-minio-secret" (include "dms.fullname" .)) -}}
+{{- else -}}
+{{- .Values.minio.external.existingSecret -}}
+{{- end -}}
+{{- end -}}
+{{- define "dms.minioSecretKey" -}}root-password{{- end -}}
+
+{{/* DMS_REDIS_URL (P26-S3, neu) — bundled-only, kein external-Escape-Hatch
+(siehe values.yaml, gleiche Begründung wie bei NATS). Kein Passwort/Secret
+nötig, Redis läuft hier ohne Auth (analog infra/docker-compose.yml). */}}
+{{- define "dms.redisUrl" -}}
+redis://{{ include "dms.fullname" . }}-redis:{{ .Values.redis.port }}/0
+{{- end -}}
+
 {{/*
 Baseline-Env-Set, das JEDER Service bekommt (Pendant zu den in praktisch
 jedem infra/docker-compose.yml-Service wiederholten DMS_INSTALLATION_ID/
@@ -106,6 +218,14 @@ Zeilen). Erwartet dict "root" $ "name" $serviceName.
   value: {{ .root.Values.global.installationId | quote }}
 - name: DMS_INSTALLATION_DISPLAY_NAME
   value: {{ .root.Values.global.installationDisplayName | quote }}
+{{/* Seit P26-S3: das Passwort selbst kommt über secretKeyRef, DMS_POSTGRES_DSN
+baut es per k8s-"$(VAR)"-Substitution ein statt es literal einzubetten (siehe
+dms.postgresDsn/dms.postgresSecretName-Kommentar oben). */}}
+- name: DMS_POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "dms.postgresSecretName" .root }}
+      key: {{ include "dms.postgresSecretKey" .root }}
 - name: DMS_POSTGRES_DSN
   value: {{ include "dms.postgresDsn" .root | quote }}
 - name: DMS_NATS_URL
@@ -154,8 +274,20 @@ DMS_QUORUM_COUNT. Nur eingebunden, wenn services.<name>.storageTargetsEnv
 true ist. Erwartet den Chart-Root ($).
 */}}
 {{- define "dms.storageServiceTargetsEnv" -}}
+{{/*
+Seit P26-S3: storageService.targets[].endpoint_url darf den Platzhalter
+"__DMS_MINIO_ENDPOINT__" enthalten (siehe secondary-s3-Ziel in values.yaml) -
+wird hier per Text-Replace durch dms.minioEndpoint ersetzt (respektiert
+minio.enabled bundled/external), statt wie vor dieser Session den reinen
+Compose-Hostnamen "minio" fest einzubrennen (der im Chart nicht existiert -
+echter Bug, den erst der reale templates/minio.yaml-Service in dieser Session
+sichtbar gemacht hat). toJson liefert den kompletten JSON-String, der
+Platzhalter steht darin wie jeder andere Feldwert als Text - kein
+JSON-Escaping-Sonderfall, da dms.minioEndpoint selbst kein JSON-Sonderzeichen
+enthält.
+*/}}
 - name: DMS_TARGETS
-  value: {{ toJson .Values.storageService.targets | quote }}
+  value: {{ toJson .Values.storageService.targets | replace "__DMS_MINIO_ENDPOINT__" (include "dms.minioEndpoint" .) | quote }}
 - name: DMS_WRITE_STRATEGY
   value: {{ .Values.storageService.writeStrategy | quote }}
 - name: DMS_QUORUM_COUNT

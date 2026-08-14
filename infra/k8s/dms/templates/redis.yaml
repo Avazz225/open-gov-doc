@@ -1,0 +1,66 @@
+{{/*
+Bundled Redis (P26-S3) — bundled-only, KEIN enabled/external-Umschalter
+(explizite Nutzerentscheidung, siehe ADR 0099/values.yaml-Kommentar), deshalb
+ohne umschließendes {{- if }}. Kein PersistentVolumeClaim (siehe
+values.yaml-Kommentar am redis-Block — rein transienter Rate-Limit-Store,
+ADR 0097).
+*/}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "redis") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "redis") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "redis") | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.redis.image.repository .Values.redis.image.tag | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: {{ .Values.redis.resources.memory.requests | quote }}
+              cpu: {{ .Values.redis.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ .Values.redis.resources.memory.limits | quote }}
+              cpu: {{ .Values.redis.resources.cpu.limits | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "redis") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "redis") | nindent 4 }}
+  ports:
+    - name: redis
+      port: {{ .Values.redis.port }}
+      targetPort: redis
+      protocol: TCP

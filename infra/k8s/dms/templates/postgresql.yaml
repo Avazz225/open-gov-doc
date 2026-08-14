@@ -1,0 +1,133 @@
+{{/*
+Bundled Postgres (P26-S3) — nur gerendert, wenn postgresql.enabled=true
+(sonst zeigt jeder Konsument über dms.postgresDsn/dms.postgresHost auf
+postgresql.external.*, siehe templates/_helpers.tpl). Bewusst ein einfaches
+Deployment+PVC statt eines StatefulSet (explizite, bereits getroffene v1-
+Entscheidung, siehe IMPLEMENTATION_PLAN.md Phase 26 und Session-Report) —
+eigenes Template statt des generischen services:-Mechanismus, weil Volumes/
+Secret-Verweise/ein abweichender Health-Check-Mechanismus strukturell nicht
+in das generische Schema passen.
+
+KEINE WAL-Archivierung/kein zweites Wal-Archive-PVC/kein Chown-Init-Container
+(anders als infra/docker-compose.yml, siehe dortiger postgres-Kommentar) -
+bewusster Scope-Cut dieser Session: Point-in-Time-Recovery über ein lokales
+zweites Volume ist für ein Single-Replica-"kein echtes Cluster-Deployment in
+Phase 26 gefordert"-v1-Chart (siehe ADR 0099 Konsequenzen) von begrenztem
+Nutzen, und der Compose-Chown-Trick (fester "postgres:postgres"-User) ist auf
+OpenShift mit zufällig zugewiesener, nicht-root UID (restricted SCC) ohnehin
+nicht 1:1 übertragbar. Offener Punkt für eine spätere Session, falls eine
+reale Cluster-Bereitstellung tatsächlich ansteht (siehe Session-Report).
+*/}}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "postgresql") }}-init
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "postgresql") | nindent 4 }}
+data:
+{{- (.Files.Glob "files/postgres-init/*.sql").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "postgresql") }}-data
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "postgresql") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.postgresql.persistence.storageClassName }}
+  storageClassName: {{ .Values.postgresql.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.persistence.size | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "postgresql") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "postgresql") | nindent 4 }}
+spec:
+  replicas: 1
+  # RWO-PVC + Einzelinstanz: bei einem Rollout darf niemals ein zweiter Pod
+  # gleichzeitig dasselbe Volume mounten wollen (kein RollingUpdate-Overlap).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "postgresql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "postgresql") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgresql
+          image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.postgresql.image.repository .Values.postgresql.image.tag | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - name: postgresql
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dms.postgresSecretName" . }}
+                  key: {{ include "dms.postgresSecretKey" . }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.auth.database | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgresql.auth.username | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgresql.auth.username | quote }}]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              memory: {{ .Values.postgresql.resources.memory.requests | quote }}
+              cpu: {{ .Values.postgresql.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ .Values.postgresql.resources.memory.limits | quote }}
+              cpu: {{ .Values.postgresql.resources.cpu.limits | quote }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "dms.serviceFullname" (dict "root" . "name" "postgresql") }}-data
+        - name: init-scripts
+          configMap:
+            name: {{ include "dms.serviceFullname" (dict "root" . "name" "postgresql") }}-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "postgresql") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "postgresql") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "postgresql") | nindent 4 }}
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+{{- end }}

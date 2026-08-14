@@ -1,0 +1,100 @@
+{{/*
+Bundled NATS (P26-S3) — bundled-only, KEIN enabled/external-Umschalter
+(explizite Nutzerentscheidung, siehe ADR 0099/values.yaml-Kommentar), deshalb
+anders als postgresql.yaml/keycloak.yaml/minio.yaml ohne umschließendes
+{{- if }}. PVC für JetStream (-js -sd /data): Streams/Consumer-State sollen
+einen Pod-Neustart überleben (Event-Bus, Konzept 3.4).
+*/}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "nats") }}-data
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "nats") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.nats.persistence.storageClassName }}
+  storageClassName: {{ .Values.nats.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.nats.persistence.size | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "nats") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "nats") | nindent 4 }}
+spec:
+  replicas: 1
+  # RWO-PVC + Einzelinstanz, gleiche Begründung wie templates/postgresql.yaml.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "nats") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "nats") | nindent 8 }}
+    spec:
+      containers:
+        - name: nats
+          image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.nats.image.repository .Values.nats.image.tag | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args: ["-js", "-sd", "/data", "-m", {{ .Values.nats.monitorPort | quote }}]
+          ports:
+            - name: client
+              containerPort: {{ .Values.nats.port }}
+              protocol: TCP
+            - name: monitor
+              containerPort: {{ .Values.nats.monitorPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: {{ .Values.nats.resources.memory.requests | quote }}
+              cpu: {{ .Values.nats.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ .Values.nats.resources.memory.limits | quote }}
+              cpu: {{ .Values.nats.resources.cpu.limits | quote }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "dms.serviceFullname" (dict "root" . "name" "nats") }}-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "nats") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "nats") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "nats") | nindent 4 }}
+  ports:
+    - name: client
+      port: {{ .Values.nats.port }}
+      targetPort: client
+      protocol: TCP
+    - name: monitor
+      port: {{ .Values.nats.monitorPort }}
+      targetPort: monitor
+      protocol: TCP

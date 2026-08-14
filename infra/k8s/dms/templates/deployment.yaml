@@ -2,6 +2,10 @@
 Ein Deployment je Eintrag in .Values.services mit enabled=true.
 Generisches Template — NEUE Services brauchen KEIN neues Template, nur einen
 neuen Map-Eintrag in values.yaml (siehe Kommentar dort).
+
+Seit P26-S3: `usesRedis: true` (analog `usesKeycloak`) injiziert
+DMS_REDIS_URL via dms.redisUrl-Helper (bundled-only, siehe
+templates/redis.yaml) — aktuell nur bei gateway-service gesetzt (ADR 0097).
 */}}
 {{- range $name, $svc := .Values.services }}
 {{- if $svc.enabled }}
@@ -38,6 +42,10 @@ spec:
             {{- if $svc.usesKeycloak }}
             - name: DMS_KEYCLOAK_BASE_URL
               value: {{ include "dms.keycloakBaseUrl" $ | quote }}
+            {{- end }}
+            {{- if $svc.usesRedis }}
+            - name: DMS_REDIS_URL
+              value: {{ include "dms.redisUrl" $ | quote }}
             {{- end }}
             {{- if $svc.storageTargetsEnv }}
             {{- include "dms.storageServiceTargetsEnv" $ | nindent 12 }}

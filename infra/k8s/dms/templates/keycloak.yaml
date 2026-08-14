@@ -1,0 +1,103 @@
+{{/*
+Bundled Keycloak (P26-S3) — nur gerendert, wenn keycloak.enabled=true (sonst
+zeigt jeder Konsument über dms.keycloakBaseUrl auf keycloak.external.baseUrl,
+siehe templates/_helpers.tpl). Nutzt dieselbe Postgres-Instanz wie die
+zustandslosen Services (dms.postgresHost/-Port/-Database/-Username/
+dms.postgresSecretName respektieren dabei automatisch postgresql.enabled
+bundled vs. external, genau wie DMS_POSTGRES_DSN oben) — 1:1 dieselbe
+Architektur wie infra/docker-compose.yml ("Keycloak nutzt dieselbe
+Postgres-Instanz, eigenes Schema, kein separater DB-Server").
+
+Kein PersistentVolumeClaim für Keycloak selbst — siehe values.yaml-Kommentar
+am keycloak-Block (fachlicher Zustand liegt vollständig in Postgres).
+*/}}
+{{- if .Values.keycloak.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "keycloak") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "keycloak") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "keycloak") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "keycloak") | nindent 8 }}
+    spec:
+      containers:
+        - name: keycloak
+          image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.keycloak.image.repository .Values.keycloak.image.tag | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          # Dev-Modus, 1:1 wie infra/docker-compose.yml (`command: start-dev`)
+          # - siehe dortiger Kommentar zum Realm-Import/Produktionsmodus.
+          args: ["start-dev"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: KEYCLOAK_ADMIN
+              value: {{ .Values.keycloak.admin.username | quote }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dms.keycloakSecretName" . }}
+                  key: {{ include "dms.keycloakSecretKey" . }}
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: {{ printf "jdbc:postgresql://%s:%s/%s?currentSchema=keycloak" (include "dms.postgresHost" .) (include "dms.postgresPort" .) (include "dms.postgresDatabase" .) | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ include "dms.postgresUsername" . | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dms.postgresSecretName" . }}
+                  key: {{ include "dms.postgresSecretKey" . }}
+          # Kein curl/wget im Keycloak-Image (siehe infra/docker-compose.yml-
+          # Kommentar, dort per rohem /dev/tcp-Bash-Trick gelöst) - ein
+          # einfacher tcpSocket-Probe auf den HTTP-Port ist hier ausreichend
+          # (Probe-Mechanismus ist keine versions-/konfigrelevante Angabe wie
+          # Image/Port/Env, sondern reine k8s-Infrastruktur). Großzügige
+          # initialDelaySeconds/failureThreshold: Keycloaks JVM-Start dauert
+          # spürbar länger als bei den schlanken FastAPI-Services.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: {{ .Values.keycloak.resources.memory.requests | quote }}
+              cpu: {{ .Values.keycloak.resources.cpu.requests | quote }}
+            limits:
+              memory: {{ .Values.keycloak.resources.memory.limits | quote }}
+              cpu: {{ .Values.keycloak.resources.cpu.limits | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" . "name" "keycloak") }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" . "name" "keycloak") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "dms.serviceSelectorLabels" (dict "root" . "name" "keycloak") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+{{- end }}
