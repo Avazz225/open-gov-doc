@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P21-S3 — HTML-Vorschau-Sandbox härten (Phase 21 Session 3, siehe [ADR 0086](docs/adr/0086-html-preview-external-subresource-blocking.md)): `user-ui`s `PreviewPane` rendert HTML über ein `sandbox=""`-`srcDoc`-iframe, das externe Subressourcen-Requests (z. B. Tracking-Pixel) NICHT selbst blockiert, und ein CSP-Header wirkt bei `srcDoc`-Inhalten ohne eigene Origin nur eingeschränkt. Lösung: `document-service`s beide Content-Download-Endpunkte neutralisieren bei `content_type="text/html"` (Sniffing-basiert) externe `src`/`href`-Referenzen VOR der Auslieferung — neue `html_preview_guard.py` (BeautifulSoup/`html.parser`, erstes HTML-Parsing-Tool im Repo, neue Abhängigkeit), attribut- statt tag-getrieben, erlaubt `data:`/`mailto:`/`tel:`/Fragment-Anker, blockiert auch relative Pfade (keine sichere Basis-URL in `srcDoc`), fügt sichtbare `[Blockierte externe Anfrage: ...]`-Markierung ein. Bewusst nur `src`/`href` (Plan-Vorgabe) — `srcset`/`poster`/CSS-`url()` bleiben offen. Tests: `document-service` 247 (+13). Live gegen den echten Stack verifiziert: echtes Upload+Download über den Gateway zeigte externe Tracker-Referenz/Link blockiert mit sichtbarer Markierung, `data:`-Bild/Fragment-Anker unverändert erhalten.
+**Zuletzt abgeschlossen:** P21-S4 — BPMN-Import-Review-Gate (Phase 21 Session 4, letzte Session der Phase, siehe [ADR 0087](docs/adr/0087-bpmn-import-review-gate.md)): `POST /process-definitions` (`workflow-service`) bekommt einen neuen Vier-Augen-Aktionstyp `workflow.process_definition.import` über das bereits bestehende, generische Approval-Mechanismus (Vorbild `config-service`s P17-S3-Retrofit) — neuer `approval_client.py`, neuer reiner Konsument (`consumer.py`, reagiert auf `permission.approval.approved`, wendet den zurückgestellten Import über dieselbe `repository.create_process_definition` an wie der Sofort-Pfad, BPMN-Validierung bewusst erst dort). Erfolgsfall bleibt bewusst **byteidentisch** (`201` + `ProcessDefinitionOut`, keine Status-Hülle wie bei `config-service`) — über 40 bestehende Testaufrufstellen sowie `process-designer`s Erfolgspfad hätten sonst angefasst werden müssen; nur der neue `pending_approval`-Fall bekommt `202` + eigene Form. `scripts/run-tests.sh`: `workflow-service` zur `CONSUMER_SERVICES`-Liste ergänzt (erster eigener NATS-Konsument des Service). Beim ersten vollständigen Testlauf seit P20-S5 eine echte, seither unbemerkte Regression in `test_federation.py` gefunden und behoben (Testerwartung `"delivery_failed"` war seit ADR 0081 veraltet, korrekt `"pending_retry"` — Produktionscode war bereits korrekt). `process-designer`: `isPendingApproval()`-Type-Guard, `handleSave()` zeigt bei `pending_approval` einen Hinweistext statt zu navigieren. Tests: `workflow-service` 177 (vorher 170, +7); `process-designer` 39 unverändert grün. Live gegen den echten Stack verifiziert (Image-Neubau + Neustart von `workflow-service`): Rolle live zugewiesen, Genehmigungspflicht aktiviert, echtes BPMN hochgeladen → `202`/`pending_approval`, Prozessfamilie nachweislich noch nicht angelegt; nach echtem `POST .../approve` legte der neue Konsument die Definition innerhalb weniger Sekunden tatsächlich an. **Phase 21 (Sicherheitshärtung) damit vollständig abgeschlossen.**
 
-**Nächste Session:** **P21-S4** (BPMN-Import-Review-Gate: `POST /process-definitions` bei `workflow-service` bekommt einen neuen Vier-Augen-Aktionstyp `workflow.process_definition.import` über den bereits bestehenden Approval-Mechanismus — ein Upload landet als `pending_approval`, wird erst nach Review durch einen zweiten Admin aktiv/instanzstartfähig, letzte Session der Phase 21, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P22-S1** ("Jetzt aussondern"-Button in `ArchivalTransfersView.tsx`, ruft `POST /documents/{id}/archive-request` — erste Session der neuen **Phase 22 (Admin-UI-Ausbau)**, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -2449,6 +2449,70 @@ Phase 21 "Sicherheitshärtung", siehe [ADR 0084](docs/adr/0084-fleet-license-key
 - Doku: neues [ADR 0086](docs/adr/0086-html-preview-external-subresource-blocking.md),
   `docs/services/document-service.md` (neue "HTML-Vorschau-Härtung"-Sektion, API-Tabelle),
   `docs/services/user-ui.md` ("Offene Punkte" als behoben markiert) ergänzt.
+
+**P21-S4 — BPMN-Import-Review-Gate** (letzte Session der Phase 21, siehe
+[ADR 0087](docs/adr/0087-bpmn-import-review-gate.md)):
+
+- **Problem**: `POST /process-definitions` (`workflow-service`) legte bislang sofort und ungegated
+  (bis auf die bereits bestehende `admin.object_config`-Rollenprüfung, P6-S6) eine neue,
+  instanzstartfähige Prozessdefinition an — ein hochgeladenes BPMN-Dokument kann Script-Tasks
+  enthalten, ein einzelner Admin konnte das also unbeobachtet aktivieren.
+- **Lösung**: exakte Replikation des bereits bestehenden, generischen Vier-Augen-Rezepts aus
+  `config-service`s P17-S3-Retrofit (ADR 0060, permission-services genereller Approval-Mechanismus,
+  ADR 0022). Neuer Aktionstyp `workflow.process_definition.import`. Neuer, reiner
+  `workflow_service.approval_client.ApprovalClient` (identisches Muster wie
+  `config_service`/`document_service`). `POST /process-definitions` fragt vor der Anlage ab, ob der
+  Aktionstyp Genehmigung erfordert; falls ja, wird BPMN-Text+Name+optionale `process_id` als `payload`
+  in einen Freigabe-Request gepackt, `202` mit `{status: "pending_approval", approval_request_id}`
+  zurückgegeben — keine Anlage, keine BPMN-Validierung an dieser Stelle (bewusst zurückgestellt, exakt
+  wie bei `config_service._apply_config_document`). Neuer, reiner Konsument (`consumer.py`,
+  `ensure_stream=False`, Durable-Name `workflow-service-approval`) reagiert auf das bereits bestehende
+  `permission.approval.approved`-Event, wendet den zurückgestellten Import über dieselbe
+  `repository.create_process_definition` an, die auch der Sofort-Pfad nutzt.
+- **Bewusste Design-Abweichung von `config-service`s Muster**: `config-service`s `ImportActionResult`
+  verpackt JEDE Antwort (`applied`/`pending_approval`) einheitlich in eine Status-Hülle. Für
+  `POST /process-definitions` wäre das riskant gewesen — der Endpunkt ist tief verwurzelte
+  Test-Infrastruktur: über 40 Aufrufstellen in `test_api.py`/`test_federation.py` laden zunächst eine
+  Prozessdefinition hoch, BEVOR der eigentlich zu testende Sachverhalt beginnt, und `process-designer`s
+  bestehender Erfolgspfad erwartet die flache Form. Vor der endgültigen Umsetzung mit einem vollen
+  Testlauf verifiziert, dass eine einheitliche Hülle tatsächlich alle diese Stellen angefasst hätte —
+  stattdessen bleibt der Erfolgsfall **byteidentisch** (`201` + `ProcessDefinitionOut`), nur der neue
+  `pending_approval`-Fall bekommt `202` + eigene Form (`ProcessDefinitionImportResult`, per
+  `JSONResponse` statt `response_model`), unterscheidbar bereits am HTTP-Status.
+- **`scripts/run-tests.sh`**: `workflow-service` zur `CONSUMER_SERVICES`-Liste ergänzt — der Service
+  hatte vorher gar keinen eigenen NATS-Konsumenten (nur einen Producer für seinen `"workflow"`-Stream),
+  braucht seit dieser Session denselben Container-Stopp-Schutz wie `document-service`/etc.
+- **Echte Regression aus einer früheren Session gefunden und behoben**: die volle
+  `workflow-service`-Testsuite (zum ersten Mal seit P20-S5 komplett gelaufen) deckte auf, dass
+  `test_dispatch_records_delivery_failed_for_unreachable_target` (`test_federation.py`) noch die VOR
+  ADR 0081 gültige Statuserwartung (`"delivery_failed"` sofort) hatte — seit ADR 0081 markiert der Hub
+  einen einzelnen Fehlschlag als retry-fähiges `"pending_retry"`, `workflow-service`s
+  `federation_task.status` übernahm `handover["status"]` unverändert und war technisch bereits korrekt;
+  nur der Test war seit P20-S5 stillschweigend veraltet, unbemerkt, weil die Tests seither nie in
+  vollem Umfang liefen. Behoben durch Anpassung der Testerwartung.
+- **`process-designer`**: `lib/api.ts` bekommt `ProcessDefinitionImportPending` +
+  `isPendingApproval()`-Type-Guard; `createProcessDefinition()`s Rückgabetyp wird zur Union.
+  `designer/page.tsx`s `handleSave()` zeigt bei `pending_approval` den neuen Hinweistext
+  `designer.savePendingApproval` statt zur (noch nicht existierenden) Definition zu navigieren.
+- **Tests**: `workflow-service` 177 (vorher 170, +7: neue `test_consumer.py` mit 5 Tests, 1 neuer
+  API-Integrationstest gegen den echten laufenden `permission-service`, 1 Regressionskorrektur wie
+  oben). `process-designer`: bestehende 39 Tests unverändert grün, kein dedizierter neuer Test für den
+  `pending_approval`-Zweig der `designer/page.tsx`-Speicherfunktion (dieser Save-Flow hatte bereits
+  vorher keine Testabdeckung; `tsc`/`eslint`/`next build` bestätigen Typkorrektheit, kein echter
+  Browser in dieser Entwicklungsumgebung verfügbar).
+- **Vollständig live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
+  `workflow-service`): ein Test-Principal erhielt live die Rolle `domain-admin-config`, Genehmigungspflicht
+  für `workflow.process_definition.import` aktiviert, ein echtes BPMN hochgeladen — lieferte `202` +
+  `pending_approval`, die Prozessfamilie existierte danach nachweislich noch nicht
+  (`GET /process-definitions?name=...` leer); nach echtem `POST .../approve` gegen den laufenden
+  `permission-service` wurde die Definition innerhalb weniger Sekunden vom neuen Konsumenten tatsächlich
+  angelegt (`bpmn_process_id` korrekt aus dem BPMN extrahiert) — bestätigt den vollständigen
+  Anfrage→Genehmigung→Konsum-Kreislauf gegen echte, unabhängig laufende Container.
+- Doku: neues [ADR 0087](docs/adr/0087-bpmn-import-review-gate.md), `docs/services/workflow-service.md`
+  (API-Tabelle, neue "BPMN-Import-Review-Gate"-Sektion, Tests-Sektion, "Offene Punkte" als behoben
+  markiert), `docs/services/process-designer.md` (neues Verhalten beim Speichern, Tests-Sektion)
+  ergänzt.
+- **Phase 21 (Sicherheitshärtung) damit vollständig abgeschlossen.**
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

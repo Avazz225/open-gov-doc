@@ -49,6 +49,12 @@ class Settings(BaseServiceSettings):
     # Vermittlungsstelle). TTL-Cache-Client, Vorbild `permission_client.py`.
     license_status_cache_ttl_seconds: float = 15.0
 
+    # BPMN-Import-Review-Gate (4.3, Post-Roadmap Phase 21 Session 4, ADR 0087):
+    # Subjects, auf die der reine Konsument (kein eigener Stream, siehe
+    # `consumer.py`) lauscht, um einen per Vier-Augen-Prinzip zurückgestellten
+    # `workflow.process_definition.import` nach Genehmigung anzuwenden.
+    approval_subjects: list[str] = ["permission.approval.approved"]
+
     # Connector-Service-Tasks (7.1 "Auslösen eines Connector-Aufrufs", P12-S2):
     # Timeout für den synchronen HTTP-Aufruf einer `taskType=connector_call`-
     # `serviceUrl`. Grosszügig bemessen (nicht wie ein normaler Web-Request), da

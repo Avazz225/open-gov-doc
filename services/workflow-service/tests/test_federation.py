@@ -298,6 +298,15 @@ async def test_list_ready_tasks_excludes_federated_tasks(client, admin_headers):
 async def test_dispatch_records_delivery_failed_for_unreachable_target(
     client, admin_headers, session
 ):
+    """Seit Post-Roadmap Phase 20 Session 5 (ADR 0081) markiert der Hub einen
+    EINZELNEN Zustellfehlschlag nicht mehr sofort als terminales
+    `delivery_failed`, sondern als retry-fähiges `pending_retry` (erst nach
+    Erschöpfung von `max_handover_delivery_attempts` wird es terminal) -
+    `workflow-service`s `federation_task.status` übernimmt `handover["status"]`
+    unverändert (`repository.update_federation_task_status`,
+    `main.py`s `create_federation_task`-Aufrufer), daher hier ebenfalls
+    `pending_retry` statt des ursprünglich (vor ADR 0081) erwarteten
+    `delivery_failed`."""
     target_payload, _ = await _register_throwaway_installation()
 
     bpmn = _federated_task_bpmn(
@@ -320,11 +329,11 @@ async def test_dispatch_records_delivery_failed_for_unreachable_target(
     federation_task = await repository.get_federation_task_by_task(session, instance_id, task_id)
     assert federation_task is not None
     assert federation_task.direction == "outbound"
-    assert federation_task.status == "delivery_failed"
+    assert federation_task.status == "pending_retry"
 
     async with httpx.AsyncClient(base_url=FEDERATION_HUB_SERVICE_URL) as hub:
         handover = (await hub.get(f"/handovers/{federation_task.handover_id}")).json()
-    assert handover["status"] == "delivery_failed"
+    assert handover["status"] == "pending_retry"
     assert handover["to_installation_id"] == target_payload["id"]
 
 

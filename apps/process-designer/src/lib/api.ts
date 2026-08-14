@@ -143,6 +143,24 @@ export interface ProcessDefinitionDetail extends ProcessDefinitionSummary {
   bpmn_xml: string;
 }
 
+// Post-Roadmap Phase 21 Session 4 (ADR 0087): `POST /process-definitions`
+// kann optional per Vier-Augen-Mechanismus gegated sein - der Erfolgsfall
+// (Default, keine Genehmigungspflicht konfiguriert) bleibt unverändert
+// `ProcessDefinitionSummary` mit `201`; ein `202` signalisiert stattdessen
+// diese neue, separate Form.
+export interface ProcessDefinitionImportPending {
+  status: "pending_approval";
+  approval_request_id: string;
+}
+
+export type CreateProcessDefinitionResult = ProcessDefinitionSummary | ProcessDefinitionImportPending;
+
+export function isPendingApproval(
+  result: CreateProcessDefinitionResult
+): result is ProcessDefinitionImportPending {
+  return "status" in result && result.status === "pending_approval";
+}
+
 export async function listProcessDefinitions(token: string): Promise<ProcessDefinitionSummary[]> {
   const response = await request("workflow-service", "process-definitions", {}, token);
   return response.json();
@@ -173,7 +191,7 @@ export async function getProcessDefinition(
 export async function createProcessDefinition(
   token: string,
   params: { name: string; bpmnXml: string; processId?: string }
-): Promise<ProcessDefinitionSummary> {
+): Promise<CreateProcessDefinitionResult> {
   const formData = new FormData();
   formData.set("name", params.name);
   if (params.processId) formData.set("process_id", params.processId);

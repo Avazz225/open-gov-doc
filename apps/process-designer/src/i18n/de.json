@@ -62,6 +62,7 @@
     "saveButton": "Speichern",
     "saving": "Speichere...",
     "saveSuccess": "Gespeichert als Version {version}.",
+    "savePendingApproval": "Zur Genehmigung eingereicht - ein zweiter Admin muss den Import bestätigen, bevor die Prozessdefinition aktiv wird.",
     "saveError": "Speichern fehlgeschlagen",
     "importError": "Import fehlgeschlagen - BPMN-Datei nicht lesbar",
     "loadError": "Prozessdefinition konnte nicht geladen werden"

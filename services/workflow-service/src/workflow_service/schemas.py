@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -16,6 +17,17 @@ class ProcessDefinitionOut(BaseModel):
 
 class ProcessDefinitionDetailOut(ProcessDefinitionOut):
     bpmn_xml: str
+
+
+class ProcessDefinitionImportResult(BaseModel):
+    """Wie `config_service.schemas.ImportActionResult`/`document_service`s
+    `ForceReleaseResult` - `POST /process-definitions` kann seit Post-Roadmap
+    Phase 21 Session 4 (ADR 0087) optional per generischem Vier-Augen-
+    Mechanismus gegated sein (`workflow.process_definition.import`)."""
+
+    status: Literal["applied", "pending_approval"]
+    result: ProcessDefinitionOut | None = None
+    approval_request_id: str | None = None
 
 
 class DmnDefinitionOut(BaseModel):

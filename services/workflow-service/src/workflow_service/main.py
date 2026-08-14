@@ -14,10 +14,12 @@ from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from workflow_service import federation_crypto, repository, spiff_adapter
+from workflow_service import consumer, federation_crypto, repository, spiff_adapter
+from workflow_service.approval_client import ApprovalClient
 from workflow_service.federation_client import FederationHubClient
 from workflow_service.license_client import LicenseStatusClient
 from workflow_service.models import Base, FederationConfig, FederationIdentity
@@ -31,6 +33,7 @@ from workflow_service.schemas import (
     FederationConfigOut,
     FederationConfigUpdate,
     ProcessDefinitionDetailOut,
+    ProcessDefinitionImportResult,
     ProcessDefinitionOut,
     ProcessInstanceCreate,
     ProcessInstanceOut,
@@ -90,6 +93,34 @@ def _handle_connector_task(extensions: dict[str, str], data: dict) -> dict:
 
 
 spiff_adapter.register_connector_task_handler(_handle_connector_task)
+
+
+async def _apply_approved_process_definition_import(
+    name: str, bpmn_xml: str, process_id: str | None
+) -> None:
+    """Wendet einen per Vier-Augen-Prinzip genehmigten BPMN-Import an
+    (Post-Roadmap Phase 21 Session 4, ADR 0087) - dieselbe `repository.
+    create_process_definition`, die auch der sofortige, ungegatete Pfad in
+    `create_process_definition` (Endpunkt) verwendet, hier nur mit einer
+    eigenen Session statt der Request-Session (kein HTTP-Request-Kontext im
+    Consumer, siehe `consumer.py`). BPMN-Validierung war bei der ursprünglichen
+    Anfrage bewusst zurückgestellt (wie `config_service._apply_config_document`
+    ihre Schema-Validierung auch erst hier vornimmt) - ein ungültiges BPMN
+    scheitert deshalb erst jetzt, nicht bereits beim Anlegen des
+    Freigabe-Requests."""
+    async with app.state.session_factory() as session:
+        try:
+            await repository.create_process_definition(
+                session, name=name, bpmn_xml=bpmn_xml, process_id=process_id
+            )
+        except repository.InvalidBpmnError:
+            logger.exception(
+                "Genehmigter BPMN-Import für Prozessfamilie %r ist ungültiges BPMN "
+                "(Validierung war bei der Anfrage bewusst zurückgestellt, siehe ADR 0087)",
+                name,
+            )
+            return
+        await session.commit()
 
 
 async def _sla_poll_loop(
@@ -309,6 +340,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
+    # BPMN-Import-Review-Gate (4.3, Post-Roadmap Phase 21 Session 4, ADR 0087):
+    app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
+    # Reiner Konsument, kein eigener Stream (`ensure_stream=False`) - anders
+    # als `event_bus` oben (workflow-service's eigener `"workflow"`-Stream)
+    # reagiert dieser zweite, separate Client nur auf permission-services
+    # bereits bestehendes `permission.approval.approved`-Event, gleiches
+    # Muster wie `config_service.main.lifespan`.
+    approval_consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
+    await approval_consumer_bus.connect()
+    app.state.approval_consumer_bus = approval_consumer_bus
+    await consumer.start_consuming(
+        approval_consumer_bus, settings.approval_subjects, _apply_approved_process_definition_import
+    )
+
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
@@ -332,6 +377,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if registration:
         await registration.stop()
     await event_bus.close()
+    await approval_consumer_bus.close()
+    await app.state.approval_client.close()
     await app.state.permission_client.close()
     await app.state.signature_client.close()
     await app.state.license_client.close()
@@ -617,13 +664,40 @@ async def create_process_definition(
     process_id: str | None = Form(None),
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
-) -> ProcessDefinitionOut:
+) -> ProcessDefinitionOut | JSONResponse:
+    """Seit Post-Roadmap Phase 21 Session 4 (ADR 0087) optional per
+    generischem Vier-Augen-Mechanismus gegated (`workflow.process_definition.
+    import`) - ein hochgeladenes BPMN-Dokument kann Script-Tasks/Connector-
+    Aufrufe enthalten (siehe `docs/services/workflow-service.md` "ein reales
+    Sicherheitsthema"), ein zweiter Admin kann das vor Aktivierung prüfen.
+    Per Default (keine Konfiguration) bleibt das Verhalten UNVERÄNDERT: sofortige
+    Anlage, `201` + `ProcessDefinitionOut` wie bisher - bewusst NICHT wie
+    `config_service`s `POST /config/import` (ADR 0060) IMMER in eine
+    Status-Hülle verpackt, da dieser Endpunkt (anders als dort) als
+    Test-/Setup-Infrastruktur in sehr vielen bestehenden Aufrufern
+    (Prozessdesigner, dutzende Tests) fest auf die unveränderte Erfolgs-Form
+    angewiesen ist - nur der neue, bisher nicht existierende
+    `pending_approval`-Fall bekommt eine eigene Form (`202` +
+    `ProcessDefinitionImportResult`), erkennbar am HTTP-Status."""
     await _require_object_config(x_dms_principal)
     xml_bytes = await bpmn_xml.read()
     try:
         xml_text = xml_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=422, detail="bpmn_xml ist kein gültiges UTF-8") from exc
+
+    if await app.state.approval_client.requires_approval("workflow.process_definition.import"):
+        request = await app.state.approval_client.create_request(
+            action_type="workflow.process_definition.import",
+            initiated_by=x_dms_principal,
+            payload={"name": name, "bpmn_xml": xml_text, "process_id": process_id},
+        )
+        pending = ProcessDefinitionImportResult(
+            status="pending_approval", approval_request_id=request["id"]
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED, content=pending.model_dump(mode="json")
+        )
 
     try:
         definition = await repository.create_process_definition(

@@ -9,6 +9,7 @@ import {
   ApiError,
   createProcessDefinition,
   getProcessDefinition,
+  isPendingApproval,
   listFederationInstallations,
 } from "@/lib/api";
 import type { FederationInstallationSummary } from "@/lib/api";
@@ -140,8 +141,16 @@ function DesignerPageInner() {
         name: name.trim(),
         bpmnXml: xml,
       });
-      setSaveSuccess(t("designer.saveSuccess", { version: saved.version }));
-      router.replace(`/designer/?id=${saved.id}`);
+      if (isPendingApproval(saved)) {
+        // Post-Roadmap Phase 21 Session 4 (ADR 0087): mit aktivierter
+        // Genehmigungspflicht existiert noch keine Prozessdefinition, auf
+        // die navigiert werden könnte - ein zweiter Admin muss den
+        // Freigabe-Request erst bestätigen.
+        setSaveSuccess(t("designer.savePendingApproval"));
+      } else {
+        setSaveSuccess(t("designer.saveSuccess", { version: saved.version }));
+        router.replace(`/designer/?id=${saved.id}`);
+      }
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : t("designer.saveError"));
     } finally {

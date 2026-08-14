@@ -42,7 +42,7 @@ TEST_DB="dms_test"
 # Container gerade laufend, ein Stoppen bricht sie (P17-S3-Fund: fälschlich
 # hinzugefügtes `config-service` ließ jeden `config-service`-Test mit
 # "Connection refused" fehlschlagen).
-CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service registry-service rendering-service reporting-service search-service)
+CONSUMER_SERVICES=(audit-service auth-service case-service document-service folder-service notification-service ocr-service permission-service query-service registry-service rendering-service reporting-service search-service workflow-service)
 
 BUILD=0
 RUN_RUFF=1

@@ -93,6 +93,42 @@ def test_create_and_get_process_definition(client, manual_task_bpmn, admin_heade
     assert "bpmn:definitions" in get_response.json()["bpmn_xml"]
 
 
+def test_create_process_definition_with_approval_required_defers_creation(
+    client, manual_task_bpmn, admin_headers
+):
+    """Post-Roadmap Phase 21 Session 4 (ADR 0087) - mit aktivierter
+    Genehmigungspflicht wird NICHT sofort angelegt, echte Integration gegen
+    den lokal laufenden permission-service (kein Mocking), gleiches Muster
+    wie config-service's `test_import_with_approval_required_defers_execution`.
+    Der Erfolgsfall (Default, keine Genehmigungspflicht konfiguriert) bleibt
+    unverändert `201` + `ProcessDefinitionOut` - siehe die zahlreichen
+    anderen Tests in dieser Datei, die `_upload_definition(...).json()["id"]`
+    unverändert weiterverwenden."""
+    httpx.put(
+        f"{PERMISSION_SERVICE_URL}/approval-config/workflow.process_definition.import",
+        json={"requires_approval": True},
+    )
+    try:
+        name = f"Approval-Pending-{uuid.uuid4().hex[:8]}"
+        response = _upload_definition(client, manual_task_bpmn, name=name, headers=admin_headers)
+        assert response.status_code == 202
+        body = response.json()
+        assert body["status"] == "pending_approval"
+        assert body["result"] is None
+        assert body["approval_request_id"] is not None
+
+        # Keine sofortige Anlage - die Prozessfamilie existiert (noch) nicht.
+        # Die tatsächliche Anwendung folgt asynchron über consumer.py, sobald
+        # das Approval-Event eintrifft (siehe test_consumer.py).
+        list_response = client.get("/process-definitions", params={"name": name})
+        assert list_response.json() == []
+    finally:
+        httpx.put(
+            f"{PERMISSION_SERVICE_URL}/approval-config/workflow.process_definition.import",
+            json={"requires_approval": False},
+        )
+
+
 def test_create_process_definition_with_existing_name_creates_next_version(
     client, manual_task_bpmn, admin_headers
 ):
