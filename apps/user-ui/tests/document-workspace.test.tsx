@@ -484,6 +484,68 @@ describe("DocumentWorkspace", () => {
     expect(within(previewPane).getByText("Version 2")).toBeInTheDocument();
   });
 
+  it("opens the same right-click context menu (delete/favorite) for a folder in the tree view (P23-S8)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Verträge", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    trashFolderMock.mockResolvedValue({ status: "trashed" });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Baum"));
+    const treeContainer = await screen.findByLabelText("Ordner-Baumansicht");
+    const folderRow = within(treeContainer).getByText(/Verträge/).closest("span.tree-row");
+    expect(folderRow).toBeTruthy();
+
+    fireEvent.contextMenu(folderRow!);
+    await user.click(await screen.findByText("Verträge löschen"));
+
+    await waitFor(() =>
+      expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1", "alice")
+    );
+  });
+
+  it("opens the right-click context menu for a document in the tree view and toggles a favorite (P23-S8)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listFavoritesMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "fav-1",
+        user_id: "alice",
+        object_type: "document",
+        object_id: "d1",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    addFavoriteMock.mockResolvedValue({});
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText("Baum"));
+    const treeContainer = await screen.findByLabelText("Ordner-Baumansicht");
+    const documentRow = within(treeContainer).getByText(/Rechnung\.pdf/).closest("span.tree-row");
+    expect(documentRow).toBeTruthy();
+
+    fireEvent.contextMenu(documentRow!);
+    await user.click(await screen.findByText('"Rechnung.pdf" zu Favoriten hinzufügen'));
+
+    await waitFor(() =>
+      expect(addFavoriteMock).toHaveBeenCalledWith("token-123", {
+        user_id: "alice",
+        object_type: "document",
+        object_id: "d1",
+      })
+    );
+    await waitFor(() => {
+      const button = within(treeContainer).getByText(/Rechnung\.pdf/).closest("button");
+      expect(button?.textContent).toContain("⭐");
+    });
+  });
+
   it("navigates into a subfolder and updates the breadcrumb", async () => {
     listChildFoldersMock.mockImplementation(async (_token: string, folderId: string) => {
       if (folderId === "root") {

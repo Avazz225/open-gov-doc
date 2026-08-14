@@ -618,6 +618,8 @@ export function ExplorerPane({
           onNavigateToFolder={onNavigateToFolder}
           onMoveFolder={onMoveFolder}
           favoriteKeys={favoriteKeys}
+          onFolderContextMenu={openFolderContextMenu}
+          onDocumentContextMenu={openDocumentContextMenu}
         />
       ) : isLoading ? (
         <p>{t("common.loading")}</p>

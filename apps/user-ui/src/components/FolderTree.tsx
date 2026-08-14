@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState, type DragEvent as ReactDragEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
@@ -36,6 +41,8 @@ export function FolderTree({
   onOpenDocument,
   onNavigateToFolder,
   onMoveFolder,
+  onFolderContextMenu,
+  onDocumentContextMenu,
 }: {
   token: string;
   rootLabel: string;
@@ -46,6 +53,14 @@ export function FolderTree({
   onOpenDocument: (doc: DocumentSummary) => void;
   onNavigateToFolder: (path: Folder[]) => void;
   onMoveFolder: (folderId: string, newParentId: string) => Promise<boolean>;
+  // Rechtsklick-Kontextmenü (P23-S8) - baut auf der bereits in ExplorerPane
+  // bestehenden Logik auf (Löschen/Favorisieren/Freigabelink), die dortige
+  // `ContextMenu`-Instanz + ihr `contextMenu`-State werden wiederverwendet
+  // (Klick-Koordinaten sind bildschirmrelativ, unabhängig davon, welche
+  // verschachtelte Komponente den Aufruf auslöst) - kein zweites Menü, keine
+  // Logik-Duplikation für Löschgenehmigung/Favoritenstatus/Freigabelink hier.
+  onFolderContextMenu: (event: ReactMouseEvent, folder: Folder) => void;
+  onDocumentContextMenu: (event: ReactMouseEvent, doc: DocumentSummary) => void;
 }) {
   const { t } = useI18n();
   const [childrenByParent, setChildrenByParent] = useState<Record<string, NodeChildren>>({});
@@ -198,6 +213,7 @@ export function FolderTree({
                 onDragOver={(e) => handleDragOver(e, folder.id, childPath)}
                 onDragLeave={() => setDragOverFolderId((prev) => (prev === folder.id ? null : prev))}
                 onDrop={(e) => handleDrop(e, folder.id, childPath)}
+                onContextMenu={(e) => onFolderContextMenu(e, folder)}
               >
                 <button
                   type="button"
@@ -222,7 +238,7 @@ export function FolderTree({
         })}
         {node.documents.map((doc) => (
           <li key={doc.id}>
-            <span className="tree-row">
+            <span className="tree-row" onContextMenu={(e) => onDocumentContextMenu(e, doc)}>
               <span className="tree-toggle-spacer" aria-hidden="true" />
               <button type="button" className="entry-name" onClick={() => onOpenDocument(doc)}>
                 {favoriteKeys.has(`document:${doc.id}`) && "⭐ "}
