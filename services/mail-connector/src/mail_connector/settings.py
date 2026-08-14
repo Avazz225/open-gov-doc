@@ -24,8 +24,12 @@ class Settings(BaseServiceSettings):
     object_type_service_base_url: str = "http://localhost:8007"
 
     # Austauschbares Abhol-Protokoll nach demselben Plugin-Prinzip wie die
-    # Storage-Backends/Virenscan-Engines (3.3/3.6/10.3) - aktuell nur "pop3"
-    # implementiert (siehe backends/pop3_backend.py).
+    # Storage-Backends/Virenscan-Engines (3.3/3.6/10.3) - "pop3" (Default) und
+    # seit P24-S3 "imap" implementiert (siehe backends/pop3_backend.py bzw.
+    # backends/imap_backend.py). Microsoft Graph (Exchange/O365) ist über
+    # dasselbe `MailboxBackend`-Interface vorbereitet, aber bewusst nicht
+    # Teil dieser Session (siehe docs/services/mail-connector.md "Offene
+    # Punkte").
     inbound_protocol: str = "pop3"
 
     # Entwicklungsstandard: der bereits vorhandene `mailpit`-Container dient
@@ -38,6 +42,20 @@ class Settings(BaseServiceSettings):
     pop3_username: str = "mailconnector"
     pop3_password: str = "mailconnector"
     pop3_use_tls: bool = False
+
+    # IMAP-Gegenstück (P24-S3) - `mailpit` (Stand v1.30.6, siehe
+    # `docker run axllent/mailpit --help`) bringt anders als beim POP3-Server
+    # KEINEN eigenen IMAP-Server mit, es gibt deshalb (noch) keinen
+    # Entwicklungsstandard-Selbst-Loopback für IMAP wie bei POP3 - Defaults
+    # hier sind reine Platzhalter für einen echten externen IMAP-Server.
+    # `imap_mailbox` ist IMAP-spezifisch (POP3 kennt keine benannten Ordner,
+    # dort wird stets das gesamte - flache - Postfach abgeholt).
+    imap_host: str = "localhost"
+    imap_port: int = 993
+    imap_username: str = "mailconnector"
+    imap_password: str = "mailconnector"
+    imap_use_tls: bool = True
+    imap_mailbox: str = "INBOX"
 
     # Postausgang (2.5, P15-S3) - eigener SMTP-Versand statt Wiederverwendung
     # von notification-service (dessen `POST /notifications` ist auf bereits

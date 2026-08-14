@@ -10,6 +10,10 @@ from mail_connector.main import _ingest_message, app
 
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+# "mailpit" (Docker-interner Hostname) löst vom Testlaufhost aus nicht auf -
+# gleiche Überschreibung wie `DMS_SMTP_HOST` in conftest.py, hier für den
+# direkten Zugriff auf mailpits eigene REST-API (Nachrichten-Verifikation).
+MAILPIT_URL = os.environ.get("TEST_MAILPIT_URL", "http://localhost:8025")
 
 ADMIN_HEADERS = {"X-DMS-Principal": "poststelle-1", "X-DMS-Roles": "dms-poststelle"}
 
@@ -324,3 +328,81 @@ def test_send_outbound_and_list(client):
     listed = client.get("/outbound", headers=ADMIN_HEADERS)
     assert listed.status_code == 200
     assert any(m["to_address"] == "extern@example.com" for m in listed.json())
+
+
+def _upload_test_document(*, filename: str, content_type: str, data: bytes) -> str:
+    response = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        data={"title": "Anhang-Testdokument", "created_by": "alice"},
+        files={"file": (filename, data, content_type)},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def _find_mailpit_message_by_subject(subject: str) -> dict:
+    response = httpx.get(f"{MAILPIT_URL}/api/v1/search", params={"query": subject}, timeout=30.0)
+    response.raise_for_status()
+    [summary] = response.json()["messages"]
+    detail = httpx.get(f"{MAILPIT_URL}/api/v1/message/{summary['ID']}", timeout=30.0)
+    detail.raise_for_status()
+    return detail.json()
+
+
+def test_send_outbound_with_related_document_attaches_file(client):
+    filename = f"anhang-{uuid.uuid4().hex[:8]}.txt"
+    content = b"Inhalt des verknuepften Dokuments fuer den Postausgang-Anhang-Test."
+    document_id = _upload_test_document(filename=filename, content_type="text/plain", data=content)
+    subject = f"Antwort mit Anhang {uuid.uuid4().hex[:8]}"
+
+    try:
+        response = client.post(
+            "/outbound",
+            json={
+                "to_address": "extern@example.com",
+                "subject": subject,
+                "body": "Anbei das angeforderte Dokument.",
+                "related_document_id": document_id,
+            },
+            headers=ADMIN_HEADERS,
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["status"] == "sent"
+        assert body["related_document_id"] == document_id
+
+        message = _find_mailpit_message_by_subject(subject)
+        [attachment] = message["Attachments"]
+        assert attachment["FileName"] == filename
+        assert attachment["ContentType"] == "text/plain"
+        assert attachment["Size"] == len(content)
+
+        part = httpx.get(
+            f"{MAILPIT_URL}/api/v1/message/{message['ID']}/part/{attachment['PartID']}",
+            timeout=30.0,
+        )
+        part.raise_for_status()
+        assert part.content == content
+    finally:
+        httpx.delete(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}", timeout=30.0)
+
+
+def test_send_outbound_with_unknown_related_document_returns_400(client):
+    response = client.post(
+        "/outbound",
+        json={
+            "to_address": "extern@example.com",
+            "subject": "Sollte nicht versendet werden",
+            "body": "Hallo",
+            "related_document_id": "does-not-exist",
+        },
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 400
+    # Kein Datensatz angelegt (Eingabefehler VOR dem Versandversuch geprüft,
+    # siehe `_attach_related_document`s Aufrufstelle in `send_outbound`).
+    listed = client.get("/outbound", headers=ADMIN_HEADERS)
+    assert not any(m["subject"] == "Sollte nicht versendet werden" for m in listed.json())

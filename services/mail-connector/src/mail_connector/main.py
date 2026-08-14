@@ -505,6 +505,35 @@ async def reject_message(
     return await _to_message_out(session, message)
 
 
+async def _attach_related_document(message: EmailMessage, document_id: str) -> None:
+    """Hängt den aktuellen Inhalt eines bereits im DMS liegenden Dokuments an
+    eine Postausgang-Nachricht an (2.5) - das anhang-seitige Gegenstück zu
+    `_create_documents_for_message`s Posteingang-Pfad (dort: Anhang -> neues
+    Dokument; hier: bestehendes Dokument -> Anhang). Unbekannte
+    `related_document_id` ist ein Eingabefehler des Aufrufers (400, siehe
+    Aufrufstelle in `send_outbound`), ein im Storage Service fehlender
+    Inhalt (z. B. bereits ausgesondert) ein 404 - gleiche Unterscheidung wie
+    `_create_documents_for_message`."""
+    version = await app.state.documents.get_current_version(document_id)
+    if version is None:
+        raise HTTPException(
+            status_code=400, detail=f"related_document_id {document_id!r} unbekannt"
+        )
+    try:
+        data = await app.state.storage.download(version["storage_object_key"])
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Inhalt des verknüpften Dokuments {document_id!r} nicht (mehr) im "
+            "Storage Service vorhanden",
+        ) from exc
+    content_type = version["content_type"] or "application/octet-stream"
+    maintype, _, subtype = content_type.partition("/")
+    if not subtype:
+        maintype, subtype = "application", "octet-stream"
+    message.add_attachment(data, maintype=maintype, subtype=subtype, filename=version["filename"])
+
+
 @app.post("/outbound", response_model=OutboundMessageOut, status_code=status.HTTP_201_CREATED)
 async def send_outbound(
     payload: OutboundMessageCreate,
@@ -518,6 +547,15 @@ async def send_outbound(
     message["To"] = payload.to_address
     message["Subject"] = payload.subject
     message.set_content(payload.body)
+
+    # Anhang aus einem bereits im DMS liegenden Dokument (2.5) - VOR dem
+    # eigentlichen Versandversuch aufgelöst, nicht in dessen try/except
+    # eingeschlossen: eine unbekannte `related_document_id` ist ein
+    # Eingabefehler des Aufrufers (400), keine Versand-Fehlschlagsituation
+    # wie ein nicht erreichbarer SMTP-Server - gleiches Prinzip wie
+    # `assign_manually`s Vorab-Prüfung einer unbekannten `case_id`.
+    if payload.related_document_id is not None:
+        await _attach_related_document(message, payload.related_document_id)
 
     error_message = None
     send_status = "sent"

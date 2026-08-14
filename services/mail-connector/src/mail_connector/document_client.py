@@ -41,6 +41,24 @@ class DocumentClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_current_version(self, document_id: str) -> dict | None:
+        """Liefert die Datei-Metadaten (`filename`/`content_type`/
+        `storage_object_key`) der aktuellen Version - `DocumentOut` selbst
+        trägt diese nicht, document-service versioniert Inhalte getrennt vom
+        Dokument-Datensatz (`DocumentVersionOut`, siehe dortiges
+        `schemas.py`). Genutzt vom Postausgang-Anhang-Pfad (P24-S3,
+        `main.py`s `_attach_related_document`)."""
+        document = await self.get(document_id)
+        if document is None:
+            return None
+        response = await self._client.get(
+            f"/documents/{document_id}/versions/{document['current_version_number']}"
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
     async def lookup_by_kennzeichen(self, value: str) -> list[dict]:
         response = await self._client.get("/documents/by-kennzeichen", params={"value": value})
         response.raise_for_status()
