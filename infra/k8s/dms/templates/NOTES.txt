@@ -1,0 +1,23 @@
+DMS-Chart "{{ .Chart.Name }}" ({{ .Chart.Version }}) als Release "{{ .Release.Name }}" in Namespace "{{ .Release.Namespace }}" gerendert/installiert.
+
+Aktive Services (services.<name>.enabled=true in values.yaml):
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+  - {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }} (Port 8000{{ if and $svc.autoscaling $svc.autoscaling.enabled }}, HPA {{ $svc.autoscaling.minReplicas }}-{{ $svc.autoscaling.maxReplicas }} Replicas{{ end }}{{ if and $svc.podDisruptionBudget $svc.podDisruptionBudget.enabled }}, PDB minAvailable={{ $svc.podDisruptionBudget.minAvailable }}{{ end }})
+{{- end }}
+{{- end }}
+
+Zustandsbehaftete Infrastruktur:
+  - postgresql: {{ if .Values.postgresql.enabled }}bundled (Chart-intern, P26-S3){{ else }}external ({{ .Values.postgresql.external.host }}:{{ .Values.postgresql.external.port }}){{ end }}
+  - keycloak:   {{ if .Values.keycloak.enabled }}bundled (Chart-intern, P26-S3){{ else }}external ({{ .Values.keycloak.external.baseUrl }}){{ end }}
+  - minio:      {{ if .Values.minio.enabled }}bundled (Chart-intern, P26-S3){{ else }}external ({{ .Values.minio.external.endpoint }}){{ end }}
+  - nats / redis: bundled-only, kein external-Umschalter (siehe values.yaml)
+
+Hinweis: dieses Chart ist Stand P26-S1 (Phase 26, Session 1) nur das
+Grundgerüst mit 4 Beispiel-Services (registry-service, gateway-service,
+document-service, storage-service). Die übrigen ~28 Services aus
+infra/docker-compose.yml sowie die zustandsbehaftete Infrastruktur, das
+Storage-Replikations-CronJob und die Frontend-Apps folgen in P26-S2..S5.
+Kein reales Cluster-Deployment in dieser Phase erforderlich (siehe
+IMPLEMENTATION_PLAN.md Phase 26) — Verifikation über `helm lint` /
+`helm template`.

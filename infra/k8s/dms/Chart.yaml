@@ -1,0 +1,17 @@
+apiVersion: v2
+name: dms
+description: >-
+  DMS (Document Management System) — ein einziges, werte-getriebenes Helm-Chart für
+  alle Container aus infra/docker-compose.yml (Phase 26, ADR siehe docs/adr/).
+  Eine services:-Map in values.yaml plus generische Deployment-/Service-/HPA-/PDB-
+  Templates statt 34+ separater, fast identischer Charts.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - dms
+  - document-management
+home: https://github.com/
+sources: []
+maintainers:
+  - name: DMS-Projekt

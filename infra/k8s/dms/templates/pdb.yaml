@@ -1,0 +1,21 @@
+{{/*
+Ein PodDisruptionBudget je Eintrag in .Values.services mit enabled=true UND
+podDisruptionBudget.enabled=true. Konvention: minAvailable (nicht
+maxUnavailable) — konsistent über alle Services hinweg, siehe values.yaml.
+*/}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.podDisruptionBudget $svc.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  minAvailable: {{ $svc.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+{{- end }}
+{{- end }}

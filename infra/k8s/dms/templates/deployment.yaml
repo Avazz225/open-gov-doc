@@ -1,0 +1,58 @@
+{{/*
+Ein Deployment je Eintrag in .Values.services mit enabled=true.
+Generisches Template — NEUE Services brauchen KEIN neues Template, nur einen
+neuen Map-Eintrag in values.yaml (siehe Kommentar dort).
+*/}}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dms.serviceSelectorLabels" (dict "root" $ "name" $name) | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: {{ printf "%s%s:%s" $.Values.global.image.registry $svc.image.repository $svc.image.tag | quote }}
+          imagePullPolicy: {{ $.Values.global.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          env:
+            {{- include "dms.baseEnv" (dict "root" $ "name" $name) | nindent 12 }}
+            {{- if $svc.dependsOnServices }}
+            {{- include "dms.dependsOnServicesEnv" (dict "root" $ "deps" $svc.dependsOnServices) | nindent 12 }}
+            {{- end }}
+            {{- if $svc.usesKeycloak }}
+            - name: DMS_KEYCLOAK_BASE_URL
+              value: {{ include "dms.keycloakBaseUrl" $ | quote }}
+            {{- end }}
+            {{- if $svc.storageTargetsEnv }}
+            {{- include "dms.storageServiceTargetsEnv" $ | nindent 12 }}
+            {{- end }}
+            {{- range $key, $value := $svc.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- $resources := mergeOverwrite (deepCopy $.Values.resources.baseline) (default dict $svc.resources) }}
+          resources:
+            requests:
+              memory: {{ $resources.memory.requests | quote }}
+              cpu: {{ $resources.cpu.requests | quote }}
+            limits:
+              memory: {{ $resources.memory.limits | quote }}
+              cpu: {{ $resources.cpu.limits | quote }}
+{{- end }}
+{{- end }}

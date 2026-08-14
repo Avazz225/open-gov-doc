@@ -1,0 +1,282 @@
+# values.yaml — DMS Helm-Chart (Phase 26, P26-S1)
+#
+# EIN Chart für alle Container aus infra/docker-compose.yml. Statt eines
+# Templates pro Service (34+ fast identische Kopien) iterieren die
+# generischen Templates unter templates/ über die `services:`-Map unten
+# (siehe ADR — Dateiname siehe docs/adr/, "one chart, values-driven service
+# map"). Neue Services werden hinzugefügt, indem hier ein neuer Eintrag unter
+# `services:` erscheint — nie durch ein neues Template.
+#
+# Diese Session (P26-S1) baut nur das Grundgerüst + 4 reale Beispiel-Einträge
+# (registry-service, gateway-service, document-service, storage-service) zum
+# Beweis, dass die Templates echt rendern. Die übrigen ~28 Services aus
+# infra/docker-compose.yml folgen in P26-S2 (zustandslose FastAPI-Services)
+# nach demselben Muster — einfach weitere `services.<name>:`-Blöcke ergänzen.
+
+global:
+  # Installationsweite Identität (Konzept 3a) — entspricht DMS_INSTALLATION_ID
+  # / DMS_INSTALLATION_DISPLAY_NAME in infra/docker-compose.yml, hier als
+  # Helm-Values statt Compose-.env.
+  installationId: local-dev
+  installationDisplayName: "DMS-Installation (Kubernetes)"
+  image:
+    # Optionales Registry-Prefix, z. B. "registry.example.com/" (mit
+    # trailing slash) — leer = services.<name>.image.repository wird
+    # unverändert verwendet. Getrennt von den einzelnen Repository-Pfaden
+    # gehalten, damit ein Registry-Wechsel nicht 34 Einträge anfasst.
+    registry: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# resources.baseline — Default-Requests/-Limits (harte Nutzeranforderung).
+# Jeder services.<name> ohne eigenen `resources:`-Block fällt hierauf zurück;
+# ein Service, der `resources:` (auch nur teilweise) angibt, überschreibt nur
+# die angegebenen Felder (Deep-Merge via `mergeOverwrite` in
+# templates/_helpers.tpl, siehe dort `dms.mergedResources`).
+# ---------------------------------------------------------------------------
+resources:
+  baseline:
+    memory:
+      requests: 128Mi
+      limits: 256Mi
+    cpu:
+      requests: 100m
+      limits: 500m
+
+# ---------------------------------------------------------------------------
+# services — eine Map, ein Eintrag je Container. Shape ist für ALLE Services
+# identisch (auch die, die P26-S2 noch ergänzt) — das ist der ganze Punkt
+# dieser Architektur.
+#
+# Erwartete Felder je Eintrag:
+#   enabled                    - bool, false = Deployment/Service werden nicht gerendert
+#   image.repository / .tag    - Container-Image
+#   port                       - Container-Port (siehe infra/docker-compose.yml,
+#                                 bei den FastAPI-Services intern immer 8000)
+#   replicas                   - Start-Replicas (bei autoscaling.enabled i.d.R. == minReplicas)
+#   resources                  - optional, selektiver Override von resources.baseline
+#                                 (Shape: {memory: {requests, limits}, cpu: {requests, limits}})
+#   autoscaling                - HPA-Konfiguration, siehe templates/hpa.yaml
+#   podDisruptionBudget        - PDB-Konfiguration, siehe templates/pdb.yaml
+#   dependsOnServices          - optional, Liste anderer services.<name>-Keys; für jeden
+#                                 Eintrag wird automatisch ein
+#                                 DMS_<NAME>_BASE_URL=http://<fullname>-<name>:8000 Env-Var
+#                                 gesetzt (Pendant zu den Compose DMS_*_SERVICE_BASE_URL-
+#                                 Zeilen) — spart es, jede Upstream-URL einzeln in `env:`
+#                                 zu tippen.
+#   usesKeycloak                - optional bool, injiziert DMS_KEYCLOAK_BASE_URL (siehe
+#                                 dms.keycloakBaseUrl-Helper, respektiert keycloak.enabled/
+#                                 external unten)
+#   storageTargetsEnv          - optional bool, NUR für storage-service: injiziert
+#                                 DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT aus dem
+#                                 storageService:-Block unten (siehe dort)
+#   env                        - Map zusätzlicher/überschreibender Env-Vars (roher Wert,
+#                                 kein Templating — für Werte, die keine berechnete
+#                                 Service-URL sind)
+# ---------------------------------------------------------------------------
+services:
+  # --- Beispiel 1: einfacher Service, reiner resources.baseline-Fallback ---
+  registry-service:
+    enabled: true
+    image:
+      repository: dms/registry-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~276 (Container-Port, Host-Mapping ist 8001)
+    replicas: 1
+    # kein eigener resources-Block -> komplett resources.baseline (Verifikationsfall
+    # "ein Service nutzt reinen Baseline-Fallback", siehe PROGRESS/Report)
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    env: {}
+
+  # --- Beispiel 2: "public route"-Charakter (vom Gateway nach außen erreichbar),
+  # mehrere Replicas -> PDB sinnvoll und hier aktiv geschaltet, um
+  # templates/pdb.yaml in dieser Session tatsächlich zu rendern. ---
+  gateway-service:
+    enabled: true
+    image:
+      repository: dms/gateway-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~1437 (Host-Mapping 8009)
+    replicas: 2
+    resources:
+      # selektiver Override: nur cpu, memory bleibt beim resources.baseline-Fallback
+      # (Verifikationsfall "ein Service überschreibt selektiv")
+      cpu:
+        requests: 200m
+        limits: 750m
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+    podDisruptionBudget:
+      enabled: true # aktiv in dieser Session, um templates/pdb.yaml zu exercisen
+      minAvailable: 1
+    usesKeycloak: true
+    env:
+      DMS_KEYCLOAK_CLIENT_ID: "dms-api"
+      # Reale OCP-Route (Ingress-Äquivalent) für den öffentlichen Zugriff auf
+      # gateway-service folgt in P26-S2/S5 zusammen mit den Frontend-Apps
+      # (braucht deren finale Hostnamen) — hier bewusst noch nicht gebaut.
+      DMS_CORS_ALLOWED_ORIGINS: '["http://localhost:3000"]'
+
+  # --- Beispiel 3: mehrere Upstream-Abhängigkeiten (dependsOnServices),
+  # Autoscaling aktiv -> exercised templates/hpa.yaml in dieser Session, plus
+  # PDB aktiv (zweiter Beleg neben gateway-service). ---
+  document-service:
+    enabled: true
+    image:
+      repository: dms/document-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~481 (Host-Mapping 8006)
+    replicas: 2
+    resources:
+      # vollständiger Override beider Achsen (dritter Verifikationsfall)
+      memory:
+        requests: 256Mi
+        limits: 512Mi
+      cpu:
+        requests: 150m
+        limits: 600m
+    autoscaling:
+      enabled: true # aktiv in dieser Session, um templates/hpa.yaml zu exercisen
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 75
+      targetMemoryUtilizationPercentage: 80
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    dependsOnServices:
+      - storage-service
+      - folder-service
+      - object-type-service
+    env: {}
+
+  # --- Beispiel 4: storage-service — belegt storageService.targets (unten)
+  # via DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT, siehe
+  # storageTargetsEnv-Flag und dms.storageServiceTargetsEnv in _helpers.tpl.
+  # Zweiter reiner Baseline-Fallback-Fall (kein eigener resources-Block). ---
+  storage-service:
+    enabled: true
+    image:
+      repository: dms/storage-service
+      tag: latest
+    port: 8000 # siehe infra/docker-compose.yml Zeile ~433 (Host-Mapping 8005)
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    storageTargetsEnv: true
+    env:
+      DMS_GOVERNANCE_BYPASS_ROLE: "dms-admin"
+
+  # Die übrigen ~28 Container aus infra/docker-compose.yml (audit-service,
+  # auth-service, permission-service, virus-scan-service, rendering-service,
+  # ocr-service, search-service, workflow-service, notification-service,
+  # case-service, signature-service, federation-hub-service, favorite-service,
+  # reporting-service, archival-service, query-service, license-service,
+  # plugin-orchestration-service, monitoring-service, webdav-connector,
+  # cmis-connector, mail-connector, migration-service, config-service,
+  # fleet-management-service, teamspace-service, object-type-service,
+  # folder-service, ...) folgen in P26-S2 als weitere Einträge nach exakt
+  # diesem Muster — KEIN neues Template nötig, nur ein neuer Map-Eintrag.
+
+# ---------------------------------------------------------------------------
+# Zustandsbehaftete Infrastruktur: postgresql / keycloak / minio (NUR diese
+# drei, explizite Nutzervorgabe) bekommen einen enabled/external-Umschalter,
+# damit eine Installation wahlweise die im Chart gebündelte Instanz nutzt
+# ODER auf eine bereits vorhandene externe Instanz zeigt (z. B. verwaltete
+# RDS-Postgres, zentrales Keycloak, externes S3/MinIO). NATS und Redis bleiben
+# bewusst bundled-only OHNE diesen Umschalter (explizite Nutzerentscheidung,
+# siehe ADR) — für sie unten nur Verbindungsdaten der gebündelten Instanz.
+#
+# WICHTIG für P26-S3: dies ist bislang nur die values.yaml-Formstruktur plus
+# die davon abgeleiteten Connection-Helper in templates/_helpers.tpl
+# (dms.postgresDsn / dms.keycloakBaseUrl). Die tatsächlichen Postgres-/
+# Keycloak-/MinIO-Deployment+PVC-Manifeste selbst baut P26-S3 noch — wenn
+# enabled=true, müssen deren Ressourcennamen exakt "<fullname>-postgresql" /
+# "<fullname>-keycloak" / "<fullname>-minio" lauten, damit die Helper hier
+# ohne Änderung weiter funktionieren.
+# ---------------------------------------------------------------------------
+postgresql:
+  enabled: true
+  auth:
+    # Dev-Defaults analog infra/docker-compose.yml (POSTGRES_USER/_PASSWORD/_DB).
+    # Klartext-Passwort hier ist ein bewusster, dokumentierter v1-Kompromiss
+    # (Parität zum Compose-Dev-Setup) — P26-S3 sollte das echte Deployment auf
+    # ein Kubernetes-Secret umstellen, statt das Passwort weiter als Plain-Value
+    # durchzureichen.
+    username: dms
+    password: dms_dev_only
+    database: dms
+  external:
+    host: ""
+    port: 5432
+    database: ""
+    username: ""
+    # Passwort bewusst NICHT hier — bei enabled=false per eigenem
+    # Secret-Verweis lösen (P26-S3), nicht als Klartext-Value.
+
+keycloak:
+  enabled: true
+  external:
+    baseUrl: ""
+    realm: "dms"
+
+minio:
+  enabled: true
+  external:
+    endpoint: ""
+    bucket: ""
+    # Zugangsdaten analog Postgres bewusst nicht hier — Secret-Verweis (P26-S3).
+
+# Bundled-only, kein enabled/external-Escape-Hatch (siehe oben).
+nats:
+  port: 4222
+redis:
+  port: 6379
+
+# ---------------------------------------------------------------------------
+# storageService.targets — natives YAML-Äquivalent zu STORAGE_SERVICE_TARGETS
+# (siehe services/storage-service/src/storage_service/settings.py,
+# BackendTargetConfig) statt eines einzelnen JSON-Freitext-Strings. Feldnamen
+# sind 1:1 aus BackendTargetConfig übernommen. Wird vom generischen
+# Deployment-Template (nur für Services mit `storageTargetsEnv: true`, siehe
+# storage-service oben) zur Laufzeit per `toJson` in die vom Service
+# tatsächlich gelesene Umgebungsvariable serialisiert.
+#
+# WICHTIG (Abweichung vom Session-Briefing): die vom Service gelesene
+# Variable heißt `DMS_TARGETS`, NICHT `STORAGE_SERVICE_TARGETS` —
+# `STORAGE_SERVICE_TARGETS` ist nur der Name der HOST-seitigen
+# Compose-.env-Variable, die den Wert von DMS_TARGETS befüllt (siehe
+# `DMS_TARGETS: ${STORAGE_SERVICE_TARGETS:-...}` in infra/docker-compose.yml).
+# `Settings` nutzt env_prefix "DMS_" + Feldname `targets` -> `DMS_TARGETS` ist
+# der einzige Name, den storage-service im Container tatsächlich liest.
+# ---------------------------------------------------------------------------
+storageService:
+  targets:
+    - id: primary-local
+      type: local
+      base_path: /data/storage
+    - id: secondary-s3
+      type: s3
+      endpoint_url: http://minio:9000
+      access_key: dms_minio
+      secret_key: dms_minio_dev_only
+      bucket: dms-storage
+      region: us-east-1
+  writeStrategy: primary_async
+  quorumCount: 1
