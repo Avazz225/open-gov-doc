@@ -215,6 +215,83 @@ def test_delete_process_definition_without_instances_succeeds(
     assert client.get(f"/process-definitions/{definition_id}").status_code == 404
 
 
+def test_restore_process_definition_without_permission_is_forbidden(
+    client, manual_task_bpmn, admin_headers
+):
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="Approval", headers=admin_headers
+    ).json()["id"]
+
+    response = client.post(f"/process-definitions/{definition_id}/restore", headers={})
+
+    assert response.status_code == 403
+
+
+def test_restore_unknown_process_definition_returns_404(client, admin_headers):
+    response = client.post("/process-definitions/999999/restore", headers=admin_headers)
+    assert response.status_code == 404
+
+
+def test_restore_process_definition_creates_next_version_with_matching_content(
+    client, manual_task_bpmn, admin_headers
+):
+    """Rollback (P25-S2): restore aus einer älteren Version legt eine
+    BRANDNEUE, nächste Version derselben Familie mit exakt deren Inhalt an -
+    append-only, kein In-Place-Edit. Version 2 (ein zweiter regulärer Upload
+    "dazwischen") bleibt unverändert bestehen, Version 3 (das Restore-
+    Ergebnis) hat wieder exakt den `bpmn_xml`/`bpmn_process_id`-Inhalt von
+    Version 1."""
+    name = f"Restore-{uuid.uuid4().hex[:8]}"
+    v1 = _upload_definition(client, manual_task_bpmn, name=name, headers=admin_headers).json()
+    v1_detail = client.get(f"/process-definitions/{v1['id']}").json()
+
+    # Eine zweite, inhaltlich andere Version "dazwischen" - stellt sicher,
+    # dass restore tatsächlich den Inhalt der ZIELVERSION (v1) zurückbringt,
+    # nicht einfach zufällig irgendeine ältere/neuere Version trifft.
+    modified_bpmn = manual_task_bpmn.replace(
+        'id="manual" name="manual"', 'id="manual" name="manual-geaendert"'
+    )
+    assert modified_bpmn != manual_task_bpmn
+    v2 = _upload_definition(client, modified_bpmn, name=name, headers=admin_headers).json()
+    assert v2["version"] == 2
+
+    restore_response = client.post(
+        f"/process-definitions/{v1['id']}/restore", headers=admin_headers
+    )
+    assert restore_response.status_code == 201
+    v3 = restore_response.json()
+    assert v3["version"] == 3
+    assert v3["name"] == name
+    assert v3["bpmn_process_id"] == v1_detail["bpmn_process_id"]
+    assert v3["id"] != v1["id"]
+
+    v3_detail = client.get(f"/process-definitions/{v3['id']}").json()
+    assert v3_detail["bpmn_xml"] == v1_detail["bpmn_xml"]
+
+    # Die Zwischenversion (v2) und die Ursprungsversion (v1) bleiben dabei
+    # unverändert abrufbar - kein Überschreiben.
+    history = client.get("/process-definitions", params={"name": name}).json()
+    assert [d["version"] for d in history] == [3, 2, 1]
+
+
+def test_restore_from_already_latest_version_creates_redundant_version(
+    client, manual_task_bpmn, admin_headers
+):
+    """Bewusste Design-Entscheidung (P25-S2): ein Restore aus der bereits
+    aktuellsten Version ist KEIN Sonderfall/No-Op - append-only wie jeder
+    andere Aufruf, legt einfach eine weitere, inhaltlich identische Version
+    an."""
+    name = f"Restore-Latest-{uuid.uuid4().hex[:8]}"
+    v1 = _upload_definition(client, manual_task_bpmn, name=name, headers=admin_headers).json()
+
+    restore_response = client.post(
+        f"/process-definitions/{v1['id']}/restore", headers=admin_headers
+    )
+
+    assert restore_response.status_code == 201
+    assert restore_response.json()["version"] == 2
+
+
 def test_create_dmn_definition_without_permission_is_forbidden(client, approval_level_dmn):
     response = _upload_dmn(client, approval_level_dmn, name="Freigabestufe", headers={})
     assert response.status_code == 403

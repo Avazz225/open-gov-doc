@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from dms_db_base import make_session_factory
 from workflow_service import repository, spiff_adapter
 
 
@@ -26,6 +27,55 @@ async def test_create_process_definition_with_existing_name_creates_next_version
     assert first.version == 1
     assert second.version == 2
     assert first.id != second.id
+
+
+async def test_create_process_definition_concurrent_uploads_get_distinct_versions(
+    engine, manual_task_bpmn
+):
+    """P25-S1 (ADR 0096): reproduziert die Race Condition tatsächlich - jeder
+    Aufruf läuft in seiner EIGENEN `AsyncSession`/DB-Transaktion (eine einzelne
+    `AsyncSession` ist nicht nebenläufig verwendbar, siehe `session`-Fixture in
+    `conftest.py`, die deshalb hier bewusst NICHT verwendet wird), alle fünf
+    starten unter demselben, brandneuen `name` via `asyncio.gather` echt
+    gleichzeitig. Fünf statt zwei parallele Aufrufe, um die Serialisierung über
+    mehr als ein Kollisionspaar zu stressen. Vor P25-S1 hätte das je nach
+    Timing eine `IntegrityError` (`UniqueConstraint` auf `(name, version)`)
+    geworfen - der Advisory-Lock in `create_process_definition` serialisiert
+    die Versionsvergabe stattdessen, ohne dass der Aufrufer selbst etwas
+    retryen müsste."""
+    factory = make_session_factory(engine)
+
+    async def _create() -> int:
+        async with factory() as own_session:
+            definition = await repository.create_process_definition(
+                own_session, name="Konkurrenz", bpmn_xml=manual_task_bpmn, process_id=None
+            )
+            await own_session.commit()
+            return definition.version
+
+    versions = await asyncio.gather(*[_create() for _ in range(5)])
+    assert sorted(versions) == [1, 2, 3, 4, 5]
+
+
+async def test_create_dmn_definition_concurrent_uploads_get_distinct_versions(
+    engine, approval_level_dmn
+):
+    """Wie `test_create_process_definition_concurrent_uploads_get_distinct_versions`,
+    aber für `create_dmn_definition` (P25-S1, ADR 0096) - identische Race
+    Condition, identischer Fix (eigener Advisory-Lock-Namespace, siehe
+    `repository._DMN_DEFINITION_LOCK_NAMESPACE`)."""
+    factory = make_session_factory(engine)
+
+    async def _create() -> int:
+        async with factory() as own_session:
+            definition = await repository.create_dmn_definition(
+                own_session, name="Konkurrenz-DMN", dmn_xml=approval_level_dmn
+            )
+            await own_session.commit()
+            return definition.version
+
+    versions = await asyncio.gather(*[_create() for _ in range(5)])
+    assert sorted(versions) == [1, 2, 3, 4, 5]
 
 
 async def test_create_process_definition_invalid_bpmn_raises(session):

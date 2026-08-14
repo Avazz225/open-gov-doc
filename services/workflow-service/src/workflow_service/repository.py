@@ -77,6 +77,16 @@ class InstanceNotRunningError(Exception):
     nichts zum Wiederholen."""
 
 
+# Postgres-Advisory-Lock-Namespaces (P25-S1, ADR 0096) für `create_process_definition`/
+# `create_dmn_definition` - zwei feste `key1`-Werte für die Zwei-Integer-Variante von
+# `pg_advisory_xact_lock(key1, key2)`, damit eine Prozessdefinition und eine
+# DMN-Definition mit zufällig demselben `name` sich NICHT gegenseitig sperren (beide
+# Familien sind unabhängig versioniert, siehe `models.py`). `key2` ist jeweils
+# `hashtext(name)` - beliebig, aber deterministisch je Familienname.
+_PROCESS_DEFINITION_LOCK_NAMESPACE = 1
+_DMN_DEFINITION_LOCK_NAMESPACE = 2
+
+
 async def create_process_definition(
     session: AsyncSession, *, name: str, bpmn_xml: str, process_id: str | None
 ) -> ProcessDefinition:
@@ -84,7 +94,26 @@ async def create_process_definition(
     Versionierungsmuster, wie bei Dokumentversionen) - ein Aufruf unter einem
     bereits existierenden Namen legt automatisch die nächste Version an,
     statt abgelehnt zu werden. Frühere Versionen bleiben unverändert
-    abrufbar/startbar, kein Überschreiben."""
+    abrufbar/startbar, kein Überschreiben.
+
+    **P25-S1 (ADR 0096)**: vor dem Lesen von `max(version)` wird ein
+    transaktionsgebundener Postgres-Advisory-Lock auf `name` genommen
+    (`pg_advisory_xact_lock`), der beim COMMIT/ROLLBACK dieser Transaktion
+    automatisch wieder freigegeben wird. Anders als bei `object_type_service`s
+    `_next_sequence_number`/`case_service`s `_next_case_sequence_number` gibt es
+    hier KEINE separate, immer schon existierende Zähler-Zeile, die sich per
+    `SELECT ... FOR UPDATE` sperren ließe: für eine brandneue Familie (noch keine
+    einzige `ProcessDefinition`-Zeile mit diesem `name`) gäbe es unter Postgres'
+    Standard-Isolationsstufe (READ COMMITTED, kein Predicate Locking) schlicht
+    nichts, was `SELECT ... FOR UPDATE` sperren könnte - zwei gleichzeitige
+    Erstanlagen derselben neuen Familie würden beide `next_version = 1` berechnen
+    und weiterhin an der `(name, version)`-Unique-Constraint scheitern. Der
+    Advisory-Lock sperrt stattdessen rein über den `name`-Hash, unabhängig vom
+    aktuellen Zeilenbestand, und deckt dadurch sowohl die Erstanlage als auch
+    nachfolgende Versionen ab."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(_PROCESS_DEFINITION_LOCK_NAMESPACE, func.hashtext(name)))
+    )
     max_version = await session.execute(
         select(func.max(ProcessDefinition.version)).where(ProcessDefinition.name == name)
     )
@@ -166,7 +195,15 @@ async def create_dmn_definition(session: AsyncSession, *, name: str, dmn_xml: st
     Familienschlüssel). Prüft zusätzlich, dass die extrahierte `decision_id` unter den
     jeweils neuesten Versionen ALLER Familien eindeutig ist (siehe
     `DuplicateDecisionIdError`) - eine ältere, nicht mehr aktuelle Version einer anderen
-    Familie darf dabei kollidieren, da `list_latest_dmn_xml` sie ohnehin nie lädt."""
+    Familie darf dabei kollidieren, da `list_latest_dmn_xml` sie ohnehin nie lädt.
+
+    **P25-S1 (ADR 0096)**: gleicher Advisory-Lock-Schutz gegen die Versions-Race-
+    Condition wie `create_process_definition` - siehe dortigen Docstring für die
+    Begründung, warum hier `pg_advisory_xact_lock` statt `SELECT ... FOR UPDATE`
+    auf einer Zähler-Zeile verwendet wird."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(_DMN_DEFINITION_LOCK_NAMESPACE, func.hashtext(name)))
+    )
     max_version = await session.execute(
         select(func.max(DmnDefinition.version)).where(DmnDefinition.name == name)
     )

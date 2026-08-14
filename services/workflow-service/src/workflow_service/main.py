@@ -757,6 +757,65 @@ async def delete_process_definition(
 
 
 @app.post(
+    "/process-definitions/{process_definition_id}/restore",
+    response_model=ProcessDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def restore_process_definition(
+    process_definition_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ProcessDefinitionOut:
+    """Rollback (P25-S2): liest eine beliebige historische Version einer
+    Prozessfamilie (`process_definition_id` kann jede Version dieser Familie
+    sein, nicht nur die jeweils neueste) und legt daraus eine BRANDNEUE,
+    jetzt aktuelle Version mit exakt deren `bpmn_xml`/`bpmn_process_id` an -
+    append-only wie jedes andere Anlegen einer Version (ADR 0027), kein
+    In-Place-Edit/Überschreiben der Zielversion oder irgendeiner
+    Zwischenversion. Ruft dafür dieselbe (seit P25-S1, ADR 0096 racefeste)
+    `repository.create_process_definition` auf wie der reguläre Upload-Pfad
+    (`POST /process-definitions`) - erbt dadurch deren Advisory-Lock-Schutz
+    gegen gleichzeitige Versionsvergabe automatisch, ohne die
+    Versionsnummern-Logik hier zu duplizieren. `process_id` wird bewusst
+    explizit als die bereits zum Zeitpunkt der Ursprungsversion aufgelöste
+    `bpmn_process_id` übergeben (nicht `None`) - eine erneute automatische
+    Auflösung ist unnötig und könnte bei einer BPMN-Datei mit mehreren
+    Top-Level-Prozessen sogar scheitern, obwohl die Ursprungsversion selbst
+    beim Anlegen bereits eindeutig aufgelöst wurde.
+
+    Gegated wie `POST /process-definitions` (`admin.object_config` +
+    Lizenz-Gate) - dieselbe administrative Aktion, nur mit bereits im System
+    bekanntem statt frisch hochgeladenem Inhalt. Bewusst NICHT zusätzlich
+    durch das optionale BPMN-Import-Review-Gate geführt (ADR 0087, `workflow.
+    process_definition.import`): dessen Vier-Augen-Prüfung adressiert extern
+    hochgeladenen, dem System bislang unbekannten Inhalt - die hier
+    wiederhergestellte Version war bereits zuvor eine ganz reguläre Version
+    dieser Familie (ggf. selbst schon einmal genehmigt, falls das Gate zum
+    damaligen Zeitpunkt aktiv war), kein neuer, ungeprüfter Inhalt.
+
+    Kein Sonderfall für "Restore der bereits aktuellsten Version" - legt
+    genau wie jeder andere Aufruf einfach eine weitere, inhaltlich
+    identische Version an, statt mit `409`/No-Op abzulehnen - konsistent mit
+    dem append-only-Versionierungsmodell, keine zusätzliche Sonderregel
+    nötig."""
+    await _require_object_config(x_dms_principal)
+    try:
+        source = await repository.get_process_definition(session, process_definition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        definition = await repository.create_process_definition(
+            session, name=source.name, bpmn_xml=source.bpmn_xml, process_id=source.bpmn_process_id
+        )
+    except repository.InvalidBpmnError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return definition
+
+
+@app.post(
     "/dmn-definitions",
     response_model=DmnDefinitionOut,
     status_code=status.HTTP_201_CREATED,
