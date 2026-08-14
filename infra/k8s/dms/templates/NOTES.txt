@@ -20,10 +20,25 @@ Default aus values.yaml generiert (Dev-Komfort), oder via
 <component>.existingSecret auf ein bereits vorhandenes Secret verweisen
 (Produktionspfad).
 
-Hinweis: dieses Chart ist Stand P26-S3 (Phase 26, Session 3) — Grundgerüst +
-32 zustandslose FastAPI-Services (P26-S1/S2) plus die zustandsbehaftete
-Infrastruktur oben als echte Deployments+Service(+PVC) (P26-S3). Das
-Storage-Replikations-CronJob und die Frontend-Apps folgen in P26-S4/S5. Kein
-reales Cluster-Deployment in dieser Phase erforderlich (siehe
-IMPLEMENTATION_PLAN.md Phase 26) — Verifikation über `helm lint` /
-`helm template`.
+Öffentliche Zugriffswege (Ingress, P26-S5, siehe ADR 0103):
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.ingress $svc.ingress.enabled }}
+  - {{ $svc.ingress.host }} -> {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}{{ if and $svc.ingress.tls $svc.ingress.tls.enabled }} (TLS){{ end }}
+{{- end }}
+{{- end }}
+
+Hinweis: dieses Chart ist Stand P26-S5 (Phase 26, letzte Session) —
+Grundgerüst + 32 zustandslose FastAPI-Services (P26-S1/S2), die
+zustandsbehaftete Infrastruktur als echte Deployments+Service(+PVC) (P26-S3),
+das Storage-Replikations-CronJob (P26-S4, siehe ADR 0101) sowie die 6
+Next.js-Frontend-Apps + Ingress-Ressourcen (P26-S5, siehe ADR 0102/0103).
+Phase 26 damit vollständig abgeschlossen. Kein reales Cluster-Deployment in
+dieser Phase erforderlich (siehe IMPLEMENTATION_PLAN.md Phase 26) —
+Verifikation über `helm lint` / `helm template`.
+
+WICHTIG (ADR 0102): die 6 Frontend-Apps backen ihre öffentliche
+Gateway-Adresse (NEXT_PUBLIC_GATEWAY_BASE_URL) beim Docker-Image-Build ein,
+nicht zur Laufzeit — `services.gateway-service.ingress.host` oben muss mit
+dem Build-Arg übereinstimmen, mit dem die Frontend-Images gebaut wurden,
+sonst schlagen Cross-Origin-Fetches im Browser fehl, obwohl dieses Chart
+klaglos rendert/installiert.

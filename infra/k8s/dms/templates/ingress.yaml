@@ -1,0 +1,64 @@
+{{/*
+Ein Ingress (networking.k8s.io/v1, vanilla Kubernetes) je Eintrag in
+.Values.services mit enabled=true UND ingress.enabled=true — P26-S5, gleiches
+Muster wie hpa.yaml/pdb.yaml (generisches Template, optionales Feld je
+Service statt eines Spezial-Templates). Genutzt von gateway-service (der in
+P26-S1/S2 dokumentierte, bis hierhin fehlende öffentliche Zugriffsweg) sowie
+den 6 neuen Frontend-Apps.
+
+Vanilla `Ingress` statt eines OpenShift-eigenen `Route`-Objekts — siehe
+ADR 0102 für die volle Begründung (Kurzfassung: OCPs Standard-Router nimmt
+reguläre Ingress-Objekte ohnehin entgegen, ein zusätzliches natives
+Route-Template mit OCP-spezifischen HAProxy-Annotationen/Terminierungsarten
+ist als dokumentierte künftige Erweiterung offen, nicht Teil dieser Session).
+
+Host-basiert (ein eigener Hostname je Service), NICHT Pfad-basiert unter
+einem gemeinsamen Host: keiner der 6 Next.js-Exports setzt in seiner
+next.config.mjs `basePath`/`assetPrefix` (geprüft) — ihre `/_next/...`-
+Asset-Pfade sind root-relativ. Mehrere Apps unter demselben Host mit reinem
+Pfad-Präfix (z. B. "/admin-ui/") würden sich bei diesen Asset-URLs
+gegenseitig überschreiben, ohne eine next.config.mjs-Änderung + Rebuild
+aller 6 Images (siehe ADR 0102).
+
+`port.number: 8000` ist hier IMMER korrekt, unabhängig vom tatsächlichen
+Container-Port (`services.<name>.port`, bei den Frontend-Apps 80 statt
+8000) — templates/service.yaml setzt den Kubernetes-Service-Port für JEDEN
+Eintrag hart auf 8000 (`targetPort: http` verweist per Namen auf den
+tatsächlichen Container-Port, unabhängig vom Zahlenwert).
+*/}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.ingress $svc.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}
+  labels:
+    {{- include "dms.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
+  {{- if $svc.ingress.annotations }}
+  annotations:
+    {{- toYaml $svc.ingress.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $svc.ingress.className }}
+  ingressClassName: {{ $svc.ingress.className }}
+  {{- end }}
+  {{- if and $svc.ingress.tls $svc.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ $svc.ingress.host | quote }}
+      secretName: {{ $svc.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ $svc.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ $svc.ingress.path | default "/" }}
+            pathType: {{ $svc.ingress.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "dms.serviceFullname" (dict "root" $ "name" $name) }}
+                port:
+                  number: 8000
+{{- end }}
+{{- end }}

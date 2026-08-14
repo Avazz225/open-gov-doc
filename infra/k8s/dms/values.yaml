@@ -18,14 +18,28 @@
 # verschieden für den generischen services:-Mechanismus) plus einen echten
 # Secret-Mechanismus für deren Admin-Passwörter (ADR 0100).
 #
+# P26-S4 ergänzte das Storage-Replikations-CronJob-Äquivalent
+# (storageCronJob unten, templates/storage-cronjob.yaml, ADR 0101). P26-S5
+# (diese Session) ergänzte die 6 Next.js-Frontend-Apps (user-ui/admin-ui/
+# process-designer/reviewer-ui/migration-console/office-addin) als weitere
+# `services:`-Einträge — strukturell weiterhin "ein Container auf einem
+# Port", ABER mit einer wichtigen Abweichung: ihre NEXT_PUBLIC_*-Variablen
+# werden beim `docker build` fest eingebrannt, nicht zur Laufzeit gelesen
+# (siehe ADR 0102, sowie der Kommentarblock direkt vor den 6 Einträgen
+# unten). P26-S5 baute außerdem echte `Ingress`-Ressourcen (neues optionales
+# `ingress:`-Feld je Service, templates/ingress.yaml) für gateway-service
+# und die 6 Frontend-Apps — der in gateway-services Kommentar seit P26-S1
+# angekündigte, bis dahin fehlende öffentliche Zugriffsweg (siehe ADR 0102
+# für die Ingress- vs. OpenShift-Route-Entscheidung).
+#
 # Weiterhin ausgenommen (kein Bestandteil von Phase 26, siehe
-# IMPLEMENTATION_PLAN.md P26-S3/S4/S5): azurite/mailpit/prometheus/grafana
-# (Dev-Emulator/Test-SMTP/Observability-Stack, kein im Session-Briefing
-# beauftragter Bestandteil dieser Phase), postgres-wal-archive-init (Job,
-# kein Deployment — siehe offener Punkt im P26-S2-Report), das
-# Storage-Replikations-CronJob-Äquivalent (P26-S4) sowie die Next.js-Frontend-
-# Apps user-ui/admin-ui/process-designer/reviewer-ui/migration-console/
-# office-addin (P26-S5).
+# IMPLEMENTATION_PLAN.md): azurite/mailpit/prometheus/grafana (Dev-Emulator/
+# Test-SMTP/Observability-Stack, kein im Session-Briefing beauftragter
+# Bestandteil dieser Phase), postgres-wal-archive-init (Job, kein Deployment
+# — siehe offener Punkt im P26-S2-Report), sowie libreoffice-addin
+# (`apps/libreoffice-addin/` — eine UNO-`.oxt`-Erweiterung, kein
+# eigenständig deploybarer HTTP-Container, hat deshalb gar keinen
+# `infra/docker-compose.yml`-Eintrag und damit auch kein Helm-Pendant).
 
 global:
   # Installationsweite Identität (Konzept 3a) — entspricht DMS_INSTALLATION_ID
@@ -87,6 +101,19 @@ resources:
 #   env                        - Map zusätzlicher/überschreibender Env-Vars (roher Wert,
 #                                 kein Templating — für Werte, die keine berechnete
 #                                 Service-URL sind)
+#   healthCheckPath            - optional, Default "/healthz" (seit P26-S5) — Pfad für
+#                                 Liveness-/Readiness-Probe (templates/deployment.yaml).
+#                                 Die 6 Frontend-Apps setzen "/" (nginx statt FastAPI,
+#                                 siehe dort).
+#   staticFrontend             - optional bool (seit P26-S5), NUR bei den 6 Next.js-Apps
+#                                 gesetzt — aktiviert einen Helm-`fail`-Guard gegen
+#                                 versehentliche NEXT_PUBLIC_*-Einträge in `env:` (siehe
+#                                 ADR 0102, wirkungslos zur Laufzeit, da beim Build
+#                                 eingebrannt).
+#   ingress                    - optional (seit P26-S5), siehe templates/ingress.yaml.
+#                                 Shape: {enabled, className, host, path, pathType,
+#                                 tls: {enabled, secretName}, annotations}. Vanilla
+#                                 k8s Ingress statt OpenShift Route, siehe ADR 0102.
 # ---------------------------------------------------------------------------
 services:
   # --- Beispiel 1: einfacher Service, reiner resources.baseline-Fallback ---
@@ -139,12 +166,36 @@ services:
     # templates/redis.yaml). Einziger Service in diesem Chart mit
     # usesRedis: true, siehe services/gateway-service/src/gateway_service/settings.py.
     usesRedis: true
+    # Öffentlicher Zugriffsweg (P26-S5, siehe ADR 0102) — seit P26-S1 als
+    # offener Punkt angekündigt ("folgt in P26-S2/S5 zusammen mit den
+    # Frontend-Apps, braucht deren finale Hostnamen"), jetzt gebaut. `host`
+    # ist ein Dev-/Demo-Platzhalter (analog global.installationId:
+    # "local-dev") — WICHTIG: dieser Wert MUSS mit dem
+    # NEXT_PUBLIC_GATEWAY_BASE_URL-Build-Arg übereinstimmen, mit dem die 6
+    # Frontend-Images gebaut wurden (siehe deren values.yaml-Kommentar
+    # unten) — kein Helm-Mechanismus kann das automatisch synchron halten,
+    # da NEXT_PUBLIC_GATEWAY_BASE_URL bereits vor `helm install` fest im
+    # Image steht.
+    ingress:
+      enabled: true
+      className: ""
+      host: "gateway.dms.local"
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: false
+        secretName: ""
+      annotations: {}
     env:
       DMS_KEYCLOAK_CLIENT_ID: "dms-api"
-      # Reale OCP-Route (Ingress-Äquivalent) für den öffentlichen Zugriff auf
-      # gateway-service folgt in P26-S2/S5 zusammen mit den Frontend-Apps
-      # (braucht deren finale Hostnamen) — hier bewusst noch nicht gebaut.
-      DMS_CORS_ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      # Muss jeden Hostnamen enthalten, unter dem eine der 6 Frontend-Apps
+      # öffentlich erreichbar ist (siehe deren ingress.host unten) — sonst
+      # blockt der Browser die Cross-Origin-Fetches gegen den Gateway
+      # (unterschiedliche Hosts: jede Frontend-App und der Gateway haben
+      # eigene Ingress-Hostnamen, siehe ADR 0102 "host-basiertes Routing").
+      # "http://localhost:3000" bleibt für den unveränderten
+      # docker-compose-Dev-Fall (user-ui) erhalten.
+      DMS_CORS_ALLOWED_ORIGINS: '["http://localhost:3000","https://user-ui.dms.local","https://admin-ui.dms.local","https://process-designer.dms.local","https://reviewer-ui.dms.local","https://migration-console.dms.local","https://office-addin.dms.local"]'
 
   # --- Beispiel 3: mehrere Upstream-Abhängigkeiten (dependsOnServices),
   # Autoscaling aktiv -> exercised templates/hpa.yaml in dieser Session, plus
@@ -948,6 +999,260 @@ services:
     dependsOnServices:
       - object-type-service
       - permission-service
+    env: {}
+
+  # ---------------------------------------------------------------------
+  # Ab hier: die 6 Next.js-Frontend-Apps aus infra/docker-compose.yml
+  # (P26-S5, Zeilen ~1448-1543, apps/<name>/) — struktureller Unterschied zu
+  # ALLEN 32 Services oben, siehe ADR 0102 für die volle Begründung:
+  #
+  # 1. Statisch exportierte SPA (ADR 0006, next.config.mjs `output:
+  #    "export"`), ausgeliefert über nginx (apps/<name>/Dockerfile, zweite
+  #    Stage `nginx:1.27-alpine`) — es gibt KEINEN Node-Prozess zur
+  #    Laufzeit, der eine Umgebungsvariable lesen könnte. `NEXT_PUBLIC_*`-
+  #    Variablen (Gateway-Adresse u. ä.) werden per Dockerfile-`ARG`/`ENV`
+  #    VOR `RUN npm run build` in den JS-Bundle eingebrannt — überschreibbar
+  #    ausschließlich als Docker-`--build-arg`, NIE als Container-Env zur
+  #    Laufzeit. `env:` bleibt deshalb bei allen 6 Einträgen unten bewusst
+  #    LEER: ein hier gesetzter `NEXT_PUBLIC_*`-Wert würde vom bereits
+  #    fertig gebauten Bundle schlicht ignoriert — ein Helm-`fail`-Guard
+  #    (`staticFrontend: true`, siehe templates/deployment.yaml) bricht
+  #    `helm template`/`lint` deshalb hart ab, statt das still wirkungslos
+  #    zu rendern.
+  #    KONSEQUENZ für den produktiven Betrieb dieses Charts: `image.tag`
+  #    unten ist bei diesen 6 Einträgen NICHT nur eine Versionsnummer wie
+  #    bei den FastAPI-Services, sondern faktisch auch ein
+  #    Ziel-Umgebungs-Bezeichner (z. B. "prod-eu-2026-08" statt "latest") —
+  #    jede Zielumgebung mit einer anderen öffentlichen Gateway-Adresse
+  #    braucht ein EIGENES, vorab mit dem passenden `--build-arg
+  #    NEXT_PUBLIC_GATEWAY_BASE_URL=...` gebautes Image, BEVOR dieses Chart
+  #    es referenziert. Dieses Chart selbst baut keine Images und kann
+  #    NEXT_PUBLIC_*-Werte nicht nachträglich beeinflussen (reale, keine
+  #    zufällige Limitation von Next.js Static Export — siehe ADR 0102).
+  # 2. `healthCheckPath: "/"` statt des generischen "/healthz"-Defaults:
+  #    nginx liefert hier nur statische Dateien aus (apps/<name>/
+  #    nginx.conf: `try_files $uri $uri.html $uri/ =404;`) — kein
+  #    FastAPI-Health-Endpunkt existiert. "/" liefert bereits vorhandenes
+  #    `index.html` mit 200 zurück (reiner Datei-Response, kein
+  #    Client-JS-Ausführungsbedarf) — ausreichend/passend für
+  #    Liveness/Readiness einer reinen statischen SPA.
+  # 3. `port: 80` statt 8000 (nginx `EXPOSE 80`, siehe Dockerfile) —
+  #    templates/service.yaml setzt den Kubernetes-Service-Port trotzdem
+  #    einheitlich auf 8000 für JEDEN Eintrag (targetPort verweist per Namen
+  #    auf den tatsächlichen Container-Port), das bleibt hier unverändert
+  #    korrekt.
+  # 4. `ingress:` (templates/ingress.yaml, ADR 0102) — ein eigener
+  #    Hostname je App (Platzhalter unten, je Installation zu
+  #    überschreiben), NICHT ein gemeinsamer Host mit Pfad-Präfix: keine der
+  #    6 next.config.mjs setzt `basePath`/`assetPrefix`, ihre
+  #    `/_next/...`-Assets sind root-relativ und würden sich unter
+  #    Pfad-Präfixen gegenseitig überschreiben.
+  # 5. Alle generischen `dms.baseEnv`-Felder (DMS_POSTGRES_DSN/DMS_NATS_URL/
+  #    DMS_REGISTRY_SERVICE_BASE_URL/...) werden trotzdem injiziert (kein
+  #    Opt-out im generischen Template, gleiches bereits etabliertes Prinzip
+  #    wie bei federation-hub-service/webdav-connector oben) — unschädlich,
+  #    nginx liest sie nicht.
+  #
+  # office-addin ist eine Ausnahme unter den 6 Apps (siehe deren eigener
+  # Kommentar unten): docs/services/office-addin.md dokumentiert eine
+  # HTTPS-Pflicht (Office lädt Add-in-Webinhalte grundsätzlich nur über
+  # HTTPS) — `ingress.tls.enabled: true` ist deshalb dort (anders als bei
+  # den übrigen 5) der Default. Zusätzlich enthält `apps/office-addin/
+  # manifest.xml` selbst fest eingebrannte `https://localhost:3006`-URLs
+  # (IconUrl/SupportUrl/AppDomain) — eine noch tiefere Baustufe als die
+  # NEXT_PUBLIC_*-Build-Args (nicht mal ein Build-Arg, sondern eine im
+  # Quellcode/Image liegende XML-Datei) — dieses Chart kann sie ebenso
+  # wenig zur Deploy-Zeit umschreiben, siehe ADR 0102 "Konsequenzen".
+  # ---------------------------------------------------------------------
+  user-ui:
+    enabled: true
+    image:
+      repository: dms/user-ui
+      tag: latest # siehe Blockkommentar oben — produktiv faktisch ein Umgebungs-Tag
+    port: 80 # nginx (apps/user-ui/Dockerfile EXPOSE 80), NICHT 8000 wie die FastAPI-Services
+    replicas: 2
+    staticFrontend: true
+    healthCheckPath: "/"
+    # kein eigener resources-Block -> resources.baseline-Fallback (ausreichend
+    # für eine reine statische Datei-Auslieferung über nginx).
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: true # primäre Endnutzer-App -> HA-Anspruch, analog gateway-service
+      minAvailable: 1
+    ingress:
+      enabled: true
+      className: ""
+      host: "user-ui.dms.local" # Platzhalter, je Installation überschreiben (siehe Blockkommentar oben)
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: false
+        secretName: ""
+      annotations: {}
+    env: {}
+
+  admin-ui:
+    enabled: true
+    image:
+      repository: dms/admin-ui
+      tag: latest
+    port: 80
+    replicas: 2
+    staticFrontend: true
+    healthCheckPath: "/"
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    ingress:
+      enabled: true
+      className: ""
+      host: "admin-ui.dms.local"
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: false
+        secretName: ""
+      annotations: {}
+    env: {}
+
+  # Spezialisiertes Admin-/Fachwerkzeug (BPMN-Prozessdesigner), geringere
+  # erwartete Nutzerzahl/Parallellast als user-ui/admin-ui -> ein Replica
+  # ohne PDB, analog registry-service oben (Single-Replica-PDB mit
+  # minAvailable:1 würde Node-Drains blockieren).
+  process-designer:
+    enabled: true
+    image:
+      repository: dms/process-designer
+      tag: latest
+    port: 80
+    replicas: 1
+    staticFrontend: true
+    healthCheckPath: "/"
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    ingress:
+      enabled: true
+      className: ""
+      host: "process-designer.dms.local"
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: false
+        secretName: ""
+      annotations: {}
+    env: {}
+
+  reviewer-ui:
+    enabled: true
+    image:
+      repository: dms/reviewer-ui
+      tag: latest
+    port: 80
+    replicas: 1
+    staticFrontend: true
+    healthCheckPath: "/"
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    ingress:
+      enabled: true
+      className: ""
+      host: "reviewer-ui.dms.local"
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: false
+        secretName: ""
+      annotations: {}
+    env: {}
+
+  migration-console:
+    enabled: true
+    image:
+      repository: dms/migration-console
+      tag: latest
+    port: 80
+    replicas: 1
+    staticFrontend: true
+    healthCheckPath: "/"
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    ingress:
+      enabled: true
+      className: ""
+      host: "migration-console.dms.local"
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: false
+        secretName: ""
+      annotations: {}
+    env: {}
+
+  # Ausnahme unter den 6 Frontend-Apps, siehe Blockkommentar oben:
+  # HTTPS-Pflicht (docs/services/office-addin.md, Office lädt
+  # Add-in-Webinhalte nur über HTTPS) -> tls.enabled Default hier bewusst
+  # true (bei den übrigen 5 Apps false). `tls.secretName` bleibt trotzdem
+  # leer (Platzhalter) — ein echtes TLS-Secret für den gewählten
+  # ingress.host bereitzustellen (z. B. via cert-manager, über
+  # `annotations:` anzubinden) ist ein Vorbereitungsschritt je Installation,
+  # kein Bestandteil dieses Charts. `manifest.xml`/`assets/` sind kein
+  # Next.js-Build-Ausgang (siehe Dockerfile COPY-Zeilen) — trotzdem
+  # weiterhin über denselben nginx-Container ausgeliefert, kein separater
+  # Service/Port nötig.
+  office-addin:
+    enabled: true
+    image:
+      repository: dms/office-addin
+      tag: latest
+    port: 80
+    replicas: 1
+    staticFrontend: true
+    healthCheckPath: "/"
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: 1
+    ingress:
+      enabled: true
+      className: ""
+      host: "office-addin.dms.local"
+      path: /
+      pathType: Prefix
+      tls:
+        enabled: true # siehe Kommentar oben — HTTPS-Pflicht für Office-Add-ins
+        secretName: "office-addin-tls" # Platzhalter-Name, Secret muss vor `helm install` vorhanden sein
+      annotations: {}
     env: {}
 
 # ---------------------------------------------------------------------------

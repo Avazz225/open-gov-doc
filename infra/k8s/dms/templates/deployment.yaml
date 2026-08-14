@@ -6,6 +6,25 @@ neuen Map-Eintrag in values.yaml (siehe Kommentar dort).
 Seit P26-S3: `usesRedis: true` (analog `usesKeycloak`) injiziert
 DMS_REDIS_URL via dms.redisUrl-Helper (bundled-only, siehe
 templates/redis.yaml) — aktuell nur bei gateway-service gesetzt (ADR 0097).
+
+Seit P26-S5:
+- `healthCheckPath` (optional, Default "/healthz") steuert Liveness-/
+  Readiness-Probe-Pfad. VORHER (P26-S1..S4) hatte dieses Template GAR KEINE
+  Probes — echter, bislang unbemerkter Gap (jeder FastAPI-Service dieses
+  Projekts hat laut docs/service-template.md/main.py einen `/healthz`-
+  Endpunkt, siehe main.py jedes Services unter services/, aber kein Template
+  dieses Charts hat ihn je verdrahtet). Wird in dieser Session behoben (Default
+  "/healthz" deckt alle 32 bestehenden FastAPI-Services ohne
+  values.yaml-Änderung ab), UND von den 6 neuen Next.js/nginx-Frontend-Apps
+  (P26-S5) gebraucht, die explizit "/" setzen (kein FastAPI-Prozess, siehe
+  deren values.yaml-Kommentar/ADR 0102).
+- `staticFrontend: true` (nur bei den 6 Frontend-Apps gesetzt) lässt
+  `helm template`/`helm lint` HART fehlschlagen, falls in `env:` trotzdem
+  ein `NEXT_PUBLIC_*`-Eintrag steht — dieser würde vom bereits fertig
+  gebauten statischen JS-Bundle schlicht ignoriert (Next.js backt
+  NEXT_PUBLIC_*-Variablen beim `docker build` ein, nicht beim Container-
+  Start), ein stiller Fehlschlag wäre hier schlimmer als ein lauter
+  Chart-Fehler. Siehe ADR 0102.
 */}}
 {{- range $name, $svc := .Values.services }}
 {{- if $svc.enabled }}
@@ -51,6 +70,9 @@ spec:
             {{- include "dms.storageServiceTargetsEnv" $ | nindent 12 }}
             {{- end }}
             {{- range $key, $value := $svc.env }}
+            {{- if and $svc.staticFrontend (hasPrefix "NEXT_PUBLIC_" $key) }}
+            {{- fail (printf "services.%s.env.%s: NEXT_PUBLIC_*-Variablen werden beim Next.js-Build per --build-arg eingebrannt (siehe apps/%s/Dockerfile), nicht zur Container-Laufzeit gelesen — ein hier gesetzter Wert hätte keinerlei Wirkung. Siehe ADR 0102." $name $key $name) }}
+            {{- end }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -62,5 +84,19 @@ spec:
             limits:
               memory: {{ $resources.memory.limits | quote }}
               cpu: {{ $resources.cpu.limits | quote }}
+          readinessProbe:
+            httpGet:
+              path: {{ $svc.healthCheckPath | default "/healthz" }}
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: {{ $svc.healthCheckPath | default "/healthz" }}
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
 {{- end }}
 {{- end }}
