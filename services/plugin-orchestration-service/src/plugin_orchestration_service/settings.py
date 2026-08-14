@@ -31,3 +31,10 @@ class Settings(BaseServiceSettings):
     default_ram_mb: float = 256.0
 
     registry_dependency_cache_ttl_seconds: float = 15.0
+
+    # Scoping fuer `KubernetesSchedulerAdapter` (P24-S4, siehe
+    # platform_scheduler.py und ADR 0094): optionaler Label-Selector, um bei
+    # `CoreV1Api.list_node()` nur eine Teilmenge der Cluster-Knoten als
+    # Platzierungskandidaten zu beruecksichtigen (z. B. einen dedizierten
+    # Plugin-Node-Pool). Leerer String (Default) = alle Knoten des Clusters.
+    kubernetes_node_label_selector: str = ""

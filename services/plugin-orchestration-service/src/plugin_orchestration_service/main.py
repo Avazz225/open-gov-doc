@@ -27,6 +27,7 @@ from plugin_orchestration_service.models import (
     PluginResourceReport,
 )
 from plugin_orchestration_service.platform_scheduler import (
+    KubernetesSchedulerAdapter,
     NullSchedulerAdapter,
     detect_platform_scheduler,
 )
@@ -106,16 +107,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.registry_service_base_url or "",
         cache_ttl_seconds=settings.registry_dependency_cache_ttl_seconds,
     )
-    # Plattform-Scheduler-Erkennung (3.8, P10-S2): rein informativ, siehe
-    # platform_scheduler.py-Moduldocstring - kein Adapter fuer einen Treffer
-    # vorhanden, `NullSchedulerAdapter` ist der reale Zustand in diesem
-    # Docker-Compose-only-Projekt (P10-S0-Entscheidung).
-    app.state.scheduler_adapter = NullSchedulerAdapter()
+    # Plattform-Scheduler-Erkennung (3.8, P10-S2/P24-S4): `NullSchedulerAdapter`
+    # bleibt der Default (Docker-Compose-only-Realitaet dieser
+    # Entwicklungsumgebung, P10-S0-Entscheidung) - nur wenn
+    # `detect_platform_scheduler()` tatsaechlich Kubernetes erkennt
+    # (`KUBERNETES_SERVICE_HOST` gesetzt, also ein echter Pod-Kontext), wird
+    # der echte `KubernetesSchedulerAdapter` verdrahtet (siehe ADR 0094).
     detected_platform = detect_platform_scheduler()
-    if detected_platform is not None:
-        logger.warning(
-            "platform_scheduler_detected_without_adapter", extra={"platform": detected_platform}
+    if detected_platform == "kubernetes":
+        app.state.scheduler_adapter = KubernetesSchedulerAdapter(
+            node_label_selector=settings.kubernetes_node_label_selector
         )
+        logger.info("platform_scheduler_active", extra={"platform": detected_platform})
+    else:
+        app.state.scheduler_adapter = NullSchedulerAdapter()
+        if detected_platform is not None:
+            logger.warning(
+                "platform_scheduler_detected_without_adapter",
+                extra={"platform": detected_platform},
+            )
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="orchestration")
     await event_bus.connect()
