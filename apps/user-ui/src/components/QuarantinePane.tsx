@@ -10,14 +10,14 @@ import {
   type ScanResult,
 } from "@/lib/api";
 
-// Quarantäne-Bereich (2.5/10.3, P15-S2) - Uploads, die den verpflichtenden
-// Virenscan nicht bestanden haben und deshalb nie ein Dokument wurden (siehe
-// virus-scan-service main.py). Zugriff selbst ist bereits serverseitig UND
-// (siehe IconRail.tsx) client-seitig rollen-gegated - anders als die
-// Papierkorb-Familie (P15-S1) gibt es hier keine "persönliche" Sicht.
-// "Freigeben" muss `title` nachreichen (beim ursprünglich gescheiterten
-// Upload wurde ja nie ein Dokument angelegt) - daher ein kleines Inline-
-// Formular statt eines einzelnen Buttons wie bei "endgültig löschen".
+// Quarantine area (2.5/10.3, P15-S2) - uploads that failed the mandatory
+// virus scan and therefore never became a document (see
+// virus-scan-service main.py). Access itself is already role-gated both
+// server-side AND (see IconRail.tsx) client-side - unlike the trash family
+// (P15-S1), there is no "personal" view here. "Freigeben" has to supply
+// `title` retroactively (since the originally failed upload never created
+// a document) - hence a small inline form instead of a single button like
+// "endgültig löschen".
 export function QuarantinePane({ token }: { token: string }) {
   const { t } = useI18n();
   const [scans, setScans] = useState<ScanResult[]>([]);

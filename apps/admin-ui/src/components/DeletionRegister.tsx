@@ -48,11 +48,11 @@ function mergeEntries(
   return merged.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
 }
 
-// Löschregister (5.2a, seit P7-S1, um Ordner erweitert seit P7-S1b) - reine
-// Lese-Tabelle, führt die beiden unabhängigen Register von document-service
-// und folder-service anzeigeseitig zusammen (siehe docs/services/
-// document-service.md zur bewusst noch fehlenden separaten Backup-Politik,
-// Phase 11).
+// Deletion register (5.2a, since P7-S1, extended with folders since P7-S1b)
+// - a pure read-only table that merges the two independent registers from
+// document-service and folder-service for display purposes (see
+// docs/services/document-service.md regarding the deliberately still
+// missing separate backup policy, phase 11).
 export function DeletionRegister() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

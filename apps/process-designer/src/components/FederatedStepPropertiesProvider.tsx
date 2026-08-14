@@ -1,25 +1,25 @@
-// Eigener Properties-Panel-Provider für einen föderierten Prozessschritt
-// (7.4, P6-S9) - kein eigenes BPMN-Element, sondern eine zusätzliche Gruppe
-// auf jedem `bpmn:ManualTask`, die `bpmn:extensionElements/camunda:properties`
-// (`taskType`/`targetInstallationId`/`targetProcessType`) liest/schreibt -
-// exakt das Format, das `workflow-service`s `dispatch_pending_federation_tasks`
-// als föderierten Schritt erkennt (siehe
-// `services/workflow-service/src/workflow_service/main.py`). Gleiches Muster
-// wie `SignatureTaskPropertiesProvider.tsx` (P6-S7/P6-S8) - bewusst dupliziert
-// statt eine gemeinsame Abstraktion einzuführen (zwei unabhängige, kleine
-// Provider sind einfacher nachvollziehbar als eine vorzeitig geteilte
-// Hilfsschicht für zwei Anwendungsfälle).
+// Dedicated properties panel provider for a federated process step
+// (7.4, P6-S9) - not its own BPMN element, but an additional group
+// on every `bpmn:ManualTask` that reads/writes `bpmn:extensionElements/camunda:properties`
+// (`taskType`/`targetInstallationId`/`targetProcessType`) - exactly the format
+// that `workflow-service`'s `dispatch_pending_federation_tasks`
+// recognizes as a federated step (see
+// `services/workflow-service/src/workflow_service/main.py`). Same pattern
+// as `SignatureTaskPropertiesProvider.tsx` (P6-S7/P6-S8) - deliberately
+// duplicated instead of introducing a shared abstraction (two independent,
+// small providers are easier to follow than a prematurely shared
+// helper layer for two use cases).
 //
-// Die Gruppe erscheint nur, wenn `installations` (statisch injiziert beim
-// Erzeugen des Modelers, siehe `BpmnDesigner.tsx`) nicht leer ist - erfüllt
-// Konzept 7.1 "bietet der Process Designer föderierte Prozessschritte gar
-// nicht erst als Auswahlmöglichkeit an", wenn kein Hub konfiguriert ist bzw.
-// keine Installationen bekannt sind.
-/* eslint-disable @typescript-eslint/no-explicit-any -- bpmn-js selbst typisiert
-   `Moddle`/`ModdleElement` als `any` (node_modules/bpmn-js/lib/model/Types.d.ts),
-   `bpmn-js-properties-panel`/`@bpmn-io/properties-panel` liefern gar keine
-   Typdeklarationen (siehe src/types/untyped-modules.d.ts) - `any` ist hier die
-   von der Bibliothek selbst vorgegebene Grenze, keine Abkürzung. */
+// The group only appears when `installations` (statically injected when
+// creating the modeler, see `BpmnDesigner.tsx`) is not empty - fulfills
+// concept 7.1 "the process designer does not even offer federated process
+// steps as an option" when no hub is configured or
+// no installations are known.
+/* eslint-disable @typescript-eslint/no-explicit-any -- bpmn-js itself types
+   `Moddle`/`ModdleElement` as `any` (node_modules/bpmn-js/lib/model/Types.d.ts),
+   `bpmn-js-properties-panel`/`@bpmn-io/properties-panel` provide no
+   type declarations at all (see src/types/untyped-modules.d.ts) - `any` here is
+   the boundary imposed by the library itself, not a shortcut. */
 import { getBusinessObject, is } from "bpmn-js/lib/util/ModelUtil";
 import {
   CheckboxEntry,
@@ -68,9 +68,9 @@ function getTargetProcessType(element: any): string {
   return getFederatedPropertyValue(element, "targetProcessType") ?? "";
 }
 
-/** Schreibt `taskType`/`targetInstallationId`/`targetProcessType` als
- * `camunda:Property`-Trio - legt `bpmn:ExtensionElements`/`camunda:Properties`
- * bei Bedarf neu an (gleiches Muster wie `SignatureTaskPropertiesProvider`). */
+/** Writes `taskType`/`targetInstallationId`/`targetProcessType` as a
+ * `camunda:Property` trio - creates `bpmn:ExtensionElements`/`camunda:Properties`
+ * anew if needed (same pattern as `SignatureTaskPropertiesProvider`). */
 function setFederatedStepProperties(
   element: any,
   bpmnFactory: any,
@@ -153,8 +153,8 @@ function TargetInstallationField(props: { element: any }) {
   const bpmnFactory = useService("bpmnFactory");
   const commandStack = useService("commandStack");
   const translate = useService("translate");
-  // Statisch beim Erzeugen des Modelers injiziert (siehe BpmnDesigner.tsx) -
-  // kein Live-Nachladen während einer Bearbeitungssitzung nötig.
+  // Statically injected when creating the modeler (see BpmnDesigner.tsx) -
+  // no live reloading needed during an editing session.
   const installations: FederationInstallation[] = useService("federationInstallations");
 
   const getValue = () => getTargetInstallationId(element);
@@ -266,5 +266,5 @@ export const FederatedStepPropertiesProviderModule = {
   federatedStepPropertiesProvider: ["type", FederatedStepPropertiesProvider],
 };
 
-// Für Tests: reine Lesefunktionen ohne DOM/bpmn-js-Instanziierung.
+// For tests: pure read functions without DOM/bpmn-js instantiation.
 export { getTargetInstallationId, getTargetProcessType, isFederatedStepEnabled };

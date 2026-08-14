@@ -43,12 +43,12 @@ const initialSectionState: SectionState = {
   restorePeriodDaysInput: "30",
 };
 
-// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
-// Lade-/Speicher-Muster wie UploadSettings/OcrSettings. Seit P7-S1b zwei
-// unabhängige Sektionen (Dokumente über document-service, Ordner über
-// folder-service - eigene, unabhängig konfigurierbare Configs, siehe
-// docs/services/folder-service.md), damit z. B. eine andere
-// Papierkorb-Frist für Ordner als für Dokumente möglich ist.
+// Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - same
+// load/save pattern as UploadSettings/OcrSettings. Since P7-S1b two
+// independent sections (documents via document-service, folders via
+// folder-service - separate, independently configurable configs, see
+// docs/services/folder-service.md), so that e.g. a different trash
+// retention period is possible for folders than for documents.
 function RetentionSection({
   heading,
   hint,

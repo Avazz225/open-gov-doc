@@ -1,9 +1,9 @@
-// Klassen-Icons für Ordnerklassen (2.2a/2.2b, seit P5b-S4). Dasselbe
-// kuratierte Sieben-Icon-Set wie im Admin-UI-Objekttyp-Editor (P5b-S3) -
-// bewusst dupliziert statt geteilt (ADR 0006: keine gemeinsame Fachlogik
-// zwischen unabhängig deploybaren Frontend-Apps). Dokumentklassen können
-// serverseitig nie ein Icon tragen (object-type-service erlaubt `icon` nur
-// für `applies_to="folder"`), Dokumente zeigen deshalb immer das feste 📄.
+// Class icons for folder classes (2.2a/2.2b, since P5b-S4). Same curated
+// seven-icon set as in the admin-UI object-type editor (P5b-S3) -
+// deliberately duplicated rather than shared (ADR 0006: no shared business
+// logic between independently deployable frontend apps). Document classes
+// can never carry an icon server-side (object-type-service allows `icon`
+// only for `applies_to="folder"`), so documents always show the fixed 📄.
 const ICON_GLYPHS: Record<string, string> = {
   folder: "📁",
   "folder-open": "📂",

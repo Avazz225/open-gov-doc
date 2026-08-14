@@ -5,11 +5,11 @@ import { useI18n } from "@/i18n";
 import { getMaintenanceStatus } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Not-Shutdown (4.8, P6-S6): "von jedem regulären UI-Zugriff klar
-// signalisiert" - reines Status-Banner ohne Bedienelemente, die eigentliche
-// Steuerung (Auslösen/Aufheben) liegt in der Admin-UI (`/superuser/`).
-// Gleiches Poll-Prinzip wie das Admin-UI-Pendant, siehe dort für die
-// Begründung des 30s-Intervalls.
+// Emergency shutdown (4.8, P6-S6): "clearly signaled from every regular UI
+// access" - a pure status banner without controls; the actual control
+// (triggering/lifting) lives in the admin UI (`/superuser/`). Same polling
+// principle as the admin UI counterpart, see there for the rationale behind
+// the 30s interval.
 export function MaintenanceBanner() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -24,8 +24,8 @@ export function MaintenanceBanner() {
         const status = await getMaintenanceStatus(accessToken as string);
         if (!cancelled) setActive(status.active);
       } catch {
-        // Unerreichbarer permission-service soll die restliche UI nicht
-        // blockieren - Banner bleibt einfach aus.
+        // An unreachable permission-service should not block the rest of
+        // the UI - the banner simply stays off.
       }
     }
 

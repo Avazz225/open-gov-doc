@@ -9,12 +9,12 @@ import { LicenseStatusBanner } from "./LicenseStatusBanner";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
-// Management-Dashboard-Layout (P4-S5, Nutzer-Feedback nach P4-S3, Konzept 8):
-// ersetzt die vorherige flache Top-Nav-Leiste durch eine linke
-// Navigationsseitenleiste (`AdminSidebar`), Hauptbereich rechts zeigt die
-// jeweils gewählte Funktion. Der `InstallationSwitcher` sitzt in der
-// Kopfzeile, da er - anders als die Seitennavigation - installationsweit
-// und nicht bereichsspezifisch ist.
+// Management dashboard layout (P4-S5, user feedback after P4-S3, concept 8):
+// replaces the previous flat top-nav bar with a left-hand navigation
+// sidebar (`AdminSidebar`); the main area on the right shows the currently
+// selected function. The `InstallationSwitcher` sits in the header bar
+// because - unlike the side navigation - it is installation-wide rather
+// than scoped to a specific section.
 export function AdminShell({ title, children }: { title: string; children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();

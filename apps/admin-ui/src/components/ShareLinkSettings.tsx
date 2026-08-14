@@ -10,10 +10,10 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Öffentlicher Freigabelink (4.2a, P14-S10) - `enabled=false` bedeutet laut
-// Konzept-Wortlaut "keine API-Route erreichbar" (dort als `404` statt `403`
-// auf den betroffenen document-service-Endpunkten umgesetzt, siehe ADR
-// 0047) - deaktiviert damit auch bereits ausgegebene Links, nicht nur neue.
+// Public share link (4.2a, P14-S10) - per the concept wording, `enabled=false`
+// means "no API route reachable" (implemented there as `404` instead of
+// `403` on the affected document-service endpoints, see ADR 0047) - this
+// also disables already-issued links, not just new ones.
 export function ShareLinkSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

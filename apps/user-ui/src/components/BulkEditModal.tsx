@@ -34,13 +34,13 @@ function attributeInputType(attrType: string | undefined): string {
   return "text";
 }
 
-// Ein 400 mit Constraint-Fehlern (4.5) liefert `detail: {"errors": [...]}` -
-// `ApiError.message` enthält dafür den JSON-stringifizierten Body (siehe
-// lib/api.ts's `extractErrorMessage`, das nur einen reinen String-`detail`
-// speziell behandelt). Für eine lesbare Ergebniszeile wird hier versucht,
-// die einzelnen Fehlermeldungen wieder herauszulösen, statt den rohen
-// JSON-String anzuzeigen - schlägt das fehl (kein JSON, z. B. 404), bleibt
-// die ursprüngliche Nachricht unverändert stehen.
+// A 400 with constraint errors (4.5) returns `detail: {"errors": [...]}` -
+// `ApiError.message` therefore contains the JSON-stringified body (see
+// lib/api.ts's `extractErrorMessage`, which only special-cases a plain
+// string `detail`). For a readable result line, this attempts to
+// extract the individual error messages again instead of showing the
+// raw JSON string - if that fails (not JSON, e.g. 404), the original
+// message is left unchanged.
 function readableErrorMessage(message: string): string {
   try {
     const parsed = JSON.parse(message);
@@ -48,27 +48,27 @@ function readableErrorMessage(message: string): string {
       return parsed.errors.join("; ");
     }
   } catch {
-    // kein JSON - message bleibt unverändert.
+    // not JSON - message remains unchanged.
   }
   return message;
 }
 
-// Sammelbearbeitung von Metadaten (8, P14-S12) - bewusst OHNE eigenen
-// Backend-Endpunkt: läuft für jedes ausgewählte Objekt einzeln über die
-// bereits bestehenden Einzel-PATCH-Endpunkte (`updateDocumentMetadata`/
-// `updateFolderAttributes`), damit exakt dieselbe Constraint-Prüfung wie bei
-// einer Einzeländerung greift (4.5, keine zweite Validierungsimplementierung).
-// Ergebnis ist bewusst NICHT alles-oder-nichts - jedes Objekt wird einzeln
-// versucht, das Ergebnis (erfolgreich/fehlgeschlagen je Objekt) danach klar
-// zusammengefasst angezeigt, exakt wie im Konzept gefordert.
+// Bulk metadata editing (8, P14-S12) - deliberately WITHOUT its own
+// backend endpoint: runs for each selected object individually via the
+// already-existing single-object PATCH endpoints (`updateDocumentMetadata`/
+// `updateFolderAttributes`), so exactly the same constraint checking applies
+// as for a single edit (4.5, no second validation implementation).
+// The result is deliberately NOT all-or-nothing - each object is attempted
+// individually, the result (success/failure per object) is then displayed
+// clearly summarized, exactly as required by the concept.
 //
-// Bewusste Einschränkung: nur möglich, wenn die Auswahl homogen ist (alle
-// Dokumente ODER alle Ordner, alle mit demselben, gesetzten Objekttyp) - nur
-// dann gibt es ein einziges Attribut-Schema, das sich sinnvoll gemeinsam
-// befüllen lässt. Ein leer gelassenes Feld bedeutet "für dieses Objekt
-// unverändert lassen", nicht "leeren" - nur tatsächlich befüllte Felder
-// werden pro Objekt in dessen bereits bestehende Attribute gemergt (der
-// Server ersetzt `attributes` vollständig, kein serverseitiges Merge).
+// Deliberate restriction: only possible if the selection is homogeneous (all
+// documents OR all folders, all with the same, set object type) - only
+// then is there a single attribute schema that can be meaningfully filled
+// in together. A field left blank means "leave unchanged for this object",
+// not "clear" - only fields that were actually filled in are merged per
+// object into its already-existing attributes (the server replaces
+// `attributes` entirely, no server-side merge).
 export function BulkEditModal({
   token,
   items,

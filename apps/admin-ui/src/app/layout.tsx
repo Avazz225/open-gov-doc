@@ -7,9 +7,9 @@ import { InstallationProvider } from "@/lib/installation-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import "./globals.css";
 
-// Direkter JSON-Import statt über `@/i18n` (dort mit "use client" markiert) -
-// Next.js wertet `metadata` serverseitig/zur Build-Zeit aus, das verträgt
-// sich nicht mit einem Re-Export aus einem Client-Modul.
+// Direct JSON import instead of going through `@/i18n` (which is marked
+// "use client" there) - Next.js evaluates `metadata` server-side/at build
+// time, which is incompatible with a re-export from a client module.
 export const metadata: Metadata = {
   title: de.meta.title,
   description: de.meta.description,

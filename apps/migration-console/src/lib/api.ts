@@ -19,9 +19,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 }
 
-// Jeder Aufruf geht über das Gateway (3.5): /api/{service_type}/{path} statt
-// direkter Backend-Adressen - Registry-Auflösung und Auth-Prüfung passieren
-// dort, nicht hier.
+// Every call goes through the gateway (3.5): /api/{service_type}/{path}
+// instead of direct backend addresses - registry resolution and auth checks
+// happen there, not here.
 async function request(
   serviceType: string,
   path: string,
@@ -79,11 +79,11 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
-// migration-service gated seine schreibenden Endpunkte nur über die eigene
-// Lizenzprüfung (`license_gate`), keine domänengetrennte Admin-Rolle (siehe
-// docs/services/migration-console.md "Autorisierung") - trotzdem abgerufen,
-// identisches Muster wie reviewer-ui/process-designer/admin-ui/user-ui, falls
-// eine spätere Session gezielt einschränken will.
+// migration-service gates its write endpoints only via its own license check
+// (`license_gate`), with no domain-separated admin role (see
+// docs/services/migration-console.md "Authorization") - fetched anyway,
+// identical pattern to reviewer-ui/process-designer/admin-ui/user-ui, in
+// case a later session wants to restrict this specifically.
 export async function getEffectivePermissions(
   token: string,
   principalId: string
@@ -138,9 +138,9 @@ export interface PairedInstallation {
 }
 
 export interface PairedInstallationCreated extends PairedInstallation {
-  // Nur in der Anlage-Antwort enthalten, nie in GET/List (siehe
-  // docs/services/migration-service.md "Paarung") - diese App darf ihn
-  // deshalb auch nur unmittelbar nach dem Anlegen einmalig anzeigen.
+  // Only included in the creation response, never in GET/List (see
+  // docs/services/migration-service.md "Pairing") - this app may therefore
+  // only display it once, immediately after creation.
   api_key: string;
 }
 

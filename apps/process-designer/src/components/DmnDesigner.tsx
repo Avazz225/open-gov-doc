@@ -19,23 +19,23 @@ export interface DmnDesignerHandle {
 interface DmnDesignerProps {
   initialXml: string;
   onImportError?: (message: string) => void;
-  // Callback- statt `forwardRef`-Muster, identisch zu `BpmnDesigner.tsx`
-  // (siehe dortige Begründung: kein aktiv gepflegter React-Wrapper für die
-  // bpmn.io-Toolkits, kein Risiko durch Ref-Weiterreichung durch
+  // Callback pattern instead of `forwardRef`, identical to `BpmnDesigner.tsx`
+  // (see the reasoning there: no actively maintained React wrapper for the
+  // bpmn.io toolkits, no risk from ref forwarding through
   // `next/dynamic`).
   onReady?: (handle: DmnDesignerHandle) => void;
 }
 
-// Gleiches manuelles `useRef`/`useEffect`-Mounting wie `BpmnDesigner.tsx` -
-// `dmn-js` manipuliert wie `bpmn-js` direkt das DOM (eigenes SVG-Canvas für
-// die Decision-Table-/DRD-Ansicht), nicht React-idiomatisch. Wird ebenfalls
-// per `next/dynamic`/`{ssr:false}` eingebunden (siehe dmn-designer/page.tsx).
-// Kompatibilität mit der gepinnten `bpmn-js` 18.22.1-Stack per Spike
-// empirisch verifiziert (P14-S4): `dmn-js` 17.10.1 nutzt dieselbe
-// `diagram-js` ^15.23.2-Major-Version wie `bpmn-js`, ein realer
-// `next build`/Static-Export-Durchlauf sowie ein Live-Rendering-Test
-// (Decision-Table-Ansicht inkl. Hit-Policy-Dropdown, Regel-Zeilen) liefen
-// beide ohne Fehler - kein Fallback auf einen rohen XML-Editor nötig.
+// Same manual `useRef`/`useEffect` mounting as `BpmnDesigner.tsx` -
+// `dmn-js`, like `bpmn-js`, manipulates the DOM directly (its own SVG canvas for
+// the decision table/DRD view), not React-idiomatic. Also loaded
+// via `next/dynamic`/`{ssr:false}` (see dmn-designer/page.tsx).
+// Compatibility with the pinned `bpmn-js` 18.22.1 stack empirically
+// verified via spike (P14-S4): `dmn-js` 17.10.1 uses the same
+// `diagram-js` ^15.23.2 major version as `bpmn-js`; a real
+// `next build`/static export run as well as a live rendering test
+// (decision table view including hit policy dropdown, rule rows) both
+// ran without errors - no fallback to a raw XML editor needed.
 export function DmnDesigner({ initialXml, onImportError, onReady }: DmnDesignerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -61,7 +61,7 @@ export function DmnDesigner({ initialXml, onImportError, onReady }: DmnDesignerP
     return () => {
       modeler.destroy();
     };
-    // Nur beim ersten Mounten - siehe BpmnDesigner.tsx für dieselbe Begründung.
+    // Only on first mount - see BpmnDesigner.tsx for the same reasoning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

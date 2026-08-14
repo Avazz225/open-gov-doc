@@ -4,19 +4,19 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, getPublicShareLink, publicShareLinkContentUrl, type PublicShareLink } from "@/lib/api";
 
-// Öffentliche, unauthentifizierte Freigabelink-Seite (4.2a, P14-S10) - bewusst
-// NICHT in <RequireAuth> gewrappt (anders als jede andere Seite dieser App).
-// Konzept 8 nennt "bereits geplante öffentliche, nicht-personalisierte
-// Ausnahmeseiten" ausdrücklich - "kein Python-Datenzugriff pro Request nötig"
-// ist hier erfüllt, weil der dynamische Abruf clientseitig per JS gegen die
-// öffentliche Gateway-Route läuft (siehe lib/api.ts), nicht serverseitiges
-// Python-Rendering (kein SSR, reiner statischer Export wie jede andere Seite
-// dieser App, siehe next.config.mjs).
+// Public, unauthenticated share link page (4.2a, P14-S10) - deliberately
+// NOT wrapped in <RequireAuth> (unlike every other page in this app).
+// Concept 8 explicitly mentions "already-planned public, non-personalized
+// exception pages" - "no Python data access needed per request"
+// is satisfied here because the dynamic fetch runs client-side via JS against
+// the public gateway route (see lib/api.ts), not server-side
+// Python rendering (no SSR, pure static export like every other page
+// in this app, see next.config.mjs).
 export default function SharePage() {
   const { t } = useI18n();
-  // `undefined` = URL noch nicht ausgewertet, `null` = ausgewertet, aber kein
-  // `?token=` vorhanden - beides mit `null` zu modellieren wäre nicht von der
-  // ersten Render-Runde (vor dem Effekt unten) unterscheidbar gewesen.
+  // `undefined` = URL not yet evaluated, `null` = evaluated, but no
+  // `?token=` present - modeling both with `null` would not have been
+  // distinguishable from the first render pass (before the effect below).
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [link, setLink] = useState<PublicShareLink | null>(null);
   const [error, setError] = useState<string | null>(null);

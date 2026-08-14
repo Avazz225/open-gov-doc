@@ -17,9 +17,9 @@ import { LayoutFormFields } from "./LayoutFormFields";
 import { RetentionPanel } from "./RetentionPanel";
 import { SignaturesPanel } from "./SignaturesPanel";
 
-// Muss zur Document-Service-Settings `kennzeichen_admin_role` passen (Default,
-// P5e-S2) - nur Principals mit dieser Rolle dürfen ein bereits vergebenes
-// Kennzeichen ändern, alle anderen sehen es rein lesbar.
+// Must match the document-service setting `kennzeichen_admin_role` (default,
+// P5e-S2) - only principals with this role may change an already-assigned
+// reference number, everyone else sees it read-only.
 const KENNZEICHEN_ADMIN_ROLE = "dms-admin";
 
 function attributeInputType(attrType: string | undefined): string {
@@ -28,15 +28,15 @@ function attributeInputType(attrType: string | undefined): string {
   return "text";
 }
 
-// Untere linke Spalte des 3-Spalten-Layouts (Nutzer-Feedback nach P4-S3, 8):
-// Metadaten des über die Tabs ausgewählten Dokuments. Seit P5b-S4 werden die
-// Attribut-Formfelder nicht mehr fest verdrahtet (ein Feld pro Zeile in
-// Attributreihenfolge), sondern über das "display"-Formular-Layout des
-// Objekttyps angeordnet (2.2b) - `LayoutFormFields` rendert das Zeilen/
-// Spalten-Grid, `objectType.attributes` liefert weiterhin Typ (für den
-// Eingabefeld-Typ) und Wertebereich. Ohne Objekttyp gibt es weiterhin nur
-// den Titel zu bearbeiten. Speichert über den seit P4-S4 vorhandenen
-// `PATCH /documents/{id}` (Document Service).
+// Lower-left column of the 3-column layout (user feedback after P4-S3, 8):
+// metadata of the document selected via the tabs. Since P5b-S4 the
+// attribute form fields are no longer hardwired (one field per row in
+// attribute order), but arranged via the object type's "display" form
+// layout (2.2b) - `LayoutFormFields` renders the row/column grid,
+// `objectType.attributes` still supplies the type (for the input field
+// type) and value range. Without an object type, only the title remains
+// editable. Saves via the `PATCH /documents/{id}` endpoint (document
+// service) available since P4-S4.
 export function MetadataPanel({
   document: activeDocument,
   onSaved,

@@ -131,10 +131,10 @@ describe("ProcessDefinitionList", () => {
     renderList();
     await screen.findByText("Rechnungsfreigabe");
 
-    // `next/link` wendet die `trailingSlash:true`-Konfiguration (next.config.mjs)
-    // nur innerhalb des echten Next.js-Routers an, nicht unter Vitest/jsdom -
-    // hier wird daher gegen den in dieser Umgebung tatsächlich gerenderten
-    // Pfad (ohne abschließenden Slash) geprüft.
+    // `next/link` only applies the `trailingSlash:true` configuration
+    // (next.config.mjs) within the real Next.js router, not under Vitest/jsdom -
+    // this therefore checks against the path actually rendered in this
+    // environment (without a trailing slash).
     expect(screen.getByText("Neu erstellen").closest("a")).toHaveAttribute("href", "/designer");
     const row = screen.getByText("Rechnungsfreigabe").closest("tr")!;
     expect(within(row).getByText("Öffnen").closest("a")).toHaveAttribute(

@@ -21,12 +21,12 @@ const listInstancesForDocumentMock = vi.fn();
 const listInstanceTasksMock = vi.fn();
 const listProcessDefinitionsMock = vi.fn();
 
-// AuthProvider braucht echte `login`/`getCurrentUser` - unabhängig vom
-// übrigen `@/lib/api`-Mock, da AuthProvider intern `getCurrentUser`
-// importiert. Statt AuthProvider selbst zu mocken, wird ein bereits
-// eingeloggter Zustand per vorab gesetztem localStorage-Eintrag simuliert
-// (identisches Muster wie `restores a still-valid session`-Test in
-// auth-context.test.tsx), plus ein gemockter `getCurrentUser`-Rückgabewert.
+// AuthProvider needs real `login`/`getCurrentUser` - independent of
+// the rest of the `@/lib/api` mock, since AuthProvider internally
+// imports `getCurrentUser`. Instead of mocking AuthProvider itself,
+// an already-logged-in state is simulated via a pre-set localStorage
+// entry (identical pattern to the `restores a still-valid session` test in
+// auth-context.test.tsx), plus a mocked `getCurrentUser` return value.
 const getCurrentUserMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {

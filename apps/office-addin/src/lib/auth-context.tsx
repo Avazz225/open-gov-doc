@@ -14,13 +14,13 @@ import type { CurrentUser, TokenResponse } from "./api";
 
 const STORAGE_KEY = "ogdoc.tokens";
 
-// Bekannte Vereinfachung dieses Grundgerüsts: Tokens liegen im localStorage,
-// nicht in einem httpOnly-Cookie (identisches Muster wie user-ui/reviewer-ui,
-// ADR 0006). Im Office-Taskpane-Kontext gilt dieselbe Einschränkung mit einer
-// zusätzlichen, dokumentierten Nuance: der Speicherort/die Lebensdauer des
-// Taskpane-Webviews unterscheidet sich je Office-Version/-Plattform (siehe
-// docs/services/office-addin.md "Offene Punkte") - ein erneutes Anmelden
-// nach Neustart von Word ist deshalb ein erwartbarer, kein fehlerhafter Fall.
+// Known simplification of this scaffolding: tokens live in localStorage,
+// not in an httpOnly cookie (identical pattern to user-ui/reviewer-ui,
+// ADR 0006). In the Office taskpane context the same limitation applies, with an
+// additional, documented nuance: the storage location/lifetime of the
+// taskpane webview differs per Office version/platform (see
+// docs/services/office-addin.md "Open Points") - having to log in again
+// after restarting Word is therefore an expected case, not a bug.
 interface StoredTokens {
   accessToken: string;
   refreshToken: string;

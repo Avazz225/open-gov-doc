@@ -40,14 +40,14 @@ const STATUS_OPTIONS = [
   "failed_permanent",
 ] as const;
 
-// Nur Status, deren Archivkopie bereits geschrieben und verifiziert wurde,
-// sind rückholbar (5.6) - "pending"/"locked"/"copied"/"verified"/"failed"
-// haben (noch) keine verlässliche Archivkopie.
+// Only statuses whose archive copy has already been written and verified
+// are retrievable (5.6) - "pending"/"locked"/"copied"/"verified"/"failed"
+// do not (yet) have a reliable archive copy.
 const RETRIEVABLE_STATUSES = new Set(["released", "dehydrated"]);
 
-// "failed_permanent" -> "FailedPermanent" - Statuswerte mit Unterstrich
-// (seit Post-Roadmap Phase 20 Session 2/7) brauchen PascalCase je Wortteil,
-// nicht nur eine Großschreibung des ersten Buchstabens.
+// "failed_permanent" -> "FailedPermanent" - status values with underscores
+// (since post-roadmap phase 20 session 2/7) need PascalCase for each word
+// part, not just capitalizing the first letter.
 function toPascalCase(value: string): string {
   return value
     .split("_")
@@ -77,10 +77,10 @@ function caseStatusLabel(t: (key: string) => string, status: string): string {
   return label === key ? status : label;
 }
 
-// Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - reine
-// Status-/Rückhol-Ansicht auf die vom archival-service geführte
-// Transfer-Zustandsmaschine. Auslösung selbst (Objekttyp-Frist/manueller
-// Trigger) passiert in document-service, hier nur Beobachtung + Rückholung.
+// Disposal & long-term archiving (5.6, since P7-S3) - a pure status/
+// retrieval view onto the transfer state machine maintained by
+// archival-service. Triggering itself (object-type deadline/manual trigger)
+// happens in document-service; here it's only observation + retrieval.
 export function ArchivalTransfersView() {
   return (
     <div>
@@ -303,13 +303,13 @@ function DocumentArchivalSection() {
   );
 }
 
-// XDOMEA-Aussonderung für Umlaufmappen (5.6, seit P7-S3b) - eigener
-// Abschnitt statt eines neuen Seiten-Slugs, gleiches Mehr-Sektionen-Muster
-// wie RetentionSettings (Dokumente + Ordner in einem Formular). Installations-
-// weite Konfiguration (kein Pendant zu ObjectType.default_archive_after_days,
-// da Umlaufmappen keine eigene applies_to-Kategorie haben) + Statustabelle
-// mit reinem Download (kein Zurückschreiben - eine Umlaufmappe besitzt
-// keinen eigenen Live-Speicherplatz).
+// XDOMEA disposal for routing folders (5.6, since P7-S3b) - its own section
+// instead of a new page slug, the same multi-section pattern as
+// RetentionSettings (documents + folders in one form). Installation-wide
+// configuration (no counterpart to ObjectType.default_archive_after_days,
+// since routing folders have no applies_to category of their own) + a
+// status table with pure download (no write-back - a routing folder has no
+// live storage space of its own).
 function CaseArchivalSection() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

@@ -4,8 +4,8 @@ import { useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, searchDocuments, type SearchResult } from "@/lib/api";
 
-// "Aus OG Doc öffnen" (3.3a) - nutzt die bestehende Volltextsuche
-// (search-service, 3.7/3.7a) statt eines eigenen Auflistungs-Endpunkts.
+// "Open from OG Doc" (3.3a) - uses the existing full-text search
+// (search-service, 3.7/3.7a) instead of a separate listing endpoint.
 export function DocumentPicker({
   token,
   onOpen,

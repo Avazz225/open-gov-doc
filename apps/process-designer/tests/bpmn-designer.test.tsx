@@ -2,10 +2,10 @@ import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BpmnDesigner, type BpmnDesignerHandle } from "@/components/BpmnDesigner";
 
-// jsdom hat keine echte Canvas-/SVG-Layout-Engine (siehe Plan, "Kein Browser
-// in dieser Entwicklungsumgebung") - `bpmn-js` selbst wird deshalb gemockt,
-// verifiziert wird nur, dass `BpmnDesigner` es mit den erwarteten Argumenten
-// instanziiert/aufruft, nicht das visuelle Rendering.
+// jsdom has no real canvas/SVG layout engine (see plan, "No browser
+// in this development environment") - `bpmn-js` itself is therefore mocked;
+// only that `BpmnDesigner` instantiates/calls it with the expected arguments
+// is verified, not the visual rendering.
 const importXMLMock = vi.fn().mockResolvedValue({ warnings: [] });
 const saveXMLMock = vi.fn().mockResolvedValue({ xml: "<exported/>" });
 const destroyMock = vi.fn();
@@ -57,8 +57,8 @@ describe("BpmnDesigner", () => {
     const options = modelerConstructorMock.mock.calls[0][0] as {
       additionalModules: unknown[];
     };
-    // 4 bisherige Module + FederatedStepPropertiesProviderModule + die
-    // didi-Inline-Bindung für die statische Installationsliste (P6-S9).
+    // 4 previous modules + FederatedStepPropertiesProviderModule + the
+    // didi inline binding for the static installation list (P6-S9).
     expect(options.additionalModules).toHaveLength(6);
 
     await waitFor(() => expect(importXMLMock).toHaveBeenCalledWith(STARTER_XML));

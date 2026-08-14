@@ -19,9 +19,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 }
 
-// Jeder Aufruf geht über das Gateway (3.5): /api/{service_type}/{path} statt
-// direkter Backend-Adressen - Registry-Auflösung und Auth-Prüfung passieren
-// dort, nicht hier.
+// Every call goes through the gateway (3.5): /api/{service_type}/{path} instead
+// of direct backend addresses - registry resolution and auth checks happen
+// there, not here.
 async function request(
   serviceType: string,
   path: string,
@@ -79,10 +79,10 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
-// Domänengetrennte Admin-Rollen (4.6, P6-S5): systemeigen im Permission
-// Service, NICHT als Keycloak-Realm-Rolle (anders als `realm_roles` oben) -
-// dieselbe Quelle, die auch das Backend-Gating von `POST/DELETE
-// /process-definitions` nutzt (Capability `admin.object_config`, seit P6-S6).
+// Domain-separated admin roles (4.6, P6-S5): native to the Permission
+// Service, NOT a Keycloak realm role (unlike `realm_roles` above) -
+// the same source that also backs the backend gating of `POST/DELETE
+// /process-definitions` (capability `admin.object_config`, since P6-S6).
 export async function getEffectivePermissions(
   token: string,
   principalId: string
@@ -127,9 +127,9 @@ export async function getMaintenanceStatus(token: string): Promise<MaintenanceMo
   return response.json();
 }
 
-// Workflow Service (7.1) - Prozessdefinitionen. Seit P6-S8 ist `name` der
-// Prozessfamilien-Schlüssel: mehrere Definitionen mit demselben Namen sind
-// Versionen derselben Familie, siehe ADR 0027.
+// Workflow Service (7.1) - process definitions. Since P6-S8, `name` is the
+// process family key: multiple definitions with the same name are
+// versions of the same family, see ADR 0027.
 export interface ProcessDefinitionSummary {
   id: number;
   name: string;
@@ -144,10 +144,10 @@ export interface ProcessDefinitionDetail extends ProcessDefinitionSummary {
 }
 
 // Post-Roadmap Phase 21 Session 4 (ADR 0087): `POST /process-definitions`
-// kann optional per Vier-Augen-Mechanismus gegated sein - der Erfolgsfall
-// (Default, keine Genehmigungspflicht konfiguriert) bleibt unverändert
-// `ProcessDefinitionSummary` mit `201`; ein `202` signalisiert stattdessen
-// diese neue, separate Form.
+// can optionally be gated by a four-eyes mechanism - the success case
+// (default, no approval requirement configured) remains unchanged as
+// `ProcessDefinitionSummary` with `201`; a `202` instead signals
+// this new, separate form.
 export interface ProcessDefinitionImportPending {
   status: "pending_approval";
   approval_request_id: string;
@@ -218,8 +218,8 @@ export async function deleteProcessDefinition(token: string, id: number): Promis
   );
 }
 
-// DMN-1.3-Entscheidungstabellen (7.1, P14-S4) - gleiches Versionierungsmuster
-// wie Prozessdefinitionen (`name` ist der Familienschlüssel), siehe
+// DMN 1.3 decision tables (7.1, P14-S4) - same versioning pattern
+// as process definitions (`name` is the family key), see
 // `models.DmnDefinition`.
 export interface DmnDefinitionSummary {
   id: number;
@@ -282,10 +282,10 @@ export async function deleteDmnDefinition(token: string, id: number): Promise<vo
   await request("workflow-service", `dmn-definitions/${id}`, { method: "DELETE" }, token);
 }
 
-// Federation Hub (7.4, P6-S9) - Proxy von workflow-service auf das
-// Hub-Adressbuch (`GET /federation/installations`, ungegated wie andere
-// GETs). Leere Liste ohne konfigurierten Hub - der Designer bietet
-// föderierte Prozessschritte dann gar nicht erst an (siehe
+// Federation Hub (7.4, P6-S9) - proxy from workflow-service to the
+// hub's address book (`GET /federation/installations`, ungated like other
+// GETs). Empty list without a configured hub - the designer then
+// doesn't even offer federated process steps (see
 // components/FederatedStepPropertiesProvider.tsx).
 export interface FederationInstallationSummary {
   id: string;

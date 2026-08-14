@@ -18,13 +18,13 @@ import { useAuth } from "@/lib/auth-context";
 
 const FAILED_PERMANENT = "failed_permanent";
 
-// Verarbeitungsfehler-Sichtbarkeit (Post-Roadmap Phase 20 Session 7) - reine
-// Sichtbarkeit auf `failed_permanent`-Datensätze aus drei unabhängigen
-// Services + manueller Neustart, analog zu `ArchivalTransfersView`s
-// Document-/Case-Sektionen. Bewusst DREI eigenständige Sektionen (kein
-// gemeinsamer generischer Hook) - gleiches "leichtgewichtige Duplikation
-// statt Abstraktion"-Prinzip wie bei den Poll-Loops der zugehörigen
-// Backend-Services dieser Phase.
+// Processing failure visibility (Post-Roadmap Phase 20 Session 7) - pure
+// visibility into `failed_permanent` records from three independent
+// services + manual restart, analogous to `ArchivalTransfersView`'s
+// Document/Case sections. Deliberately THREE standalone sections (no
+// shared generic hook) - same "lightweight duplication instead of
+// abstraction" principle as the poll loops of this phase's associated
+// backend services.
 export function ProcessingFailuresView() {
   return (
     <div>

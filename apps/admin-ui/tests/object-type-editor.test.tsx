@@ -129,7 +129,7 @@ describe("ObjectTypeEditor", () => {
         classificationLevel: null,
       })
     );
-    // Kein abweichender Anzeigename vergeben -> kein Layout-Override nötig.
+    // No differing display label provided -> no layout override needed.
     expect(putObjectTypeLayoutMock).not.toHaveBeenCalled();
   });
 
@@ -178,7 +178,7 @@ describe("ObjectTypeEditor", () => {
     expect(await screen.findByRole("form", { name: "Objekttyp speichern" })).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toHaveValue("Rechnung");
     expect(screen.getByLabelText("Name")).toBeDisabled();
-    // Anzeigename ist im Bearbeiten-Modus nicht editierbar (nur beim Anlegen relevant, ADR 0014).
+    // Display label is not editable in edit mode (only relevant when creating, ADR 0014).
     expect(screen.queryByLabelText("Anzeigename")).not.toBeInTheDocument();
 
     fireEvent.submit(screen.getByRole("form", { name: "Objekttyp speichern" }));
@@ -281,8 +281,8 @@ describe("ObjectTypeEditor", () => {
     expect(screen.getByLabelText("Standard-Aufbewahrungsfrist (Tage)")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
-    // Anders als Kennzeichen/Signatur bleiben die Aufbewahrungsfelder auch
-    // für Ordnerklassen sichtbar.
+    // Unlike reference number/signature, the retention fields remain
+    // visible for folder classes too.
     expect(screen.getByLabelText("Standard-Aufbewahrungsfrist (Tage)")).toBeInTheDocument();
     expect(screen.getByLabelText("Löschgrund-Pflicht")).toBeInTheDocument();
   });
@@ -332,8 +332,8 @@ describe("ObjectTypeEditor", () => {
     expect(screen.getByLabelText("Aussonderung nach (Tage)")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Gilt für"), { target: { value: "folder" } });
-    // Wie die Aufbewahrungsfelder gelten die Aussonderungsfelder auch für
-    // Ordnerklassen.
+    // Like the retention fields, the archival fields also apply to
+    // folder classes.
     expect(screen.getByLabelText("Aussonderung nach (Tage)")).toBeInTheDocument();
     expect(screen.getByLabelText("Archiv-Kopie verschlüsseln")).toBeInTheDocument();
   });

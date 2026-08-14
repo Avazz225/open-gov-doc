@@ -1,12 +1,12 @@
-// Zur Build-Zeit fest eingebrannt (statischer Export, Konzept 8 - kein Server,
-// der zur Laufzeit Konfiguration nachladen könnte). Für einen anderen
-// Gateway-Endpunkt muss das Image mit einem anderen Wert neu gebaut werden.
+// Baked in at build time (static export, concept 8 - no server that could
+// reload configuration at runtime). To point at a different gateway
+// endpoint, the image must be rebuilt with a different value.
 export const GATEWAY_BASE_URL =
   process.env.NEXT_PUBLIC_GATEWAY_BASE_URL ?? "http://localhost:8009";
 
-// Office-Direktbearbeitung (Post-Roadmap-Feature): webdav-connector ist ein
-// eigenständiger, dem Browser direkt bekannter Dienst (anders als jeder
-// andere Aufruf in api.ts, die alle über den Gateway laufen) - die
-// Office-URI-Schema-Start-URL muss ihn direkt ansprechen, kein Proxy dazwischen.
+// Direct Office editing (post-roadmap feature): webdav-connector is a
+// standalone service known directly to the browser (unlike every other call
+// in api.ts, all of which go through the gateway) - the Office URI scheme
+// launch URL must address it directly, no proxy in between.
 export const WEBDAV_CONNECTOR_BASE_URL =
   process.env.NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL ?? "http://localhost:8027";

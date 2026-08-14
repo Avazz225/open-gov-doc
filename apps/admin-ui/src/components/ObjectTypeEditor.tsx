@@ -41,10 +41,10 @@ const ICON_OPTIONS = [
   "invoice",
   "contract",
 ];
-// Muss zur Smart-Layout-Generierung des Backends passen (2.2b,
-// object_type_service.layout.COLUMNS_PER_ROW), da hier nur beim Anlegen
-// einmalig dieselbe Paketierung mit den hier vergebenen Anzeigenamen
-// nachgebildet wird (siehe Begründung bei handleSubmit).
+// Must match the backend's smart layout generation (2.2b,
+// object_type_service.layout.COLUMNS_PER_ROW), since this only replicates
+// the same packing, once at creation time, with the display names assigned
+// here (see the rationale in handleSubmit).
 const LAYOUT_COLUMNS_PER_ROW = 2;
 const LAYOUT_PURPOSES = ["display", "search", "upload"] as const;
 
@@ -112,30 +112,32 @@ export function ObjectTypeEditor() {
   const [icon, setIcon] = useState("");
   const [allowedParentTypes, setAllowedParentTypes] = useState<Set<string>>(new Set());
   const [kennzeichenFormat, setKennzeichenFormat] = useState("");
-  // "default" = kein Override (null), sonst "true"/"false" (Tri-State, P5e-S1).
+  // "default" = no override (null), otherwise "true"/"false" (tri-state, P5e-S1).
   const [kennzeichenDisplayOverride, setKennzeichenDisplayOverride] = useState<
     "default" | "true" | "false"
   >("default");
-  // Mindest-Signaturniveau (3.10, seit P6-S7) - "none" = keine Anforderung.
+  // Minimum signature level (3.10, since P6-S7) - "none" = no requirement.
   const [requiredSignatureLevel, setRequiredSignatureLevel] = useState<
     "none" | "ses" | "aes" | "qes"
   >("none");
-  // Aufbewahrung (5.2, seit P7-S1) - gilt für Dokument- UND Ordnerklassen,
-  // anders als Kennzeichen/Signatur oben. Leerer String = kein Typ-Default.
+  // Retention (5.2, since P7-S1) - applies to BOTH document and folder
+  // classes, unlike reference number/signature above. Empty string = no
+  // type default.
   const [defaultRetentionDays, setDefaultRetentionDays] = useState("");
-  // Tri-State wie kennzeichenDisplayOverride oben.
+  // Tri-state like kennzeichenDisplayOverride above.
   const [deletionReasonRequiredOverride, setDeletionReasonRequiredOverride] = useState<
     "default" | "true" | "false"
   >("default");
-  // Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - gilt wie
-  // defaultRetentionDays für beide appliesTo-Werte.
+  // Disposal & long-term archiving (5.6, since P7-S3) - applies to both
+  // appliesTo values, like defaultRetentionDays.
   const [defaultArchiveAfterDays, setDefaultArchiveAfterDays] = useState("");
   const [archiveEncryptionEnabled, setArchiveEncryptionEnabled] = useState(false);
-  // Verschlusssachen-Einstufung (2.5, seit P15-S1, mehrstufig seit P17-S2,
-  // 14.2) - nur für appliesTo="document" gültig, gleiches clientseitiges
-  // Erzwingungsmuster wie kennzeichenFormat/requiredSignatureLevel oben.
-  // "" = nicht eingestuft (kein `ClassificationLevel`-Wert ist ein leerer
-  // String, daher als Sentinel für die <select>-Leerauswahl nutzbar).
+  // Classified-material classification (2.5, since P15-S1, multi-level
+  // since P17-S2, 14.2) - only valid for appliesTo="document", the same
+  // client-side enforcement pattern as kennzeichenFormat/
+  // requiredSignatureLevel above. "" = not classified (no
+  // `ClassificationLevel` value is an empty string, so it can be used as a
+  // sentinel for the empty <select> selection).
   const [classificationLevel, setClassificationLevel] = useState<ClassificationLevel | "">("");
 
   const reload = useCallback(async () => {
@@ -151,10 +153,11 @@ export function ObjectTypeEditor() {
     reload();
   }, [reload]);
 
-  // Nur bestehende Ordnerklassen dürfen referenziert werden (2.2a, nur Ordner
-  // können Elternobjekte sein) - die eigene Klasse wird beim Bearbeiten
-  // ausgeblendet (Selbstreferenz wäre strukturell sinnlos, auch wenn das
-  // Backend mangels Zyklenerkennung, ADR 0013, keinen Fehler werfen würde).
+  // Only existing folder classes may be referenced (2.2a, only folders can
+  // be parent objects) - the class being edited itself is hidden (a
+  // self-reference would be structurally meaningless, even though the
+  // backend wouldn't throw an error, due to a lack of cycle detection,
+  // ADR 0013).
   const folderTypeNames = useMemo(
     () =>
       objectTypes
@@ -258,34 +261,36 @@ export function ObjectTypeEditor() {
     const backendAttributes = attributes.map(toBackendAttribute);
     const allowedParentTypesArray = allowedParentTypes.size > 0 ? Array.from(allowedParentTypes) : null;
     const iconValue = appliesTo === "folder" && icon ? icon : null;
-    // Kennzeichengenerator (2.2, P5e-S1/S3) ist nur für Dokumentklassen gültig
-    // - analog zu iconValue oben auf null erzwungen statt dem Backend die
-    // 422-Ablehnung zu überlassen, falls appliesTo="folder" gewählt ist.
+    // The reference number generator (2.2, P5e-S1/S3) is only valid for
+    // document classes - forced to null analogous to iconValue above,
+    // instead of leaving the 422 rejection to the backend if
+    // appliesTo="folder" is selected.
     const kennzeichenFormatValue =
       appliesTo === "document" && kennzeichenFormat.trim() ? kennzeichenFormat.trim() : null;
     const kennzeichenDisplayOverrideValue =
       appliesTo === "document" && kennzeichenDisplayOverride !== "default"
         ? kennzeichenDisplayOverride === "true"
         : null;
-    // Mindest-Signaturniveau (3.10) ist wie Kennzeichen-Felder nur für
-    // Dokumentklassen gültig - dieselbe clientseitige Erzwingung statt einer
-    // 422-Ablehnung durch das Backend zu riskieren.
+    // Minimum signature level (3.10) is, like the reference number fields,
+    // only valid for document classes - the same client-side enforcement
+    // instead of risking a 422 rejection from the backend.
     const requiredSignatureLevelValue =
       appliesTo === "document" && requiredSignatureLevel !== "none" ? requiredSignatureLevel : null;
-    // Aufbewahrung (5.2, P7-S1) - gilt für beide appliesTo-Werte, deshalb
-    // keine der obigen appliesTo-Erzwingungen.
+    // Retention (5.2, P7-S1) - applies to both appliesTo values, so none of
+    // the above appliesTo enforcements apply here.
     const defaultRetentionDaysValue =
       defaultRetentionDays.trim() === "" ? null : Number(defaultRetentionDays);
     const deletionReasonRequiredOverrideValue =
       deletionReasonRequiredOverride !== "default"
         ? deletionReasonRequiredOverride === "true"
         : null;
-    // Aussonderung (5.6, P7-S3) - gilt wie defaultRetentionDaysValue für
-    // beide appliesTo-Werte.
+    // Disposal (5.6, P7-S3) - applies to both appliesTo values, like
+    // defaultRetentionDaysValue.
     const defaultArchiveAfterDaysValue =
       defaultArchiveAfterDays.trim() === "" ? null : Number(defaultArchiveAfterDays);
-    // Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2) ist
-    // wie Kennzeichen-Felder nur für Dokumentklassen gültig.
+    // Classified-material classification (2.5, P15-S1, multi-level since
+    // P17-S2) is, like the reference number fields, only valid for document
+    // classes.
     const classificationLevelValue =
       appliesTo === "document" && classificationLevel !== "" ? classificationLevel : null;
 
@@ -307,12 +312,12 @@ export function ObjectTypeEditor() {
           classificationLevel: classificationLevelValue,
         });
 
-        // Anzeigenamen leben im Layout, nicht im Attribut-Schema (ADR 0014) -
-        // nur beim Anlegen wird aus ihnen ein initiales Smart Layout mit den
-        // hier vergebenen Labels für alle drei Verwendungszwecke persistiert;
-        // ohne abweichende Labels bleibt es beim serverseitig generierten
-        // Default (kein unnötiges Override). Spätere Anpassungen laufen
-        // ausschließlich über den separaten Layout-Designer.
+        // Display names live in the layout, not in the attribute schema
+        // (ADR 0014) - only at creation time is an initial smart layout
+        // persisted from them, with the labels assigned here, for all three
+        // purposes; without deviating labels, it stays with the
+        // server-generated default (no unnecessary override). Later
+        // adjustments run exclusively through the separate layout designer.
         const labelsAssigned = attributes.some(
           (a) => a.label.trim() && a.label.trim() !== a.name.trim()
         );

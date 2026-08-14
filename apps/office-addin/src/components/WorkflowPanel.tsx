@@ -14,11 +14,11 @@ import {
   type ReadyTask,
 } from "@/lib/api";
 
-// "Einen Workflow direkt aus dem geöffneten Dokument heraus starten oder
-// eine offene Aufgabe daran fortsetzen/abschließen" (3.3a). Korrelation über
-// `business_key = documentId` - derselbe, bereits im gesamten System
-// etablierte Mechanismus (kein neuer Endpunkt/keine neue Verknüpfungstabelle
-// nötig, siehe `GET /instances?business_key=`).
+// "Start a workflow directly from the open document or
+// continue/complete an open task on it" (3.3a). Correlation via
+// `business_key = documentId` - the same mechanism already
+// established throughout the system (no new endpoint/no new linking table
+// needed, see `GET /instances?business_key=`).
 export function WorkflowPanel({
   token,
   documentId,

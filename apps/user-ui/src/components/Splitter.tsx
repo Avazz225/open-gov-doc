@@ -2,11 +2,11 @@
 
 import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 
-// Generischer Ziehgriff für resizable Panels (Nutzer-Feedback nach P4-S3,
-// 3-geteiltes Explorer-Layout, 8). Bewusst ohne externe Layout-Bibliothek -
-// berechnet die neue Größe bei jedem "pointermove" relativ zur
-// Bounding-Box von `containerRef`, statt kumulierter Deltas zu addieren
-// (robuster gegenüber verlorenen Events).
+// Generic drag handle for resizable panels (user feedback after P4-S3,
+// 3-way split explorer layout, 8). Deliberately without an external layout
+// library - computes the new size on every "pointermove" relative to
+// `containerRef`'s bounding box, instead of accumulating deltas (more
+// robust against lost events).
 export function Splitter({
   orientation,
   containerRef,

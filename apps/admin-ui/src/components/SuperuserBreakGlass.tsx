@@ -15,14 +15,14 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Superuser Break-Glass (4.6, P6-S5): Aktivierung selbst läuft über den
-// bereits bestehenden generischen Vier-Augen-Mechanismus des Permission
-// Service (P6-S4, ADR 0022) - diese Seite ruft nur dessen Endpunkte auf und
-// zeigt den Status (`GET /superuser/status`, Auth Service). Zwei
-// *verschiedene* Personen, beide mit der Capability `breakglass.approve`
-// (Rollenzuweisung über die bestehende Nutzer-/Rechteverwaltung-Seite),
-// müssen anfordern und genehmigen - identisch mit jedem anderen gegateten
-// Aktionstyp aus P6-S4, hier nur mit erzwungener Rollenbindung.
+// Superuser break-glass (4.6, P6-S5): activation itself runs through the
+// already-existing generic four-eyes principle mechanism of the Permission
+// Service (P6-S4, ADR 0022) - this page only calls its endpoints and
+// displays the status (`GET /superuser/status`, Auth Service). Two
+// *different* people, both holding the `breakglass.approve` capability
+// (role assignment via the existing user/permission management page), must
+// request and approve - identical to any other gated action type from
+// P6-S4, just with an enforced role binding here.
 export function SuperuserBreakGlass() {
   const { user, permissions, accessToken } = useAuth();
   const { t } = useI18n();

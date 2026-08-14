@@ -17,10 +17,10 @@ import { LayoutFormFields } from "./LayoutFormFields";
 
 const RANGE_TYPES = new Set(["date", "decimal", "integer"]);
 
-// Fällt zurück auf ein Ein-Attribut-pro-Zeile-Layout (identisch zur
-// Anordnung vor P5b-S4), falls das "search"-Layout des gewählten Objekttyps
-// nicht geladen werden kann - die Suche soll nicht wegen eines Ausfalls des
-// Object-Type Service komplett unbenutzbar werden.
+// Falls back to a one-attribute-per-row layout (identical to the
+// arrangement before P5b-S4) if the "search" layout of the selected object
+// type cannot be loaded - search shouldn't become completely unusable due
+// to an object-type-service outage.
 function fallbackLayout(objectType: FacetObjectType | undefined): LayoutData {
   return {
     rows: (objectType?.attributes ?? []).map((attribute) => ({
@@ -31,14 +31,14 @@ function fallbackLayout(objectType: FacetObjectType | undefined): LayoutData {
   };
 }
 
-// Linke Spalte im "Suche"-Ansichtsmodus (Nutzerwunsch, P5-S4) - ersetzt
-// ExplorerPane/MetadataPanel, während PreviewPane unverändert vom aktiven Tab
-// gesteuert bleibt (siehe DocumentWorkspace). Objekttyp-Auswahl blendet
-// passende Attributfilter ein, seit P5b-S4 angeordnet über das "search"-
-// Formular-Layout des Objekttyps (2.2b) statt einer festen Ein-Feld-pro-
-// Zeile-Reihenfolge - Bereichsfilter bei date/decimal/integer, Exakt-Match
-// sonst. Klick auf ein Ergebnis öffnet es wie jedes andere Dokument über die
-// bestehende Tab-/Vorschau-Maschinerie.
+// Left column in "search" view mode (user request, P5-S4) - replaces
+// ExplorerPane/MetadataPanel, while PreviewPane remains unchanged and
+// controlled by the active tab (see DocumentWorkspace). Selecting an
+// object type shows the matching attribute filters, arranged since P5b-S4
+// via the object type's "search" form layout (2.2b) instead of a fixed
+// one-field-per-row order - range filter for date/decimal/integer, exact
+// match otherwise. Clicking a result opens it like any other document via
+// the existing tab/preview machinery.
 export function SearchPane({
   token,
   onOpenDocument,

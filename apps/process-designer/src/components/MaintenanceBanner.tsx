@@ -5,9 +5,9 @@ import { useI18n } from "@/i18n";
 import { getMaintenanceStatus } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Not-Shutdown (4.8, P6-S6): "von jedem regulären UI-Zugriff klar
-// signalisiert" - reines Status-Banner ohne Bedienelemente, identisches
-// Muster wie admin-ui/user-ui.
+// Emergency shutdown (4.8, P6-S6): "clearly signaled from every regular
+// UI access point" - pure status banner without controls, identical
+// pattern to admin-ui/user-ui.
 export function MaintenanceBanner() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -22,8 +22,8 @@ export function MaintenanceBanner() {
         const status = await getMaintenanceStatus(accessToken as string);
         if (!cancelled) setActive(status.active);
       } catch {
-        // Unerreichbarer permission-service soll die restliche UI nicht
-        // blockieren - Banner bleibt einfach aus.
+        // An unreachable permission-service should not block the rest of
+        // the UI - banner simply stays off.
       }
     }
 

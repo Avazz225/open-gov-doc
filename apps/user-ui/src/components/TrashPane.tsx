@@ -16,28 +16,28 @@ import {
   type Folder,
 } from "@/lib/api";
 
-// Papierkorb-Familie (2.5, P15-S1) - installationsweite Sonderbereich-Ansicht,
-// bewusst getrennt vom bestehenden ordnerbezogenen Papierkorb-Umschalter in
-// ExplorerPane.tsx (der zeigt weiterhin nur, was IM GERADE GEÖFFNETEN Ordner
-// gelöscht ist - unverändertes Verhalten, keine Rückwärtskompatibilitäts-
-// Sorge). Drei strukturell getrennte Sichten, je nach Rolle des angemeldeten
-// Nutzers (gleiches client-seitiges Gating-Muster wie MetadataPanel.tsx's
-// Kennzeichen-Admin-Prüfung - eine Installation mit abweichend konfigurierten
-// Rollennamen müsste diese Konstanten entsprechend anpassen):
-//   - "personal" (immer verfügbar): nur die eigenen Löschmarkierungen, kein
-//     "endgültig löschen" - reguläre Nutzer können laut Konzept nur markieren.
-//   - "admin" (nur mit trash_hard_delete_admin_role): vollständiger, aber
-//     nicht-klassifizierter Papierkorb samt "endgültig löschen".
-//   - "admin_classified" (nur mit classified_trash_hard_delete_admin_role):
-//     strukturell getrennter Verschlusssachen-Papierkorb (nur Dokumente,
-//     Ordner kennen laut Konzept keine Klassifizierung) samt "endgültig
-//     löschen".
-// Bewusst kein "Öffnen"-Button: `folder-service`s reguläres `GET /folders/
-// {id}` behandelt einen bereits im Papierkorb liegenden Ordner wie nicht
-// vorhanden (siehe `repository.get_folder`) - eine In-Place-Vorschau eines
-// gelöschten Objekts wäre ein eigenständiges Feature, nicht Teil dieser
-// Session (Name/Attribute in der Liste selbst erfüllen bereits das
-// Konzept-Ziel "durchsuch-/einsehbar").
+// Trash family (2.5, P15-S1) - installation-wide special-area view,
+// deliberately separate from the existing folder-scoped trash toggle in
+// ExplorerPane.tsx (which continues to show only what is deleted WITHIN THE
+// CURRENTLY OPEN folder - unchanged behavior, no backward-compatibility
+// concern). Three structurally separate views, depending on the role of the
+// logged-in user (same client-side gating pattern as MetadataPanel.tsx's
+// reference-number admin check - an installation with differently configured
+// role names would need to adjust these constants accordingly):
+//   - "personal" (always available): only the user's own deletion markers, no
+//     "delete permanently" - per the concept, regular users can only mark for
+//     deletion.
+//   - "admin" (only with trash_hard_delete_admin_role): full but
+//     non-classified trash, including "delete permanently".
+//   - "admin_classified" (only with classified_trash_hard_delete_admin_role):
+//     structurally separate classified-documents trash (documents only,
+//     per the concept folders have no classification) including "delete
+//     permanently".
+// Deliberately no "open" button: `folder-service`'s regular `GET /folders/
+// {id}` treats a folder that is already in the trash as non-existent (see
+// `repository.get_folder`) - an in-place preview of a deleted object would be
+// a separate feature, not part of this session (the name/attributes shown in
+// the list already satisfy the concept goal of "searchable/viewable").
 const TRASH_HARD_DELETE_ADMIN_ROLE = "dms-admin";
 const CLASSIFIED_TRASH_HARD_DELETE_ADMIN_ROLE = "dms-admin";
 
@@ -66,7 +66,7 @@ export function TrashPane({ token }: { token: string }) {
       const documentScope: DocumentTrashScope = scope;
       const [loadedDocuments, loadedFolders] = await Promise.all([
         listDeletedDocumentsGlobal(token, documentScope),
-        // Verschlusssachen-Papierkorb kennt laut Konzept nur Dokumente.
+        // Per the concept, the classified-documents trash only knows documents.
         scope === "admin_classified" ? Promise.resolve([]) : listDeletedFoldersGlobal(token, scope),
       ]);
       setDocuments(loadedDocuments);

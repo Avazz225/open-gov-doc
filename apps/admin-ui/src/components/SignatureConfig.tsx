@@ -12,10 +12,10 @@ import { useAuth } from "@/lib/auth-context";
 
 const ALL_LEVELS = ["ses", "aes", "qes"] as const;
 
-// Connector-Niveaus (3.10, Post-Roadmap Phase 22 Session 6, ADR 0091) - `id`/
-// `type` sind strukturell fest (env-var), nur `levels` je Connector ist
-// admin-editierbar. Wirkt beim nächsten Signaturvorgang sofort, kein
-// Neustart des Signature Service nötig.
+// Connector levels (3.10, Post-Roadmap Phase 22 Session 6, ADR 0091) - `id`/
+// `type` are structurally fixed (env var), only `levels` per connector is
+// admin-editable. Takes effect immediately on the next signing operation, no
+// restart of the Signature Service required.
 export function SignatureConfig() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

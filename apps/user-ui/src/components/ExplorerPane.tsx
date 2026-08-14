@@ -47,15 +47,15 @@ function loadViewMode(): ExplorerViewMode {
   return window.localStorage.getItem(VIEW_MODE_KEY) === "tree" ? "tree" : "list";
 }
 
-// Eigenständiges Panel im dockbaren Arbeitsbereich (Konzept 8, seit P16-S1) -
-// Windows-Explorer-artige Ordnernavigation mit Ordner-CRUD (bisher gab es nur
-// Navigation, keine Erstellung/Umbenennung/Löschung in der UI - die Backend-
-// Endpunkte existierten bereits seit P3-S3). Trug bis P16-S1 zusätzlich die
-// Tableiste für geöffnete Dokumente - die wandert seit P16-S1 mit der
-// Vorschau zusammen in eine eigene dockview-Gruppe (`DockableDocumentArea`,
-// "Dokumenttabs künftig über der Vorschau statt über dem Explorer", Konzept
-// 8) und wird jetzt von dockviews eigenem Tab-Strip gerendert statt einer
-// handgebauten Tableiste hier.
+// Standalone panel within the dockable workspace (concept 8, since P16-S1) -
+// Windows-Explorer-style folder navigation with folder CRUD (previously
+// there was only navigation, no create/rename/delete in the UI - the
+// backend endpoints already existed since P3-S3). Until P16-S1 it also
+// carried the tab bar for open documents - since P16-S1 that moves together
+// with the preview into its own dockview group (`DockableDocumentArea`,
+// "document tabs going forward above the preview instead of above the
+// explorer", concept 8) and is now rendered by dockview's own tab strip
+// instead of a hand-built tab bar here.
 export function ExplorerPane({
   trail,
   folders,
@@ -125,18 +125,17 @@ export function ExplorerPane({
   const [shareLinkModalDocument, setShareLinkModalDocument] = useState<DocumentSummary | null>(
     null
   );
-  // Sammelbearbeitung von Metadaten (8, P14-S12) - "kind:id"-Set, gleiches
-  // Schlüsselformat wie `favoriteKeys` oben. Nur in der Listenansicht
-  // außerhalb des Papierkorbs sinnvoll (siehe Checkbox-Rendering unten) -
-  // wird bei Ordnerwechsel/Papierkorb-Umschalten geleert, damit sie nie auf
-  // gerade nicht mehr sichtbare Objekte verweist.
+  // Bulk metadata editing (8, P14-S12) - a "kind:id" set, same key format as
+  // `favoriteKeys` above. Only meaningful in the list view outside the trash
+  // (see checkbox rendering below) - cleared on folder change/trash toggle,
+  // so it never references objects that are no longer visible.
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [showBulkEdit, setShowBulkEdit] = useState(false);
-  // Ordner-Verschieben per Drag & Drop (8, P23-S4). `draggedFolderId` merkt
-  // sich den gezogenen Ordner (auch für den Drop-Handler selbst nötig -
-  // `dataTransfer` ist im `dragover`-Event aus Sicherheitsgründen nicht
-  // lesbar, nur im `drop`-Event); `dragOverFolderId` steuert nur die
-  // visuelle Rückmeldung, welche Zeile aktuell als Ziel gilt.
+  // Folder move via drag & drop (8, P23-S4). `draggedFolderId` remembers
+  // the dragged folder (also needed for the drop handler itself -
+  // `dataTransfer` is not readable in the `dragover` event for security
+  // reasons, only in the `drop` event); `dragOverFolderId` only controls the
+  // visual feedback for which row currently counts as the target.
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
@@ -199,12 +198,12 @@ export function ExplorerPane({
       })),
   ];
 
-  // Klassen-Icons vor jedem Ordnernamen (2.2a/2.2b) sowie die Liste selbst
-  // für die Ordnerklassen-Auswahl beim Anlegen (Nutzer-Feedback: bislang war
-  // die Ordnerklasse beim Erstellen gar nicht wählbar, obwohl das Backend sie
-  // seit P3-S3 unterstützt) - einmalig geladen, kein Blocker für die übrige
-  // Anzeige, wenn das fehlschlägt (bleibt dann beim generischen
-  // Ordner-Symbol/keiner Klassenauswahl, siehe `folderIcon()`-Fallback).
+  // Class icons before each folder name (2.2a/2.2b) as well as the list
+  // itself for the folder class selection when creating (user feedback: until
+  // now the folder class wasn't selectable at all when creating, even though
+  // the backend has supported it since P3-S3) - loaded once, not a blocker
+  // for the rest of the display if this fails (falls back to the generic
+  // folder icon/no class selection, see the `folderIcon()` fallback).
   useEffect(() => {
     if (!token) return;
     listObjectTypes(token, "folder")
@@ -215,9 +214,10 @@ export function ExplorerPane({
       .catch(() => {});
   }, [token]);
 
-  // Kennzeichen-Anzeige vor dem Dateinamen (2.2/8, P5e-S3) - Objekttyp-Override
-  // je Dokumentenart plus globaler Standard, siehe lib/kennzeichen.ts. Gleiches
-  // "einmalig laden, bei Fehlschlag beim Fallback bleiben"-Muster wie oben.
+  // Reference-number display before the file name (2.2/8, P5e-S3) - object
+  // type override per document kind plus a global default, see
+  // lib/kennzeichen.ts. Same "load once, fall back on failure" pattern as
+  // above.
   useEffect(() => {
     if (!token) return;
     listObjectTypes(token, "document")
@@ -228,13 +228,13 @@ export function ExplorerPane({
       .catch(() => {});
   }, [token]);
 
-  // Löschantrag-Workflow (5.2, seit P7-S1c): einmalig geladen, ob die
-  // reguläre Papierkorb-Aktion per Vier-Augen-Prinzip genehmigungspflichtig
-  // konfiguriert ist - bestimmt nur die Beschriftung ("Löschen" vs.
-  // "Löschung beantragen"), die eigentliche Durchsetzung passiert serverseitig
-  // in document-service/folder-service unabhängig davon. Bei Fehlschlag
-  // (z. B. permission-service nicht erreichbar) bleibt der sichere Default
-  // "false" - identisches Fallback-Prinzip wie bei den Klassen-Icons oben.
+  // Delete-request workflow (5.2, since P7-S1c): loaded once, whether the
+  // regular trash action is configured to require approval via the
+  // four-eyes principle - determines only the label ("delete" vs. "request
+  // deletion"), the actual enforcement happens server-side in
+  // document-service/folder-service independently of this. On failure (e.g.
+  // permission-service unreachable) the safe default "false" remains - the
+  // identical fallback principle as with the class icons above.
   useEffect(() => {
     if (!token) return;
     getApprovalConfig(token, "folder.delete")
@@ -245,11 +245,11 @@ export function ExplorerPane({
       .catch(() => {});
   }, [token]);
 
-  // Öffentlicher Freigabelink (4.2a, P14-S10): der Kontextmenü-Eintrag wird
-  // nur angeboten, wenn die Funktion installationsweit aktiv ist ("kein
-  // Menüpunkt" laut Konzept-Wortlaut bei Deaktivierung) - bei Fehlschlag
-  // bleibt der sichere Default "false", gleiches Fallback-Prinzip wie bei
-  // den übrigen einmalig geladenen Konfigurationen oben.
+  // Public share link (4.2a, P14-S10): the context menu entry is only
+  // offered if the feature is active installation-wide ("no menu item" per
+  // the concept wording when disabled) - on failure the safe default "false"
+  // remains, the same fallback principle as for the other configurations
+  // loaded once above.
   useEffect(() => {
     if (!token) return;
     getShareLinkConfig(token)
@@ -257,12 +257,12 @@ export function ExplorerPane({
       .catch(() => {});
   }, [token]);
 
-  // Favoriten/Merkliste (schnelles Wiederfinden, seit P7-S1d): einmalig alle
-  // Favoriten des aktuellen Nutzers laden (beide Objekttypen in einem Aufruf,
-  // `favorite-service` filtert nicht standardmäßig nach Typ), als
-  // "type:id"-Set für O(1)-Mitgliedschaftsprüfung im Kontextmenü/⭐-Präfix.
-  // Nach jeder Änderung neu geladen statt optimistisch aktualisiert, gleiches
-  // "Quelle der Wahrheit bleibt der Server"-Prinzip wie beim Papierkorb.
+  // Favorites/bookmark list (quickly finding things again, since P7-S1d):
+  // load all favorites of the current user once (both object types in a
+  // single call, `favorite-service` doesn't filter by type by default), as a
+  // "type:id" set for O(1) membership checks in the context menu/⭐ prefix.
+  // Reloaded after every change instead of optimistically updated, the same
+  // "server remains the source of truth" principle as with the trash.
   const reloadFavorites = useCallback(() => {
     if (!token || !createdBy) return;
     listFavorites(token, createdBy)
@@ -292,9 +292,9 @@ export function ExplorerPane({
     }
   }
 
-  // Papierkorb-Umschalter (5.2, seit P7-S1, um Ordner erweitert seit
-  // P7-S1b) - bewusst minimal: nur der aktuelle Ordner, keine eigene
-  // Sonderbereich-Navigation (siehe Phase 15).
+  // Trash toggle (5.2, since P7-S1, extended to folders since
+  // P7-S1b) - deliberately minimal: only the current folder, no separate
+  // special-area navigation (see phase 15).
   function reloadTrash() {
     if (!token) return;
     setIsTrashLoading(true);

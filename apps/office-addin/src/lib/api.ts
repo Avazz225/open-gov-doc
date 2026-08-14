@@ -19,11 +19,11 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 }
 
-// Jeder Aufruf geht über das Gateway (3.5): /api/{service_type}/{path} statt
-// direkter Backend-Adressen. Der Taskpane spricht damit DIESELBEN
-// bestehenden REST-Endpunkte wie user-ui an (3.3a: "denselben bereits
-// bestehenden ... API-Weg" statt eigener Dokumentenlogik) - kein neuer
-// Backend-Service/-Endpunkt für diese Session.
+// Every call goes through the gateway (3.5): /api/{service_type}/{path} instead
+// of direct backend addresses. This means the taskpane talks to the SAME
+// existing REST endpoints as user-ui (3.3a: "the same already
+// existing ... API path" instead of its own document logic) - no new
+// backend service/endpoint for this session.
 async function request(
   serviceType: string,
   path: string,
@@ -81,7 +81,7 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
-// --- Dokumente (document-service) ------------------------------------------
+// --- Documents (document-service) ------------------------------------------
 
 export interface DocumentSummary {
   id: string;
@@ -133,9 +133,9 @@ export async function downloadDocumentContent(token: string, documentId: string)
   return response.blob();
 }
 
-// Neue Version eines bereits mit dem Taskpane verknüpften Dokuments
-// einchecken ("In OG Doc speichern") - identischer Endpunkt/Konfliktschutz
-// (`expected_base_version_number`) wie jeder andere Check-in-Client.
+// Check in a new version of a document already linked to the taskpane
+// ("Save to OG Doc") - identical endpoint/conflict protection
+// (`expected_base_version_number`) as any other check-in client.
 export interface CheckinResult {
   version: { version_number: number };
   is_conflict: boolean;
@@ -161,10 +161,10 @@ export async function checkinVersion(
   return response.json();
 }
 
-// Neues Dokument anlegen ("Aus Vorlage neu" - erstes Speichern nach dem
-// Laden einer Vorlage in ein leeres Word-Dokument). `derived_from_document_id`
-// existiert bereits im Schema (Herkunfts-Nachverfolgung, document-service),
-// wird hier zum ersten Mal von einem Frontend tatsächlich gesetzt.
+// Create a new document ("New from template" - first save after
+// loading a template into an empty Word document). `derived_from_document_id`
+// already exists in the schema (provenance tracking, document-service),
+// and is actually set by a frontend for the first time here.
 export async function createDocument(
   token: string,
   params: {
@@ -201,13 +201,13 @@ export async function createDocument(
   return response.json();
 }
 
-// --- Sperren (Check-out/Check-in, document-service) -------------------------
+// --- Locks (check-out/check-in, document-service) -------------------------
 //
-// Anders als user-ui (das rein optimistische Versionsprüfung beim Check-in
-// nutzt, ADR 0002) verwendet der Taskpane die bereits vorhandene, bislang von
-// keinem Frontend genutzte explizite Sperre: eine Word-Bearbeitungssitzung
-// kann lange dauern, "jemand anderes bearbeitet das gerade" ist hier ein
-// echter, sinnvoller Hinweis statt nur eines Konflikts beim Speichern.
+// Unlike user-ui (which uses purely optimistic version checking on check-in,
+// ADR 0002), the taskpane uses the already-existing explicit lock that no
+// frontend has used so far: a Word editing session
+// can take a long time, so "someone else is currently editing this" is a
+// genuine, meaningful hint here rather than just a conflict on save.
 export interface DocumentLock {
   document_id: string;
   locked_by: string;
@@ -251,7 +251,7 @@ export async function releaseLock(
   );
 }
 
-// --- Ordner/Vorlagenbibliothek (folder-service) -----------------------------
+// --- Folders/template library (folder-service) -----------------------------
 
 export interface Folder {
   id: string;
@@ -277,7 +277,7 @@ export async function listDocumentsInFolder(
   return response.json();
 }
 
-// --- Objekttypen (object-type-service) - für die inline Metadaten-Form -----
+// --- Object types (object-type-service) - for the inline metadata form -----
 
 export interface ObjectTypeAttribute {
   name: string;
@@ -301,7 +301,7 @@ export async function getObjectType(token: string, objectTypeId: number): Promis
   return response.json();
 }
 
-// --- Suche (search-service) - Dokument-Picker "Aus OG Doc öffnen" -----------
+// --- Search (search-service) - document picker "Open from OG Doc" -----------
 
 export interface SearchResult {
   id: string;
@@ -340,9 +340,9 @@ export interface ProcessInstance {
   status: string;
 }
 
-// `business_key` = die DMS-Dokument-ID - dieselbe Korrelation, mit der jeder
-// andere Prozess in diesem System bereits an ein fachliches Objekt gebunden
-// wird (kein neuer Mechanismus).
+// `business_key` = the DMS document ID - the same correlation used to bind
+// every other process in this system to a business object
+// (no new mechanism).
 export async function listInstancesForDocument(
   token: string,
   documentId: string

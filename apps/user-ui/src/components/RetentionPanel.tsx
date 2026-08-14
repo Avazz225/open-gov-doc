@@ -18,19 +18,19 @@ function toDateInputValue(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
-// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - Anbau-
-// Muster wie SignaturesPanel: eigener list*-Aufruf, eigener Lade-Effekt,
-// unterhalb des Metadaten-Formulars. Pflicht/optional für den Löschgrund
-// wird ausschließlich serverseitig durchgesetzt (422 bei Verstoß), hier nur
-// clientseitig gespiegelt über die Fehlermeldung.
+// Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - attached
+// using the same pattern as SignaturesPanel: its own list* call, its own
+// load effect, below the metadata form. Whether the deletion reason is
+// required/optional is enforced exclusively server-side (422 on
+// violation), mirrored here only client-side via the error message.
 export function RetentionPanel({ document: activeDocument }: { document: DocumentSummary }) {
   const { accessToken, user, permissions } = useAuth();
   const { t } = useI18n();
-  // RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075): Legal Hold setzen/
-  // aufheben verlangt serverseitig `admin.legal_hold` - der Button bleibt
-  // sichtbar (Statusanzeige gilt für jeden Betrachter), aber nur für
-  // berechtigte Principals aktiv. Das serverseitige 403 bleibt die
-  // eigentliche Durchsetzung, dies ist reines UX.
+  // RBAC (post-roadmap phase 19 session 10, ADR 0075): setting/releasing a
+  // legal hold requires `admin.legal_hold` server-side - the button stays
+  // visible (the status display applies to every viewer), but is only
+  // active for authorized principals. The server-side 403 remains the
+  // actual enforcement; this is pure UX.
   const canManageLegalHold = permissions.includes("admin.legal_hold");
   const [retentionUntil, setRetentionUntil] = useState(
     toDateInputValue(activeDocument.retention_until)

@@ -6,9 +6,9 @@ import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 
-// Statischer Export hat keinen Server, der Redirects vor dem Rendern
-// ausführen könnte (kein Middleware-Äquivalent) - der Schutz greift daher
-// clientseitig nach dem ersten Render, sobald der Auth-Zustand geladen ist.
+// A static export has no server that could run redirects before
+// rendering (no middleware equivalent) - the protection therefore kicks
+// in client-side after the first render, once the auth state has loaded.
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();

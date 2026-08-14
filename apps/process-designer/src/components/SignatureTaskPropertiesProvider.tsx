@@ -1,25 +1,25 @@
-// Eigener Properties-Panel-Provider für den Signature Task (3.10, P6-S7/P6-S8) -
-// kein eigenes BPMN-Element, sondern eine zusätzliche Gruppe auf jedem
-// `bpmn:ManualTask`, die `bpmn:extensionElements/camunda:properties`
-// (`taskType`/`requiredLevel`) liest/schreibt - exakt das Format, das
-// `workflow-service`s `CamundaParser` seit P6-S7 als Signature Task erkennt
-// (siehe `services/workflow-service/src/workflow_service/spiff_adapter.py`).
+// Dedicated properties panel provider for the Signature Task (3.10, P6-S7/P6-S8) -
+// not its own BPMN element, but an additional group on every
+// `bpmn:ManualTask` that reads/writes `bpmn:extensionElements/camunda:properties`
+// (`taskType`/`requiredLevel`) - exactly the format that
+// `workflow-service`'s `CamundaParser` has recognized as a Signature Task
+// since P6-S7 (see `services/workflow-service/src/workflow_service/spiff_adapter.py`).
 //
-// `bpmn-js-spiffworkflow` wird bewusst nicht verwendet (siehe ADR 0026) - das
-// hier verwendete Muster (Gruppe/Entry-Registrierung, `bpmnFactory`,
-// `commandStack.execute('element.updateModdleProperties', ...)`, verschachtelte
-// `camunda:Properties`/`camunda:Property`-Erzeugung) ist 1:1 aus dem
-// eingebauten `CamundaPlatformPropertiesProviderModule`s eigener
-// "Extension properties"-Gruppe übernommen (`bpmn-js-properties-panel`,
-// gegen die tatsächlich installierte Version 5.63.0 im gebündelten Quelltext
-// nachvollzogen, nicht aus der Doku angenommen) - dieselbe, real
-// funktionierende Mechanik, nur mit einer zweckgebundenen statt generischen
-// Bedienoberfläche (Checkbox + Niveau-Auswahl statt freier Schlüssel/Wert-Liste).
-/* eslint-disable @typescript-eslint/no-explicit-any -- bpmn-js selbst typisiert
-   `Moddle`/`ModdleElement` als `any` (node_modules/bpmn-js/lib/model/Types.d.ts),
-   `bpmn-js-properties-panel`/`@bpmn-io/properties-panel` liefern gar keine
-   Typdeklarationen (siehe src/types/untyped-modules.d.ts) - `any` ist hier die
-   von der Bibliothek selbst vorgegebene Grenze, keine Abkürzung. */
+// `bpmn-js-spiffworkflow` is deliberately not used (see ADR 0026) - the
+// pattern used here (group/entry registration, `bpmnFactory`,
+// `commandStack.execute('element.updateModdleProperties', ...)`, nested
+// `camunda:Properties`/`camunda:Property` creation) is taken 1:1 from the
+// built-in `CamundaPlatformPropertiesProviderModule`'s own
+// "Extension properties" group (`bpmn-js-properties-panel`,
+// traced against the actually installed version 5.63.0 in the bundled
+// source, not assumed from the docs) - the same, actually
+// working mechanism, just with a purpose-built instead of generic
+// UI (checkbox + level selection instead of a free key/value list).
+/* eslint-disable @typescript-eslint/no-explicit-any -- bpmn-js itself types
+   `Moddle`/`ModdleElement` as `any` (node_modules/bpmn-js/lib/model/Types.d.ts),
+   `bpmn-js-properties-panel`/`@bpmn-io/properties-panel` provide no
+   type declarations at all (see src/types/untyped-modules.d.ts) - `any` here is
+   the boundary imposed by the library itself, not a shortcut. */
 import { getBusinessObject, is } from "bpmn-js/lib/util/ModelUtil";
 import {
   CheckboxEntry,
@@ -28,9 +28,9 @@ import {
   isCheckboxEntryEdited,
   isSelectEntryEdited,
 } from "@bpmn-io/properties-panel";
-// `useService` wird von `bpmn-js-properties-panel` reexportiert, nicht von
-// `@bpmn-io/properties-panel` (verifiziert gegen die installierten Pakete -
-// ein ursprünglicher Import von dort schlug beim Produktions-Build fehl).
+// `useService` is re-exported by `bpmn-js-properties-panel`, not by
+// `@bpmn-io/properties-panel` (verified against the installed packages -
+// an original import from there failed the production build).
 import { useService } from "bpmn-js-properties-panel";
 
 const SIGNATURE_LEVELS = ["ses", "aes", "qes"];
@@ -63,9 +63,9 @@ function getSignatureLevel(element: any): string {
   return getSignaturePropertyValue(element, "requiredLevel") ?? DEFAULT_LEVEL;
 }
 
-/** Schreibt `taskType`/`requiredLevel` als `camunda:Property`-Paar - legt
- * `bpmn:ExtensionElements`/`camunda:Properties` bei Bedarf neu an (gleiches
- * Muster wie `ExtensionPropertiesProps.addFactory` im eingebauten Provider). */
+/** Writes `taskType`/`requiredLevel` as a `camunda:Property` pair - creates
+ * `bpmn:ExtensionElements`/`camunda:Properties` anew if needed (same
+ * pattern as `ExtensionPropertiesProps.addFactory` in the built-in provider). */
 function setSignatureProperties(
   element: any,
   bpmnFactory: any,
@@ -212,5 +212,5 @@ export const SignatureTaskPropertiesProviderModule = {
   signatureTaskPropertiesProvider: ["type", SignatureTaskPropertiesProvider],
 };
 
-// Für Tests: reine Lesefunktionen ohne DOM/bpmn-js-Instanziierung.
+// For tests: pure read functions without DOM/bpmn-js instantiation.
 export { getSignatureLevel, isSignatureRequired };

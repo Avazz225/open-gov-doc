@@ -3,10 +3,11 @@
 import { useI18n } from "@/i18n";
 import { useInstallation } from "@/lib/installation-context";
 
-// Kern der Multi-Installation-Anforderung (P4-S5, Konzept 3a/8): Wechsel der
-// aktiven Installation ohne erneute Anmeldung, solange deren Sitzung noch
-// gültig ist (siehe `auth-context.tsx`). Bewusst ausgeblendet, solange nur
-// eine Installation konfiguriert ist - nichts zum Wechseln, unnötiger UI-Ballast.
+// Core of the multi-installation requirement (P4-S5, concept 3a/8):
+// switching the active installation without logging in again, as long as
+// its session is still valid (see `auth-context.tsx`). Deliberately hidden
+// as long as only one installation is configured - nothing to switch to,
+// unnecessary UI clutter.
 export function InstallationSwitcher() {
   const { t } = useI18n();
   const { installations, activeInstallation, switchInstallation } = useInstallation();

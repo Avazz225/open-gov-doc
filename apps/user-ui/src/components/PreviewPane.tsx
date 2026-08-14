@@ -33,23 +33,23 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
 
 type PreviewKind = "loading" | "image" | "text" | "html" | "pdf" | "none";
 
-// Clientseitige Direktanzeige (P5d-S2, Nutzer-Feedback: `.txt`/`.json` hatten
-// bislang keine funktionierende Vorschau) - kein neuer rendering-service-
-// Renderer, kein Ersatzdarstellungs-Overhead für bereits textbasierte Inhalte.
-// `content_type` kommt seit P5d-S1 aus dem serverseitigen Sniffing, ist also
-// zuverlässiger als ein vom Client geratener Wert.
+// Client-side direct display (P5d-S2, user feedback: `.txt`/`.json` had no
+// working preview until now) - no new rendering-service renderer, no
+// substitute-rendering overhead for content that's already text-based.
+// `content_type` has come from server-side sniffing since P5d-S1, so it's
+// more reliable than a value guessed by the client.
 const MAX_PREVIEW_CHARS = 200_000;
 
-// Polling für noch nicht fertige Renditions/OCR-Ergebnisse (P23-S3,
-// Nutzerwunsch) - `rendering-service`/`ocr-service` legen ihre Zeilen erst
-// beim Abschluss der Verarbeitung an (kein eigener "pending"-Status in der
-// API, siehe RenditionSummary/OcrResultSummary), ein noch nicht fertiges
-// Ergebnis ist also am Fehlen der Zeile erkennbar, nicht an ihrem Status.
-// Bewusst mit einer Obergrenze (statt endlosem Polling): ein Format ohne
-// unterstützte Rendition (z. B. Office-Format mit deaktivierter OCR) würde
-// sonst für immer weiterfragen.
+// Polling for not-yet-ready renditions/OCR results (P23-S3, user request) -
+// `rendering-service`/`ocr-service` only create their row once processing
+// completes (no dedicated "pending" status in the API, see
+// RenditionSummary/OcrResultSummary), so a not-yet-ready result is
+// recognizable by the absence of the row, not by its status. Deliberately
+// capped (instead of endless polling): a format without a supported
+// rendition (e.g. an Office format with OCR disabled) would otherwise keep
+// polling forever.
 const RENDITION_POLL_INTERVAL_MS = 7_000;
-const RENDITION_POLL_MAX_ATTEMPTS = 8; // ~56s Gesamtfenster
+const RENDITION_POLL_MAX_ATTEMPTS = 8; // ~56s total window
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,9 +67,9 @@ function findReadyRendition(
   return renditions.find((r) => r.rendition_type === renditionType && r.status === "ready");
 }
 
-// Lädt das Seitenbild eines OCR-Ergebnisses; fällt für Rasterbilder (die der
-// OCR Service ohne eigenständiges Seitenbild verarbeitet, 409) auf die
-// bestehende rendering-service-Thumbnail-Rendition zurück.
+// Loads the page image of an OCR result; falls back to the existing
+// rendering-service thumbnail rendition for raster images (which the OCR
+// service processes without a dedicated page image, 409).
 async function loadOcrOrThumbnailImage(
   token: string,
   ocrResult: OcrResultSummary,
@@ -79,32 +79,33 @@ async function loadOcrOrThumbnailImage(
   try {
     return await downloadOcrPageImage(token, ocrResult.id, pageNumber);
   } catch {
-    // fällt durch auf die Rendition unten (Rasterbild-Fall oder Fehler)
+    // falls through to the rendition below (raster image case or error)
   }
   const thumbnail = findReadyRendition(renditions, "thumbnail");
   if (!thumbnail) throw new Error("keine Vorschau verfügbar");
   return downloadRenditionContent(token, thumbnail.id);
 }
 
-// Rechte Spalte des 3-Spalten-Layouts (Nutzer-Feedback nach P4-S3, 8) - vom
-// Tab-gesteuerten aktiven Dokument synchronisiert. Lädt seit P5-S2 die vom
-// Rendering Service erzeugte Thumbnail-Ersatzdarstellung nach, seit P5-S3
-// zusätzlich eine Versionsauswahl (Nutzerwunsch) und ein Text-Overlay aus den
-// Wort-Bounding-Boxen des OCR Service (Nutzerwunsch: Text in der Vorschau
-// markieren können, wie bei pdf.js). Ersatzdarstellungen/OCR sind ein
-// Zusatznutzen, kein Blocker: existiert (noch) keine (falsches Format,
-// Verarbeitung noch nicht abgeschlossen, Ladefehler), fällt die Spalte auf
-// einen Hinweistext zurück, der Download-Button bleibt in jedem Fall nutzbar.
+// Right column of the 3-column layout (user feedback after P4-S3, 8) -
+// synchronized with the tab-controlled active document. Since P5-S2, loads
+// the thumbnail substitute rendering produced by the rendering service;
+// since P5-S3, additionally a version selector (user request) and a text
+// overlay from the OCR service's word bounding boxes (user request: being
+// able to select text in the preview, like with pdf.js). Substitute
+// renderings/OCR are a bonus feature, not a blocker: if none exists (yet)
+// (wrong format, processing not yet complete, load error), the column
+// falls back to a hint text; the download button remains usable in any
+// case.
 export function PreviewPane({
   document: activeDocument,
   versionBump = 0,
 }: {
   document: DocumentSummary | null;
-  // Erhöht sich, wenn eine andere Komponente (aktuell nur `SignaturesPanel`,
-  // P23-S7) außerhalb dieses Panels eine neue Version desselben Dokuments
-  // erzeugt hat - löst ein Nachladen der Versionsliste aus, siehe Effekt
-  // unten. Default 0 für alle Aufrufstellen ohne eigenen Bump-Zustand
-  // (z. B. `PreviewEmptyContent`).
+  // Increments when another component (currently only `SignaturesPanel`,
+  // P23-S7) outside this panel has created a new version of the same
+  // document - triggers a reload of the version list, see the effect
+  // below. Defaults to 0 for all call sites without their own bump state
+  // (e.g. `PreviewEmptyContent`).
   versionBump?: number;
 }) {
   const { accessToken } = useAuth();
@@ -123,11 +124,11 @@ export function PreviewPane({
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgRenderedHeight, setImgRenderedHeight] = useState(0);
 
-  // Versionsliste laden + Auswahl auf die aktuelle Version zurücksetzen,
-  // sobald ein anderes Dokument aktiv wird - seit P23-S7 zusätzlich bei jedem
-  // `versionBump` (z. B. nach einer Signatur aus `SignaturesPanel`), damit
-  // eine extern erzeugte neue Version ohne erneutes Öffnen des Dokuments in
-  // der Auswahl auftaucht.
+  // Load the version list + reset the selection to the current version as
+  // soon as a different document becomes active - since P23-S7 also on
+  // every `versionBump` (e.g. after a signature from `SignaturesPanel`), so
+  // an externally created new version shows up in the selector without
+  // reopening the document.
   useEffect(() => {
     if (!activeDocument) {
       setVersions([]);
@@ -151,11 +152,11 @@ export function PreviewPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, activeDocument?.id, versionBump]);
 
-  // Vorschau für die ausgewählte Version laden: entweder clientseitiger
-  // Text-Direktanzeige (P5d-S2) oder das bisherige Vorschaubild + OCR-Ergebnis.
-  // Wartet auf `versions` (Content-Type-Herkunft), bevor entschieden wird,
-  // welcher Zweig greift - der Versions-Effekt oben setzt `selectedVersion`
-  // sofort, lädt die Metadaten aber asynchron nach.
+  // Load the preview for the selected version: either client-side direct
+  // text display (P5d-S2) or the previous preview image + OCR result.
+  // Waits for `versions` (content-type source) before deciding which
+  // branch applies - the version effect above sets `selectedVersion`
+  // immediately, but loads the metadata asynchronously afterward.
   useEffect(() => {
     if (!accessToken || !activeDocument || selectedVersion === null) {
       setPreviewKind("none");
@@ -170,7 +171,7 @@ export function PreviewPane({
     }
 
     const versionMeta = versions.find((v) => v.version_number === selectedVersion);
-    if (!versionMeta) return; // Versions-Metadaten noch nicht geladen - kein Zwischenzustand zeigen
+    if (!versionMeta) return; // version metadata not loaded yet - don't show an intermediate state
     const contentType = versionMeta.content_type;
 
     let cancelled = false;
@@ -188,9 +189,9 @@ export function PreviewPane({
     async function load() {
       if (!accessToken || !activeDocument || selectedVersion === null) return;
 
-      // HTML zuerst prüfen (2.4, Nutzer-Feedback) - `text/html` matcht sonst
-      // isTextPreviewable()s `text/*`-Prefix und würde im Plain-Text-Zweig
-      // landen (rohes, escaptes Markup statt gerenderter Seite).
+      // Check HTML first (2.4, user feedback) - `text/html` would otherwise
+      // match isTextPreviewable()'s `text/*` prefix and end up in the
+      // plain-text branch (raw, escaped markup instead of a rendered page).
       if (contentType === "text/html") {
         try {
           const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
@@ -219,13 +220,14 @@ export function PreviewPane({
         return;
       }
 
-      // Bild- und PDF-Quellen erwarten hier keine Rendition (eigener,
-      // direkterer Rohbyte-Zweig weiter unten) - nur für alles andere (v.a.
-      // Office-/Textformate) wird auf `pdf_archive`/`substitute_text`
-      // gewartet, ggf. per Polling (P23-S3, siehe RENDITION_POLL_* oben):
-      // `rendering-service` legt die Rendition-Zeile erst NACH Abschluss der
-      // LibreOffice-Konvertierung an, ein direkt nach dem Upload noch leeres
-      // Ergebnis heißt "noch in Arbeit", nicht "wird nie kommen".
+      // Image and PDF sources don't expect a rendition here (their own,
+      // more direct raw-byte branch further below) - only for everything
+      // else (mainly Office/text formats) do we wait for `pdf_archive`/
+      // `substitute_text`, polling if necessary (P23-S3, see
+      // RENDITION_POLL_* above): `rendering-service` only creates the
+      // rendition row AFTER the LibreOffice conversion completes, so a
+      // still-empty result right after upload means "still in progress",
+      // not "will never arrive".
       const expectsOfficeRendition =
         !contentType?.startsWith("image/") && contentType !== "application/pdf";
       let fetchedRenditions: RenditionSummary[] = [];
@@ -251,11 +253,11 @@ export function PreviewPane({
         if (cancelled) return;
       }
 
-      // Word-ähnliche A4-Ansicht (2.4, Nutzer-Feedback): rendering-service
-      // konvertiert Office-/Textformate bereits automatisch per LibreOffice
-      // in ein echtes, paginiertes PDF (pdf_archive-Rendition, ursprünglich
-      // nur als Archivkopie gedacht) - das ist bereits die gewünschte
-      // formatierte Ansicht, hier nur erstmals als Vorschau konsumiert.
+      // Word-like A4 view (2.4, user feedback): rendering-service already
+      // automatically converts Office/text formats via LibreOffice into a
+      // real, paginated PDF (pdf_archive rendition, originally intended
+      // only as an archive copy) - that's already the desired formatted
+      // view, here consumed as a preview for the first time.
       if (pdfArchive) {
         try {
           const blob = await downloadRenditionContent(accessToken, pdfArchive.id);
@@ -269,11 +271,11 @@ export function PreviewPane({
         return;
       }
 
-      // Ersatzdarstellung als Text (DOCX/PPTX/ODS, 2.4) - der
-      // rendering-service erzeugt dafür eine "substitute_text"-Rendition
-      // statt eines Thumbnails; ohne diesen Zweig blieb die Vorschau für
-      // diese Formate leer, obwohl die Rendition längst existierte
-      // (Nutzer-Feedback).
+      // Substitute rendering as text (DOCX/PPTX/ODS, 2.4) - for these,
+      // rendering-service produces a "substitute_text" rendition instead
+      // of a thumbnail; without this branch, the preview stayed empty for
+      // these formats even though the rendition had long existed (user
+      // feedback).
       if (substitute) {
         try {
           const blob = await downloadRenditionContent(accessToken, substitute.id);
@@ -294,27 +296,28 @@ export function PreviewPane({
       try {
         const results = await listOcrResults(accessToken, activeDocument.id, selectedVersion);
         ocr = results.find((r) => r.status === "ready" || r.status === "needs_review") ?? null;
-        // Genau wie bei Renditions legt der OCR Service seine Zeile erst nach
-        // Abschluss der Verarbeitung an - für PDFs/Bilder (die einzigen
-        // OCR-fähigen Formate) heißt ein leeres Ergebnis "noch in Arbeit",
-        // nicht "wird nie kommen" (P23-S3). Nur relevant, wenn noch kein
-        // OCR-Ergebnis gefunden wurde - ein bereits vorhandenes (ready/
-        // needs_review) braucht kein Nachladen mehr.
+        // Just like with renditions, the OCR service only creates its row
+        // after processing completes - for PDFs/images (the only
+        // OCR-capable formats), an empty result means "still in progress",
+        // not "will never arrive" (P23-S3). Only relevant if no OCR result
+        // has been found yet - an already-present one (ready/
+        // needs_review) needs no further reload.
         ocrStillProcessing =
           !ocr &&
           (contentType === "application/pdf" || !!contentType?.startsWith("image/")) &&
           results.every((r) => r.status !== "failed");
       } catch {
-        // OCR ist ein Zusatznutzen (3.9) - ein Ladefehler blendet nur das
-        // Text-Overlay aus, das Thumbnail wird trotzdem versucht.
+        // OCR is a bonus feature (3.9) - a load error only hides the text
+        // overlay; the thumbnail is still attempted.
         ocr = null;
       }
       if (cancelled) return;
       if (ocrStillProcessing) {
-        // Läuft im Hintergrund weiter, NACHDEM die native PDF-/Bild-Ansicht
-        // unten bereits angezeigt wurde (Nutzer sieht sofort etwas) - erst
-        // bei Erfolg wird `ocrResult` gesetzt, das Overlay erscheint dann
-        // nachträglich, ohne die bereits sichtbare Vorschau zu unterbrechen.
+        // Keeps running in the background AFTER the native PDF/image view
+        // below has already been shown (the user sees something
+        // immediately) - `ocrResult` is only set on success, so the
+        // overlay appears afterward without interrupting the already
+        // visible preview.
         void (async () => {
           for (let attempt = 0; attempt < RENDITION_POLL_MAX_ATTEMPTS; attempt++) {
             await sleep(RENDITION_POLL_INTERVAL_MS);
@@ -335,26 +338,27 @@ export function PreviewPane({
           }
         })();
       }
-      // PDFs: das Seitenbild-Overlay bleibt nur Fallback für echte Scans ohne
-      // Textlayer (engine "tesseract") - hat OCR bereits einen echten
-      // Textlayer eingebettet (engine "native_text_layer", siehe ocr-service
-      // text_layer.py) oder existiert noch kein Ergebnis, zeigt die native
-      // PDF-Ansicht unten den echten, durchsuchbaren Inhalt direkt aus dem
-      // Browser heraus - kein Overlay-Umweg mehr nötig. Für Bilder bleibt das
-      // bestehende Overlay-Verhalten unverändert (jede Engine, wie bisher).
+      // PDFs: the page-image overlay remains only a fallback for real
+      // scans without a text layer (engine "tesseract") - if OCR has
+      // already embedded a real text layer (engine "native_text_layer",
+      // see ocr-service text_layer.py) or no result exists yet, the native
+      // PDF view below shows the real, searchable content directly from
+      // the browser - no more need for the overlay detour. For images, the
+      // existing overlay behavior remains unchanged (every engine, as
+      // before).
       const useOverlay = !!ocr && (contentType !== "application/pdf" || ocr.engine === "tesseract");
       if (useOverlay && ocr) {
-        // Das eigentliche Seitenbild lädt der separate Effekt unten (hängt
-        // von `selectedPage` ab, oben bereits auf 1 zurückgesetzt) - so löst
-        // ein späterer Seitenwechsel keinen kompletten Reload aus.
+        // The actual page image is loaded by the separate effect below
+        // (depends on `selectedPage`, already reset to 1 above) - this way
+        // a later page change doesn't trigger a full reload.
         setOcrResult(ocr);
         return;
       }
 
-      // Natives PDF-Embed (2.4, Nutzer-Feedback) - primäre Ansicht für PDFs
-      // mit echtem Textlayer (immer schon vorhanden, oder von OCR eingebettet),
-      // Fallback ohne (fertiges) OCR-Ergebnis. Ohne diesen Zweig zeigte ein
-      // PDF ohne OCR-Ergebnis bisher gar keine Vorschau.
+      // Native PDF embed (2.4, user feedback) - primary view for PDFs with
+      // a real text layer (either always present, or embedded by OCR),
+      // fallback without a (finished) OCR result. Without this branch, a
+      // PDF without an OCR result previously showed no preview at all.
       if (contentType === "application/pdf") {
         try {
           const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
@@ -368,9 +372,10 @@ export function PreviewPane({
         return;
       }
 
-      // Echte Bilddokumente in voller Auflösung zeigen (2.4, Nutzer-Feedback)
-      // statt nur der 256×256-Thumbnail-Rendition - dieser Zweig greift nur,
-      // wenn oben kein OCR-Ergebnis gefunden wurde (Scan-Overlay hat Vorrang).
+      // Show real image documents at full resolution (2.4, user feedback)
+      // instead of just the 256x256 thumbnail rendition - this branch only
+      // applies if no OCR result was found above (scan overlay takes
+      // precedence).
       if (contentType?.startsWith("image/")) {
         try {
           const blob = await downloadDocumentVersion(accessToken, activeDocument.id, selectedVersion);
@@ -384,10 +389,10 @@ export function PreviewPane({
         return;
       }
 
-      // Alle bekannten Ersatzdarstellungs-Pfade sind oben abgedeckt
-      // (thumbnail-Renditionen existieren nur für Bilder, die bereits ihren
-      // eigenen Rohbyte-Zweig oben hatten) - für alles andere bleibt es beim
-      // Hinweistext, der Download-Button bleibt in jedem Fall nutzbar.
+      // All known substitute-rendering paths are covered above (thumbnail
+      // renditions only exist for images, which already had their own
+      // raw-byte branch above) - for everything else it stays at the hint
+      // text; the download button remains usable in any case.
       setPreviewKind("none");
     }
 
@@ -400,10 +405,10 @@ export function PreviewPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, activeDocument?.id, selectedVersion, versions]);
 
-  // Lädt/wechselt das Seitenbild eines OCR-Ergebnisses, getrennt vom Effekt
-  // oben: ein Seitenwechsel (Nutzer-Feedback: mehrseitige PDFs zeigten bisher
-  // immer nur Seite 1) soll nur ein neues Seitenbild nachladen, nicht erneut
-  // OCR-Ergebnis/Renditionen abfragen.
+  // Loads/switches the page image of an OCR result, separate from the
+  // effect above: a page change (user feedback: multi-page PDFs previously
+  // always showed only page 1) should only reload a new page image, not
+  // re-query the OCR result/renditions.
   useEffect(() => {
     if (!accessToken || !ocrResult) return;
     let cancelled = false;
@@ -432,8 +437,8 @@ export function PreviewPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, ocrResult, selectedPage]);
 
-  // Misst die tatsächlich gerenderte Bildhöhe, damit die Overlay-Wort-Spans
-  // bei jeder Splitter-Breite/jedem Zoom die richtige Schriftgröße bekommen.
+  // Measures the actually rendered image height so the overlay word spans
+  // get the correct font size at any splitter width/zoom level.
   useEffect(() => {
     const el = imgRef.current;
     if (!el) return;
@@ -452,11 +457,11 @@ export function PreviewPane({
       const blob = await downloadDocumentVersion(accessToken, activeDocument.id, version);
       triggerBrowserDownload(blob, activeDocument.title);
     } catch (error) {
-      // Post-Roadmap Phase 19 Session 11: vorher komplett stillschweigend
-      // fehlgeschlagen - insbesondere bei ausgesonderten (dehydrierten)
-      // Dokumenten (409, siehe document-service) wirkte das wie ein Klick
-      // ins Leere. 409 bekommt eine gezielte Meldung mit Rückholungs-Hinweis,
-      // alles andere die generische Fallback-Meldung.
+      // Post-roadmap phase 19 session 11: previously failed completely
+      // silently - especially for disposed (dehydrated) documents (409,
+      // see document-service), this felt like clicking into a void. 409
+      // now gets a targeted message with a retrieval hint, everything else
+      // gets the generic fallback message.
       setDownloadError(
         error instanceof ApiError && error.status === 409
           ? t("preview.downloadErrorDehydrated")
@@ -465,10 +470,10 @@ export function PreviewPane({
     }
   }
 
-  // Office-Direktbearbeitung (Post-Roadmap-Feature): Word/Excel/PowerPoint
-  // direkt aus dem Browser heraus zum Bearbeiten öffnen, über das
-  // Office-URI-Schema gegen webdav-connector - kein Passwort-Dialog, da ein
-  // kurzlebiges, dokumentgescoptes Token in der Start-URL steckt.
+  // Direct Office editing (post-roadmap feature): open Word/Excel/PowerPoint
+  // for editing directly from the browser, via the Office URI scheme
+  // against webdav-connector - no password dialog, since a short-lived,
+  // document-scoped token is embedded in the launch URL.
   async function handleOfficeLaunch() {
     if (!accessToken || !activeDocument) return;
     const launch = officeLaunchInfo(currentContentType);
@@ -478,8 +483,8 @@ export function PreviewPane({
       const url = officeLaunchUrl(webdavToken, activeDocument.id, launch.ext);
       window.location.href = `${launch.scheme}:ofe|u|${url}`;
     } catch {
-      // Bewusst kein separater Fehlerbereich - gleiches Muster wie
-      // handleDownload oben.
+      // Deliberately no separate error area - same pattern as
+      // handleDownload above.
     }
   }
 
@@ -495,12 +500,12 @@ export function PreviewPane({
   const currentVersionMeta = versions.find((v) => v.version_number === selectedVersion);
   const currentContentType = currentVersionMeta?.content_type ?? null;
 
-  // Seit P16-S1 (dockbarer Arbeitsbereich) kann mehr als eine `PreviewPane`
-  // gleichzeitig im DOM stehen (ein Panel je geöffnetem Dokument, "mehrere
-  // Dokumente gleichzeitig sicht- und anordenbar", Konzept 8) - ein pauschales
-  // `aria-label="Vorschau"` wäre für Screenreader-Nutzende nicht mehr
-  // eindeutig. Der Titel des jeweiligen Dokuments macht jede Instanz
-  // unterscheidbar.
+  // Since P16-S1 (dockable workspace), more than one `PreviewPane` can be
+  // in the DOM at the same time (one panel per open document, "multiple
+  // documents simultaneously visible and arrangeable", concept 8) - a
+  // blanket `aria-label="Vorschau"` would no longer be unique for
+  // screen-reader users. The title of the respective document makes each
+  // instance distinguishable.
   return (
     <section
       className="preview-pane"

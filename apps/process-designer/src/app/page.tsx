@@ -8,11 +8,11 @@ import { RequireAuth } from "@/components/RequireAuth";
 
 type Tab = "processes" | "dmn";
 
-// Zwei Übersichtslisten seit P14-S4 (Prozessdefinitionen/DMN-1.3-
-// Entscheidungstabellen) - einfacher Tab-Umschalter statt zweier
-// eigenständiger Routen, da beide dieselbe Rolle ("Konfigurationsobjekt der
-// Workflow-Engine") einnehmen und nur eine der beiden Listen gleichzeitig
-// gebraucht wird.
+// Two overview lists since P14-S4 (process definitions/DMN 1.3
+// decision tables) - a simple tab switcher instead of two
+// separate routes, since both play the same role ("configuration object of
+// the workflow engine") and only one of the two lists is
+// needed at a time.
 function HomePageInner() {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("processes");

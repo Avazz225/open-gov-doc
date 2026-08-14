@@ -5,12 +5,12 @@ import { useI18n } from "@/i18n";
 import { getMaintenanceStatus } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Not-Shutdown (4.8, P6-S6): "von jedem regulären UI-Zugriff klar
-// signalisiert" - Poll-Intervall bewusst grob (30s), da eine Sekunde
-// Verzögerung bei der Anzeige unkritisch ist, verglichen mit der
-// eigentlichen, serverseitig bereits sofort wirksamen Sperre (Gateway/
-// auth-service, siehe ADR 0024). Rendert nichts, außer der Wartungsmodus
-// ist tatsächlich aktiv (kein leeres Banner im Normalbetrieb).
+// Emergency shutdown (4.8, P6-S6): "clearly signaled from every regular UI
+// access" - poll interval deliberately coarse (30s), since a delay of a few
+// seconds in the display is uncritical compared to the actual lock, which
+// already takes effect immediately server-side (gateway/auth-service, see
+// ADR 0024). Renders nothing unless maintenance mode is actually active (no
+// empty banner during normal operation).
 export function MaintenanceBanner() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -25,8 +25,8 @@ export function MaintenanceBanner() {
         const status = await getMaintenanceStatus(accessToken as string);
         if (!cancelled) setActive(status.active);
       } catch {
-        // Unerreichbarer permission-service soll die restliche UI nicht
-        // blockieren - Banner bleibt einfach aus.
+        // An unreachable permission-service should not block the rest of
+        // the UI - the banner simply stays off.
       }
     }
 

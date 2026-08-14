@@ -30,11 +30,11 @@ const PHASE_FIELDS: { key: keyof Transfer; labelKey: string }[] = [
   { key: "deleted_at", labelKey: "transfers.phaseDeleted" },
 ];
 
-// Konsole für Transfer-Vorgänge (7.2, Konzept 8) - `POST /transfers`,
-// `.../steps/*` (Ziel automatischer `connector_call`-Service-Tasks) und die
-// `/inbound/*`-Endpunkte sind bewusst NICHT Teil dieser UI (interne
-// Implementierungsdetails des Workflows, siehe
-// docs/services/migration-console.md "Bewusste Grenzen").
+// Console for transfer operations (7.2, concept 8) - `POST /transfers`,
+// `.../steps/*` (target of automatic `connector_call` service tasks) and the
+// `/inbound/*` endpoints are deliberately NOT part of this UI (internal
+// implementation details of the workflow, see
+// docs/services/migration-console.md "Deliberate Boundaries").
 export function TransferConsole() {
   const { accessToken, user } = useAuth();
   const { t } = useI18n();
@@ -71,10 +71,10 @@ export function TransferConsole() {
       .catch(() => setError(t("common.loadError")));
   }, [accessToken, t]);
 
-  // Leichtgewichtiges Polling statt Push - ein Transfer durchläuft mehrere
-  // Phasen automatisch im Hintergrund (workflow-service-Instanz), ohne
-  // erneutes Laden bliebe die Konsole auf dem Stand des letzten Seitenaufrufs
-  // stehen (gleiches Muster wie `MaintenanceBanner`s 30s-Poll).
+  // Lightweight polling instead of push - a transfer automatically goes
+  // through several phases in the background (workflow-service instance);
+  // without reloading, the console would stay stuck at the state of the
+  // last page load (same pattern as `MaintenanceBanner`'s 30s poll).
   useEffect(() => {
     const interval = setInterval(reloadTransfers, POLL_INTERVAL_MS);
     return () => clearInterval(interval);

@@ -20,11 +20,10 @@ import type { CurrentUser, TokenResponse } from "./api";
 
 const STORAGE_KEY = "dms.tokens";
 
-// Bekannte Vereinfachung dieses Grundgerüsts: Tokens liegen im localStorage,
-// nicht in einem httpOnly-Cookie (siehe ADR 0006). Einzelne, fest
-// konfigurierte Installation wie process-designer/user-ui - Multi-
-// Installation (ADR 0008) ist laut Konzept 8 explizit nur eine
-// Admin-UI-Anforderung.
+// Known simplification of this scaffolding: tokens live in localStorage,
+// not in an httpOnly cookie (see ADR 0006). A single, fixed-configured
+// installation like process-designer/user-ui - multi-installation (ADR 0008)
+// is explicitly only an admin-ui requirement per concept 8.
 interface StoredTokens {
   accessToken: string;
   refreshToken: string;
@@ -55,7 +54,7 @@ function toStoredTokens(response: TokenResponse): StoredTokens {
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
-    // 30s Sicherheitsabstand, damit ein Refresh nicht erst nach Ablauf greift.
+    // 30s safety margin so a refresh doesn't kick in only after expiry.
     expiresAt: Date.now() + (response.expires_in - 30) * 1000,
   };
 }
@@ -107,9 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
-  // Proaktiver Refresh statt reaktiv auf 401 zu warten - einfacher für dieses
-  // Grundgerüst, da nur ein einziger, vorhersagbarer Ablaufzeitpunkt je
-  // Session existiert (kein Multi-Tab-Koordinierungsbedarf berücksichtigt).
+  // Proactive refresh instead of reactively waiting for a 401 - simpler for
+  // this scaffolding, since only a single, predictable expiry time exists
+  // per session (no multi-tab coordination need considered).
   useEffect(() => {
     if (!tokens) return;
     const delay = Math.max(tokens.expiresAt - Date.now(), 0);

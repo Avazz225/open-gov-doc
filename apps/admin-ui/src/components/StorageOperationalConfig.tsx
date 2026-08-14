@@ -5,10 +5,11 @@ import { useI18n } from "@/i18n";
 import { ApiError, getOperationalConfig, updateOperationalConfig } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Betriebsparameter des Ziel-Sets (3.6, Post-Roadmap Phase 22 Session 6,
-// ADR 0091) - anders als das Ziel-Set selbst (Zugangsdaten, bleibt env-var-
-// only) ohne Geheimnisse, daher live editierbar. Eine Änderung wirkt beim
-// nächsten Upload/Retry-Lauf sofort, kein Neustart des Storage Service nötig.
+// Operational parameters of the target set (3.6, Post-Roadmap Phase 22
+// Session 6, ADR 0091) - unlike the target set itself (credentials, remain
+// env-var-only), these contain no secrets, so they're live-editable. A
+// change takes effect immediately on the next upload/retry run, no restart
+// of the Storage Service required.
 export function StorageOperationalConfig() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

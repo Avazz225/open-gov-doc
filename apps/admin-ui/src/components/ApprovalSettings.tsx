@@ -10,12 +10,13 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Generische Vier-Augen-Einstellungsseite (Post-Roadmap Phase 22 Session 3) -
-// `GET /approval-config` liefert nur bereits konfigurierte Aktionstypen
-// (fehlt eine Zeile, gilt implizit `requires_approval=false`) - kein fester
-// Katalog aller im System existierenden Aktionstypen. Das Formular unten
-// erlaubt daher, einen bislang nicht konfigurierten Aktionstyp per Freitext
-// erstmals anzulegen, zusätzlich zum Toggle je bereits vorhandener Zeile.
+// Generic four-eyes-principle settings page (post-roadmap phase 22 session
+// 3) - `GET /approval-config` only returns action types that are already
+// configured (if a row is missing, `requires_approval=false` applies
+// implicitly) - there is no fixed catalog of all action types that exist in
+// the system. The form below therefore allows a not-yet-configured action
+// type to be created for the first time via free text, in addition to the
+// toggle for each already-existing row.
 export function ApprovalSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -58,8 +59,8 @@ export function ApprovalSettings() {
     setError(null);
     setTogglingActionType(config.action_type);
     try {
-      // `required_permission` wird bewusst unverändert mitgeschickt - das
-      // Backend überschreibt es sonst mit `null`, siehe `putApprovalConfig`.
+      // `required_permission` is deliberately sent unchanged - otherwise the
+      // backend overwrites it with `null`, see `putApprovalConfig`.
       await putApprovalConfig(accessToken, config.action_type, {
         requiresApproval: !config.requires_approval,
         requiredPermission: config.required_permission,

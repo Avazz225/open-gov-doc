@@ -13,13 +13,13 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Kein Editor für das Ziel-Set selbst (Zugangsdaten/Struktur bleiben
-// Settings-JSON, siehe ADR 0017/0091) - aber seit Post-Roadmap Phase 22
-// Session 7 (ADR 0092) echte Bearbeitung der Ziel-*Metadaten*
-// (Object-Lock-Modus, Aussonderungs-Rolle) je bereits konfiguriertem Ziel,
-// wirkt ohne Neustart. Plus: Wächter-Status (Geräte-ID je Ziel, offene
-// Nachreplikation) und der Admin-Override, der einen degradierten Start
-// beim nächsten Neustart erlaubt.
+// No editor for the target set itself (credentials/structure remain
+// settings JSON, see ADR 0017/0091) - but since Post-Roadmap Phase 22
+// Session 7 (ADR 0092), genuine editing of target *metadata*
+// (object lock mode, archival role) per already-configured target, takes
+// effect without a restart. Plus: guard status (device ID per target,
+// pending re-replication) and the admin override that allows a degraded
+// start on the next restart.
 export function StorageGuard() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

@@ -10,13 +10,13 @@ import {
 } from "@/lib/api";
 import { TEMPLATE_LIBRARY_FOLDER_NAME } from "@/lib/config";
 
-// Zentrale, rollenbasierte Vorlagenbibliothek (3.3a) - bewusst KEIN neuer
-// Speicher-/Berechtigungsmechanismus: eine Vorlage ist ein gewöhnliches
-// Dokument im namentlich vereinbarten Wurzelordner "Vorlagen"
-// (TEMPLATE_LIBRARY_FOLDER_NAME), die Rollenbasiertheit folgt automatisch
-// aus der bereits bestehenden Ordner-Leserechtsprüfung (permission-service) -
-// wer den Ordner nicht lesen darf, sieht ihn (und seine Suchergebnisse aus
-// search-service) ohnehin nicht.
+// Central, role-based template library (3.3a) - deliberately NO new
+// storage/permission mechanism: a template is an ordinary
+// document in the conventionally named root folder "Vorlagen"
+// (TEMPLATE_LIBRARY_FOLDER_NAME); role-basedness follows automatically
+// from the already-existing folder read-permission check (permission-service) -
+// whoever isn't allowed to read the folder won't see it (or its search results from
+// search-service) anyway.
 export function TemplatePicker({
   token,
   onUseTemplate,

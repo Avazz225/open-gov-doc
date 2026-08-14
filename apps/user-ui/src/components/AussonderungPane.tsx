@@ -10,15 +10,15 @@ import {
   type ReleasedItem,
 } from "@/lib/api";
 
-// Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - bereits ausgesonderte,
-// aber noch innerhalb der Übergangsfrist befindliche Dokumente/Umlaufmappen
-// bleiben hier durchsuch-/einsehbar, statt nur indirekt über Audit-Trail-
-// Verweise auffindbar zu sein. Reine gefilterte Sicht auf archival-services
-// bereits bestehende `released`-Zustandsmaschine - kein neuer Datenspeicher,
-// keine neuen Mutationen (Rückholung/Paket-Download rufen bereits
-// bestehende Endpunkte auf). Umlaufmappen haben keinen automatischen
-// Ablauf-/Löschzeitpunkt (kein `dehydrated`-Status, siehe ADR 0055) -
-// `purge_at` bleibt für sie deshalb leer.
+// Records disposal access area (2.5/5.6, P15-S5) - documents/circulation
+// folders that have already been disposed of but are still within the
+// transition period remain searchable/viewable here, instead of being
+// discoverable only indirectly via audit trail references. A purely
+// filtered view onto archival-service's already-existing `released` state
+// machine - no new data store, no new mutations (retrieval/package
+// download call already-existing endpoints). Circulation folders have no
+// automatic expiry/deletion timestamp (no `dehydrated` status, see ADR
+// 0055) - `purge_at` therefore remains empty for them.
 function formatDate(value: string | null, locale: string): string {
   if (!value) return "—";
   return new Date(value).toLocaleString(locale);

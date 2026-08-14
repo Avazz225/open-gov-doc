@@ -19,9 +19,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 }
 
-// Jeder Aufruf geht über das Gateway (3.5): /api/{service_type}/{path} statt
-// direkter Backend-Adressen - Registry-Auflösung und Auth-Prüfung passieren
-// dort, nicht hier.
+// Every call goes through the gateway (3.5): /api/{service_type}/{path}
+// instead of direct backend addresses - registry resolution and auth checks
+// happen there, not here.
 async function request(
   serviceType: string,
   path: string,
@@ -67,7 +67,7 @@ export async function refreshToken(refresh_token: string): Promise<TokenResponse
   return response.json();
 }
 
-// SSO/automatischer Login (Post-Roadmap-Feature)
+// SSO/automatic login (post-roadmap feature)
 
 export interface SsoConfig {
   enabled: boolean;
@@ -144,9 +144,9 @@ export interface Folder {
   object_type_id: number | null;
   attributes: Record<string, unknown>;
   deleted_at: string | null;
-  // Persönlicher Papierkorb (2.5, P15-S1).
+  // Personal trash (2.5, P15-S1).
   deleted_by: string | null;
-  // Aufbewahrung/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b).
+  // Retention/forced deletion for folders (5.2/5.2a, since P7-S1b).
   retention_until: string | null;
   full_deletion: boolean;
   pending_deletion_reason: string | null;
@@ -198,10 +198,11 @@ export async function renameFolder(token: string, folderId: string, name: string
   return response.json();
 }
 
-// Ordner-Verschieben per Drag & Drop (8, P23-S4) - eigene Funktion statt
-// Wiederverwendung von `renameFolder`, da semantisch ein anderer Vorgang
-// (Elternordner statt Name) - der Endpunkt selbst existierte bereits vorher
-// unverändert (`FolderUpdate.parent_id`), nur ohne Frontend-Anbindung.
+// Moving folders via drag & drop (8, P23-S4) - separate function instead of
+// reusing `renameFolder`, since this is semantically a different operation
+// (parent folder instead of name) - the endpoint itself already existed
+// unchanged before (`FolderUpdate.parent_id`), just without a frontend
+// integration.
 export async function moveFolder(
   token: string,
   folderId: string,
@@ -220,11 +221,11 @@ export async function moveFolder(
   return response.json();
 }
 
-// Sammelbearbeitung von Metadaten (8, P14-S12) - Ordner-Pendant zu
-// `updateDocumentMetadata`, bislang gab es dafür keine eigene Funktion (nur
-// `renameFolder`, das ausschließlich `name` setzt). Gleiche Full-Replace-
-// Semantik wie beim Dokument-Pendant - `attributes` ersetzt den gesamten
-// bestehenden Wert, kein Merge serverseitig.
+// Bulk metadata editing (8, P14-S12) - folder counterpart to
+// `updateDocumentMetadata`; previously there was no dedicated function for
+// this (only `renameFolder`, which sets exclusively `name`). Same
+// full-replace semantics as the document counterpart - `attributes` replaces
+// the entire existing value, no server-side merge.
 export async function updateFolderAttributes(
   token: string,
   folderId: string,
@@ -252,11 +253,11 @@ export async function deleteFolder(token: string, folderId: string): Promise<voi
   );
 }
 
-// Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - zwei
-// mögliche Ausgänge, gleiches Wrapper-Muster für Ordner und Dokumente:
-// sofort ausgeführt, oder per Vier-Augen-Prinzip zurückgestellt (Aktionstyp
-// `folder.delete`/`document.delete`, unabhängig von der bereits
-// bestehenden retentionsgetriggerten Zwangslöschung).
+// Deletion request workflow for regular users (5.2, since P7-S1c) - two
+// possible outcomes, same wrapper pattern for folders and documents:
+// executed immediately, or deferred via the four-eyes principle (action type
+// `folder.delete`/`document.delete`, independent of the already-existing
+// retention-triggered forced deletion).
 export interface FolderTrashResult {
   status: "trashed" | "pending_approval";
   folder: Folder | null;
@@ -325,10 +326,10 @@ export async function listDeletedFolders(token: string, parentId: string): Promi
   return response.json();
 }
 
-// Papierkorb-Familie (2.5, P15-S1) - installationsweite Sichten statt der
-// obigen ordnerbezogenen Auflistung. "personal" braucht keine Rolle (nur die
-// eigenen Löschmarkierungen), "admin" verlangt serverseitig die
-// Löschadministration-Rolle (403 sonst).
+// Trash family (2.5, P15-S1) - installation-wide views instead of the
+// folder-scoped listing above. "personal" needs no role (only the user's own
+// deletion markers), "admin" requires the deletion-administration role
+// server-side (403 otherwise).
 export type TrashScope = "personal" | "admin";
 
 export async function listDeletedFoldersGlobal(
@@ -459,13 +460,14 @@ export interface ObjectType {
   applies_to: string;
   attributes: ObjectTypeAttribute[];
   icon: string | null;
-  // Kennzeichengenerator (2.2, seit P5e-S1/S3) - nur für applies_to="document"
-  // gesetzt. kennzeichen_display_override ist ein Tri-State: null/undefined =
-  // globaler Standard (KennzeichenConfig) gilt, siehe lib/kennzeichen.ts.
+  // Reference-number generator (2.2, since P5e-S1/S3) - only set for
+  // applies_to="document". kennzeichen_display_override is a tri-state:
+  // null/undefined = the global default (KennzeichenConfig) applies, see
+  // lib/kennzeichen.ts.
   kennzeichen_format?: string | null;
   kennzeichen_display_override?: boolean | null;
-  // Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2, 14.2) -
-  // nur für applies_to="document".
+  // Classified-document classification level (2.5, P15-S1, multi-level since
+  // P17-S2, 14.2) - only for applies_to="document".
   classification_level?: string | null;
 }
 
@@ -498,12 +500,11 @@ export async function listObjectTypes(
   return response.json();
 }
 
-// Formular-Layouts (2.2b, seit P5b-S2/ADR 0014) - steuern seit P5b-S4 die
-// Anordnung der Attributfelder in Metadaten-Panel, Suchmaske und Upload-
-// Dialog. `is_custom: false` heißt "generiertes Smart Layout, nicht
-// gespeichert", `true` heißt "über den Admin-UI-Layout-Designer gespeichertes
-// Override" - für die reine Anzeige hier ohne Bedeutung, nur zur Vollständigkeit
-// mit übernommen.
+// Form layouts (2.2b, since P5b-S2/ADR 0014) - since P5b-S4 they control the
+// arrangement of attribute fields in the metadata panel, search form, and
+// upload dialog. `is_custom: false` means "generated smart layout, not
+// saved", `true` means "override saved via the admin-UI layout designer" -
+// not meaningful for plain display here, included only for completeness.
 export type LayoutPurpose = "display" | "search" | "upload";
 
 export interface LayoutField {
@@ -544,12 +545,12 @@ export interface DocumentSummary {
   attributes: Record<string, unknown>;
   current_version_number: number;
   deleted_at: string | null;
-  // Persönlicher Papierkorb (2.5, P15-S1).
+  // Personal trash (2.5, P15-S1).
   deleted_by: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
-  // Aufbewahrung/Zwangslöschung (5.2/5.2a, seit P7-S1).
+  // Retention/forced deletion (5.2/5.2a, since P7-S1).
   retention_until: string | null;
   full_deletion: boolean;
   pending_deletion_reason: string | null;
@@ -616,7 +617,7 @@ export async function updateDocumentMetadata(
   return response.json();
 }
 
-// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1).
+// Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1).
 export async function putDocumentRetention(
   token: string,
   documentId: string,
@@ -668,10 +669,10 @@ export async function listDeletedDocuments(
   return response.json();
 }
 
-// Papierkorb-Familie (2.5, P15-S1) - installationsweite Sichten. "admin"
-// zeigt den regulären, nicht-klassifizierten Papierkorb, "admin_classified"
-// den strukturell getrennten Verschlusssachen-Papierkorb (je eigene,
-// serverseitig geprüfte Rolle, 403 ohne).
+// Trash family (2.5, P15-S1) - installation-wide views. "admin" shows the
+// regular, non-classified trash, "admin_classified" the structurally
+// separate classified-documents trash (each with its own server-side
+// checked role, 403 without it).
 export type DocumentTrashScope = "personal" | "admin" | "admin_classified";
 
 export async function listDeletedDocumentsGlobal(
@@ -696,9 +697,9 @@ export async function purgeDocument(token: string, documentId: string): Promise<
   );
 }
 
-// Quarantäne-Bereich (2.5/10.3, P15-S2) - infizierte (oder als solche
-// eingestufte) Uploads, die nie ein Dokument wurden (siehe virus-scan-service
-// main.py). "released"/"purged" sind Endzustände, kein weiterer Übergang.
+// Quarantine area (2.5/10.3, P15-S2) - infected (or classified as such)
+// uploads that never became a document (see virus-scan-service main.py).
+// "released"/"purged" are terminal states, no further transition.
 export interface ScanResult {
   id: string;
   document_id: string | null;
@@ -758,9 +759,9 @@ export async function purgeQuarantinedScan(token: string, scanId: string): Promi
   );
 }
 
-// Posteingang/Postausgang (2.5/3.3, P15-S3) - technischer Empfang/Versand
-// externer Korrespondenz, Sichtung/Zuordnung durch die Poststelle-Rolle
-// (siehe mail-connector main.py).
+// Inbox/outbox (2.5/3.3, P15-S3) - technical receipt/dispatch of external
+// correspondence, review/assignment by the mailroom role (see mail-connector
+// main.py).
 export interface InboundAttachment {
   id: number;
   filename: string;
@@ -905,9 +906,9 @@ export async function listOutboundMessages(token: string): Promise<OutboundMessa
   return response.json();
 }
 
-// Kontakte (2.5/4.4/7.4, P15-S4) - Verzeichnis zum Auffinden anderer
-// Mitarbeitender, lokal immer verfügbar, optional installationsübergreifend
-// über den Federation Hub (siehe auth-service main.py).
+// Contacts (2.5/4.4/7.4, P15-S4) - directory for finding other employees,
+// always available locally, optionally across installations via the
+// Federation Hub (see auth-service main.py).
 export interface DirectoryEntry {
   id: string;
   username: string;
@@ -1042,8 +1043,9 @@ export interface DocumentVersion {
   created_at: string;
 }
 
-// Versionshistorie (P5-S3, Nutzerwunsch) - Backend existiert bereits seit
-// document-service's Check-in-Funktion, war im User-UI bisher nicht sichtbar.
+// Version history (P5-S3, user request) - the backend has existed since
+// document-service's check-in function, it just wasn't visible in the
+// user UI until now.
 export async function listDocumentVersions(
   token: string,
   documentId: string
@@ -1087,10 +1089,10 @@ export interface RenditionSummary {
   updated_at: string;
 }
 
-// Rendering Service (3.7/2.4, P5-S2) - erzeugt Ersatzdarstellungen/Vorschauen
-// asynchron nach dem Upload, daher kann die Liste für ein frisch hochgeladenes
-// Dokument zunächst leer sein. `versionNumber` seit P5-S3 (Versionsauswahl in
-// der Vorschau) optional filterbar.
+// Rendering Service (3.7/2.4, P5-S2) - generates surrogate representations/
+// previews asynchronously after upload, so the list for a freshly uploaded
+// document can initially be empty. `versionNumber` optionally filterable
+// since P5-S3 (version selection in the preview).
 export async function listRenditions(
   token: string,
   documentId: string,
@@ -1142,8 +1144,8 @@ export interface OcrResultSummary {
   updated_at: string;
 }
 
-// OCR Service (3.9, P5-S3) - liefert Wort-Bounding-Boxen für die
-// positionsgenaue Text-Overlay-Markierung in der Vorschau (Nutzerwunsch).
+// OCR Service (3.9, P5-S3) - supplies word bounding boxes for
+// position-accurate text overlay highlighting in the preview (user request).
 export async function listOcrResults(
   token: string,
   documentId: string,
@@ -1169,11 +1171,11 @@ export async function downloadOcrPageImage(
   return response.blob();
 }
 
-// Signature Service (3.10, P6-S7) - elektronische Signatur (SES/AES/QES),
-// bindet sich an die konkrete Dokumentversion. Signieren erzeugt serverseitig
-// eine neue Dokumentversion (die PAdES-Signatur verändert die PDF-Bytes) -
-// diese Session aktualisiert die Versionsanzeige an anderer Stelle (z. B.
-// PreviewPane) nicht automatisch, siehe docs/services/user-ui.md.
+// Signature Service (3.10, P6-S7) - electronic signature (SES/AES/QES),
+// binds to the specific document version. Signing creates a new document
+// version server-side (the PAdES signature changes the PDF bytes) - this
+// session does not automatically update the version display elsewhere
+// (e.g. PreviewPane), see docs/services/user-ui.md.
 export type SignatureLevel = "ses" | "aes" | "qes";
 
 export interface SignatureSummary {
@@ -1243,8 +1245,8 @@ export async function verifySignature(
   return response.json();
 }
 
-// Search Service (3.7, P5-S4, ADR 0012: Postgres Volltextsuche statt
-// dediziertem Suchindex) - Facetten orientieren sich am Objekttyp-Schema.
+// Search Service (3.7, P5-S4, ADR 0012: Postgres full-text search instead of
+// a dedicated search index) - facets follow the object-type schema.
 export interface SearchResult extends DocumentSummary {
   folder_name: string | null;
   rank: number;
@@ -1284,8 +1286,8 @@ export interface SearchParams {
   createdBy?: string;
   createdAfter?: string;
   createdBefore?: string;
-  // Schlüssel bereits in der Backend-Konvention, z. B. "attr.kunde" oder
-  // "attr.betrag.gte" - siehe docs/services/search-service.md.
+  // Keys already in the backend convention, e.g. "attr.kunde" or
+  // "attr.betrag.gte" - see docs/services/search-service.md.
   attrFilters?: Record<string, string>;
   limit?: number;
   offset?: number;
@@ -1308,8 +1310,8 @@ export async function searchDocuments(token: string, params: SearchParams): Prom
   return response.json();
 }
 
-// Not-Shutdown (4.8, P6-S6) - reines Status-Banner, keine Bedienelemente
-// (nur der aktivierte Superuser ist während der Sperre handlungsfähig, 4.8).
+// Emergency shutdown (4.8, P6-S6) - pure status banner, no controls (only
+// the activated superuser can act during the lockdown, 4.8).
 export interface MaintenanceMode {
   active: boolean;
 }
@@ -1319,10 +1321,11 @@ export async function getMaintenanceStatus(token: string): Promise<MaintenanceMo
   return response.json();
 }
 
-// Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - generischer
-// Vier-Augen-Mechanismus des Permission Service (4.3, seit P6-S4), hier zum
-// ersten Mal von der User-UI selbst genutzt (bisher nur `document.force_
-// unlock`/`document.force_delete`/`folder.force_delete`, ohne jede UI).
+// Deletion request workflow for regular users (5.2, since P7-S1c) - generic
+// four-eyes mechanism of the Permission Service (4.3, since P6-S4), used
+// here for the first time by the user UI itself (previously only
+// `document.force_unlock`/`document.force_delete`/`folder.force_delete`,
+// without any UI).
 export interface ApprovalConfig {
   action_type: string;
   requires_approval: boolean;
@@ -1340,12 +1343,12 @@ export async function getApprovalConfig(token: string, actionType: string): Prom
   return response.json();
 }
 
-// Domänengetrennte Admin-Rollen (4.6) - systemeigene Capabilities aus dem
-// Permission Service, NICHT aus `user.realm_roles` (getrennte Quelle,
-// gleiches Muster wie `apps/admin-ui/src/lib/api.ts`s gleichnamige
-// Funktion). Erster Konsument in user-ui: RetentionPanel/FolderRetentionModal
-// (Post-Roadmap Phase 19 Session 10, ADR 0075) blenden den Legal-Hold-
-// Aktionsbutton nur für Principals mit `admin.legal_hold` ein.
+// Domain-separated admin roles (4.6) - system-native capabilities from the
+// Permission Service, NOT from `user.realm_roles` (separate source, same
+// pattern as `apps/admin-ui/src/lib/api.ts`'s function of the same name).
+// First consumer in user-ui: RetentionPanel/FolderRetentionModal
+// (post-roadmap Phase 19 Session 10, ADR 0075) show the legal-hold action
+// button only for principals with `admin.legal_hold`.
 export async function getEffectivePermissions(
   token: string,
   principalId: string
@@ -1425,10 +1428,10 @@ export async function rejectApprovalRequest(
   return response.json();
 }
 
-// Einzelabruf (seit P7-S1d) - beide Endpunkte existieren bereits seit
-// langem, nur bislang keine Frontend-Funktion dafür. Werden von
-// `FavoritesPane`/dem Favoriten-Öffnen-Pfad gebraucht, um Anzeigenamen bzw.
-// (bei Ordnern) die Eltern-Kette bis zur Wurzel aufzulösen.
+// Single-item retrieval (since P7-S1d) - both endpoints have existed for a
+// long time, just no frontend function for them until now. Needed by
+// `FavoritesPane`/the favorite-open path to resolve display names, or (for
+// folders) the parent chain up to the root.
 export async function getDocument(token: string, documentId: string): Promise<DocumentSummary> {
   const response = await request(
     "document-service",
@@ -1444,9 +1447,9 @@ export async function getFolder(token: string, folderId: string): Promise<Folder
   return response.json();
 }
 
-// Favoriten/Merkliste (schnelles Wiederfinden, seit P7-S1d) - neuer, bewusst
-// entkoppelter `favorite-service` ohne referenzielle Prüfung gegen
-// document-/folder-service (siehe docs/services/favorite-service.md).
+// Favorites/watch list (quick retrieval, since P7-S1d) - new, deliberately
+// decoupled `favorite-service` without referential checks against
+// document-/folder-service (see docs/services/favorite-service.md).
 export interface Favorite {
   id: string;
   user_id: string;
@@ -1491,12 +1494,12 @@ export async function removeFavorite(
   await request("favorite-service", `favorites?${query.toString()}`, { method: "DELETE" }, token);
 }
 
-// Nutzer-Auflösung per exaktem Username (2.5, P14-S6) - bewusst NICHT hinter
-// `admin.user_management` gegated (anders als eine vollständige Nutzerliste):
-// jeder authentifizierte Nutzer darf einen einzelnen Account auflösen, um ihn
-// z. B. in einen Teamspace einzuladen. `X-DMS-Principal` ist die Keycloak-
-// `sub`-UUID, kein Nutzer kennt sie auswendig - dieser Aufruf übersetzt den
-// eingetippten Username in genau diese UUID.
+// User resolution by exact username (2.5, P14-S6) - deliberately NOT gated
+// behind `admin.user_management` (unlike a full user list): every
+// authenticated user may resolve a single account, e.g. to invite them to a
+// teamspace. `X-DMS-Principal` is the Keycloak `sub` UUID, which no user
+// knows by heart - this call translates the typed username into exactly
+// that UUID.
 export interface UserLookup {
   id: string;
   username: string;
@@ -1515,11 +1518,11 @@ export async function lookupUserByUsername(
   return response.json();
 }
 
-// Rückwärts-Identitätsauflösung (Post-Roadmap Phase 19 Session 4, ADR 0069) -
-// Gegenstück zu lookupUserByUsername: Delegationen/Teamspace-Mitgliederlisten
-// kennen nur die rohe principal_id-UUID, dieser Aufruf übersetzt sie zurück
-// in einen Nutzernamen zur Anzeige. Gleiches Gate wie die Vorwärtsauflösung
-// (`users.lookup` über die "everyone"-Gruppe in permission-service).
+// Reverse identity resolution (post-roadmap Phase 19 Session 4, ADR 0069) -
+// counterpart to lookupUserByUsername: delegations/teamspace member lists
+// only know the raw principal_id UUID; this call translates it back into a
+// username for display. Same gate as the forward resolution (`users.lookup`
+// via the "everyone" group in permission-service).
 export async function lookupUserById(token: string, userId: string): Promise<UserLookup> {
   const response = await request(
     "auth-service",
@@ -1530,12 +1533,12 @@ export async function lookupUserById(token: string, userId: string): Promise<Use
   return response.json();
 }
 
-// Team-Arbeitsbereich "Teamspace" (2.5, P14-S6) - selbstverwalteter,
-// dauerhafter Gruppenbereich (Ordner/Dokumente/Termine/Kontakte), neuer
-// `teamspace-service`. Eigenes, von der übrigen RBAC unabhängiges
-// Zugriffsregime (siehe docs/services/teamspace-service.md) - jeder Aufruf
-// hier trägt implizit `X-DMS-Principal` über den vom Gateway weitergereichten
-// Bearer-Token, `teamspace-service` prüft die Mitgliedschaft selbst.
+// Team workspace "Teamspace" (2.5, P14-S6) - self-managed, persistent group
+// area (folders/documents/appointments/contacts), new `teamspace-service`.
+// Its own access regime, independent of the rest of RBAC (see
+// docs/services/teamspace-service.md) - every call here implicitly carries
+// `X-DMS-Principal` via the bearer token forwarded by the gateway;
+// `teamspace-service` checks membership itself.
 export interface Teamspace {
   id: string;
   name: string;
@@ -1753,12 +1756,12 @@ export async function deleteTeamspaceContact(
   );
 }
 
-// Öffentlicher Freigabelink (4.2a, P14-S10) - zeitlich begrenzter,
-// unauthentifizierter Lesezugriff auf genau ein Dokument. Die beiden
-// `public/...`-Aufrufe unten übergeben bewusst KEIN Token (letzter Parameter
-// von `request()` bleibt weg) - sie laufen über die gateway-eigene
-// `public_routes`-Ausnahmeliste, das Freigabelink-Token selbst reist als
-// Query-Parameter mit, siehe docs/services/gateway-service.md.
+// Public share link (4.2a, P14-S10) - time-limited, unauthenticated read
+// access to exactly one document. The two `public/...` calls below
+// deliberately pass NO token (the last parameter of `request()` is omitted) -
+// they go through the gateway's own `public_routes` exception list, the
+// share-link token itself travels along as a query parameter, see
+// docs/services/gateway-service.md.
 
 export interface ShareLinkConfig {
   enabled: boolean;
@@ -1839,11 +1842,11 @@ export function publicShareLinkContentUrl(shareToken: string): string {
   )}`;
 }
 
-// Office-Direktbearbeitung (Post-Roadmap-Feature): Word/Excel/PowerPoint
-// direkt aus dem Browser heraus starten, über das Office-URI-Schema
-// (`ms-word:ofe|u|<url>` usw.) gegen webdav-connector. Content-Type→
-// Schema/Extension-Zuordnung existiert im Projekt bislang nirgends, wird
-// nur hier gebraucht.
+// Direct Office editing (post-roadmap feature): launch Word/Excel/PowerPoint
+// directly from the browser via the Office URI scheme
+// (`ms-word:ofe|u|<url>` etc.) against webdav-connector. The content-type →
+// scheme/extension mapping doesn't exist anywhere else in the project yet,
+// it's only needed here.
 const OFFICE_LAUNCH_MAP: Record<string, { scheme: string; ext: string; label: string }> = {
   "application/msword": { scheme: "ms-word", ext: "doc", label: "Word" },
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
@@ -1890,10 +1893,10 @@ export async function createWebdavEditToken(
   return response.json();
 }
 
-// Bettet das Edit-Token als Basic-Auth-"Benutzername" mit leerem Passwort in
-// die URL ein - `DmsAuthDomainController` unterscheidet daran ein Edit-Token
-// von einem echten WebDAV-Mount (der immer ein echtes Passwort sendet), ohne
-// das Token-Format selbst kennen zu müssen.
+// Embeds the edit token as the basic-auth "username" with an empty password
+// in the URL - `DmsAuthDomainController` uses this to distinguish an edit
+// token from a real WebDAV mount (which always sends a real password),
+// without needing to know the token format itself.
 export function officeLaunchUrl(webdavToken: string, documentId: string, ext: string): string {
   const host = new URL(WEBDAV_CONNECTOR_BASE_URL).host;
   const protocol = new URL(WEBDAV_CONNECTOR_BASE_URL).protocol;
@@ -1902,12 +1905,12 @@ export function officeLaunchUrl(webdavToken: string, documentId: string, ext: st
   )}.${ext}`;
 }
 
-// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - selbstverwaltete,
-// zeitlich befristete Übertragung der Aufgabenwahrnehmung, neuer
-// `permission-service`-Datensatz (kein eigener Service, siehe
-// docs/services/permission-service.md). `delegator_principal_id` ist immer
-// die anfragende Person selbst (server-seitig aus `X-DMS-Principal`
-// abgeleitet) - kein Feld dafür im Request-Body.
+// Deputy delegation for absences (4.4a, P14-S11) - self-managed,
+// time-limited transfer of task responsibility, new `permission-service`
+// record (not a dedicated service, see docs/services/permission-service.md).
+// `delegator_principal_id` is always the requesting person themselves
+// (derived server-side from `X-DMS-Principal`) - no field for it in the
+// request body.
 export interface Delegation {
   id: string;
   delegator_principal_id: string;
@@ -1978,8 +1981,9 @@ export async function revokeDelegation(token: string, delegationId: string): Pro
   );
 }
 
-// Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - bereits ausgesonderte,
-// aber noch innerhalb der Übergangsfrist befindliche Dokumente/Umlaufmappen.
+// Records-disposal access area (2.5/5.6, P15-S5) - documents/case folders
+// that have already been disposed of but are still within the transition
+// period.
 export interface ReleasedItem {
   transfer_id: string;
   kind: "document" | "case";
@@ -2018,8 +2022,8 @@ export async function downloadCaseArchivalPackage(
   return response.blob();
 }
 
-// Struktur-Vorlagen (2.5/7.3, P15-S6) - Ordner-Teilbaum als benannte,
-// wiederverwendbare Vorlage (z. B. Aktenplan-Rohbau).
+// Structure templates (2.5/7.3, P15-S6) - a folder subtree as a named,
+// reusable template (e.g. a file-plan skeleton).
 export interface FolderTemplate {
   id: string;
   name: string;

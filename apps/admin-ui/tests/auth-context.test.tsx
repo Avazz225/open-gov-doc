@@ -172,7 +172,7 @@ describe("AuthProvider (admin-ui)", () => {
   });
 
   it("keeps sessions isolated per installation and requires no re-login when switching back", async () => {
-    // Vorbereitung: Installation "default" hat bereits eine gültige Sitzung.
+    // Setup: installation "default" already has a valid session.
     window.localStorage.setItem(
       "dms.tokens.default",
       JSON.stringify({
@@ -207,15 +207,15 @@ describe("AuthProvider (admin-ui)", () => {
       screen.getByText("switch-to-second").click();
     });
 
-    // Neue Installation hat noch keine Sitzung - Login nötig.
+    // New installation doesn't have a session yet - login required.
     await waitFor(() => expect(screen.getByTestId("user").textContent).toBe("none"));
     await act(async () => {
       screen.getByText("login").click();
     });
     await waitFor(() => expect(screen.getByTestId("user").textContent).toBe("second-admin"));
 
-    // Zurück zur ersten Installation: keine erneute Anmeldung nötig, die
-    // ursprüngliche Sitzung ist weiterhin gültig und wurde nicht angetastet.
+    // Back to the first installation: no re-login required, the
+    // original session is still valid and was not touched.
     await act(async () => {
       screen.getByText("switch-to-default").click();
     });

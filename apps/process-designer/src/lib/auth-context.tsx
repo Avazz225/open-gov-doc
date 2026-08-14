@@ -20,10 +20,10 @@ import type { CurrentUser, TokenResponse } from "./api";
 
 const STORAGE_KEY = "dms.tokens";
 
-// Bekannte Vereinfachung dieses Grundgerüsts: Tokens liegen im localStorage,
-// nicht in einem httpOnly-Cookie (siehe ADR 0006). Einzelne, fest
-// konfigurierte Installation wie User-UI - Multi-Installation (ADR 0008) ist
-// laut Konzept 8 explizit nur eine Admin-UI-Anforderung.
+// Known simplification of this scaffold: tokens live in localStorage,
+// not in an httpOnly cookie (see ADR 0006). A single, fixed
+// configured installation like User-UI - multi-installation (ADR 0008) is,
+// per concept 8, explicitly only an Admin-UI requirement.
 interface StoredTokens {
   accessToken: string;
   refreshToken: string;
@@ -54,17 +54,17 @@ function toStoredTokens(response: TokenResponse): StoredTokens {
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
-    // 30s Sicherheitsabstand, damit ein Refresh nicht erst nach Ablauf greift.
+    // 30s safety margin so that a refresh doesn't kick in only after expiry.
     expiresAt: Date.now() + (response.expires_in - 30) * 1000,
   };
 }
 
 interface AuthContextValue {
   user: CurrentUser | null;
-  // Domänengetrennte Admin-Rollen (4.6, P6-S5): systemeigene Capabilities aus
-  // dem Permission Service - hier für das Ausblenden/Deaktivieren von
-  // Speichern/Löschen ohne `admin.object_config` (P6-S6-Gating am
-  // workflow-service selbst), siehe RequireCapability.tsx.
+  // Domain-separated admin roles (4.6, P6-S5): native capabilities from
+  // the Permission Service - here for hiding/disabling
+  // save/delete without `admin.object_config` (P6-S6 gating on
+  // workflow-service itself), see RequireCapability.tsx.
   permissions: string[];
   accessToken: string | null;
   isLoading: boolean;
@@ -110,9 +110,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
-  // Proaktiver Refresh statt reaktiv auf 401 zu warten - einfacher für dieses
-  // Grundgerüst, da nur ein einziger, vorhersagbarer Ablaufzeitpunkt je
-  // Session existiert (kein Multi-Tab-Koordinierungsbedarf berücksichtigt).
+  // Proactive refresh instead of reactively waiting for a 401 - simpler for
+  // this scaffold, since only a single, predictable expiry time per
+  // session exists (no multi-tab coordination need considered).
   useEffect(() => {
     if (!tokens) return;
     const delay = Math.max(tokens.expiresAt - Date.now(), 0);

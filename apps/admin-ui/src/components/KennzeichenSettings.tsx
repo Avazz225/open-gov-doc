@@ -10,11 +10,11 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Globaler Standard-Schalter für den Kennzeichengenerator (2.2, P5e-S3) -
-// einzelnes Feld statt eines Katalogs mehrerer unabhängiger Anzeigepunkte
-// (Tab-Titel, Listen-Präfix, ...), siehe PROGRESS.md "Kennzeichengenerator".
-// Einzelne Dokumentenarten können diesen Standard über den Tri-State
-// `kennzeichen_display_override` im Objekttyp-Editor überschreiben.
+// Global default switch for the reference number generator (2.2, P5e-S3) -
+// a single field instead of a catalog of several independent display points
+// (tab title, list prefix, ...), see PROGRESS.md "Kennzeichengenerator".
+// Individual document types can override this default via the tri-state
+// `kennzeichen_display_override` in the object type editor.
 export function KennzeichenSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

@@ -21,11 +21,11 @@ import type { CurrentUser, TokenResponse } from "./api";
 
 const STORAGE_KEY = "dms.tokens";
 
-// Bekannte Vereinfachung dieses Grundgerüsts: Tokens liegen im localStorage,
-// nicht in einem httpOnly-Cookie - einfachste Variante für eine rein
-// clientseitig gerenderte SPA ohne eigenes Backend (Konzept 8). XSS-Härtung
-// (z. B. über eine Session-Cookie-Ausgabe durch das Gateway) ist ein späterer
-// Schritt, siehe docs/services/user-ui.md "Offene Punkte".
+// Known simplification of this scaffold: tokens live in localStorage, not
+// an httpOnly cookie - the simplest option for a purely client-rendered SPA
+// without its own backend (concept 8). XSS hardening (e.g. via a session
+// cookie issued by the gateway) is a later step, see
+// docs/services/user-ui.md "Open Points".
 interface StoredTokens {
   accessToken: string;
   refreshToken: string;
@@ -56,26 +56,26 @@ function toStoredTokens(response: TokenResponse): StoredTokens {
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
-    // 30s Sicherheitsabstand, damit ein Refresh nicht erst nach Ablauf greift.
+    // 30s safety margin so a refresh doesn't kick in only after expiry.
     expiresAt: Date.now() + (response.expires_in - 30) * 1000,
   };
 }
 
 interface AuthContextValue {
   user: CurrentUser | null;
-  // Domänengetrennte Admin-Rollen (4.6): systemeigene Capabilities aus dem
-  // Permission Service, NICHT aus `user.realm_roles` - getrennte Quelle,
-  // gleiches Muster wie `apps/admin-ui`s Auth-Context (siehe api.ts
-  // `getEffectivePermissions`). Erster Konsument seit Post-Roadmap Phase 19
+  // Domain-separated admin roles (4.6): system-native capabilities from the
+  // Permission Service, NOT from `user.realm_roles` - separate source, same
+  // pattern as `apps/admin-ui`'s auth context (see api.ts
+  // `getEffectivePermissions`). First consumer since post-roadmap Phase 19
   // Session 10 (ADR 0075): `admin.legal_hold`.
   permissions: string[];
   accessToken: string | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  // SSO/automatischer Login (Post-Roadmap-Feature): `login/callback/page.tsx`
-  // übernimmt damit eine per `POST /oidc/callback` erhaltene Session über
-  // denselben Speicherpfad wie ein regulärer Formular-Login, statt ihn zu
-  // duplizieren.
+  // SSO/automatic login (post-roadmap feature): `login/callback/page.tsx`
+  // uses this to adopt a session obtained via `POST /oidc/callback` through
+  // the same storage path as a regular form login, instead of duplicating
+  // it.
   applySession: (response: TokenResponse) => Promise<void>;
   logout: () => void;
 }
@@ -118,23 +118,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
-    // SSO/automatischer Login (Post-Roadmap-Feature): beendet zusätzlich die
-    // Sitzung wirklich auf Keycloak-Seite (best-effort, blockiert den
-    // lokalen Logout nicht bei einem Netzwerkfehler) - ohne das würde ein
-    // SPNEGO-fähiger Browser sich beim nächsten Besuch sofort wieder
-    // automatisch anmelden, da Keycloaks eigene SSO-Sitzung unangetastet
-    // bliebe.
+    // SSO/automatic login (post-roadmap feature): also actually ends the
+    // session on the Keycloak side (best-effort, does not block the local
+    // logout on a network error) - without this, a SPNEGO-capable browser
+    // would immediately log back in automatically on the next visit, since
+    // Keycloak's own SSO session would remain untouched.
     if (tokens) {
       logoutSession(tokens.refreshToken).catch(() => {
-        // Bewusst ignoriert - siehe Kommentar oben.
+        // Deliberately ignored - see comment above.
       });
     }
     clearSession();
   }, [clearSession, tokens]);
 
-  // Proaktiver Refresh statt reaktiv auf 401 zu warten - einfacher für dieses
-  // Grundgerüst, da nur ein einziger, vorhersagbarer Ablaufzeitpunkt je
-  // Session existiert (kein Multi-Tab-Koordinierungsbedarf berücksichtigt).
+  // Proactive refresh instead of reactively waiting for a 401 - simpler for
+  // this scaffold, since there is only a single, predictable expiry point
+  // per session (no multi-tab coordination need considered).
   useEffect(() => {
     if (!tokens) return;
     const delay = Math.max(tokens.expiresAt - Date.now(), 0);

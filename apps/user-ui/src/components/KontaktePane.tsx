@@ -11,10 +11,10 @@ import {
   type FederatedDirectoryEntry,
 } from "@/lib/api";
 
-// Kontakte (2.5/4.4/7.4, P15-S4) - Verzeichnis zum Auffinden anderer
-// Mitarbeitender. Anders als Papierkorb/Quarantäne/Posteingang ist dieser
-// Sonderbereich laut Konzept "lokal, immer verfügbar" - kein Rollen-Gate,
-// weder hier noch am IconRail-Eintrag.
+// Contacts (2.5/4.4/7.4, P15-S4) - directory for finding other employees.
+// Unlike trash/quarantine/inbox, this special area is "local, always
+// available" per the concept - no role gate, neither here nor on the
+// IconRail entry.
 function displayName(entry: DirectoryEntry): string {
   const name = [entry.first_name, entry.last_name].filter(Boolean).join(" ");
   return name || entry.username;

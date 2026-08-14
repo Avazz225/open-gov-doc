@@ -388,8 +388,8 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
           content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }),
       ]);
-      // Erster Poll-Durchlauf: rendering-service hat noch keine Rendition-Zeile
-      // angelegt (Verarbeitung läuft noch) - erst der zweite liefert sie fertig.
+      // First poll cycle: rendering-service has not yet created a rendition row
+      // (processing still in progress) - only the second one delivers it ready.
       listRenditionsMock
         .mockResolvedValueOnce([])
         .mockResolvedValue([
@@ -444,7 +444,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
       for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
 
       const previewPane = screen.getByLabelText("Vorschau: scan.pdf");
-      // Natives PDF-Embed erscheint sofort, ohne auf OCR zu warten.
+      // Native PDF embed appears immediately, without waiting for OCR.
       const embed = previewPane.querySelector("embed");
       expect(embed).toHaveAttribute("title", "scan.pdf");
       expect(downloadOcrPageImageMock).not.toHaveBeenCalled();
@@ -452,10 +452,10 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
       await vi.advanceTimersByTimeAsync(7_000);
       for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
 
-      // OCR wurde inzwischen fertig (engine "tesseract") - die Vorschau
-      // wechselt jetzt korrekt vom nativen PDF-Embed auf das
-      // Seitenbild-mit-Wort-Overlay (gleiches Verhalten wie beim initialen
-      // Laden mit bereits fertigem OCR-Ergebnis).
+      // OCR has since completed (engine "tesseract") - the preview now
+      // correctly switches from the native PDF embed to the
+      // page-image-with-word-overlay (same behavior as on initial
+      // load with an already-completed OCR result).
       expect(downloadOcrPageImageMock).toHaveBeenCalled();
       expect(within(previewPane).getByRole("img")).toBeInTheDocument();
       expect(previewPane.querySelector("embed")).not.toBeInTheDocument();

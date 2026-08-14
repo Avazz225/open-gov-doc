@@ -47,8 +47,8 @@ describe("InstallationManager", () => {
     await user.type(screen.getByLabelText("Name"), "Kaputt");
     const urlInput = screen.getByLabelText("Gateway-Adresse");
     await user.type(urlInput, "nicht-http");
-    // input[type=url] blockiert das native Submit bei Konstraint-Verletzung -
-    // wie beim Datei-Upload in P4-S2 direkt gegen das Form-Element submitten.
+    // input[type=url] blocks the native submit on constraint violation -
+    // submit directly against the form element, like the file upload in P4-S2.
     fireEvent.submit(screen.getByRole("form", { name: "Installation hinzufügen" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Bitte eine gültige URL angeben.");

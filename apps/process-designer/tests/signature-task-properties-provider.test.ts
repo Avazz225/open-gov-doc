@@ -4,11 +4,11 @@ import {
   isSignatureRequired,
 } from "@/components/SignatureTaskPropertiesProvider";
 
-// Nur die reinen Lesefunktionen werden hier getestet - die echten
-// UI-Bibliotheken (`bpmn-js-properties-panel`/`@bpmn-io/properties-panel`)
-// ziehen beim Laden intern weitere `bpmn-js`-Module nach, die in dieser
-// Testumgebung ohne echten Browser nicht sauber auflösen; dieselben Mocks
-// wie in bpmn-designer.test.tsx.
+// Only the pure read functions are tested here - the real UI libraries
+// (`bpmn-js-properties-panel`/`@bpmn-io/properties-panel`) internally pull in
+// further `bpmn-js` modules on load, which do not resolve cleanly in this
+// test environment without a real browser; same mocks as in
+// bpmn-designer.test.tsx.
 vi.mock("bpmn-js-properties-panel", () => ({ useService: vi.fn() }));
 vi.mock("@bpmn-io/properties-panel", () => ({
   CheckboxEntry: vi.fn(),
@@ -18,10 +18,10 @@ vi.mock("@bpmn-io/properties-panel", () => ({
   isSelectEntryEdited: vi.fn(),
 }));
 
-// Minimales moddle-Element-Double: `getBusinessObject`/`findExtensionElement`
-// greifen nur über `.get(key)` zu (siehe bpmn-js' `ModelUtil.getBusinessObject`
-// und `bpmn:ExtensionElements`/`camunda:Properties`s `values`-Liste) - ein
-// echtes `bpmn-moddle`-Modell ist für diese reinen Lesefunktionen nicht nötig.
+// Minimal moddle element double: `getBusinessObject`/`findExtensionElement`
+// only access via `.get(key)` (see bpmn-js' `ModelUtil.getBusinessObject`
+// and `bpmn:ExtensionElements`/`camunda:Properties`'s `values` list) - a real
+// `bpmn-moddle` model is not needed for these pure read functions.
 function fakeProperty(name: string, value: string) {
   return { $type: "camunda:Property", name, value };
 }

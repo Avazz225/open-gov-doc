@@ -34,13 +34,13 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-// Cross-UI-Theming (8, P4-S6, Nutzer-Feedback nach P4-S5): identisches Muster
-// wie in der User-UI (bewusst dupliziert statt geteilt, ADR 0006), da die
-// Präferenz geräteübergreifend am Nutzerprofil hängt (`auth-service`
-// `/me/preferences`, ADR 0009), nicht an einer einzelnen Installation.
-// `accessToken` kommt hier aus dem installationsbezogenen `AuthProvider`
-// (ADR 0008) - ein Wechsel der aktiven Installation liest also automatisch
-// die Theme-Präferenz des dort angemeldeten Kontos nach.
+// Cross-UI theming (8, P4-S6, user feedback after P4-S5): identical pattern
+// to the user UI (deliberately duplicated instead of shared, ADR 0006), since the
+// preference is tied to the user profile across devices (`auth-service`
+// `/me/preferences`, ADR 0009), not to a single installation.
+// `accessToken` here comes from the installation-scoped `AuthProvider`
+// (ADR 0008) - switching the active installation therefore automatically
+// re-reads the theme preference of the account logged in there.
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth();
   const [theme, setThemeState] = useState<ThemeName>(() => loadCachedTheme());
@@ -67,8 +67,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(STORAGE_KEY, serverTheme);
       })
       .catch(() => {
-        // Bewusst stillschweigend: der lokal gecachte Wert bleibt gültig,
-        // falls die Server-Präferenz (noch) nicht lesbar ist.
+        // Deliberately silent: the locally cached value remains valid
+        // if the server preference is (not yet) readable.
       });
   }, [accessToken]);
 
@@ -78,8 +78,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       window.localStorage.setItem(STORAGE_KEY, next);
       if (accessToken) {
         updateThemePreference(accessToken, next).catch(() => {
-          // Auswahl gilt sofort lokal weiter, auch wenn die Server-
-          // Persistenz fehlschlägt - kein Retry in diesem Grundgerüst.
+          // Selection continues to apply locally immediately, even if the server
+          // persistence fails - no retry in this base scaffold.
         });
       }
     },

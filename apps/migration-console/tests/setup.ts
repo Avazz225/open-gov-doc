@@ -2,8 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
-// jsdom implementiert `matchMedia` nicht (Node hat kein echtes Rendering) -
-// `ThemeProvider` (P4-S6) braucht es für die "Automatisch"-Auflösung.
+// jsdom does not implement `matchMedia` (Node has no real rendering) -
+// `ThemeProvider` (P4-S6) needs it for the "Automatic" resolution.
 if (typeof window !== "undefined" && !window.matchMedia) {
   window.matchMedia = (query: string) =>
     ({

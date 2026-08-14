@@ -11,11 +11,12 @@ import {
   type FolderTemplate,
 } from "@/lib/api";
 
-// Struktur-Vorlagen (2.5/7.3, P15-S6) - ein Ordner-Teilbaum als benannte,
-// wiederverwendbare Vorlage (z. B. Aktenplan-Rohbau). Wie bei
-// QuarantinePane/PoststellePane (P15-S2/S3) werden Ordner-IDs bewusst als
-// rohe Texteingabe erfasst statt über einen eigens gebauten Baum-Picker -
-// etablierte, in diesem Projekt akzeptierte Vereinfachung, siehe ADR 0056.
+// Structure templates (2.5/7.3, P15-S6) - a folder subtree as a named,
+// reusable template (e.g. a file-plan skeleton). As with
+// QuarantinePane/PoststellePane (P15-S2/S3), folder IDs are deliberately
+// captured as raw text input rather than through a purpose-built tree
+// picker - an established simplification accepted in this project, see
+// ADR 0056.
 export function VorlagenPane({ token, createdBy }: { token: string; createdBy: string }) {
   const { t } = useI18n();
   const [templates, setTemplates] = useState<FolderTemplate[]>([]);

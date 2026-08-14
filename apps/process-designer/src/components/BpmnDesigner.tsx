@@ -23,29 +23,29 @@ export interface BpmnDesignerHandle {
 
 interface BpmnDesignerProps {
   initialXml: string;
-  // Statisch beim Erzeugen des Modelers injiziert (7.4, P6-S9) - vom
-  // aufrufenden `designer/page.tsx` einmalig vor dem Mounten geladen (siehe
-  // `lib/api.ts#listFederationInstallations`). Leer, wenn kein Federation Hub
-  // konfiguriert ist - `FederatedStepPropertiesProvider` blendet die
-  // gesamte Gruppe dann aus.
+  // Injected statically when the modeler is created (7.4, P6-S9) - loaded
+  // once by the calling `designer/page.tsx` before mounting (see
+  // `lib/api.ts#listFederationInstallations`). Empty if no federation hub
+  // is configured - `FederatedStepPropertiesProvider` then hides the
+  // entire group.
   federationInstallations: FederationInstallation[];
   onImportError?: (message: string) => void;
-  // Callback-Prop statt `forwardRef`/`useImperativeHandle` - vermeidet jede
-  // Unsicherheit über Ref-Weiterreichung durch `next/dynamic` (mit dem diese
-  // Komponente eingebunden wird, `{ssr:false}`, siehe designer/page.tsx) und
-  // ist genauso ausdrucksstark für den hier gebrauchten Fall (Eltern-
-  // Komponente braucht `exportXml`/`importXml` erst nach der Modeler-
-  // Initialisierung).
+  // Callback prop instead of `forwardRef`/`useImperativeHandle` - avoids any
+  // uncertainty about ref forwarding through `next/dynamic` (which this
+  // component is loaded with, `{ssr:false}`, see designer/page.tsx) and
+  // is just as expressive for the case needed here (the parent
+  // component only needs `exportXml`/`importXml` after the modeler's
+  // initialization).
   onReady?: (handle: BpmnDesignerHandle) => void;
 }
 
-// Manuelles `useRef`/`useEffect`-Mounting statt eines React-Wrappers - kein
-// aktiv gepflegter React-Wrapper für bpmn-js verfügbar (`react-bpmn` seit
-// 2020 stehengeblieben, siehe ADR 0026), bpmn-js manipuliert das DOM ohnehin
-// direkt (eigenes SVG-Canvas), nicht React-idiomatisch. Wird per
-// `next/dynamic`/`{ssr:false}` vom aufrufenden Code eingebunden (direkte
-// DOM-Zugriffe beim Modul-Import vertragen sich nicht mit Next.js'
-// Build-Zeit-Renderdurchlauf unter `output:"export"`).
+// Manual `useRef`/`useEffect` mounting instead of a React wrapper - no
+// actively maintained React wrapper for bpmn-js is available (`react-bpmn`
+// stalled since 2020, see ADR 0026); bpmn-js manipulates the DOM directly
+// anyway (its own SVG canvas), which isn't React-idiomatic. Loaded via
+// `next/dynamic`/`{ssr:false}` by the calling code (direct
+// DOM access on module import is incompatible with Next.js'
+// build-time render pass under `output:"export"`).
 export function BpmnDesigner({
   initialXml,
   federationInstallations,
@@ -67,8 +67,8 @@ export function BpmnDesigner({
         CamundaPlatformPropertiesProviderModule,
         SignatureTaskPropertiesProviderModule,
         FederatedStepPropertiesProviderModule,
-        // Kein eigenes bpmn-js-Modul, sondern eine didi-Inline-Bindung für die
-        // statische Installationsliste (siehe FederatedStepPropertiesProvider.tsx).
+        // Not a dedicated bpmn-js module, but a didi inline binding for the
+        // static installation list (see FederatedStepPropertiesProvider.tsx).
         { federationInstallations: ["value", federationInstallations] },
       ],
       moddleExtensions: { camunda: camundaModdleDescriptor },
@@ -91,9 +91,9 @@ export function BpmnDesigner({
     return () => {
       modeler.destroy();
     };
-    // Nur beim ersten Mounten - ein späteres Ändern von `initialXml` läuft
-    // über `importXml()` am `onReady`-Handle (Toolbar "Datei importieren"),
-    // kein Neu-Mounten der gesamten Canvas nötig/gewollt.
+    // Only on the first mount - a later change to `initialXml` goes
+    // through `importXml()` on the `onReady` handle (toolbar "Import file"),
+    // no re-mounting of the entire canvas is needed/wanted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

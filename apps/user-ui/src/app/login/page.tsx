@@ -6,11 +6,11 @@ import { useI18n } from "@/i18n";
 import { ApiError, useAuth } from "@/lib/auth-context";
 import { getSsoConfig, oidcAuthorize } from "@/lib/api";
 
-// SSO/automatischer Login (Post-Roadmap-Feature): der Speicherschlüssel für
-// den `state`-Wert, den `login/callback/page.tsx` gegen den von Keycloak
-// zurückgegebenen `state` prüft (CSRF-/Replay-Schutz) - `sessionStorage`
-// statt `localStorage`, da der Wert nur für den Dauer des Redirect-Umwegs
-// gebraucht wird, nicht über Tabs/Neustarts hinweg.
+// SSO/automatic login (post-roadmap feature): the storage key for
+// the `state` value that `login/callback/page.tsx` checks against the
+// `state` returned by Keycloak (CSRF/replay protection) - `sessionStorage`
+// instead of `localStorage`, since the value is only needed for the
+// duration of the redirect round trip, not across tabs/restarts.
 const SSO_STATE_KEY = "dms.sso.state";
 
 export default function LoginPage() {
@@ -29,14 +29,14 @@ export default function LoginPage() {
     }
   }, [isLoading, user, router]);
 
-  // SSO/automatischer Login (Post-Roadmap-Feature): vor dem Formular ein
-  // stiller Versuch, ob eine installationsweite SSO-Konfiguration aktiv ist -
-  // besitzt der Rechner ein gültiges Kerberos-Ticket, meldet Keycloaks
-  // SPNEGO-Mechanismus automatisch an, ohne dass dieses Formular je sichtbar
-  // wird; andernfalls zeigt Keycloak selbst sein Formular (kein Bruch). Kein
-  // erneuter Versuch nach einem bereits fehlgeschlagenen Anlauf
-  // (`?ssoError=1`, von `login/callback/page.tsx` gesetzt) - sonst
-  // entstünde eine Endlosschleife aus Redirects.
+  // SSO/automatic login (post-roadmap feature): before the form, a
+  // silent attempt to check whether an installation-wide SSO configuration is
+  // active - if the machine holds a valid Kerberos ticket, Keycloak's
+  // SPNEGO mechanism logs in automatically without this form ever becoming
+  // visible; otherwise Keycloak shows its own form (no breakage). No
+  // retry after an already-failed attempt
+  // (`?ssoError=1`, set by `login/callback/page.tsx`) - otherwise
+  // an infinite loop of redirects would result.
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("ssoError")) {
       setError(t("login.ssoError"));
@@ -61,8 +61,8 @@ export default function LoginPage() {
         window.location.href = authorizationUrl;
       })
       .catch(() => {
-        // SSO-Konfiguration nicht abrufbar - bleibt beim Passwort-Formular,
-        // kein Fehler an dieser Stelle sichtbar (identisches Prinzip wie
+        // SSO configuration not retrievable - stays on the password form,
+        // no error visible at this point (same principle as
         // handleDownload/handleOfficeLaunch in PreviewPane.tsx).
       });
     return () => {

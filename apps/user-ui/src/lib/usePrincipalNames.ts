@@ -3,14 +3,13 @@
 import { useEffect, useState } from "react";
 import { lookupUserById } from "@/lib/api";
 
-// Rückwärts-Identitätsauflösung für Anzeigezwecke (Post-Roadmap Phase 19
-// Session 4, ADR 0069) - löst eine Liste roher principal_id-UUIDs
-// (Delegationen, Teamspace-Mitglieder) in Nutzernamen auf, mit einem
-// einfachen In-Memory-Cache über den Hook-Aufruf hinweg (kein erneuter
-// Request für bereits aufgelöste IDs). Fällt bei einem Fehlschlag (z. B.
-// `users.lookup` der "everyone"-Gruppe entzogen, oder ein zwischenzeitlich
-// gelöschtes Konto) auf die rohe UUID zurück, statt die Anzeige zu
-// blockieren.
+// Reverse identity resolution for display purposes (post-roadmap Phase 19
+// Session 4, ADR 0069) - resolves a list of raw principal_id UUIDs
+// (delegations, teamspace members) into usernames, with a simple in-memory
+// cache across the hook's calls (no repeat request for already-resolved
+// IDs). Falls back to the raw UUID on failure (e.g. `users.lookup` revoked
+// from the "everyone" group, or an account deleted in the meantime) instead
+// of blocking the display.
 export function usePrincipalNames(token: string, principalIds: string[]): Record<string, string> {
   const [names, setNames] = useState<Record<string, string>>({});
   const key = Array.from(new Set(principalIds)).sort().join(",");

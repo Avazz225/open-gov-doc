@@ -19,14 +19,14 @@ function statusBadgeClass(status: string): string {
   return "badge badge-pending";
 }
 
-// Generische Vier-Augen-Freigabe-Inbox (4.3, 8, P14-S2) - konsumiert
-// `permission-service`s `GET /approval-requests` ungefiltert nach
-// `action_type` (bislang gab es nur eng gefilterte Einzelkonsumenten in
-// admin-ui/user-ui, siehe docs/services/reviewer-ui.md "Verhältnis zu
-// bestehenden Konsumenten"). `payload` bleibt bewusst rohes JSON in der
-// Detailansicht - diese App kennt die Fachbedeutung der einzelnen
-// `action_type`s nicht (und soll sie auch nicht kennen müssen, sonst müsste
-// sie bei jedem neuen Aktionstyp im System mit angepasst werden).
+// Generic four-eyes approval inbox (4.3, 8, P14-S2) - consumes
+// `permission-service`'s `GET /approval-requests` unfiltered by
+// `action_type` (previously there were only narrowly filtered individual
+// consumers in admin-ui/user-ui, see docs/services/reviewer-ui.md
+// "Relationship to existing consumers"). `payload` deliberately stays raw
+// JSON in the detail view - this app does not know the domain meaning of the
+// individual `action_type`s (and should not need to, otherwise it would have
+// to be adapted for every new action type added to the system).
 export function ApprovalList() {
   const { accessToken, user } = useAuth();
   const { t } = useI18n();
@@ -37,9 +37,9 @@ export function ApprovalList() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  // Post-Roadmap Phase 22 Session 4: `window.prompt` durch ein Inline-
-  // Formular ersetzt (kein natives Browser-Popup, konsistent zum übrigen
-  // Formularstil dieser App, testbar mit Testing Library).
+  // Post-roadmap Phase 22 Session 4: replaced `window.prompt` with an inline
+  // form (no native browser popup, consistent with the rest of this app's
+  // form style, testable with Testing Library).
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 

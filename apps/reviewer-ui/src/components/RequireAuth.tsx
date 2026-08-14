@@ -6,12 +6,12 @@ import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { Shell } from "./Shell";
 
-// Statischer Export hat keinen Server, der Redirects vor dem Rendern
-// ausführen könnte (kein Middleware-Äquivalent) - der Schutz greift daher
-// clientseitig nach dem ersten Render, sobald der Auth-Zustand geladen ist.
-// Weder Aufgaben-Abschluss noch Freigabe-Entscheidungen sind backend-seitig
-// capability-gegated (siehe docs/services/reviewer-ui.md "Autorisierung") -
-// diese Komponente prüft nur, ob überhaupt eine gültige Sitzung vorliegt.
+// A static export has no server that could perform redirects before
+// rendering (no middleware equivalent) - the guard therefore kicks in
+// client-side after the first render, once the auth state has loaded.
+// Neither task completion nor approval decisions are capability-gated on the
+// backend (see docs/services/reviewer-ui.md "Authorization") - this
+// component only checks whether a valid session exists at all.
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();

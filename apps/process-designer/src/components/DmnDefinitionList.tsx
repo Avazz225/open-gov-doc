@@ -14,10 +14,10 @@ import { useAuth } from "@/lib/auth-context";
 
 const CAN_MANAGE_CAPABILITY = "admin.object_config";
 
-// Übersichtsliste der DMN-1.3-Entscheidungstabellen (7.1, P14-S4) - exaktes
-// Analogon zu `ProcessDefinitionList.tsx` (gleiches Versionierungsmuster:
-// `name` ist der Familienschlüssel, nur die jeweils neueste Version wird
-// standardmäßig gezeigt).
+// Overview list of DMN 1.3 decision tables (7.1, P14-S4) - an exact
+// analogue to `ProcessDefinitionList.tsx` (same versioning pattern:
+// `name` is the family key, only the respective latest version is
+// shown by default).
 export function DmnDefinitionList() {
   const { accessToken, permissions } = useAuth();
   const { t } = useI18n();
@@ -69,8 +69,8 @@ export function DmnDefinitionList() {
     try {
       setHistory(await listDmnDefinitionVersions(accessToken, name));
     } catch {
-      // Historie bleibt beim vorherigen Stand, kein Blocker für die
-      // eigentliche Löschbestätigung oben.
+      // History stays at its previous state, not a blocker for the
+      // actual delete confirmation above.
     }
   }
 

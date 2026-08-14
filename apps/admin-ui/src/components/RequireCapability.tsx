@@ -5,13 +5,12 @@ import { useEffect, type ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 
-// Tiefen-Verteidigung für domänengetrennte Admin-Rollen (4.6, P6-S5):
-// `AdminSidebar` blendet Einträge ohne die nötige Capability zwar bereits
-// aus, aber ein direkt aufgerufener Link muss serverunabhängig (statischer
-// Export, kein Middleware-Äquivalent, siehe RequireAuth) trotzdem geschützt
-// sein. Setzt voraus, dass die Seite bereits innerhalb von `<RequireAuth>`
-// liegt - `permissions` ist erst nach erfolgreichem Login/Session-Restore
-// aussagekräftig.
+// Defense in depth for domain-separated admin roles (4.6, P6-S5):
+// `AdminSidebar` already hides entries without the required capability, but
+// a directly navigated link still needs to be protected independently of
+// the server (static export, no middleware equivalent, see RequireAuth).
+// Assumes the page is already nested inside `<RequireAuth>` - `permissions`
+// is only meaningful after a successful login/session restore.
 export function RequireCapability({
   capability,
   children,

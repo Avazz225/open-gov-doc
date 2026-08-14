@@ -6,13 +6,13 @@ import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 
-// Statischer Export hat keinen Server, der Redirects vor dem Rendern
-// ausführen könnte (kein Middleware-Äquivalent) - der Schutz greift daher
-// clientseitig nach dem ersten Render, sobald der Auth-Zustand geladen ist.
-// Lesen/Öffnen von Prozessdefinitionen bleibt für jeden authentifizierten
-// Principal offen (workflow-service `GET /process-definitions*` ist
-// ungegated) - nur Speichern/Löschen sind zusätzlich hinter
-// `RequireCapability` versteckt, siehe dort.
+// A static export has no server that could perform redirects before
+// rendering (no middleware equivalent) - protection therefore kicks in
+// client-side after the first render, once the auth state has loaded.
+// Reading/opening process definitions remains open to every authenticated
+// principal (workflow-service `GET /process-definitions*` is
+// ungated) - only saving/deleting are additionally hidden behind
+// `RequireCapability`, see there.
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();

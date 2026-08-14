@@ -23,14 +23,14 @@ interface NodeChildren {
   documents: DocumentSummary[];
 }
 
-// Baumansicht (2.2a/8, seit P5b-S4) - Alternative zur Listenansicht in
-// ExplorerPane, baut die Ordnerhierarchie strukturell ab der Wurzel auf,
-// Kinder werden erst beim Aufklappen nachgeladen (dasselbe Prinzip wie
-// AdminSidebars gruppierte Navigation, hier aber rekursiv über beliebig
-// viele Ebenen). Klick auf einen Ordnernamen navigiert dorthin - siehe
-// ADR 0015 für die Begründung, warum der vollständige Breadcrumb-Pfad dabei
-// clientseitig aus den bereits aufgeklappten Vorfahren rekonstruiert wird,
-// statt einen neuen Backend-Endpunkt für den vollständigen Pfad zu bauen.
+// Tree view (2.2a/8, since P5b-S4) - an alternative to the list view in
+// ExplorerPane, builds up the folder hierarchy structurally starting from
+// the root, children are only loaded on expand (the same principle as
+// AdminSidebar's grouped navigation, but recursive here across arbitrarily
+// many levels). Clicking a folder name navigates there - see
+// ADR 0015 for the rationale behind reconstructing the full breadcrumb path
+// client-side from the already-expanded ancestors, instead of building a
+// new backend endpoint for the full path.
 export function FolderTree({
   token,
   rootLabel,
@@ -53,12 +53,12 @@ export function FolderTree({
   onOpenDocument: (doc: DocumentSummary) => void;
   onNavigateToFolder: (path: Folder[]) => void;
   onMoveFolder: (folderId: string, newParentId: string) => Promise<boolean>;
-  // Rechtsklick-Kontextmenü (P23-S8) - baut auf der bereits in ExplorerPane
-  // bestehenden Logik auf (Löschen/Favorisieren/Freigabelink), die dortige
-  // `ContextMenu`-Instanz + ihr `contextMenu`-State werden wiederverwendet
-  // (Klick-Koordinaten sind bildschirmrelativ, unabhängig davon, welche
-  // verschachtelte Komponente den Aufruf auslöst) - kein zweites Menü, keine
-  // Logik-Duplikation für Löschgenehmigung/Favoritenstatus/Freigabelink hier.
+  // Right-click context menu (P23-S8) - builds on the logic already
+  // existing in ExplorerPane (delete/favorite/share link), the
+  // `ContextMenu` instance there + its `contextMenu` state are reused
+  // (click coordinates are screen-relative, regardless of which nested
+  // component triggers the call) - no second menu, no logic duplication
+  // for delete approval/favorite status/share link here.
   onFolderContextMenu: (event: ReactMouseEvent, folder: Folder) => void;
   onDocumentContextMenu: (event: ReactMouseEvent, doc: DocumentSummary) => void;
 }) {
@@ -67,11 +67,11 @@ export function FolderTree({
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["root"]));
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  // Ordner-Verschieben per Drag & Drop (8, P23-S4). `draggedFolderParentId`
-  // wird beim Drag-Start mitgemerkt (nicht aus dem Baum ableitbar, da ein
-  // Knoten hier keine Rückreferenz auf seinen Elternordner trägt) - nur so
-  // lässt sich nach einem erfolgreichen Move gezielt der ALTE Elternordner
-  // im Cache invalidieren, ohne den gesamten Baum neu zu laden.
+  // Folder move via drag & drop (8, P23-S4). `draggedFolderParentId`
+  // is recorded at drag start (not derivable from the tree, since a node
+  // here carries no back-reference to its parent folder) - this is the only
+  // way to selectively invalidate the OLD parent folder in the cache after a
+  // successful move, without reloading the entire tree.
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [draggedFolderParentId, setDraggedFolderParentId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
@@ -100,10 +100,10 @@ export function FolderTree({
     await fetchChildren(folderId);
   }
 
-  // Nach einem erfolgreichen Move: alter UND neuer Elternordner zeigen sonst
-  // weiterhin ihren veralteten Kinderstand (Cache wurde beim ersten Aufklappen
-  // gefüllt und danach nie wieder angefasst) - nur betroffene, bereits
-  // geladene Knoten neu laden, kein kompletter Baum-Reset.
+  // After a successful move: otherwise both the old AND new parent folder
+  // would keep showing their stale children (the cache was filled on first
+  // expand and never touched again afterward) - only reload the affected,
+  // already-loaded nodes, no complete tree reset.
   async function refreshIfLoaded(folderId: string) {
     if (childrenByParent[folderId]) await fetchChildren(folderId);
   }
@@ -119,14 +119,14 @@ export function FolderTree({
     setDragOverFolderId(null);
   }
 
-  // `targetPath` ist die Vorfahrenkette des Ziels INKLUSIVE des Ziels selbst
-  // (siehe Aufrufstelle unten) - enthält sie die gezogene Ordner-ID, wäre das
-  // Ziel entweder der Ordner selbst oder einer seiner (im Baum aktuell
-  // sichtbaren) Nachfahren. Der Backend-Endpunkt selbst prüft nur "nicht sein
-  // eigener Elternordner" (siehe folder-service `update_folder`), nicht
-  // tiefere Zyklen - diese clientseitige Prüfung ist eine zusätzliche
-  // Sicherung für den im Baum sichtbaren Teil, kein Ersatz für eine
-  // vollständige Server-seitige Zyklusprüfung (siehe "Offene Punkte").
+  // `targetPath` is the ancestor chain of the target INCLUDING the target
+  // itself (see call site below) - if it contains the dragged folder's ID,
+  // the target would either be the folder itself or one of its (currently
+  // visible in the tree) descendants. The backend endpoint itself only
+  // checks "not its own parent folder" (see folder-service `update_folder`),
+  // not deeper cycles - this client-side check is an additional safeguard
+  // for the part visible in the tree, not a replacement for a complete
+  // server-side cycle check (see "Open Points").
   function isValidDropTarget(targetFolderId: string, targetPath: Folder[]): boolean {
     if (!draggedFolderId) return false;
     return !targetPath.some((f) => f.id === draggedFolderId);
@@ -155,8 +155,8 @@ export function FolderTree({
 
   useEffect(() => {
     if (token) ensureLoaded("root");
-    // Nur beim Wechsel des Tokens neu laden - `ensureLoaded` selbst hängt von
-    // Komponentenzustand ab, der sich bei jedem Aufruf ändert.
+    // Only reload when the token changes - `ensureLoaded` itself depends on
+    // component state that changes on every call.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 

@@ -126,7 +126,7 @@ describe("RetentionSettings", () => {
     renderRetentionSettings();
 
     expect(await screen.findByText("Document Service nicht erreichbar.")).toBeInTheDocument();
-    // Ordner-Sektion bleibt unabhängig funktionsfähig.
+    // Folder section remains independently functional.
     expect(await within(foldersCard()).findByDisplayValue("30")).toBeInTheDocument();
   });
 

@@ -13,9 +13,9 @@ function formatDimension(
   return `${value.current ?? "-"} / ${limit}`;
 }
 
-// Lizenzstatus-Übersicht (Konzept 9.3, P9-S2): "jederzeit einsehbar, inkl.
-// Restlaufzeit und Auslastung je Dimension" + Upload-Formular, da
-// `POST /license` bislang nur per curl bedienbar war.
+// License status overview (concept 9.3, P9-S2): "viewable at any time,
+// including remaining term and usage per dimension" + upload form, since
+// `POST /license` was previously only operable via curl.
 export function LicenseStatusView() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

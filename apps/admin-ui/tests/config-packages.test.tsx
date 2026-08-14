@@ -148,9 +148,9 @@ describe("ConfigPackages", () => {
   });
 
   it("applies the package and shows the per-category result", async () => {
-    // Seit P17-S3 (14.2 "Konfigurationsimport") liefert `importConfig` das
-    // gegatete `ConfigImportActionResult` - ohne aktivierte
-    // Genehmigungspflicht (Default) bleibt `result` sofort gesetzt.
+    // Since P17-S3 (14.2 "Configuration Import"), `importConfig` returns the
+    // gated `ConfigImportActionResult` - without approval requirement
+    // enabled (the default), `result` is set immediately.
     importConfigMock.mockResolvedValue({
       status: "applied",
       result: {

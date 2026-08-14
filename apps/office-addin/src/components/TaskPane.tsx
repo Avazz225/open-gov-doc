@@ -38,12 +38,12 @@ interface PendingTemplate {
   suggestedTitle: string;
 }
 
-// Orchestriert den in 3.3a verlangten Funktionsumfang - Öffnen/Speichern,
-// inline Metadaten, Workflow-Start/-Fortsetzung, Vorlagenbibliothek. Der
-// eigentliche "welches DMS-Dokument ist das" - Zustand lebt NICHT hier,
-// sondern in der Word-Datei selbst (`Office.context.document.settings`,
-// siehe lib/office.ts) - nach Schließen/erneutem Öffnen der Datei (mit dem
-// Add-in aktiviert) ist die Verknüpfung automatisch wieder da.
+// Orchestrates the feature scope required by 3.3a - open/save, inline
+// metadata, workflow start/continuation, template library. The actual
+// "which DMS document is this" state does NOT live here, but in the Word
+// file itself (`Office.context.document.settings`, see lib/office.ts) -
+// after closing/reopening the file (with the add-in activated), the link
+// is automatically restored.
 export function TaskPane() {
   const { t } = useI18n();
   const { accessToken, user } = useAuth();
@@ -209,8 +209,8 @@ export function TaskPane() {
       try {
         await releaseLock(token, linked.documentId, user?.username ?? "");
       } catch {
-        /* Sperre kann bereits abgelaufen/anderweitig freigegeben sein -
-           das Lösen der Verknüpfung soll daran nicht scheitern. */
+        /* The lock may already have expired/been released otherwise -
+           unlinking should not fail because of that. */
       }
     }
     await clearLinkedDocument();

@@ -34,16 +34,16 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-// Cross-UI-Theming (8, P4-S6): Hell/Dunkel/Hoher-Kontrast/Automatisch,
-// geräteübergreifend über das Nutzerprofil (ADR 0009). `localStorage` bleibt
-// als sofort verfügbarer Cache bestehen, damit ein späterer Login nicht auf
-// die erste Server-Antwort warten muss.
+// Cross-UI theming (8, P4-S6): light/dark/high-contrast/automatic,
+// cross-device via the user profile (ADR 0009). `localStorage` remains as an
+// immediately available cache so a later login does not have to wait for
+// the first server response.
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth();
   const [theme, setThemeState] = useState<ThemeName>(() => loadCachedTheme());
 
-  // `useLayoutEffect` statt `useEffect`, damit das Attribut vor dem ersten
-  // sichtbaren Bildaufbau gesetzt ist (kein Flash des falschen Themes).
+  // `useLayoutEffect` instead of `useEffect` so the attribute is set before
+  // the first visible paint (no flash of the wrong theme).
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = resolveTheme(theme);
   }, [theme]);
@@ -66,8 +66,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem(STORAGE_KEY, serverTheme);
       })
       .catch(() => {
-        // Bewusst stillschweigend: der lokal gecachte Wert bleibt gültig,
-        // falls die Server-Präferenz (noch) nicht lesbar ist.
+        // Deliberately silent: the locally cached value remains valid if
+        // the server preference is not (yet) readable.
       });
   }, [accessToken]);
 
@@ -77,8 +77,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       window.localStorage.setItem(STORAGE_KEY, next);
       if (accessToken) {
         updateThemePreference(accessToken, next).catch(() => {
-          // Auswahl gilt sofort lokal weiter, auch wenn die Server-
-          // Persistenz fehlschlägt - kein Retry in diesem Grundgerüst.
+          // The selection continues to apply locally right away, even if
+          // server persistence fails - no retry in this scaffolding.
         });
       }
     },

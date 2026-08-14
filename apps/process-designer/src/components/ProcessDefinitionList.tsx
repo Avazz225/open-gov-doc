@@ -14,11 +14,11 @@ import { useAuth } from "@/lib/auth-context";
 
 const CAN_MANAGE_CAPABILITY = "admin.object_config";
 
-// Übersichtsliste der Prozessdefinitionen (P6-S8, Konzept 7.1). Zeigt je
-// Prozessfamilie (`name`) nur die neueste Version (`listProcessDefinitions`,
-// serverseitig per `DISTINCT ON` gefiltert, siehe ADR 0027) - eine
-// aufklappbare Versionshistorie je Zeile lädt bei Bedarf die vollständige
-// Liste dieser Familie nach.
+// Overview list of process definitions (P6-S8, concept 7.1). Shows only
+// the latest version per process family (`name`) (`listProcessDefinitions`,
+// filtered server-side via `DISTINCT ON`, see ADR 0027) - an
+// expandable version history per row loads the full list of that
+// family on demand.
 export function ProcessDefinitionList() {
   const { accessToken, permissions } = useAuth();
   const { t } = useI18n();
@@ -70,8 +70,8 @@ export function ProcessDefinitionList() {
     try {
       setHistory(await listProcessDefinitionVersions(accessToken, name));
     } catch {
-      // Historie bleibt beim vorherigen Stand, kein Blocker für die
-      // eigentliche Löschbestätigung oben.
+      // History stays at its previous state, not a blocker for the
+      // actual delete confirmation above.
     }
   }
 

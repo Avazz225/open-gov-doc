@@ -18,19 +18,19 @@ function attributeInputType(attrType: string | undefined): string {
   return "text";
 }
 
-// Seit P5b-S4 kann beim Hochladen erstmals eine Dokumentklasse gewählt
-// werden - vorher kannte der Upload-Dialog gar keine Objekttypen, nur
-// Datei/Titel. Die Attributfelder der gewählten Klasse werden über deren
-// "upload"-Formular-Layout angeordnet (2.2b), analog zu MetadataPanel
-// (Anzeige) und SearchPane (Suche) - dieselbe Objekttyp-Hierarchie-Prüfung
-// (2.2a) wie bisher übernimmt weiterhin der Document Service serverseitig,
-// diese UI dupliziert sie nicht.
+// Since P5b-S4, a document class can be selected for the first time during
+// upload - previously the upload dialog didn't know about object types at
+// all, only file/title. The attribute fields of the selected class are
+// arranged via that class's "upload" form layout (2.2b), analogous to
+// MetadataPanel (display) and SearchPane (search) - the same object-type
+// hierarchy check (2.2a) as before is still handled server-side by the
+// Document Service; this UI does not duplicate it.
 //
-// Seit P5d-S2 ein echter Modal-Dialog (Nutzer-Feedback) statt eines inline in
-// `ExplorerPane` eingeblendeten Formulars - nimmt zusätzlich Drag-and-Drop
-// von Dateien auf die gesamte Dialogfläche entgegen, nicht nur auf das
-// `<input type="file">`. Wiederverwendet die bereits vorhandenen, aber
-// bislang ungenutzten `.modal-backdrop`/`.modal-content`-Klassen.
+// Since P5d-S2, a real modal dialog (user feedback) instead of a form shown
+// inline in `ExplorerPane` - it additionally accepts drag-and-drop of files
+// onto the entire dialog area, not just onto the `<input type="file">`.
+// Reuses the already-existing but previously unused `.modal-backdrop`/
+// `.modal-content` classes.
 export function UploadForm({
   token,
   folderId,

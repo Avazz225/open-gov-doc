@@ -8,10 +8,9 @@ import { useAuth } from "@/lib/auth-context";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
-// Schlanke Konsole für Transfer-Vorgänge (Konzept 8) - nur zwei Bereiche,
-// daher eine einfache Tab-Leiste statt einer vollen Seitennavigation wie
-// AdminShell (admin-ui). Gleiches Kopfzeilen-Muster (Titel/Theme/Logout) wie
-// die übrigen Apps.
+// Lightweight console for transfer operations (concept 8) - only two areas,
+// so a simple tab bar instead of full page navigation like AdminShell
+// (admin-ui). Same header pattern (title/theme/logout) as the other apps.
 export function Shell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();

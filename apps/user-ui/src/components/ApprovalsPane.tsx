@@ -14,12 +14,12 @@ function objectId(request: ApprovalRequest): string {
   return String(request.payload.document_id ?? request.payload.folder_id ?? "?");
 }
 
-// Minimale Genehmigungs-Inbox für den Löschantrag-Workflow (5.2, seit
-// P7-S1c) - bewusst nur für `document.delete`/`folder.delete` gefiltert,
-// keine generische Alle-Aktionstypen-Inbox (das wäre der später geplante
-// "Administrative Papierkorb", siehe PROGRESS.md). Lebt in der User-UI statt
-// der Admin-UI, da sich hier reguläre Nutzer gegenseitig genehmigen, kein
-// administrativer Vorgang.
+// Minimal approval inbox for the delete-request workflow (5.2, since
+// P7-S1c) - deliberately filtered to only `document.delete`/`folder.delete`,
+// not a generic all-action-types inbox (that would be the later-planned
+// "administrative trash", see PROGRESS.md). Lives in the user UI instead
+// of the admin UI, since here regular users approve each other's requests,
+// not an administrative process.
 export function ApprovalsPane({
   token,
   currentUsername,

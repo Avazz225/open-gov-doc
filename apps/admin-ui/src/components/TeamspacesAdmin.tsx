@@ -5,12 +5,12 @@ import { useI18n } from "@/i18n";
 import { ApiError, listAllTeamspaces, type TeamspaceAdmin } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Teamspaces-Admin-Übersicht (Post-Roadmap Phase 22 Session 5) - reine
-// Statustabelle gegen den neuen `teamspace-service`-Endpunkt
-// (`GET /admin/teamspaces`, installationsweit statt nach Mitgliedschaft
-// gefiltert wie `GET /teamspaces`). Anlegen/Löschen/Mitgliederverwaltung
-// bleibt bewusst Selbstverwaltung (2.5) - keine administrativen Aktionen
-// hier, nur Sichtbarkeit.
+// Teamspaces admin overview (Post-Roadmap Phase 22 Session 5) - a plain
+// status table against the new `teamspace-service` endpoint
+// (`GET /admin/teamspaces`, installation-wide instead of filtered by
+// membership like `GET /teamspaces`). Creation/deletion/member management
+// deliberately remains self-service (2.5) - no administrative actions here,
+// visibility only.
 export function TeamspacesAdmin() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

@@ -20,11 +20,11 @@ interface InstallationContextValue {
 
 const InstallationContext = createContext<InstallationContextValue | null>(null);
 
-// Multi-Installation-Grundlage der Admin-UI (P4-S5, Konzept 3a/8): eine
-// Liste konfigurierter Installationen (je eigener Gateway-Endpunkt) plus die
-// aktuell "aktive" - `AuthProvider` hält davon abhängig eine eigene Sitzung
-// je Installation (siehe dort), kein Single-Sign-on über Installationsgrenzen
-// hinweg (bewusste Isolation, Konzept 3a).
+// Multi-installation foundation of the admin UI (P4-S5, Concept 3a/8): a
+// list of configured installations (each with its own gateway endpoint) plus the
+// currently "active" one - `AuthProvider` maintains its own session
+// per installation depending on this (see there), no single sign-on across
+// installation boundaries (deliberate isolation, Concept 3a).
 export function InstallationProvider({ children }: { children: ReactNode }) {
   const [installations, setInstallations] = useState<Installation[]>(() => loadInstallations());
   const [activeInstallationId, setActiveInstallationId] = useState<string>(() => {
@@ -39,15 +39,15 @@ export function InstallationProvider({ children }: { children: ReactNode }) {
     installations.find((installation) => installation.id === activeInstallationId) ??
     installations[0];
 
-  // Synchron im Render statt in einem `useEffect` gesetzt: `AuthProvider` ist
-  // ein Kind dieser Komponente und braucht die aktuelle Gateway-Adresse
-  // schon in seinem eigenen ersten Render-Effekt (Sitzungswiederherstellung
-  // für die aktive Installation). Ein `useEffect` hier würde erst NACH dem
-  // Kind-Effekt feuern (React führt Effekte von unten nach oben aus) und die
-  // erste Anfrage nach einem Installationswechsel noch gegen die alte
-  // Adresse schicken. Reine Zuweisung einer externen Modulvariablen (kein
-  // DOM-/Subscription-Seiteneffekt), bei wiederholter Ausführung mit
-  // demselben Wert idempotent - unter React Strict Mode unkritisch.
+  // Set synchronously during render instead of in a `useEffect`: `AuthProvider`
+  // is a child of this component and needs the current gateway address
+  // already in its own first render effect (session restoration
+  // for the active installation). A `useEffect` here would only fire AFTER the
+  // child effect (React runs effects bottom-up) and would send the
+  // first request after an installation switch against the old
+  // address. Plain assignment of an external module variable (no
+  // DOM/subscription side effect), idempotent when run repeatedly with
+  // the same value - uncritical under React Strict Mode.
   setGatewayBaseUrl(activeInstallation.gatewayBaseUrl);
 
   const switchInstallation = useCallback((id: string) => {
@@ -55,8 +55,8 @@ export function InstallationProvider({ children }: { children: ReactNode }) {
     saveActiveInstallationId(id);
   }, []);
 
-  // Falls die aktive Installation entfernt wurde, auf die erste verbleibende
-  // wechseln, statt in einem inkonsistenten Zustand zu bleiben.
+  // If the active installation was removed, switch to the first remaining
+  // one instead of staying in an inconsistent state.
   useEffect(() => {
     if (!installations.some((installation) => installation.id === activeInstallationId)) {
       switchInstallation(installations[0].id);
@@ -76,7 +76,7 @@ export function InstallationProvider({ children }: { children: ReactNode }) {
 
   const removeInstallation = useCallback((id: string) => {
     setInstallations((prev) => {
-      if (prev.length <= 1) return prev; // mindestens eine Installation bleibt immer erhalten
+      if (prev.length <= 1) return prev; // at least one installation is always kept
       const next = prev.filter((installation) => installation.id !== id);
       saveInstallations(next);
       return next;

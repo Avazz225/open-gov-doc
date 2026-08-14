@@ -18,17 +18,17 @@ function toDateInputValue(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
-// Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
-// P7-S1b) - inhaltlich identisch zu `RetentionPanel.tsx` (Dokumente, P7-S1),
-// aber als Modal statt als Anbau unter einem dauerhaften Metadaten-Panel, da
-// es für Ordner (anders als für das aktuell offene Dokument) noch kein
-// solches Panel gibt. Erreichbar über ein neues Icon je Ordnerzeile in
-// `ExplorerPane.tsx`, wiederverwendet die bereits vorhandenen
-// `.modal-backdrop`/`.modal-content`-Klassen (siehe `UploadForm.tsx`).
+// Retention/legal hold/forced deletion for folders (5.2/5.2a, since
+// P7-S1b) - functionally identical to `RetentionPanel.tsx` (documents,
+// P7-S1), but as a modal instead of an addition under a persistent metadata
+// panel, since no such panel exists yet for folders (unlike for the
+// currently open document). Reachable via a new icon per folder row in
+// `ExplorerPane.tsx`, reuses the already-existing `.modal-backdrop`/
+// `.modal-content` classes (see `UploadForm.tsx`).
 export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onClose: () => void }) {
   const { accessToken, user, permissions } = useAuth();
   const { t } = useI18n();
-  // RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075) - siehe RetentionPanel.tsx.
+  // RBAC (post-roadmap phase 19 session 10, ADR 0075) - see RetentionPanel.tsx.
   const canManageLegalHold = permissions.includes("admin.legal_hold");
   const [retentionUntil, setRetentionUntil] = useState(toDateInputValue(folder.retention_until));
   const [fullDeletion, setFullDeletion] = useState(folder.full_deletion);

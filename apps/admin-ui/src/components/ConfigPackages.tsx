@@ -16,14 +16,14 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Konfigurationspakete (14.1, P17-S1): ein Paket ist ein `ConfigDocument`
-// (7.3-Format, seit P12-S3 bestehend) mit optionalem, rein beschreibendem
-// `manifest`. Diese Seite ist die erste Admin-UI-Anbindung von config-service
-// überhaupt - vorher gab es hierfür KEINE Oberfläche, nur der (seither in
-// `POST /config/fleet-import` umbenannte) Fleet-Agent-Zugriffsweg konnte
-// importieren, siehe ADR zu P17-S1. Die Anwendung selbst nutzt ausschließlich
-// den bereits bestehenden, abgesicherten Konfigurationsimport - kein neuer
-// Anwendungsmechanismus, nur eine Bedienoberfläche dafür.
+// Configuration packages (14.1, P17-S1): a package is a `ConfigDocument`
+// (7.3 format, existing since P12-S3) with an optional, purely descriptive
+// `manifest`. This page is the first admin-UI integration of config-service
+// at all - previously there was NO UI for this, only the fleet-agent access
+// path (since renamed to `POST /config/fleet-import`) could import, see the
+// ADR for P17-S1. The application itself exclusively uses the already
+// existing, secured configuration import - no new application mechanism,
+// just a UI for it.
 function presentCategories(doc: ConfigDocument): ConfigCategory[] {
   return CONFIG_CATEGORIES.filter((category) => {
     const value = doc[category];
@@ -106,8 +106,8 @@ export function ConfigPackages() {
     }
     setFileName(file.name);
     try {
-      // FileReader statt `file.text()` - breiter unterstützt, u. a. in
-      // jsdom (Testumgebung) tatsächlich implementiert.
+      // FileReader instead of `file.text()` - more widely supported, and
+      // actually implemented in jsdom (test environment), among others.
       const text = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result ?? ""));
@@ -132,12 +132,13 @@ export function ConfigPackages() {
     setCompareError(null);
     setCompareResult(null);
     try {
-      // Nur die im Paket tatsächlich vorhandenen Kategorien vergleichen -
-      // ohne Einschränkung würde jede vom Paket nicht berührte Kategorie
-      // (leer im Dokument) gegen den vollständigen Live-Export verglichen
-      // und als "nur im aktuellen System" gelistet - bei vielen bereits
-      // angesammelten Objekten (Rollen, Workflows, ...) unbrauchbar viel
-      // Rauschen für ein Paket, das nur eine einzelne Kategorie mitbringt.
+      // Only compare the categories actually present in the package -
+      // without this restriction, every category not touched by the
+      // package (empty in the document) would be compared against the full
+      // live export and listed as "only in current system" - for many
+      // already-accumulated objects (roles, workflows, ...) that's an
+      // unusable amount of noise for a package that only brings a single
+      // category.
       setCompareResult(await compareConfig(accessToken, configDoc, presentCategories(configDoc)));
     } catch (err) {
       setCompareError(err instanceof ApiError ? err.message : t("common.loadError"));

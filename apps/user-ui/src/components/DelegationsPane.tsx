@@ -17,7 +17,7 @@ function toDateTimeInputValue(daysFromNow: number): string {
   const date = new Date();
   date.setDate(date.getDate() + daysFromNow);
   date.setSeconds(0, 0);
-  // <input type="datetime-local"> erwartet lokale Zeit ohne Zeitzonen-Suffix.
+  // <input type="datetime-local"> expects local time without a timezone suffix.
   return date.toISOString().slice(0, 16);
 }
 
@@ -27,12 +27,12 @@ function isActive(delegation: Delegation): boolean {
   return new Date(delegation.starts_at).getTime() <= now && now <= new Date(delegation.ends_at).getTime();
 }
 
-// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - zwei Abschnitte: links
-// die selbst hinterlegten Stellvertretungen (ich bin die vertretene Person,
-// "delegator") inkl. Anlegen/Widerrufen; rechts eine reine Leseliste, für
-// wen ich gerade aktiv als Stellvertretung eingetragen bin ("deputy") - das
-// eigentliche Handeln "im Auftrag von" passiert nicht hier, sondern beim
-// Aufgabenabschluss in der Reviewer-UI (siehe dortiges "Im Auftrag von"-Feld).
+// Delegation while absent (4.4a, P14-S11) - two sections: on the left
+// the delegations I've set up myself (I am the represented person,
+// "delegator") including create/revoke; on the right a read-only list of
+// whom I am currently registered as a deputy for ("deputy") - the
+// actual acting "on behalf of" doesn't happen here, but during task
+// completion in the reviewer UI (see the "on behalf of" field there).
 export function DelegationsPane({
   token,
   currentPrincipalId,
@@ -73,8 +73,8 @@ export function DelegationsPane({
     reload();
   }, [reload]);
 
-  // Rückwärts-Identitätsauflösung (P19-S4, ADR 0069) - zeigt Namen statt
-  // roher principal_id-UUIDs in beiden Listen unten.
+  // Reverse identity resolution (P19-S4, ADR 0069) - shows names instead
+  // of raw principal_id UUIDs in both lists below.
   const principalNames = usePrincipalNames(token, [
     ...myDelegations.map((d) => d.deputy_principal_id),
     ...deputyFor.map((d) => d.delegator_principal_id),

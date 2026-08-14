@@ -47,10 +47,9 @@ describe("DelegationsPane", () => {
 
     listMyDelegationsMock.mockResolvedValue([]);
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
-    // Standardmäßig nicht auflösbar (P19-S4) - `usePrincipalNames` fällt in
-    // diesem Fall auf die rohe principal_id zurück, bestehende Tests bleiben
-    // dadurch unverändert gültig; ein dedizierter Test unten prüft die
-    // tatsächliche Namensauflösung.
+    // Not resolvable by default (P19-S4) - `usePrincipalNames` falls back to
+    // the raw principal_id in this case, so existing tests remain valid
+    // unchanged; a dedicated test below verifies actual name resolution.
     lookupUserByIdMock.mockRejectedValue(new Error("not mocked"));
   });
 

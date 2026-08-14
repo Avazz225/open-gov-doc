@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth-context";
 
-// Bewusst kein Tab-Nav/Theme-Umschalter/Wartungsbanner wie bei den übrigen
-// Apps - der Taskpane ist eine schmale Seitenleiste (~300-450px) mit genau
-// EINER Ansicht, kein Platz und kein Bedarf für zusätzliche Chrome. Ein
-// Add-in sollte sich idealerweise am Office-eigenen Theme orientieren
-// (`Office.context.officeTheme`) statt einem eigenen Umschalter - nicht Teil
-// dieser Session, siehe docs/services/office-addin.md "Offene Punkte".
+// Deliberately no tab nav/theme switcher/maintenance banner like the other
+// apps - the task pane is a narrow sidebar (~300-450px) with exactly ONE
+// view, no room and no need for additional chrome. An add-in should
+// ideally follow Office's own theme (`Office.context.officeTheme`) instead
+// of its own switcher - not part of this session, see
+// docs/services/office-addin.md "Open Points".
 export function Shell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();

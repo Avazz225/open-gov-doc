@@ -9,10 +9,10 @@ import { useAuth } from "@/lib/auth-context";
 interface NavItem {
   href: string;
   labelKey: string;
-  // Domänengetrennte Admin-Rollen (4.6, P6-S5): fehlt die Capability, wird
-  // der Eintrag ausgeblendet - Tiefen-Verteidigung übernimmt zusätzlich
-  // `RequireCapability` auf der Zielseite selbst, falls die URL direkt
-  // aufgerufen wird.
+  // Domain-separated admin roles (4.6, P6-S5): if the capability is
+  // missing, the entry is hidden - defense in depth is additionally
+  // provided by `RequireCapability` on the target page itself, in case the
+  // URL is accessed directly.
   requiresCapability?: string;
 }
 
@@ -123,11 +123,11 @@ function loadCollapsedGroups(): Record<string, boolean> {
   }
 }
 
-// Dashboard-Layout-Leitbild (P4-S5, Nutzer-Feedback nach P4-S3, Konzept 8):
-// linke, gruppierbare/ausklappbare Navigationsseitenleiste statt der
-// vorherigen flachen Top-Nav-Links. Nur zwei Gruppen bisher ("Verwaltung",
-// "Installationen"), aber bereits generisch gebaut, da mit wachsendem
-// Funktionsumfang (spätere Phasen) weitere Gruppen dazukommen werden.
+// Dashboard layout guiding principle (P4-S5, user feedback after P4-S3,
+// concept 8): a left-hand, groupable/collapsible navigation sidebar instead
+// of the previous flat top-nav links. Only two groups so far ("Management",
+// "Installations"), but already built generically, since more groups will
+// be added as functionality grows (later phases).
 export function AdminSidebar() {
   const { t } = useI18n();
   const pathname = usePathname();

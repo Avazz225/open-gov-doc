@@ -8,10 +8,10 @@ import { useAuth } from "@/lib/auth-context";
 import { MaintenanceBanner } from "./MaintenanceBanner";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
-// Schlanker Rahmen (Konzept 8: "schlanker Fokus nur auf Freigabeaufgaben") -
-// nur zwei Bereiche, daher eine einfache Tab-Leiste statt einer vollen
-// Seitennavigation wie AdminShell (admin-ui). Gleiches Kopfzeilen-Muster
-// (Titel/Theme/Logout) wie die übrigen Apps.
+// Lean shell (concept 8: "lean focus on approval tasks only") - only two
+// areas, hence a simple tab bar instead of full page navigation like
+// AdminShell (admin-ui). Same header pattern (title/theme/logout) as the
+// other apps.
 export function Shell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();

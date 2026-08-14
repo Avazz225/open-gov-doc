@@ -1,10 +1,10 @@
 import { vi } from "vitest";
 
-// Handgeschriebener Fake der `Office`/`Word`-globalen Objekte - es gibt in
-// dieser Umgebung keinen echten Office-Host (kein Windows/Office/gültiger
-// M365-Sideloading-Mandant), daher kann kein echtes `office.js` geladen
-// werden. Deckt nur die Teilmenge ab, die `src/lib/office.ts` tatsächlich
-// anspricht.
+// Hand-written fake of the `Office`/`Word` global objects - this
+// environment has no real Office host (no Windows/Office/valid
+// M365 sideloading tenant), so no real `office.js` can be loaded.
+// Covers only the subset that `src/lib/office.ts` actually
+// touches.
 
 export interface OfficeMockState {
   settingsStore: Record<string, unknown>;

@@ -137,8 +137,8 @@ export function UserManagement() {
       });
       setNewAssignment({ principalId: "", roleId: "", resourceId: ROOT_RESOURCE_ID });
       if (result.status === "pending_approval") {
-        // Vier-Augen aktiv (4.3/14.2) - noch nicht angelegt, daher kein
-        // reload() (die Liste würde ohnehin unverändert bleiben).
+        // Four-eyes principle active (4.3/14.2) - not yet created, so no
+        // reload() (the list would remain unchanged anyway).
         setAssignmentPending(true);
       } else {
         await reload();

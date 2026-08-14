@@ -2,8 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
-// jsdom implementiert `matchMedia` nicht (Node hat kein echtes Rendering) -
-// `ThemeProvider` (P4-S6) braucht es für die "Automatisch"-Auflösung.
+// jsdom does not implement `matchMedia` (Node has no real rendering) -
+// `ThemeProvider` (P4-S6) needs it for the "Automatic" resolution.
 if (typeof window !== "undefined" && !window.matchMedia) {
   window.matchMedia = (query: string) => ({
     matches: false,
@@ -17,8 +17,8 @@ if (typeof window !== "undefined" && !window.matchMedia) {
   }) as unknown as MediaQueryList;
 }
 
-// jsdom implementiert `ResizeObserver` nicht - `PreviewPane` (P5-S3) nutzt es,
-// um die gerenderte Bildhöhe für die OCR-Overlay-Schriftgröße zu messen.
+// jsdom does not implement `ResizeObserver` - `PreviewPane` (P5-S3) uses it
+// to measure the rendered image height for the OCR overlay font size.
 if (typeof window !== "undefined" && !window.ResizeObserver) {
   class ResizeObserverStub {
     observe(): void {}
@@ -28,8 +28,8 @@ if (typeof window !== "undefined" && !window.ResizeObserver) {
   window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
 
-// jsdoms `Blob` implementiert `.text()` nicht - `PreviewPane` (P5d-S2) liest
-// darüber den Inhalt für die clientseitige Text-Direktanzeige aus.
+// jsdom's `Blob` does not implement `.text()` - `PreviewPane` (P5d-S2) uses it
+// to read the content for client-side direct text display.
 if (typeof Blob !== "undefined" && !Blob.prototype.text) {
   Blob.prototype.text = function (this: Blob): Promise<string> {
     return new Promise((resolve, reject) => {

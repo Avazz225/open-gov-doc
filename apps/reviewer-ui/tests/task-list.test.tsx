@@ -135,7 +135,7 @@ describe("TaskList", () => {
     expect(completeTaskMock).not.toHaveBeenCalled();
   });
 
-  // --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -----------------------
+  // --- Absence deputization (4.4a, P14-S11) ---------------------------------
 
   it("does not show an 'Im Auftrag von' selector when there are no active delegations", async () => {
     listReadyTasksMock.mockResolvedValue([MANUAL_TASK]);

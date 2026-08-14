@@ -17,13 +17,12 @@ import { useAuth } from "@/lib/auth-context";
 
 const PURPOSES: LayoutPurpose[] = ["display", "search", "upload"];
 
-// Reine Zeilenoperationen (Zeile verschieben/löschen/hinzufügen) statt
-// freiem Ziehen einzelner Felder zwischen Zeilen: ein Feld wird aus seiner
-// Zeile entfernt (wird dadurch wieder "verfügbar") und über die
-// Zeilen-eigene Hinzufügen-Auswahl gezielt in eine andere Zeile gesetzt -
-// zwei eindeutige Schritte statt einer mehrdeutigen Verschieben-Geste, ohne
-// Drag&Drop-Bibliothek (keine visuelle Browser-Verifikation in dieser
-// Umgebung möglich, siehe PROGRESS.md).
+// Pure row operations (move/delete/add row) instead of freely dragging
+// individual fields between rows: a field is removed from its row (thereby
+// becoming "available" again) and placed into another row via that row's
+// own add-selector - two unambiguous steps instead of one ambiguous
+// move gesture, without a drag&drop library (no visual browser verification
+// possible in this environment, see PROGRESS.md).
 function cloneRows(rows: LayoutRow[]): LayoutRow[] {
   return rows.map((row) => ({ columns: row.columns.map((field) => ({ ...field })) }));
 }

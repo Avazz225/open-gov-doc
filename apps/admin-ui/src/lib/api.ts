@@ -1,10 +1,10 @@
 import { GATEWAY_BASE_URL as DEFAULT_GATEWAY_BASE_URL } from "./config";
 
-// Mutable statt eines festen Imports (P4-S5, Multi-Installation, Konzept 8):
-// Die Admin-UI kann mehrere Installationen mit je eigenem Gateway-Endpunkt
-// verwalten - `InstallationProvider` ruft `setGatewayBaseUrl()` bei jedem
-// Installationswechsel auf. Alle bestehenden Aufrufer dieses Moduls bleiben
-// unverändert (sie kennen die URL nicht, nur den `service_type`/Pfad).
+// Mutable instead of a fixed import (P4-S5, multi-installation, Concept 8):
+// the admin UI can manage multiple installations, each with its own gateway
+// endpoint - `InstallationProvider` calls `setGatewayBaseUrl()` on every
+// installation switch. All existing callers of this module remain
+// unchanged (they don't know the URL, only the `service_type`/path).
 let gatewayBaseUrl = DEFAULT_GATEWAY_BASE_URL;
 
 export function setGatewayBaseUrl(url: string): void {
@@ -30,9 +30,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 }
 
-// Jeder Aufruf geht über das Gateway (3.5): /api/{service_type}/{path} statt
-// direkter Backend-Adressen - Registry-Auflösung und Auth-Prüfung passieren
-// dort, nicht hier.
+// Every call goes through the gateway (3.5): /api/{service_type}/{path}
+// instead of direct backend addresses - registry resolution and auth
+// checks happen there, not here.
 async function request(
   serviceType: string,
   path: string,
@@ -86,10 +86,10 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
-// Domänengetrennte Admin-Rollen (4.6, P6-S5): systemeigen im Permission
-// Service, NICHT als Keycloak-Realm-Rolle (anders als `realm_roles` oben) -
-// dieselbe Quelle, die auch das Backend-Gating (z. B. Auth-Service `/users`)
-// nutzt, siehe ADR 0023.
+// Domain-separated admin roles (4.6, P6-S5): native to the Permission
+// Service, NOT a Keycloak realm role (unlike `realm_roles` above) - the
+// same source also used by backend gating (e.g. Auth Service `/users`),
+// see ADR 0023.
 export async function getEffectivePermissions(
   token: string,
   principalId: string
@@ -190,9 +190,9 @@ export interface RoleAssignment {
   resource_id: string;
 }
 
-// Seit P17-S3 (14.2 "Berechtigungsänderung"): `POST /role-assignments` kann
-// optional per Vier-Augen-Prinzip gegated sein - `role_assignment` ist nur
-// bei `status === "created"` gesetzt.
+// Since P17-S3 (14.2 "permission change"): `POST /role-assignments` can
+// optionally be gated by the four-eyes principle - `role_assignment` is
+// only set when `status === "created"`.
 export interface RoleAssignmentActionResult {
   status: "created" | "pending_approval";
   role_assignment: RoleAssignment | null;
@@ -231,11 +231,11 @@ export async function deleteRoleAssignment(token: string, assignmentId: number):
   );
 }
 
-// Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen die
-// seit Phase 19 Session 2 bestehende, hartkodierte "everyone"-Gruppe.
-// Gleiches `admin.user_management`-Self-Gating wie `POST`/`PUT /roles`
-// (der Gateway injiziert `X-DMS-Principal` bereits aus dem Access Token,
-// kein manuelles Header-Setzen hier nötig - gleiches Muster wie `createRole`).
+// Admin-creatable groups (Post-Roadmap Phase 22 Session 2) - complement the
+// hardcoded "everyone" group that has existed since Phase 19 Session 2.
+// Same `admin.user_management` self-gating as `POST`/`PUT /roles` (the
+// gateway already injects `X-DMS-Principal` from the access token, no
+// manual header setting needed here - same pattern as `createRole`).
 export interface Group {
   id: string;
   name: string;
@@ -308,12 +308,12 @@ export async function removeGroupMember(
   );
 }
 
-// Generische Vier-Augen-Einstellungsseite (Post-Roadmap Phase 22 Session 3) -
-// `GET /approval-config` liefert NUR bereits konfigurierte Aktionstypen (fehlt
-// eine Zeile, gilt implizit `requires_approval=false`, siehe
-// `docs/services/permission-service.md`) - kein fester, hartkodierter Katalog
-// aller im System existierenden Aktionstypen, daher das Formular zum
-// Hinzufügen eines neuen, noch nicht konfigurierten Aktionstyps unten.
+// Generic four-eyes principle settings page (Post-Roadmap Phase 22 Session
+// 3) - `GET /approval-config` returns ONLY already-configured action types
+// (if a row is missing, `requires_approval=false` applies implicitly, see
+// `docs/services/permission-service.md`) - there is no fixed, hardcoded
+// catalog of all action types existing in the system, hence the form below
+// for adding a new, not-yet-configured action type.
 export interface ApprovalActionConfig {
   action_type: string;
   requires_approval: boolean;
@@ -326,9 +326,10 @@ export async function listApprovalConfig(token: string): Promise<ApprovalActionC
   return response.json();
 }
 
-// WICHTIG: `required_permission` muss immer explizit mitgeschickt werden
-// (auch wenn nur `requires_approval` geändert wird) - das Backend überschreibt
-// es sonst mit `null`, siehe `permission_service.repository.set_approval_config`.
+// IMPORTANT: `required_permission` must always be sent explicitly (even if
+// only `requires_approval` is being changed) - otherwise the backend
+// overwrites it with `null`, see
+// `permission_service.repository.set_approval_config`.
 export async function putApprovalConfig(
   token: string,
   actionType: string,
@@ -350,7 +351,7 @@ export async function putApprovalConfig(
   return response.json();
 }
 
-// Verfügbare Attribut-Typen der Constraint Engine (4.5) - siehe
+// Available attribute types of the Constraint Engine (4.5) - see
 // libs/dms-constraint-engine.
 export type AttributeType = "string" | "decimal" | "integer" | "boolean" | "date" | "reference";
 
@@ -363,8 +364,8 @@ export interface ObjectTypeAttribute {
   max?: number;
 }
 
-// Sentinel für "direkt unter der Wurzel platzierbar" (2.2a, ADR 0013) - muss
-// exakt zum Backend-Konstanten `ROOT_PARENT_TYPE` passen.
+// Sentinel for "can be placed directly under the root" (2.2a, ADR 0013) -
+// must match the backend constant `ROOT_PARENT_TYPE` exactly.
 export const ROOT_PARENT_TYPE = "$ROOT";
 
 export interface ObjectType {
@@ -376,33 +377,35 @@ export interface ObjectType {
   conditions: Array<Record<string, unknown>>;
   allowed_parent_types: string[] | null;
   icon: string | null;
-  // Kennzeichengenerator (2.2, seit P5e-S1/S3) - beide nur für
-  // applies_to="document" gesetzt. kennzeichen_display_override ist ein
-  // Tri-State: null = globaler Standard (KennzeichenConfig) gilt.
+  // Reference number generator (2.2, since P5e-S1/S3) - both are only set
+  // for applies_to="document". kennzeichen_display_override is a tri-state:
+  // null = the global default (KennzeichenConfig) applies.
   kennzeichen_format: string | null;
   kennzeichen_display_override: boolean | null;
-  // Mindest-Signaturniveau (3.10, seit P6-S7) - nur für applies_to="document"
-  // gesetzt, null = keine Anforderung. Wird vom Signature Service bei jedem
-  // Signiervorgang durchgesetzt, hier nur konfiguriert.
+  // Minimum signature level (3.10, since P6-S7) - only set for
+  // applies_to="document", null = no requirement. Enforced by the Signature
+  // Service on every signing operation, only configured here.
   required_signature_level: "ses" | "aes" | "qes" | null;
-  // Aufbewahrung (5.2, seit P7-S1) - gilt anders als Kennzeichen/Signatur für
-  // applies_to="document" UND "folder" gleichermaßen. deletion_reason_
-  // required_override ist ein Tri-State wie kennzeichen_display_override:
-  // null = installationsweiter Standard (RetentionConfig) gilt.
+  // Retention (5.2, since P7-S1) - unlike reference number/signature, this
+  // applies equally to applies_to="document" AND "folder". deletion_reason_
+  // required_override is a tri-state like kennzeichen_display_override:
+  // null = the installation-wide default (RetentionConfig) applies.
   default_retention_days: number | null;
   deletion_reason_required_override: boolean | null;
-  // Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - gilt wie
-  // default_retention_days für beide appliesTo-Werte. null = kein
-  // Typ-Default (kein automatischer Aussonderungs-Zeitpunkt).
+  // Archival & long-term retention (5.6, since P7-S3) - applies to both
+  // appliesTo values like default_retention_days. null = no type default
+  // (no automatic archival due date).
   default_archive_after_days: number | null;
   archive_encryption_enabled: boolean;
-  // Verschlusssachen-Einstufung (2.5, seit P15-S1, mehrstufig seit P17-S2,
-  // 14.2) - nur für applies_to="document" zulässig. null = nicht eingestuft.
+  // Classified information level (2.5, since P15-S1, multi-level since
+  // P17-S2, 14.2) - only permitted for applies_to="document". null = not
+  // classified.
   classification_level: ClassificationLevel | null;
 }
 
-// Die vier gängigen deutschen VS-Einstufungen (14.2, P17-S2) - wörtlich aus
-// dem Konzepttext, siehe object-type-service.schemas.ClassificationLevel.
+// The four common German classified-information levels (14.2, P17-S2) -
+// taken verbatim from the concept text, see
+// object-type-service.schemas.ClassificationLevel.
 export type ClassificationLevel = "VS-NfD" | "VS-VERTRAULICH" | "GEHEIM" | "STRENG GEHEIM";
 
 export async function listObjectTypes(token: string): Promise<ObjectType[]> {
@@ -451,12 +454,11 @@ export async function createObjectType(
   return response.json();
 }
 
-// Bewusst kein `name`/`appliesTo` im Payload - beide sind serverseitig nach
-// Anlage unveränderlich (siehe object-type-service). `namingConstraints`/
-// `conditions` werden unverändert durchgereicht statt in der geführten
-// Oberfläche editierbar zu sein (außerhalb des Umfangs von P5b-S3) - ohne das
-// würde ein Speichern über diesen Editor sie stillschweigend auf ihren
-// Default zurücksetzen.
+// Deliberately no `name`/`appliesTo` in the payload - both are immutable
+// server-side after creation (see object-type-service). `namingConstraints`/
+// `conditions` are passed through unchanged rather than being editable in
+// the guided UI (out of scope for P5b-S3) - without this, saving via this
+// editor would silently reset them to their default.
 export async function updateObjectType(
   token: string,
   objectTypeId: number,
@@ -512,9 +514,9 @@ export async function deleteObjectType(token: string, objectTypeId: number): Pro
   );
 }
 
-// Formular-Layouts (2.2b, seit P5b-S2, ADR 0014) - `is_custom: false` heißt
-// "generiertes Smart Layout, nicht gespeichert", `true` heißt "explizites,
-// über PUT gespeichertes Override".
+// Form layouts (2.2b, since P5b-S2, ADR 0014) - `is_custom: false` means
+// "generated smart layout, not saved", `true` means "explicit override
+// saved via PUT".
 export type LayoutPurpose = "display" | "search" | "upload";
 
 export interface LayoutField {
@@ -589,11 +591,11 @@ export interface OcrConfig {
   updated_at: string;
 }
 
-// ocrEnabled selbst ist bewusst kein Feld hier - das ist ein Docker-Compose-
-// Profil-Opt-out (ADR 0016, P5b-S5), keine Laufzeit-Einstellung des Service.
-// Ist ocr-service nicht deployt, schlägt dieser Aufruf mit einem
-// Verbindungsfehler fehl - `OcrSettings.tsx` zeigt das dann als "nicht
-// erreichbar" statt eines Werts an.
+// ocrEnabled itself is deliberately not a field here - it is a Docker
+// Compose profile opt-out (ADR 0016, P5b-S5), not a runtime setting of the
+// service. If ocr-service isn't deployed, this call fails with a connection
+// error - `OcrSettings.tsx` then displays that as "unreachable" instead of
+// a value.
 export async function getOcrConfig(token: string): Promise<OcrConfig> {
   const response = await request("ocr-service", "config", {}, token);
   return response.json();
@@ -625,8 +627,8 @@ export interface UploadConfig {
   updated_at: string;
 }
 
-// Analog zu getOcrConfig/updateOcrConfig - Document Service, nicht OCR Service
-// (P5d-S1, Format-Whitelist statt OCR-Filterliste).
+// Analogous to getOcrConfig/updateOcrConfig - Document Service, not OCR
+// Service (P5d-S1, format whitelist instead of OCR filter list).
 export async function getUploadConfig(token: string): Promise<UploadConfig> {
   const response = await request("document-service", "upload-config", {}, token);
   return response.json();
@@ -649,8 +651,8 @@ export async function updateUploadConfig(
   return response.json();
 }
 
-// Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
-// Get/Update-Muster wie UploadConfig oben, ebenfalls document-service.
+// Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - same
+// get/update pattern as UploadConfig above, also document-service.
 export interface RetentionConfig {
   deletion_reason_required: boolean;
   reminder_lead_days: number | null;
@@ -723,9 +725,9 @@ export async function listDeletionRegister(token: string): Promise<DeletionRegis
   return response.json();
 }
 
-// Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b) -
-// eigene, unabhängig konfigurierbare Configs (nicht dieselben Zeilen wie
-// document-service, siehe docs/services/folder-service.md).
+// Retention/legal hold/forced deletion for folders (5.2/5.2a, since
+// P7-S1b) - separate, independently configurable configs (not the same
+// rows as document-service, see docs/services/folder-service.md).
 export async function getFolderRetentionConfig(token: string): Promise<RetentionConfig> {
   const response = await request("folder-service", "retention-config", {}, token);
   return response.json();
@@ -794,9 +796,10 @@ export interface KennzeichenConfig {
   updated_at: string;
 }
 
-// Globaler Anzeige-Standard des Kennzeichengenerators (2.2, seit P5e-S3) -
-// lebt im Object-Type Service, nicht im Document Service, da dort auch schon
-// der per-Objekttyp-Override (`ObjectType.kennzeichen_display_override`) sitzt.
+// Global display default of the reference number generator (2.2, since
+// P5e-S3) - lives in the Object Type Service, not the Document Service,
+// since the per-object-type override
+// (`ObjectType.kennzeichen_display_override`) already lives there too.
 export async function getKennzeichenConfig(token: string): Promise<KennzeichenConfig> {
   const response = await request("object-type-service", "kennzeichen-config", {}, token);
   return response.json();
@@ -851,8 +854,8 @@ export interface GuardStatusEntry {
   device_id: string | null;
   verified_at: string | null;
   pending_copies: number;
-  // Aufbewahrung/WORM (5.1/5.2a, seit P7-S1). Seit Post-Roadmap Phase 22
-  // Session 7 (ADR 0092) live editierbar über `updateTargetConfig()`.
+  // Retention/WORM (5.1/5.2a, since P7-S1). Live-editable via
+  // `updateTargetConfig()` since Post-Roadmap Phase 22 Session 7 (ADR 0092).
   object_lock_mode: "governance" | null;
   role: "archive" | null;
 }
@@ -872,10 +875,11 @@ export async function reidentifyTarget(token: string, targetId: string): Promise
   return response.json();
 }
 
-// Ziel-Metadaten (Post-Roadmap Phase 22 Session 7, ADR 0092) - NUR
-// `object_lock_mode`/`role` je bereits konfiguriertem Ziel, wirkt ohne
-// Neustart des Storage Service. Das Ziel-Set selbst (Zugangsdaten/Struktur)
-// bleibt weiterhin env-var-only, siehe ADR 0091/0092 "Begründung".
+// Target metadata (Post-Roadmap Phase 22 Session 7, ADR 0092) - ONLY
+// `object_lock_mode`/`role` per already-configured target, takes effect
+// without restarting the Storage Service. The target set itself
+// (credentials/structure) remains env-var-only, see ADR 0091/0092
+// "Rationale".
 export async function updateTargetConfig(
   token: string,
   targetId: string,
@@ -894,9 +898,10 @@ export async function updateTargetConfig(
   return response.json();
 }
 
-// Betriebsparameter (Post-Roadmap Phase 22 Session 6, ADR 0091) - anders als
-// das Ziel-Set selbst (Zugangsdaten, bewusst weiterhin env-var-only) ohne
-// Geheimnisse, daher live editierbar, wirkt ohne Neustart des Storage Service.
+// Operational parameters (Post-Roadmap Phase 22 Session 6, ADR 0091) -
+// unlike the target set itself (credentials, deliberately remains
+// env-var-only), these contain no secrets, so they're live-editable, taking
+// effect without restarting the Storage Service.
 export interface OperationalConfig {
   write_strategy: "quorum" | "primary_async";
   quorum_count: number;
@@ -930,9 +935,10 @@ export async function updateOperationalConfig(
   return response.json();
 }
 
-// Signatur-Connector-Niveaus (Post-Roadmap Phase 22 Session 6, ADR 0091) -
-// `id`/`type` sind strukturell fest (`Settings.signature_providers`), nur
-// `levels` ist admin-editierbar, wirkt ohne Neustart des Signature Service.
+// Signature connector levels (Post-Roadmap Phase 22 Session 6, ADR 0091) -
+// `id`/`type` are structurally fixed (`Settings.signature_providers`), only
+// `levels` is admin-editable, taking effect without restarting the
+// Signature Service.
 export interface SignatureProviderStatus {
   id: string;
   type: "internal" | "qtsp";
@@ -976,9 +982,9 @@ export async function listServiceInstances(token: string): Promise<ServiceInstan
   return response.json();
 }
 
-// Superuser Break-Glass (4.6, P6-S5) - Aktivierung selbst läuft über den
-// bereits bestehenden generischen Vier-Augen-Mechanismus des Permission
-// Service (P6-S4, ADR 0022), kein separates Approval-System hier.
+// Superuser break-glass (4.6, P6-S5) - activation itself runs through the
+// already-existing generic four-eyes principle mechanism of the Permission
+// Service (P6-S4, ADR 0022), no separate approval system here.
 export interface SuperuserStatus {
   active: boolean;
   expires_at: string | null;
@@ -1037,10 +1043,10 @@ export async function approveApprovalRequest(
   return response.json();
 }
 
-// Not-Shutdown (4.8, P6-S6) - Auslösung nutzt denselben generischen Vier-
-// Augen-Mechanismus wie Break-Glass, hier aber mit einem direkten
-// Ausführungspfad (siehe permission-service `POST /maintenance-mode/trigger`),
-// falls kein Vier-Augen-Zwischenschritt konfiguriert ist.
+// Emergency shutdown (4.8, P6-S6) - triggering uses the same generic
+// four-eyes principle mechanism as break-glass, but here with a direct
+// execution path (see permission-service `POST /maintenance-mode/trigger`)
+// if no four-eyes principle intermediate step is configured.
 export interface MaintenanceMode {
   active: boolean;
   reason: string | null;
@@ -1088,8 +1094,8 @@ export async function liftMaintenanceMode(
   return response.json();
 }
 
-// Standardberichte (5.4a, seit P7-S2b) - vier Berichtstypen, jeweils eine
-// JSON-Ansicht + ein Export-Endpunkt (CSV/PDF), plus planbarer Versand.
+// Standard reports (5.4a, since P7-S2b) - four report types, each with a
+// JSON view + an export endpoint (CSV/PDF), plus schedulable delivery.
 export interface DocumentVolumeEntry {
   period: string;
   folder_id: string | null;
@@ -1241,9 +1247,9 @@ export async function deleteReportSchedule(token: string, scheduleId: string): P
   );
 }
 
-// Forensik-Trace (5.4b, seit P7-S2c) - objektbezogene Nachverfolgung
-// ("alle Aktionen von Nutzer X"/"alle Nutzer auf Dokument Y") auf Basis der
-// P7-S2-Audit-Filter-API, zweite Funktion des reporting-service (5.4).
+// Forensic trace (5.4b, since P7-S2c) - object-related tracking ("all
+// actions by user X"/"all users on document Y") built on the P7-S2 audit
+// filter API, second function of the reporting-service (5.4).
 export type ForensicTraceCategory = "view" | "download" | "change" | "delete";
 
 export interface ForensicTraceEntry {
@@ -1317,9 +1323,9 @@ export async function exportForensicTrace(
   return response.blob();
 }
 
-// Audit-Tiefe fuer den Forensik-Trace (5.4b, seit P7-S2c) - Basis-
-// Konfiguration + Rollen-Overrides in document-service, steuert ob
-// document.viewed/document.downloaded ueberhaupt publiziert werden.
+// Audit depth for the forensic trace (5.4b, since P7-S2c) - base
+// configuration + role overrides in document-service, controls whether
+// document.viewed/document.downloaded are published at all.
 export interface AuditTraceConfig {
   log_viewed: boolean;
   log_downloaded: boolean;
@@ -1391,11 +1397,11 @@ export async function deleteAuditTraceRoleOverride(token: string, role: string):
   );
 }
 
-// Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - reine
-// Status-/Rückhol-Ansicht auf die vom archival-service geführte
-// Transfer-Zustandsmaschine (pending -> locked -> copied -> verified ->
-// released -> dehydrated, + failed -> failed_permanent seit Post-Roadmap
-// Phase 20 Session 2/7, ADR 0078).
+// Archival & long-term retention (5.6, since P7-S3) - a pure
+// status/retrieval view onto the transfer state machine maintained by
+// archival-service (pending -> locked -> copied -> verified -> released ->
+// dehydrated, + failed -> failed_permanent since Post-Roadmap Phase 20
+// Session 2/7, ADR 0078).
 export interface ArchivalTransfer {
   id: string;
   document_id: string;
@@ -1426,13 +1432,13 @@ export async function listArchivalTransfers(
   return response.json();
 }
 
-// Manueller Aussonderungs-Trigger (5.6, seit Post-Roadmap Phase 22 Session
-// 1) - setzt bei `document-service` `archive_after` auf jetzt, macht das
-// Dokument also sofort fällig statt erst nach Ablauf der Objekttyp-Frist.
-// Erzeugt selbst NOCH KEINE `ArchivalTransfer`-Zeile - das übernimmt erst
-// `archival-service`s nächster Poll-Tick (Default stündlich, siehe
-// `docs/services/archival-service.md`), daher kein sofortiges Neuladen der
-// Transfer-Tabelle nach dem Aufruf.
+// Manual archival trigger (5.6, since Post-Roadmap Phase 22 Session 1) -
+// sets `archive_after` to now on `document-service`, making the document
+// due immediately instead of only after the object type deadline expires.
+// This itself does NOT yet create an `ArchivalTransfer` row - that only
+// happens on `archival-service`'s next poll tick (default hourly, see
+// `docs/services/archival-service.md`), hence no immediate reload of the
+// transfer table after the call.
 export async function requestDocumentArchive(token: string, documentId: string): Promise<void> {
   await request(
     "document-service",
@@ -1442,9 +1448,9 @@ export async function requestDocumentArchive(token: string, documentId: string):
   );
 }
 
-// Rückholung (5.6) - erfordert `archive_retrieval_role` (Default
-// "dms-admin") im X-DMS-Roles-Header, den das Gateway aus dem Access Token
-// setzt, nicht diese Funktion selbst.
+// Retrieval (5.6) - requires `archive_retrieval_role` (default "dms-admin")
+// in the X-DMS-Roles header, which the gateway sets from the access token,
+// not this function itself.
 export async function retrieveArchivalTransfer(
   token: string,
   transferId: string
@@ -1458,9 +1464,9 @@ export async function retrieveArchivalTransfer(
   return response.json();
 }
 
-// Manueller Neustart eines dauerhaft fehlgeschlagenen Transfers (Post-Roadmap
-// Phase 20 Session 2/7, ADR 0078) - nur für `failed_permanent` sinnvoll
-// (`409` sonst).
+// Manual restart of a permanently failed transfer (Post-Roadmap Phase 20
+// Session 2/7, ADR 0078) - only meaningful for `failed_permanent` (`409`
+// otherwise).
 export async function retryArchivalTransfer(
   token: string,
   transferId: string
@@ -1474,10 +1480,10 @@ export async function retryArchivalTransfer(
   return response.json();
 }
 
-// XDOMEA-Aussonderung für Umlaufmappen (5.6, seit P7-S3b) - erzeugt eine
-// Aussonderungsnachricht (XDOMEA 4.0.0) + packt die referenzierten
-// Dokumentinhalte in ein ZIP, kein "dehydrated"-Status (Case besitzt keinen
-// eigenen Live-Inhalt) und keine Rückschreib-Rückholung, nur ein Download.
+// XDOMEA archival for case files (5.6, since P7-S3b) - generates an
+// archival message (XDOMEA 4.0.0) + packs the referenced document contents
+// into a ZIP, no "dehydrated" status (the case holds no live content of
+// its own) and no write-back retrieval, download only.
 export interface CaseArchivalTransfer {
   id: string;
   case_id: string;
@@ -1568,12 +1574,12 @@ export async function updateCaseArchivalConfig(
   return response.json();
 }
 
-// Verarbeitungsfehler-Sichtbarkeit (Post-Roadmap Phase 20 Session 7) - reine
-// Status-/Neustart-Ansicht auf `failed_permanent`-Datensätze in drei
-// unabhängigen Services (notification-/rendering-/ocr-service), analog zu
-// `ArchivalTransfersView` oben, hier aber als eine gemeinsame neue Seite
-// statt einer je-Service-Seite (gleiches "kleine Sektion statt eigener
-// Seite"-Prinzip, hier auf Seitenebene angewendet).
+// Processing failure visibility (Post-Roadmap Phase 20 Session 7) - a pure
+// status/restart view onto `failed_permanent` records in three independent
+// services (notification-/rendering-/ocr-service), analogous to
+// `ArchivalTransfersView` above, but here as one shared new page instead of
+// a page per service (same "small section instead of its own page"
+// principle, applied here at the page level).
 export interface Notification {
   id: string;
   channel: string;
@@ -1597,10 +1603,10 @@ export async function listNotifications(
   return response.json();
 }
 
-// Notification-service hat (anders als die drei anderen Resilienz-Services
-// dieser Phase) KEINE permission-service-Integration (ADR 0079/0081) - der
-// Retry-Endpunkt ist deshalb ohne RBAC-Gate, diese Funktion braucht kein
-// zusätzliches Capability-Handling.
+// Unlike the other three resilience services of this phase,
+// notification-service has NO permission-service integration (ADR
+// 0079/0081) - the retry endpoint is therefore without an RBAC gate, this
+// function needs no additional capability handling.
 export async function retryNotification(token: string, id: string): Promise<Notification> {
   const response = await request(
     "notification-service",
@@ -1668,11 +1674,11 @@ export async function retryOcrResult(token: string, id: string): Promise<OcrResu
   return response.json();
 }
 
-// Query- & Trace-Konsole (6.1, seit P8-S1) - `X-DMS-Principal` wird vom
-// Gateway aus dem Bearer-Token injiziert, nicht hier gesetzt (siehe
-// `request()` oben). Nur die strukturierte Filter-API ist an die UI
-// angebunden - der freie SQL-Pfad (`POST /query`) bleibt ohne installiertes
-// Parser-Plugin (ADR 0031) ohnehin ungenutzt, siehe docs/services/admin-ui.md.
+// Query & trace console (6.1, since P8-S1) - `X-DMS-Principal` is injected
+// by the gateway from the bearer token, not set here (see `request()`
+// above). Only the structured filter API is wired to the UI - the free-form
+// SQL path (`POST /query`) remains unused anyway without an installed
+// parser plugin (ADR 0031), see docs/services/admin-ui.md.
 export interface QueryEvent {
   id: number;
   event_type: string;
@@ -1712,10 +1718,10 @@ export async function listQueryEvents(
   return response.json();
 }
 
-// Manipulationsmodus (6.1, seit P8-S2/P8-S2b) - die drei bekannten
-// Aktionstypen sind hartkodierter Spiegel von query_service/manipulation.py's
-// Katalog (kein generisches Backend-Schema dafuer, siehe docs/services/
-// query-service.md).
+// Manipulation mode (6.1, since P8-S2/P8-S2b) - the three known action
+// types are a hardcoded mirror of query_service/manipulation.py's catalog
+// (no generic backend schema for this, see
+// docs/services/query-service.md).
 export const MANIPULATION_ACTION_TYPES = [
   "document.attribute_reset",
   "permission.role_assignment.delete",
@@ -1811,9 +1817,9 @@ export async function listPendingManipulationApprovals(token: string): Promise<A
   );
 }
 
-// Lizenzsystem (Konzept 9, P9-S1/S2) - `license-service` selbst gategatet
-// den Upload (`admin.license`), der Statusendpunkt bleibt ungegated (auch
-// von registry-service/Admin-UI ohne Principal-Header abgefragt).
+// License system (Concept 9, P9-S1/S2) - `license-service` itself gates the
+// upload (`admin.license`), the status endpoint remains ungated (also
+// queried by registry-service/admin UI without a principal header).
 export interface LicenseDimensionUsage {
   limit: number | null;
   current: number | null;
@@ -1850,8 +1856,8 @@ export async function uploadLicense(token: string, licenseToken: string): Promis
   return response.json();
 }
 
-// Öffentlicher Freigabelink (4.2a, P14-S10) - installationsweiter Schalter,
-// gleiches Get/Update-Muster wie RetentionConfig/TrashConfig (document-service).
+// Public share link (4.2a, P14-S10) - installation-wide toggle, same
+// get/update pattern as RetentionConfig/TrashConfig (document-service).
 export interface ShareLinkConfig {
   enabled: boolean;
   max_validity_days: number;
@@ -1883,11 +1889,11 @@ export async function updateShareLinkConfig(
   return response.json();
 }
 
-// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - reine Admin-Übersicht +
-// Widerrufsmöglichkeit (Konzept-Wortlaut: "kann jederzeit vorzeitig von der
-// vertretenen Person oder einer berechtigten Admin-Rolle beendet werden").
-// Anlegen selbst ist bewusst kein Admin-UI-Feature (Selbstverwaltung, siehe
-// user-ui's `DelegationsPane`).
+// Absence delegation (4.4a, P14-S11) - a pure admin overview + revocation
+// capability (concept wording: "can be ended early at any time by the
+// delegating person or an authorized admin role"). Creation itself is
+// deliberately not an admin UI feature (self-service, see user-ui's
+// `DelegationsPane`).
 export interface Delegation {
   id: string;
   delegator_principal_id: string;
@@ -1916,14 +1922,14 @@ export async function revokeDelegationAsAdmin(token: string, delegationId: strin
   );
 }
 
-// Vorkonfigurierte Konfigurationspakete (14.1, P17-S1) - "Paket" ist am Ende
-// nur ein `ConfigDocument` (7.3-Format, bereits seit P12-S3 bestehend) mit
-// einem optionalen, rein beschreibenden `manifest`. Der Dokumentinhalt selbst
-// bleibt hier bewusst lose typisiert (`Record<string, unknown>` je Kategorie)
-// statt jede der neun Kategorien 1:1 nachzubilden - diese Seite liest ein vom
-// Nutzer hochgeladenes JSON-Dokument ein und reicht es unverändert an
-// config-service weiter (Vorschau/Anwendung), sie interpretiert dessen
-// Feldinhalte selbst nicht.
+// Preconfigured configuration packages (14.1, P17-S1) - a "package" is
+// ultimately just a `ConfigDocument` (7.3 format, already existing since
+// P12-S3) with an optional, purely descriptive `manifest`. The document
+// content itself remains deliberately loosely typed here
+// (`Record<string, unknown>` per category) rather than modeling each of the
+// nine categories 1:1 - this page reads in a JSON document uploaded by the
+// user and passes it through unchanged to config-service (preview/apply),
+// it does not interpret its field contents itself.
 export const CONFIG_CATEGORIES = [
   "object_types",
   "workflows",
@@ -1986,10 +1992,9 @@ export interface CompareResult {
   categories: Record<string, CategoryDelta>;
 }
 
-// `base` weglassen zieht bei config-service automatisch den eigenen aktuellen
-// Live-Export heran (7.5-Anwendungsfall "was würde sich ändern, wenn ich
-// dieses Paket importiere") - das ist die von dieser Seite genutzte Vorschau
-// vor dem eigentlichen Anwenden.
+// Omitting `base` makes config-service automatically pull its own current
+// live export (7.5 use case "what would change if I import this package") -
+// this is the preview used by this page before actually applying it.
 export async function compareConfig(
   token: string,
   compareDoc: ConfigDocument,
@@ -2016,9 +2021,9 @@ export interface ConfigImportResult {
   results: Record<string, ConfigCategoryResult>;
 }
 
-// Seit P17-S3 (14.2 "Konfigurationsimport"): `POST /config/import` kann
-// optional per Vier-Augen-Prinzip gegated sein - `result` ist nur bei
-// `status === "applied"` gesetzt.
+// Since P17-S3 (14.2 "configuration import"): `POST /config/import` can
+// optionally be gated by the four-eyes principle - `result` is only set
+// when `status === "applied"`.
 export interface ConfigImportActionResult {
   status: "applied" | "pending_approval";
   result: ConfigImportResult | null;
@@ -2039,11 +2044,11 @@ export async function importConfig(
   return response.json();
 }
 
-// Teamspaces-Admin-Übersicht (Post-Roadmap Phase 22 Session 5) - erste
-// Admin-UI-Anbindung von `teamspace-service` überhaupt. `GET /admin/teamspaces`
-// ist gegated (`admin.teamspace_management`, neue Domäne "domain-admin-
-// teamspaces") - anders als `GET /teamspaces` (dort nach Mitgliedschaft
-// gefiltert, hier installationsweit alle).
+// Teamspaces admin overview (Post-Roadmap Phase 22 Session 5) - the first
+// admin UI integration of `teamspace-service` at all. `GET /admin/teamspaces`
+// is gated (`admin.teamspace_management`, new domain "domain-admin-
+// teamspaces") - unlike `GET /teamspaces` (filtered by membership there,
+// installation-wide here for all).
 export interface TeamspaceAdmin {
   id: string;
   name: string;

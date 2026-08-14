@@ -119,8 +119,8 @@ describe("SignaturesPanel", () => {
 
     renderPanel();
 
-    // Gezielt auf das Level-Badge der Signatur beschränkt - die
-    // Signieren-Auswahl darunter hat ebenfalls eine "AES"-Option.
+    // Deliberately scoped to the signature's level badge - the
+    // signing selector below it also has an "AES" option.
     expect(await screen.findByText("AES", { selector: ".signature-level" })).toBeInTheDocument();
     expect(screen.getByText(/Alice Test/)).toBeInTheDocument();
 

@@ -4,11 +4,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useI18n } from "@/i18n";
 import { waitForOfficeReady } from "@/lib/office";
 
-// Jede Interaktion mit `Office.context`/`Word.run` setzt voraus, dass
-// `Office.onReady()` bereits aufgelöst hat (office.js lädt sich selbst
-// asynchron, siehe layout.tsx <head>-Script-Tag) - dieses Gate rendert den
-// eigentlichen Taskpane-Inhalt erst danach, identisches Prinzip wie jedes
-// offizielle Office-Add-in-Beispiel.
+// Every interaction with `Office.context`/`Word.run` assumes that
+// `Office.onReady()` has already resolved (office.js loads itself
+// asynchronously, see layout.tsx <head> script tag) - this gate only
+// renders the actual task pane content afterwards, identical principle
+// to every official Office Add-in example.
 export function OfficeGate({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const [ready, setReady] = useState(false);

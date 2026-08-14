@@ -6,13 +6,13 @@ import { useI18n } from "@/i18n";
 import { oidcCallback } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// SSO/automatischer Login (Post-Roadmap-Feature): Rückweg von Keycloaks
-// Redirect (`GET /oidc/authorize` in login/page.tsx) - liest `code`/`state`
-// aus der URL, tauscht den Code serverseitig gegen Tokens (`POST
-// /oidc/callback`) und übernimmt die Sitzung über denselben Mechanismus wie
-// ein regulärer Formular-Login (`applySession`). Bewusst ein eigenständiger
-// Client-Page statt Middleware/SSR (statischer Export, kein Server, der
-// einen Redirect-Callback serverseitig verarbeiten könnte, Konzept 8).
+// SSO/automatic login (post-roadmap feature): return path from Keycloak's
+// redirect (`GET /oidc/authorize` in login/page.tsx) - reads `code`/`state`
+// from the URL, exchanges the code server-side for tokens (`POST
+// /oidc/callback`) and applies the session via the same mechanism as
+// a regular form login (`applySession`). Deliberately a standalone
+// client page instead of middleware/SSR (static export, no server that
+// could process a redirect callback server-side, concept 8).
 const SSO_STATE_KEY = "dms.sso.state";
 
 export default function LoginCallbackPage() {

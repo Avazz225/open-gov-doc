@@ -19,28 +19,28 @@ export type WorkspaceView =
   | "aussonderung"
   | "vorlagen";
 
-// Quarantäne-Bereich (2.5/10.3, P15-S2) - anders als der Papierkorb (immer
-// zumindest in der persönlichen Sicht sichtbar) gibt es hier laut Konzept
-// KEINE allgemein zugängliche Sicht: "eine eigene, eng begrenzte Rolle darf
-// einen Quarantäne-Fall einsehen" - der Icon-Rail-Eintrag selbst bleibt für
-// alle anderen Rollen unsichtbar, nicht nur die Aktionen darin (gleiches
-// unabhängig konfigurierbares Rollen-Setting-Muster wie überall im Projekt).
+// Quarantine area (2.5/10.3, P15-S2) - unlike the trash (always visible at
+// least in the personal view), the concept specifies NO generally
+// accessible view here: "a dedicated, narrowly scoped role may view a
+// quarantine case" - the icon rail entry itself stays invisible to all
+// other roles, not just the actions within it (same independently
+// configurable role-setting pattern used throughout the project).
 const QUARANTINE_ADMIN_ROLE = "dms-admin";
 
-// Posteingang/Postausgang (2.5/3.3, P15-S3) - gleiches Muster: "Nur eine
-// dedizierte Poststelle-Rolle sieht/bearbeitet den ungesichteten Zulauf."
+// Inbox/outbox (2.5/3.3, P15-S3) - same pattern: "Only a dedicated mail
+// room role sees/processes the unscreened incoming items."
 const POSTSTELLE_ROLE = "dms-poststelle";
 
-// Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - gleiches Rollen-Gate wie
-// archival-services `archive_retrieval_role` (Konzept 2.5: "eine dedizierte
-// Archiv-/Registratur-Rolle"), keine ungegatete Sicht wie bei Kontakte.
+// Records disposal access area (2.5/5.6, P15-S5) - same role gate as
+// archival-services `archive_retrieval_role` (concept 2.5: "a dedicated
+// archive/registry role"), unlike the ungated view of the contacts area.
 const ARCHIVAL_ACCESS_ROLE = "dms-admin";
 
-// Ganz linker Rand, außerhalb des dreigeteilten Main-Contents (Nutzer-
-// Feedback nach P4-S3, 8): iconbasierte Cross-Cutting-Navigation. "Dokumente"
-// und seit P5-S4 auch "Suche" schalten zwischen den beiden Ansichten in
-// DocumentWorkspace um. "Einstellungen" öffnet seit P4-S6 ein Popover mit
-// dem Theme-Umschalter statt weiter deaktiviert zu sein.
+// Far left edge, outside the three-way split main content (user feedback
+// after P4-S3, 8): icon-based cross-cutting navigation. "Dokumente"
+// and, since P5-S4, also "Suche" toggle between the two views in
+// DocumentWorkspace. Since P4-S6, "Einstellungen" opens a popover with the
+// theme switcher instead of remaining disabled.
 export function IconRail({
   activeView,
   onSelectView,

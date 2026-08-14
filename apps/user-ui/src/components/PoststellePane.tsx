@@ -14,11 +14,11 @@ import {
   type OutboundMessage,
 } from "@/lib/api";
 
-// Posteingang/Postausgang (2.5/3.3, P15-S3) - externe Korrespondenz, die noch
-// keinem Vorgang zugeordnet ist. Anders als der Papierkorb gibt es hier laut
-// Konzept KEINE "persönliche" Sicht - der Icon-Rail-Eintrag selbst ist in
-// IconRail.tsx bereits rollengegated (`dms-poststelle`), diese Komponente
-// selbst prüft keine Rolle.
+// Inbox/outbox (2.5/3.3, P15-S3) - external correspondence not yet
+// assigned to a case. Unlike the trash, the concept specifies NO
+// "personal" view here - the icon rail entry itself is already role-gated
+// in IconRail.tsx (`dms-poststelle`), this component itself does not check
+// any role.
 type Tab = "inbox" | "outbox";
 
 function statusLabel(t: ReturnType<typeof useI18n>["t"], status: InboundMessage["status"]): string {

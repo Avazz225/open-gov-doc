@@ -1,12 +1,12 @@
-// Dünne Wrapper-Schicht um die Office.js/Word-JS-API (3.3a, P14-S8) - hält
-// jede direkte `Office`/`Word`-Berührung an einer Stelle, damit
-// Komponenten testbar bleiben (Tests mocken `Office`/`Word` als globale
-// Objekte, siehe tests/office-mock.ts, nicht diese Datei selbst).
+// Thin wrapper layer around the Office.js/Word JS API (3.3a, P14-S8) - keeps
+// every direct `Office`/`Word` touchpoint in one place so that
+// components remain testable (tests mock `Office`/`Word` as global
+// objects, see tests/office-mock.ts, not this file itself).
 //
-// Diese Session deckt bewusst nur **Word** ab (Host "Document") - Excel/
-// PowerPoint haben keine vergleichbare "gesamtes Dokument ersetzen"-API
-// (`insertFileFromBase64` ist eine reine Word-JS-API), siehe
-// docs/services/office-addin.md "Offene Punkte".
+// This session deliberately covers only **Word** (host "Document") - Excel/
+// PowerPoint have no comparable "replace entire document" API
+// (`insertFileFromBase64` is a Word-JS-only API), see
+// docs/services/office-addin.md "Open Points".
 
 const SETTING_DOCUMENT_ID = "ogdoc.documentId";
 const SETTING_VERSION_NUMBER = "ogdoc.versionNumber";
@@ -20,11 +20,11 @@ export async function waitForOfficeReady(): Promise<void> {
   await Office.onReady();
 }
 
-// `Office.context.document.settings` ist add-in-spezifischer, in der Datei
-// selbst gespeicherter Schlüssel/Wert-Zustand (eigene XML-Custom-Part) - für
-// GENAU diesen Zweck vorgesehen: "welches DMS-Dokument gehört zu dieser
-// Word-Datei" bleibt auch nach Schließen/erneutem Öffnen bekannt, ohne einen
-// eigenen Server-Zustand zu brauchen.
+// `Office.context.document.settings` is add-in-specific key/value state
+// stored inside the file itself (its own XML custom part) - designed for
+// EXACTLY this purpose: "which DMS document belongs to this
+// Word file" remains known even after closing/reopening, without needing
+// dedicated server-side state.
 export function getLinkedDocument(): LinkedDocument | null {
   const settings = Office.context.document.settings;
   const documentId = settings.get(SETTING_DOCUMENT_ID) as string | undefined;
@@ -56,10 +56,10 @@ export async function clearLinkedDocument(): Promise<void> {
   await saveSettings();
 }
 
-// Ersetzt den GESAMTEN Word-Dokumentinhalt durch die übergebene .docx-Datei
-// (als Base64) - `Body.insertFileFromBase64` mit `InsertLocation.Replace`
-// ist die dafür offiziell vorgesehene Word-JS-API (WordApi 1.5), kein
-// Workaround über Copy/Paste oder Ähnliches.
+// Replaces the ENTIRE Word document content with the given .docx file
+// (as Base64) - `Body.insertFileFromBase64` with `InsertLocation.Replace`
+// is the officially intended Word-JS API for this (WordApi 1.5), not a
+// workaround via copy/paste or similar.
 export async function replaceDocumentContentFromBase64(base64: string): Promise<void> {
   await Word.run(async (context) => {
     context.document.body.insertFileFromBase64(base64, Word.InsertLocation.replace);
@@ -73,11 +73,11 @@ function bytesToBase64(bytes: number[]): string {
   return btoa(binary);
 }
 
-// Liest die Rohbytes des GERADE GEÖFFNETEN Word-Dokuments (für "In DMS
-// speichern") - `getFileAsync`/`getSliceAsync` sind Teil der plattform-
-// übergreifenden Office-"Common API" (nicht Word-spezifisch), liefern die
-// Datei in Segmenten (`sliceSize`), die hier sequenziell eingesammelt und
-// zu einer einzigen Base64-Zeichenkette zusammengesetzt werden.
+// Reads the raw bytes of the CURRENTLY OPEN Word document (for "Save to
+// DMS") - `getFileAsync`/`getSliceAsync` are part of the cross-platform
+// Office "Common API" (not Word-specific); they deliver the file
+// in segments (`sliceSize`), which are collected sequentially here and
+// assembled into a single Base64 string.
 export async function getCurrentDocumentAsBase64(): Promise<string> {
   const file = await new Promise<Office.File>((resolve, reject) => {
     Office.context.document.getFileAsync(
@@ -104,9 +104,9 @@ export async function getCurrentDocumentAsBase64(): Promise<string> {
     return bytesToBase64(chunks.flat());
   } finally {
     file.closeAsync(() => {
-      /* Rückgabewert absichtlich ignoriert - ein fehlgeschlagenes Schließen
-         des internen Datei-Handles ist nicht behebbar und blockiert nicht
-         den eigentlichen Speichervorgang. */
+      /* Return value intentionally ignored - a failed close
+         of the internal file handle is not recoverable and does not block
+         the actual save operation. */
     });
   }
 }
@@ -118,9 +118,9 @@ export function base64ToBlob(base64: string, contentType: string): Blob {
   return new Blob([bytes], { type: contentType });
 }
 
-// Umkehrung von `base64ToBlob` - für Dokumentinhalte, die als `Blob` vom DMS
-// heruntergeladen wurden (`fetch().blob()`) und per `insertFileFromBase64`
-// ins Word-Dokument geladen werden sollen.
+// Inverse of `base64ToBlob` - for document content that was downloaded
+// as a `Blob` from the DMS (`fetch().blob()`) and is to be loaded
+// into the Word document via `insertFileFromBase64`.
 export async function blobToBase64(blob: Blob): Promise<string> {
   const buffer = await blob.arrayBuffer();
   return bytesToBase64(Array.from(new Uint8Array(buffer)));

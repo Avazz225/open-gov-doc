@@ -89,8 +89,8 @@ describe("ApprovalsPane", () => {
     expect(screen.getByText(/folder-1/)).toBeInTheDocument();
 
     const approveButtons = screen.getAllByText("Genehmigen") as HTMLButtonElement[];
-    // req-1 (initiated_by alice) darf von bob genehmigt werden, req-2
-    // (initiated_by bob) nicht - Vier-Augen-Vorwegnahme (5.2, seit P7-S1c).
+    // req-1 (initiated_by alice) may be approved by bob, req-2
+    // (initiated_by bob) may not - four-eyes principle anticipation (5.2, since P7-S1c).
     expect(approveButtons.some((b) => !b.disabled)).toBe(true);
     expect(approveButtons.some((b) => b.disabled)).toBe(true);
   });

@@ -34,11 +34,11 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-// Standardberichte (5.4a, seit P7-S2b) - vier feste Berichtstypen gegen den
-// neuen reporting-service, jeweils Tabelle + CSV-/PDF-Export, plus Verwaltung
-// planbarer, per E-Mail versendeter Läufe. Bewusst in der Admin-UI (nicht
-// User-UI) - Systemauswertung/Nutzeraktivität ist ein administrativer
-// Vorgang, gleiche Rollenteilung wie z. B. MaintenanceBanner.
+// Standard reports (5.4a, since P7-S2b) - four fixed report types against
+// the new reporting-service, each with a table + CSV/PDF export, plus
+// management of schedulable, email-delivered runs. Deliberately in the
+// admin UI (not the user UI) - system analytics/user activity is an
+// administrative concern, same role split as e.g. MaintenanceBanner.
 export function ReportsView() {
   const { accessToken } = useAuth();
 

@@ -15,20 +15,20 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Signaturformat ist aktuell ausschließlich PAdES (3.10) - der
-// Signature Service lehnt jede andere aktuelle Version serverseitig mit
-// einem Fehler ab (`main.py`: `content_type != "application/pdf"`). Ohne
-// diese Prüfung bot die UI das Signieren-Formular für jedes Dokument an,
-// auch wenn ein Klick garantiert scheitern musste (Nutzer-Feedback).
+// The signature format is currently exclusively PAdES (3.10) - the
+// signature service rejects any other current version server-side with an
+// error (`main.py`: `content_type != "application/pdf"`). Without this
+// check, the UI offered the sign form for every document, even though a
+// click was guaranteed to fail (user feedback).
 const SIGNABLE_CONTENT_TYPE = "application/pdf";
 
-// Anbau-Muster wie OCR-/Renditions-Anzeige in PreviewPane.tsx (eigener
-// list*-Aufruf, eigener Lade-Effekt, non-blocking Fallback-UI) - unter das
-// Metadaten-Formular gesetzt, da es sich um eine dokumentgebundene, aber
-// nicht editierbare Zusatzinformation handelt (3.10, seit P6-S7). QES ist in
-// der Niveau-Auswahl bewusst nicht wählbar - dieses Grundgerüst hat keinen
-// konfigurierten externen QTSP-Connector (siehe docs/services/
-// signature-service.md "Offene Punkte").
+// Attached using the same pattern as the OCR/rendition display in
+// PreviewPane.tsx (its own list* call, its own load effect, non-blocking
+// fallback UI) - placed below the metadata form, since this is
+// document-bound but non-editable supplementary information (3.10, since
+// P6-S7). QES is deliberately not selectable in the level selector - this
+// baseline setup has no configured external QTSP connector (see
+// docs/services/signature-service.md "Open Points").
 export function SignaturesPanel({
   document: activeDocument,
   onSigned,
@@ -55,9 +55,9 @@ export function SignaturesPanel({
       .catch(() => setError(t("signatures.loadError")));
   }, [accessToken, activeDocument.id, t]);
 
-  // Aktuelle Version auf Signierbarkeit prüfen (nur PDF, siehe oben) - eigener
-  // Aufruf statt eines Props-Durchreichens von `PreviewPane`, da beide
-  // Komponenten unabhängig voneinander eingebunden werden.
+  // Check the current version for signability (PDF only, see above) - its
+  // own call instead of passing it down as a prop from `PreviewPane`,
+  // since both components are mounted independently of each other.
   useEffect(() => {
     setIsSignable(false);
     if (!accessToken) return;
@@ -89,9 +89,9 @@ export function SignaturesPanel({
         signerPrincipalId: user.username,
       });
       setSignatures((prev) => [created, ...prev]);
-      // Die PAdES-Signatur erzeugt serverseitig eine neue Dokumentversion
-      // (ADR 0025) - PreviewPane weiß davon nichts, da beide Panels
-      // unabhängig voneinander gemountet sind (P23-S7).
+      // The PAdES signature creates a new document version server-side
+      // (ADR 0025) - PreviewPane doesn't know about this, since both
+      // panels are mounted independently of each other (P23-S7).
       onSigned?.(activeDocument.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("signatures.signError"));

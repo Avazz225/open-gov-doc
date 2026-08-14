@@ -18,14 +18,14 @@ interface ResolvedFavorite {
   folder: Folder | null;
 }
 
-// Filteransicht/Merkliste für schnelles Wiederfinden (seit P7-S1d). Löst je
-// Favorit den Anzeigenamen live über document-/folder-service auf statt ihn
-// selbst zu speichern - ein zwischenzeitlich umbenanntes/verschobenes Objekt
-// zeigt so immer den aktuellen Stand. Ein 404 (z. B. nach Löschung des
-// Originals) wird toleriert statt die ganze Liste scheitern zu lassen - der
-// Eintrag bleibt mit Platzhaltertext sichtbar und entfernbar (siehe
-// docs/services/favorite-service.md, bewusst keine referenzielle Prüfung
-// beim Anlegen eines Favoriten).
+// Filtered view/bookmark list for quickly finding things again (since
+// P7-S1d). Resolves the display name live via the document/folder service
+// for each favorite instead of storing it itself - an object that was
+// meanwhile renamed/moved this way always shows the current state. A 404
+// (e.g. after deletion of the original) is tolerated instead of letting
+// the whole list fail - the entry remains visible with placeholder text
+// and removable (see docs/services/favorite-service.md, deliberately no
+// referential check when creating a favorite).
 export function FavoritesPane({
   token,
   currentUsername,

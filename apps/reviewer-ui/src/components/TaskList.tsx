@@ -12,10 +12,10 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Freigabeaufgaben-Inbox (8, P14-S2) - konsumiert `GET /tasks`
-// (workflow-service, neu seit dieser Session), die erste Cross-Instanz-
-// Aufgabenliste im gesamten System (vorher nur je Instanz einzeln über den
-// Process Designer/curl abrufbar, siehe docs/services/reviewer-ui.md).
+// Approval task inbox (8, P14-S2) - consumes `GET /tasks` (workflow-service,
+// new since this session), the first cross-instance task list in the entire
+// system (previously only retrievable per instance individually via the
+// Process Designer/curl, see docs/services/reviewer-ui.md).
 export function TaskList() {
   const { accessToken, user } = useAuth();
   const { t } = useI18n();
@@ -30,9 +30,9 @@ export function TaskList() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  // Stellvertretung bei Abwesenheit (4.4a, P14-S11) - für wen die
-  // angemeldete Person gerade aktiv als Stellvertretung eingetragen ist,
-  // füllt die "Im Auftrag von"-Auswahl unten.
+  // Absence deputization (4.4a, P14-S11) - who the logged-in person is
+  // currently actively registered as a deputy for, populates the "On behalf
+  // of" selector below.
   const [delegations, setDelegations] = useState<Delegation[]>([]);
 
   const reload = () => {

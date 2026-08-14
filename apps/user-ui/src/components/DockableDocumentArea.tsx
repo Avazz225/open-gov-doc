@@ -24,27 +24,27 @@ import { ExplorerPane, type BreadcrumbEntry } from "./ExplorerPane";
 import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
 
-// Dockbarer Arbeitsbereich (Konzept 8, P16-S1, Bibliothekswahl siehe ADR
-// 0057/P16-S0) - ersetzt das feste, per Hand gebaute Splitter-Layout für
-// Explorer/Metadaten/Vorschau durch ein echtes VS-Code-artiges Docking
-// (`dockview-react`): Panels lassen sich frei verschieben/stapeln/abspalten,
-// mehrere Dokumente sind gleichzeitig sicht- und anordenbar. Neue
-// Standardanordnung: Explorer als eigenständiges Panel links, rechts die
-// Dokumenttabs (jetzt echte dockview-Tabs statt der früheren handgebauten
-// Tableiste in `ExplorerPane`) über der Vorschau, darunter die Metadaten des
-// gerade aktiven Dokuments.
+// Dockable workspace (concept 8, P16-S1, library choice see ADR
+// 0057/P16-S0) - replaces the fixed, hand-built splitter layout for
+// explorer/metadata/preview with a real VS-Code-style docking system
+// (`dockview-react`): panels can be freely moved/stacked/split off,
+// multiple documents are visible and arrangeable at the same time. New
+// default arrangement: explorer as a standalone panel on the left, on the
+// right the document tabs (now real dockview tabs instead of the earlier
+// hand-built tab bar in `ExplorerPane`) above the preview, below that the
+// metadata of the currently active document.
 //
-// State-Architektur: welche Dokumente offen sind (`openDocuments`) bleibt in
-// `DocumentWorkspace` (überlebt ein Aus-/Einblenden dieser Komponente beim
-// Wechsel der IconRail-Sonderbereiche, siehe dort). Alles, was NUR das
-// dockview-Layout selbst betrifft (welches Panel gerade aktiv ist, die
-// `DockviewApi`-Instanz) bleibt hier lokal. Panel-Inhalte lesen häufig
-// wechselnde Daten (Ordnerinhalt, offene Dokumente, aktives Dokument) über
-// einen React-Context statt über dockviews `params` - `params` eignet sich
-// nur für zur Panel-Erzeugungszeit feste Werte (hier: `documentId`), ein
-// Aktualisieren wechselnder Werte über `params` würde für jede Änderung
-// `panel.api.updateParameters()` erfordern, während der Context automatisch
-// mit jedem Render aktuell bleibt.
+// State architecture: which documents are open (`openDocuments`) stays in
+// `DocumentWorkspace` (survives this component being hidden/shown when
+// switching IconRail special areas, see there). Everything that concerns
+// ONLY the dockview layout itself (which panel is currently active, the
+// `DockviewApi` instance) stays local here. Panel content reads frequently
+// changing data (folder content, open documents, active document) via a
+// React context instead of via dockview's `params` - `params` is only
+// suited for values fixed at panel creation time (here: `documentId`),
+// updating changing values via `params` would require
+// `panel.api.updateParameters()` for every change, while the context
+// automatically stays current with every render.
 const LAYOUT_STORAGE_KEY = "dms.workspace.dockLayout";
 const EMPTY_PANEL_ID = "preview-empty";
 const EXPLORER_PANEL_ID = "explorer";
@@ -145,14 +145,14 @@ const PANEL_COMPONENTS = {
   documentPreview: DocumentPreviewContent,
 };
 
-// Ohne eigenes `theme` fällt dockview-core auf sein eingebautes `themeAbyss`-
-// Preset zurück, dessen CSS-Klasse dieselben `--dv-*`-Variablen erneut mit
-// fest verdrahteten dunklen Werten belegt - das überschreibt die eigentlich
-// theme-fähige `--dv-*`→`--dms-*`-Zuordnung in globals.css innerhalb des
-// gesamten dockview-Hosts, unabhängig vom aktuellen `data-theme` (Bug: der
-// Arbeitsbereich blieb dadurch immer dunkel). Ein Theme-Objekt ohne eigene,
-// irgendwo definierte CSS-Klasse setzt keine eigenen `--dv-*`-Werte, sodass
-// die bereits vorhandene `:root`-Zuordnung ungehindert durchgereicht wird.
+// Without its own `theme`, dockview-core falls back to its built-in
+// `themeAbyss` preset, whose CSS class assigns the same `--dv-*` variables
+// fixed dark values again - this overrides the actually theme-capable
+// `--dv-*`→`--dms-*` mapping in globals.css within the entire dockview
+// host, regardless of the current `data-theme` (bug: the workspace
+// therefore always stayed dark). A theme object without its own CSS class
+// defined anywhere sets no `--dv-*` values of its own, so the
+// already-existing `:root` mapping is passed through unhindered.
 const DMS_DOCKVIEW_THEME: DockviewTheme = {
   name: "dms",
   className: "dms-dockview-theme",
@@ -228,20 +228,20 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       try {
         window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
       } catch {
-        // localStorage kann in seltenen Fällen (Privatmodus, Kontingent)
-        // fehlschlagen - das Layout bleibt dann nur für die laufende
-        // Sitzung erhalten, kein Retry in diesem Grundgerüst.
+        // localStorage can fail in rare cases (private mode, quota) -
+        // the layout is then only kept for the current
+        // session, no retry in this scaffold.
       }
     }, []);
 
-    // `title: doc.title` bewusst der rohe Dokumenttitel, nicht die
-    // Kennzeichen-formatierte Anzeige aus `formatDocumentTitle`
-    // (`@/lib/kennzeichen`, siehe `ExplorerPane`) - deren Objekttyp-/
-    // Konfigurationsdaten (`documentTypeById`, `kennzeichenShowByDefault`)
-    // müssten sonst aus `ExplorerPane` heraus- und hierher hochgehoben
-    // werden. Gleiche Vereinfachung wie `PreviewPane`s Überschrift, die
-    // ebenfalls schon immer nur den rohen Titel zeigt - bewusste Grenze
-    // dieses Grundgerüsts (P16-S1), keine Regression.
+    // `title: doc.title` deliberately the raw document title, not the
+    // reference-number-formatted display from `formatDocumentTitle`
+    // (`@/lib/kennzeichen`, see `ExplorerPane`) - its object-type/
+    // configuration data (`documentTypeById`, `kennzeichenShowByDefault`)
+    // would otherwise have to be lifted out of `ExplorerPane` and up to here.
+    // Same simplification as `PreviewPane`'s heading, which has also always
+    // shown only the raw title - a deliberate limitation of this scaffold
+    // (P16-S1), not a regression.
     const docPanelOptions = useCallback(
       (doc: DocumentSummary, position?: { referencePanel: string; direction: "right" | "within" }) => ({
         id: `${DOC_PANEL_PREFIX}${doc.id}`,
@@ -253,18 +253,18 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       []
     );
 
-    // Werksstandard (Konzept 8): Explorer eigenständig links, rechts oben
-    // die Dokumenttabs (leerer Platzhalter, falls keine offen sind) über der
-    // Vorschau, darunter Metadaten - genau die neue, bei P16-S0 verifizierte
-    // Standardanordnung ("Dokumenttabs künftig über der Vorschau statt über
-    // dem Explorer"). Baut bereits offene Dokumente DIREKT mit ein, statt
-    // erst einen Platzhalter anzulegen und ihn im Anschluss separat zu
-    // entfernen: ein `addPanel()` gefolgt von einem SOFORTIGEN `getPanel()`/
-    // `removePanel()` auf denselben, gerade erst erzeugten Platzhalter
-    // findet dockview-intern zuverlässig NICHT (vermutlich intern verzögerte
-    // Registrierung) - live über einen fehlgeschlagenen "Zurücksetzen"-Test
-    // gefunden (doppeltes Vorschau-Panel blieb bestehen). Ein einziger,
-    // in sich konsistenter Aufbau-Durchlauf umgeht das vollständig.
+    // Factory default (concept 8): explorer standalone on the left, top
+    // right the document tabs (empty placeholder if none are open) above
+    // the preview, below that metadata - exactly the new default arrangement
+    // verified in P16-S0 ("document tabs going forward above the preview
+    // instead of above the explorer"). Includes already-open documents
+    // DIRECTLY, instead of first creating a placeholder and then removing it
+    // separately afterward: an `addPanel()` followed by an IMMEDIATE
+    // `getPanel()`/`removePanel()` on the same, just-created placeholder
+    // reliably does NOT work internally in dockview (presumably internally
+    // delayed registration) - found live via a failing "reset" test
+    // (duplicate preview panel remained). A single, internally consistent
+    // build pass avoids this entirely.
     const buildDefaultLayout = useCallback(
       (api: DockviewApi, docs: DocumentSummary[]) => {
         api.clear();
@@ -300,11 +300,10 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       [t, docPanelOptions]
     );
 
-    // Fügt EIN weiteres Dokument in eine BEREITS BESTEHENDE, settled Anordnung
-    // ein (Explorer/Vorschau/Metadaten existieren schon aus einem früheren
-    // Render/Tick) - anders als `buildDefaultLayout` oben ist hier kein
-    // Timing-Risiko bekannt, da nichts unmittelbar zuvor selbst erzeugt
-    // wurde.
+    // Adds ONE additional document into an ALREADY EXISTING, settled
+    // arrangement (explorer/preview/metadata already exist from an earlier
+    // render/tick) - unlike `buildDefaultLayout` above, no timing risk is
+    // known here, since nothing was just created immediately before.
     const addDocumentPanel = useCallback(
       (api: DockviewApi, doc: DocumentSummary) => {
         const panelId = `${DOC_PANEL_PREFIX}${doc.id}`;
@@ -346,23 +345,22 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
         if (!restored) {
           buildDefaultLayout(api, openDocuments);
         } else {
-          // Bereits offene Dokumente, die im gespeicherten Layout fehlen
-          // (z. B. weil die Sitzung sie nach dem letzten Speichern noch
-          // geöffnet hat), einzeln nachträglich einhängen.
+          // Retroactively mount, one by one, already-open documents that are
+          // missing from the saved layout (e.g. because the session opened
+          // them after the last save).
           openDocuments.forEach((doc) => {
             if (!api.getPanel(`${DOC_PANEL_PREFIX}${doc.id}`)) addDocumentPanel(api, doc);
           });
         }
 
-        // Nur EIN Panel ist jemals global "aktiv" (dockview-Konzept über die
-        // gesamte Gridview hinweg, nicht je Gruppe) - ein Klick in die
-        // Metadaten- oder Explorer-Gruppe macht DIESE zum aktiven Panel und
-        // würde `activeDocumentId` sonst fälschlich auf `null` zurücksetzen
-        // (die Metadaten-Anzeige würde sich selbst leeren, sobald man
-        // hineinklickt, um z. B. ein Feld zu bearbeiten). Deshalb nur bei
-        // einem Wechsel AUF ein Dokument-Panel aktualisieren; ein Wechsel
-        // AUF Explorer/Metadaten/Vorschau-Platzhalter lässt das zuletzt
-        // aktive Dokument unangetastet.
+        // Only ONE panel is ever globally "active" (dockview concept across
+        // the entire gridview, not per group) - a click into the metadata or
+        // explorer group makes THAT the active panel and would otherwise
+        // wrongly reset `activeDocumentId` to `null` (the metadata display
+        // would clear itself as soon as you click into it, e.g. to edit a
+        // field). Therefore only update on a switch TO a document panel; a
+        // switch TO the explorer/metadata/preview placeholder leaves the
+        // last active document untouched.
         api.onDidActivePanelChange((changeEvent) => {
           const panel = changeEvent.panel;
           if (panel && panel.id.startsWith(DOC_PANEL_PREFIX)) {
@@ -389,13 +387,12 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
 
         api.onDidLayoutChange(() => persistLayout(api));
       },
-      // `openDocuments` bewusst nicht in den Deps: `onReady` wird von
-      // dockview nur EINMAL beim Erststart aufgerufen (kein Re-Init bei
-      // Prop-Änderungen), der Nachhol-Schritt oben braucht ohnehin nur den
-      // zum Mount-Zeitpunkt gültigen Bestand. `onCloseDocument` ist über
-      // `useCallback` mit funktionalem `setState` in `DocumentWorkspace`
-      // stabil, damit der spätere `onDidRemovePanel`-Listener nie eine
-      // veraltete Fassung aufruft.
+      // `openDocuments` deliberately not in the deps: `onReady` is called by
+      // dockview only ONCE on initial startup (no re-init on prop changes),
+      // the catch-up step above only needs the set valid at mount time
+      // anyway. `onCloseDocument` is kept stable via `useCallback` with
+      // functional `setState` in `DocumentWorkspace`, so the later
+      // `onDidRemovePanel` listener never calls a stale version.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [buildDefaultLayout, addDocumentPanel, persistLayout, t, onCloseDocument]
     );

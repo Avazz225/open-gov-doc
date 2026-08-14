@@ -12,9 +12,9 @@ import type { DmnDesignerHandle } from "@/components/DmnDesigner";
 
 const CAN_MANAGE_CAPABILITY = "admin.object_config";
 
-// Minimale Start-Entscheidungstabelle als Vorlage für "Neu erstellen" -
-// dmn-js braucht wie bpmn-js immer ein gültiges, importierbares
-// Ausgangsdiagramm (7.1, P14-S4).
+// Minimal starter decision table as a template for "Create new" -
+// dmn-js, like bpmn-js, always needs a valid, importable
+// starting diagram (7.1, P14-S4).
 const STARTER_DMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" id="Definitions_1" name="definitions" namespace="http://camunda.org/schema/1.0/dmn">
   <decision id="Decision_1" name="Neue Entscheidungstabelle">
@@ -29,8 +29,8 @@ const STARTER_DMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
   </decision>
 </definitions>`;
 
-// `next/dynamic`/`{ssr:false}` - siehe designer/page.tsx (dmn-js manipuliert
-// wie bpmn-js beim Modul-Import direkt das DOM).
+// `next/dynamic`/`{ssr:false}` - see designer/page.tsx (dmn-js, like
+// bpmn-js, manipulates the DOM directly on module import).
 const DmnDesigner = dynamic(
   () => import("@/components/DmnDesigner").then((m) => m.DmnDesigner),
   { ssr: false }
@@ -52,10 +52,10 @@ function DmnDesignerPageInner() {
   const [isSaving, setIsSaving] = useState(false);
   const handleRef = useRef<DmnDesignerHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // `undefined`-Sentinel statt `null` - siehe designer/page.tsx (P14-S4-Fund):
-  // `searchParams.get("id")` liefert bei fehlendem `?id=` ebenfalls `null`,
-  // ein mit `null` initialisierter Ref würde die Erstinitialisierung sonst
-  // fälschlich überspringen.
+  // `undefined` sentinel instead of `null` - see designer/page.tsx (P14-S4 finding):
+  // `searchParams.get("id")` also returns `null` when `?id=` is missing,
+  // a ref initialized with `null` would otherwise incorrectly
+  // skip the initial render.
   const loadedForId = useRef<string | null | undefined>(undefined);
 
   if (loadedForId.current !== id) {
@@ -175,8 +175,8 @@ function DmnDesignerPageInner() {
   );
 }
 
-// `useSearchParams()` braucht laut Next.js unter `output:"export"` eine
-// umschließende Suspense-Grenze, siehe designer/page.tsx.
+// According to Next.js, `useSearchParams()` needs an enclosing Suspense
+// boundary under `output:"export"`, see designer/page.tsx.
 export default function DmnDesignerPage() {
   return (
     <RequireAuth>

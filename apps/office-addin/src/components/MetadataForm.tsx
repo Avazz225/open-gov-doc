@@ -4,11 +4,11 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, getObjectType, type ObjectTypeAttribute } from "@/lib/api";
 
-// Inline-Metadaten-Bearbeitung (3.3a: "statt dafür die Anwendung zu
-// wechseln") - bewusst vereinfacht gegenüber user-ui's `LayoutFormFields`
-// (2.2b): ein einfaches Textfeld je Attribut statt typspezifischer Widgets/
-// Layout-Anordnung, angemessen für die schmale Taskpane-Breite. Siehe
-// docs/services/office-addin.md "Offene Punkte".
+// Inline metadata editing (3.3a: "instead of switching applications for
+// that") - deliberately simplified compared to user-ui's `LayoutFormFields`
+// (2.2b): a simple text field per attribute instead of type-specific
+// widgets/layout arrangement, appropriate for the narrow task pane width.
+// See docs/services/office-addin.md "Open Points".
 export function MetadataForm({
   token,
   objectTypeId,

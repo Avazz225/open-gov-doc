@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import HomePage from "@/app/page";
 import { I18nProvider } from "@/i18n";
 
-// Tab-Umschalter Prozessdefinitionen/DMN-Entscheidungstabellen (P14-S4) -
-// die beiden Listen-Komponenten selbst sind bereits eigenständig getestet
-// (process-definition-list.test.tsx/dmn-definition-list.test.tsx), hier wird
-// nur das Umschaltverhalten verifiziert.
+// Tab switcher for process definitions/DMN decision tables (P14-S4) -
+// the two list components themselves are already tested independently
+// (process-definition-list.test.tsx/dmn-definition-list.test.tsx); here
+// only the switching behavior is verified.
 vi.mock("@/components/ProcessDefinitionList", () => ({
   ProcessDefinitionList: () => <div data-testid="process-list" />,
 }));

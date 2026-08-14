@@ -19,8 +19,8 @@ import type { BpmnDesignerHandle } from "@/components/BpmnDesigner";
 
 const CAN_MANAGE_CAPABILITY = "admin.object_config";
 
-// Minimales Start-Event-Diagramm als Vorlage für "Neu erstellen" - `bpmn-js`
-// braucht immer ein gültiges, importierbares Ausgangsdiagramm.
+// Minimal start-event diagram as a template for "Create new" - `bpmn-js`
+// always needs a valid, importable starting diagram.
 const STARTER_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
@@ -38,9 +38,9 @@ const STARTER_BPMN_XML = `<?xml version="1.0" encoding="UTF-8"?>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>`;
 
-// `next/dynamic`/`{ssr:false}`, da bpmn-js beim Modul-Import direkt das DOM
-// anfasst (eigenes SVG-Canvas) - unvereinbar mit Next.js' Build-Zeit-
-// Renderdurchlauf unter `output:"export"`.
+// `next/dynamic`/`{ssr:false}`, because bpmn-js touches the DOM directly
+// on module import (its own SVG canvas) - incompatible with Next.js'
+// build-time render pass under `output:"export"`.
 const BpmnDesigner = dynamic(
   () => import("@/components/BpmnDesigner").then((m) => m.BpmnDesigner),
   { ssr: false }
@@ -56,10 +56,10 @@ function DesignerPageInner() {
 
   const [name, setName] = useState("");
   const [initialXml, setInitialXml] = useState<string | null>(null);
-  // `null` = noch nicht geladen - Rendern von BpmnDesigner wartet darauf, damit
-  // die Föderations-Properties-Panel-Gruppe (7.4, P6-S9) beim allerersten
-  // Aufbau des Modelers bereits die richtige Installationsliste injiziert
-  // bekommt (siehe components/BpmnDesigner.tsx).
+  // `null` = not yet loaded - rendering of BpmnDesigner waits for this so that
+  // the federation properties panel group (7.4, P6-S9) already gets the
+  // correct installation list injected during the very first
+  // construction of the modeler (see components/BpmnDesigner.tsx).
   const [federationInstallations, setFederationInstallations] = useState<
     FederationInstallationSummary[] | null
   >(null);
@@ -69,13 +69,13 @@ function DesignerPageInner() {
   const [isSaving, setIsSaving] = useState(false);
   const handleRef = useRef<BpmnDesignerHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // `undefined` als Sentinel, NICHT `null` - `searchParams.get("id")` liefert
-  // bei fehlendem `?id=` (Neuanlage) ebenfalls `null`, ein `useRef<string |
-  // null>(null)` würde die Erstinitialisierung dann fälschlich als "bereits
-  // geladen" ansehen (`null !== null` ist `false`) und den Zweig unten nie
-  // ausführen - `initialXml` bliebe dauerhaft `null`, der Designer würde nie
-  // gerendert (real gefunden bei der P14-S4-Browser-Verifikation, betraf
-  // jede Neuanlage ohne `?id=`).
+  // `undefined` as sentinel, NOT `null` - `searchParams.get("id")` also
+  // returns `null` when `?id=` is missing (new creation); a `useRef<string |
+  // null>(null)` would then incorrectly treat the initial render as "already
+  // loaded" (`null !== null` is `false`) and never run the branch
+  // below - `initialXml` would stay `null` forever, and the designer would never
+  // be rendered (actually found during P14-S4 browser verification, affected
+  // every new creation without `?id=`).
   const loadedForId = useRef<string | null | undefined>(undefined);
 
   if (loadedForId.current !== id) {
@@ -97,8 +97,8 @@ function DesignerPageInner() {
     if (!accessToken) return;
     listFederationInstallations(accessToken)
       .then(setFederationInstallations)
-      // Fail-open statt den ganzen Designer zu blockieren - ohne erreichbaren
-      // Hub bleibt die Föderations-Gruppe einfach ausgeblendet.
+      // Fail-open instead of blocking the whole designer - without a reachable
+      // hub, the federation group simply stays hidden.
       .catch(() => setFederationInstallations([]));
   }, [accessToken]);
 
@@ -142,10 +142,10 @@ function DesignerPageInner() {
         bpmnXml: xml,
       });
       if (isPendingApproval(saved)) {
-        // Post-Roadmap Phase 21 Session 4 (ADR 0087): mit aktivierter
-        // Genehmigungspflicht existiert noch keine Prozessdefinition, auf
-        // die navigiert werden könnte - ein zweiter Admin muss den
-        // Freigabe-Request erst bestätigen.
+        // Post-roadmap Phase 21 Session 4 (ADR 0087): with approval requirement
+        // enabled, there is not yet a process definition to
+        // navigate to - a second admin must first confirm the
+        // approval request.
         setSaveSuccess(t("designer.savePendingApproval"));
       } else {
         setSaveSuccess(t("designer.saveSuccess", { version: saved.version }));
@@ -216,8 +216,8 @@ function DesignerPageInner() {
   );
 }
 
-// `useSearchParams()` braucht laut Next.js unter `output:"export"` eine
-// umschließende Suspense-Grenze, sonst schlägt der statische Build fehl.
+// According to Next.js, `useSearchParams()` needs an enclosing Suspense
+// boundary under `output:"export"`, otherwise the static build fails.
 export default function DesignerPage() {
   return (
     <RequireAuth>

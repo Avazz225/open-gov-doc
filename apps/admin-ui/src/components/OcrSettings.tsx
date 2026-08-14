@@ -5,12 +5,12 @@ import { useI18n } from "@/i18n";
 import { ApiError, getOcrConfig, updateOcrConfig, type OcrConfig } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// ocrEnabled (3.9) ist bewusst NICHT hier editierbar - das ist ein Docker-
-// Compose-Profil-Opt-out (ADR 0016): der Container wird gar nicht deployt,
-// eine bereits laufende Instanz kann sich nicht selbst "undeployen". Ist der
-// Service nicht erreichbar, zeigt diese Seite genau das an (unreachable
-// statt eines Fehlers) - das ist zugleich der sichtbare Status von
-// "ocrEnabled=false" in dieser UI, ohne einen eigenen Schalter dafür.
+// ocrEnabled (3.9) is deliberately NOT editable here - it is a Docker
+// Compose profile opt-out (ADR 0016): the container isn't deployed at all,
+// and an already-running instance cannot "undeploy" itself. If the service
+// is unreachable, this page shows exactly that (unreachable instead of an
+// error) - which also serves as the visible status of "ocrEnabled=false" in
+// this UI, without a dedicated toggle for it.
 export function OcrSettings() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

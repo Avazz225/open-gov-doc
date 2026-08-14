@@ -4,10 +4,11 @@ import { useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { useInstallation } from "@/lib/installation-context";
 
-// Verwaltung der Installationsliste (P4-S5, Konzept 3a/8) - rein clientseitig
-// in `localStorage` (siehe `lib/installations.ts`), kein Backend-Endpunkt
-// dafür nötig. Jede Installation braucht eine eigene Anmeldung, aber genau
-// einmal - danach erlaubt der `InstallationSwitcher` verlustfreies Wechseln.
+// Management of the installation list (P4-S5, concept 3a/8) - purely
+// client-side in `localStorage` (see `lib/installations.ts`), no backend
+// endpoint needed for this. Each installation needs its own login, but
+// exactly once - after that, the `InstallationSwitcher` allows lossless
+// switching.
 export function InstallationManager() {
   const { t } = useI18n();
   const { installations, activeInstallation, addInstallation, removeInstallation, switchInstallation } =

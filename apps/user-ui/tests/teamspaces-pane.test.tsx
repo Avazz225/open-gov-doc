@@ -87,10 +87,10 @@ describe("TeamspacesPane", () => {
     listTeamspaceMembersMock.mockResolvedValue([ALICE_MEMBER]);
     listTeamspaceAppointmentsMock.mockResolvedValue([]);
     listTeamspaceContactsMock.mockResolvedValue([]);
-    // Standardmäßig nicht auflösbar (P19-S4) - `usePrincipalNames` fällt in
-    // diesem Fall auf die rohe principal_id zurück, bestehende Tests bleiben
-    // dadurch unverändert gültig; ein dedizierter Test unten prüft die
-    // tatsächliche Namensauflösung.
+    // Not resolvable by default (P19-S4) - `usePrincipalNames` falls back to
+    // the raw principal_id in this case, keeping existing tests valid
+    // unchanged; a dedicated test below verifies the
+    // actual name resolution.
     lookupUserByIdMock.mockRejectedValue(new Error("not mocked"));
   });
 

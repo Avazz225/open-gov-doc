@@ -24,12 +24,12 @@ import {
 } from "@/lib/api";
 import { usePrincipalNames } from "@/lib/usePrincipalNames";
 
-// Team-Arbeitsbereich "Teamspace" (2.5, P14-S6) - selbstverwalteter,
-// dauerhafter Gruppenbereich. Master-Detail-Ansicht: links die Liste der
-// Teamspaces, in denen `currentPrincipalId` Mitglied ist (+ Neuanlage-
-// Formular), rechts Mitglieder/Termine/Kontakte des ausgewählten Teamspace
-// samt "Ordner öffnen"-Sprung in den regulären Dokumenten-Explorer (der
-// Wurzelordner ist ein gewöhnlicher `folder-service`-Ordner, siehe
+// Team workspace "Teamspace" (2.5, P14-S6) - self-managed, persistent
+// group area. Master-detail view: list of teamspaces where
+// `currentPrincipalId` is a member on the left (+ a create form), members/
+// appointments/contacts of the selected teamspace on the right, including
+// an "Ordner öffnen" jump into the regular document explorer (the root
+// folder is an ordinary `folder-service` folder, see
 // docs/services/teamspace-service.md).
 export function TeamspacesPane({
   token,
@@ -60,8 +60,8 @@ export function TeamspacesPane({
 
   const currentMember = members.find((m) => m.principal_id === currentPrincipalId) ?? null;
   const canManage = currentMember?.can_manage_members ?? false;
-  // Rückwärts-Identitätsauflösung (P19-S4, ADR 0069) - zeigt Namen statt
-  // roher principal_id-UUIDs in der Mitgliederliste unten.
+  // Reverse identity resolution (P19-S4, ADR 0069) - shows names instead
+  // of raw principal_id UUIDs in the member list below.
   const principalNames = usePrincipalNames(
     token,
     members.map((m) => m.principal_id)

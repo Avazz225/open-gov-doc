@@ -11,8 +11,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Direkte Installations-Paarung statt Hub-Vermittlung (7.2, ADR 0034) - jede
-// Zeile hier ist eine mögliche Ziel-Installation für `TransferConsole`.
+// Direct installation pairing instead of hub mediation (7.2, ADR 0034) - each
+// row here is a possible target installation for `TransferConsole`.
 export function PairedInstallationList() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

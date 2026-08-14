@@ -1,5 +1,5 @@
-// Zur Build-Zeit fest eingebrannt (statischer Export, Konzept 8 - kein Server,
-// der zur Laufzeit Konfiguration nachladen könnte). Für einen anderen
-// Gateway-Endpunkt muss das Image mit einem anderen Wert neu gebaut werden.
+// Baked in at build time (static export, Concept 8 - no server
+// that could reload configuration at runtime). For a different
+// gateway endpoint, the image must be rebuilt with a different value.
 export const GATEWAY_BASE_URL =
   process.env.NEXT_PUBLIC_GATEWAY_BASE_URL ?? "http://localhost:8009";

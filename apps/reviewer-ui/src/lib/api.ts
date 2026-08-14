@@ -19,9 +19,9 @@ async function extractErrorMessage(response: Response): Promise<string> {
   }
 }
 
-// Jeder Aufruf geht über das Gateway (3.5): /api/{service_type}/{path} statt
-// direkter Backend-Adressen - Registry-Auflösung und Auth-Prüfung passieren
-// dort, nicht hier.
+// Every call goes through the gateway (3.5): /api/{service_type}/{path}
+// instead of direct backend addresses - registry resolution and auth
+// checking happen there, not here.
 async function request(
   serviceType: string,
   path: string,
@@ -79,12 +79,13 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
   return response.json();
 }
 
-// Anders als admin-ui/process-designer wertet diese App keine domänengetrennte
-// Admin-Rolle aus (weder Task-Abschluss noch Vier-Augen-Entscheidungen sind
-// backend-seitig capability-gegated, siehe docs/services/reviewer-ui.md
-// "Autorisierung") - trotzdem abgerufen, falls eine spätere Session gezielt
-// einzelne Aktionen einschränken will, ohne die Auth-Schicht anfassen zu
-// müssen (identisches Muster wie process-designer/admin-ui/user-ui).
+// Unlike admin-ui/process-designer, this app does not evaluate a
+// domain-separated admin role (neither task completion nor four-eyes
+// decisions are capability-gated on the backend, see
+// docs/services/reviewer-ui.md "Authorization") - still fetched in case a
+// later session wants to restrict individual actions in a targeted way
+// without having to touch the auth layer (identical pattern to
+// process-designer/admin-ui/user-ui).
 export async function getEffectivePermissions(
   token: string,
   principalId: string
@@ -129,13 +130,13 @@ export async function getMaintenanceStatus(token: string): Promise<MaintenanceMo
   return response.json();
 }
 
-// --- Workflow Engine (7.1) - Freigabeaufgaben (Manual/Signature Tasks) -----
+// --- Workflow Engine (7.1) - approval tasks (Manual/Signature Tasks) -------
 //
-// `GET /tasks` (workflow-service, seit P14-S2) listet die bereiten Tasks über
-// ALLE laufenden Instanzen hinweg - vorher gab es nur die instanzgebundene
-// `GET /instances/{id}/tasks`, für eine Reviewer-Inbox ungeeignet. Federierte
-// Tasks (7.4) sind darin bereits serverseitig herausgefiltert (werden
-// automatisch über den Federation Hub abgeschlossen, nie von einem Menschen).
+// `GET /tasks` (workflow-service, since P14-S2) lists the ready tasks across
+// ALL running instances - previously there was only the instance-bound
+// `GET /instances/{id}/tasks`, which is unsuitable for a reviewer inbox.
+// Federated tasks (7.4) are already filtered out server-side (they are
+// completed automatically via the Federation Hub, never by a human).
 export interface ReadyTaskWithInstance {
   id: string;
   name: string;
@@ -180,13 +181,13 @@ export async function completeTask(
   );
 }
 
-// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - für wen die angemeldete
-// Person gerade aktiv als Stellvertretung eingetragen ist, gefüllt vom neuen
-// `permission-service`-Delegationsendpunkt (siehe docs/services/
-// permission-service.md). Nur diese Liste befüllt die "Im Auftrag von"-
-// Auswahl in `TaskList.tsx` - die eigentliche Berechtigungsprüfung passiert
-// serverseitig beim Abschluss selbst (workflow-service), diese Liste ist
-// reine UX-Hilfe.
+// Absence deputization (4.4a, P14-S11) - who the logged-in person is
+// currently actively registered as a deputy for, populated by the new
+// `permission-service` delegation endpoint (see
+// docs/services/permission-service.md). Only this list populates the "On
+// behalf of" selector in `TaskList.tsx` - the actual permission check
+// happens server-side at completion itself (workflow-service), this list is
+// purely a UX aid.
 export interface Delegation {
   id: string;
   delegator_principal_id: string;
@@ -208,14 +209,14 @@ export async function listActiveDelegationsForDeputy(
   return response.json();
 }
 
-// --- Permission Service (4.3) - generische Vier-Augen-Freigaben ------------
+// --- Permission Service (4.3) - generic four-eyes approvals ----------------
 //
-// `permission-service`s `/approval-requests` ist bereits vollständig generisch
-// über ALLE `action_type`s hinweg (Dokument-/Ordnerlöschung, Superuser-
-// Aktivierung, Bereichssperren, Migrationstransfers, ...) - bislang gab es nur
-// je Aufrufer eng gefilterte Konsumenten (admin-ui/user-ui, siehe
-// docs/services/reviewer-ui.md), diese App ist der erste generische, alle
-// Aktionstypen gleichermaßen zeigende Konsument.
+// `permission-service`'s `/approval-requests` is already fully generic
+// across ALL `action_type`s (document/folder deletion, superuser
+// activation, scope locks, migration transfers, ...) - previously there
+// were only narrowly filtered per-caller consumers (admin-ui/user-ui, see
+// docs/services/reviewer-ui.md); this app is the first generic consumer
+// that shows all action types equally.
 export interface ApprovalRequest {
   id: string;
   action_type: string;

@@ -21,11 +21,11 @@ function shareUrlFor(shareToken: string): string {
   return `${window.location.origin}/share?token=${encodeURIComponent(shareToken)}`;
 }
 
-// Öffentlicher Freigabelink (4.2a, P14-S10) - erreichbar über einen neuen
-// Kontextmenü-Eintrag in ExplorerPane.tsx (nur wenn `share-link-config`
-// `enabled` meldet, siehe dortiges Laden). Gleiches Modal-Muster wie
-// FolderRetentionModal.tsx: Liste bestehender Links + ein Erzeugen-Formular
-// in einem Dialog, `.modal-backdrop`/`.modal-content`-Klassen wiederverwendet.
+// Public share link (4.2a, P14-S10) - reachable via a new context menu
+// entry in ExplorerPane.tsx (only when `share-link-config` reports
+// `enabled`, see the loading there). Same modal pattern as
+// FolderRetentionModal.tsx: list of existing links + a create form in one
+// dialog, reusing the `.modal-backdrop`/`.modal-content` classes.
 export function ShareLinkModal({
   documentId,
   documentTitle,

@@ -1,9 +1,9 @@
 import { GATEWAY_BASE_URL } from "./config";
 
-// Mehrfachinstallationen (P4-S5, Konzept 3a/8): Die Admin-UI hält eine Liste
-// konfigurierter Installationen (je mit eigenem Gateway-Endpunkt) rein
-// clientseitig in `localStorage` - kein eigener Backend-Prozess dafür, da
-// diese Liste rein administrative UI-Präferenz ist, keine fachliche Daten.
+// Multiple installations (P4-S5, Concept 3a/8): The admin UI keeps a list
+// of configured installations (each with its own gateway endpoint) purely
+// client-side in `localStorage` - no dedicated backend process for this, since
+// this list is purely an administrative UI preference, not business data.
 export interface Installation {
   id: string;
   name: string;

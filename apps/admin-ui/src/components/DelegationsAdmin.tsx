@@ -21,13 +21,13 @@ function statusLabel(t: (path: string) => string, delegation: Delegation): strin
   return t("delegationsAdmin.statusPending");
 }
 
-// Stellvertretung bei Abwesenheit (4.4a, P14-S11) - reine Admin-Übersicht
-// über ALLE hinterlegten Delegationen installationsweit (`GET /delegations`
-// ohne Filter), mit Widerrufsmöglichkeit für eine berechtigte Admin-Rolle
-// (`share_link_revoke_admin_role`-artiges Muster, hier
-// `delegation_revoke_admin_role`, serverseitig in permission-service
-// geprüft - diese Seite selbst gated nichts zusätzlich, gleiches Prinzip
-// wie ArchivalTransfersView).
+// Delegation during absence (4.4a, P14-S11) - a pure admin overview of ALL
+// delegations recorded installation-wide (`GET /delegations` without a
+// filter), with a revoke option for an authorized admin role
+// (a pattern like `share_link_revoke_admin_role`, here
+// `delegation_revoke_admin_role`, checked server-side in permission-service
+// - this page itself gates nothing additionally, the same principle as
+// ArchivalTransfersView).
 export function DelegationsAdmin() {
   const { accessToken } = useAuth();
   const { t } = useI18n();

@@ -3,11 +3,11 @@ import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { installOfficeMock } from "./office-mock";
 
-// jsdoms Blob-Polyfill implementiert `arrayBuffer()` nicht (gleiche Lücke
-// wie `Blob.prototype.text` in apps/user-ui/tests/setup.ts seit P5d-S2) -
-// `lib/office.ts`s `blobToBase64` braucht es, um heruntergeladene DMS-
-// Dokumentinhalte für `insertFileFromBase64` zu kodieren. `FileReader` ist
-// in jsdom vollständiger implementiert, darüber lässt sich das nachbilden.
+// jsdom's Blob polyfill does not implement `arrayBuffer()` (same gap
+// as `Blob.prototype.text` in apps/user-ui/tests/setup.ts since P5d-S2) -
+// `lib/office.ts`'s `blobToBase64` needs it to encode downloaded DMS
+// document content for `insertFileFromBase64`. `FileReader` is
+// more fully implemented in jsdom, so this can be reconstructed via that.
 if (typeof Blob !== "undefined" && !Blob.prototype.arrayBuffer) {
   Blob.prototype.arrayBuffer = function (this: Blob): Promise<ArrayBuffer> {
     return new Promise((resolve, reject) => {
@@ -19,12 +19,12 @@ if (typeof Blob !== "undefined" && !Blob.prototype.arrayBuffer) {
   };
 }
 
-// Kein echter Office-Host in dieser Umgebung verfügbar (kein Windows/Office/
-// gültiger M365-Sideloading-Mandant) - jeder Test läuft gegen einen
-// handgeschriebenen Fake von `Office`/`Word` (office-mock.ts), demselben
-// Prinzip wie das Mocken von `fetch` in den übrigen Frontend-Apps dieses
-// Projekts. Wird vor jedem Test frisch installiert, einzelne Tests können
-// das zurückgegebene Objekt weiter anpassen/spionieren.
+// No real Office host available in this environment (no Windows/Office/
+// valid M365 sideloading tenant) - every test runs against a
+// hand-written fake of `Office`/`Word` (office-mock.ts), the same
+// principle as mocking `fetch` in the other frontend apps of this
+// project. Freshly installed before each test; individual tests can
+// further adapt/spy on the returned object.
 installOfficeMock();
 
 afterEach(() => {

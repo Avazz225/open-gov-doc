@@ -19,21 +19,21 @@ import {
 import type { CurrentUser, TokenResponse } from "./api";
 import { useInstallation } from "./installation-context";
 
-// Bekannte Vereinfachung dieses Grundgerüsts: Tokens liegen im localStorage,
-// nicht in einem httpOnly-Cookie - einfachste Variante für eine rein
-// clientseitig gerenderte SPA ohne eigenes Backend (Konzept 8). XSS-Härtung
-// (z. B. über eine Session-Cookie-Ausgabe durch das Gateway) ist ein späterer
-// Schritt, siehe docs/services/user-ui.md "Offene Punkte".
+// Known simplification of this scaffolding: tokens live in localStorage,
+// not in an httpOnly cookie - the simplest option for a purely client-side
+// rendered SPA without its own backend (Concept 8). XSS hardening (e.g. via
+// a session cookie issued by the gateway) is a later step, see
+// docs/services/user-ui.md "Open Points".
 interface StoredTokens {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
 }
 
-// Eigener Storage-Key je Installation (P4-S5, Konzept 3a/8): Wechsel zwischen
-// Installationen darf die Sitzung(en) der jeweils anderen nicht berühren -
-// "kein erneutes Anmelden, solange die Sitzung gilt" gilt pro Installation,
-// nicht global.
+// Separate storage key per installation (P4-S5, Concept 3a/8): switching
+// between installations must not touch the other installations' session(s) -
+// "no need to log in again while the session is valid" applies per
+// installation, not globally.
 function storageKey(installationId: string): string {
   return `dms.tokens.${installationId}`;
 }
@@ -62,16 +62,16 @@ function toStoredTokens(response: TokenResponse): StoredTokens {
   return {
     accessToken: response.access_token,
     refreshToken: response.refresh_token,
-    // 30s Sicherheitsabstand, damit ein Refresh nicht erst nach Ablauf greift.
+    // 30s safety margin so a refresh doesn't only kick in after expiry.
     expiresAt: Date.now() + (response.expires_in - 30) * 1000,
   };
 }
 
 interface AuthContextValue {
   user: CurrentUser | null;
-  // Domänengetrennte Admin-Rollen (4.6, P6-S5): systemeigene Capabilities aus
-  // dem Permission Service, NICHT aus `user.realm_roles` - getrennte Quelle,
-  // siehe api.ts `getEffectivePermissions`.
+  // Domain-separated admin roles (4.6, P6-S5): system-native capabilities
+  // from the Permission Service, NOT from `user.realm_roles` - a separate
+  // source, see api.ts `getEffectivePermissions`.
   permissions: string[];
   accessToken: string | null;
   isLoading: boolean;
@@ -123,9 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
   }, [clearSession]);
 
-  // Proaktiver Refresh statt reaktiv auf 401 zu warten - einfacher für dieses
-  // Grundgerüst, da nur ein einziger, vorhersagbarer Ablaufzeitpunkt je
-  // Session existiert (kein Multi-Tab-Koordinierungsbedarf berücksichtigt).
+  // Proactive refresh instead of reacting to a 401 - simpler for this
+  // scaffolding, since only a single, predictable expiry time exists per
+  // session (no multi-tab coordination need is accounted for).
   useEffect(() => {
     if (!tokens) return;
     const delay = Math.max(tokens.expiresAt - Date.now(), 0);
@@ -142,9 +142,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [tokens, applySession, clearSession]);
 
-  // Läuft bei jedem Wechsel der aktiven Installation erneut: lädt deren
-  // eigene gespeicherte Sitzung (falls vorhanden und noch gültig), ohne die
-  // gespeicherten Sitzungen anderer Installationen anzufassen.
+  // Reruns on every switch of the active installation: loads its own stored
+  // session (if present and still valid), without touching the stored
+  // sessions of other installations.
   useEffect(() => {
     setIsLoading(true);
     const stored = loadStoredTokens(installationId);

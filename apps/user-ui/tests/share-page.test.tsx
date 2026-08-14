@@ -22,8 +22,8 @@ function renderSharePage() {
   );
 }
 
-// Öffentliche Seite (4.2a, P14-S10) - bewusst OHNE RequireAuth/useAuth-Mock,
-// da genau das der Punkt dieser Seite ist (kein eingeloggter Nutzer nötig).
+// Public page (4.2a, P14-S10) - deliberately WITHOUT RequireAuth/useAuth mock,
+// since that is exactly the point of this page (no logged-in user required).
 describe("SharePage", () => {
   beforeEach(() => {
     getPublicShareLinkMock.mockReset();

@@ -8,11 +8,11 @@ export interface ContextMenuItem {
   disabled?: boolean;
 }
 
-// Generisches Rechtsklick-Kontextmenü (5.2, seit P7-S1c) - Position am
-// Klickpunkt, schließt bei Klick außerhalb oder Escape. Bewusst als
-// eigenständige, wiederverwendbare Komponente gebaut statt eines weiteren
-// Icon-Buttons: P7-S1d (Favoriten/"Markieren") kann denselben Menü-
-// Mechanismus direkt mit einem weiteren Eintrag weiterverwenden.
+// Generic right-click context menu (5.2, since P7-S1c) - positioned at
+// the click point, closes on click outside or Escape. Deliberately built
+// as a standalone, reusable component instead of another icon button:
+// P7-S1d (favorites/"marking") can directly reuse the same menu
+// mechanism with another entry.
 export function ContextMenu({
   x,
   y,
