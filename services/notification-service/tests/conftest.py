@@ -53,6 +53,11 @@ async def session(engine):
 
 
 @pytest.fixture
+def session_factory(engine):
+    return make_session_factory(engine)
+
+
+@pytest.fixture
 def settings() -> Settings:
     return Settings()
 

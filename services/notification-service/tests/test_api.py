@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from notification_service.main import app
+from notification_service.main import app, settings
 
 
 @pytest.fixture
@@ -68,7 +68,60 @@ def test_create_webhook_notification_records_failure_when_unreachable(client):
         },
     )
     assert response.status_code == 201
-    assert response.json()["status"] == "failed"
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["attempts"] == 1
+    assert body["next_retry_at"] is not None
+
+
+def test_retry_returns_404_for_unknown_notification(client):
+    response = client.post("/notifications/999999/retry")
+    assert response.status_code == 404
+
+
+def test_retry_returns_409_for_still_retryable_notification(client):
+    created = client.post(
+        "/notifications",
+        json={
+            "channel": "webhook",
+            "recipient": "http://127.0.0.1:1/nope",
+            "subject": "S",
+            "body": "B",
+        },
+    ).json()
+
+    response = client.post(f"/notifications/{created['id']}/retry")
+
+    assert response.status_code == 409
+
+
+def test_retry_reattempts_a_failed_permanent_notification(client):
+    """Post-Roadmap Phase 20 Session 3 (ADR 0079): der Endpunkt unternimmt
+    sofort einen neuen Zustellversuch statt nur zurueckzusetzen."""
+    original_max_attempts = settings.max_notification_attempts
+    settings.max_notification_attempts = 1
+    try:
+        created = client.post(
+            "/notifications",
+            json={
+                "channel": "webhook",
+                "recipient": "http://127.0.0.1:1/nope",
+                "subject": "S",
+                "body": "B",
+            },
+        ).json()
+        assert created["status"] == "failed_permanent"
+
+        response = client.post(f"/notifications/{created['id']}/retry")
+
+        assert response.status_code == 200
+        body = response.json()
+        # Ziel bleibt unerreichbar - erneut sofort failed_permanent, attempts blieb bei 1
+        # (zurueckgesetzt auf 0, dann durch den erneuten Fehlschlag wieder auf 1 erhoeht).
+        assert body["status"] == "failed_permanent"
+        assert body["attempts"] == 1
+    finally:
+        settings.max_notification_attempts = original_max_attempts
 
 
 def test_get_unknown_notification_returns_404(client):

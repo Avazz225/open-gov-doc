@@ -15,6 +15,18 @@ class Settings(BaseServiceSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
 
+    # Retry/Backoff (Post-Roadmap Phase 20 Session 3, ADR 0079) - gleicher
+    # Zahlenwert wie archival-service's `max_archival_attempts`/storage-service's
+    # `max_replication_attempts`. Nach Erschoepfung wechselt die Notification auf
+    # `failed_permanent`.
+    max_notification_attempts: int = 5
+
+    # Poll-Intervall des neuen `_notification_retry_poll_loop` (main.py) - deutlich
+    # kuerzer als z. B. archival-service's `archival_poll_interval_seconds`
+    # (Stunden), da eine E-Mail-/Webhook-Zustellung typischerweise binnen Sekunden
+    # bis Minuten erneut sinnvoll ist, nicht Stunden.
+    notification_retry_poll_interval_seconds: float = 60.0
+
     # Welche Subjects der Notification Service konsumiert (P6-S2, seit P6-S5
     # auch `auth.superuser.activated`, seit P6-S6 zusätzlich
     # `permission.maintenance_mode.activated`). Gezielt statt `workflow.>`/

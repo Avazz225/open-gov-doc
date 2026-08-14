@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -14,13 +15,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from notification_service import repository
 from notification_service.auth_client import AuthServiceClient
 from notification_service.consumer import publish_notification_result, start_consuming
-from notification_service.models import Base
+from notification_service.models import Base, Notification
 from notification_service.schemas import NotificationCreate, NotificationOut
 from notification_service.settings import Settings
 
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+
+async def _run_retry_tick(session_factory) -> None:
+    """Ein einzelner Durchlauf der fälligen Wiederholungsversuche - ausgelagert
+    aus `_notification_retry_poll_loop`, damit ein Tick isoliert testbar ist
+    (gleiches Muster wie archival-service's `run_active_transfers_tick`)."""
+    async with session_factory() as session:
+        due = await repository.list_due_for_retry(session)
+    for stale in due:
+        async with session_factory() as session:
+            notification = await session.get(Notification, stale.id)
+            if notification is None or notification.status != "failed":
+                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+            await repository.attempt_delivery(
+                session, settings, notification, max_attempts=settings.max_notification_attempts
+            )
+            await session.commit()
+            await publish_notification_result(publish_event, notification)
+
+
+async def _notification_retry_poll_loop(session_factory) -> None:
+    """Wiederholt fehlgeschlagene E-Mail-/Webhook-Zustellungen (Post-Roadmap
+    Phase 20 Session 3, ADR 0079) - der erste Zustellversuch bleibt bewusst
+    synchron im NATS-Handler bzw. in `POST /notifications` (schnelle Antwort im
+    Regelfall), nur die WIEDERHOLUNG läuft asynchron in diesem eigenen
+    Poll-Loop, um den Handler nicht zu blockieren. Gleiches Idiom wie
+    archival-service's `_archival_poll_loop`."""
+    while True:
+        try:
+            await _run_retry_tick(session_factory)
+        except Exception:
+            logger.exception(
+                "Notification-Retry-Poll-Tick fehlgeschlagen - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.notification_retry_poll_interval_seconds)
 
 
 @asynccontextmanager
@@ -30,6 +67,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS notification"))
         await conn.run_sync(Base.metadata.create_all)
+        # Ad-hoc-Migration fuer bereits laufende Installationen (Post-Roadmap
+        # Phase 20 Session 3, ADR 0079) - `create_all` legt nur neue Tabellen an,
+        # aendert aber keine bestehenden (gleiches Muster wie archival-service).
+        await conn.execute(
+            text(
+                "ALTER TABLE notification.notification "
+                "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE notification.notification "
+                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.auth_client = AuthServiceClient(
@@ -61,12 +113,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version="0.1.0",
     )
 
+    retry_poll_task = asyncio.create_task(_notification_retry_poll_loop(app.state.session_factory))
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    retry_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await retry_poll_task
     if registration:
         await registration.stop()
     await consumer.close()
@@ -149,3 +206,31 @@ async def get_notification(
         return await repository.get_notification(session, notification_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/notifications/{notification_id}/retry", response_model=NotificationOut)
+async def retry_notification(
+    notification_id: int, session: AsyncSession = Depends(get_session)
+) -> NotificationOut:
+    """Manueller Neustart einer dauerhaft fehlgeschlagenen Zustellung
+    (Post-Roadmap Phase 20 Session 3, ADR 0079) - nur fuer `failed_permanent`
+    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen
+    Zustellversuch statt auf den naechsten Poll-Tick zu warten."""
+    try:
+        notification = await repository.get_notification(session, notification_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if notification.status != "failed_permanent":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Notification hat Status {notification.status!r}, nur "
+                "'failed_permanent' kann erneut versucht werden"
+            ),
+        )
+    await repository.retry_now(
+        session, settings, notification, max_attempts=settings.max_notification_attempts
+    )
+    await session.commit()
+    await publish_notification_result(publish_event, notification)
+    return notification

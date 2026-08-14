@@ -19,8 +19,10 @@ class NotificationOut(BaseModel):
     recipient: str
     subject: str
     body: str
-    status: Literal["sent", "failed"]
+    status: Literal["sent", "failed", "failed_permanent"]
     error: str | None
+    attempts: int
+    next_retry_at: datetime | None
     created_at: datetime
     sent_at: datetime | None
 

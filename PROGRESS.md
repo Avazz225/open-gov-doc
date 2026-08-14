@@ -2069,6 +2069,47 @@ letzte Session von Phase 19:
   `docs/services/archival-service.md` (Zustandsmaschinen-Tabellen, API-Tabelle, "Offene Punkte" als
   behoben markiert) ergänzt.
 
+**P20-S3 — notification-service: Retry/Backoff, `failed_permanent`, asynchroner Retry-Poll-Loop**
+(siehe [ADR 0079](docs/adr/0079-notification-service-retry-backoff-failed-permanent.md)):
+
+- **Bislang GAR KEIN Retry-Mechanismus**: ein fehlgeschlagener `email`/`webhook`-Zustellversuch setzte
+  sofort das terminale `status="failed"`.
+- Anders als bei `archival-service` (mehrphasiger Prozess) ist Zustellung hier ein einziger,
+  synchroner Schritt im NATS-Handler bzw. in `POST /notifications` — ein Backoff-Warten DORT würde
+  entweder den NATS-Konsumenten blockieren oder den HTTP-Request unzumutbar lange offenhalten. Neue,
+  öffentliche `attempt_delivery`-Funktion kapselt den eigentlichen Versuch (aufgerufen vom Erstversuch
+  UND später erneut), ein komplett neuer, eigenständiger `_notification_retry_poll_loop` (main.py,
+  Intervall `notification_retry_poll_interval_seconds`, Default 60s — deutlich kürzer als
+  archival-services stündliches Intervall, da E-Mail-/Webhook-Zustellung typischerweise binnen
+  Sekunden bis Minuten erneut sinnvoll ist) übernimmt NUR die WIEDERHOLUNG asynchron, ohne den
+  Erstversuch-Pfad zu berühren.
+- Unterhalb von `max_notification_attempts` (Default 5) bleibt `status="failed"` (retry-fähig) mit
+  steigendem `attempts` und einem per `compute_backoff_seconds` gesetzten `next_retry_at`; erst bei
+  Erschöpfung wechselt `status` auf das neue Terminalstatus `failed_permanent`. `in_app` hat keinen
+  echten Zustellschritt und ist daher nie retry-fähig.
+- Neuer `POST /notifications/{id}/retry` (`409` außer bei `failed_permanent`) — **anders als
+  archival-services phasenbasierter Reset auf `pending`** stellt dieser Endpunkt SOFORT synchron
+  erneut zu: eine Notification ist ein einzelner, leichtgewichtiger Zustellschritt, kein mehrphasiger
+  Prozess, ein Admin erwartet ein sofortiges Ergebnis statt eines Wartens auf den nächsten Poll-Tick.
+- **Bewusst KEIN RBAC-Gate**: `notification-service` hat aktuell überhaupt keine
+  `permission-service`-Integration — eine komplette RBAC-Neueinführung nur für diesen einen Endpunkt
+  wäre Umfangsausweitung weit über diese Session hinaus (Phase 19 war explizit die RBAC-Phase).
+- Tick-Logik in `_run_retry_tick` ausgelagert (isoliert testbar, gleiches Muster wie
+  archival-services `run_active_transfers_tick`). Neue `session_factory`-Fixture in `conftest.py`
+  ergänzt (fehlte bislang für diesen Service).
+- **Tests**: notification-service 40 (vorher 30, +10: Backoff-Verhalten unterhalb/bei Erschöpfung,
+  `list_due_for_retry`-Filterung nach Status UND Backoff-Fenster, `retry_now`, neuer `/retry`-Endpunkt
+  inkl. `404`/`409`/erfolgreichem Neustart, neue `test_main.py` für `_run_retry_tick`).
+- **Vollständig live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart, Migration
+  per `\d notification.notification` bestätigt): ein Webhook an eine unerreichbare URL liefert nach dem
+  ersten Fehlschlag `status="failed"` mit gesetztem `next_retry_at`; `POST .../retry` liefert `409` für
+  diesen noch retry-fähigen Fall; nach Ablauf des echten 60-Sekunden-Poll-Intervalls hat der
+  Retry-Poll-Loop automatisch einen zweiten Versuch unternommen (`attempts` auf 2 erhöht, ohne
+  manuelles Eingreifen).
+- Doku: neues [ADR 0079](docs/adr/0079-notification-service-retry-backoff-failed-permanent.md),
+  `docs/services/notification-service.md` (Datenmodell, Kanäle-Abschnitt, API-Tabelle, "Offene Punkte"
+  als behoben markiert, Test-Übersicht) ergänzt.
+
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.
 - **P6-S4 in P6-S4/S5/S6 aufgeteilt**: ursprünglich ein Sammel-Session für Vier-Augen-Mechanismus (4.3) + Break-Glass (4.6) + Not-Shutdown (4.8) UND Nachhol-Termin für sechs bereits ungesicherte Stellen — zu viel für eine Session. Neuer Zuschnitt und **provisorische** Zuordnung der sechs Alt-Fälle siehe `IMPLEMENTATION_PLAN.md` Phase 6; zu bestätigen/anzupassen bei jeweiligem Sessionstart. Alte P6-S5 (Signature)→P6-S7, alte P6-S6 (Process Designer)→P6-S8.
