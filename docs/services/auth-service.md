@@ -3,7 +3,7 @@
 **Verantwortung:** Schlanker OIDC-Broker vor Keycloak — hält Client-Secret und Admin-Zugang, Aufrufer sehen nur Login/Refresh/Token-Validierung (Konzept 4.4). Keine eigene IAM-Logik, keine eigene Nutzertabelle.
 
 **Konzept-Referenz:** 4.4/2.5 (Kontakte, seit P15-S4)/7.4 (föderierte Kontaktsuche, seit P15-S4)/14.1 (Realm-Rollen für Konfigurationspakete, seit P17-S1)
-**Eigenes Postgres-Schema:** `auth` (seit P15-S4, `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche; seit dem Ad-hoc-Post-Roadmap-SSO-Feature zusätzlich `sso_config`, ebenfalls eine Singleton-Zeile; seit Phase 18 zusätzlich `local_signing_key` (Singleton) und `technical_account`, siehe "Auth-Entkopplung von Keycloak" unten). Bis P15-S4 war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
+**Eigenes Postgres-Schema:** `auth` (seit P15-S4, `federation_identity` — eine Singleton-Zeile für die optionale föderierte Kontaktsuche; seit dem Ad-hoc-Post-Roadmap-SSO-Feature zusätzlich `sso_config`, ebenfalls eine Singleton-Zeile; seit Phase 18 zusätzlich `local_signing_key` (Singleton) und `technical_account`, siehe "Auth-Entkopplung von Keycloak" unten; seit **P24-S2** zusätzlich `ad_group_role_mapping`, siehe "AD-Gruppe→Rolle-Mapping" unten). Bis P15-S4 war der Service vollständig zustandslos; Keycloak selbst verwaltet seine Daten weiterhin im eigenen Schema `keycloak` (siehe `infra/postgres-init/001-schemas.sql`).
 
 ## API
 
@@ -11,7 +11,7 @@
 |---|---|---|
 | `POST` | `/login` | `{username, password}` → Password-Grant gegen Keycloak, liefert Access-/Refresh-Token. **Seit P6-S6**: liest `X-DMS-Maintenance-Active` (vom Gateway injiziert, 4.8) — ist Wartungsmodus aktiv und `username` ungleich dem Superuser-Konto, `503` statt Login. **Seit Phase 18 Session 2/3**: erkennt technische Konten (`technical_account`-Tabellen-Lookup) vor dem Keycloak-Pfad und authentifiziert diese lokal (bcrypt) — seit Session 2 der Superuser, seit Session 3 zusätzlich beide Domain-Admin-Konten, siehe "Auth-Entkopplung von Keycloak" unten |
 | `POST` | `/refresh` | `{refresh_token}` → neue Tokens. **Seit Phase 18 Session 2**: erkennt lokal ausgestellte Refresh-Tokens am `iss`-Claim und stellt ein frisches Paar ohne Keycloak-Beteiligung aus |
-| `GET` | `/me` | Bearer-Token validieren (JWKS, zustandslos, keine Rückfrage bei Keycloak), normalisierte Identität zurückgeben |
+| `GET` | `/me` | Bearer-Token validieren (JWKS, zustandslos, keine Rückfrage bei Keycloak), normalisierte Identität zurückgeben. **Seit P24-S2**: `realm_roles` enthält zusätzlich zu Keycloaks rohen `realm_access.roles` die aus dem `groups`-JWT-Claim abgeleiteten Rollen (AD-Gruppe→Rolle-Mapping, 4.4), dedupliziert in dieselbe Liste gemerged — siehe "AD-Gruppe→Rolle-Mapping" unten |
 | `GET` | `/users` | Nutzer auflisten (seit P4-S3, Grundlage der Admin-UI-Nutzerverwaltung) — liest direkt aus Keycloak. **Seit P6-S5 gegated**: erfordert die Capability `admin.user_management` (Domäne "Nutzer-/Rechteverwaltung", 4.6), sonst `403` |
 | `POST` | `/users` | Nutzer anlegen (`username`, `email`, `password`, `first_name`, `last_name`) — 409 bei bereits vergebenem Benutzernamen. Gegated wie `GET /users` |
 | `DELETE` | `/users/{id}` | Nutzer löschen — 404 bei unbekannter `id`. Gegated wie `GET /users` |
@@ -36,6 +36,9 @@
 | `GET` | `/sso-config` | `{enabled, updated_at}` — ob SSO installationsweit aktiv ist. Ungegatet, `login/page.tsx` fragt dies vor dem Formular ab |
 | `PUT` | `/sso-config` | `{enabled}` setzen — gegated auf `admin.user_management`, gleiche Domäne wie Nutzerverwaltung |
 | `POST` | `/logout` | `{refresh_token}` → beendet die Sitzung wirklich auf Keycloak-Seite (`.../protocol/openid-connect/logout`) — vorher gab es keinen serverseitigen Logout-Mechanismus |
+| `GET` | `/ad-group-mappings` | **Seit P24-S2** (4.4): alle konfigurierten AD-Gruppe→Rolle-Zuordnungen (`{id, ad_group_name, role_name, created_at, created_by}`). Gegated auf `admin.user_management`, gleiche Domäne wie `GET /users` |
+| `POST` | `/ad-group-mappings` | **Seit P24-S2**: legt eine neue Zuordnung an (`{ad_group_name, role_name}`), `201`. Auditiert über `auth.ad_group_role_mapping.created`. Wirkt sich ab der nächsten `GET /me`-Auflösung aus. Gegated wie `GET /ad-group-mappings` |
+| `DELETE` | `/ad-group-mappings/{id}` | **Seit P24-S2**: löscht eine Zuordnung, `404` bei unbekannter `id`. Auditiert über `auth.ad_group_role_mapping.deleted`. Gegated wie `GET /ad-group-mappings` |
 
 ## Realm-/Client-Bootstrap
 
@@ -52,6 +55,7 @@ Bei jedem Start (`ensure_realm_and_client`, idempotent via `skip_exists=True`):
   `main.py`s Lifespan (`domain_admins.ensure_domain_admin_account`, DB-basiert), direkt neben dem
   Superuser, nicht mehr hier in diesem synchronen, rein Keycloak-fokussierten Bootstrap-Schritt.
 - **Seit Ad-hoc-Post-Roadmap-SSO-Feature**: `_ensure_client_updated` (läuft bei JEDEM Start, nicht nur bei Ersteinrichtung) aktiviert `standardFlowEnabled` und registriert die Redirect-URIs (`{origin}/login/callback/` je `sso_redirect_uri_allowed_origins`) — behebt die unten genannte `skip_exists`-Lücke für genau diese beiden Felder. `_ensure_kerberos` (bedingt, nur wenn `kerberos_enabled` und alle drei Kerberos-Settings gesetzt sind) richtet zusätzlich Kerberos/SPNEGO ein, siehe "SSO/automatischer Login" unten und [ADR 0062](../adr/0062-sso-automatischer-login-oidc-redirect-und-optionales-kerberos.md).
+- **Seit P24-S2**: `_ensure_groups_mapper` (läuft ebenfalls bei JEDEM Start) fügt dem Client einen `oidc-group-membership-mapper` hinzu (Claim-Name `groups`, `full.path=false`) — ohne diesen Mapper trägt Keycloak Gruppenmitgliedschaften NICHT in den Access-Token ein (anders als Rollen über `realm_access.roles`), das AD-Gruppe→Rolle-Mapping (siehe unten) wäre sonst immer wirkungslos. Siehe [ADR 0093](../adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md).
 
 **Bekannte Grenze**: `skip_exists=True` verhindert weiterhin, dass eine spätere Änderung der übrigen Client-Konfiguration (z. B. neue Mapper) auf einen bereits bestehenden Client nachgezogen wird — für Dev/Test unkritisch, für Produktivbetrieb bei Konfigurationsänderungen zu beachten. Nur `standardFlowEnabled`/`redirectUris` sind seit dem SSO-Feature davon ausgenommen (siehe oben).
 
@@ -153,7 +157,7 @@ Optional, installationsweit aktivierbar über `GET/PUT /sso-config` (Singleton-Z
 
 ## Events
 
-**Publiziert** (`stream="auth"`, seit P6-S5): `auth.superuser.activated` (`{request_id, expires_at}`), `auth.superuser.deactivated` (`{reason}`, `"expired"`|`"manual"`).
+**Publiziert** (`stream="auth"`, seit P6-S5): `auth.superuser.activated` (`{request_id, expires_at}`), `auth.superuser.deactivated` (`{reason}`, `"expired"`|`"manual"`). **Seit P24-S2**: `auth.ad_group_role_mapping.created`/`.deleted` (`{id, ad_group_name, role_name}`, `actor=`aufrufender Principal) — Audit-Trail für Änderungen am AD-Gruppe→Rolle-Mapping, siehe oben.
 
 **Konsumiert** (`durable="auth-service"`, seit P6-S5, erster Konsument dieses Service): `permission.approval.approved`, gefiltert auf `action_type="auth.superuser.activate"` — jeder andere Aktionstyp wird ignoriert (gehört einem anderen Service, gleiches Prinzip wie in ADR 0022 beschrieben).
 
@@ -167,6 +171,40 @@ Verzeichnis zum Auffinden anderer Mitarbeitender - "lokal, immer verfügbar" (2.
 - **Direkte Installation-zu-Installation-Anfragen, nicht über den Hub relayt**: `GET /users/directory/federated` fragt jede über `GET /installations` bekannte, nicht widerrufene, für Kontaktsuche freigegebene Peer-Installation DIREKT über deren `callback_base_url` an (`directory_federation.search_all_peers`/`query_peer`), signiert mit dem eigenen privaten Schlüssel (`X-Installation-Signature`, RSA-PSS/SHA-256, identisches Schema wie ADR 0039 — `federation_crypto.py`, dupliziert wie bereits zweimal zuvor in diesem Projekt, siehe ADR 0054). Ein einzelner nicht erreichbarer/ablehnender Peer blockiert die übrigen nicht.
 - **`POST /users/directory/federated-search-inbound`**: empfängt eine signierte Anfrage einer Peer-Installation — verifiziert `X-Installation-Signature` gegen den beim Hub hinterlegten öffentlichen Schlüssel der ANFRAGENDEN Installation (live per `GET /installations` abgerufen, kein lokaler Peer-Schlüsselspeicher), lehnt unbekannte/widerrufene/nicht für Kontaktsuche registrierte Installationen mit `401` ab. Öffentliche Route am Gateway (`gateway-service`s `public_routes`, kein `X-DMS-Principal`), analog zu `workflow-service`s `federation/inbound`.
 - **Keine Ende-zu-Ende-Verschlüsselung der Nutzlast** (anders als das Handover-Schema) — der Hub liegt bei direkten Aufrufen ohnehin nie im Anfragepfad, siehe ADR 0054 "Begründung".
+
+## AD-Gruppe→Rolle-Mapping (4.4, seit P24-S2)
+
+Konfigurierbares Mapping von Keycloak-/AD-Gruppenmitgliedschaften auf interne DMS-Rollen — vor dieser
+Session gab es dafür überhaupt keine Übersetzungsschicht, `/me` lieferte ausschließlich Keycloaks rohe
+`realm_access.roles`. Vollständige Architekturbegründung/Scope-Abgrenzung: [ADR 0093](../adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md).
+
+- **`ad_group_role_mapping`** (Model `AdGroupRoleMapping`, `auth`-Schema): `id`, `ad_group_name`,
+  `role_name`, `created_at`, `created_by` — **eigene, schlanke Tabelle**, bewusst NICHT
+  `permission-service`s `Group`/`GroupMembership`/`RoleAssignment` (Post-Roadmap Phase 22 Session 2,
+  ADR 0088): jene bilden ADMIN-ANGELEGTE Gruppen mit eigener, synchron zu haltender
+  Mitgliedschaftstabelle ab — eine andere, unabhängige Funktion als das Mapping EXTERNER
+  Keycloak-/AD-Gruppenclaims hier. `UniqueConstraint(ad_group_name, role_name)` verhindert nur exakt
+  doppelte Zeilen — ein AD-Gruppenname kann auf mehrere Rollen gemappt sein (mehrere Zeilen).
+- **Bewusster Scope-Cut gegenüber Konzept 4.4**: nur einfache 1:1-Zuordnung (eine AD-Gruppe → eine
+  Rolle). Zusammengesetzte Regeln ("Gruppe X **und** Attribut Y → Rolle Z", "mehrere Gruppen → eine
+  gemeinsame Rolle") sind laut Konzept 4.4 als volle Zielausbaustufe vorgesehen, aber explizit NICHT
+  Teil dieser Session — siehe "Offene Punkte" unten und ADR 0093.
+- **`groups`-JWT-Claim**: Keycloak trägt Gruppenmitgliedschaften nicht automatisch in den Access-Token
+  ein — `bootstrap._ensure_groups_mapper` (läuft bei jedem Start, siehe "Realm-/Client-Bootstrap" oben)
+  ergänzt einen `oidc-group-membership-mapper` (`full.path=false`, also nur der blanke Gruppenname,
+  kein Keycloak-interner Pfad).
+- **`ad_group_mapping.resolve_roles_for_groups(session, groups)`**: reine Lesefunktion, wertet bei
+  JEDER `GET /me`-Anfrage frisch gegen die Tabelle aus (kein Caching) — eine Änderung/ein Löschen einer
+  Zuordnung wirkt sich damit ohne Invalidierungsproblem ab dem nächsten Aufruf aus. `GET /me` merged das
+  Ergebnis in dasselbe `realm_roles`-Feld wie Keycloaks direkt zugewiesene Rollen (dedupliziert,
+  `dict.fromkeys`) — bewusst kein separates Feld, siehe ADR 0093 "Begründung".
+- **`GET`/`POST`/`DELETE /ad-group-mappings`** (siehe API-Tabelle oben): CRUD für die Mapping-Zeilen,
+  gegated auf `admin.user_management` (gleiche Domäne wie `GET /users`/`POST /realm-roles` — eine
+  falsch konfigurierte Zuordnung kann Nutzern stillschweigend zusätzliche Rollen verleihen).
+- **Audit**: `POST`/`DELETE` publizieren `auth.ad_group_role_mapping.created`/`.deleted`
+  (`actor=`aufrufender Principal) über den bestehenden Event-Bus-Mechanismus — `audit-service`
+  konsumiert bereits das gesamte `auth.>`-Subject (seit P6-S5), kein neuer Audit-Mechanismus nötig.
+  `created_by`/`created_at` zusätzlich direkt an der Zeile.
 
 ## Realm-Rollen-Verwaltung (14.1, seit P17-S1)
 
@@ -191,7 +229,15 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-`uv run pytest services/auth-service/tests` (**64 Tests**, davon 5 neu seit **P17-S1**,
+`uv run pytest services/auth-service/tests` (**105 Tests**, davon 9 neu seit **P24-S2**,
+`test_ad_group_mapping.py`: CRUD (`GET`/`POST`/`DELETE /ad-group-mappings`, ohne Bearer-Token → `401`,
+mit authentifiziertem, aber nicht `admin.user_management`-berechtigtem Nutzer → `403`, unbekannte `id`
+beim Löschen → `404`) sowie die Rollenauflösung selbst gegen echte Keycloak-Gruppen (`keycloak_group`-
+Fixture): ein Principal in einer gemappten Gruppe bekommt die gemappte Rolle in `GET /me`s `realm_roles`,
+ein Principal in zwei gemappten Gruppen bekommt beide Rollen, ein Principal in einer NICHT gemappten
+Gruppe bleibt unverändert, ein Löschen der Zuordnung wirkt sich ab dem nächsten `/me`-Aufruf aus (kein
+Caching). Läuft komplett gegen echtes Postgres/Keycloak (echte Gruppen/Mitgliedschaften über
+`KeycloakAdmin.create_group`/`group_user_add`), keine Mocks. Davor 96 Tests, davon 5 neu seit **P17-S1**,
 `test_realm_roles.py`: `GET /realm-roles` enthält das bereits bootstrapped `dms-admin`, schließt
 Keycloak-Built-ins aus, `POST /realm-roles` ohne/mit unautorisiertem Principal → `403`, legt eine
 neue Rolle idempotent an — zweiter Aufruf mit demselben Namen scheitert nicht, gleiches
@@ -200,7 +246,24 @@ neue Rolle idempotent an — zweiter Aufruf mit demselben Namen scheitert nicht,
 
 ## Offene Punkte
 
-- **AD-Gruppe → interne Rolle Mapping** (Konzept 4.4): Keycloak deckt lokale + LDAP/AD-föderierte Nutzer bereits nativ ab, aber die konfigurierbare Mapping-Regelengine (AD-Gruppe → DMS-Rolle) ist nicht implementiert. Rollenzuweisung/-auswertung ist Aufgabe des Permission Service (4.1, P2-S2); `/me` liefert aktuell nur Keycloaks rohe `realm_access.roles`.
+- **AD-Gruppe → interne Rolle Mapping — teilweise gelöst seit P24-S2**: einfache 1:1-Zuordnung
+  (`ad_group_role_mapping`, `GET`/`POST`/`DELETE /ad-group-mappings`, siehe "AD-Gruppe→Rolle-Mapping"
+  oben, ADR 0093) ist implementiert. Weiterhin offen, laut Konzept 4.4 vorgesehen, aber bewusster
+  Scope-Cut dieser Session:
+  - **Zusammengesetzte Regeln** (Gruppe X **und** Attribut Y → Rolle Z; mehrere Gruppen → eine
+    gemeinsame Rolle via UND-Logik) — keine generische Regel-DSL, nur direkte 1:1-Namensabbildung.
+  - **Konfigurierbares Default-Verhalten bei nicht gemappten Gruppen** ("keine Rolle vergeben vs.
+    definierte Standardrolle") — aktuell fest "keine Rolle", keine Einstellung dafür.
+  - **Explizite Freigabe/Speicherung vor Wirksamkeit** ("kein Live-Editing mit sofortiger
+    Breitenwirkung ohne Kontrolle") — jede Änderung wirkt sofort, kein zusätzlicher
+    Vier-Augen-/Freigabe-Schritt wie bei `permission.role_assignment.create` (ADR 0060).
+  - **Kein AD-Synchronisationsintervall/keine Nutzer-/Gruppen-Synchronisation** — Gruppenmitgliedschaften
+    werden ausschließlich aus dem `groups`-JWT-Claim zum Zeitpunkt des Tokenbezugs gelesen, kein
+    periodischer Abgleich.
+  - **Kein JSON-Konfigurationsexport** (7.3) — `ad_group_role_mapping`-Zeilen sind nicht Teil von
+    `config-service`s Konfigurationspaketen, lassen sich also nicht zwischen Installationen übertragen.
+  Rollenzuweisung/-auswertung im engeren Sinn bleibt weiterhin Aufgabe des Permission Service (4.1,
+  P2-S2) — `auth-service` liefert nur die Rollennamen, keine Berechtigungsprüfung selbst.
 - **Issuer-Hostname-Konsistenz — teilweise gelöst seit dem Ad-hoc-Post-Roadmap-SSO-Feature**: Der Auth Service spricht Keycloak intern über `DMS_KEYCLOAK_BASE_URL` (im Compose-Netz `http://keycloak:8080`) an; ausgestellte Tokens tragen entsprechend `iss=http://keycloak:8080/realms/dms`. Mit dem neuen browserbasierten Redirect-Flow (`standardFlowEnabled`, seit dem SSO-Feature) wurde genau die hier vorhergesagte Konsequenz real: `GET /oidc/authorize` liefert eine URL, zu der der Browser navigiert — mit der internen `http://keycloak:8080` wäre das für den Browser nicht auflösbar gewesen. Behoben über eine neue, separate `keycloak_public_base_url`-Einstellung (`DMS_KEYCLOAK_PUBLIC_BASE_URL`, im Compose-Stack `http://localhost:8080`), die nur `_authorization_endpoint` (in `keycloak_client.py`) verwendet — Token-/Logout-Endpunkte bleiben auf der internen URL, da sie ausschließlich serverseitig aus `auth-service` heraus aufgerufen werden. `iss` im Token selbst bleibt weiterhin die interne URL (Keycloaks eigene `frontendUrl`-Konfiguration wäre der vollständige Fix dafür, hier bewusst nicht angefasst, da `TokenValidator` bereits konsistent gegen denselben internen Issuer prüft).
 - **SAML 2.0** (Konzept 4.4, für ADFS-Alt-Föderationen) nicht Teil dieser Session.
 - **`/users`-Endpunkte seit P6-S5 gegated** (siehe oben) — löst den vormaligen offenen Punkt für diesen Service. Die Zuweisung von `admin.user_management` an *weitere* Principals (z. B. echte Menschen zusätzlich zum technischen `users-admin`-Konto) läuft über die jetzt selbst gegatete Nutzer-/Rechteverwaltungs-Admin-UI-Seite (`POST /role-assignments` gegen `permission-service`).

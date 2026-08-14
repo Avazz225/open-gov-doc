@@ -80,6 +80,46 @@ def _ensure_client_updated(admin: KeycloakAdmin, settings: Settings) -> None:
     )
 
 
+def _ensure_groups_mapper(admin: KeycloakAdmin, settings: Settings) -> None:
+    """AD-Gruppe -> interne Rolle-Mapping (4.4, P24-S2): Keycloak trägt
+    Gruppenmitgliedschaften NICHT automatisch in den Access-Token ein
+    (anders als Rollen über `realm_access.roles`) - dafür braucht der Client
+    einen expliziten `oidc-group-membership-mapper`. Ohne diesen Claim wäre
+    `ad_group_mapping.resolve_roles_for_groups` (siehe `main.py`s `/me`)
+    immer wirkungslos, da `user.get("groups")` stets leer bliebe.
+
+    Läuft wie `_ensure_client_updated` bei JEDEM Start (nicht nur bei
+    Ersteinrichtung) - `create_client(..., skip_exists=True)` oben würde
+    einen bereits bestehenden Client (jede Installation vor dieser Session)
+    sonst nie um diesen Mapper ergänzen, siehe `ensure_realm_and_client`s
+    "Bekannte Grenze"-Docstring. `full.path=false` liefert nur den blanken
+    Gruppennamen (z. B. `sales`), keinen Keycloak-internen Pfad
+    (`/sales`) - passend zur bewusst einfachen 1:1-Namensabbildung dieser
+    Session (kein hierarchisches Gruppen-Matching)."""
+    client_uuid = admin.get_client_id(settings.keycloak_client_id)
+    if client_uuid is None:
+        return
+    existing_mappers = admin.get_mappers_from_client(client_uuid)
+    if any(mapper.get("name") == "groups" for mapper in existing_mappers):
+        return
+    admin.add_mapper_to_client(
+        client_uuid,
+        payload={
+            "name": "groups",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-group-membership-mapper",
+            "consentRequired": False,
+            "config": {
+                "full.path": "false",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false",
+                "claim.name": "groups",
+            },
+        },
+    )
+
+
 def _ensure_kerberos(admin: KeycloakAdmin, settings: Settings) -> None:
     """Kerberos/SPNEGO-Realmkonfiguration (Post-Roadmap-Feature, SSO) - läuft
     NUR, wenn alle drei Kerberos-Einstellungen gesetzt sind (fehlt eine,
@@ -202,4 +242,5 @@ def ensure_realm_and_client(settings: Settings) -> None:
     _ensure_theme_attribute(admin)
     _ensure_dms_admin_role(admin)
     _ensure_client_updated(admin, settings)
+    _ensure_groups_mapper(admin, settings)
     _ensure_kerberos(admin, settings)

@@ -22,6 +22,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_service import (
+    ad_group_mapping,
     admin_users,
     directory_federation,
     domain_admins,
@@ -36,9 +37,17 @@ from auth_service.consumer import start_consuming
 from auth_service.directory_federation import CONTACT_DIRECTORY_CAPABILITY
 from auth_service.federation_hub_client import FederationHubClient
 from auth_service.keycloak_client import InvalidCredentialsError
-from auth_service.models import Base, FederationIdentity, SsoConfig, TechnicalAccount
+from auth_service.models import (
+    AdGroupRoleMapping,
+    Base,
+    FederationIdentity,
+    SsoConfig,
+    TechnicalAccount,
+)
 from auth_service.permission_client import PermissionServiceClient
 from auth_service.schemas import (
+    AdGroupRoleMappingIn,
+    AdGroupRoleMappingOut,
     DirectoryEntryOut,
     DirectoryFederationStatusOut,
     DirectorySearchRequest,
@@ -451,16 +460,33 @@ async def refresh_token(
 
 
 @app.get("/me")
-async def me(user: dict = Depends(get_current_user)) -> dict:
+async def me(
+    user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+) -> dict:
     """Normalisierte Identität aus dem Token (4.4) - die Übersetzung in
     interne DMS-Rollen übernimmt der Permission Service (4.1, P2-S2), nicht
     der Auth Service selbst.
-    """
+
+    Seit P24-S2: `realm_roles` enthält zusätzlich zu Keycloaks rohen
+    `realm_access.roles` auch die aus dem `groups`-JWT-Claim abgeleiteten
+    Rollen (`ad_group_mapping.resolve_roles_for_groups`, konfigurierbares
+    AD-Gruppe->Rolle-Mapping, 4.4) - bewusst in dieselbe Liste gemerged statt
+    ein separates Feld, da jeder bestehende Aufrufer (`permission-service`s
+    Rollenzuweisungs-Abgleich, Frontend-Rollenprüfungen) bereits `realm_roles`
+    liest und eine Rolle aus Sicht des restlichen Systems gleich behandelt
+    werden soll, unabhängig davon, ob sie direkt als Keycloak-Realm-Rolle
+    zugewiesen oder über eine Gruppenmitgliedschaft abgeleitet ist -
+    Duplikate (z. B. dieselbe Rolle sowohl direkt zugewiesen als auch über
+    eine Gruppe abgeleitet) werden dedupliziert."""
+    realm_roles = list(user.get("realm_access", {}).get("roles", []))
+    mapped_roles = await ad_group_mapping.resolve_roles_for_groups(
+        session, user.get("groups", []) or []
+    )
     return {
         "sub": user.get("sub"),
         "username": user.get("preferred_username"),
         "email": user.get("email"),
-        "realm_roles": user.get("realm_access", {}).get("roles", []),
+        "realm_roles": list(dict.fromkeys(realm_roles + mapped_roles)),
     }
 
 
@@ -740,6 +766,79 @@ async def ensure_realm_roles(
     await _require_service_user_management(x_dms_principal)
     for name in payload.names:
         app.state.keycloak_admin.create_realm_role(payload={"name": name}, skip_exists=True)
+
+
+@app.get("/ad-group-mappings", response_model=list[AdGroupRoleMappingOut])
+async def list_ad_group_mappings(
+    user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+) -> list[AdGroupRoleMapping]:
+    """AD-Gruppe->interne-Rolle-Mapping (4.4, P24-S2, Admin-CRUD) - gegated
+    wie `GET /users` (`admin.user_management`, gleiche Domäne
+    "Nutzer-/Rechteverwaltung", da eine falsch konfigurierte Zuordnung
+    Nutzer stillschweigend zusätzliche Rollen verleihen kann)."""
+    await _require_user_management(user)
+    return await ad_group_mapping.list_mappings(session)
+
+
+@app.post(
+    "/ad-group-mappings",
+    response_model=AdGroupRoleMappingOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ad_group_mapping(
+    payload: AdGroupRoleMappingIn,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> AdGroupRoleMapping:
+    """Legt eine neue Zuordnung an - wirkt sich ab der nächsten `GET
+    /me`-Auflösung aus (keine Caching-Verzögerung, siehe
+    `ad_group_mapping.resolve_roles_for_groups`). Auditiert über
+    `auth.ad_group_role_mapping.created` (`audit-service` konsumiert bereits
+    `auth.>`, kein neuer Audit-Mechanismus nötig) sowie `created_by`/
+    `created_at` direkt an der Zeile."""
+    await _require_user_management(user)
+    mapping = await ad_group_mapping.create_mapping(
+        session,
+        ad_group_name=payload.ad_group_name,
+        role_name=payload.role_name,
+        created_by=user.get("preferred_username") or user.get("sub"),
+    )
+    await session.commit()
+    await publish_event(
+        "auth.ad_group_role_mapping.created",
+        {
+            "id": mapping.id,
+            "ad_group_name": mapping.ad_group_name,
+            "role_name": mapping.role_name,
+        },
+        actor=user.get("sub"),
+    )
+    return mapping
+
+
+@app.delete("/ad-group-mappings/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ad_group_mapping(
+    mapping_id: int,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Löscht eine Zuordnung - wirkt sich wie die Anlage ab der nächsten
+    `GET /me`-Auflösung aus. `404` bei unbekannter `mapping_id`."""
+    await _require_user_management(user)
+    try:
+        mapping = await ad_group_mapping.delete_mapping(session, mapping_id)
+    except ad_group_mapping.MappingNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "auth.ad_group_role_mapping.deleted",
+        {
+            "id": mapping_id,
+            "ad_group_name": mapping.ad_group_name,
+            "role_name": mapping.role_name,
+        },
+        actor=user.get("sub"),
+    )
 
 
 @app.get("/superuser/status", response_model=SuperuserStatus)

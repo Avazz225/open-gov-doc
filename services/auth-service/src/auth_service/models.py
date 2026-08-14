@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import Boolean, DateTime, Integer, LargeBinary, String
+from sqlalchemy import Boolean, DateTime, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("auth")
@@ -92,3 +92,36 @@ class TechnicalAccount(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AdGroupRoleMapping(Base):
+    """Konfigurierbares AD-/Keycloak-Gruppe -> interne-Rolle-Mapping (4.4,
+    P24-S2). EIGENE, schlanke Tabelle statt Wiederverwendung von
+    `permission_service.models.Group`/`GroupMembership`/`RoleAssignment`
+    (Post-Roadmap Phase 22) - jene bilden ADMIN-ANGELEGTE Gruppen mit
+    expliziter, synchron zu haltender Mitgliedschaftstabelle ab, eine
+    andere, unabhängige Funktion. Dieses Mapping bildet stattdessen EXTERNE
+    Keycloak-/AD-Gruppenclaims (`groups`-JWT-Claim, siehe
+    `bootstrap._ensure_groups_mapper`) auf interne Rollennamen ab - keine
+    eigene Mitgliedschaftstabelle nötig, da der Claim bei jedem Tokenbezug
+    ohnehin frisch aus Keycloak kommt und dynamisch bei jeder `/me`-Anfrage
+    ausgewertet wird (siehe `ad_group_mapping.resolve_roles_for_groups`).
+
+    Bewusster Scope-Cut dieser Session (siehe docs/services/auth-service.md
+    "Offene Punkte" und ADR 0093): nur einfache 1:1-Zuordnung (eine
+    `ad_group_name` -> eine `role_name`), keine zusammengesetzten Regeln
+    (Gruppe UND Attribut, mehrere Gruppen -> eine Rolle via UND-Logik), die
+    Konzept 4.4 als volle Zielausbaustufe beschreibt. Ein AD-Gruppenname
+    kann mehrfach vorkommen (z. B. auf zwei verschiedene Rollen gemappt
+    sein) - `UniqueConstraint` verhindert nur exakt doppelte Zeilen."""
+
+    __tablename__ = "ad_group_role_mapping"
+    __table_args__ = (
+        UniqueConstraint("ad_group_name", "role_name", name="uq_ad_group_role_mapping"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ad_group_name: Mapped[str] = mapped_column(String(255), index=True)
+    role_name: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)

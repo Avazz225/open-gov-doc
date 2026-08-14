@@ -127,6 +127,22 @@ class RealmRolesRequest(BaseModel):
     names: list[str]
 
 
+class AdGroupRoleMappingIn(BaseModel):
+    """Payload für `POST /ad-group-mappings` (4.4, P24-S2) - bewusst nur
+    einfache 1:1-Zuordnung, siehe `models.AdGroupRoleMapping`-Docstring."""
+
+    ad_group_name: str
+    role_name: str
+
+
+class AdGroupRoleMappingOut(AdGroupRoleMappingIn):
+    model_config = {"from_attributes": True}
+
+    id: int
+    created_at: datetime
+    created_by: str | None = None
+
+
 class SuperuserStatus(BaseModel):
     active: bool
     expires_at: str | None = None

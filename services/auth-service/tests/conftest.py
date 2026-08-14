@@ -78,6 +78,7 @@ async def _clean_tables():
         await conn.execute(text("TRUNCATE auth.federation_identity"))
         await conn.execute(text("TRUNCATE auth.sso_config"))
         await conn.execute(text("TRUNCATE auth.local_signing_key"))
+        await conn.execute(text("TRUNCATE auth.ad_group_role_mapping"))
         # Nur Nicht-Domain-Admin-Konten (aktuell also der Superuser) werden
         # pro Test zurückgesetzt - Domain-Admin-Zeilen bleiben bewusst über
         # die gesamte Session stabil, siehe
