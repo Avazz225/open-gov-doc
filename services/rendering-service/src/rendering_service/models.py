@@ -28,7 +28,11 @@ class Rendition(Base):
     target_content_type: Mapped[str] = mapped_column(String(255))
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_object_key: Mapped[str] = mapped_column(String(1024))
-    status: Mapped[str] = mapped_column(String(16))  # "ready" | "failed"
+    # "ready" | "failed" | "failed_permanent" (seit Post-Roadmap Phase 20
+    # Session 4, ADR 0080).
+    status: Mapped[str] = mapped_column(String(16))
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

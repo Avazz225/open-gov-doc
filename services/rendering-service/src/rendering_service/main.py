@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -16,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rendering_service import repository
 from rendering_service.consumer import start_consuming, start_consuming_ocr
 from rendering_service.document_client import DocumentServiceClient
-from rendering_service.models import Base
+from rendering_service.models import Base, Rendition
 from rendering_service.ocr_client import OcrServiceClient
+from rendering_service.pipeline import retry_rendition
 from rendering_service.schemas import RenditionOut
 from rendering_service.settings import Settings
 from rendering_service.storage_client import StorageClient
@@ -28,6 +30,48 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 
+async def _run_retry_tick(session_factory) -> None:
+    """Ein einzelner Durchlauf der fälligen Rendition-Wiederholungsversuche
+    (Post-Roadmap Phase 20 Session 4, ADR 0080) - ausgelagert aus
+    `_rendition_retry_poll_loop`, damit ein Tick isoliert testbar ist."""
+    async with session_factory() as session:
+        due = await repository.list_due_for_retry(session)
+    for stale in due:
+        async with session_factory() as session:
+            fresh = await session.get(Rendition, stale.id)
+            if fresh is None or fresh.status != "failed":
+                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+            document_id = fresh.document_id
+            version_number = fresh.version_number
+            rendition_type = fresh.rendition_type
+        await retry_rendition(
+            document_id,
+            version_number,
+            rendition_type,
+            session_factory=session_factory,
+            document_client=app.state.document_client,
+            storage=app.state.storage,
+            publish_event=publish_event,
+            max_attempts=settings.max_rendering_attempts,
+        )
+
+
+async def _rendition_retry_poll_loop(session_factory) -> None:
+    """Wiederholt fehlgeschlagene Ersatzdarstellungs-Erzeugung (Post-Roadmap
+    Phase 20 Session 4, ADR 0080) - der erste Versuch bleibt synchron im
+    NATS-Handler, nur die WIEDERHOLUNG läuft asynchron in diesem eigenen
+    Poll-Loop. Gleiches Idiom wie notification-/ocr-service."""
+    while True:
+        try:
+            await _run_retry_tick(session_factory)
+        except Exception:
+            logger.exception(
+                "Rendering-Retry-Poll-Tick fehlgeschlagen - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.rendering_retry_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -35,6 +79,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS rendering"))
         await conn.run_sync(Base.metadata.create_all)
+        # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080).
+        await conn.execute(
+            text(
+                "ALTER TABLE rendering.rendition "
+                "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE rendering.rendition ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -62,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         document_client=app.state.document_client,
         storage=app.state.storage,
         publish_event=publish_event,
+        max_attempts=settings.max_rendering_attempts,
     )
     # Nachzieheffekt aus P5-S3 (2.4/3.9): zweites Abo auf demselben event_bus-
     # Client, aber auf dem "ocr"-Stream statt "document" - siehe consumer.py.
@@ -81,12 +138,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version="0.1.0",
     )
 
+    retry_poll_task = asyncio.create_task(_rendition_retry_poll_loop(app.state.session_factory))
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    retry_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await retry_poll_task
     if registration:
         await registration.stop()
     await publisher.close()
@@ -168,6 +230,54 @@ async def get_rendition(
         return await repository.get_rendition(session, rendition_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/renditions/{rendition_id}/retry", response_model=RenditionOut)
+async def retry_rendition_endpoint(
+    rendition_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RenditionOut:
+    """Manueller Neustart einer dauerhaft fehlgeschlagenen Ersatzdarstellung
+    (Post-Roadmap Phase 20 Session 4, ADR 0080) - nur fuer `failed_permanent`
+    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen Versuch
+    NUR fuer den betroffenen Renderer statt auf den naechsten Poll-Tick zu
+    warten."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    try:
+        rendition = await repository.get_rendition(session, rendition_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if rendition.status != "failed_permanent":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Ersatzdarstellung hat Status {rendition.status!r}, nur "
+                "'failed_permanent' kann erneut versucht werden"
+            ),
+        )
+    document_id, version_number, rendition_type = (
+        rendition.document_id,
+        rendition.version_number,
+        rendition.rendition_type,
+    )
+    await repository.reset_for_retry(session, rendition)
+    await session.commit()
+    await retry_rendition(
+        document_id,
+        version_number,
+        rendition_type,
+        session_factory=app.state.session_factory,
+        document_client=app.state.document_client,
+        storage=app.state.storage,
+        publish_event=publish_event,
+        max_attempts=settings.max_rendering_attempts,
+    )
+    # Frische Session statt der obigen `session` (deren Identity Map sonst die
+    # VOR `retry_rendition` geladene, jetzt veraltete Instanz zurückgäbe -
+    # `retry_rendition` committet über eigene, separate Sessions).
+    async with app.state.session_factory() as fresh_session:
+        return await repository.get_rendition(fresh_session, rendition_id)
 
 
 @app.get("/renditions/{rendition_id}/content")

@@ -75,6 +75,122 @@ async def test_upsert_overwrites_same_key(session):
     assert len(all_for_doc) == 1
 
 
+async def test_record_failure_below_max_attempts_stays_failed_and_schedules_retry(session):
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080): unterhalb von
+    `max_attempts` bleibt `status="failed"` (retry-fähig) mit gesetztem
+    `next_retry_at`, statt sofort terminal zu werden."""
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        rendition_type="pdf_archive",
+        source_filename="a.pdf",
+        source_content_type="application/pdf",
+        error="kaputt",
+        max_attempts=5,
+    )
+    await session.commit()
+
+    assert result.status == "failed"
+    assert result.attempts == 1
+    assert result.next_retry_at is not None
+
+
+async def test_record_failure_reaches_failed_permanent_at_max_attempts(session):
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        rendition_type="pdf_archive",
+        source_filename="a.pdf",
+        source_content_type="application/pdf",
+        error="kaputt",
+        max_attempts=1,
+    )
+    await session.commit()
+
+    assert result.status == "failed_permanent"
+    assert result.attempts == 1
+    assert result.next_retry_at is None
+
+
+async def test_reset_for_retry_clears_attempts_error_and_next_retry_at(session):
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080) - Regressionstest für einen
+    bei der Live-Verifikation gefundenen echten Bug, siehe ocr-service's
+    gleichnamigen Test."""
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        rendition_type="pdf_archive",
+        source_filename="a.pdf",
+        source_content_type="application/pdf",
+        error="kaputt",
+        max_attempts=1,
+    )
+    await session.commit()
+    assert result.status == "failed_permanent"
+    assert result.attempts == 1
+
+    await repository.reset_for_retry(session, result)
+    await session.commit()
+
+    assert result.attempts == 0
+    assert result.error_message is None
+    assert result.next_retry_at is None
+    assert result.status == "failed_permanent"
+
+
+async def test_list_due_for_retry_excludes_ready_and_failed_permanent(session):
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    retryable = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        rendition_type="pdf_archive",
+        source_filename="a.pdf",
+        source_content_type="application/pdf",
+        error="e",
+        max_attempts=5,
+    )
+    retryable.next_retry_at = None  # sofort faellig fuer diesen Test
+    await session.commit()
+
+    await repository.upsert_rendition(
+        session,
+        document_id=f"doc-{uuid.uuid4().hex[:8]}",
+        version_number=1,
+        rendition_type="thumbnail",
+        source_filename="foto.png",
+        source_content_type="image/png",
+        target_filename="foto_thumbnail.png",
+        target_content_type="image/png",
+        size_bytes=10,
+        storage_object_key="key",
+        status="ready",
+        error_message=None,
+    )
+    permanent = await repository.record_failure(
+        session,
+        document_id=f"doc-{uuid.uuid4().hex[:8]}",
+        version_number=1,
+        rendition_type="pdf_archive",
+        source_filename="a.pdf",
+        source_content_type="application/pdf",
+        error="e",
+        max_attempts=1,
+    )
+    await session.commit()
+
+    due_ids = {r.id for r in await repository.list_due_for_retry(session)}
+
+    assert due_ids == {retryable.id}
+    assert permanent.id not in due_ids
+
+
 async def test_list_renditions_filters_by_version(session):
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
     for version in (1, 2):

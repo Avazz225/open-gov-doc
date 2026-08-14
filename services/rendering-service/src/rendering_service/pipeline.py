@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from rendering_service import repository
 from rendering_service.document_client import DocumentNotFoundError, DocumentServiceClient
 from rendering_service.models import Rendition
-from rendering_service.renderers import select_renderers
+from rendering_service.renderers import get_renderer_by_type, select_renderers
 from rendering_service.storage_client import StorageClient
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ async def process_version(
     document_client: DocumentServiceClient,
     storage: StorageClient,
     publish_event: PublishEvent,
+    max_attempts: int,
 ) -> list[Rendition]:
     """Wendet die Ersatzdarstellungs-Regeltabelle (2.4) auf eine Dokumentversion
     an. Wird sowohl vom NATS-Consumer (`consumer.py`, automatischer Pfad nach
@@ -83,19 +84,15 @@ async def process_version(
                     document_id,
                     version_number,
                 )
-                rendition = await repository.upsert_rendition(
+                rendition = await repository.record_failure(
                     session,
                     document_id=document_id,
                     version_number=version_number,
                     rendition_type=renderer.rendition_type,
                     source_filename=metadata.filename,
                     source_content_type=metadata.content_type,
-                    target_filename="",
-                    target_content_type="",
-                    size_bytes=0,
-                    storage_object_key="",
-                    status="failed",
-                    error_message=str(exc),
+                    error=str(exc),
+                    max_attempts=max_attempts,
                 )
             await session.commit()
             results.append(rendition)
@@ -112,6 +109,99 @@ async def process_version(
                 actor="system:rendering-service",
             )
     return results
+
+
+async def retry_rendition(
+    document_id: str,
+    version_number: int,
+    rendition_type: str,
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    document_client: DocumentServiceClient,
+    storage: StorageClient,
+    publish_event: PublishEvent,
+    max_attempts: int,
+) -> Rendition | None:
+    """Wiederholt gezielt NUR den einen fehlgeschlagenen Renderer (Post-Roadmap
+    Phase 20 Session 4, ADR 0080) - anders als `process_version` (läuft alle
+    zutreffenden Regeln neu) wird hier über `get_renderer_by_type` genau der
+    betroffene Renderer nachgeschlagen, damit ein Wiederholungsversuch nicht
+    auch bereits erfolgreiche Renditions unnötig neu erzeugt. Aufgerufen vom
+    Retry-Poll-Loop UND vom manuellen `POST .../retry`-Endpunkt (main.py)."""
+    renderer = get_renderer_by_type(rendition_type)
+    if renderer is None:
+        logger.warning(
+            "Kein Renderer mehr für rendition_type %r (Dokument %r Version %s) - "
+            "Retry übersprungen",
+            rendition_type,
+            document_id,
+            version_number,
+        )
+        return None
+
+    try:
+        metadata = await document_client.get_version(document_id, version_number)
+        data = await document_client.download_content(document_id, version_number)
+    except DocumentNotFoundError:
+        logger.warning(
+            "Dokument %r Version %s nicht (mehr) verfügbar - Retry übersprungen",
+            document_id,
+            version_number,
+        )
+        return None
+
+    async with session_factory() as session:
+        try:
+            output = await renderer.render(
+                data, filename=metadata.filename, content_type=metadata.content_type
+            )
+            key = f"renditions/{document_id}/{version_number}/{output.rendition_type}"
+            await storage.upload(key, output.data, output.target_content_type)
+            rendition = await repository.upsert_rendition(
+                session,
+                document_id=document_id,
+                version_number=version_number,
+                rendition_type=output.rendition_type,
+                source_filename=metadata.filename,
+                source_content_type=metadata.content_type,
+                target_filename=output.target_filename,
+                target_content_type=output.target_content_type,
+                size_bytes=len(output.data),
+                storage_object_key=key,
+                status="ready",
+                error_message=None,
+            )
+        except Exception as exc:  # Plugin-Fehler isolieren, gleiches Muster wie process_version
+            logger.exception(
+                "Renderer %r erneut fehlgeschlagen für %r Version %s",
+                renderer.rendition_type,
+                document_id,
+                version_number,
+            )
+            rendition = await repository.record_failure(
+                session,
+                document_id=document_id,
+                version_number=version_number,
+                rendition_type=renderer.rendition_type,
+                source_filename=metadata.filename,
+                source_content_type=metadata.content_type,
+                error=str(exc),
+                max_attempts=max_attempts,
+            )
+        await session.commit()
+    await publish_event(
+        "rendering.completed",
+        document_id,
+        {
+            "version_number": version_number,
+            "rendition_type": rendition.rendition_type,
+            "target_filename": rendition.target_filename,
+            "status": rendition.status,
+            "error": rendition.error_message,
+        },
+        actor="system:rendering-service",
+    )
+    return rendition
 
 
 async def process_ocr_text(

@@ -119,6 +119,130 @@ async def test_update_config_can_clear_max_word_count(session):
     assert cleared.max_word_count is None
 
 
+async def test_record_failure_below_max_attempts_stays_failed_and_schedules_retry(session):
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080): unterhalb von
+    `max_attempts` bleibt `status="failed"` (retry-fähig) mit gesetztem
+    `next_retry_at`, statt sofort terminal zu werden."""
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        engine="tesseract",
+        error="kaputt",
+        max_attempts=5,
+    )
+    await session.commit()
+
+    assert result.status == "failed"
+    assert result.attempts == 1
+    assert result.next_retry_at is not None
+
+
+async def test_record_failure_reaches_failed_permanent_at_max_attempts(session):
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        engine="tesseract",
+        error="kaputt",
+        max_attempts=1,
+    )
+    await session.commit()
+
+    assert result.status == "failed_permanent"
+    assert result.attempts == 1
+    assert result.next_retry_at is None
+
+
+async def test_record_failure_increments_attempts_on_repeated_failure(session):
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        engine="tesseract",
+        error="kaputt 1",
+        max_attempts=5,
+    )
+    await session.commit()
+
+    second = await repository.record_failure(
+        session,
+        document_id=document_id,
+        version_number=1,
+        engine="tesseract",
+        error="kaputt 2",
+        max_attempts=5,
+    )
+    await session.commit()
+
+    assert second.attempts == 2
+    assert second.status == "failed"
+
+
+async def test_reset_for_retry_clears_attempts_error_and_next_retry_at(session):
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080) - Regressionstest für einen
+    bei der Live-Verifikation gefundenen echten Bug: ohne diesen Reset würde
+    ein erneuter Fehlschlag nach manuellem Retry von der bereits erschöpften
+    `attempts`-Zahl weiterzählen und sofort wieder `failed_permanent`
+    erreichen, egal wie viele Versuche `max_attempts` eigentlich erlaubt."""
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    result = await repository.record_failure(
+        session, document_id=document_id, version_number=1, engine="", error="e", max_attempts=1
+    )
+    await session.commit()
+    assert result.status == "failed_permanent"
+    assert result.attempts == 1
+
+    await repository.reset_for_retry(session, result)
+    await session.commit()
+
+    assert result.attempts == 0
+    assert result.error_message is None
+    assert result.next_retry_at is None
+    # `status` bleibt bewusst unberührt - der Aufrufer (main.py) startet
+    # danach einen echten Verarbeitungsversuch, der `status` neu setzt.
+    assert result.status == "failed_permanent"
+
+
+async def test_list_due_for_retry_excludes_ready_skipped_and_failed_permanent(session):
+    document_id = f"doc-{uuid.uuid4().hex[:8]}"
+    retryable = await repository.record_failure(
+        session, document_id=document_id, version_number=1, engine="", error="e", max_attempts=5
+    )
+    retryable.next_retry_at = None  # sofort faellig fuer diesen Test
+    await session.commit()
+
+    await repository.upsert_ocr_result(
+        session,
+        document_id=f"doc-{uuid.uuid4().hex[:8]}",
+        version_number=1,
+        status="ready",
+        engine="tesseract",
+        average_confidence=90.0,
+        full_text="Text",
+        pages=[],
+        page_image_storage_key=None,
+        error_message=None,
+    )
+    permanent = await repository.record_failure(
+        session,
+        document_id=f"doc-{uuid.uuid4().hex[:8]}",
+        version_number=1,
+        engine="",
+        error="e",
+        max_attempts=1,
+    )
+    await session.commit()
+
+    due_ids = {r.id for r in await repository.list_due_for_retry(session)}
+
+    assert due_ids == {retryable.id}
+    assert permanent.id not in due_ids
+
+
 async def test_list_ocr_results_filters_by_version(session):
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
     for version in (1, 2):

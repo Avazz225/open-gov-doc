@@ -19,6 +19,7 @@ def make_handler(
     document_client: DocumentServiceClient,
     storage: StorageClient,
     publish_event: PublishEvent,
+    max_attempts: int,
 ) -> Callable[[bytes], Awaitable[None]]:
     """Reagiert auf `document.created` (erste Version, Payload enthält keine
     `version_number`) und `document.version.created` (Check-in, `version_
@@ -51,6 +52,7 @@ def make_handler(
             document_client=document_client,
             storage=storage,
             publish_event=publish_event,
+            max_attempts=max_attempts,
         )
 
     return handle
@@ -64,12 +66,14 @@ async def start_consuming(
     document_client: DocumentServiceClient,
     storage: StorageClient,
     publish_event: PublishEvent,
+    max_attempts: int,
 ) -> None:
     handler = make_handler(
         session_factory=session_factory,
         document_client=document_client,
         storage=storage,
         publish_event=publish_event,
+        max_attempts=max_attempts,
     )
     for subject in subjects:
         try:

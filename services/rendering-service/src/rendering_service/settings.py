@@ -32,3 +32,12 @@ class Settings(BaseServiceSettings):
     # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - rendering-service
     # hatte bislang gar keine Berechtigungsprüfung.
     permission_service_base_url: str = "http://localhost:8004"
+
+    # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080) - gleicher
+    # Zahlenwert wie archival-/notification-/ocr-service's `max_*_attempts`.
+    # Nach Erschoepfung wechselt eine Rendition auf `failed_permanent`.
+    max_rendering_attempts: int = 5
+
+    # Poll-Intervall des neuen `_rendition_retry_poll_loop` (main.py) - gleicher
+    # Wert wie notification-/ocr-service's `*_retry_poll_interval_seconds`.
+    rendering_retry_poll_interval_seconds: float = 60.0

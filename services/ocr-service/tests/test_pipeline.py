@@ -102,7 +102,9 @@ class EventRecorder:
         self.events.append((event_type, subject, payload))
 
 
-async def _run_pipeline(document_id: str, version_number: int, recorder: EventRecorder):
+async def _run_pipeline(
+    document_id: str, version_number: int, recorder: EventRecorder, *, max_attempts: int = 5
+):
     engine = build_engine(DSN)
     session_factory = make_session_factory(engine)
     document_client = DocumentServiceClient(DOCUMENT_SERVICE_URL)
@@ -115,6 +117,7 @@ async def _run_pipeline(document_id: str, version_number: int, recorder: EventRe
             document_client=document_client,
             storage=storage,
             publish_event=recorder,
+            max_attempts=max_attempts,
         )
     finally:
         await document_client.close()
@@ -176,10 +179,34 @@ async def test_process_version_marks_corrupt_pdf_as_failed():
 
     assert result is not None
     assert result.status == "failed"
+    assert result.attempts == 1
+    assert result.next_retry_at is not None
     assert result.error_message is not None
     assert recorder.events == [
-        ("ocr.failed", document_id, {"version_number": 1, "error": result.error_message})
+        (
+            "ocr.failed",
+            document_id,
+            {"version_number": 1, "error": result.error_message, "status": "failed"},
+        )
     ]
+
+
+async def test_process_version_reaches_failed_permanent_at_max_attempts():
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080): mit `max_attempts=1`
+    erreicht bereits der erste Fehlschlag das Terminalstatus."""
+    document_id = _upload_document(
+        filename=f"kaputt-{uuid.uuid4().hex[:8]}.pdf",
+        content=b"das ist kein echtes PDF",
+        content_type="application/pdf",
+    )
+    recorder = EventRecorder()
+
+    result = await _run_pipeline(document_id, 1, recorder, max_attempts=1)
+
+    assert result is not None
+    assert result.status == "failed_permanent"
+    assert result.attempts == 1
+    assert result.next_retry_at is None
 
 
 async def test_process_version_skips_gracefully_if_storage_object_missing():

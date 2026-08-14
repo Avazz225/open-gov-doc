@@ -16,7 +16,9 @@ class RenditionOut(BaseModel):
     target_filename: str
     target_content_type: str
     size_bytes: int
-    status: Literal["ready", "failed"]
+    status: Literal["ready", "failed", "failed_permanent"]
     error_message: str | None
+    attempts: int
+    next_retry_at: datetime | None
     created_at: datetime
     updated_at: datetime

@@ -38,3 +38,12 @@ class Settings(BaseServiceSettings):
     # Konfidenz) - rein informativ, blockiert nichts (siehe ADR 0010: nur der
     # Virenscan gated den Zugriff).
     needs_review_confidence_threshold: float = 70.0
+
+    # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080) - gleicher
+    # Zahlenwert wie archival-/notification-service's `max_*_attempts`. Nach
+    # Erschoepfung wechselt ein OCR-Ergebnis auf `failed_permanent`.
+    max_ocr_attempts: int = 5
+
+    # Poll-Intervall des neuen `_ocr_retry_poll_loop` (main.py) - gleicher Wert
+    # wie notification-service's `notification_retry_poll_interval_seconds`.
+    ocr_retry_poll_interval_seconds: float = 60.0

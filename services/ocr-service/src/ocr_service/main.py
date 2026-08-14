@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -13,7 +14,8 @@ from fastapi.responses import Response
 from ocr_service import repository
 from ocr_service.consumer import start_consuming
 from ocr_service.document_client import DocumentServiceClient
-from ocr_service.models import Base
+from ocr_service.models import Base, OcrResult
+from ocr_service.pipeline import process_version
 from ocr_service.schemas import OcrConfigIn, OcrConfigOut, OcrResultOut
 from ocr_service.settings import Settings
 from ocr_service.storage_client import StorageClient
@@ -23,6 +25,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
+
+
+async def _run_retry_tick(session_factory) -> None:
+    """Ein einzelner Durchlauf der fälligen OCR-Wiederholungsversuche
+    (Post-Roadmap Phase 20 Session 4, ADR 0080) - ausgelagert aus
+    `_ocr_retry_poll_loop`, damit ein Tick isoliert testbar ist. Ruft
+    `pipeline.process_version` erneut auf (nicht nur einen Teilschritt) - es
+    gibt nur EIN autoritatives Ergebnis je Version, ein Neudurchlauf ist
+    idempotent (`upsert_ocr_result` überschreibt dieselbe Zeile)."""
+    async with session_factory() as session:
+        due = await repository.list_due_for_retry(session)
+    for stale in due:
+        async with session_factory() as session:
+            fresh = await session.get(OcrResult, stale.id)
+            if fresh is None or fresh.status != "failed":
+                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+        await process_version(
+            fresh.document_id,
+            fresh.version_number,
+            session_factory=session_factory,
+            document_client=app.state.document_client,
+            storage=app.state.storage,
+            publish_event=publish_event,
+            max_attempts=settings.max_ocr_attempts,
+        )
+
+
+async def _ocr_retry_poll_loop(session_factory) -> None:
+    """Wiederholt fehlgeschlagene OCR-Verarbeitung (Post-Roadmap Phase 20
+    Session 4, ADR 0080) - der erste Versuch bleibt synchron im NATS-Handler,
+    nur die WIEDERHOLUNG läuft asynchron in diesem eigenen Poll-Loop.
+    Gleiches Idiom wie notification-service's `_notification_retry_poll_loop`."""
+    while True:
+        try:
+            await _run_retry_tick(session_factory)
+        except Exception:
+            logger.exception(
+                "OCR-Retry-Poll-Tick fehlgeschlagen - wird beim naechsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.ocr_retry_poll_interval_seconds)
 
 
 @asynccontextmanager
@@ -46,6 +88,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ALTER TABLE ocr.ocr_config "
                 "ADD COLUMN IF NOT EXISTS allowed_content_types JSON DEFAULT '[]'::json NOT NULL"
             )
+        )
+        # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080).
+        await conn.execute(
+            text(
+                "ALTER TABLE ocr.ocr_result "
+                "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE ocr.ocr_result ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ")
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
@@ -73,6 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         document_client=app.state.document_client,
         storage=app.state.storage,
         publish_event=publish_event,
+        max_attempts=settings.max_ocr_attempts,
     )
 
     registration = await maybe_start_registration(
@@ -82,12 +135,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version="0.1.0",
     )
 
+    retry_poll_task = asyncio.create_task(_ocr_retry_poll_loop(app.state.session_factory))
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    retry_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await retry_poll_task
     if registration:
         await registration.stop()
     await publisher.close()
@@ -195,6 +253,48 @@ async def get_ocr_result(
         return await repository.get_ocr_result(session, ocr_result_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/ocr-results/{ocr_result_id}/retry", response_model=OcrResultOut)
+async def retry_ocr_result(
+    ocr_result_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> OcrResultOut:
+    """Manueller Neustart eines dauerhaft fehlgeschlagenen OCR-Laufs
+    (Post-Roadmap Phase 20 Session 4, ADR 0080) - nur fuer `failed_permanent`
+    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen Versuch
+    statt auf den naechsten Poll-Tick zu warten."""
+    await _require_ocr_permission(x_dms_principal, access_type="write")
+    try:
+        result = await repository.get_ocr_result(session, ocr_result_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result.status != "failed_permanent":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"OCR-Ergebnis hat Status {result.status!r}, nur 'failed_permanent' "
+                "kann erneut versucht werden"
+            ),
+        )
+    document_id, version_number = result.document_id, result.version_number
+    await repository.reset_for_retry(session, result)
+    await session.commit()
+    await process_version(
+        document_id,
+        version_number,
+        session_factory=app.state.session_factory,
+        document_client=app.state.document_client,
+        storage=app.state.storage,
+        publish_event=publish_event,
+        max_attempts=settings.max_ocr_attempts,
+    )
+    # Frische Session statt der obigen `session` (deren Identity Map sonst die
+    # VOR `process_version` geladene, jetzt veraltete Instanz zurückgäbe -
+    # `process_version` committet über eigene, separate Sessions).
+    async with app.state.session_factory() as fresh_session:
+        return await repository.get_ocr_result(fresh_session, ocr_result_id)
 
 
 @app.get("/ocr-results/{ocr_result_id}/page-image")

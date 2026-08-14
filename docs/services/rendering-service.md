@@ -10,7 +10,8 @@
 |---|---|---|
 | `GET` | `/renditions?document_id=...&version_number=...` | Erzeugte Ersatzdarstellungen/Vorschauen zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) — seit **P19-S8** `rendering.read`-gegated |
 | `GET` | `/renditions/{id}` | Einzelne Ersatzdarstellung (Metadaten) — 404 bei unbekannter `id`; seit **P19-S8** `rendering.read`-gegated |
-| `GET` | `/renditions/{id}/content` | Bytes der Ersatzdarstellung (Proxy auf den Storage Service) — 404 bei unbekannter `id`, 409 bei Status `failed`; seit **P19-S8** `rendering.read`-gegated |
+| `GET` | `/renditions/{id}/content` | Bytes der Ersatzdarstellung (Proxy auf den Storage Service) — 404 bei unbekannter `id`, 409 bei Status `failed`/`failed_permanent`; seit **P19-S8** `rendering.read`-gegated |
+| `POST` | `/renditions/{id}/retry` | Manueller Neustart einer `failed_permanent`-Ersatzdarstellung (seit **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` bei unbekannter `id`, `409` wenn `status != "failed_permanent"`, sonst sofortiger erneuter Versuch NUR für den betroffenen Renderer; `rendering.write`-gegated |
 | `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → On-Demand-Wasserzeichen, liefert das gestempelte PDF direkt zurück, **ohne** es zu persistieren; seit **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gegated |
 | `GET` | `/healthz` | Health-Check |
 
@@ -26,6 +27,20 @@ Der Rendering Service konsumiert `document.created` (erste Version, `version_num
 4. Erneutes Verarbeiten derselben Version (z. B. NATS-Redelivery) überschreibt die vorhandene Zeile (natürlicher Primärschlüssel), statt Duplikate anzuhäufen.
 
 Ein einziges breites Subject-Abo (`document.>`, nicht zwei Einzel-Subscriptions) mit In-Handler-Dispatch nach `event_type` — dasselbe Muster wie `permission-service/structure_consumer.py`, da ein JetStream-Durable-Consumer-Name pro abonniertem Subject reserviert wäre. Andere `document.>`-Events (Metadaten-Update, Löschung, Force-Unlock) lösen kein Rendering aus.
+
+### Retry & Backoff (Post-Roadmap Phase 20 Session 4, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md))
+
+Ein `status="failed"` (Renderer-Plugin-Fehler) ist seither **nicht mehr sofort terminal**: `attempts`
+wird erhöht, `next_retry_at` per `compute_backoff_seconds` (`libs/dms-retry`) gesetzt — ein neuer,
+eigenständiger `_rendition_retry_poll_loop` (Intervall `rendering_retry_poll_interval_seconds`, Default
+60s) greift fällige Renditions auf. **Besonderheit gegenüber `ocr-service`**: da eine Version MEHRERE
+Rendition-Zeilen haben kann (eine je zutreffender Regel), ruft der Retry gezielt NUR den einen
+betroffenen Renderer erneut auf (`renderers.get_renderer_by_type`/`pipeline.retry_rendition`), nicht die
+gesamte `process_version`-Regelkaskade — sonst würden bereits erfolgreiche Renditions unnötig neu
+erzeugt. Erst nach `max_rendering_attempts` (Default 5) erfolglosen Versuchen wechselt `status` auf das
+echte Terminalstatus `failed_permanent`, ab dem `POST /renditions/{id}/retry` einen sofortigen manuellen
+Neustart erlaubt (setzt zuerst `attempts`/`error_message`/`next_retry_at` zurück, dann ein echter neuer
+Versuch).
 
 **Rückwirkende Verarbeitung beim ersten Start**: Da kein `deliver_new` gesetzt ist (wie bei `permission-service`/`audit-service`), holt ein frischer Durable Consumer beim allerersten Start die komplette bisherige Event-Historie nach — bereits vor dieser Session hochgeladene Dokumente werden also rückwirkend mit Ersatzdarstellungen versehen, sobald der Service erstmals läuft. Gewolltes Verhalten (Backfill), keine Race Condition.
 
@@ -102,7 +117,7 @@ Noch keine — folgt in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests`: Renderer-Verhalten gegen echte, in-memory erzeugte Dateien (echtes PNG/`.docx`/`.pptx`/PDF, keine Fixture-Dateien, keine Mocks), Repository (Upsert/Überschreiben/Filter), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. Fehler-Isolation bei korruptem PDF; seit P5-S3 zusätzlich `process_ocr_text` für den Nachzieheffekt), API (`/renditions`-Endpunkte, Wasserzeichen inkl. Ablehnung bei ungültigem PDF), Consumer-Integration (echtes NATS-Event `document.created`/`document.version.created` löst echtes Rendering aus; seit P5-S3 zusätzlich `test_ocr_consumer.py` für den `ocr.completed`-Dispatch inkl. Duplikatsprüfung, mit einem Fake-`OcrServiceClient` statt eines echten OCR-Service-Aufrufs; seit P5b-S5 zusätzlich ein Regressionstest mit einem `OcrServiceClient`, der einen Verbindungsfehler simuliert — der Handler darf dabei nicht crashen).
+- `uv run pytest services/rendering-service/tests` (**44 Tests**, +11 seit **Post-Roadmap Phase 20 Session 4** — Backoff-Verhalten, `list_due_for_retry`-Filterung, `reset_for_retry`-Regressionstest, `process_version`s `failed_permanent`-Pfad, neuer `/retry`-Endpunkt, neue `test_main.py` für `_run_retry_tick`, siehe [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): Renderer-Verhalten gegen echte, in-memory erzeugte Dateien (echtes PNG/`.docx`/`.pptx`/PDF, keine Fixture-Dateien, keine Mocks), Repository (Upsert/Überschreiben/Filter), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. Fehler-Isolation bei korruptem PDF; seit P5-S3 zusätzlich `process_ocr_text` für den Nachzieheffekt), API (`/renditions`-Endpunkte, Wasserzeichen inkl. Ablehnung bei ungültigem PDF), Consumer-Integration (echtes NATS-Event `document.created`/`document.version.created` löst echtes Rendering aus; seit P5-S3 zusätzlich `test_ocr_consumer.py` für den `ocr.completed`-Dispatch inkl. Duplikatsprüfung, mit einem Fake-`OcrServiceClient` statt eines echten OCR-Service-Aufrufs; seit P5b-S5 zusätzlich ein Regressionstest mit einem `OcrServiceClient`, der einen Verbindungsfehler simuliert — der Handler darf dabei nicht crashen).
 - Live gegen den echten Stack über das API-Gateway verifiziert: Upload → automatische Thumbnail-Erzeugung → Download der Ersatzdarstellung (korrekt herunterskaliertes echtes PNG) → `rendering.completed` im Audit-Trail sichtbar, Hash-Kette weiterhin intakt. Seit P5-S3 zusätzlich: PDF mit Textlayer hochgeladen → OCR Service erzeugt `native_text_layer`-Ergebnis → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Volltext. Seit P7-S3 zusätzlich: `.txt`- und echte `.docx`-Datei (via `python-docx` erzeugt) live über `soffice --headless` zu validem PDF/A-getaggtem PDF konvertiert.
 - Seit P7-S3 zusätzlich `_libreoffice.py`-Tests (Binärpfad-Auflösung inkl. Fehlerfall bei fehlendem Binary via `monkeypatch` auf `_BINARY_CANDIDATES`) sowie erweiterte `PdfArchiveRenderer`-Tests für Bild-/Office-Formate.
 
@@ -112,6 +127,6 @@ Noch keine — folgt in Phase 11.
 - **PDF/A weiterhin nicht ISO-19005-validiert** (s. o., seit P7-S3 zumindest über LibreOffices eigenen Export-Filter statt reinem `pypdf`-Tagging) — eine unabhängige veraPDF-Prüfung ist nicht Teil dieses Service.
 - **Größeres Docker-Image** durch die LibreOffice-Installation (seit P7-S3) — bewusster Trade-off für die geforderte Formatabdeckung (5.6), kein Weg daran vorbei ohne proprietäre Cloud-APIs.
 - **Kein Video-Transkriptions-Plugin**: laut Konzept selbst optional, keine Engine vorhanden.
-- **Keine Bereinigung fehlgeschlagener Renditions**: eine dauerhaft `status="failed"` bleibende Zeile wird nicht automatisch erneut versucht (kein Retry-Mechanismus).
+- ~~**Keine Bereinigung fehlgeschlagener Renditions**~~ — **behoben in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatischer Retry mit Full-Jitter-Backoff bis `max_rendering_attempts`, danach `failed_permanent` + manueller Neustart über `POST .../retry` (gezielt nur für den betroffenen Renderer).
 - ~~Keine Autorisierung~~ — **behoben in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): alle Endpunkte prüfen jetzt `rendering.read`/`rendering.write` über `permission-service`. Weiterhin offen: Ersatzdarstellungen erben laut 2.4 dieselben Berechtigungen wie das Original (feingranular, dokumentspezifisch) — die neue Prüfung ist ein grobes, service-weites `read`/`write`, keine Vererbung der konkreten Dokument-Berechtigung.
 - **Wasserzeichen-Endpunkt bewusst minimal**: fester diagonaler Stempel, keine Positions-/Wiederholungs-/Farbkonfiguration.

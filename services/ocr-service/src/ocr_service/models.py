@@ -19,7 +19,10 @@ class OcrResult(Base):
     id: Mapped[str] = mapped_column(String(300), primary_key=True)
     document_id: Mapped[str] = mapped_column(String(128), index=True)
     version_number: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(16))  # "ready" | "needs_review" | "failed"
+    # "ready" | "needs_review" | "skipped" | "failed" | "failed_permanent" (seit
+    # Post-Roadmap Phase 20 Session 4, ADR 0080) - "skipped" (Wortobergrenze/
+    # Content-Type-Positivliste) ist eine bewusste Entscheidung, nie retry-fähig.
+    status: Mapped[str] = mapped_column(String(16))
     engine: Mapped[str] = mapped_column(String(32))  # "native_text_layer" | "tesseract" | ""
     average_confidence: Mapped[float] = mapped_column(Float)
     full_text: Mapped[str] = mapped_column(Text)
@@ -30,6 +33,8 @@ class OcrResult(Base):
     # verweisen stattdessen auf ihre bestehende rendering-service-Thumbnail-Rendition.
     page_image_storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

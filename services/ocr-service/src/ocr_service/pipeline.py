@@ -29,6 +29,7 @@ async def process_version(
     document_client: DocumentServiceClient,
     storage: StorageClient,
     publish_event: PublishEvent,
+    max_attempts: int,
 ) -> OcrResult | None:
     """Wird sowohl vom NATS-Consumer (`consumer.py`, automatischer Pfad nach
     `document.created`/`document.version.created`) als auch direkt in Tests
@@ -59,6 +60,7 @@ async def process_version(
             error=str(exc),
             session_factory=session_factory,
             publish_event=publish_event,
+            max_attempts=max_attempts,
         )
 
     if engine is None:
@@ -124,6 +126,7 @@ async def process_version(
             error=str(exc),
             session_factory=session_factory,
             publish_event=publish_event,
+            max_attempts=max_attempts,
         )
 
     # `page_image_storage_key` ist ein Präfix, keine vollständige Objekt-ID
@@ -231,25 +234,26 @@ async def _persist_failure(
     error: str,
     session_factory: async_sessionmaker[AsyncSession],
     publish_event: PublishEvent,
+    max_attempts: int,
 ) -> OcrResult:
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080): nutzt `repository.
+    record_failure` statt eines direkten `upsert_ocr_result`-Aufrufs - bleibt
+    unterhalb `max_attempts` bei `status="failed"` (retry-fähig), wechselt
+    erst bei Erschöpfung auf `failed_permanent`."""
     async with session_factory() as session:
-        result = await repository.upsert_ocr_result(
+        result = await repository.record_failure(
             session,
             document_id=document_id,
             version_number=version_number,
-            status="failed",
             engine=engine_name,
-            average_confidence=0.0,
-            full_text="",
-            pages=[],
-            page_image_storage_key=None,
-            error_message=error,
+            error=error,
+            max_attempts=max_attempts,
         )
         await session.commit()
     await publish_event(
         "ocr.failed",
         document_id,
-        {"version_number": version_number, "error": error},
+        {"version_number": version_number, "error": error, "status": result.status},
         actor="system:ocr-service",
     )
     return result

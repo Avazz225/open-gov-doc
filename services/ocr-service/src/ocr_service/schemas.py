@@ -26,12 +26,14 @@ class OcrResultOut(BaseModel):
     id: str
     document_id: str
     version_number: int
-    status: Literal["ready", "needs_review", "failed", "skipped"]
+    status: Literal["ready", "needs_review", "failed", "failed_permanent", "skipped"]
     engine: str
     average_confidence: float
     full_text: str
     pages: list[OcrPageOut]
     error_message: str | None
+    attempts: int
+    next_retry_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

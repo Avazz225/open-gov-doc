@@ -61,7 +61,9 @@ class EventRecorder:
         self.events.append((event_type, subject, payload))
 
 
-async def _run_pipeline(document_id: str, version_number: int, recorder: EventRecorder):
+async def _run_pipeline(
+    document_id: str, version_number: int, recorder: EventRecorder, *, max_attempts: int = 5
+):
     engine = build_engine(DSN)
     session_factory = make_session_factory(engine)
     document_client = DocumentServiceClient(DOCUMENT_SERVICE_URL)
@@ -74,6 +76,7 @@ async def _run_pipeline(document_id: str, version_number: int, recorder: EventRe
             document_client=document_client,
             storage=storage,
             publish_event=recorder,
+            max_attempts=max_attempts,
         )
     finally:
         await document_client.close()
@@ -172,8 +175,28 @@ async def test_process_version_marks_corrupt_pdf_as_failed():
     assert len(results) == 1
     assert results[0].rendition_type == "pdf_archive"
     assert results[0].status == "failed"
+    assert results[0].attempts == 1
+    assert results[0].next_retry_at is not None
     assert results[0].error_message is not None
     assert recorder.events[0][2]["status"] == "failed"
+
+
+async def test_process_version_reaches_failed_permanent_at_max_attempts():
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080): mit `max_attempts=1`
+    erreicht bereits der erste Fehlschlag das Terminalstatus."""
+    document_id = _upload_document(
+        filename=f"kaputt-{uuid.uuid4().hex[:8]}.pdf",
+        content=b"das ist kein echtes PDF",
+        content_type="application/pdf",
+    )
+    recorder = EventRecorder()
+
+    results = await _run_pipeline(document_id, 1, recorder, max_attempts=1)
+
+    assert len(results) == 1
+    assert results[0].status == "failed_permanent"
+    assert results[0].attempts == 1
+    assert results[0].next_retry_at is None
 
 
 async def test_process_version_skips_gracefully_if_storage_object_missing():

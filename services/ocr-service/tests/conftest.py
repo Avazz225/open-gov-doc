@@ -41,3 +41,8 @@ async def session(engine):
     factory = make_session_factory(engine)
     async with factory() as s:
         yield s
+
+
+@pytest.fixture
+def session_factory(engine):
+    return make_session_factory(engine)

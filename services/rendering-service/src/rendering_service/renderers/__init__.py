@@ -24,4 +24,18 @@ def select_renderers(*, content_type: str | None, filename: str) -> list[Rendere
     return [r for r in RENDERERS if r.supports(content_type=content_type, filename=filename)]
 
 
-__all__ = ["RENDERERS", "RenderOutput", "Renderer", "select_renderers"]
+def get_renderer_by_type(rendition_type: str) -> Renderer | None:
+    """Für den Retry-Poll-Loop (Post-Roadmap Phase 20 Session 4, ADR 0080):
+    eine fehlgeschlagene Rendition-Zeile kennt nur ihren `rendition_type`
+    (nicht mehr die ursprüngliche Content-Type-/Dateinamen-Zuordnung, die zur
+    Renderer-Auswahl führte) - ein Wiederholungsversuch muss gezielt NUR den
+    einen betroffenen Renderer erneut aufrufen, nicht `select_renderers()`
+    erneut über alle Regeln laufen lassen (würde auch bereits erfolgreiche
+    Renditions unnötig neu erzeugen)."""
+    for renderer in RENDERERS:
+        if renderer.rendition_type == rendition_type:
+            return renderer
+    return None
+
+
+__all__ = ["RENDERERS", "RenderOutput", "Renderer", "get_renderer_by_type", "select_renderers"]
