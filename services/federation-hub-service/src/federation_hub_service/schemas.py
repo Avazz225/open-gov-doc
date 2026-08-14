@@ -72,6 +72,8 @@ class HandoverOut(BaseModel):
     to_installation_id: str
     process_type: str
     status: str
+    attempts: int
+    next_retry_at: datetime | None
     created_at: datetime
     delivered_at: datetime | None
     completed_at: datetime | None

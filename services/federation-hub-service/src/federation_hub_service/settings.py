@@ -23,3 +23,11 @@ class Settings(BaseServiceSettings):
     # den Endpunkt vollständig - ein Hub-Betreiber muss diesen Wert bewusst
     # setzen, um Revocation überhaupt zu aktivieren.
     hub_operator_key: str | None = None
+
+    # Retry/Backoff für die Handover-Erstzustellung (P20-S5, ADR 0081) -
+    # gleiche Full-Jitter-Formel wie an den anderen vier Resilienz-Stellen
+    # dieser Phase (`libs/dms-retry`). Betrifft ausschließlich die
+    # `POST /handovers`-Zustellung an `to_installation_id`, NICHT die
+    # separate `submit_handover_result`-Rückleitung.
+    max_handover_delivery_attempts: int = 5
+    handover_retry_poll_interval_seconds: float = 60.0

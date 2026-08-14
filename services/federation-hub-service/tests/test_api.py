@@ -392,7 +392,11 @@ def test_create_handover_delivers_signed_payload_to_target_callback(client):
     assert status_response.json()["status"] == "delivered"
 
 
-def test_create_handover_marks_delivery_failed_on_unreachable_target(client):
+def test_create_handover_marks_pending_retry_on_unreachable_target(client):
+    """Post-Roadmap Phase 20 Session 5 (ADR 0081): ein transienter erster
+    Fehlschlag landet nicht mehr sofort im terminalen `delivery_failed`,
+    sondern im retry-fähigen `pending_retry` - solange
+    `max_handover_delivery_attempts` (Default 5) noch nicht erschöpft ist."""
     sender, sender_key = register_installation(client)
     target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
 
@@ -410,7 +414,155 @@ def test_create_handover_marks_delivery_failed_on_unreachable_target(client):
     response = _signed_post(client, "/handovers", payload, sender_key, installation_id=sender["id"])
 
     assert response.status_code == 201
-    assert response.json()["status"] == "delivery_failed"
+    body = response.json()
+    assert body["status"] == "pending_retry"
+    assert body["attempts"] == 1
+    assert body["next_retry_at"] is not None
+    # Der Payload wird für den späteren Retry (Poll-Loop oder manueller
+    # `POST .../retry`) flüchtig im Hub-Prozessspeicher gehalten.
+    assert body["id"] in app.state.pending_handover_payloads
+
+
+def test_create_handover_reaches_delivery_failed_after_exhausting_attempts(client):
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+        response = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["status"] == "delivery_failed"
+        assert body["attempts"] == 1
+        assert body["next_retry_at"] is None
+        # Bleibt trotz Erschöpfung im Cache - genau dafür ist er da: ein
+        # manueller `POST .../retry` braucht ihn jetzt. Nur ein ERFOLGREICHER
+        # Versuch entfernt den Eintrag wieder (ADR 0081).
+        assert body["id"] in app.state.pending_handover_payloads
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+
+
+def test_retry_handover_requires_delivery_failed_status(client):
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    created = _signed_post(
+        client, "/handovers", payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert created["status"] == "pending_retry"
+
+    response = client.post(f"/handovers/{created['id']}/retry")
+    assert response.status_code == 409
+
+
+def test_retry_handover_reattempts_a_delivery_failed_handover(client):
+    """ADR 0081: manueller Neustart setzt `attempts`/`next_retry_at` VOR dem
+    erneuten Versuch zurück (`repository.reset_for_retry`) - andernfalls
+    zählt `mark_handover_delivered` von der bereits erschöpften Zahl weiter
+    (gleicher Bug wie in ADR 0080 für ocr-/rendering-service dokumentiert)."""
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+        created = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        ).json()
+        assert created["status"] == "delivery_failed"
+        # Bleibt nach Erschöpfung im Cache (ADR 0081) - kein manuelles
+        # Nachhelfen nötig, das ist der eigentliche Zweck des Fixes.
+        assert created["id"] in app.state.pending_handover_payloads
+
+        stub, received = _make_stub_receiver()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+
+        response = client.post(f"/handovers/{created['id']}/retry")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "delivered"
+        # attempts zaehlt nur Fehlschlaege - reset_for_retry setzt sie auf 0
+        # zurueck, ein erfolgreicher Zustellversuch erhoeht sie nicht.
+        assert body["attempts"] == 0
+        assert len(received) == 1
+        assert created["id"] not in app.state.pending_handover_payloads
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+
+
+def test_retry_handover_without_cached_payload_returns_409(client):
+    """Deckt die dokumentierte Grenze ab: nach einem (simulierten) Neustart
+    ist der Payload nicht mehr im Prozessspeicher - ein manueller Retry kann
+    dann nicht mehr automatisch nachgestellt werden."""
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+        created = _signed_post(
+            client, "/handovers", payload, sender_key, installation_id=sender["id"]
+        ).json()
+        assert created["status"] == "delivery_failed"
+        assert created["id"] in app.state.pending_handover_payloads
+
+        # Simuliert den Verlust des Prozessspeicher-Cache (z. B. Neustart des
+        # Hub) - der einzige Fall, in dem die Payload-Zwischenspeicherung
+        # tatsächlich nicht mehr verfügbar ist.
+        app.state.pending_handover_payloads.pop(created["id"], None)
+
+        response = client.post(f"/handovers/{created['id']}/retry")
+        assert response.status_code == 409
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
 
 
 def test_submit_result_only_allowed_by_target_installation(client):

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, LargeBinary, String, Text
+from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("federation")
@@ -64,7 +64,13 @@ class Handover(Base):
     """Metadaten einer einzelnen Übergabe-Vermittlung (7.4: "protokolliert nur
     Metadaten des Vermittlungsvorgangs ... nicht die Dokumentinhalte selbst") -
     bewusst **kein** Feld für den (Ende-zu-Ende verschlüsselten) Payload selbst,
-    der wird synchron weitergeleitet, nie hier persistiert."""
+    der wird synchron weitergeleitet, nie hier persistiert. Seit Post-Roadmap
+    Phase 20 Session 5 (ADR 0081) gilt das weiterhin - ein zwischenzeitlich
+    per Retry erneut zuzustellender Payload wird nur FLÜCHTIG im Prozess-
+    speicher gehalten (`app.state.pending_handover_payloads`), nie in dieser
+    Tabelle - ein Neustart des Hub während eines offenen Retry-Fensters
+    verliert daher die Möglichkeit zur automatischen Nachzustellung (siehe
+    docs/services/federation-hub-service.md "Offene Punkte")."""
 
     __tablename__ = "handover"
 
@@ -72,8 +78,14 @@ class Handover(Base):
     from_installation_id: Mapped[str] = mapped_column(String(128), index=True)
     to_installation_id: Mapped[str] = mapped_column(String(128), index=True)
     process_type: Mapped[str] = mapped_column(String(256))
-    # "pending" -> "delivered"|"delivery_failed" -> "completed"|"result_delivery_failed"
+    # "pending" -> "delivered"|"pending_retry"->...->"delivery_failed" ->
+    # "completed"|"result_delivery_failed" (Post-Roadmap Phase 20 Session 5,
+    # ADR 0081: "pending_retry" ist neu, "delivery_failed" wird erst nach
+    # Erschoepfung von max_handover_delivery_attempts erreicht statt wie
+    # zuvor sofort bei jedem einzelnen Fehlschlag).
     status: Mapped[str] = mapped_column(String(32))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

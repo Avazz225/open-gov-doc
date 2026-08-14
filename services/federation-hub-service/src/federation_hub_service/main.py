@@ -1,8 +1,9 @@
+import asyncio
 import json
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import httpx
 from dms_common import configure_logging
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from federation_hub_service import repository
 from federation_hub_service.crypto_utils import sign_body
-from federation_hub_service.models import Base, Installation
+from federation_hub_service.models import Base, Handover, Installation
 from federation_hub_service.schemas import (
     HandoverCreate,
     HandoverOut,
@@ -76,6 +77,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE federation.installation DROP COLUMN IF EXISTS api_key_hash")
         )
+        # Post-Roadmap Phase 20 Session 5 (ADR 0081): Retry/Backoff für die
+        # Handover-Erstzustellung, analog zu den vier anderen Resilienz-Stellen
+        # dieser Phase.
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.handover "
+                "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.handover "
+                "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -91,12 +107,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Handover-Rundlauf ohne echtes Netzwerk getestet werden kann.
     app.state.http_client = httpx.AsyncClient(timeout=15.0)
 
+    # Post-Roadmap Phase 20 Session 5 (ADR 0081): der Ende-zu-Ende
+    # verschlüsselte Payload wird bewusst NIE in der `handover`-Tabelle
+    # persistiert (siehe `models.Handover`-Docstring, ADR 0028) - ein
+    # zwischenzeitlich per Retry erneut zuzustellender Payload lebt daher nur
+    # FLÜCHTIG in diesem Prozessspeicher-Dict (keyed by handover_id). Ein
+    # Neustart des Hub während eines offenen Retry-Fensters verliert damit
+    # bewusst die Möglichkeit zur automatischen Nachzustellung - dokumentiert,
+    # nicht stillschweigend umgangen (siehe `docs/services/
+    # federation-hub-service.md` "Offene Punkte").
+    app.state.pending_handover_payloads = {}
+    retry_poll_task = asyncio.create_task(
+        _handover_retry_poll_loop(app.state.session_factory, app.state.pending_handover_payloads)
+    )
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    retry_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await retry_poll_task
     await app.state.http_client.aclose()
     await engine.dispose()
 
@@ -252,6 +285,65 @@ async def _deliver(url: str, body: dict) -> bool:
         return False
 
 
+async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) -> None:
+    """Ein einzelner Durchlauf der fälligen Handover-Wiederholungsversuche -
+    ausgelagert aus `_handover_retry_poll_loop`, damit ein Tick isoliert
+    testbar ist (gleiches Muster wie notification-service's `_run_retry_tick`,
+    ADR 0079)."""
+    async with session_factory() as session:
+        due = await repository.list_due_for_retry(session)
+    for stale in due:
+        async with session_factory() as session:
+            handover = await session.get(Handover, stale.id)
+            if handover is None or handover.status != "pending_retry":
+                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+            cached = pending_payloads.get(handover.id)
+            if cached is None:
+                logger.warning(
+                    "federation_handover_retry_payload_lost", extra={"handover_id": handover.id}
+                )
+                handover.status = "delivery_failed"
+                handover.next_retry_at = None
+                await session.commit()
+                continue
+            to_installation = await session.get(Installation, handover.to_installation_id)
+            delivered = False
+            if to_installation is not None:
+                delivered = await _deliver(
+                    to_installation.callback_base_url.rstrip("/") + "/federation/inbound", cached
+                )
+            await repository.mark_handover_delivered(
+                session,
+                handover,
+                success=delivered,
+                max_attempts=settings.max_handover_delivery_attempts,
+            )
+            # NUR bei Erfolg entfernen - bleibt auch nach Erschöpfung
+            # (`delivery_failed`) im Cache, sonst wäre der Cache-Eintrag exakt
+            # in dem Moment weg, in dem `POST .../retry` ihn erstmals nutzen
+            # könnte (beide Übergänge passieren im selben Tick).
+            if delivered:
+                pending_payloads.pop(handover.id, None)
+            await session.commit()
+
+
+async def _handover_retry_poll_loop(session_factory, pending_payloads: dict[str, dict]) -> None:
+    """Wiederholt fehlgeschlagene Handover-Erstzustellungen (Post-Roadmap
+    Phase 20 Session 5, ADR 0081) - der erste Zustellversuch bleibt bewusst
+    synchron in `POST /handovers` (schnelle Antwort im Regelfall), nur die
+    WIEDERHOLUNG läuft asynchron in diesem eigenen Poll-Loop. Gleiches Idiom
+    wie notification-service's `_notification_retry_poll_loop` (ADR 0079)."""
+    while True:
+        try:
+            await _run_retry_tick(session_factory, pending_payloads)
+        except Exception:
+            logger.exception(
+                "Federation-Handover-Retry-Poll-Tick fehlgeschlagen - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.handover_retry_poll_interval_seconds)
+
+
 async def _authenticate(
     session: AsyncSession, *, installation_id: str, body: bytes, signature: str
 ) -> Installation:
@@ -314,16 +406,25 @@ async def create_handover(
     # schlägt sonst reproduzierbar mit 404 fehl.
     await session.commit()
 
+    delivery_body = {
+        "handover_id": handover.id,
+        "from_installation_id": from_installation.id,
+        "process_type": payload.process_type,
+        "encrypted_payload": payload.encrypted_payload,
+    }
     delivered = await _deliver(
-        to_installation.callback_base_url.rstrip("/") + "/federation/inbound",
-        {
-            "handover_id": handover.id,
-            "from_installation_id": from_installation.id,
-            "process_type": payload.process_type,
-            "encrypted_payload": payload.encrypted_payload,
-        },
+        to_installation.callback_base_url.rstrip("/") + "/federation/inbound", delivery_body
     )
-    await repository.mark_handover_delivered(session, handover, success=delivered)
+    await repository.mark_handover_delivered(
+        session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
+    )
+    if not delivered:
+        # Bleibt auch nach Erschöpfung (`delivery_failed`) im Cache - ein
+        # manueller `POST .../retry` braucht ihn gerade dann. Nur ein
+        # ERFOLGREICHER Versuch (hier oder später im Poll-Loop/Retry-Endpunkt)
+        # entfernt den Eintrag wieder. Siehe `lifespan`s Kommentar zur bewusst
+        # flüchtigen Natur dieses Cache (ADR 0028, ADR 0081).
+        app.state.pending_handover_payloads[handover.id] = delivery_body
     await session.commit()
     return handover
 
@@ -373,3 +474,62 @@ async def get_handover(
         return await repository.get_handover(session, handover_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/handovers/{handover_id}/retry", response_model=HandoverOut)
+async def retry_handover(
+    handover_id: str, session: AsyncSession = Depends(get_session)
+) -> HandoverOut:
+    """Manueller Neustart eines endgültig fehlgeschlagenen Handover
+    (Post-Roadmap Phase 20 Session 5, ADR 0081) - nur für `delivery_failed`
+    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen
+    Zustellversuch statt auf den nächsten Poll-Tick zu warten, gleiches Muster
+    wie ocr-/rendering-service (ADR 0080). Setzt `attempts`/`next_retry_at`
+    zwingend VOR dem erneuten Versuch zurück (`repository.reset_for_retry`).
+    Funktioniert nur, solange der verschlüsselte Payload noch im
+    Prozessspeicher des Hub liegt - nach einem Neustart während eines offenen
+    Retry-Fensters ist er unwiederbringlich verloren (bewusste Konsequenz aus
+    "kein Payload wird je persistiert", ADR 0028); die Absenderinstallation
+    muss in diesem Fall einen neuen Handover mit neuer handover_id einreichen."""
+    try:
+        handover = await repository.get_handover(session, handover_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if handover.status != "delivery_failed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Handover hat Status {handover.status!r}, nur 'delivery_failed' "
+                "kann erneut versucht werden"
+            ),
+        )
+    cached = app.state.pending_handover_payloads.get(handover_id)
+    if cached is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Verschlüsselter Payload ist nicht mehr im Hub-Speicher vorhanden "
+                "(z. B. nach einem Neustart) - die Absenderinstallation muss einen "
+                "neuen Handover mit neuer handover_id einreichen"
+            ),
+        )
+    await repository.reset_for_retry(session, handover)
+    await session.commit()
+
+    to_installation = await session.get(Installation, handover.to_installation_id)
+    delivered = False
+    if to_installation is not None:
+        delivered = await _deliver(
+            to_installation.callback_base_url.rstrip("/") + "/federation/inbound", cached
+        )
+    await repository.mark_handover_delivered(
+        session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
+    )
+    # Nur bei Erfolg entfernen - bleibt bei erneutem Fehlschlag im Cache, damit
+    # ein weiterer manueller Retry (oder ein zwischenzeitlich wieder
+    # aufgenommener Poll-Loop, falls attempts noch nicht erschöpft war) ihn
+    # weiterhin nutzen kann.
+    if delivered:
+        app.state.pending_handover_payloads.pop(handover_id, None)
+    await session.commit()
+    return handover

@@ -1,5 +1,6 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from dms_retry import compute_backoff_seconds
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -242,10 +243,48 @@ async def get_handover(session: AsyncSession, handover_id: str) -> Handover:
 
 
 async def mark_handover_delivered(
-    session: AsyncSession, handover: Handover, *, success: bool
+    session: AsyncSession, handover: Handover, *, success: bool, max_attempts: int
 ) -> None:
-    handover.status = "delivered" if success else "delivery_failed"
-    handover.delivered_at = datetime.now(UTC)
+    """Retry-aware Fassung (P20-S5, ADR 0081): ein Fehlschlag führt nicht mehr
+    sofort zu ``delivery_failed``, sondern zu ``pending_retry`` mit
+    Full-Jitter-Backoff, solange ``max_attempts`` noch nicht erreicht ist -
+    gleiches Muster wie `ocr_service.repository.record_failure` /
+    `rendering_service.repository.record_failure` (ADR 0080)."""
+    if success:
+        handover.status = "delivered"
+        handover.delivered_at = datetime.now(UTC)
+        handover.next_retry_at = None
+        await session.flush()
+        return
+    handover.attempts += 1
+    if handover.attempts >= max_attempts:
+        handover.status = "delivery_failed"
+        handover.next_retry_at = None
+    else:
+        handover.status = "pending_retry"
+        delay = compute_backoff_seconds(handover.attempts - 1)
+        handover.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+    await session.flush()
+
+
+async def list_due_for_retry(session: AsyncSession) -> list[Handover]:
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Handover).where(
+            Handover.status == "pending_retry",
+            Handover.next_retry_at <= now,
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def reset_for_retry(session: AsyncSession, handover: Handover) -> None:
+    """MUSS vor einem erneuten Zustellversuch laufen - sonst zählt
+    `mark_handover_delivered` von der bereits erschöpften attempts-Zahl
+    weiter (siehe ADR 0080 "Konsequenzen" für den gefundenen Bug in
+    ocr-service/rendering-service, der dieses Muster begründet hat)."""
+    handover.attempts = 0
+    handover.next_retry_at = None
     await session.flush()
 
 
