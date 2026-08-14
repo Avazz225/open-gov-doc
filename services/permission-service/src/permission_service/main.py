@@ -508,6 +508,14 @@ async def put_approval_config(
     payload: ApprovalActionConfigUpdate,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalActionConfigOut:
+    """Bewusst weiterhin ungegatet (Post-Roadmap Phase 22 Session 3 hat das
+    geprüft, nicht umgesetzt, siehe ADR 0089): über ein Dutzend Testsuiten quer
+    durchs Repo (auth-/config-/folder-/document-/migration-/workflow-service,
+    webdav-connector) rufen diesen Endpunkt direkt als Test-Infrastruktur auf,
+    ohne `X-DMS-Principal`/Capability - ein Self-Gating analog zu `POST`/
+    `PUT /roles` (ADR 0071) hätte all diese Aufrufstellen angefasst. Siehe
+    `docs/services/permission-service.md` "Offene Punkte" für die
+    Dokumentation dieser bewusst zurückgestellten Härtung."""
     config = await repository.set_approval_config(
         session,
         action_type,

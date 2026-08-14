@@ -53,6 +53,7 @@
     "auditTraceSettings": "Audit-Tiefe",
     "shareLinkSettings": "Öffentlicher Freigabelink",
     "delegations": "Stellvertretungen",
+    "approvalSettings": "Vier-Augen-Einstellungen",
     "retentionSettings": "Aufbewahrung & Papierkorb",
     "deletionRegister": "Löschregister",
     "archivalTransfers": "Aussonderung & Archivierung",
@@ -108,6 +109,24 @@
     "addMemberError": "Mitglied hinzufügen fehlgeschlagen",
     "removeMember": "Entfernen",
     "removeMemberError": "Mitglied entfernen fehlgeschlagen"
+  },
+  "approvalSettings": {
+    "pageTitle": "Vier-Augen-Einstellungen",
+    "hint": "Steuert je Aktionstyp, ob eine zweite Person die Aktion bestätigen muss, bevor sie wirksam wird (4.3). Fehlt ein Aktionstyp in der Liste, ist er nicht gegated (Standardverhalten).",
+    "unreachable": "Permission Service nicht erreichbar.",
+    "empty": "Noch keine Aktionstypen konfiguriert.",
+    "actionType": "Aktionstyp",
+    "actionTypePlaceholder": "z. B. document.force_unlock",
+    "requiresApproval": "Genehmigungspflicht",
+    "requiredPermission": "Erforderliche Berechtigung",
+    "requiredPermissionPlaceholder": "optional, z. B. breakglass.approve",
+    "updatedAt": "Zuletzt geändert",
+    "active": "Aktiv",
+    "inactive": "Inaktiv",
+    "toggleError": "Umschalten fehlgeschlagen",
+    "createHeading": "Neuen Aktionstyp konfigurieren",
+    "createFormLabel": "Aktionstyp konfigurieren",
+    "createError": "Speichern fehlgeschlagen"
   },
   "roleAssignments": {
     "sectionTitle": "Rollenzuweisungen",

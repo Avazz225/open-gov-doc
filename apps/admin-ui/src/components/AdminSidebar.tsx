@@ -75,6 +75,7 @@ const GROUPS: NavGroup[] = [
       { href: "/audit-trace-settings/", labelKey: "nav.auditTraceSettings" },
       { href: "/share-link-settings/", labelKey: "nav.shareLinkSettings" },
       { href: "/delegations/", labelKey: "nav.delegations" },
+      { href: "/approval-settings/", labelKey: "nav.approvalSettings" },
     ],
   },
   {

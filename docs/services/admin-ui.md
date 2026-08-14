@@ -34,6 +34,7 @@
 | `/share-link-settings/` | Installationsweiter Schalter + maximale Gültigkeitsdauer für den öffentlichen Freigabelink (`ShareLinkSettings`, 4.2a, seit P14-S10) — gleiches Lade-/Speicher-Muster wie `OcrSettings`, gegen den Document Service |
 | `/delegations/` | Installationsweite Übersicht über alle Stellvertretungen (`DelegationsAdmin`, 4.4a, seit P14-S11) — Anlegen bleibt Selbstverwaltung (User-UI), hier nur Überblick + Admin-Widerruf |
 | `/config-packages/` | Konfigurationspakete laden/vorschauen/anwenden (`ConfigPackages`, 14.1, seit P17-S1) — **erste Admin-UI-Anbindung von `config-service` überhaupt**, siehe unten |
+| `/approval-settings/` | Generische Vier-Augen-Einstellungen (`ApprovalSettings`, 4.3, seit **Post-Roadmap Phase 22 Session 3**, [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)) — Toggle je konfiguriertem Aktionstyp + Formular zum erstmaligen Konfigurieren eines neuen, siehe unten |
 
 Alle Seiten außer `/login/` sind über `RequireAuth` geschützt (clientseitiger Redirect, kein Server für Middleware verfügbar — wie bei der User-UI). `RequireAuth` prüft die Sitzung der **aktiven Installation**. `/users/` ist seit **P6-S5** zusätzlich über `RequireCapability` geschützt (Domäne "Nutzer-/Rechteverwaltung", 4.6) — siehe "Autorisierung" unten.
 
@@ -55,6 +56,31 @@ bestehende, hartkodierte "everyone"-Gruppe um echte Mitgliederlisten ergänzen.
   seit P6-S5 über `RequireCapability` gegated (s. o.); das serverseitige `403` von `permission-service`
   bei fehlender `admin.user_management`-Capability ist die eigentliche Durchsetzung, identisch zum
   bestehenden Muster bei Rollen-Anlage.
+
+## Vier-Augen-Einstellungen (Post-Roadmap Phase 22 Session 3, [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md))
+
+Neue Seite `/approval-settings/` (`ApprovalSettings.tsx`) — erste Admin-UI-Anbindung des generischen
+Vier-Augen-Mechanismus (4.3) selbst, bislang nur per `curl`/direktem HTTP-Aufruf konfigurierbar.
+
+- **Tabelle bereits konfigurierter Aktionstypen** (`GET /approval-config`, alphabetisch sortiert): jede
+  Zeile zeigt `action_type`, eine Checkbox für `requires_approval` (klicken schaltet sofort per `PUT
+  /approval-config/{action_type}` um und lädt neu), `required_permission` (falls gesetzt, sonst "—") und
+  den letzten Änderungszeitpunkt. **`GET /approval-config` liefert nur Zeilen mit bereits mindestens
+  einem `PUT`-Aufruf** — kein fester Katalog aller im System existierenden Aktionstypen (siehe
+  `docs/services/permission-service.md`), daher ist ein leerer Zustand ("Noch keine Aktionstypen
+  konfiguriert") ein normaler Startzustand, kein Fehler.
+- **Formular "Neuen Aktionstyp konfigurieren"**: Freitext-`action_type` (z. B. `document.force_unlock`)
+  + `requires_approval`-Checkbox + optionales `required_permission`-Feld, ruft denselben `PUT`-Endpunkt
+  auf. Einziger Weg in der Admin-UI, einen bislang unkonfigurierten Aktionstyp erstmals zu setzen.
+- **Wichtige Korrektheitsregel beim Umschalten**: `required_permission` wird beim Umschalten-Klick
+  IMMER mit dem zuletzt geladenen Wert der Zeile mitgeschickt (nie weggelassen) — `PUT
+  /approval-config/{action_type}` überschreibt das Feld sonst mit `null`, was z. B. `auth.superuser.
+  activate`s Break-Glass-Rollenbindung (`breakglass.approve`) stillschweigend löschen würde.
+- **Bewusst kein `RequireCapability`-Wrapper und keine `requiresCapability` am Sidebar-Eintrag** — anders
+  als `/users/`: `PUT /approval-config/{action_type}` blieb in dieser Session bewusst ungegatet (siehe
+  ADR 0089 für die vollständige Begründung, insbesondere die Blast-Radius-Analyse über acht betroffene
+  Testsuiten), ein clientseitiges Capability-Gate würde eine serverseitig nicht existierende Durchsetzung
+  vortäuschen — gleiche Disziplin wie bei `ArchivalTransfersView`s ungegatetem Rückholen-Button.
 
 ## Layout (P4-S5, Nutzer-Feedback nach dem ersten echten Browser-Test des MVP)
 
@@ -192,6 +218,7 @@ Ausschließlich über das API-Gateway der jeweils **aktiven Installation** (3.5,
 | Rollen | `GET/POST /api/permission-service/roles` |
 | Gruppen (seit **Post-Roadmap Phase 22 Session 2**) | `GET/POST /api/permission-service/groups`, `DELETE .../{id}`, `GET/POST /api/permission-service/groups/{id}/members`, `DELETE .../{id}/members/{principal_id}` |
 | Rollenzuweisungen | `GET/POST /api/permission-service/role-assignments`, `DELETE .../{id}` |
+| Vier-Augen-Einstellungen (seit **Post-Roadmap Phase 22 Session 3**) | `GET /api/permission-service/approval-config`, `PUT .../{action_type}` |
 | Objekttypen | `GET/POST/PUT/DELETE /api/object-type-service/object-types`, `GET/PUT/DELETE .../object-types/{id}/layouts/{purpose}` (seit P5b-S3) — seit **P7-S3** zusätzlich `default_archive_after_days`/`archive_encryption_enabled` im Create/Update-Payload (5.6) |
 | Registry | `GET /api/registry-service/instances` |
 | Theme-Präferenz | `GET/PUT /api/auth-service/me/preferences` (seit P4-S6) |
@@ -227,7 +254,11 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **179 Tests** — seit **Post-Roadmap Phase 22 Session 2** (siehe
+- `npm test` (Vitest + Testing Library, **185 Tests** — seit **Post-Roadmap Phase 22 Session 3** (siehe
+  "Vier-Augen-Einstellungen" oben): neue Testdatei `approval-settings.test.tsx` (6 Tests: Leerzustand,
+  Unreachable-Zustand, Auflisten sortiert inkl. `required_permission`/Status, Umschalten inkl. Erhalt von
+  `required_permission`, Anlegen eines neuen Aktionstyps, Fehleranzeige beim Umschalten) für die neue
+  `ApprovalSettings`; davor 179 — seit **Post-Roadmap Phase 22 Session 2** (siehe
   "Gruppen-Verwaltung" oben): vier neue Tests in `user-management.test.tsx` (Leerzustand ohne Gruppen,
   Anlegen inkl. Reload, Auflisten + Löschen, Aufklappen inkl. Mitgliederliste laden/Mitglied
   hinzufügen/entfernen); davor 175 — seit **Post-Roadmap Phase 22 Session 1**

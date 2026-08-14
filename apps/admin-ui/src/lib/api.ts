@@ -308,6 +308,48 @@ export async function removeGroupMember(
   );
 }
 
+// Generische Vier-Augen-Einstellungsseite (Post-Roadmap Phase 22 Session 3) -
+// `GET /approval-config` liefert NUR bereits konfigurierte Aktionstypen (fehlt
+// eine Zeile, gilt implizit `requires_approval=false`, siehe
+// `docs/services/permission-service.md`) - kein fester, hartkodierter Katalog
+// aller im System existierenden Aktionstypen, daher das Formular zum
+// Hinzufügen eines neuen, noch nicht konfigurierten Aktionstyps unten.
+export interface ApprovalActionConfig {
+  action_type: string;
+  requires_approval: boolean;
+  required_permission: string | null;
+  updated_at: string;
+}
+
+export async function listApprovalConfig(token: string): Promise<ApprovalActionConfig[]> {
+  const response = await request("permission-service", "approval-config", {}, token);
+  return response.json();
+}
+
+// WICHTIG: `required_permission` muss immer explizit mitgeschickt werden
+// (auch wenn nur `requires_approval` geändert wird) - das Backend überschreibt
+// es sonst mit `null`, siehe `permission_service.repository.set_approval_config`.
+export async function putApprovalConfig(
+  token: string,
+  actionType: string,
+  params: { requiresApproval: boolean; requiredPermission: string | null }
+): Promise<ApprovalActionConfig> {
+  const response = await request(
+    "permission-service",
+    `approval-config/${encodeURIComponent(actionType)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requires_approval: params.requiresApproval,
+        required_permission: params.requiredPermission,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
 // Verfügbare Attribut-Typen der Constraint Engine (4.5) - siehe
 // libs/dms-constraint-engine.
 export type AttributeType = "string" | "decimal" | "integer" | "boolean" | "date" | "reference";
