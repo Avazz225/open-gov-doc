@@ -100,6 +100,60 @@ def test_sign_rejects_qes_when_no_connector_configured(client, pdf_document, rea
     assert response.status_code == 400
 
 
+def test_get_signature_config_returns_env_defaults(client):
+    """Post-Roadmap Phase 22 Session 6, ADR 0091 - vor dem ersten `PUT`
+    spiegelt `GET /signature-config` den bisherigen Env-Var-Ausgangswert
+    (`Settings.signature_providers`), kein separates Seed-Skript nötig."""
+    response = client.get("/signature-config")
+    assert response.status_code == 200
+    assert response.json() == [{"id": "internal", "type": "internal", "levels": ["ses", "aes"]}]
+
+
+def test_put_signature_config_rejects_unknown_provider(client):
+    """'Nur bestehende Einträge bearbeiten' (Sessionsvorgabe) - eine
+    unbekannte Connector-`id` wird abgelehnt statt sie stillschweigend
+    anzulegen."""
+    response = client.put("/signature-config", json=[{"id": "does-not-exist", "levels": ["ses"]}])
+    assert response.status_code == 422
+
+
+def test_put_signature_config_rejects_empty_levels(client):
+    response = client.put("/signature-config", json=[{"id": "internal", "levels": []}])
+    assert response.status_code == 422
+
+
+def test_put_signature_config_rejects_qes_for_internal_type(client):
+    """Dieselbe Validierung wie `SignatureProviderConfig._check_levels`
+    (Settings-Schema) - `type=internal` kann kein QES ausstellen, jetzt zur
+    Laufzeit statt nur beim Start geprüft."""
+    response = client.put("/signature-config", json=[{"id": "internal", "levels": ["qes"]}])
+    assert response.status_code == 422
+
+
+def test_put_signature_config_takes_effect_without_restart(client, pdf_document, real_signer):
+    """Kernverhalten dieser Session (Live-Reload, kein `app.state`-Cache):
+    nach `PUT /signature-config` mit `levels=["ses"]` (AES entfernt) schlägt
+    ein Signieren mit `level="aes"` sofort fehl - ganz ohne Neustart
+    zwischen PUT und dem nachfolgenden Signaturversuch."""
+    document_id, _version = pdf_document
+
+    put_response = client.put("/signature-config", json=[{"id": "internal", "levels": ["ses"]}])
+    assert put_response.status_code == 200
+    assert put_response.json() == [{"id": "internal", "type": "internal", "levels": ["ses"]}]
+
+    aes_response = client.post(
+        "/signatures",
+        json={"document_id": document_id, "level": "aes", "signer_principal_id": real_signer},
+    )
+    assert aes_response.status_code == 400
+
+    ses_response = client.post(
+        "/signatures",
+        json={"document_id": document_id, "level": "ses", "signer_principal_id": real_signer},
+    )
+    assert ses_response.status_code == 201
+
+
 def test_sign_respects_object_type_minimum_level(
     client, pdf_document_with_required_level, real_signer
 ):

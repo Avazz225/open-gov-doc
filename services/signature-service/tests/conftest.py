@@ -34,7 +34,12 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS signature"))
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("TRUNCATE signature.signature, signature.internal_ca CASCADE"))
+        await conn.execute(
+            text(
+                "TRUNCATE signature.signature, signature.internal_ca, "
+                "signature.signature_config CASCADE"
+            )
+        )
     await eng.dispose()
     yield
 

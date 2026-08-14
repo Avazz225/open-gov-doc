@@ -28,6 +28,8 @@ from storage_service.schemas import (
     GuardStatusEntry,
     ObjectCopyOut,
     ObjectMetadataOut,
+    OperationalConfigIn,
+    OperationalConfigOut,
     ReplicationRunResult,
     StorageUsageEntry,
     VerifyResult,
@@ -173,6 +175,19 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with app.state.session_factory() as session:
         yield session
+
+
+async def _get_operational_config(session: AsyncSession):
+    """Frisch aus der DB gelesen bei jedem Aufruf (kein `app.state`-Cache) -
+    Post-Roadmap Phase 22 Session 6, ADR 0091: macht `write_strategy`/
+    `quorum_count`/`max_replication_attempts` ohne Neustart wirksam, gleiches
+    Live-Reload-Prinzip wie `GuardConfig`/`ocr_service.OcrConfig`."""
+    return await repository.get_operational_config(
+        session,
+        default_write_strategy=settings.write_strategy,
+        default_quorum_count=settings.quorum_count,
+        default_max_replication_attempts=settings.max_replication_attempts,
+    )
 
 
 @app.get("/healthz")
@@ -351,13 +366,14 @@ async def upload_object(
         content_type=request.headers.get("content-type"),
     )
 
+    operational_config = await _get_operational_config(session)
     try:
         await replication.write_with_redundancy(
             session,
             backends=app.state.backends,
             targets=app.state.targets,
-            strategy=settings.write_strategy,
-            quorum_count=settings.quorum_count,
+            strategy=operational_config.write_strategy,
+            quorum_count=operational_config.quorum_count,
             key=key,
             data=data,
             checksum=checksum,
@@ -513,14 +529,51 @@ async def replication_process_pending(
     bewusst ein expliziter Endpunkt statt eines In-Prozess-Hintergrundtasks
     (siehe ADR 0004), gedacht zum periodischen Aufruf durch einen externen
     Scheduler (noch nicht Teil dieser Session)."""
+    operational_config = await _get_operational_config(session)
     result = await replication.process_pending(
         session,
         backends=app.state.backends,
-        max_attempts=settings.max_replication_attempts,
+        max_attempts=operational_config.max_replication_attempts,
         limit=limit,
     )
     await session.commit()
     return result
+
+
+@app.get("/operational-config", response_model=OperationalConfigOut)
+async def get_operational_config(
+    session: AsyncSession = Depends(get_session),
+) -> OperationalConfigOut:
+    return await _get_operational_config(session)
+
+
+@app.put("/operational-config", response_model=OperationalConfigOut)
+async def put_operational_config(
+    body: OperationalConfigIn, session: AsyncSession = Depends(get_session)
+) -> OperationalConfigOut:
+    """Betriebsparameter (Post-Roadmap Phase 22 Session 6, ADR 0091) - anders
+    als das Ziel-Set selbst (Zugangsdaten, `Settings.targets`, bewusst
+    weiterhin env-var-only) ohne Geheimnisse, daher live editierbar. Die
+    Anzahl konfigurierter Ziele ist strukturell fest (env-var, diese Session
+    ändert daran nichts) - dieselbe Quorum-Erfüllbarkeits-Prüfung wie beim
+    Start (`_validate_settings`), hier gegen einen admin-gewählten Wert statt
+    des Env-Var-Defaults."""
+    if body.write_strategy == "quorum" and not (1 <= body.quorum_count <= len(app.state.targets)):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"quorum_count={body.quorum_count} ist mit {len(app.state.targets)} "
+                "konfigurierten Ziel(en) nicht erfüllbar"
+            ),
+        )
+    config = await repository.update_operational_config(
+        session,
+        write_strategy=body.write_strategy,
+        quorum_count=body.quorum_count,
+        max_replication_attempts=body.max_replication_attempts,
+    )
+    await session.commit()
+    return config
 
 
 @app.get("/guard-config", response_model=GuardConfigOut)

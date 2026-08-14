@@ -20,8 +20,10 @@
 | `/teamspaces/` | Teamspaces-Admin-Übersicht (`TeamspacesAdmin`, 2.5, seit **Post-Roadmap Phase 22 Session 5**, [ADR 0090](../adr/0090-teamspaces-admin-overview.md)) — installationsweite Statustabelle aller Teamspaces gegen `teamspace-service`s neuen `GET /admin/teamspaces`, hinter der Capability `admin.teamspace_management` (`RequireCapability` UND gegateter Sidebar-Eintrag, echte serverseitige Durchsetzung), siehe unten |
 | `/installations/` | Installationsliste verwalten (anlegen/löschen/wechseln) — seit P4-S5 |
 | `/ocr-settings/` | Maximale Wortobergrenze/Verarbeitungs-Batch-Size/Content-Type-Positivliste des OCR Service (`OcrSettings`, seit P5b-S5, Positivliste seit P5d-S1) |
+| `/signature-config/` | Signaturniveaus je Connector des Signature Service (`SignatureConfig`, 3.10, seit **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) — **erste Admin-UI-Anbindung von `signature-service` überhaupt** |
 | `/upload-settings/` | Format-Whitelist des Document Service (`UploadSettings`, seit P5d-S1) |
 | `/storage-guard/` | Datenträger-Wechsel-Wächter-Status + Admin-Override des Storage Service (`StorageGuard`, seit P5b-S6) |
+| `/storage-operational-config/` | Schreibstrategie/Quorum/Max-Replikationsversuche des Storage Service (`StorageOperationalConfig`, 3.6, seit **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) |
 | `/kennzeichen-settings/` | Globaler Standard "Kennzeichen vor Dateinamen anzeigen" des Object-Type Service (`KennzeichenSettings`, seit P5e-S3) |
 | `/retention-settings/` | Installationsweite Aufbewahrungs-/Papierkorb-Konfiguration (`RetentionSettings`, 5.2/5.2a, seit P7-S1) — zwei unabhängige Sektionen seit P7-S1b: Document Service und Folder Service (eigene, unabhängig konfigurierbare Configs) |
 | `/deletion-register/` | Löschregister lesen (`DeletionRegister`, reine Lese-Tabelle, 5.2a, seit P7-S1) — zeigt seit P7-S1b Dokumente **und** Ordner gemeinsam in einer Tabelle (Spalte "Typ") |
@@ -128,6 +130,26 @@ Ersetzt den JSON-Freitext-Attribut-Editor aus P4-S3 durch zwei getrennte Bereich
 ## Speicher-Wächter (3.6, seit P5b-S6, [ADR 0017](../adr/0017-storage-device-identity-guard.md))
 
 `StorageGuard` (`/storage-guard/`) zeigt je konfiguriertem Ziel des Storage Service (`GET /api/storage-service/guard-status`) die zuletzt bestätigte Geräte-ID und einen Ampel-Badge für offene Nachreplikationen (`pending_copies > 0` → "wird nachrepliziert"), plus einen Admin-Override-Schalter (`GET`/`PUT /api/storage-service/guard-config`, `allow_degraded_start`). Wie bei `OcrSettings` gibt es **kein** Feld für das Ziel-Set selbst (Backends/Zugangsdaten sind reine Deployment-Konfiguration, `DMS_TARGETS`) und **keinen** Inline-Notfall-Schalter im Moment einer Startverweigerung — der Override ist eine proaktiv gesetzte Standing-Policy, die erst beim nächsten Neustart greift (Begründung: ADR 0017, derselbe Zero-Change-artige Deployment/Admin-UI-Split wie bei `ocrEnabled`, ADR 0016). Bei nicht erreichbarem Storage Service (z. B. weil ein Start gerade verweigert wurde) zeigt die Seite denselben erklärenden Leerzustand wie `OcrSettings`. **Seit P5c-S2**: jede Zeile hat zusätzlich einen Button "Datenträger-Wechsel akzeptieren" (`window.confirm`-Bestätigung, `POST /api/storage-service/guard-status/{target_id}/reidentify`) für den Korrekturmechanismus bei einem beabsichtigten, legitimen Geräte-Tausch — ersetzt die zuvor nötige direkte DB-Korrektur. **Seit P7-S1**: eine zusätzliche, rein lesende Spalte "Object Lock" zeigt je Ziel `object_lock_mode` (`governance` oder "—") — kein Editor dafür, das Ziel-Set bleibt wie bisher reine Deployment-Konfiguration (siehe ADR 0030).
+
+## Betriebsparameter des Storage Service (3.6, Post-Roadmap Phase 22 Session 6, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md))
+
+`StorageOperationalConfig` (`/storage-operational-config/`) — schlichtes Formular (Schreibstrategie-
+Auswahl, Quorum-Anzahl, maximale Replikationsversuche) gegen `GET`/`PUT
+/api/storage-service/operational-config`. Anders als `StorageGuard`s Admin-Override (wirkt erst beim
+nächsten Neustart) wirkt eine Änderung hier **sofort** — gleiches Lade-/Speicher-Muster wie
+`ShareLinkSettings`. Wie bei `StorageGuard` bleibt das Ziel-Set selbst (Zugangsdaten, `DMS_TARGETS`)
+außerhalb dieser Seite (reine Deployment-Konfiguration, siehe ADR 0091 "Begründung").
+
+## Signatur-Connectoren (3.10, Post-Roadmap Phase 22 Session 6, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md))
+
+`SignatureConfig` (`/signature-config/`) — **erste Admin-UI-Anbindung von `signature-service`
+überhaupt**. Tabelle aller konfigurierten Connectoren (`GET /api/signature-service/signature-config`):
+`id`/`type` rein lesend, je Zeile drei Checkboxen (SES/AES/QES) für `levels` — ein Klick ruft sofort
+`PUT /api/signature-service/signature-config` mit nur diesem Connector auf und lädt neu. Client-seitig
+blockiert (kein API-Aufruf), das letzte verbleibende Niveau eines Connectors abzuwählen (`levels` darf
+laut Backend nie leer sein) — serverseitiges `422` bleibt die eigentliche Durchsetzung, das ist reine
+UX-Vorwegnahme. Wie bei `StorageOperationalConfig` bleibt die Connector-*Liste* selbst (`id`/`type`,
+`DMS_SIGNATURE_PROVIDERS`) außerhalb dieser Seite.
 
 ## Aufbewahrung & Löschregister (5.2/5.2a, seit P7-S1)
 
@@ -238,6 +260,8 @@ Ausschließlich über das API-Gateway der jeweils **aktiven Installation** (3.5,
 | Theme-Präferenz | `GET/PUT /api/auth-service/me/preferences` (seit P4-S6) |
 | OCR-Einstellungen | `GET/PUT /api/ocr-service/config` (seit P5b-S5) |
 | Speicher-Wächter | `GET/PUT /api/storage-service/guard-config`, `GET /api/storage-service/guard-status` (seit P5b-S6), `POST /api/storage-service/guard-status/{target_id}/reidentify` (seit P5c-S2) |
+| Betriebsparameter (Storage, seit **Post-Roadmap Phase 22 Session 6**) | `GET/PUT /api/storage-service/operational-config` |
+| Signatur-Connectoren (seit **Post-Roadmap Phase 22 Session 6**) | `GET/PUT /api/signature-service/signature-config` |
 | Not-Shutdown / Wartungsmodus | `GET /api/permission-service/maintenance-mode` (seit P6-S6, `MaintenanceBanner` + `SuperuserBreakGlass`), `POST /api/permission-service/maintenance-mode/trigger`, `POST /api/permission-service/maintenance-mode/lift` (beide seit P6-S6, `SuperuserBreakGlass`) |
 | Aufbewahrung & Löschregister | `GET/PUT /api/document-service/retention-config`, `GET/PUT /api/document-service/trash-config`, `GET /api/document-service/deletion-register` (alle seit P7-S1, `RetentionSettings`/`DeletionRegister`); seit **P7-S1b** zusätzlich dieselben drei gegen `folder-service` (eigene, unabhängige Configs) |
 | Standardberichte | `GET /api/reporting-service/reports/{document-volume,open-workflow-tasks,storage-usage,user-activity}` + `.../export?format=csv\|pdf`, `GET/POST/DELETE /api/reporting-service/report-schedules`, `GET /api/reporting-service/report-runs/{id}/download` (alle seit P7-S2b, `ReportsView`) |
@@ -268,7 +292,13 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **191 Tests** — seit **Post-Roadmap Phase 22 Session 5** (siehe
+- `npm test` (Vitest + Testing Library, **201 Tests** — seit **Post-Roadmap Phase 22 Session 6** (siehe
+  "Betriebsparameter des Storage Service"/"Signatur-Connectoren" oben): neue Testdatei
+  `storage-operational-config.test.tsx` (4 Tests: Laden/Anzeigen, Unreachable-Zustand, Speichern
+  geänderter Werte, Fehleranzeige bei `422`) für `StorageOperationalConfig`, neue Testdatei
+  `signature-config.test.tsx` (6 Tests: Auflisten inkl. Niveau-Checkboxen, Leerzustand,
+  Unreachable-Zustand, Umschalten inkl. Reload, kein Aufruf beim Versuch das letzte Niveau
+  abzuwählen, Fehleranzeige bei `422`) für `SignatureConfig`; davor 191 — seit **Post-Roadmap Phase 22 Session 5** (siehe
   "Teamspaces-Admin-Übersicht" oben): neue Testdatei `teamspaces-admin.test.tsx` (4 Tests: Auflisten
   inkl. Teamspaces, in denen der Aufrufer selbst kein Mitglied ist, Leerzustand, Unreachable-Zustand,
   Fehleranzeige bei fehlender Capability) für die neue `TeamspacesAdmin`, plus zwei neue

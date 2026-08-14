@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, Integer, LargeBinary, String
+from sqlalchemy import JSON, DateTime, Integer, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("signature")
@@ -51,3 +51,21 @@ class Signature(Base):
     certificate_not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
     signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SignatureConfig(Base):
+    """Admin-UI-editierbare Connector-Niveaus (3.10, Post-Roadmap Phase 22
+    Session 6, ADR 0091) - einzelne Zeile mit fester `id=1`, gleiches
+    Singleton-Muster wie `InternalCa`/`OcrConfig`. `provider_levels` bildet
+    NUR `SignatureProviderConfig.levels` je bereits per Env-Var konfiguriertem
+    Connector ab (`{connector_id: [level, ...]}`) - `id`/`type` bleiben
+    strukturell fest (env-var, keine Geheimnisse involviert, aber neue
+    Connector-Typen brauchen ohnehin Code, siehe `connectors/__init__.py`).
+    Bei jedem Signaturvorgang frisch aus der DB gelesen (kein `app.state`-
+    Cache), daher ohne Neustart wirksam."""
+
+    __tablename__ = "signature_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_levels: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

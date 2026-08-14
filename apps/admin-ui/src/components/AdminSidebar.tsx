@@ -55,12 +55,16 @@ const GROUPS: NavGroup[] = [
       { href: "/ocr-settings/", labelKey: "nav.ocrSettings" },
       { href: "/upload-settings/", labelKey: "nav.uploadSettings" },
       { href: "/processing-failures/", labelKey: "nav.processingFailures" },
+      { href: "/signature-config/", labelKey: "nav.signatureConfig" },
     ],
   },
   {
     id: "storage",
     labelKey: "nav.groupStorage",
-    items: [{ href: "/storage-guard/", labelKey: "nav.storageGuard" }],
+    items: [
+      { href: "/storage-guard/", labelKey: "nav.storageGuard" },
+      { href: "/storage-operational-config/", labelKey: "nav.storageOperationalConfig" },
+    ],
   },
   {
     id: "compliance",

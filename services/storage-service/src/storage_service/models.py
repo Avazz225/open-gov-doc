@@ -4,6 +4,8 @@ from dms_db_base import make_declarative_base
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+WRITE_STRATEGIES = ("quorum", "primary_async")
+
 Base = make_declarative_base("storage")
 
 
@@ -91,4 +93,26 @@ class GuardConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     allow_degraded_start: Mapped[bool] = mapped_column(Boolean)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OperationalConfig(Base):
+    """Admin-UI-editierbare Schreibstrategie/Retry-Parameter (3.6, Post-
+    Roadmap Phase 22 Session 6) - einzelne Zeile mit fester `id=1`, gleiches
+    Muster wie `GuardConfig`/`OcrConfig`. Anders als `Settings.targets`
+    (env-only, Zugangsdaten - bleibt bewusst unveränderlich zur Laufzeit,
+    siehe ADR 0091) sind das reine Betriebsparameter ohne Geheimnisse: bei
+    jedem Schreibzugriff frisch aus der DB gelesen (kein `app.state`-Cache),
+    daher ohne Neustart wirksam. Seed-Werte kommen bei der ersten Zeile aus
+    den bisherigen Env-Var-Defaults (`Settings.write_strategy` u. a.) - eine
+    bereits laufende Installation ändert damit beim Upgrade auf diese
+    Session ihr Verhalten nicht, bis ein Admin bewusst `PUT
+    /operational-config` aufruft."""
+
+    __tablename__ = "operational_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    write_strategy: Mapped[str] = mapped_column(String(32))
+    quorum_count: Mapped[int] = mapped_column(Integer)
+    max_replication_attempts: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -38,13 +38,19 @@ def build_connectors(
 
 
 def resolve_connector_for_level(
-    settings: Settings, connectors: dict[str, SignatureProviderConnector], level: str
+    providers: list[SignatureProviderConfig],
+    connectors: dict[str, SignatureProviderConnector],
+    level: str,
 ) -> tuple[str, SignatureProviderConnector] | None:
     """Erstes konfiguriertes Connector, das das angeforderte Niveau
-    unterstützt (Reihenfolge der `signature_providers`-Liste) - `None`, wenn
-    kein Connector dieses Niveau anbietet (z. B. `level="qes"` ohne
-    konfigurierten QTSP)."""
-    for config in settings.signature_providers:
+    unterstützt (Reihenfolge der übergebenen `providers`-Liste) - `None`,
+    wenn kein Connector dieses Niveau anbietet (z. B. `level="qes"` ohne
+    konfigurierten QTSP). Seit Post-Roadmap Phase 22 Session 6 (ADR 0091)
+    nimmt dieser Parameter bewusst die bereits mit `SignatureConfig`s
+    live-editierbaren `levels` gemergte Liste entgegen (`main.py`), nicht
+    mehr `Settings` direkt - `id`/`type` bleiben strukturell aus `Settings`,
+    nur `levels` kann inzwischen vom Env-Var-Ausgangswert abweichen."""
+    for config in providers:
         if level in config.levels:
             return config.id, connectors[config.id]
     return None

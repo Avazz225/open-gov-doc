@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P22-S5 — Teamspaces-Admin-Übersicht (Phase 22 Session 5, siehe [ADR 0090](docs/adr/0090-teamspaces-admin-overview.md)): neuer `GET /admin/teamspaces` (`teamspace-service`) liefert installationsweit ALLE Teamspaces inkl. `member_count`, unabhängig von der eigenen Mitgliedschaft (anders als `GET /teamspaces`, mitgliedschaftsgefiltert). Neue Capability `admin.teamspace_management`, neue vorgeseedete Domäne `domain-admin-teamspaces` bei `permission-service` (gleiches Muster wie jede vorherige neue Admin-Domäne). Neue `admin-ui`-Seite `/teamspaces/` (`TeamspacesAdmin.tsx`), gegatet über `RequireCapability` + Sidebar-Eintrag — echte serverseitige Durchsetzung (anders als P22-S3s bewusst ungegatete Vier-Augen-Einstellungen). `member_count` statt vollständiger Mitgliederliste (spart eine zweite gegatete Mitglieder-Route, der bestehende `GET /teamspaces/{id}/members` verlangt Mitgliedschaft, die ein Admin nicht zwangsläufig hat). Tests: `teamspace-service` 45 (vorher 41, +4); `admin-ui` 191 (vorher 185, +6). Live gegen den echten Stack verifiziert (Image-Neubau + Neustart von `teamspace-service`/`permission-service`/`admin-ui`): zwei echte Teamspaces mit unterschiedlichen Erstellern angelegt, ein Admin-Principal (kein Mitglied von keinem der beiden) sah in der Übersicht beide inkl. korrekter Mitgliederzahl, bestätigt durch einen parallelen `403` auf die reguläre `GET /teamspaces/{id}`-Route für denselben Principal. Dabei bestätigt: `X-DMS-Principal` ist der Keycloak-`sub`-Claim, nicht der Benutzername — wichtig für künftige Live-Verifikationen über den Gateway.
+**Zuletzt abgeschlossen:** P22-S6 — Connector-Konfigurationsseiten für signature-service/storage-service (Phase 22 Session 6, siehe [ADR 0091](docs/adr/0091-connector-operational-config-live-editable.md)): Scope per Rückfrage geklärt — nur Betriebsparameter (keine Zugangsdaten/Struktur), nur bereits bestehende Einträge editierbar, Live-Reload ohne Neustart. `storage-service`: neues `GET`/`PUT /operational-config` (`write_strategy`/`quorum_count`/`max_replication_attempts`, DB-Singleton, `422` bei nicht erfüllbarem Quorum). `signature-service`: neues `GET`/`PUT /signature-config` (`levels` je Connector, `422` bei unbekannter `id`/leeren `levels`/`qes` bei `type=internal`). Beide bewusst NICHT das Ziel-/Connector-Set selbst — Zugangsdaten bräuchten neue Verschlüsselung, `object_lock_mode`/`role` sind WORM-relevant. Neue `admin-ui`-Seiten `/storage-operational-config/`, `/signature-config/` (letztere erste Admin-UI-Anbindung von `signature-service` überhaupt). **Testinfrastruktur-Fund**: `signature-service`s Truncate-Fixture fehlte die neue Tabelle (gleicher Fund wie P22-S2); `storage-service` hat gar keine Truncate-Fixture, neue Tests bekamen eine lokale Restore-Fixture — beide durch zweimaliges Hintereinander-Ausführen verifiziert. Tests: `storage-service` 117 (vorher 113, +4); `signature-service` 16 (vorher 11, +5); `admin-ui` 201 (vorher 191, +10). Live gegen den echten Stack verifiziert (Image-Neubau + Neustart aller drei Services): unerfüllbares Quorum → `422`, satisfiabler `PUT` gefolgt von echtem Upload lief sofort über den neuen Codepfad; Signatur-Validierungsfälle bestätigt.
 
-**Nächste Session:** **P22-S6** (Connector-Konfigurationsseiten für `signature-service`/`storage-service` — Backend-Arbeit zuerst [neue `GET/PUT /config`-Endpunkte, heute reine Env-Var-Konfiguration], dann UI nach dem Muster der bereits bestehenden `ocr-settings`/`storage-guard`-Seiten, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P22-S7** (OCR-/Speicher-Ziel-Set editierbar machen — Erweiterung derselben zwei bestehenden Seiten aus P22-S6 um echte Schreiboperationen statt nur Override-Schalter, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -2732,6 +2732,71 @@ neue Architekturentscheidung):
   Admin-Übersicht", Tests-Sektion, "Offene Punkte" als behoben markiert), `docs/services/
   permission-service.md` ("Domänengetrennte Admin-Rollen"-Tabelle), `docs/services/admin-ui.md`
   (Seiten-Tabelle, neue Sektion "Teamspaces-Admin-Übersicht", Backend-Anbindungstabelle,
+  Tests-Sektion) ergänzt.
+
+**P22-S6 — Connector-Konfigurationsseiten für signature-service/storage-service** (siehe
+[ADR 0091](docs/adr/0091-connector-operational-config-live-editable.md)):
+
+- **Vorgeschichte**: der Plan-Wortlaut ("Backend-Arbeit zuerst, neue `GET/PUT /config`-Endpunkte") ließ
+  offen, WIE weit "Connector-Konfiguration" reicht — `storage-service`s Ziel-Set enthält echte
+  S3-Zugangsdaten, `object_lock_mode`/`role` sind WORM-/Aussonderungs-relevant. Vor der Umsetzung per
+  `AskUserQuestion` geklärt statt angenommen: (1) Scope = nur Betriebsparameter, keine Zugangsdaten;
+  (2) nur bereits bestehende Einträge editierbar, keine CRUD-Verwaltung der Liste; (3) Live-Reload ohne
+  Neustart. Alle drei Empfehlungen vom Nutzer bestätigt.
+- **`storage-service`**: neue DB-Singleton-Tabelle `operational_config` (`write_strategy`,
+  `quorum_count`, `max_replication_attempts`), gleiches Get-or-create-Muster wie `GuardConfig` — bei
+  jedem betroffenen Request frisch aus der DB gelesen (kein `app.state`-Cache). Neue Endpunkte `GET`/
+  `PUT /operational-config`; `PUT` wiederholt dieselbe Quorum-Erfüllbarkeits-Prüfung wie der Start
+  (`_validate_settings`) gegen die (strukturell weiterhin feste) Zielanzahl, `422` bei
+  Nichterfüllbarkeit. `upload_object`/`replication_process_pending` lesen die Werte jetzt über die neue
+  `_get_operational_config()`-Hilfsfunktion statt direkt aus `settings`.
+- **`signature-service`**: neue DB-Singleton-Tabelle `signature_config` (`provider_levels`, JSON-Dict
+  `{connector_id: [levels]}`). Neue Endpunkte `GET`/`PUT /signature-config` — `PUT` akzeptiert eine
+  Liste `[{id, levels}]` und aktualisiert NUR die genannten Connector-`id`s (partielles Merge), lehnt
+  unbekannte `id`s, leere `levels` und `qes` bei `type=internal` mit `422` ab (dieselbe Regel wie
+  `SignatureProviderConfig._check_levels`, hier zur Laufzeit statt nur beim Start geprüft).
+  `resolve_connector_for_level()` (`connectors/__init__.py`) nimmt seither eine bereits gemergte
+  `list[SignatureProviderConfig]` entgegen statt `Settings` direkt zu lesen — einziger Aufrufer-Umbau
+  in `main.py`s `create_signature`-Endpunkt.
+- **Bewusst NICHT Teil dieser Session** (siehe ADR 0091 "Begründung" für die vollständige
+  Abwägung): das Ziel-/Connector-Set selbst (Zugangsdaten, `id`/`type`) sowie
+  `object_lock_mode`/`role` je Storage-Ziel — beide bleiben env-var-only, nur per Neustart änderbar.
+- **Neue `admin-ui`-Seiten**: `/storage-operational-config/` (`StorageOperationalConfig.tsx`, schlichtes
+  Formular) und `/signature-config/` (`SignatureConfig.tsx`, Tabelle mit Level-Checkboxen je
+  Connector — **erste Admin-UI-Anbindung von `signature-service` überhaupt**). Client-seitig blockiert
+  (kein API-Aufruf), das letzte verbleibende Niveau eines Connectors abzuwählen — reine
+  UX-Vorwegnahme, `422` bleibt die serverseitige Durchsetzung.
+- **Zwei echte Testinfrastruktur-Bugs gefunden und behoben** (beide durch zweimaliges
+  Hintereinander-Ausführen der jeweiligen Testsuite aufgedeckt, exakt das Symptom, das sonst erst bei
+  einem späteren, unabhängigen Lauf aufgefallen wäre): (1) `signature-service`s `tests/conftest.py`
+  truncatet eine feste Tabellenliste statt `Base.metadata` dynamisch abzuleiten — die neue
+  `signature_config`-Tabelle fehlte darin (identischer Fund wie bereits in P22-S2 bei
+  `permission-service`), behoben durch Ergänzen der Liste. (2) `storage-service` hat GAR KEINE
+  Truncate-Fixture zwischen Tests (bestehende Tests setzen stattdessen auf pro-Test-eindeutige
+  Objektschlüssel) — die neuen, den DB-Singleton `operational_config` mutierenden Tests hätten sonst
+  über mehrere `run-tests.sh`-Läufe hinweg Zustand geleakt; behoben durch eine neue, lokale
+  `operational_config_client`-Fixture, die die Env-Var-Defaults nach jedem Test wiederherstellt, statt
+  die Testinfrastruktur des gesamten Service umzubauen.
+- **Tests**: `storage-service` 117 (vorher 113, +4: `GET`-Default, `PUT`-Persistenz,
+  Quorum-Ablehnung, Ende-zu-Ende-Beweis über einen echten Upload direkt nach `PUT`); `signature-service`
+  16 (vorher 11, +5: `GET`-Default, drei Validierungsfälle, Ende-zu-Ende-Beweis über einen
+  fehlschlagenden AES-Sign-Versuch nach Entfernen von AES aus den Niveaus, gefolgt von einem
+  erfolgreichen SES-Versuch); `admin-ui` 201 (vorher 191, +10: `storage-operational-config.test.tsx` 4
+  Tests, `signature-config.test.tsx` 6 Tests).
+- **Vollständig live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
+  `storage-service`/`signature-service`/`admin-ui`): `GET /operational-config`/`GET /signature-config`
+  zeigten die korrekten Env-Var-Ausgangswerte; `PUT` mit `quorum_count=2` (nur 1 reguläres Ziel im
+  Dev-Stack, das zweite trägt `role=archive`) lieferte `422`; ein satisfiabler `PUT` auf
+  `strategy=quorum` gefolgt von einem echten Objekt-Upload lief erfolgreich über den Quorum-Codepfad
+  ohne Neustart zwischen `PUT` und Upload; `signature-config`s `PUT` mit `levels=["qes"]` für den
+  `internal`-Connector sowie mit einer unbekannten Connector-`id` lieferten beide `422`. Alle
+  Testdaten/Konfigurationsänderungen anschließend zurückgesetzt. Kein interaktiver Browser-Test der
+  beiden neuen Admin-UI-Seiten (kein Browser/Playwright in dieser Entwicklungsumgebung verfügbar,
+  projektweit etablierte Praxis).
+- Doku: neues [ADR 0091](docs/adr/0091-connector-operational-config-live-editable.md),
+  `docs/services/storage-service.md`, `docs/services/signature-service.md` (jeweils API-Tabelle, neue
+  Sektion, Tests-Sektion, "Offene Punkte" bei signature-service als teilweise behoben markiert),
+  `docs/services/admin-ui.md` (Seiten-Tabelle, zwei neue Sektionen, Backend-Anbindungstabelle,
   Tests-Sektion) ergänzt.
 
 ### Roadmap-Vorausplanung nach P6-S2

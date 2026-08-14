@@ -20,8 +20,14 @@ from signature_service.document_client import NotFoundError as DocumentNotFoundE
 from signature_service.models import Base
 from signature_service.object_type_client import NotFoundError as ObjectTypeNotFoundError
 from signature_service.object_type_client import ObjectTypeServiceClient
-from signature_service.schemas import SignatureCreate, SignatureOut, VerificationOut
-from signature_service.settings import Settings
+from signature_service.schemas import (
+    SignatureCreate,
+    SignatureOut,
+    SignatureProviderLevelsIn,
+    SignatureProviderStatusOut,
+    VerificationOut,
+)
+from signature_service.settings import Settings, SignatureProviderConfig
 
 settings = Settings()
 configure_logging(settings)
@@ -88,6 +94,28 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with app.state.session_factory() as session:
         yield session
+
+
+def _default_provider_levels() -> dict[str, list[str]]:
+    return {config.id: list(config.levels) for config in settings.signature_providers}
+
+
+async def _effective_providers(session: AsyncSession) -> list[SignatureProviderConfig]:
+    """Frisch aus der DB gelesen bei jedem Aufruf (kein `app.state`-Cache) -
+    Post-Roadmap Phase 22 Session 6, ADR 0091: macht `levels` ohne Neustart
+    wirksam. `id`/`type` bleiben strukturell aus `Settings`, nur `levels`
+    kann von der `SignatureConfig`-Zeile überschrieben sein."""
+    config = await repository.get_signature_config(
+        session, default_provider_levels=_default_provider_levels()
+    )
+    return [
+        SignatureProviderConfig(
+            id=provider.id,
+            type=provider.type,
+            levels=config.provider_levels.get(provider.id, provider.levels),
+        )
+        for provider in settings.signature_providers
+    ]
 
 
 async def publish_event(
@@ -157,7 +185,8 @@ async def create_signature(
             status_code=400, detail=f"Unbekannter Principal {payload.signer_principal_id!r}"
         )
 
-    resolved = resolve_connector_for_level(settings, app.state.connectors, payload.level)
+    effective_providers = await _effective_providers(session)
+    resolved = resolve_connector_for_level(effective_providers, app.state.connectors, payload.level)
     if resolved is None:
         raise HTTPException(
             status_code=400,
@@ -210,6 +239,38 @@ async def create_signature(
         actor=signature.signer_principal_id,
     )
     return signature
+
+
+@app.get("/signature-config", response_model=list[SignatureProviderStatusOut])
+async def get_signature_config(
+    session: AsyncSession = Depends(get_session),
+) -> list[SignatureProviderStatusOut]:
+    providers = await _effective_providers(session)
+    return [SignatureProviderStatusOut(id=p.id, type=p.type, levels=p.levels) for p in providers]
+
+
+@app.put("/signature-config", response_model=list[SignatureProviderStatusOut])
+async def put_signature_config(
+    body: list[SignatureProviderLevelsIn], session: AsyncSession = Depends(get_session)
+) -> list[SignatureProviderStatusOut]:
+    """Connector-Niveaus (Post-Roadmap Phase 22 Session 6, ADR 0091) - `id`/
+    `type` bleiben strukturell aus `Settings.signature_providers`
+    ("nur bestehende Einträge bearbeiten"), nur `levels` ist editierbar.
+    Dieselbe Validierung wie `SignatureProviderConfig._check_levels`
+    (Settings-Schema), hier zur Laufzeit statt beim Start."""
+    known_provider_types = {p.id: p.type for p in settings.signature_providers}
+    try:
+        await repository.update_signature_config(
+            session,
+            provider_levels={item.id: item.levels for item in body},
+            known_provider_types=known_provider_types,
+            default_provider_levels=_default_provider_levels(),
+        )
+    except repository.InvalidProviderLevelsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    providers = await _effective_providers(session)
+    return [SignatureProviderStatusOut(id=p.id, type=p.type, levels=p.levels) for p in providers]
 
 
 @app.get("/signatures", response_model=list[SignatureOut])

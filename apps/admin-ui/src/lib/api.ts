@@ -871,6 +871,73 @@ export async function reidentifyTarget(token: string, targetId: string): Promise
   return response.json();
 }
 
+// Betriebsparameter (Post-Roadmap Phase 22 Session 6, ADR 0091) - anders als
+// das Ziel-Set selbst (Zugangsdaten, bewusst weiterhin env-var-only) ohne
+// Geheimnisse, daher live editierbar, wirkt ohne Neustart des Storage Service.
+export interface OperationalConfig {
+  write_strategy: "quorum" | "primary_async";
+  quorum_count: number;
+  max_replication_attempts: number;
+  updated_at: string;
+}
+
+export async function getOperationalConfig(token: string): Promise<OperationalConfig> {
+  const response = await request("storage-service", "operational-config", {}, token);
+  return response.json();
+}
+
+export async function updateOperationalConfig(
+  token: string,
+  params: { writeStrategy: "quorum" | "primary_async"; quorumCount: number; maxReplicationAttempts: number }
+): Promise<OperationalConfig> {
+  const response = await request(
+    "storage-service",
+    "operational-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        write_strategy: params.writeStrategy,
+        quorum_count: params.quorumCount,
+        max_replication_attempts: params.maxReplicationAttempts,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+// Signatur-Connector-Niveaus (Post-Roadmap Phase 22 Session 6, ADR 0091) -
+// `id`/`type` sind strukturell fest (`Settings.signature_providers`), nur
+// `levels` ist admin-editierbar, wirkt ohne Neustart des Signature Service.
+export interface SignatureProviderStatus {
+  id: string;
+  type: "internal" | "qtsp";
+  levels: ("ses" | "aes" | "qes")[];
+}
+
+export async function getSignatureConfig(token: string): Promise<SignatureProviderStatus[]> {
+  const response = await request("signature-service", "signature-config", {}, token);
+  return response.json();
+}
+
+export async function updateSignatureConfig(
+  token: string,
+  entries: { id: string; levels: string[] }[]
+): Promise<SignatureProviderStatus[]> {
+  const response = await request(
+    "signature-service",
+    "signature-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entries),
+    },
+    token
+  );
+  return response.json();
+}
+
 export interface ServiceInstance {
   instance_id: string;
   service_type: string;

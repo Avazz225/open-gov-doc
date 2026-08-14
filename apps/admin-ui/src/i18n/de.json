@@ -49,6 +49,8 @@
     "uploadSettings": "Format-Whitelist",
     "processingFailures": "Verarbeitungsfehler",
     "storageGuard": "Speicher-Wächter",
+    "storageOperationalConfig": "Schreibstrategie",
+    "signatureConfig": "Signatur-Connectoren",
     "superuser": "Superuser Break-Glass",
     "forensicTrace": "Forensik-Trace",
     "auditTraceSettings": "Audit-Tiefe",
@@ -121,6 +123,29 @@
     "createdBy": "Angelegt von",
     "memberCount": "Mitglieder",
     "createdAt": "Angelegt am"
+  },
+  "storageOperationalConfig": {
+    "pageTitle": "Schreibstrategie",
+    "hint": "Betriebsparameter des konfigurierten Ziel-Sets (3.6) - Zugangsdaten/Ziel-Liste selbst bleiben env-var-only, diese Werte wirken ohne Neustart sofort.",
+    "unreachable": "Storage Service nicht erreichbar.",
+    "writeStrategy": "Schreibstrategie",
+    "strategyPrimaryAsync": "Primär synchron, Rest asynchron (primary_async)",
+    "strategyQuorum": "Quorum (synchron)",
+    "quorumCount": "Quorum-Anzahl",
+    "maxReplicationAttempts": "Maximale Replikationsversuche",
+    "saved": "Gespeichert.",
+    "saveError": "Speichern fehlgeschlagen",
+    "updatedAt": "Zuletzt geändert"
+  },
+  "signatureConfig": {
+    "pageTitle": "Signatur-Connectoren",
+    "hint": "Signaturniveaus je konfiguriertem Connector (3.10) - Connector-Liste selbst bleibt env-var-only, die Niveaus wirken ohne Neustart sofort.",
+    "unreachable": "Signature Service nicht erreichbar.",
+    "empty": "Keine Connectoren konfiguriert.",
+    "connectorId": "Connector",
+    "type": "Typ",
+    "levels": "Niveaus",
+    "saveError": "Speichern fehlgeschlagen"
   },
   "approvalSettings": {
     "pageTitle": "Vier-Augen-Einstellungen",

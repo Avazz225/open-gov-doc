@@ -13,6 +13,8 @@
 | `GET` | `/signatures?document_id=...` | Signaturen eines Dokuments |
 | `GET` | `/signatures/{id}` | Einzelne Signatur - `404` |
 | `GET` | `/signatures/{id}/verify` | Verifiziert die Signatur erneut gegen die aktuell bei document-service hinterlegten Bytes (`valid`, `integrity_intact`, `certificate_expired`, `errors[]`) |
+| `GET` | `/signature-config` | Aktuelle Connector-Niveaus (seit **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) — `id`/`type` strukturell aus `Settings.signature_providers`, `levels` live editierbar, Default-Zeile beim ersten Aufruf aus den bisherigen Env-Var-Werten |
+| `PUT` | `/signature-config` | Aktualisiert `levels` NUR der genannten Connector-`id`s (`[{id, levels}]`, nicht genannte behalten ihren Wert) — wirkt **ohne Neustart**; `422` bei unbekannter `id` ("nur bestehende Einträge bearbeiten"), leeren `levels`, oder `qes` bei `type=internal` (dieselbe Regel wie `SignatureProviderConfig._check_levels`) |
 | `GET` | `/healthz` | Health-Check |
 
 ## Datenmodell
@@ -22,7 +24,7 @@
 
 ## Signature-Provider-Connectoren (3.10, Plugin-Prinzip wie 3.3)
 
-`SignatureProviderConnector`(ABC, `connectors/interface.py`): `sign(pdf_bytes, signer, level)`/`verify(pdf_bytes)`. Factory (`connectors/__init__.py`) dispatcht auf `type` bei stabiler `id`-Zuordnung (wie `storage_service.backends.build_backend`, ADR 0017), konfiguriert über `DMS_SIGNATURE_PROVIDERS` (JSON-Liste). Default-Seed: `{id: "internal", type: "internal", levels: ["ses","aes"]}`.
+`SignatureProviderConnector`(ABC, `connectors/interface.py`): `sign(pdf_bytes, signer, level)`/`verify(pdf_bytes)`. Factory (`connectors/__init__.py`) dispatcht auf `type` bei stabiler `id`-Zuordnung (wie `storage_service.backends.build_backend`, ADR 0017), konfiguriert über `DMS_SIGNATURE_PROVIDERS` (JSON-Liste). Default-Seed: `{id: "internal", type: "internal", levels: ["ses","aes"]}`. **Seit Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `levels` ist zusätzlich über `GET`/`PUT /signature-config` live editierbar (neue DB-Singleton-Tabelle `signature_config`, bei jedem Signaturvorgang frisch gelesen) — `id`/`type` bleiben strukturell aus `DMS_SIGNATURE_PROVIDERS`. `resolve_connector_for_level()` (`connectors/__init__.py`) nimmt seither eine bereits gemergte `list[SignatureProviderConfig]` entgegen statt `Settings` direkt zu lesen.
 
 - **`InternalSelfSignedConnector`** (`connectors/internal.py`, einzig real implementiert): stellt je Signaturvorgang ein von der internen Root-CA signiertes Leaf-Zertifikat aus - `level="ses"` mit generischem Subject (`CN=DMS System (SES)`), `level="aes"` mit personenbezogenem Subject (`CN=<Anzeigename>`, `emailAddress=<E-Mail>`, aus einer echten `auth-service`-Kontenprüfung). Bettet das Zertifikat per **pyHanko** (`SimpleSigner.load()` + `async_sign_pdf()`, PAdES-B-B) in die PDF-Bytes ein. `verify()` nutzt `async_validate_pdf_signature()` mit einer `ValidationContext`, deren einziger Trust Root die interne CA ist (`allow_fetching=False`, `revocation_mode="soft-fail"` - keine echte OCSP/CRL-Infrastruktur vorhanden). **`IncrementalPdfFileWriter`/`PdfFileReader` laufen mit `strict=False`** (Bugfix nach Nutzer-Feedback: `SigningError: ... hybrid cross-reference sections ...` bei PDFs mit hybrider Querverweistabelle, wie sie u. a. LibreOffice erzeugt) - pyHanko lehnt solche Dokumente im Default-strikten Modus ab (Schutz vor "Shadow Attacks" bei der *Validierung* fremder PDFs); für das Signieren/Verifizieren eines im eigenen System hochgeladenen Dokuments ist das ein zu häufiger, legitimer Fall für eine pauschale Ablehnung, bewusster Trade-off statt Versehen.
 - **`type: "qtsp"`** ist im Konfigurationsschema vorgesehen, aber **nicht implementiert** - ein Konfigurationsversuch schlägt in der Factory mit einer klaren Fehlermeldung fehl. Kein akkreditierter externer Vertrauensdiensteanbieter verfügbar/testbar in dieser Session (siehe "Offene Punkte").
@@ -75,7 +77,7 @@ Noch keine - folgt in Phase 11.
 - Objekttyp-Mindestniveau-Gate (`400` bei zu niedrigem Niveau, `201` bei ausreichendem).
 - Ablehnung bei Nicht-PDF-Dokument, unbekanntem Dokument, unbekanntem Signer-Principal, `level="qes"` ohne konfigurierten Connector.
 - Liste/Detail/Verify inkl. `404`-Fälle.
-- **11 Tests.**
+- **16 Tests seit Post-Roadmap Phase 22 Session 6** (vorher 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` liefert die Env-Var-Defaults vor dem ersten `PUT`, `PUT` mit unbekannter Connector-`id`/leeren `levels`/`qes` bei `type=internal` liefert je `422`, ein Ende-zu-Ende-Test entfernt `aes` aus `internal`s Niveaus und beweist live (ohne Neustart), dass ein anschließender AES-Signaturversuch mit `400` fehlschlägt, während SES weiterhin funktioniert.
 - Reine Backend-Session, kein Browser-Test nötig (User-UI-Anbindung siehe `docs/services/user-ui.md`).
 
 ## Offene Punkte
@@ -87,4 +89,4 @@ Noch keine - folgt in Phase 11.
 - **Kein PKCS#11/HSM-Support** - 3.10 erwähnt pyHanko explizit auch für Hardware-Token/HSM-Anbindung; diese Session nutzt ausschließlich In-Memory-generierte Software-Schlüssel.
 - **Nur PDF-Dokumente signierbar** - PAdES ist PDF-spezifisch (durch pyHanko selbst vorgegeben); XAdES/CAdES für andere Formate sind nicht umgesetzt.
 - **Technisches Konto `users-admin` dient auch hier als interne Service-Anmeldung** - wie bei notification-service (P6-S6) authentifiziert sich signature-service für die Signer-Existenzprüfung als fremdes technisches Konto statt einer eigenen Identität (siehe ADR 0024 "Konsequenzen" für die bereits vermerkte Revisitierungs-Empfehlung).
-- **Keine Admin-UI-Konfiguration für Connectoren** - `DMS_SIGNATURE_PROVIDERS` ist reine Env-Var-Konfiguration, konsistent mit Storage-Backends (ebenfalls ohne Admin-UI-Konfiguration).
+- ~~Keine Admin-UI-Konfiguration für Connectoren - `DMS_SIGNATURE_PROVIDERS` ist reine Env-Var-Konfiguration, konsistent mit Storage-Backends (ebenfalls ohne Admin-UI-Konfiguration)~~ — **`levels` teilweise behoben in Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET`/`PUT /signature-config` + neue Admin-UI-Seite `/signature-config/`. Weiterhin env-var-only (bewusst, siehe ADR 0091 "Begründung"): die Connector-*Liste* selbst (`id`/`type`), da neue Connectoren echte Infrastruktur brauchen, kein reiner Konfigurationswert.

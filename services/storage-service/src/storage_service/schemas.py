@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -56,6 +57,18 @@ class GuardConfigIn(BaseModel):
 
 
 class GuardConfigOut(GuardConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class OperationalConfigIn(BaseModel):
+    write_strategy: Literal["quorum", "primary_async"]
+    quorum_count: int
+    max_replication_attempts: int
+
+
+class OperationalConfigOut(OperationalConfigIn):
     model_config = {"from_attributes": True}
 
     updated_at: datetime

@@ -4,12 +4,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from signature_service.connectors import generate_root_ca
-from signature_service.models import InternalCa, Signature
+from signature_service.models import InternalCa, Signature, SignatureConfig
 
 _CA_ID = 1
+_SIGNATURE_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
+    pass
+
+
+class InvalidProviderLevelsError(Exception):
     pass
 
 
@@ -85,3 +90,57 @@ async def list_signatures(
         query = query.where(Signature.document_id == document_id)
     result = await session.execute(query.order_by(Signature.signed_at.desc()))
     return list(result.scalars().all())
+
+
+async def get_signature_config(
+    session: AsyncSession, *, default_provider_levels: dict[str, list[str]]
+) -> SignatureConfig:
+    """Get-or-create (Post-Roadmap Phase 22 Session 6, ADR 0091), gleiches
+    Muster wie `storage_service.repository.get_operational_config`. Der
+    Default kommt als Parameter vom Aufrufer (`main.py`, aus `Settings.
+    signature_providers`), damit dieses Modul frei von Env-Var-Kenntnis
+    bleibt."""
+    config = await session.get(SignatureConfig, _SIGNATURE_CONFIG_ID)
+    if config is None:
+        config = SignatureConfig(
+            id=_SIGNATURE_CONFIG_ID,
+            provider_levels=default_provider_levels,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_signature_config(
+    session: AsyncSession,
+    *,
+    provider_levels: dict[str, list[str]],
+    known_provider_types: dict[str, str],
+    default_provider_levels: dict[str, list[str]],
+) -> SignatureConfig:
+    """Aktualisiert NUR die im Aufruf genannten Connector-`id`s (partielles
+    Merge, nicht-genannte Connectoren behalten ihren aktuellen Wert) -
+    passend zu `SignatureProviderLevelsIn`s Listenform, ein Admin muss nicht
+    jedes Mal alle Connectoren mitschicken. `known_provider_types` (id->type
+    aus `Settings.signature_providers`) begrenzt auf bereits per Env-Var
+    konfigurierte Connectoren ("nur bestehende Einträge bearbeiten") und
+    reicht `type` für dieselbe Validierung wie `SignatureProviderConfig.
+    _check_levels` (Settings-Schema-Validator) durch."""
+    for provider_id, levels in provider_levels.items():
+        if provider_id not in known_provider_types:
+            raise InvalidProviderLevelsError(f"Unbekannter Connector: {provider_id!r}")
+        if not levels:
+            raise InvalidProviderLevelsError(
+                f"Connector {provider_id!r}: levels darf nicht leer sein"
+            )
+        if known_provider_types[provider_id] == "internal" and "qes" in levels:
+            raise InvalidProviderLevelsError(
+                f"Connector {provider_id!r}: type=internal kann kein QES ausstellen"
+            )
+
+    config = await get_signature_config(session, default_provider_levels=default_provider_levels)
+    config.provider_levels = {**config.provider_levels, **provider_levels}
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config

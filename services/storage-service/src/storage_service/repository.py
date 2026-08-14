@@ -3,9 +3,16 @@ from datetime import UTC, datetime
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from storage_service.models import BackendIdentity, GuardConfig, ObjectCopy, ObjectMetadata
+from storage_service.models import (
+    BackendIdentity,
+    GuardConfig,
+    ObjectCopy,
+    ObjectMetadata,
+    OperationalConfig,
+)
 
 _GUARD_CONFIG_ID = 1
+_OPERATIONAL_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -269,6 +276,53 @@ async def get_guard_config(session: AsyncSession) -> GuardConfig:
 async def update_guard_config(session: AsyncSession, *, allow_degraded_start: bool) -> GuardConfig:
     config = await get_guard_config(session)
     config.allow_degraded_start = allow_degraded_start
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def get_operational_config(
+    session: AsyncSession,
+    *,
+    default_write_strategy: str,
+    default_quorum_count: int,
+    default_max_replication_attempts: int,
+) -> OperationalConfig:
+    """Get-or-create (Post-Roadmap Phase 22 Session 6, ADR 0091), gleiches
+    Muster wie `get_guard_config`. Die Defaults kommen bewusst als Parameter
+    vom Aufrufer (`main.py`, aus `Settings`) statt hier direkt aus `Settings`
+    gelesen zu werden - `repository.py` bleibt dadurch frei von jeder
+    Env-Var-Kenntnis (Konvention dieses Moduls), nur beim allerersten Anlegen
+    der Zeile wird der bisherige Env-Var-Wert übernommen, damit ein Upgrade
+    auf diese Session das Ist-Verhalten nicht stillschweigend ändert."""
+    config = await session.get(OperationalConfig, _OPERATIONAL_CONFIG_ID)
+    if config is None:
+        config = OperationalConfig(
+            id=_OPERATIONAL_CONFIG_ID,
+            write_strategy=default_write_strategy,
+            quorum_count=default_quorum_count,
+            max_replication_attempts=default_max_replication_attempts,
+            updated_at=datetime.now(UTC),
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_operational_config(
+    session: AsyncSession,
+    *,
+    write_strategy: str,
+    quorum_count: int,
+    max_replication_attempts: int,
+) -> OperationalConfig:
+    config = await session.get(OperationalConfig, _OPERATIONAL_CONFIG_ID)
+    if config is None:
+        config = OperationalConfig(id=_OPERATIONAL_CONFIG_ID, updated_at=datetime.now(UTC))
+        session.add(config)
+    config.write_strategy = write_strategy
+    config.quorum_count = quorum_count
+    config.max_replication_attempts = max_replication_attempts
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config

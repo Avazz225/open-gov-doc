@@ -43,3 +43,18 @@ class VerificationOut(BaseModel):
     integrity_intact: bool
     certificate_expired: bool
     errors: list[str]
+
+
+class SignatureProviderStatusOut(BaseModel):
+    """Ein konfigurierter Connector (3.10, Post-Roadmap Phase 22 Session 6) -
+    `id`/`type` sind strukturell fest (`Settings.signature_providers`),
+    `levels` ist der aktuell wirksame, admin-editierbare Wert."""
+
+    id: str
+    type: Literal["internal", "qtsp"]
+    levels: list[SignatureLevel]
+
+
+class SignatureProviderLevelsIn(BaseModel):
+    id: str
+    levels: list[SignatureLevel]

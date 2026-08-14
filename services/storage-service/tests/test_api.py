@@ -278,6 +278,87 @@ def test_put_guard_config_updates_and_persists(client):
     assert get_response.json()["allow_degraded_start"] is True
 
 
+_DEFAULT_OPERATIONAL_CONFIG = {
+    "write_strategy": "primary_async",
+    "quorum_count": 1,
+    "max_replication_attempts": 5,
+}
+
+
+@pytest.fixture
+def operational_config_client(client):
+    """`operational_config` ist wie `guard_config` eine DB-Singleton-Zeile,
+    die `conftest.py`s `client`-Fixture NICHT zwischen Tests zurücksetzt
+    (kein `TRUNCATE`-Fixture in diesem Service, siehe dortige Tests, die
+    stattdessen auf pro-Test-eindeutige Objektschlüssel setzen). Ein
+    geänderter `write_strategy`/`quorum_count` hätte das aber sichtbar
+    beeinflusst (anders als `guard_config.allow_degraded_start`, das kein
+    späterer Test ausliest) - diese Fixture stellt die Env-Var-Defaults nach
+    jedem Test wieder her, damit ein zweiter, unabhängiger Testlauf gegen
+    dieselbe Datenbank (z. B. ein erneutes `scripts/run-tests.sh`) nicht auf
+    von einem früheren Lauf hinterlassene Werte trifft."""
+    yield client
+    client.put("/operational-config", json=_DEFAULT_OPERATIONAL_CONFIG)
+
+
+def test_get_operational_config_returns_env_defaults(operational_config_client):
+    """Post-Roadmap Phase 22 Session 6, ADR 0091 - vor dem ersten `PUT`
+    spiegelt `GET /operational-config` die bisherigen Env-Var-Defaults, kein
+    separates Seed-Skript nötig."""
+    response = operational_config_client.get("/operational-config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["write_strategy"] == "primary_async"
+    assert body["quorum_count"] == 1
+    assert body["max_replication_attempts"] == 5
+
+
+def test_put_operational_config_updates_and_persists(operational_config_client):
+    put_response = operational_config_client.put(
+        "/operational-config",
+        json={"write_strategy": "quorum", "quorum_count": 1, "max_replication_attempts": 3},
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["write_strategy"] == "quorum"
+    assert put_response.json()["max_replication_attempts"] == 3
+
+    get_response = operational_config_client.get("/operational-config")
+    assert get_response.json()["write_strategy"] == "quorum"
+    assert get_response.json()["quorum_count"] == 1
+    assert get_response.json()["max_replication_attempts"] == 3
+
+
+def test_put_operational_config_rejects_unsatisfiable_quorum(operational_config_client):
+    """Nur ein Ziel ist im Testaufbau konfiguriert (`DMS_TARGETS`,
+    `conftest.py`) - `quorum_count=2` mit `strategy=quorum` ist damit nicht
+    erfüllbar, dieselbe Prüfung wie beim Start (`_validate_settings`)."""
+    response = operational_config_client.put(
+        "/operational-config",
+        json={"write_strategy": "quorum", "quorum_count": 2, "max_replication_attempts": 5},
+    )
+    assert response.status_code == 422
+
+
+def test_upload_reads_operational_config_fresh_per_request(operational_config_client):
+    """Kernverhalten dieser Session (Live-Reload, kein `app.state`-Cache):
+    ein Upload NACH einem `PUT /operational-config` auf `strategy="quorum"`
+    (mit dem einzigen Testziel, `quorum_count=1` weiterhin erfüllbar) läuft
+    tatsächlich über den Quorum-Codepfad in `replication.write_with_
+    redundancy`, statt weiterhin `primary_async` zu verwenden - ohne
+    Service-Neustart zwischen PUT und Upload."""
+    operational_config_client.put(
+        "/operational-config",
+        json={"write_strategy": "quorum", "quorum_count": 1, "max_replication_attempts": 5},
+    )
+    key = _key()
+    response = operational_config_client.put(f"/objects/{key}", content=b"payload")
+    assert response.status_code == 201
+
+    copies = operational_config_client.get(f"/objects/{key}/copies").json()
+    assert len(copies) == 1
+    assert copies[0]["status"] == "ok"
+
+
 def test_guard_status_shows_verified_identity_after_startup(client):
     """Der Lifespan-Wächter (P5b-S6) läuft bei jedem `TestClient`-Start und
     prägt/bestätigt die Geräte-ID des einzigen konfigurierten Ziels - direkt
