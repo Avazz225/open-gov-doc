@@ -19,6 +19,12 @@ const deleteUserMock = vi.fn();
 const createRoleMock = vi.fn();
 const createRoleAssignmentMock = vi.fn();
 const deleteRoleAssignmentMock = vi.fn();
+const listGroupsMock = vi.fn();
+const createGroupMock = vi.fn();
+const deleteGroupMock = vi.fn();
+const listGroupMembersMock = vi.fn();
+const addGroupMemberMock = vi.fn();
+const removeGroupMemberMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listUsers: (...args: unknown[]) => listUsersMock(...args),
@@ -29,6 +35,12 @@ vi.mock("@/lib/api", () => ({
   createRole: (...args: unknown[]) => createRoleMock(...args),
   createRoleAssignment: (...args: unknown[]) => createRoleAssignmentMock(...args),
   deleteRoleAssignment: (...args: unknown[]) => deleteRoleAssignmentMock(...args),
+  listGroups: (...args: unknown[]) => listGroupsMock(...args),
+  createGroup: (...args: unknown[]) => createGroupMock(...args),
+  deleteGroup: (...args: unknown[]) => deleteGroupMock(...args),
+  listGroupMembers: (...args: unknown[]) => listGroupMembersMock(...args),
+  addGroupMember: (...args: unknown[]) => addGroupMemberMock(...args),
+  removeGroupMember: (...args: unknown[]) => removeGroupMemberMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -63,6 +75,12 @@ describe("UserManagement", () => {
     createRoleMock.mockReset();
     createRoleAssignmentMock.mockReset();
     deleteRoleAssignmentMock.mockReset();
+    listGroupsMock.mockReset();
+    createGroupMock.mockReset();
+    deleteGroupMock.mockReset();
+    listGroupMembersMock.mockReset();
+    addGroupMemberMock.mockReset();
+    removeGroupMemberMock.mockReset();
 
     listUsersMock.mockResolvedValue([
       { id: "u1", username: "alice", email: "alice@example.com", enabled: true, first_name: "Alice", last_name: "A" },
@@ -73,6 +91,7 @@ describe("UserManagement", () => {
     listRoleAssignmentsMock.mockResolvedValue([
       { id: 10, principal_type: "user", principal_id: "carol", role_id: 1, resource_id: "root" },
     ]);
+    listGroupsMock.mockResolvedValue([]);
   });
 
   it("lists users, roles and assignments", async () => {
@@ -175,5 +194,89 @@ describe("UserManagement", () => {
       )
     ).toBeInTheDocument();
     expect(listRoleAssignmentsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an empty state without any groups", async () => {
+    renderUserManagement();
+
+    expect(await screen.findByText("Keine Gruppen.")).toBeInTheDocument();
+  });
+
+  it("creates a group and reloads the list", async () => {
+    createGroupMock.mockResolvedValue({
+      id: "g1",
+      name: "Reviewers",
+      description: "Vier-Augen-Prüfer",
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Gruppe anlegen" });
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Reviewers" } });
+    fireEvent.change(within(form).getByLabelText("Beschreibung"), {
+      target: { value: "Vier-Augen-Prüfer" },
+    });
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(createGroupMock).toHaveBeenCalledWith("token-123", {
+        name: "Reviewers",
+        description: "Vier-Augen-Prüfer",
+      })
+    );
+    await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists groups and deletes one", async () => {
+    listGroupsMock.mockResolvedValue([
+      { id: "g1", name: "Reviewers", description: "", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    deleteGroupMock.mockResolvedValue(undefined);
+    renderUserManagement();
+
+    await screen.findByText("Reviewers");
+    const groupRow = screen.getByText("Reviewers").closest("tr")!;
+    fireEvent.click(within(groupRow).getByRole("button", { name: "Löschen" }));
+
+    await waitFor(() => expect(deleteGroupMock).toHaveBeenCalledWith("token-123", "g1"));
+  });
+
+  it("expands a group, lists its members, adds a new one and removes it", async () => {
+    listGroupsMock.mockResolvedValue([
+      { id: "g1", name: "Reviewers", description: "", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listGroupMembersMock
+      .mockResolvedValueOnce([{ id: 1, group_id: "g1", principal_id: "dave" }])
+      .mockResolvedValueOnce([
+        { id: 1, group_id: "g1", principal_id: "dave" },
+        { id: 2, group_id: "g1", principal_id: "erin" },
+      ])
+      .mockResolvedValueOnce([{ id: 2, group_id: "g1", principal_id: "erin" }]);
+    addGroupMemberMock.mockResolvedValue({ id: 2, group_id: "g1", principal_id: "erin" });
+    removeGroupMemberMock.mockResolvedValue(undefined);
+
+    renderUserManagement();
+    await screen.findByText("Reviewers");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mitglieder anzeigen" }));
+    expect(await screen.findByText("dave")).toBeInTheDocument();
+
+    const addForm = screen.getByRole("form", { name: "Mitglied hinzufügen" });
+    fireEvent.change(within(addForm).getByLabelText("Nutzername/Principal-ID"), {
+      target: { value: "erin" },
+    });
+    fireEvent.submit(addForm);
+
+    await waitFor(() => expect(addGroupMemberMock).toHaveBeenCalledWith("token-123", "g1", "erin"));
+    expect(await screen.findByText("erin")).toBeInTheDocument();
+
+    const daveRow = screen.getByText("dave").closest("li")!;
+    fireEvent.click(within(daveRow).getByRole("button", { name: "Entfernen" }));
+
+    await waitFor(() =>
+      expect(removeGroupMemberMock).toHaveBeenCalledWith("token-123", "g1", "dave")
+    );
+    await waitFor(() => expect(screen.queryByText("dave")).not.toBeInTheDocument());
   });
 });

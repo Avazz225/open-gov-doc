@@ -102,6 +102,177 @@ def test_update_unknown_role_returns_404(client, role_management_headers):
     assert response.status_code == 404
 
 
+def test_create_group_requires_authentication(client):
+    response = client.post("/groups", json={"name": "Reviewers", "description": ""})
+    assert response.status_code == 401
+
+
+def test_create_group_returns_403_without_permission(client):
+    response = client.post(
+        "/groups",
+        json={"name": "Reviewers", "description": ""},
+        headers={"X-DMS-Principal": "nobody"},
+    )
+    assert response.status_code == 403
+
+
+def test_create_and_list_groups(client, role_management_headers):
+    created = client.post(
+        "/groups",
+        json={"name": "Reviewers", "description": "Vier-Augen-Prüfer"},
+        headers=role_management_headers,
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["name"] == "Reviewers"
+    assert body["description"] == "Vier-Augen-Prüfer"
+
+    groups = client.get("/groups").json()
+    assert any(g["id"] == body["id"] for g in groups)
+
+
+def test_delete_unknown_group_returns_404(client, role_management_headers):
+    response = client.delete("/groups/does-not-exist", headers=role_management_headers)
+    assert response.status_code == 404
+
+
+def test_add_member_to_unknown_group_returns_404(client, role_management_headers):
+    response = client.post(
+        "/groups/does-not-exist/members",
+        json={"principal_id": "carol"},
+        headers=role_management_headers,
+    )
+    assert response.status_code == 404
+
+
+def test_remove_unknown_member_returns_404(client, role_management_headers):
+    group = client.post(
+        "/groups", json={"name": "Reviewers2"}, headers=role_management_headers
+    ).json()
+    response = client.delete(
+        f"/groups/{group['id']}/members/carol", headers=role_management_headers
+    )
+    assert response.status_code == 404
+
+
+def test_add_member_is_idempotent(client, role_management_headers):
+    group = client.post(
+        "/groups", json={"name": "Reviewers3"}, headers=role_management_headers
+    ).json()
+    first = client.post(
+        f"/groups/{group['id']}/members",
+        json={"principal_id": "carol"},
+        headers=role_management_headers,
+    ).json()
+    second = client.post(
+        f"/groups/{group['id']}/members",
+        json={"principal_id": "carol"},
+        headers=role_management_headers,
+    ).json()
+    assert first["id"] == second["id"]
+
+    members = client.get(f"/groups/{group['id']}/members").json()
+    assert [m["principal_id"] for m in members] == ["carol"]
+
+
+def test_group_membership_grants_role_to_every_member(client, role_management_headers):
+    """Kernverhalten (Post-Roadmap Phase 22 Session 2): eine Rollenzuweisung
+    an eine Gruppe (statt an einen einzelnen Principal) gilt für jedes
+    eingetragene Mitglied - hier zwei verschiedene Principals, nur EINE
+    Rollenzuweisung."""
+    group = client.post(
+        "/groups", json={"name": "Reviewers4"}, headers=role_management_headers
+    ).json()
+    client.post(
+        f"/groups/{group['id']}/members",
+        json={"principal_id": "dave"},
+        headers=role_management_headers,
+    )
+    client.post(
+        f"/groups/{group['id']}/members",
+        json={"principal_id": "erin"},
+        headers=role_management_headers,
+    )
+    role = client.post(
+        "/roles",
+        json={"name": "GroupEditor", "permissions": ["group_read"]},
+        headers=role_management_headers,
+    ).json()
+    client.post(
+        "/role-assignments",
+        json={
+            "principal_type": "group",
+            "principal_id": group["id"],
+            "role_id": role["id"],
+            "resource_id": ROOT_RESOURCE_ID,
+        },
+    )
+
+    for principal_id in ("dave", "erin"):
+        allowed = client.get(
+            "/check",
+            params={
+                "principal_id": principal_id,
+                "resource_id": ROOT_RESOURCE_ID,
+                "permission": "group_read",
+            },
+        ).json()
+        assert allowed["allowed"] is True
+
+    # Ein Nicht-Mitglied bleibt unbetroffen.
+    denied = client.get(
+        "/check",
+        params={
+            "principal_id": "frank",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "group_read",
+        },
+    ).json()
+    assert denied["allowed"] is False
+
+    # Entfernen eines Mitglieds entzieht die Berechtigung wieder (Cache-
+    # Invalidierung), das verbleibende Mitglied behält sie.
+    remove_response = client.delete(
+        f"/groups/{group['id']}/members/dave", headers=role_management_headers
+    )
+    assert remove_response.status_code == 204
+    dave_after = client.get(
+        "/check",
+        params={
+            "principal_id": "dave",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "group_read",
+        },
+    ).json()
+    assert dave_after["allowed"] is False
+    erin_after = client.get(
+        "/check",
+        params={
+            "principal_id": "erin",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "group_read",
+        },
+    ).json()
+    assert erin_after["allowed"] is True
+
+
+def test_delete_group_removes_it_and_its_memberships(client, role_management_headers):
+    group = client.post(
+        "/groups", json={"name": "Reviewers5"}, headers=role_management_headers
+    ).json()
+    client.post(
+        f"/groups/{group['id']}/members",
+        json={"principal_id": "gina"},
+        headers=role_management_headers,
+    )
+
+    response = client.delete(f"/groups/{group['id']}", headers=role_management_headers)
+    assert response.status_code == 204
+
+    groups = client.get("/groups").json()
+    assert all(g["id"] != group["id"] for g in groups)
+
+
 def test_assignment_with_unknown_role_returns_404(client):
     response = client.post(
         "/role-assignments",

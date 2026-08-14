@@ -3,7 +3,7 @@
 **Verantwortung:** RBAC — Rollen, Zuweisungen an Principals (Nutzer/Gruppen) an Ressourcen, Vererbung entlang einer Ressourcen-Hierarchie, materialisierter ereignisgetriebener Rechte-Cache (Konzept 4.1). Seit P3-S4 zusätzlich Bereichssperren (4.7): temporäre, RBAC-überlagernde Sperrung ganzer Ressourcen-Teilbäume. Seit P6-S4 zusätzlich der generische Vier-Augen-Approval-Mechanismus (4.3), den auch andere Services (z. B. Document Service) nutzen. Seit P6-S5 zusätzlich Heimat der systemeigenen, domänengetrennten Admin-Rollen (4.6) — von Keycloak-Realm-Rollen komplett getrennt, siehe [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Seit P6-S6 zusätzlich Heimat des systemweiten Wartungsmodus-Zustands (Not-Shutdown, 4.8) — siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
 **Konzept-Referenz:** 4.1, 4.3, 4.6, 4.7, 4.8, 4.4a (Stellvertretung bei Abwesenheit, seit P14-S11)
-**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`)
+**Eigenes Postgres-Schema:** `permission` (Tabellen `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`, `group`, `group_membership`)
 
 ## API
 
@@ -12,6 +12,12 @@
 | `POST` | `/roles` | Rolle anlegen — seit P19-S6 gegated: `X-DMS-Principal` muss `admin.user_management` halten ([ADR 0071](../adr/0071-permission-service-self-gating.md)), sonst `401`/`403` |
 | `GET` | `/roles` | Alle Rollen — bewusst weiterhin ungegatet, siehe ADR 0071 "Begründung" |
 | `PUT` | `/roles/{role_id}` | Beschreibung/Berechtigungen aktualisieren (`name` unveränderlich) — seit P12-S3, Grundlage für `config-service`s Rollen-Upsert per Name (7.3); seit P19-S6 ebenfalls `admin.user_management`-gegated |
+| `POST` | `/groups` | Gruppe anlegen (Post-Roadmap Phase 22 Session 1) — `admin.user_management`-gegated wie `POST /roles` |
+| `GET` | `/groups` | Alle Gruppen — bewusst weiterhin ungegatet, gleiche Begründung wie `GET /roles` |
+| `DELETE` | `/groups/{id}` | Gruppe samt Mitgliedschaften löschen (`404` bei unbekannter ID) — gegatet |
+| `GET` | `/groups/{id}/members` | Mitglieder einer Gruppe auflisten — ungegatet |
+| `POST` | `/groups/{id}/members` | Mitglied hinzufügen (`principal_id`) — idempotent, `404` bei unbekannter Gruppe, gegatet |
+| `DELETE` | `/groups/{id}/members/{principal_id}` | Mitglied entfernen — `404` falls keine Mitgliedschaft besteht, gegatet |
 | `POST` | `/role-assignments` | Zuweisung anlegen — Antwort `{status: "created"\|"pending_approval", role_assignment, approval_request_id}` (seit P17-S3, `permission.role_assignment.create`, s. u.), `404` bei unbekannter Rolle/Ressource |
 | `GET` | `/role-assignments?principal_id=...&resource_id=...` | Zuweisungen auflisten, optional gefiltert (seit P4-S3, Grundlage der Admin-UI) |
 | `DELETE` | `/role-assignments/{id}` | Zuweisung entfernen |
@@ -53,6 +59,7 @@
 - `approval_request` (4.3, seit P6-S4): `id` (UUID-str), `action_type`, `initiated_by`, `payload` (JSON — genug Information, um die Aktion später auszuführen), `status` (`pending`\|`approved`\|`rejected`), `approved_by`/`rejected_by`/`reason` (nullable), `created_at`, `decided_at` (nullable).
 - `system_maintenance_mode` (4.8, seit P6-S6): Singleton (`id=1`, fest, gleiches Muster wie `OcrConfig`/`GuardConfig`), `active` (bool), `reason` (nullable), `triggered_by` (nullable), `activated_at` (nullable), `lifted_by`/`lifted_at` (nullable) — bei erneuter Aktivierung nach einer Aufhebung werden `lifted_by`/`lifted_at` zurückgesetzt.
 - `delegation` (4.4a, seit P14-S11): `id` (UUID-str, PK), `delegator_principal_id`/`deputy_principal_id`, `starts_at`/`ends_at` (beide Pflicht), `scope_object_type_ids`/`scope_process_definition_ids`/`scope_folder_resource_ids` (je JSON-Liste, `null` = auf dieser Dimension uneingeschränkt), `created_at`, `revoked_at`/`revoked_by` (nullable) — nie hart gelöscht, gleiches Muster wie `scope_lock` oben.
+- `group`/`group_membership` (Post-Roadmap Phase 22 Session 2): `group` — `id` (UUID-str, PK), `name` (unique), `description`, `created_at`. `group_membership` — `id` (PK), `group_id` (FK), `principal_id`, unique auf `(group_id, principal_id)`. Siehe "Admin-anlegbare Gruppen" unten.
 
 ## Bereichssperren (4.7, seit P3-S4)
 
@@ -144,10 +151,44 @@ Mitglied, unabhängig von seiner eigenen `principal_id`. Der Vererbungsalgorithm
   `ensure_everyone_role` aktualisiert eine bereits angelegte "everyone"-Rolle NICHT automatisch (kein
   Migrationsmechanismus, siehe dortiger Docstring) — auf einer bereits laufenden Installation muss eine
   neue Berechtigung einmalig manuell per `PUT /roles/{id}` nachgezogen werden.
-- **Kein vollständiges Gruppenverwaltungssystem**: `"everyone"` ist die einzige reservierte
-  Gruppen-Kennung, keine benutzerdefinierten Gruppen mit eigener Mitgliederverwaltung. Echte
-  Gruppenmitgliedschaft (z. B. "Nutzer X ist Mitglied von AD-Gruppe Y") bleibt weiterhin ungelöst, siehe
-  "Offene Punkte" unten.
+- ~~Kein vollständiges Gruppenverwaltungssystem: `"everyone"` ist die einzige reservierte
+  Gruppen-Kennung, keine benutzerdefinierten Gruppen mit eigener Mitgliederverwaltung.~~ — **teilweise
+  behoben in Post-Roadmap Phase 22 Session 2**, siehe "Admin-anlegbare Gruppen" unten. Echte
+  AD-Gruppen-Synchronisation (Konzept-Ausbau "AD-Gruppe → interne Rolle Mapping-Regelengine", **Phase
+  24 Session 2**) bleibt weiterhin ein separater, noch offener Punkt — die hier ergänzten Gruppen sind
+  rein manuell admin-gepflegt, kein automatischer Abgleich mit einem externen Verzeichnisdienst.
+
+## Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2)
+
+Ergänzt die oben beschriebene, hartkodierte "everyone"-Gruppe um echte, admin-verwaltete Gruppen mit
+expliziter Mitgliedschaft. Anders als `"everyone"` (implizite Mitgliedschaft für jeden authentifizierten
+Principal, keine eigene Datenzeile) braucht jede über `POST /groups` angelegte Gruppe explizite
+`group_membership`-Zeilen (`POST /groups/{id}/members`), um wirksam zu sein.
+
+- **`_collect_effective_roles`** sammelt vor dem Durchlaufen der Ressourcen-Vorfahrenkette einmalig alle
+  `group_id`s, denen der angefragte `principal_id` per `group_membership` angehört (`_group_ids_for_
+  principal`), und behandelt an jedem Knoten zusätzlich zu `principal_id == principal_id` und der
+  "everyone"-Bedingung jede Zuweisung mit `principal_type="group", principal_id IN (Mitgliedsgruppen)` als
+  zutreffend. Eine Rollenzuweisung an eine Gruppe (statt an jeden einzelnen Principal) gilt damit für
+  jedes eingetragene Mitglied.
+- **Gleiches Self-Gating wie `POST`/`PUT /roles`** (ADR 0071, `admin.user_management`) für
+  `POST`/`DELETE /groups` und `POST`/`DELETE /groups/{id}/members` — eine Gruppe ist letztlich nur ein
+  weiterer Baustein der Rechteverwaltung. `GET /groups`/`GET /groups/{id}/members` bleiben bewusst
+  ungegatet, gleiche Begründung wie `GET /roles`.
+- **Mitglied hinzufügen ist idempotent** (ein zweiter `POST` mit derselben `principal_id` liefert die
+  bereits bestehende Mitgliedschaft zurück statt eines Duplikat-Fehlers) — passt zum übrigen, bewusst
+  fehlerarmen Stil dieses Service (vgl. `ensure_everyone_role`).
+- **Löschen einer Gruppe** entfernt ihre `group_membership`-Zeilen mit, prüft aber bewusst NICHT, ob noch
+  `RoleAssignment`-Zeilen auf diese Gruppen-ID verweisen (keine FK von `role_assignment` auf `group`,
+  `principal_id` ist dort ein freier String) — eine verwaiste Zuweisung matcht danach schlicht keinen
+  Principal mehr, gleiches Verhalten wie eine Gruppe ohne je zugewiesene Mitglieder. Konsistent mit
+  `Role`, das ebenfalls keinen Lösch-Endpunkt/keine Referenzprüfung kennt.
+- **Jede Mitgliedschafts-/Löschänderung invalidiert den gesamten `effective_permission_cache`** (gleiche
+  grobkörnige Strategie wie jede andere rechteverändernde Operation in diesem Service) — ein entferntes
+  Mitglied verliert die über die Gruppe gehaltenen Berechtigungen damit sofort, nicht erst bei der
+  nächsten unabhängigen Cache-Leerung.
+- **Admin-UI-Anbindung**: `apps/admin-ui`s `UserManagement`-Seite bekam eine neue Sektion
+  "Gruppen" (siehe `docs/services/admin-ui.md`).
 
 ## Struktur-Synchronisation (Vertrag bestätigt seit P3-S3)
 
@@ -199,7 +240,7 @@ Noch keine — folgt in Phase 11.
 
 ## Offene Punkte
 
-- **Echte, benutzerdefinierte Gruppenmitgliedschaft wird weiterhin nicht aufgelöst** (seit Phase 19 Session 2 nur teilweise behoben, siehe "'everyone'-Gruppe" oben): `principal_id` einer Zuweisung muss weiterhin exakt dem abgefragten Principal entsprechen — mit der einzigen Ausnahme der reservierten `"everyone"`-Kennung, für die JEDER Principal implizit als Mitglied gilt. Eine allgemeine Auflösung "Nutzer X ist Mitglied von Gruppe Y, die Rolle Z hat" (beliebige, admin-definierte Gruppen) ist weiterhin nicht Teil des Systems (hängt von AD-Gruppen-Sync im Auth Service, 4.4, ab, der ebenfalls noch offen ist).
+- ~~Echte, benutzerdefinierte Gruppenmitgliedschaft wird weiterhin nicht aufgelöst~~ — **admin-definierte Gruppen mit echter Mitgliederauflösung ergänzt in Post-Roadmap Phase 22 Session 2**, siehe "Admin-anlegbare Gruppen" oben. Weiterhin offen: **automatische** AD-Gruppen-Synchronisation (die neuen Gruppen sind rein manuell admin-gepflegt) — geplant als eigenständige **Phase 24 Session 2** ("AD-Gruppe → interne Rolle Mapping-Regelengine").
 - Granularere Cache-Invalidierung (nur betroffener Teilbaum statt gesamter Cache) als spätere Optimierung möglich, ohne die API zu ändern.
 - **Vier-Augen-Prinzip (4.3) ist seit P6-S4 generisch verfügbar, seit P6-S5 auch mit optionaler Rollenbindung (`required_permission`)** — verdrahtet für Bereichssperren, Document-Service-Force-Unlock und Superuser-Break-Glass (`auth.superuser.activate`). Rechte-/Rollenänderungen (`POST /role-assignments`, `POST /roles`) nutzen ihn weiterhin nicht, siehe "Vier-Augen-Approval-Mechanismus" oben.
 - **`scope_object_type_ids`/`scope_folder_resource_ids` einer Delegation (4.4a, seit P14-S11) werden aktuell von keinem Endpunkt ausgewertet** — nur `scope_process_definition_ids` ist bei `GET /delegations/check` tatsächlich wirksam (siehe ADR 0048). Die beiden anderen Felder werden mitgespeichert (Konzept-Wortlaut vollständig abgebildet), aber bräuchten einen zusätzlichen Cross-Service-Umweg über `business_key`, um bei einem konkreten Aufgabenabschluss ausgewertet zu werden — nicht Teil dieser Session.

@@ -57,6 +57,32 @@ class RoleAssignmentActionResult(BaseModel):
     approval_request_id: str | None = None
 
 
+class GroupCreate(BaseModel):
+    name: str
+    description: str = ""
+
+
+class GroupOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class GroupMemberCreate(BaseModel):
+    principal_id: str
+
+
+class GroupMemberOut(BaseModel):
+    id: int
+    group_id: str
+    principal_id: str
+
+    model_config = {"from_attributes": True}
+
+
 class ResourceNodeUpdate(BaseModel):
     inherit: bool
 

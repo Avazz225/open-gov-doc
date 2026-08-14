@@ -172,6 +172,37 @@ class Delegation(Base):
     revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
+class Group(Base):
+    """Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen
+    die seit Phase 19 Session 2 bestehende, hartkodierte "everyone"-Gruppe
+    (siehe ``repository.EVERYONE_*``) um echte, admin-verwaltete Gruppen mit
+    expliziter Mitgliedschaft (``GroupMembership``). Eine Rollenzuweisung an
+    eine dieser Gruppen (``RoleAssignment.principal_type="group"``,
+    ``principal_id=<group.id>``) gilt für jedes eingetragene Mitglied, ohne
+    die Rolle jedem einzeln zuzuweisen - anders als "everyone" (implizite
+    Mitgliedschaft, keine eigene Zeile) braucht jede echte Gruppe explizite
+    ``GroupMembership``-Zeilen, siehe ``repository._collect_effective_roles``.
+    """
+
+    __tablename__ = "group"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class GroupMembership(Base):
+    __tablename__ = "group_membership"
+    __table_args__ = (UniqueConstraint("group_id", "principal_id", name="uq_group_membership"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    group_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("permission.group.id"), index=True
+    )
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+
+
 class SystemMaintenanceMode(Base):
     """Systemweite Notfallsperre & Wartungsmodus (4.8, P6-S6) - Singleton
     (feste ``id=1``, gleiches Muster wie ``OcrConfig``/``GuardConfig`` in

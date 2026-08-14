@@ -9,6 +9,8 @@ from permission_service.models import (
     ApprovalRequest,
     Delegation,
     EffectivePermissionCache,
+    Group,
+    GroupMembership,
     ResourceNode,
     Role,
     RoleAssignment,
@@ -248,6 +250,88 @@ async def ensure_everyone_role(session: AsyncSession) -> None:
         )
 
 
+# Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen die
+# obige, hartkodierte "everyone"-Gruppe um echte, admin-verwaltete Gruppen.
+# Gleiches Gating wie Rollen selbst (``_require_role_management`` in
+# ``main.py``, `admin.user_management`), da eine Gruppe letztlich nur ein
+# weiterer Baustein der Rechteverwaltung ist.
+async def create_group(session: AsyncSession, name: str, description: str) -> Group:
+    group = Group(
+        id=str(uuid.uuid4()), name=name, description=description, created_at=datetime.now(UTC)
+    )
+    session.add(group)
+    await session.flush()
+    return group
+
+
+async def list_groups(session: AsyncSession) -> list[Group]:
+    result = await session.execute(select(Group))
+    return list(result.scalars().all())
+
+
+async def delete_group(session: AsyncSession, group_id: str) -> None:
+    """Löscht die Gruppe samt ihrer Mitgliedschaften. Bewusst KEINE Prüfung
+    auf noch bestehende `RoleAssignment`-Zeilen, die auf diese Gruppe zeigen
+    (``principal_id=group_id``) - eine solche Zeile matcht danach einfach
+    keinen Principal mehr (leere Mitgliederliste), gleiches Verhalten wie
+    eine Gruppe ohne je zugewiesene Mitglieder. Konsistent mit `Role`, das
+    ebenfalls keinen Lösch-Endpunkt/keine Referenzprüfung kennt."""
+    group = await session.get(Group, group_id)
+    if group is None:
+        raise NotFoundError(f"group_id {group_id!r} unbekannt")
+    await session.execute(delete(GroupMembership).where(GroupMembership.group_id == group_id))
+    await session.delete(group)
+    await invalidate_cache(session)
+
+
+async def add_group_member(
+    session: AsyncSession, group_id: str, principal_id: str
+) -> GroupMembership:
+    group = await session.get(Group, group_id)
+    if group is None:
+        raise NotFoundError(f"group_id {group_id!r} unbekannt")
+    existing = await session.execute(
+        select(GroupMembership).where(
+            GroupMembership.group_id == group_id, GroupMembership.principal_id == principal_id
+        )
+    )
+    membership = existing.scalars().first()
+    if membership is not None:
+        return membership
+    membership = GroupMembership(group_id=group_id, principal_id=principal_id)
+    session.add(membership)
+    await session.flush()
+    await invalidate_cache(session)
+    return membership
+
+
+async def list_group_members(session: AsyncSession, group_id: str) -> list[GroupMembership]:
+    result = await session.execute(
+        select(GroupMembership).where(GroupMembership.group_id == group_id)
+    )
+    return list(result.scalars().all())
+
+
+async def remove_group_member(session: AsyncSession, group_id: str, principal_id: str) -> None:
+    result = await session.execute(
+        select(GroupMembership).where(
+            GroupMembership.group_id == group_id, GroupMembership.principal_id == principal_id
+        )
+    )
+    membership = result.scalars().first()
+    if membership is None:
+        raise NotFoundError(f"{principal_id!r} ist kein Mitglied von Gruppe {group_id!r}")
+    await session.delete(membership)
+    await invalidate_cache(session)
+
+
+async def _group_ids_for_principal(session: AsyncSession, principal_id: str) -> set[str]:
+    result = await session.execute(
+        select(GroupMembership.group_id).where(GroupMembership.principal_id == principal_id)
+    )
+    return set(result.scalars().all())
+
+
 async def create_role_assignment(
     session: AsyncSession, *, principal_type: str, principal_id: str, role_id: int, resource_id: str
 ) -> RoleAssignment:
@@ -317,25 +401,38 @@ async def _collect_effective_roles(
     "everyone"-Gruppe ein (``principal_type="group", principal_id="everyone"``,
     siehe ``ensure_everyone_role``) - jeder authentifizierte Principal gilt
     dafür implizit als Mitglied, unabhängig von seiner eigenen `principal_id`.
+    Seit Post-Roadmap Phase 22 Session 2 zusätzlich Zuweisungen an jede echte,
+    admin-angelegte Gruppe (``Group``/``GroupMembership``), der der Principal
+    per expliziter Mitgliedschaft angehört - anders als "everyone" braucht das
+    hier eine tatsächliche Zeile.
     """
     collected: dict[int, Role] = {}
     current_id: str | None = resource_id
+    member_group_ids = await _group_ids_for_principal(session, principal_id)
 
     while current_id is not None:
         node = await session.get(ResourceNode, current_id)
         if node is None:
             break
 
+        group_conditions = [
+            and_(
+                RoleAssignment.principal_type == EVERYONE_PRINCIPAL_TYPE,
+                RoleAssignment.principal_id == EVERYONE_PRINCIPAL_ID,
+            )
+        ]
+        if member_group_ids:
+            group_conditions.append(
+                and_(
+                    RoleAssignment.principal_type == "group",
+                    RoleAssignment.principal_id.in_(member_group_ids),
+                )
+            )
+
         result = await session.execute(
             select(RoleAssignment).where(
                 RoleAssignment.resource_id == current_id,
-                or_(
-                    RoleAssignment.principal_id == principal_id,
-                    and_(
-                        RoleAssignment.principal_type == EVERYONE_PRINCIPAL_TYPE,
-                        RoleAssignment.principal_id == EVERYONE_PRINCIPAL_ID,
-                    ),
-                ),
+                or_(RoleAssignment.principal_id == principal_id, *group_conditions),
             )
         )
         for assignment in result.scalars().all():

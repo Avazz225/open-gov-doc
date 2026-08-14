@@ -90,6 +90,25 @@
     "empty": "Keine Rollen.",
     "createError": "Rolle anlegen fehlgeschlagen"
   },
+  "groups": {
+    "sectionTitle": "Gruppen",
+    "hint": "Ergänzt die systemeigene \"everyone\"-Gruppe (jeder authentifizierte Nutzer) um admin-anlegbare Gruppen mit echter Mitgliederliste - eine Rollenzuweisung an eine Gruppe gilt für jedes eingetragene Mitglied.",
+    "formLabel": "Gruppe anlegen",
+    "name": "Name",
+    "description": "Beschreibung",
+    "empty": "Keine Gruppen.",
+    "createError": "Gruppe anlegen fehlgeschlagen",
+    "deleteError": "Gruppe löschen fehlgeschlagen",
+    "membersToggleShow": "Mitglieder anzeigen",
+    "membersToggleHide": "Mitglieder ausblenden",
+    "membersEmpty": "Noch keine Mitglieder.",
+    "addMemberFormLabel": "Mitglied hinzufügen",
+    "memberPrincipalId": "Nutzername/Principal-ID",
+    "addMember": "Hinzufügen",
+    "addMemberError": "Mitglied hinzufügen fehlgeschlagen",
+    "removeMember": "Entfernen",
+    "removeMemberError": "Mitglied entfernen fehlgeschlagen"
+  },
   "roleAssignments": {
     "sectionTitle": "Rollenzuweisungen",
     "formLabel": "Rolle zuweisen",

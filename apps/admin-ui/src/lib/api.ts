@@ -231,6 +231,83 @@ export async function deleteRoleAssignment(token: string, assignmentId: number):
   );
 }
 
+// Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen die
+// seit Phase 19 Session 2 bestehende, hartkodierte "everyone"-Gruppe.
+// Gleiches `admin.user_management`-Self-Gating wie `POST`/`PUT /roles`
+// (der Gateway injiziert `X-DMS-Principal` bereits aus dem Access Token,
+// kein manuelles Header-Setzen hier nötig - gleiches Muster wie `createRole`).
+export interface Group {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+export interface GroupMember {
+  id: number;
+  group_id: string;
+  principal_id: string;
+}
+
+export async function listGroups(token: string): Promise<Group[]> {
+  const response = await request("permission-service", "groups", {}, token);
+  return response.json();
+}
+
+export async function createGroup(
+  token: string,
+  params: { name: string; description: string }
+): Promise<Group> {
+  const response = await request("permission-service", "groups", jsonInit(params), token);
+  return response.json();
+}
+
+export async function deleteGroup(token: string, groupId: string): Promise<void> {
+  await request(
+    "permission-service",
+    `groups/${encodeURIComponent(groupId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function listGroupMembers(token: string, groupId: string): Promise<GroupMember[]> {
+  const response = await request(
+    "permission-service",
+    `groups/${encodeURIComponent(groupId)}/members`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function addGroupMember(
+  token: string,
+  groupId: string,
+  principalId: string
+): Promise<GroupMember> {
+  const response = await request(
+    "permission-service",
+    `groups/${encodeURIComponent(groupId)}/members`,
+    jsonInit({ principal_id: principalId }),
+    token
+  );
+  return response.json();
+}
+
+export async function removeGroupMember(
+  token: string,
+  groupId: string,
+  principalId: string
+): Promise<void> {
+  await request(
+    "permission-service",
+    `groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(principalId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
 // Verfügbare Attribut-Typen der Constraint Engine (4.5) - siehe
 // libs/dms-constraint-engine.
 export type AttributeType = "string" | "decimal" | "integer" | "boolean" | "date" | "reference";

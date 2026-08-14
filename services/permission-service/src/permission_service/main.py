@@ -29,6 +29,10 @@ from permission_service.schemas import (
     DelegationCreate,
     DelegationOut,
     EffectivePermissionsOut,
+    GroupCreate,
+    GroupMemberCreate,
+    GroupMemberOut,
+    GroupOut,
     MaintenanceModeActionResult,
     MaintenanceModeLift,
     MaintenanceModeOut,
@@ -227,6 +231,79 @@ async def update_role(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     return role
+
+
+@app.post("/groups", response_model=GroupOut, status_code=201)
+async def create_group(
+    payload: GroupCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> GroupOut:
+    """Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen
+    die seit Phase 19 Session 2 bestehende "everyone"-Gruppe. Gleiches
+    Self-Gating wie `POST /roles` (`admin.user_management`), siehe
+    `_require_role_management`."""
+    await _require_role_management(session, x_dms_principal)
+    group = await repository.create_group(session, payload.name, payload.description)
+    await session.commit()
+    return group
+
+
+@app.get("/groups", response_model=list[GroupOut])
+async def list_groups(session: AsyncSession = Depends(get_session)) -> list[GroupOut]:
+    return await repository.list_groups(session)
+
+
+@app.delete("/groups/{group_id}", status_code=204)
+async def delete_group(
+    group_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_role_management(session, x_dms_principal)
+    try:
+        await repository.delete_group(session, group_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+
+
+@app.get("/groups/{group_id}/members", response_model=list[GroupMemberOut])
+async def list_group_members(
+    group_id: str, session: AsyncSession = Depends(get_session)
+) -> list[GroupMemberOut]:
+    return await repository.list_group_members(session, group_id)
+
+
+@app.post("/groups/{group_id}/members", response_model=GroupMemberOut, status_code=201)
+async def add_group_member(
+    group_id: str,
+    payload: GroupMemberCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> GroupMemberOut:
+    await _require_role_management(session, x_dms_principal)
+    try:
+        membership = await repository.add_group_member(session, group_id, payload.principal_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return membership
+
+
+@app.delete("/groups/{group_id}/members/{principal_id}", status_code=204)
+async def remove_group_member(
+    group_id: str,
+    principal_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_role_management(session, x_dms_principal)
+    try:
+        await repository.remove_group_member(session, group_id, principal_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
 
 
 @app.post("/role-assignments", response_model=RoleAssignmentActionResult, status_code=201)

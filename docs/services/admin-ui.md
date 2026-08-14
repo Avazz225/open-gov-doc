@@ -14,7 +14,7 @@
 |---|---|
 | `/login/` | Anmeldung (identischer Ablauf wie User-UI, gegen den Auth Service der **aktiven Installation** über deren Gateway) |
 | `/` | Startseite mit Hinweistext, Navigation läuft über die Seitenleiste (`AdminShell`) |
-| `/users/` | Nutzer anlegen/löschen, Rollen anlegen, Rollenzuweisungen anlegen/entfernen |
+| `/users/` | Nutzer anlegen/löschen, Rollen anlegen, Rollenzuweisungen anlegen/entfernen — seit **Post-Roadmap Phase 22 Session 2** zusätzlich Gruppen anlegen/löschen + Mitgliederverwaltung, siehe unten |
 | `/object-types/` | Objekttypen anlegen/bearbeiten/löschen über einen geführten Formular-Assistenten (`ObjectTypeEditor`, seit P5b-S3, seit P5e-S3 inkl. Kennzeichengenerator-Format/Anzeige-Override, seit **P6-S7** inkl. Mindest-Signaturniveau, 3.10, seit **P7-S3** inkl. Aussonderungs-Frist/Verschlüsselung, 5.6) + Formular-Layout-Designer (`LayoutDesigner`, 2.2b) |
 | `/registry/` | Alle bei der Registry registrierten Instanzen inkl. Health-Status |
 | `/installations/` | Installationsliste verwalten (anlegen/löschen/wechseln) — seit P4-S5 |
@@ -36,6 +36,25 @@
 | `/config-packages/` | Konfigurationspakete laden/vorschauen/anwenden (`ConfigPackages`, 14.1, seit P17-S1) — **erste Admin-UI-Anbindung von `config-service` überhaupt**, siehe unten |
 
 Alle Seiten außer `/login/` sind über `RequireAuth` geschützt (clientseitiger Redirect, kein Server für Middleware verfügbar — wie bei der User-UI). `RequireAuth` prüft die Sitzung der **aktiven Installation**. `/users/` ist seit **P6-S5** zusätzlich über `RequireCapability` geschützt (Domäne "Nutzer-/Rechteverwaltung", 4.6) — siehe "Autorisierung" unten.
+
+## Gruppen-Verwaltung (Post-Roadmap Phase 22 Session 2)
+
+Neue Sektion "Gruppen" in `UserManagement.tsx` (`/users/`), zwischen den bestehenden Rollen- und
+Rollenzuweisungs-Sektionen. Nutzt `permission-service`s neue, admin-anlegbare Gruppen (siehe
+`docs/services/permission-service.md` "Admin-anlegbare Gruppen"), die die seit Phase 19 Session 2
+bestehende, hartkodierte "everyone"-Gruppe um echte Mitgliederlisten ergänzen.
+
+- Formular zum Anlegen (Name + Beschreibung), Tabelle aller Gruppen mit "Mitglieder anzeigen"/"Löschen"
+  je Zeile. Aufklappen einer Zeile (gleiches Auf-/Zuklapp-Muster wie `ProcessDefinitionList`s
+  Versionshistorie) lädt lazy die Mitgliederliste (`GET /groups/{id}/members`) nach, zeigt ein
+  Mini-Formular zum Hinzufügen (Nutzername/Principal-ID) sowie einen "Entfernen"-Button je Mitglied.
+- Ein Nutzer wird zu einer Gruppe über seine `principal_id` (i. d. R. der Nutzername) hinzugefügt — keine
+  Auswahl aus der bestehenden Nutzerliste, freies Textfeld (gleiche bewusste Einfachheit wie bei
+  `roleAssignments.username`).
+- **Kein neuer RBAC-Sonderfall im Frontend**: die Sichtbarkeit der gesamten `/users/`-Seite ist bereits
+  seit P6-S5 über `RequireCapability` gegated (s. o.); das serverseitige `403` von `permission-service`
+  bei fehlender `admin.user_management`-Capability ist die eigentliche Durchsetzung, identisch zum
+  bestehenden Muster bei Rollen-Anlage.
 
 ## Layout (P4-S5, Nutzer-Feedback nach dem ersten echten Browser-Test des MVP)
 
@@ -171,6 +190,7 @@ Ausschließlich über das API-Gateway der jeweils **aktiven Installation** (3.5,
 | Login/Identität | `POST /api/auth-service/login`, `GET /api/auth-service/me` |
 | Nutzer | `GET/POST /api/auth-service/users`, `DELETE /api/auth-service/users/{id}` |
 | Rollen | `GET/POST /api/permission-service/roles` |
+| Gruppen (seit **Post-Roadmap Phase 22 Session 2**) | `GET/POST /api/permission-service/groups`, `DELETE .../{id}`, `GET/POST /api/permission-service/groups/{id}/members`, `DELETE .../{id}/members/{principal_id}` |
 | Rollenzuweisungen | `GET/POST /api/permission-service/role-assignments`, `DELETE .../{id}` |
 | Objekttypen | `GET/POST/PUT/DELETE /api/object-type-service/object-types`, `GET/PUT/DELETE .../object-types/{id}/layouts/{purpose}` (seit P5b-S3) — seit **P7-S3** zusätzlich `default_archive_after_days`/`archive_encryption_enabled` im Create/Update-Payload (5.6) |
 | Registry | `GET /api/registry-service/instances` |
@@ -207,7 +227,10 @@ Zweistufiges Docker-Image (`apps/admin-ui/Dockerfile`), identisch zur User-UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **175 Tests** — seit **Post-Roadmap Phase 22 Session 1**
+- `npm test` (Vitest + Testing Library, **179 Tests** — seit **Post-Roadmap Phase 22 Session 2** (siehe
+  "Gruppen-Verwaltung" oben): vier neue Tests in `user-management.test.tsx` (Leerzustand ohne Gruppen,
+  Anlegen inkl. Reload, Auflisten + Löschen, Aufklappen inkl. Mitgliederliste laden/Mitglied
+  hinzufügen/entfernen); davor 175 — seit **Post-Roadmap Phase 22 Session 1**
   (siehe "Aussonderung & Langzeitarchivierung" unten): zwei neue Tests in `archival-transfers.test.tsx`
   für das neue "Jetzt aussondern"-Formular (Erfolgsfall inkl. Hinweistext, Fehleranzeige bei
   `ApiError`); davor 173 — seit **Post-Roadmap Phase 20 Session 7**
