@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** Phase 24 (Feature-Vervollständigung) — alle vier Sessions **parallel per Agent-Dispatch** bearbeitet (Nutzerhinweis: die vier Sessions sind voneinander unabhängig). P24-S1 Azure-Blob-Backend (storage-service), P24-S2 AD-Gruppe→Rolle-Mapping (auth-service), P24-S3 IMAP-Mailbox-Backend + Postausgang-Anhänge (mail-connector), P24-S4 echter Kubernetes-Scheduler-Adapter (plugin-orchestration-service) — Details siehe unten unter "Phase 24 — Feature-Vervollständigung". **Phase 24 damit vollständig abgeschlossen.**
+**Zuletzt abgeschlossen:** Phase 25 (Workflow-/Gateway-Härtung) — dependency-bewusst zweigleisig **parallel per Agent-Dispatch** bearbeitet (Nutzerhinweis: Phasen/Sessions parallelisieren, wann immer sie nicht auf dieselbe Ressource zugreifen müssen). P25-S1 Race-Condition-sichere Versionsvergabe via `pg_advisory_xact_lock` (workflow-service, ADR 0096), P25-S2 Rollback-Endpunkt `POST /process-definitions/{id}/restore` (workflow-service), P25-S3 Gateway-Rate-Limiting auf geteilten Redis-Sliding-Window-Store umgestellt (gateway-service, ADR 0097), P25-S4 workload-bewusste Instanzauswahl statt `random.choice` (gateway-service, ADR 0098) — Details siehe unten unter "Phase 25 — Workflow-/Gateway-Härtung". **Phase 25 damit vollständig abgeschlossen.**
 
-**Nächste Session:** **P25-S1** (Race-Condition-sichere Versionsvergabe für `workflow-service`s `create_process_definition`, erste Session der neuen **Phase 25 — Workflow-/Gateway-Härtung**, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P26-S1** (Baseline & Werte-Struktur, erste Session der neuen **Phase 26 — Helm-Charts für k8s/OCP**, siehe `IMPLEMENTATION_PLAN.md`). Nutzer hat vorab (2026-08-14) explizite Architekturanforderungen für diese Phase gegeben: HorizontalPodAutoscaler + PodDisruptionBudget je Service, `values.yaml` mit `service:`-Block je Eintrag (`enabled`/`memory: {requests, limits}`/`cpu: {...}`), individuell deaktivierbare gebündelte Infra (Postgres/Keycloak/MinIO, NICHT NATS) mit External-Endpoint-Fallback für Bring-your-own-Infra-Szenarien, Storage-Ziele als echte YAML-Liste (mapped auf storage-services bestehende Multi-Target-Architektur) statt nur externer/gebündelt-Umschaltung, sowie die Bestätigung, dass eine einzige kanonische `values.yaml` (plus optionale Beispiel-Override-Dateien) der richtige Ansatz ist, keine native Aufteilung möglich/empfohlen. Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [abgeschlossen], Sicherheitshärtung [abgeschlossen], Admin-UI-Ausbau [abgeschlossen], Frontend-UX [abgeschlossen], Feature-Vervollständigung [abgeschlossen], Workflow-/Gateway-Härtung [abgeschlossen], Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -3320,6 +3320,91 @@ frei auf dieselbe "höchste existierende Nummer war 0092"-Ausgangslage und wähl
 ohne Koordination untereinander, in der Reihenfolge ihrer jeweiligen Fertigstellung die nächsten freien
 Nummern — bei der Integration verifiziert, dass am Ende keine echte Kollision/kein Duplikat auf der
 Festplatte übrig blieb).
+
+### Phase 25 — Workflow-/Gateway-Härtung (P25-S1, ...)
+
+**Vier Sessions, dependency-bewusst zweigleisig parallel bearbeitet** (Nutzerhinweis: Phasen/Sessions
+parallelisieren, wann immer sie nicht auf dieselbe Ressource zugreifen müssen): P25-S1/P25-S2 teilen sich
+`workflow-service/repository.py` bzw. bauen direkt aufeinander auf (sequenziell), P25-S3/P25-S4 teilen sich
+zwar `gateway-service/main.py`, aber an unterschiedlichen, nicht benachbarten Stellen (als
+"safe-with-care" eingestuft und parallel dispatcht) — beide Tracks liefen gleichzeitig, S2 startete direkt
+nach S1s Fertigstellung, S4 direkt nach S3s.
+
+**P25-S1 — Race-Condition-sichere Versionsvergabe** (`workflow-service`, kein Plan-wörtliches
+`SELECT ... FOR UPDATE`, siehe [ADR 0096](docs/adr/0096-workflow-definition-version-race-advisory-lock.md)):
+
+- `create_process_definition`/`create_dmn_definition` sperrten die Versionsvergabe bisher über ein
+  ungesperrtes `MAX(version)+1` — eine `SELECT ... FOR UPDATE` auf bestehende Zeilen (wie in
+  `object-type-service`/`case-service` bereits etabliert) schützt aber nicht den kritischen Fall "erste
+  zwei gleichzeitigen Uploads einer brandneuen Prozessfamilie", da dann noch keine Zeile zum Sperren
+  existiert.
+- Stattdessen ein transaktionsgebundenes `pg_advisory_xact_lock`, geschlüsselt über einen Hash des
+  logischen Bezeichners (`name` bzw. DMN-Äquivalent) statt einer physischen Zeile — deckt auch den
+  Neuanlage-Fall ab. Bewusste, ADR-dokumentierte Abweichung von den beiden bisherigen Präzedenzfällen.
+- **Dabei live gefunden, nicht behoben**: `permission-service` hat eine eigene Cache-Insert-Race — außerhalb
+  des Session-Scopes, als offener Punkt dokumentiert.
+- Tests: `workflow-service` +2 (Nebenläufigkeits-Tests, echte parallele Inserts gegen dieselbe neue
+  Prozessfamilie).
+
+**P25-S2 — Rollback-Endpunkt** `POST /process-definitions/{id}/restore`:
+
+- Liest eine beliebige (auch nicht mehr aktuelle) historische Version und legt per
+  `repository.create_process_definition` (P25-S1, racefest) eine BRANDNEUE, jetzt aktuelle Version mit
+  deren `bpmn_xml`/`bpmn_process_id` an — append-only, kein In-Place-Edit, `process_id` wird explizit als
+  `source.bpmn_process_id` durchgereicht statt `None` (vermeidet erneute Auto-Resolution).
+- Gegated wie `POST /process-definitions` (`admin.object_config` + Lizenz-Gate), bewusst NICHT zusätzlich
+  durch das BPMN-Import-Review-Gate (ADR 0087) geführt — Begründung: kein neuer, ungeprüfter Inhalt,
+  reine Wiederverwendung bereits vorhandener Versionen.
+- Restore der bereits aktuellsten Version ist kein Sonderfall/No-Op — legt wie jeder andere Aufruf einfach
+  eine weitere, inhaltlich identische Version an (konsistent mit dem Append-only-Modell).
+- Kein eigenes ADR (reine Wiederverwendung von ADR 0096 über einen neuen Einstiegspunkt).
+- Tests: `workflow-service` 183 (vorher 179, +4: 403 ohne Berechtigung, 404 bei unbekannter ID,
+  Inhalts-/Versionshistorie-Check, Restore-der-aktuellsten-Version).
+- **Live-Verifikation**: v1 hochgeladen, v2 (verändert) hochgeladen, Restore aus v1 erzeugte v3 mit
+  byte-identischem `bpmn_xml`/`bpmn_process_id`; 404-Fall gegen unbekannte ID bestätigt; Testdaten
+  aufgeräumt.
+
+**P25-S3 — Gateway-Rate-Limiting mit geteiltem Store**
+(siehe [ADR 0097](docs/adr/0097-gateway-rate-limiting-redis-sliding-window.md)):
+
+- `RateLimiter` von einem In-Process-`dict` auf einen geteilten Redis-Sliding-Window-Store umgestellt
+  (`ZADD`/`ZREMRANGEBYSCORE`/`ZCARD`), ermöglicht horizontale Gateway-Skalierung.
+- **Bewusst Sliding-Window statt des einfacheren Fixed-Window `INCR`+`EXPIRE`**: Fixed-Window erlaubt bis
+  zu 2x das konfigurierte Limit an Fensterrändern — relevant, da der Limiter auch Login-/
+  Brute-Force-sensible Endpunkte gated.
+- Neuer `redis`-Dienst in `infra/docker-compose.yml` — erste Redis-Abhängigkeit im gesamten Projekt.
+
+**P25-S4 — Workload-bewusste Instanzauswahl**
+(siehe [ADR 0098](docs/adr/0098-gateway-workload-aware-instance-selection-per-replica.md)):
+
+- `InstanceResolver.pick()` wählt seit dieser Session unter mehreren gesunden Kandidaten eines
+  `service_type` die Instanz mit den wenigsten aktuell offenen Anfragen statt wie zuvor (ADR 0005) rein
+  zufällig — ein in-process `dict[str, int]`-Zähler je Instanz-Adresse, reserviert/freigegeben über den
+  neuen Async-Context-Manager `resolver.reserved_instance(instances)` (deckt auch fehlschlagende
+  Upstream-Aufrufe per `finally` ab, kein Leak reservierter Slots).
+- Tie-Break bei mehreren Instanzen mit demselben Minimum: zufällig unter den Minimum-Kandidaten, nicht
+  immer die erste in der Liste (sonst würde bei Ruhe/Start, wenn alle Zähler 0 sind, systematisch immer
+  dieselbe Instanz bevorzugt).
+- **Bewusst rein pro Gateway-Replika, kein clusterweiter Wert** — anders als der direkt benachbarte P25-S3
+  (Redis-Rate-Limiting), da hier kein Umgehungs-Anreiz besteht und ein zusätzlicher Redis-Roundtrip pro
+  proxied Request in keinem Verhältnis zum Nutzen stünde.
+- Tests: `test_upstream.py` um 5 Fälle erweitert (Auswahl nach Last, Tie-Break-Zufälligkeit, voller
+  Reserve/Release-Zyklus, Freigabe bei Erfolg UND bei Exception) — `gateway-service` damit bei 29 Tests
+  (vorher 24 nach P25-S3).
+- **Live-Verifikation**: zwei temporäre Test-Instanzen (eine sofort antwortend, eine künstlich 1,5s
+  verzögert) über die echte Registry registriert, echte parallele Lastbursts (120 bzw. 150 gleichzeitige
+  Requests) über den laufenden Gateway gefeuert — die schnelle Instanz erhielt reproduzierbar deutlich
+  mehr Anfragen (77/43 bzw. 105/45) statt der bei Zufallsauswahl erwarteten ~50/50-Verteilung (4-5
+  Standardabweichungen von der Gleichverteilungserwartung).
+- Offen: Auswahl weiterhin nicht latenz-bewusst, nur Anzahl offener Anfragen gezählt.
+
+Testsuiten unabhängig nachverifiziert (`scripts/run-tests.sh workflow-service gateway-service`):
+workflow-service 183/183, gateway-service 29/29, beide Zählungen bestätigten sich exakt. `ruff check`
+repo-weit sauber; die `ruff format`-Warnung betrifft ausschließlich vorbestehende, unveränderte Dateien in
+`federation-hub-service`/`license-service` (keine der vier Sessions). ADR-Nummern 0096/0097/0098 auf
+Kollisionsfreiheit geprüft (Dateisystem, `docs/adr/`) — keine Duplikate.
+
+**Phase 25 (Workflow-/Gateway-Härtung) damit vollständig abgeschlossen.**
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.
