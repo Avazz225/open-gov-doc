@@ -1,3 +1,4 @@
+from storage_service.backends.azure_backend import AzureBlobBackend
 from storage_service.backends.interface import ObjectNotFoundError, StorageBackend
 from storage_service.backends.local_backend import LocalFilesystemBackend
 from storage_service.backends.s3_backend import S3Backend
@@ -24,6 +25,12 @@ def build_backend(target: BackendTargetConfig) -> StorageBackend:
             bucket=target.bucket,
             region=target.region,
             object_lock_enabled=target.object_lock_mode is not None,
+        )
+    if target.type == "azure":
+        assert target.connection_string and target.container
+        return AzureBlobBackend(
+            connection_string=target.connection_string,
+            container=target.container,
         )
     raise ValueError(f"Unbekannter Backend-Typ: {target.type!r}")
 
@@ -60,6 +67,7 @@ def build_backends(settings: Settings) -> dict[str, StorageBackend]:
 
 __all__ = [
     "ObjectNotFoundError",
+    "AzureBlobBackend",
     "S3Backend",
     "LocalFilesystemBackend",
     "StorageBackend",

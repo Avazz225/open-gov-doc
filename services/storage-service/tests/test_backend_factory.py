@@ -1,7 +1,9 @@
 import pytest
 from pydantic import ValidationError
 from storage_service.backends import (
+    AzureBlobBackend,
     LocalFilesystemBackend,
+    build_backend,
     build_backends,
     resolve_archive_targets,
     resolve_targets,
@@ -87,6 +89,28 @@ def test_backend_target_config_requires_base_path_for_local():
 def test_backend_target_config_requires_all_s3_fields():
     with pytest.raises(ValidationError, match="endpoint_url"):
         BackendTargetConfig(id="x", type="s3", bucket="only-bucket-set")
+
+
+def test_backend_target_config_requires_all_azure_fields():
+    with pytest.raises(ValidationError, match="connection_string"):
+        BackendTargetConfig(id="x", type="azure", container="only-container-set")
+
+
+def test_build_backend_dispatches_azure_type():
+    """Reine Konstruktionsprüfung (kein echter Azurite-Aufruf, siehe
+    test_azure_backend.py für die echten Roundtrip-Tests) - bestätigt nur,
+    dass `build_backend()` den neuen Typ korrekt an `AzureBlobBackend`
+    weiterreicht (Post-Roadmap Phase 24 Session 1)."""
+    target = BackendTargetConfig(
+        id="azure-test",
+        type="azure",
+        connection_string="UseDevelopmentStorage=true",
+        container="dms-storage",
+    )
+
+    backend = build_backend(target)
+
+    assert isinstance(backend, AzureBlobBackend)
 
 
 def test_settings_rejects_duplicate_target_ids_in_practice_via_dict_collapse(tmp_path):

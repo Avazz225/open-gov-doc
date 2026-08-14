@@ -7,6 +7,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "aioboto3>=13.0",
+    "azure-storage-blob>=12.20",
+    "aiohttp>=3.9",
     "dms-common",
     "dms-db-base",
     "dms-registry-client",

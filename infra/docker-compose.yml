@@ -21,6 +21,9 @@ volumes:
   nats-data:
   keycloak-data:
   minio-data:
+  # Azure-Blob-Emulator (Azurite) für storage-service (Post-Roadmap Phase 24
+  # Session 1) - analog zu minio-data, eigenes Volume je emuliertem Provider.
+  azurite-data:
   # Steht für den PVC-Mountpunkt in einer echten Installation (Konzept 3.6) -
   # ob dahinter NFS oder ein Block-Volume liegt, ist für storage-service unsichtbar.
   storage-local-data:
@@ -153,6 +156,36 @@ services:
       - minio-data:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dms-net
+
+  # Azure-Blob-Emulator für storage-service (Post-Roadmap Phase 24 Session 1,
+  # Konzept 1a) - Azurite steht analog zu MinIO oben für den echten Provider
+  # (echtes Azure Blob Storage), `AzureBlobBackend` funktioniert identisch
+  # gegen beide. Fester, öffentlich dokumentierter Azurite-Dev-Account
+  # ("devstoreaccount1"), kein echtes Geheimnis - siehe
+  # docs/services/storage-service.md. Nur der Blob-Port (10000) wird
+  # exponiert, Queue/Table (10001/10002) werden von storage-service nicht
+  # gebraucht.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.30.0
+    restart: unless-stopped
+    # --skipApiVersionCheck: das fest gepinnte Azurite-Image kennt die
+    # jeweils neueste, vom `azure-storage-blob`-SDK gesendete API-Version
+    # (`x-ms-version`) u. U. noch nicht - Azurite lehnt unbekannte, aber
+    # tatsächlich abwärtskompatible Versionen sonst hart mit 400
+    # "InvalidHeaderValue" ab. Offizielles Azurite-CLI-Flag genau für diesen
+    # Fall, kein Sicherheitsrisiko in dieser reinen Dev/Test-Emulation.
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --skipApiVersionCheck
+    ports:
+      - "${AZURITE_BLOB_PORT:-10000}:10000"
+    volumes:
+      - azurite-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -350,6 +383,15 @@ services:
       #      "access_key":"dms_minio","secret_key":"dms_minio_dev_only",
       #      "bucket":"dms-storage","region":"us-east-1"}]'
       #   STORAGE_SERVICE_WRITE_STRATEGY=quorum STORAGE_SERVICE_QUORUM_COUNT=2
+      # Azure-Ziel gegen den Azurite-Emulator (Post-Roadmap Phase 24 Session 1)
+      # - fester, öffentlich dokumentierter Azurite-Dev-Verbindungsstring
+      # ("devstoreaccount1"), kein echtes Geheimnis, siehe
+      # docs/services/storage-service.md:
+      #   STORAGE_SERVICE_TARGETS='[{"id":"local","type":"local","base_path":"/data/storage"},
+      #     {"id":"azure-azurite","type":"azure","container":"dms-storage",
+      #      "connection_string":"DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;
+      #      AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/
+      #      K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"}]'
       # Env-Var-Werte werden nicht weiter expandiert - MinIO-Zugangsdaten in
       # einer eigenen STORAGE_SERVICE_TARGETS-Überschreibung müssen deshalb
       # wörtlich eingetragen werden, nicht als ${MINIO_ROOT_USER}-Referenz.

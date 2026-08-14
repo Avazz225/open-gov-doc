@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from storage_service import identity_guard, replication, repository, retention_guard
 from storage_service.backends import (
+    AzureBlobBackend,
     ObjectNotFoundError,
     S3Backend,
     build_backends,
@@ -182,6 +183,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     for backend in app.state.backends.values():
         if isinstance(backend, S3Backend):
             await backend.ensure_bucket()
+        elif isinstance(backend, AzureBlobBackend):
+            await backend.ensure_container()
 
     await _run_startup_guard(app.state.session_factory, app.state.backends, app.state.targets)
 

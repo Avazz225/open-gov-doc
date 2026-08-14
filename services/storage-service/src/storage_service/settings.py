@@ -11,19 +11,29 @@ class BackendTargetConfig(BaseModel):
     im selben Ziel-Set), jede mit eigenen Zugangsdaten/Mount-Parametern."""
 
     id: str
-    type: Literal["local", "s3"]
+    type: Literal["local", "s3", "azure"]
     base_path: str | None = None
     endpoint_url: str | None = None
     access_key: str | None = None
     secret_key: str | None = None
     bucket: str | None = None
     region: str | None = None
+    # Azure Blob Storage (3.6, Konzept 1a) - Verbindungsstring-Auth (kein
+    # azure-identity/AAD), siehe AzureBlobBackend/docs/services/
+    # storage-service.md. `container` ist das Azure-Pendant zu `bucket`
+    # (eigenes Feld statt Wiederverwendung von `bucket`, um beide Typen in
+    # Fehlermeldungen/Konfiguration eindeutig unterscheidbar zu halten).
+    connection_string: str | None = None
+    container: str | None = None
     # WORM/Object-Lock (5.1/5.2a, seit P7-S1) - bewusst nur "governance" als
     # gültiger Wert (kein "compliance"): Compliance-Mode würde die vom
     # Konzept verlangte Zwangslöschungs-Ausnahme technisch unmöglich machen.
     # Nur für type="s3" wirksam als echtes S3 Object Lock (siehe
     # S3Backend.ensure_bucket/write) - der Anwendungsschicht-Guard
-    # (retention_guard.py) greift unabhängig vom Backend-Typ.
+    # (retention_guard.py) greift unabhängig vom Backend-Typ. Für type="azure"
+    # ebenso wie für type="local" ohne technische Entsprechung (dokumentierter
+    # No-Op, siehe AzureBlobBackend) - lediglich entgegengenommen, damit ein
+    # Azure-Ziel trotzdem am Anwendungsschicht-Guard teilnehmen kann.
     object_lock_mode: Literal["governance"] | None = None
     # Aussonderung (5.6, seit P7-S3): "archive"-Ziele sind NICHT Teil der
     # regulären Upload-Replikation (`resolve_targets` schließt sie aus) -
@@ -42,6 +52,10 @@ class BackendTargetConfig(BaseModel):
             raise ValueError(
                 f"Ziel {self.id!r}: endpoint_url/access_key/secret_key/bucket/region "
                 "sind für type=s3 erforderlich"
+            )
+        if self.type == "azure" and not all([self.connection_string, self.container]):
+            raise ValueError(
+                f"Ziel {self.id!r}: connection_string/container sind für type=azure erforderlich"
             )
         return self
 
