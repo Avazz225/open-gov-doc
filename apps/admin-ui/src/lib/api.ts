@@ -1217,6 +1217,22 @@ export async function listArchivalTransfers(
   return response.json();
 }
 
+// Manueller Aussonderungs-Trigger (5.6, seit Post-Roadmap Phase 22 Session
+// 1) - setzt bei `document-service` `archive_after` auf jetzt, macht das
+// Dokument also sofort fällig statt erst nach Ablauf der Objekttyp-Frist.
+// Erzeugt selbst NOCH KEINE `ArchivalTransfer`-Zeile - das übernimmt erst
+// `archival-service`s nächster Poll-Tick (Default stündlich, siehe
+// `docs/services/archival-service.md`), daher kein sofortiges Neuladen der
+// Transfer-Tabelle nach dem Aufruf.
+export async function requestDocumentArchive(token: string, documentId: string): Promise<void> {
+  await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/archive-request`,
+    { method: "POST" },
+    token
+  );
+}
+
 // Rückholung (5.6) - erfordert `archive_retrieval_role` (Default
 // "dms-admin") im X-DMS-Roles-Header, den das Gateway aus dem Access Token
 // setzt, nicht diese Funktion selbst.

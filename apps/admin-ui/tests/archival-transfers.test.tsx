@@ -14,6 +14,7 @@ function renderView() {
 const listArchivalTransfersMock = vi.fn();
 const retrieveArchivalTransferMock = vi.fn();
 const retryArchivalTransferMock = vi.fn();
+const requestDocumentArchiveMock = vi.fn();
 const listCaseArchivalTransfersMock = vi.fn();
 const retryCaseArchivalTransferMock = vi.fn();
 const getCaseArchivalConfigMock = vi.fn();
@@ -24,6 +25,7 @@ vi.mock("@/lib/api", () => ({
   listArchivalTransfers: (...args: unknown[]) => listArchivalTransfersMock(...args),
   retrieveArchivalTransfer: (...args: unknown[]) => retrieveArchivalTransferMock(...args),
   retryArchivalTransfer: (...args: unknown[]) => retryArchivalTransferMock(...args),
+  requestDocumentArchive: (...args: unknown[]) => requestDocumentArchiveMock(...args),
   listCaseArchivalTransfers: (...args: unknown[]) => listCaseArchivalTransfersMock(...args),
   retryCaseArchivalTransfer: (...args: unknown[]) => retryCaseArchivalTransferMock(...args),
   getCaseArchivalConfig: (...args: unknown[]) => getCaseArchivalConfigMock(...args),
@@ -83,6 +85,7 @@ describe("ArchivalTransfersView", () => {
     listArchivalTransfersMock.mockReset();
     retrieveArchivalTransferMock.mockReset();
     retryArchivalTransferMock.mockReset();
+    requestDocumentArchiveMock.mockReset();
     listCaseArchivalTransfersMock.mockReset().mockResolvedValue([]);
     retryCaseArchivalTransferMock.mockReset();
     getCaseArchivalConfigMock.mockReset().mockResolvedValue(CASE_ARCHIVAL_CONFIG);
@@ -323,5 +326,37 @@ describe("ArchivalTransfersView", () => {
     await vi.waitFor(() =>
       expect(updateCaseArchivalConfigMock).toHaveBeenCalledWith("token-123", 90, true)
     );
+  });
+
+  it("requests immediate archival for a document by ID and shows a success hint", async () => {
+    listArchivalTransfersMock.mockResolvedValue([]);
+    requestDocumentArchiveMock.mockResolvedValue(undefined);
+
+    renderView();
+    await screen.findByText("Noch keine Aussonderungs-Transfers.");
+
+    fireEvent.change(screen.getByLabelText("Dokument-ID"), { target: { value: "doc-42" } });
+    fireEvent.click(screen.getByRole("button", { name: "Jetzt aussondern" }));
+
+    await vi.waitFor(() =>
+      expect(requestDocumentArchiveMock).toHaveBeenCalledWith("token-123", "doc-42")
+    );
+    expect(
+      await screen.findByText(/zur sofortigen Aussonderung vorgemerkt/)
+    ).toBeInTheDocument();
+  });
+
+  it("shows the backend error message when requesting immediate archival fails", async () => {
+    listArchivalTransfersMock.mockResolvedValue([]);
+    const { ApiError } = await import("@/lib/api");
+    requestDocumentArchiveMock.mockRejectedValue(new ApiError(404, "Dokument nicht gefunden"));
+
+    renderView();
+    await screen.findByText("Noch keine Aussonderungs-Transfers.");
+
+    fireEvent.change(screen.getByLabelText("Dokument-ID"), { target: { value: "unknown-doc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Jetzt aussondern" }));
+
+    expect(await screen.findByText("Dokument nicht gefunden")).toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import {
   getCaseArchivalConfig,
   listArchivalTransfers,
   listCaseArchivalTransfers,
+  requestDocumentArchive,
   retrieveArchivalTransfer,
   retryArchivalTransfer,
   retryCaseArchivalTransfer,
@@ -99,6 +100,10 @@ function DocumentArchivalSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [retrievingId, setRetrievingId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [requestDocumentId, setRequestDocumentId] = useState("");
+  const [isRequestingArchive, setIsRequestingArchive] = useState(false);
+  const [requestSuccess, setRequestSuccess] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -152,12 +157,64 @@ function DocumentArchivalSection() {
     }
   }
 
+  async function handleRequestArchive(event: FormEvent) {
+    event.preventDefault();
+    if (!accessToken || !requestDocumentId.trim()) return;
+    setRequestError(null);
+    setRequestSuccess(false);
+    setIsRequestingArchive(true);
+    try {
+      await requestDocumentArchive(accessToken, requestDocumentId.trim());
+      setRequestSuccess(true);
+      setRequestDocumentId("");
+    } catch (err) {
+      setRequestError(
+        err instanceof ApiError ? err.message : t("archivalTransfers.requestArchiveError")
+      );
+    } finally {
+      setIsRequestingArchive(false);
+    }
+  }
+
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) return <p className="empty-state">{t("archivalTransfers.unreachable")}</p>;
 
   return (
     <div className="card">
       <p className="hint">{t("archivalTransfers.hint")}</p>
+
+      <form
+        onSubmit={handleRequestArchive}
+        aria-label={t("archivalTransfers.requestArchiveFormLabel")}
+        className="form-grid"
+      >
+        <label>
+          {t("archivalTransfers.requestArchiveLabel")}
+          <input
+            type="text"
+            value={requestDocumentId}
+            onChange={(e) => {
+              setRequestDocumentId(e.target.value);
+              setRequestSuccess(false);
+              setRequestError(null);
+            }}
+            placeholder={t("archivalTransfers.requestArchivePlaceholder")}
+          />
+        </label>
+        <div className="actions">
+          <button type="submit" disabled={isRequestingArchive || !requestDocumentId.trim()}>
+            {isRequestingArchive ? t("common.loading") : t("archivalTransfers.requestArchiveButton")}
+          </button>
+        </div>
+      </form>
+      {requestError && (
+        <p className="error-text" role="alert">
+          {requestError}
+        </p>
+      )}
+      {requestSuccess && !requestError && (
+        <p className="hint">{t("archivalTransfers.requestArchiveSuccess")}</p>
+      )}
 
       <label>
         {t("archivalTransfers.filterStatus")}

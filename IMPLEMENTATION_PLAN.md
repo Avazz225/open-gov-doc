@@ -394,7 +394,7 @@ Alle Sessions folgen dem etablierten Seiten-Muster (`<RequireAuth><RequireCapabi
 
 | Session | Deliverable |
 |---|---|
-| P22-S1 | "Jetzt aussondern"-Button in `ArchivalTransfersView.tsx`. |
+| P22-S1 | ✅ "Jetzt aussondern"-Bedienelement in `ArchivalTransfersView.tsx`: neues Formular am Kopf der Dokument-Sektion (Freitextfeld für die Dokument-ID + Button "Jetzt aussondern") ruft den neuen `requestDocumentArchive()`-API-Client, der `document-service`s bereits seit P7-S3/5.6 bestehenden `POST /documents/{id}/archive-request` aufruft (setzt `archive_after` auf jetzt). Zeigt nach Erfolg einen Hinweistext statt sofort neu zu laden — der Aufruf legt selbst noch keine `ArchivalTransfer`-Zeile an, das übernimmt erst `archival-service`s nächster Poll-Tick (Default stündlich); Fehleranzeige bei unbekannter Dokument-ID (`404` → `ApiError`-Nachricht). Kein Backend-Code geändert (Endpunkt existierte bereits, war nur ohne UI-Anbindung), daher kein neues ADR. Tests: `admin-ui` 175 (+2: Erfolgsfall inkl. Hinweistext, Fehleranzeige). Live gegen den echten Stack verifiziert (Image-Neubau + Neustart von `admin-ui`; per curl über das Gateway: echtes Testdokument angelegt, `archive-request` setzte `archive_after` korrekt, unbekannte ID lieferte `404`; Testdokument anschließend gelöscht) — kein interaktiver Browser-Test (kein Browser/Playwright in dieser Entwicklungsumgebung verfügbar). |
 | P22-S2 | Gruppen-Verwaltung in `UserManagement.tsx`, nutzt Phase 19s "everyone"-Gruppen-Infrastruktur. |
 | P22-S3 | Generische Vier-Augen-Einstellungsseite (Toggle je `action_type` über `PUT /approval-config/{action_type}`). |
 | P22-S4 | Reject-Grund-Feld in `reviewer-ui`s `ApprovalList.tsx` statt `window.prompt`. |
