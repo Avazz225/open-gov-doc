@@ -1,37 +1,37 @@
 # reviewer-ui
 
-Eigenständige Frontend-Anwendung mit schlankem Fokus nur auf Freigabeaufgaben
-(Konzept 8: "dedizierte Reviewer/Approval-UI ... auch für Vier-Augen-Fälle"),
-P14-S2. Zwei Bereiche:
+Standalone frontend application with a lean focus purely on approval tasks
+(Concept 8: "dedicated reviewer/approval UI ... also for four-eyes cases"),
+P14-S2. Two sections:
 
-- **Aufgaben** — bereite Manual-/Signature-Tasks über alle laufenden
-  `workflow-service`-Prozessinstanzen hinweg (`GET /tasks`, neu seit dieser
-  Session), inkl. Abschluss-Formular (Signatur-ID-Pflichtfeld bei Signature
-  Tasks, 3.10).
-- **Freigaben** — generische Vier-Augen-Inbox (4.3) über `permission-service`s
-  `GET /approval-requests`, ungefiltert nach Aktionstyp (erster generischer
-  Konsument dieser API im gesamten System).
+- **Tasks** — ready manual/signature tasks across all running
+  `workflow-service` process instances (`GET /tasks`, new as of this
+  session), including completion form (signature ID required field for
+  signature tasks, 3.10).
+- **Approvals** — generic four-eyes inbox (4.3) via `permission-service`'s
+  `GET /approval-requests`, unfiltered by action type (first generic
+  consumer of this API in the entire system).
 
-Reines Client-Side-Rendering, kein Node-Prozess in Produktion (identisches
-Muster wie `apps/user-ui`/`apps/process-designer`, siehe
+Pure client-side rendering, no Node process in production (identical
+pattern to `apps/user-ui`/`apps/process-designer`, see
 [ADR 0006](../../docs/adr/0006-user-ui-static-export-spa.md)).
 
-Ausführliche Doku: [`docs/services/reviewer-ui.md`](../../docs/services/reviewer-ui.md).
+Detailed documentation: [`docs/services/reviewer-ui.md`](../../docs/services/reviewer-ui.md).
 
-## Lokale Entwicklung
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Erwartet ein laufendes Gateway auf `http://localhost:8009`:
+Expects a running gateway at `http://localhost:8009`:
 
 ```bash
 cd ../../infra && docker compose up -d
 ```
 
-## Build (statischer Export)
+## Build (static export)
 
 ```bash
 npm run build

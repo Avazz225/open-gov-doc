@@ -1,23 +1,23 @@
 # config-service
 
-Konfigurationsimport/-export (Konzept 7.3, P12-S3): vollständige Systemkonfiguration
-(Objekttypen inkl. Formular-Layouts, Workflows, Rollen-Templates, Vier-Augen-Konfiguration,
-Sensor-Konfiguration) als ein JSON-Dokument exportierbar und in ein anderes (oder dasselbe, z. B.
-Staging→Produktion) System re-importierbar. Seit **P14-S1** zusätzlich eine Delta-/
-Vergleichsfunktion zwischen zwei Exporten (7.5, konfigurierbare Ignore-Regex für abweichende
-Namenskonventionen). Reiner Orchestrator ohne eigenes Postgres-Schema — Details siehe
+Configuration import/export (concept 7.3, P12-S3): the complete system configuration
+(object types including form layouts, workflows, role templates, four-eyes configuration,
+sensor configuration) can be exported as a single JSON document and re-imported into another (or the
+same, e.g. staging→production) system. Since **P14-S1**, also a delta/
+comparison function between two exports (7.5, configurable ignore regex for differing
+naming conventions). Pure orchestrator without its own Postgres schema — details: see
 [`docs/services/config-service.md`](../../docs/services/config-service.md).
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/config/export` | Konfigurationsdokument exportieren, optional `?categories=roles&categories=...` |
-| `POST` | `/config/compare` | Delta-/Vergleichsfunktion zwischen zwei Exporten (7.5, P14-S1) — ungegated, rein lesend |
-| `POST` | `/config/import` | Konfigurationsdokument importieren (Upsert je Kategorie) — gegated hinter `admin.object_config`, `X-DMS-Principal`-Header nötig |
-| `GET` | `/healthz` | Health-Check |
+| `GET` | `/config/export` | Export configuration document, optionally `?categories=roles&categories=...` |
+| `POST` | `/config/compare` | Delta/comparison function between two exports (7.5, P14-S1) — ungated, read-only |
+| `POST` | `/config/import` | Import configuration document (upsert per category) — gated behind `admin.object_config`, requires `X-DMS-Principal` header |
+| `GET` | `/healthz` | Health check |
 
-## Lokale Ausführung
+## Running locally
 
 ```bash
 cd infra && docker compose up -d postgres object-type-service workflow-service permission-service monitoring-service registry-service config-service
@@ -26,8 +26,8 @@ curl localhost:8029/healthz
 
 ## Tests
 
-Läuft wie `webdav-connector`/`migration-service` gegen den echten, laufenden Container (kein
-In-Prozess-`TestClient`, kein Mocking der Nachbar-Services):
+Runs against the real, running container, like `webdav-connector`/`migration-service` (no
+in-process `TestClient`, no mocking of neighboring services):
 
 ```bash
 cd infra && docker compose up -d postgres object-type-service workflow-service permission-service monitoring-service registry-service config-service

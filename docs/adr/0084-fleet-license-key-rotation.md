@@ -1,103 +1,100 @@
-# 0084 — fleet-management-service & license-service: Schlüsselrotation
+# 0084 — fleet-management-service & license-service: key rotation
 
-**Status:** akzeptiert (Session 1 von 4, siehe Phase 21 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 21 Session 1, betrifft `fleet-management-service` und `license-service`
+**Status:** accepted (Session 1 of 4, see Phase 21 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 21 Session 1, affects `fleet-management-service` and `license-service`
 
-## Entscheidung
+## Decision
 
-Der Plan nennt als Vorbild `workflow-service`s bereits existierendes `POST /federation/rotate-key`
-(ADR 0039): "neuer Schlüssel wird ausgestellt, alter bleibt kurz gültig für einen Übergang, dann
-invalidiert". Eine genauere Prüfung dieses Vorbilds ergab: es gibt dort **kein zeitbasiertes
-Übergangsfenster** — `federation-hub-service.repository.rotate_installation_key` ersetzt
-`Installation.public_key_pem` sofort und atomar, sobald die Rotationsanfrage (signiert mit dem noch
-aktuellen Schlüssel) erfolgreich verifiziert wurde. "Alter bleibt kurz gültig" bedeutet dort: der alte
-Schlüssel bleibt der einzig gültige, bis der Rotationsaufruf durchläuft, danach ist ausschließlich der
-neue gültig — kein Zeitraum, in dem beide gleichzeitig akzeptiert würden. Diese Session repliziert dieses
-Muster für `fleet-management-service`, wo es strukturell genauso passt, und entwickelt für
-`license-service` eine abweichende, aber sinngemäß passende Variante, da dort technisch gar kein
-selbst erzeugter Signierschlüssel existiert, der "rotiert" werden könnte.
+The plan names `workflow-service`'s already existing `POST /federation/rotate-key` (ADR 0039) as the
+model: "a new key is issued, the old one stays valid briefly for a transition, then is invalidated." A
+closer look at this model revealed: there is actually **no time-based transition window** —
+`federation-hub-service.repository.rotate_installation_key` replaces `Installation.public_key_pem`
+immediately and atomically as soon as the rotation request (signed with the still-current key) has been
+successfully verified. "The old one stays valid briefly" means there: the old key remains the only
+valid one until the rotation call goes through, after which only the new one is valid — no period
+during which both would be accepted simultaneously. This session replicates this pattern for
+`fleet-management-service`, where it fits structurally the same way, and develops a differing but
+conceptually fitting variant for `license-service`, since no self-generated signing key that could be
+"rotated" exists there technically.
 
 ### fleet-management-service
 
-Neuer Endpunkt `POST /installations/{id}/rotate-key` — ersetzt `ManagedInstallation.fleet_agent_api_key`
-sofort und atomar (`repository.rotate_managed_installation_key`), optional mit einem vom Betreiber
-mitgegebenen Wert (gleiche Flexibilität wie der bestehende `POST /installations`), sonst wird ein neuer
-Wert erzeugt. Response-Schema identisch zur Erstanlage (`ManagedInstallationCreateOut`) — der
-Klartext-Schlüssel wird nur in dieser einen Antwort zurückgegeben.
+New endpoint `POST /installations/{id}/rotate-key` — replaces `ManagedInstallation.fleet_agent_api_key`
+immediately and atomically (`repository.rotate_managed_installation_key`), optionally with an
+operator-supplied value (same flexibility as the existing `POST /installations`), otherwise a new value
+is generated. Response schema identical to initial creation (`ManagedInstallationCreateOut`) — the
+plaintext key is only ever returned in this one response.
 
 ### license-service
 
-`fleet_agent_api_key` bei `fleet-management-service` ist ein selbst erzeugter, selbst verwalteter
-Schlüssel — `license-service`s "Signierschlüssel" ist etwas fundamental anderes: der private Schlüssel,
-mit dem Lizenzdateien signiert werden, gehört dem **Lizenzgeber** und liegt laut ausdrücklicher
-ADR-0032-Vorgabe **nie** in diesem Repository/Deployment ("nirgends im Repository ... darf auftauchen").
-`license-service` besitzt nur den öffentlichen **Verifikationsschlüssel**
-(`settings.license_public_key_pem`) — es gibt hier keinen selbst erzeugten Schlüssel, den dieser Service
-rotieren könnte. Eine 1:1-Übertragung von `fleet-management-service`s Muster ist daher nicht anwendbar.
+`fleet_agent_api_key` on `fleet-management-service` is a self-generated, self-managed key —
+`license-service`'s "signing key" is something fundamentally different: the private key used to sign
+license files belongs to the **licensor** and, per explicit ADR-0032 requirement, **never** resides in
+this repository/deployment ("must not appear anywhere in the repository"). `license-service` only
+holds the public **verification key** (`settings.license_public_key_pem`) — there is no
+self-generated key here that this service could rotate. A 1:1 transfer of `fleet-management-service`'s
+pattern is therefore not applicable.
 
-Stattdessen: neue, optionale Einstellung `license_previous_public_key_pem` (Default `None`). Wechselt der
-Lizenzgeber sein Schlüsselpaar, konfiguriert der Betreiber `license_public_key_pem` auf den NEUEN
-öffentlichen Schlüssel und `license_previous_public_key_pem` auf den ALTEN. `license_verifier.decode()`
-versucht `public_key_pem` zuerst, bei dessen Fehlschlag den optionalen `previous_public_key_pem` —
-**hier gibt es tatsächlich ein echtes Übergangsfenster** (anders als bei den beiden anderen
-Rotationsmustern in diesem Projekt, ADR 0039/fleet-management-service oben): bereits installierte, unter
-dem alten Schlüssel signierte Lizenzen bleiben bei jeder erneuten Statusprüfung (`GET /license/status`,
-liest `raw_token` erneut) gültig, während neu ausgestellte Lizenzen bereits mit dem neuen Schlüssel
-signiert sein können. Der Betreiber setzt `license_previous_public_key_pem` nach Abschluss der
-Übergangsfrist wieder auf `None` zurück ("dann invalidiert").
+Instead: a new, optional setting `license_previous_public_key_pem` (default `None`). When the licensor
+switches their key pair, the operator configures `license_public_key_pem` to the NEW public key and
+`license_previous_public_key_pem` to the OLD one. `license_verifier.decode()` first tries
+`public_key_pem`, and on failure the optional `previous_public_key_pem` — **here a real transition
+window actually exists** (unlike the other two rotation patterns in this project, ADR 0039/
+fleet-management-service above): already installed licenses signed under the old key remain valid on
+every renewed status check (`GET /license/status`, which re-reads `raw_token`), while newly issued
+licenses may already be signed with the new key. The operator resets
+`license_previous_public_key_pem` back to `None` after the transition period concludes ("then
+invalidated").
 
-## Begründung
+## Rationale
 
-- **Warum bei `fleet-management-service` KEIN Übergangsfenster, obwohl `workflow-service`s Vorbild
-  eines hat**: strukturell unterscheidet sich die Vertrauensrichtung. Bei der Hub-Installations-Rotation
-  bestätigt die ZIELSEITE (der Hub) die Rotation aktiv per HTTP-Aufruf und kann daher exakt in dem
-  Moment umschalten, in dem sie den neuen Schlüssel entgegennimmt. Bei `fleet_agent_api_key` gibt es
-  keine analoge Rückkopplung: `fleet-management-service` PRÄSENTIERT den Schlüssel nur, die
-  Zielinstallation verifiziert ihn gegen einen **statisch beim eigenen Start aus einer Env-Var**
-  gelesenen Wert (`DMS_FLEET_AGENT_API_KEY`) — es gibt keinen Kanal, über den `fleet-management-service`
-  diesen Wert auf der Zielinstallation zur Laufzeit ändern könnte. Ein "Übergangsfenster" ließe sich hier
-  technisch gar nicht abbilden; die Rotation bleibt unvermeidbar ein zweischrittiger, teilweise manueller
-  Vorgang (siehe "Konsequenzen").
-- **Warum `license-service`s Lösung NICHT als "Schlüsselrotation" im wörtlichen Sinne umgesetzt wird**:
-  es gibt keinen Schlüssel dieses Service, der rotiert werden könnte — nur einen extern ausgestellten
-  Vertrauensanker, der ausgetauscht wird. Die Lösung überträgt die Grundidee ("alter Zustand bleibt kurz
-  gültig, dann invalidiert") auf das, was hier tatsächlich existiert: den öffentlichen
-  Verifikationsschlüssel.
-- **Warum kein `models.py`/keine DB-Tabelle für `license-service`s vorherigen Schlüssel**: der Service
-  hat für seine Kernaufgabe (Lizenzverifikation) ohnehin nur Settings, keinen Signierschlüssel-Datensatz
-  (anders als `federation-hub-service`s `HubIdentity`/`signature-service`s `InternalCa`) — ein einzelner
-  optionaler Konfigurationswert genügt, keine neue Persistenzebene nötig.
+- **Why `fleet-management-service` has NO transition window, even though `workflow-service`'s model
+  has one**: the trust direction structurally differs. For hub installation rotation, the TARGET SIDE
+  (the hub) actively confirms the rotation via an HTTP call and can therefore switch over at the exact
+  moment it receives the new key. For `fleet_agent_api_key` there is no analogous feedback loop:
+  `fleet-management-service` only PRESENTS the key; the target installation verifies it against a value
+  **read statically from an env var at its own startup** (`DMS_FLEET_AGENT_API_KEY`) — there is no
+  channel through which `fleet-management-service` could change this value on the target installation
+  at runtime. A "transition window" simply could not be technically represented here; rotation
+  unavoidably remains a two-step, partially manual process (see "Consequences").
+- **Why `license-service`'s solution is NOT implemented as "key rotation" in the literal sense**: there
+  is no key belonging to this service that could be rotated — only an externally issued trust anchor
+  that gets swapped out. The solution carries over the core idea ("old state stays valid briefly, then
+  invalidated") to what actually exists here: the public verification key.
+- **Why no `models.py`/DB table for `license-service`'s previous key**: for its core task (license
+  verification), the service only has settings anyway, no signing-key record (unlike
+  `federation-hub-service`'s `HubIdentity`/`signature-service`'s `InternalCa`) — a single optional
+  configuration value suffices, no new persistence layer needed.
 
-## Konsequenzen
+## Consequences
 
-- **`fleet-management-service`: Rotation bleibt ein zweischrittiger, teilweise manueller Vorgang** —
-  dokumentiert im Endpunkt-Docstring und in `docs/services/fleet-management-service.md`: nach
-  `POST .../rotate-key` ist der neue Wert nur auf der `fleet-management-service`-Seite aktiv; bis ein
-  Betreiber die Zielinstallation manuell auf `DMS_FLEET_AGENT_API_KEY=<neuer Wert>` umstellt und
-  neu startet, schlagen ausgehende Aufrufe (`GET .../status`, `POST .../license`, `POST .../provision`)
-  mit `401`/`403` fehl — ein bewusst in Kauf genommener, ehrlich dokumentierter Zustand statt eines
-  scheinbar automatischen, tatsächlich aber nicht funktionierenden Rundum-Mechanismus. Der optionale
-  `fleet_agent_api_key`-Parameter im Request erlaubt die umgekehrte, empfohlene Reihenfolge (Installation
-  zuerst umstellen, dann hier nachziehen), die diese Fehlerlücke praktisch vermeidet.
-- **Migration**: keine nötig — beide Änderungen sind additiv (neuer Endpunkt bzw. neue optionale
-  Einstellung mit rückwärtskompatiblem Default `None`).
-- **Tests**: `fleet-management-service` 30 (vorher 26, +4: Standardgenerierung, Betreiber-vorgegebener
-  Wert, tatsächliche Verwendung des neuen Werts bei einem ausgehenden Aufruf, `404` bei unbekannter
-  Installation). `license-service` 37 (vorher 32, +5, alle in `test_license_verifier.py`: Fallback auf
-  den vorherigen Schlüssel während der Übergangsfrist, Bevorzugung des aktuellen Schlüssels ohne
-  Fallback-Notwendigkeit, Fehlschlag wenn weder aktueller noch vorheriger Schlüssel passt,
-  unverändertes Verhalten ohne konfigurierten vorherigen Schlüssel).
-- Doku: `docs/services/fleet-management-service.md`/`license-service.md` ("Offene Punkte" als behoben
-  markiert, neue Endpunkt-/Einstellungsdokumentation).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart beider Services):
-  `fleet-management-service` — eine echte Installation registriert, `POST .../rotate-key` sowohl mit
-  automatisch erzeugtem als auch mit betreiber-vorgegebenem Wert bestätigt (jeweils tatsächlich
-  geänderter Rückgabewert), `404` für eine unbekannte Installation bestätigt. `license-service` — über
-  eine temporäre Compose-Override-Datei (`DMS_LICENSE_PUBLIC_KEY_PEM` auf einen frisch erzeugten,
-  unabhängigen Schlüssel gesetzt, `DMS_LICENSE_PREVIOUS_PUBLIC_KEY_PEM` auf den bisherigen
-  Standardschlüssel) real nachgestellt: eine bereits vor dieser Session unter dem alten Schlüssel
-  installierte, echte Lizenz blieb über `GET /license/status` gültig (Fallback-Pfad tatsächlich
-  durchlaufen, kein Mocking); als Gegenprobe ohne konfigurierten vorherigen Schlüssel wurde dieselbe
-  Lizenz korrekt als `valid=false`/`"Lizenzsignatur ungueltig"` gemeldet — bestätigt, dass der Fallback
-  echte Verifikationsarbeit leistet statt eine Lücke zu öffnen. Nach dem Test auf die ursprüngliche
-  Konfiguration zurückgesetzt (erneut `valid=true` bestätigt).
+- **`fleet-management-service`: rotation remains a two-step, partially manual process** — documented in
+  the endpoint docstring and in `docs/services/fleet-management-service.md`: after
+  `POST .../rotate-key`, the new value is only active on the `fleet-management-service` side; until an
+  operator manually switches the target installation to `DMS_FLEET_AGENT_API_KEY=<new value>` and
+  restarts it, outgoing calls (`GET .../status`, `POST .../license`, `POST .../provision`) fail with
+  `401`/`403` — a deliberately accepted, honestly documented state instead of a seemingly automatic but
+  actually non-functional full-circle mechanism. The optional `fleet_agent_api_key` request parameter
+  allows the reverse, recommended order (switch the installation first, then follow up here), which
+  practically avoids this failure gap.
+- **Migration**: none needed — both changes are additive (a new endpoint and a new optional setting
+  with a backward-compatible default of `None`).
+- **Tests**: `fleet-management-service` 30 (previously 26, +4: default generation, operator-supplied
+  value, actual use of the new value on an outgoing call, `404` for an unknown installation).
+  `license-service` 37 (previously 32, +5, all in `test_license_verifier.py`: fallback to the previous
+  key during the transition period, preference for the current key without needing fallback, failure
+  when neither current nor previous key matches, unchanged behavior with no previous key configured).
+- Docs: `docs/services/fleet-management-service.md`/`license-service.md` ("Open Points" marked as
+  resolved, new endpoint/setting documentation).
+- **Verified live against the real running stack** (image rebuild + restart of both services):
+  `fleet-management-service` — a real installation registered, `POST .../rotate-key` confirmed both
+  with an automatically generated and with an operator-supplied value (each with an actually changed
+  return value), `404` for an unknown installation confirmed. `license-service` — reproduced for real
+  via a temporary compose override file (`DMS_LICENSE_PUBLIC_KEY_PEM` set to a freshly generated,
+  independent key, `DMS_LICENSE_PREVIOUS_PUBLIC_KEY_PEM` set to the previous default key): a real
+  license already installed under the old key before this session remained valid via
+  `GET /license/status` (fallback path actually exercised, no mocking); as a counter-check with no
+  previous key configured, the same license was correctly reported as `valid=false`/
+  `"Lizenzsignatur ungueltig"` — confirming that the fallback performs real verification work rather
+  than opening a gap. Reset to the original configuration after the test (`valid=true` confirmed
+  again).

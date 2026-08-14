@@ -1,22 +1,58 @@
-# 0012 — Suche: Postgres Volltextsuche statt dediziertem Suchindex
+# 0012 — Search: Postgres full-text search instead of a dedicated search index
 
-**Status:** akzeptiert
-**Kontext:** Konzept 3.7, Session P5-S4
+**Status:** accepted
+**Context:** Concept 3.7, Session P5-S4
 
-## Entscheidung
+## Decision
 
-Der neue `search-service` implementiert "Volltextindex + Facettensuche" (3.7) über **Postgres' eingebaute Volltextsuche** statt eines dedizierten Suchindex (Elasticsearch/Meilisearch/OpenSearch): eine `tsvector`-Spalte (`search_vector`) je indexiertem Dokument, aufgebaut aus `setweight(to_tsvector('german', title), 'A') || setweight(to_tsvector('german', full_text), 'B')` (Titeltreffer werden höher gewichtet als Volltext-Treffer), GIN-indexiert, abgefragt über `websearch_to_tsquery('german', ...)` und `ts_rank(...)` für die Relevanzsortierung.
+The new `search-service` implements "full-text index + faceted search" (3.7)
+via **Postgres's built-in full-text search** instead of a dedicated search
+index (Elasticsearch/Meilisearch/OpenSearch): a `tsvector` column
+(`search_vector`) per indexed document, built from
+`setweight(to_tsvector('german', title), 'A') ||
+setweight(to_tsvector('german', full_text), 'B')` (title matches weighted
+higher than full-text matches), GIN-indexed, queried via
+`websearch_to_tsquery('german', ...)` and `ts_rank(...)` for relevance
+ranking.
 
-## Begründung
+## Rationale
 
-- **Dieselbe Abwägungsklasse wie ADR 0010 (EicarSignatureEngine statt ClamdEngine) und ADR 0011 (Tesseract statt PaddleOCR)**: ein dedizierter Suchindex bedeutet einen weiteren Container, weitere Betriebsfläche, zusätzlichen Speicher-/Startzeit-Aufwand für ein reproduzierbares `docker compose up --build` — vermieden, wenn eine bereits vorhandene, native Alternative ausreicht.
-- **Postgres bringt eine eingebaute `german`-Textsuchekonfiguration mit** (Stemming, Stoppwörter) — keine zusätzliche Extension nötig. `pg_trgm`/`unaccent` sind in der laufenden Postgres-Instanz zwar verfügbar (`pg_available_extensions`), werden aber diese Session bewusst **nicht** installiert/verdrahtet: das Konzept verlangt nur "Volltextindex + Facettensuche", keine Tippfehlertoleranz — beides bleibt als naheliegende, günstige spätere Erweiterung dokumentiert (`CREATE EXTENSION pg_trgm`, `similarity()`-Fallback bei schwachen `ts_rank`-Treffern), aber nicht Teil dieser Session.
-- **Postgres ist bereits die zentrale Datenbank jedes Service in diesem System** (3.1: ein Schema je Service) — kein neuer Infrastruktur-Baustein, keine zusätzliche Synchronisationslogik zwischen zwei Speichersystemen.
-- **Facettensuche (Objekttyp/Ordner/Attribute/Ersteller/Datum) ist mit normalen SQL-`WHERE`-Klauseln und `GROUP BY`-Aggregation vollständig abbildbar** — kein Bedarf an einer spezialisierten Facetten-Engine für den hier verlangten Umfang.
+- **Same class of trade-off as ADR 0010 (EicarSignatureEngine instead of
+  ClamdEngine) and ADR 0011 (Tesseract instead of PaddleOCR)**: a dedicated
+  search index means another container, more operational surface, extra
+  storage/startup-time overhead for a reproducible `docker compose up
+  --build` - avoided when an already-available, native alternative
+  suffices.
+- **Postgres comes with a built-in `german` text search configuration**
+  (stemming, stop words) - no additional extension needed. `pg_trgm`/
+  `unaccent` are available in the running Postgres instance
+  (`pg_available_extensions`), but are deliberately **not** installed/wired
+  up this session: the concept only requires "full-text index + faceted
+  search", not typo tolerance - both remain documented as an obvious, cheap
+  future extension (`CREATE EXTENSION pg_trgm`, `similarity()` fallback on
+  weak `ts_rank` matches), but are not part of this session.
+- **Postgres is already the central database of every service in this
+  system** (3.1: one schema per service) - no new infrastructure component,
+  no additional synchronization logic between two storage systems.
+- **Faceted search (object type/folder/attributes/creator/date) is fully
+  expressible with plain SQL `WHERE` clauses and `GROUP BY` aggregation** -
+  no need for a specialized facet engine for the scope required here.
 
-## Konsequenzen
+## Consequences
 
-- Relevanzsortierung ist solide, aber nicht auf dem Niveau von BM25/spezialisierten Ranking-Algorithmen dedizierter Suchmaschinen — für den Umfang dieser Session (Volltextindex + Facetten) ausreichend.
-- ~~Keine Tippfehlertoleranz/Fuzzy-Matching in dieser Session (`pg_trgm` wäre der naheliegende Erweiterungspfad, siehe oben).~~ Geschlossen in P14-S7: `pg_trgm` ist seither installiert, `query_language.py`/`query_compiler.py` bauen zusätzlich Fuzzy- und Näherungssuche sowie Wildcards obendrauf - siehe [ADR 0044](0044-search-query-language-fuzzy-proximity.md).
-- Attributfilter auf dem JSONB-`attributes`-Feld sind auf einfache Exakt-/Bereichsvergleiche beschränkt (`->>`-Textextraktion + Typ-Cast) — keine komplexen verschachtelten Attributstrukturen, was aber dem aktuellen, flachen Objekttyp-Attributschema entspricht (2.2).
-- Ein Wechsel zu einem dedizierten Suchindex bleibt möglich, falls Skalierungs- oder Relevanzanforderungen das später erfordern — die Indexierungs-Pipeline (`consumer.py`/`pipeline.py`) ist bereits vom Speichermechanismus (`repository.py`) getrennt.
+- Relevance ranking is solid, but not at the level of BM25/specialized
+  ranking algorithms of dedicated search engines - sufficient for the scope
+  of this session (full-text index + facets).
+- ~~No typo tolerance/fuzzy matching in this session (`pg_trgm` would be the
+  obvious extension path, see above).~~ Closed in P14-S7: `pg_trgm` has
+  since been installed, `query_language.py`/`query_compiler.py`
+  additionally build fuzzy and proximity search as well as wildcards on top
+  - see [ADR 0044](0044-search-query-language-fuzzy-proximity.md).
+- Attribute filters on the JSONB `attributes` field are limited to simple
+  exact/range comparisons (`->>` text extraction + type cast) - no complex
+  nested attribute structures, but this matches the current, flat object
+  type attribute schema (2.2).
+- A switch to a dedicated search index remains possible should scaling or
+  relevance requirements later demand it - the indexing pipeline
+  (`consumer.py`/`pipeline.py`) is already separated from the storage
+  mechanism (`repository.py`).

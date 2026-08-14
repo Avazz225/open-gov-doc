@@ -1,75 +1,74 @@
-# 0002 — Konfliktschutz bei Force-Unlock über optimistische Versionsprüfung statt "überwachter" Lock-Zustand
+# 0002 — Conflict protection for force-unlock via optimistic version checking instead of a "monitored" lock state
 
-**Status:** akzeptiert
-**Kontext:** Konzept 4.2 (Dokumentensperre bei Bearbeitung, insbesondere die "Konfliktbehandlung bei Force-Unlock"), Session P3-S2 (Document Service)
+**Status:** accepted
+**Context:** Concept 4.2 (document lock during editing, in particular "conflict handling on force-unlock"), Session P3-S2 (Document Service)
 
-## Entscheidung
+## Decision
 
-Das Konzept beschreibt für Force-Unlock einen dreiwertigen Lock-Zustand:
-normal gesperrt → administrativ aufgehoben, aber **"überwacht"** → der
-ursprüngliche Bearbeiter wird beim nächsten Check-in-Versuch anhand dieses
-überwachten Zustands als Konfliktfall erkannt.
+The concept describes a three-valued lock state for force-unlock: normally
+locked → administratively released, but **"monitored"** → the original
+editor is recognized as a conflict case at their next check-in attempt based
+on this monitored state.
 
-Der Document Service implementiert stattdessen **keinen dritten Lock-Zustand**.
-Force-Unlock löscht die Sperre vollständig (`repository.force_release_lock`).
-Die eigentliche Schutzwirkung entsteht durch eine **von der Sperre unabhängige,
-grundsätzlich immer aktive optimistische Konflikterkennung** beim Check-in:
-Jeder Versions-Upload muss `expected_base_version_number` mitgeben (die Version,
-auf der die Bearbeitung beruhte). Weicht dieser Wert bei Ausführung von der
-tatsächlich aktuellen Hauptversion des Dokuments ab, wird der Upload nicht
-überschreibend eingespielt, sondern als eigenständige, weiterhin abrufbare
-**Konfliktkopie** neben der aktuellen Version abgelegt (`<name>_conflict_<user>_<zeitstempel>`),
-ohne den Hauptversions-Zeiger zu bewegen (siehe `repository.checkin_version`).
+The Document Service instead implements **no third lock state**. Force-unlock
+deletes the lock entirely (`repository.force_release_lock`). The actual
+protective effect comes from a **lock-independent, always-active optimistic
+conflict detection mechanism** at check-in time: every version upload must
+supply `expected_base_version_number` (the version the edit was based on). If
+this value differs at execution time from the document's actual current main
+version, the upload is not merged in as an overwrite, but is stored as a
+separate, still-retrievable **conflict copy** alongside the current version
+(`<name>_conflict_<user>_<timestamp>`), without moving the main-version
+pointer (see `repository.checkin_version`).
 
-## Begründung
+## Rationale
 
-Beide Modelle erfüllen die im Konzept geforderte Garantie identisch: **Der
-ursprüngliche Bearbeiter darf nie stillschweigend Arbeit verlieren.** Der
-Unterschied liegt nur darin, *wo* die Erkennung stattfindet:
+Both models fulfill the guarantee required by the concept identically: **the
+original editor must never silently lose work.** The difference lies only in
+*where* the detection happens:
 
-- Konzept-Variante: am Lock-Objekt selbst (ein dritter Zustand "aufgehoben,
-  aber überwacht" plus Sonderlogik, die genau diesen Fall beim nächsten
-  Check-in des *ursprünglichen* Halters abfragt).
-  Konfliktvermeidung ergibt sich unabhängig von einer Sperre.
-- Gewählte Variante: an der Versionskette selbst. Ein Check-in ist genau dann
-  ein Konflikt, wenn seine Ausgangsversion nicht mehr die aktuelle ist -
-  unabhängig davon, *warum* das so ist (Force-Unlock, abgelaufener Timeout,
-  gar keine Sperre genommen). Force-Unlock muss dafür keinen Sonderzustand
-  hinterlassen, es muss nur die Sperre wirklich freigeben, damit ein anderer
-  Nutzer regulär einchecken kann.
+- Concept variant: at the lock object itself (a third state "released, but
+  monitored" plus special-case logic that checks for exactly this case at the
+  next check-in of the *original* holder).
+  Conflict avoidance results independently of any lock.
+- Chosen variant: at the version chain itself. A check-in is a conflict
+  exactly when its base version is no longer the current one - regardless of
+  *why* that is the case (force-unlock, expired timeout, no lock taken at
+  all). Force-unlock does not need to leave behind a special state for this;
+  it only needs to actually release the lock so that another user can check
+  in normally.
 
-Vorteile der gewählten Variante:
+Advantages of the chosen variant:
 
-1. **Ein einziger Mechanismus statt zwei**: Die Konfliktkopie-Logik schützt
-   nicht nur den Force-Unlock-Fall, sondern jeden denkbaren Wettlauf (z. B.
-   zwei Check-ins kurz nacheinander ohne je eine Sperre genommen zu haben,
-   oder ein abgelaufener Timeout-Unlock). Das Konzept beschreibt den
-   Force-Unlock-Fall nur als Beispiel für ein allgemeineres Problem -
-   die Implementierung deckt das allgemeinere Problem direkt ab.
-2. Keine zusätzliche Zustandsmaschine am Lock (aktiv → überwacht → weg),
-   die separat korrekt gepflegt und getestet werden müsste.
-3. Entspricht dem etablierten Optimistic-Concurrency-/ETag-Muster aus
-   WebDAV/CMIS, mit dem das Dokument ohnehin über externe Anwendungen
-   angesprochen wird (4.2 nennt Word über WebDAV/CMIS als Beispiel).
+1. **A single mechanism instead of two**: The conflict-copy logic protects
+   not only the force-unlock case, but every conceivable race (e.g. two
+   check-ins shortly after each other without either ever taking a lock, or
+   an expired timeout unlock). The concept describes the force-unlock case
+   only as an example of a more general problem - the implementation covers
+   the more general problem directly.
+2. No additional state machine on the lock (active → monitored → gone) that
+   would need to be maintained and tested correctly on its own.
+3. Matches the established optimistic-concurrency/ETag pattern from
+   WebDAV/CMIS, which is how the document is addressed anyway by external
+   applications (4.2 names Word over WebDAV/CMIS as an example).
 
-## Konsequenzen
+## Consequences
 
-- Der Force-Unlock-Endpunkt (`POST /documents/{id}/lock/force-release`) selbst
-  löst **kein** Notification/Audit-Ereignis mit Bezug auf eine spätere
-  Konfliktkopie aus - er publiziert nur `document.lock.force_released` mit dem
-  ursprünglichen Halter, sobald die Aufhebung passiert. Die eigentliche
-  Konfliktkopie (falls sie später entsteht) erzeugt separat ihr eigenes
-  `document.version.created`-Event mit `is_conflict: true`. Beide Ereignisse
-  zusammen ergeben im Audit-Trail (Audit Service konsumiert `document.>`,
-  siehe P3-S2-Änderung an dessen `subjects`) dieselbe Nachvollziehbarkeit wie
-  vom Konzept gefordert, nur über zwei separate statt einem verknüpften
-  Ereignis.
-- Ein Vier-Augen-Prinzip für Force-Unlock (4.3) ist damit noch nicht
-  verdrahtet - folgt mit dem generischen Approval-Mechanismus in P6-S4.
-- `based_on_version_number` wird sowohl am `DocumentLock` als auch an jeder
-  `DocumentVersion` gespeichert, obwohl der Lock-Wert aktuell nicht für die
-  Konflikterkennung ausgewertet wird (die basiert rein auf dem beim Check-in
-  übergebenen Wert) - er dient der Nachvollziehbarkeit ("worauf basierte diese
-  Sperre") und könnte in einer späteren Session für striktere Prüfungen
-  (Check-in ohne aktive Sperre ablehnen) herangezogen werden, falls sich das
-  als nötig erweist.
+- The force-unlock endpoint (`POST /documents/{id}/lock/force-release`)
+  itself does **not** trigger a notification/audit event referencing a later
+  conflict copy - it only publishes `document.lock.force_released` with the
+  original holder, as soon as the release happens. The actual conflict copy
+  (if one arises later) separately generates its own
+  `document.version.created` event with `is_conflict: true`. Together, the
+  two events yield the same traceability in the audit trail (the Audit
+  Service consumes `document.>`, see the P3-S2 change to its `subjects`) as
+  required by the concept, just via two separate events instead of one linked
+  event.
+- A four-eyes principle for force-unlock (4.3) is not yet wired up - it
+  follows with the generic approval mechanism in P6-S4.
+- `based_on_version_number` is stored both on `DocumentLock` and on each
+  `DocumentVersion`, even though the lock's value is currently not evaluated
+  for conflict detection (which is based purely on the value passed at
+  check-in) - it serves traceability ("what was this lock based on") and
+  could be used in a later session for stricter checks (rejecting check-in
+  without an active lock), should that prove necessary.

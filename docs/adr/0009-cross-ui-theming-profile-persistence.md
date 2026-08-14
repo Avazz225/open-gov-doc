@@ -1,29 +1,93 @@
-# 0009 — Cross-UI-Theming: Keycloak-Nutzerattribut statt neuer Persistenz-Baustein
+# 0009 — Cross-UI theming: Keycloak user attribute instead of a new persistence component
 
-**Status:** akzeptiert
-**Kontext:** Konzept 8, Session P4-S6 (Nutzer-Feedback nach dem ersten echten Browser-Test des MVP)
+**Status:** accepted
+**Context:** Concept 8, Session P4-S6 (user feedback after the first real browser test of the MVP)
 
-## Entscheidung
+## Decision
 
-Hell/Dunkel/Hoher-Kontrast/Automatisch wird als Präferenz **am Nutzerkonto** gespeichert, nicht nur lokal im Browser, damit sie geräteübergreifend wirkt. Speicherort ist ein deklariertes Keycloak-Nutzerattribut (`dms_theme`) statt eines neuen Persistenz-Bausteins:
+Light/dark/high-contrast/automatic is stored as a preference **on the user
+account**, not only locally in the browser, so that it applies across
+devices. The storage location is a declared Keycloak user attribute
+(`dms_theme`) instead of a new persistence component:
 
-- `auth_service.bootstrap.ensure_realm_and_client` deklariert `dms_theme` idempotent im realmweiten Declarative User Profile (`_ensure_theme_attribute`), mit `permissions: {view: [admin, user], edit: [admin, user]}`.
-- `auth_service.admin_users.get_theme_preference`/`set_theme_preference` lesen/schreiben das Attribut über den bestehenden Admin-Client (`build_admin_client`, seit P4-S3 für die Nutzerverwaltung vorhanden).
-- Neue Endpunkte `GET/PUT /me/preferences` am Auth Service (`ThemePreference`-Schema, `Literal["light", "dark", "high-contrast", "auto"]`), self-service über den Bearer-Token (`user["sub"]` = Keycloak-User-ID), kein Admin-Aufruf durch den Client selbst nötig.
-- Beide Frontends (User-UI, Admin-UI) bekommen je ein eigenes, bewusst dupliziertes `theme-context.tsx` (ADR 0006: keine gemeinsame Fachlogik zwischen unabhängig deploybaren Apps) mit `ThemeProvider`/`useTheme()`: `localStorage` (`dms.theme`) als sofort verfügbarer Cache (kein Warten auf die erste Server-Antwort, funktioniert auch auf der Login-Seite ohne Sitzung), synchronisiert mit dem Server-Attribut, sobald ein `accessToken` vorhanden ist.
-- `data-theme` wird auf `document.documentElement` gesetzt (`useLayoutEffect`, um einen sichtbaren Flash des falschen Themes vor dem ersten Bildaufbau zu vermeiden) und steuert per CSS-Variablen (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...) das gesamte bestehende Stylesheet beider Apps.
+- `auth_service.bootstrap.ensure_realm_and_client` idempotently declares
+  `dms_theme` in the realm-wide Declarative User Profile
+  (`_ensure_theme_attribute`), with
+  `permissions: {view: [admin, user], edit: [admin, user]}`.
+- `auth_service.admin_users.get_theme_preference`/`set_theme_preference`
+  read/write the attribute via the existing admin client
+  (`build_admin_client`, present since P4-S3 for user management).
+- New endpoints `GET/PUT /me/preferences` on the Auth Service
+  (`ThemePreference` schema, `Literal["light", "dark", "high-contrast",
+  "auto"]`), self-service via the bearer token (`user["sub"]` = Keycloak
+  user ID), no admin call needed by the client itself.
+- Both frontends (User UI, Admin UI) each get their own, deliberately
+  duplicated `theme-context.tsx` (ADR 0006: no shared domain logic between
+  independently deployable apps) with `ThemeProvider`/`useTheme()`:
+  `localStorage` (`dms.theme`) as an immediately available cache (no waiting
+  for the first server response, also works on the login page without a
+  session), synchronized with the server attribute as soon as an
+  `accessToken` is available.
+- `data-theme` is set on `document.documentElement` (`useLayoutEffect`, to
+  avoid a visible flash of the wrong theme before the first paint) and
+  drives the entire existing stylesheet of both apps via CSS variables
+  (`--dms-bg`, `--dms-fg`, `--dms-border`, `--dms-accent`, ...).
 
-## Begründung
+## Rationale
 
-- **Warum ein Keycloak-Attribut statt eines neuen Service/einer neuen Tabelle**: Nutzerkonten leben laut Konzept bereits vollständig in Keycloak (kein eigenes Nutzer-Schema in `auth-service`, s. `docs/services/auth-service.md`). Eine reine UI-Präferenz eines bestehenden Kontos rechtfertigt keinen neuen Persistenz-Baustein - das war bereits die Prämisse aus `IMPLEMENTATION_PLAN.md` für diese Session.
-- **Stolperstein Declarative User Profile**: Keycloak 25+ (Default seit dieser Version, hier verwendet) verwirft bei `update_user` jedes nicht im Realm-Profil deklarierte Attribut **stillschweigend** - kein Fehler, einfach kein Effekt. Ein erster Testlauf ohne `_ensure_theme_attribute` zeigte genau das: `PUT /me/preferences` gab 200 zurück, ein anschließendes `GET` lieferte trotzdem wieder `"auto"`. Ursache über direkten Vergleich von `admin.get_realm_users_profile()` gefunden (nur `username`/`email`/`firstName`/`lastName` deklariert). Ohne diese Deklaration wäre die gesamte Funktion klaglos wirkungslos gewesen.
-- **`localStorage`-Cache trotz Server-Persistenz**: Ohne ihn müsste jede App bis zur ersten `/me/preferences`-Antwort warten, bevor ein Theme feststeht - inkl. eines sichtbaren Sprungs auf der Login-Seite (dort existiert noch kein Token). Der Cache macht das Theme sofort verfügbar; ein späterer Sync überschreibt ihn, sobald die Serverantwort da ist. Bewusste Vereinfachung: kein Konfliktauflösungsmechanismus, falls Server- und lokaler Wert divergieren (z. B. ein zweites Gerät hat zwischenzeitlich geändert) - letzter Fetch gewinnt, kein Retry bei fehlgeschlagenem `PUT`.
-- **`useLayoutEffect` statt Zuweisung im Render** (anders als der `gatewayBaseUrl`-Singleton in ADR 0008): Hier gibt es keine Kindkomponente, die im *gleichen* Render-Durchlauf synchron auf den neuen Wert angewiesen ist - `useLayoutEffect` reicht aus, um das Attribut vor dem Browser-Paint zu setzen, und bleibt näher an der React-Konvention.
-- **Warum vier Stufen (Hell/Dunkel/Hoher Kontrast/Automatisch) statt nur `prefers-color-scheme`**: "Hoher Kontrast" ist kein natives Browser-Farbschema und lässt sich nicht über `color-scheme` erzwingen - er braucht eigene, undurchsichtige (nicht transparente) Akzentfarben, s. `globals.css` beider Apps. "Automatisch" bleibt trotzdem der Default, um Nutzer ohne explizite Wahl nicht zu bevormunden.
+- **Why a Keycloak attribute instead of a new service/table**: according to
+  the concept, user accounts already live entirely in Keycloak (no own user
+  schema in `auth-service`, see `docs/services/auth-service.md`). A pure UI
+  preference of an existing account does not justify a new persistence
+  component - that was already the premise from `IMPLEMENTATION_PLAN.md` for
+  this session.
+- **Pitfall: Declarative User Profile**: Keycloak 25+ (default since that
+  version, used here) **silently** drops any attribute not declared in the
+  realm profile on `update_user` - no error, just no effect. An initial test
+  run without `_ensure_theme_attribute` showed exactly that: `PUT
+  /me/preferences` returned 200, but a subsequent `GET` still returned
+  `"auto"`. The cause was found via a direct comparison of
+  `admin.get_realm_users_profile()` (only `username`/`email`/`firstName`/
+  `lastName` declared). Without this declaration, the entire feature would
+  have been silently ineffective.
+- **`localStorage` cache despite server persistence**: without it, every app
+  would have to wait until the first `/me/preferences` response before a
+  theme is settled - including a visible jump on the login page (no token
+  exists there yet). The cache makes the theme immediately available; a
+  later sync overwrites it once the server response arrives. Deliberate
+  simplification: no conflict-resolution mechanism if server and local value
+  diverge (e.g. a second device changed it in the meantime) - last fetch
+  wins, no retry on a failed `PUT`.
+- **`useLayoutEffect` instead of assignment during render** (unlike the
+  `gatewayBaseUrl` singleton in ADR 0008): here there is no child component
+  that, in the *same* render pass, synchronously depends on the new value -
+  `useLayoutEffect` is sufficient to set the attribute before the browser
+  paint, and stays closer to React convention.
+- **Why four levels (light/dark/high contrast/automatic) instead of just
+  `prefers-color-scheme`**: "high contrast" is not a native browser color
+  scheme and cannot be forced via `color-scheme` - it needs its own, opaque
+  (non-transparent) accent colors, see `globals.css` in both apps.
+  "Automatic" nonetheless remains the default, so as not to force a choice
+  on users who have not made one explicitly.
 
-## Konsequenzen
+## Consequences
 
-- Ein Nutzerkonto hat **eine** Theme-Präferenz, unabhängig davon, mit welcher App (User-UI/Admin-UI) oder welchem Gerät es sich anmeldet - Admin-UI-Mehrfachinstallationen (ADR 0008) haben aber pro Installation ein eigenes Konto, daher auch eine potenziell eigene Theme-Präferenz je Installation (kein gemeinsamer Wert über Installationsgrenzen hinweg, konsistent mit der dortigen Isolation).
-- Der `dms.theme`-`localStorage`-Schlüssel ist in der Admin-UI bewusst **nicht** installationsspezifisch (anders als `dms.tokens.<id>` in ADR 0008) - ein Wechsel zu einer anderen Installation zeigt kurzzeitig noch die zuletzt gecachte Theme-Wahl, bis die neue Installation ihre eigene Präferenz nachgeladen hat. Akzeptierte Vereinfachung für dieses Grundgerüst, kein Korrektheitsproblem (nur ein kurzer visueller Zwischenzustand).
-- Kein Retry/keine Konfliktauflösung bei fehlgeschlagenem `PUT /me/preferences` - die Auswahl gilt sofort lokal weiter, ein Fehlschlag der Server-Persistenz bleibt unbemerkt (kein UI-Fehlerhinweis). Für ein Grundgerüst ohne Multi-Device-Szenario im Testfokus akzeptiert.
-- Das Theming-Verhalten selbst (Umschalten im Popover/in der Kopfzeile, kein Flash beim Neuladen) ist nur über Vitest-Komponententests verifiziert - kein Browser in dieser Entwicklungsumgebung verfügbar (siehe `docs/services/user-ui.md`).
+- A user account has **one** theme preference, regardless of which app
+  (User UI/Admin UI) or which device it logs in with - however, Admin UI
+  multi-installation setups (ADR 0008) have a separate account per
+  installation, and therefore potentially a separate theme preference per
+  installation (no shared value across installation boundaries, consistent
+  with the isolation there).
+- The `dms.theme` `localStorage` key in the Admin UI is deliberately **not**
+  installation-specific (unlike `dms.tokens.<id>` in ADR 0008) - switching
+  to a different installation briefly still shows the last cached theme
+  choice, until the new installation has loaded its own preference. Accepted
+  simplification for this base scaffold, not a correctness issue (only a
+  brief visual intermediate state).
+- No retry/conflict resolution on a failed `PUT /me/preferences` - the
+  selection continues to apply locally immediately; a failure of server
+  persistence goes unnoticed (no UI error indication). Accepted for a base
+  scaffold without a multi-device scenario in the test focus.
+- The theming behavior itself (switching in the popover/header, no flash on
+  reload) is only verified via Vitest component tests - no browser is
+  available in this development environment (see `docs/services/user-ui.md`).

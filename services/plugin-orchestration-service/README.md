@@ -1,30 +1,30 @@
 # plugin-orchestration-service
 
-Plugin Orchestration Service Grundgerüst (Konzept 3.8, P10-S1): Manifest-Format
-für "dazustellbare" Elemente (Connectoren, Rendering-Backends, Regel-Plugins,
-...), Cold-Start-Platzierung, eigene minimale Ressourcen-Stichprobe. Details
-siehe [`docs/services/plugin-orchestration-service.md`](../../docs/services/plugin-orchestration-service.md).
+Plugin Orchestration Service skeleton (Concept 3.8, P10-S1): manifest format
+for "pluggable" elements (connectors, rendering backends, rule plugins,
+...), cold-start placement, own minimal resource sampling. Details
+in [`docs/services/plugin-orchestration-service.md`](../../docs/services/plugin-orchestration-service.md).
 
-**Grenzen dieser Ausbaustufe** (bewusste Scope-Entscheidungen, siehe
-`PROGRESS.md` "Orchestrierung & Rolling Updates"): reine Entscheidungs-/
-Empfehlungs-Engine, kein Container-Lifecycle-Manager (kein Docker-Socket-
-Zugriff). Mit genau einem gesampelten Knoten ist die "Wahl zwischen Knoten"
-(FFD-Bin-Packing über mehrere Knoten, Zeitprofil-Gruppierung, Plattform-
-Scheduler-Erkennung, Drain-Mechanismus) noch nicht Gegenstand dieser Session,
-folgt in P10-S2/S3.
+**Limitations of this stage** (deliberate scope decisions, see
+`PROGRESS.md` "Orchestration & Rolling Updates"): pure decision/
+recommendation engine, not a container lifecycle manager (no Docker socket
+access). With exactly one sampled node, the "choice between nodes"
+(FFD bin-packing across multiple nodes, time-profile grouping, platform
+scheduler detection, drain mechanism) is not yet part of this session,
+follows in P10-S2/S3.
 
-## Endpunkte
+## Endpoints
 
-- `POST /plugins/{plugin_type}` — Manifest registrieren/aktualisieren (`admin.orchestration` oder aktivierter Superuser).
-- `GET /plugins`, `GET /plugins/{plugin_type}` — Manifeste lesen (ungegatet).
-- `POST /plugins/{plugin_type}/resource-usage` — Ressourcen-Selbstmeldung einer laufenden Instanz (ungegatet, service-zu-service).
-- `GET /nodes` — gesampelte Knoten (in dieser Umgebung genau einer).
-- `POST /placements` — Cold-Start-Platzierungsentscheidung anfordern (`admin.orchestration` oder aktivierter Superuser).
-- `GET /placements` — Platzierungshistorie (Audit-Read-Modell, optional `?plugin_type=`).
+- `POST /plugins/{plugin_type}` — register/update a manifest (`admin.orchestration` or activated superuser).
+- `GET /plugins`, `GET /plugins/{plugin_type}` — read manifests (ungated).
+- `POST /plugins/{plugin_type}/resource-usage` — resource self-report from a running instance (ungated, service-to-service).
+- `GET /nodes` — sampled nodes (exactly one in this environment).
+- `POST /placements` — request a cold-start placement decision (`admin.orchestration` or activated superuser).
+- `GET /placements` — placement history (audit read model, optional `?plugin_type=`).
 
 ## Events
 
-- `orchestration.placement.decided` — bei jeder `POST /placements`-Entscheidung, konsumiert von `audit-service` (`orchestration.>`).
+- `orchestration.placement.decided` — on every `POST /placements` decision, consumed by `audit-service` (`orchestration.>`).
 
 ## Tests
 

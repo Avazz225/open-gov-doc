@@ -1,100 +1,98 @@
-# 0087 — workflow-service: BPMN-Import-Review-Gate über den bestehenden Vier-Augen-Mechanismus
+# 0087 — workflow-service: BPMN import review gate via the existing four-eyes mechanism
 
-**Status:** akzeptiert (Session 4 von 4, letzte Session der Phase 21, siehe `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 21 Session 4, betrifft `workflow-service`, `process-designer`
+**Status:** accepted (Session 4 of 4, last session of Phase 21, see `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 21 Session 4, affects `workflow-service`, `process-designer`
 
-## Entscheidung
+## Decision
 
-`POST /process-definitions` (BPMN-Upload) legte bislang **sofort und ungegated** (bis auf die bereits
-bestehende `admin.object_config`-Rollenprüfung, P6-S6-Retrofit) eine neue, sofort instanzstartfähige
-Prozessdefinition an — ein hochgeladenes BPMN-Dokument kann Script-Tasks/Connector-Aufrufe enthalten
-("ein reales Sicherheitsthema", `docs/services/workflow-service.md`), ein einzelner Admin konnte das
-also unbeobachtet aktivieren. Diese Session repliziert exakt das bereits bestehende, generische
-Vier-Augen-Rezept aus `config-service`s P17-S3-Retrofit ([ADR 0060](0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)):
-ein neuer Aktionstyp `workflow.process_definition.import`, geprüft über `permission-service`s bereits
-bestehenden generischen Approval-Mechanismus ([ADR 0022](0022-four-eyes-approval-via-events.md)).
+`POST /process-definitions` (BPMN upload) previously created a new, immediately instance-startable
+process definition **instantly and ungated** (aside from the already-existing `admin.object_config` role
+check, P6-S6 retrofit) — an uploaded BPMN document can contain script tasks/connector calls ("a real
+security concern", `docs/services/workflow-service.md`), so a single admin could activate it unobserved.
+This session replicates exactly the already-existing, generic four-eyes recipe from `config-service`'s
+P17-S3 retrofit ([ADR 0060](0060-egov-paket-teil-2-vier-augen-luecken-und-umlaufmappen-prozessvorlagen.md)):
+a new action type `workflow.process_definition.import`, checked via `permission-service`'s already-
+existing generic approval mechanism ([ADR 0022](0022-four-eyes-approval-via-events.md)).
 
-1. **Neuer `workflow_service.approval_client.ApprovalClient`** — identisches Muster wie
-   `config_service`s/`document_service`s gleichnamige Klasse, reiner `httpx`-Client gegen
-   `GET /approval-config/{action_type}` und `POST /approval-requests`.
-2. **`POST /process-definitions` fragt vor der Anlage ab**, ob `workflow.process_definition.import`
-   gerade Genehmigung erfordert. Falls ja: BPMN-Text + Name + optionale `process_id` werden als
-   `payload` in einen neuen Freigabe-Request gepackt, `202` mit `{status: "pending_approval",
-   approval_request_id}` zurückgegeben — **keine** Anlage, keine BPMN-Validierung an dieser Stelle
-   (bewusst zurückgestellt, siehe unten).
-3. **Neuer, reiner Konsument** (`consumer.py`, `ensure_stream=False`) — reagiert auf
-   permission-services bereits bestehendes `permission.approval.approved`-Event, filtert auf
-   `action_type == "workflow.process_definition.import"`, wendet den zurückgestellten Import dann über
-   dieselbe `repository.create_process_definition` an, die auch der sofortige Pfad nutzt (inkl. der
-   dort bereits vorhandenen BPMN-Validierung).
-4. **`process-designer`** (`apps/process-designer`) erkennt den `202`-Fall und zeigt einen Hinweis statt
-   zur (noch nicht existierenden) neuen Definition zu navigieren.
+1. **New `workflow_service.approval_client.ApprovalClient`** — identical pattern to `config_service`'s/
+   `document_service`'s class of the same name, a plain `httpx` client against
+   `GET /approval-config/{action_type}` and `POST /approval-requests`.
+2. **`POST /process-definitions` checks before creation** whether `workflow.process_definition.import`
+   currently requires approval. If so: BPMN text + name + optional `process_id` are packed as `payload`
+   into a new approval request, and `202` is returned with `{status: "pending_approval",
+   approval_request_id}` — **no** creation, no BPMN validation at this point (deliberately deferred, see
+   below).
+3. **New, pure consumer** (`consumer.py`, `ensure_stream=False`) — reacts to `permission-service`'s
+   already-existing `permission.approval.approved` event, filters on
+   `action_type == "workflow.process_definition.import"`, then applies the deferred import via the same
+   `repository.create_process_definition` used by the immediate path (including the BPMN validation
+   already present there).
+4. **`process-designer`** (`apps/process-designer`) detects the `202` case and shows a notice instead of
+   navigating to the (not-yet-existing) new definition.
 
-## Begründung
+## Rationale
 
-- **Warum der Erfolgsfall (keine Genehmigungspflicht konfiguriert) NICHT wie bei `config-service` in
-  eine Status-Hülle verpackt wird**: `config-service`s `ImportActionResult` verpackt JEDE Antwort
-  (`applied`/`pending_approval`) einheitlich — dort vertretbar, da `POST /config/import` ein
-  vergleichsweise selten in Tests verwendeter Endpunkt ist. `POST /process-definitions` ist dagegen in
-  `workflow-service`s eigenem Testbestand tief verwurzelte Test-**Infrastruktur**: über 40 Aufrufstellen
-  in `test_api.py` (und weitere in `test_federation.py`) laden zunächst eine Prozessdefinition hoch,
-  BEVOR der eigentlich zu testende Sachverhalt beginnt (Instanzstart, Task-Abschluss, DMN-Auswertung,
-  Föderation, ...) — sie interessieren sich nicht für diese Session, sondern brauchen nur eine fertige
-  Definition. Eine einheitliche Hülle hätte alle diese Aufrufstellen (und `process-designer`s
-  bestehenden, unveränderten Erfolgspfad) angefasst, ohne dass diese Tests inhaltlich etwas mit
-  Vier-Augen zu tun haben. Stattdessen: der Erfolgsfall bleibt **byteidentisch** zum bisherigen
-  Verhalten (`201` + `ProcessDefinitionOut`), nur der neue, bislang nicht existierende
-  `pending_approval`-Fall bekommt eine eigene Form (`202` + `ProcessDefinitionImportResult`) —
-  unterscheidbar bereits am HTTP-Status, kein Client muss die Erfolgsform umstellen.
-- **Warum BPMN-Validierung erst beim Konsumieren des genehmigten Imports passiert, nicht schon beim
-  Anlegen des Freigabe-Requests**: identische Begründung wie `config_service._apply_config_document`,
-  das seine Schema-Validierung ebenfalls erst dort vornimmt — der Freigabe-Request soll die Anfrage so
-  transportieren, wie sie eingereicht wurde; eine vorzeitige Ablehnung wegen ungültigem BPMN wäre zwar
-  früheres Feedback für den Einreichenden, würde aber die Zurückstellungs-Semantik verkomplizieren
-  (zwei verschiedene Fehlerpfade statt eines). Ein ungültiges BPMN scheitert stattdessen beim
-  Konsumieren, geloggt statt einem HTTP-Aufrufer gemeldet (kein Aufrufer mehr vorhanden) — exakt
-  `config_service.consumer`s bereits etabliertes, breites Exception-Handling.
-- **Warum `create_process_definition`s License-Gate (`_license_gate("write")`) UNVERÄNDERT vor der
-  neuen Genehmigungsprüfung bleibt**: Lizenzstatus ist eine Deployment-/Vertragsfrage, unabhängig vom
-  Vier-Augen-Prinzip — ein unlizenzierter/Demo-Modus-Aufruf soll gar nicht erst einen Freigabe-Request
-  erzeugen können.
+- **Why the success case (no approval requirement configured) is NOT wrapped in a status envelope like
+  `config-service`**: `config-service`'s `ImportActionResult` uniformly wraps EVERY response
+  (`applied`/`pending_approval`) — justifiable there since `POST /config/import` is a comparatively
+  rarely used endpoint in tests. `POST /process-definitions`, by contrast, is deeply embedded test
+  **infrastructure** in `workflow-service`'s own test suite: over 40 call sites in `test_api.py` (and more
+  in `test_federation.py`) first upload a process definition BEFORE the actual subject under test begins
+  (instance start, task completion, DMN evaluation, federation, ...) — they have nothing to do with this
+  session, they just need a finished definition. A uniform envelope would have touched all of these call
+  sites (and `process-designer`'s existing, unchanged success path) even though those tests have nothing
+  to do with four-eyes. Instead: the success case stays **byte-identical** to the previous behavior
+  (`201` + `ProcessDefinitionOut`), only the new, previously nonexistent `pending_approval` case gets its
+  own shape (`202` + `ProcessDefinitionImportResult`) — already distinguishable by HTTP status alone, no
+  client needs to change for the success shape.
+- **Why BPMN validation happens only when consuming the approved import, not already when creating the
+  approval request**: identical rationale to `config_service._apply_config_document`, which likewise
+  performs its schema validation only there — the approval request should transport the request as it
+  was submitted; rejecting early for invalid BPMN would give the submitter earlier feedback, but would
+  complicate the deferral semantics (two different error paths instead of one). Invalid BPMN instead
+  fails at consumption time, logged rather than reported to an HTTP caller (no caller remains) — exactly
+  `config_service.consumer`'s already-established, broad exception handling.
+- **Why `create_process_definition`'s license gate (`_license_gate("write")`) remains UNCHANGED before
+  the new approval check**: license status is a deployment/contract question, independent of the
+  four-eyes principle — an unlicensed/demo-mode call should not be able to create an approval request in
+  the first place.
 
-## Konsequenzen
+## Consequences
 
-- **Migration**: keine DB-Änderung nötig (kein neues Feld auf `ProcessDefinition` — der Freigabe-Request
-  selbst, nicht eine DB-Zeile, ist der "wartende" Zustand, identisches Muster wie `config-service`, wo
-  ebenfalls keine Zeile vor der Genehmigung existiert).
-- **`scripts/run-tests.sh`**: `workflow-service` zur `CONSUMER_SERVICES`-Liste hinzugefügt (Services mit
-  eigenem NATS-Konsumenten, deren Tests eigenständig per In-Prozess-`TestClient` laufen) — vorher hatte
-  `workflow-service` gar keinen eigenen Konsumenten (nur einen Producer für seinen `"workflow"`-Stream),
-  seit dieser Session braucht sein Testlauf denselben Container-Stopp-Schutz wie `document-service`/
-  `notification-service`/etc., sonst konkurrieren der laufende Container-Konsument und der
-  In-Prozess-Test-Konsument um denselben Durable-Namen.
-- **Echte, während dieser Session gefundene Regression aus einer früheren Session behoben**: die volle
-  `workflow-service`-Testsuite (zum ersten Mal seit Post-Roadmap Phase 20 Session 5 komplett gelaufen)
-  deckte auf, dass `test_dispatch_records_delivery_failed_for_unreachable_target`
-  (`test_federation.py`) noch die VOR ADR 0081 gültige Statuserwartung (`"delivery_failed"` sofort bei
-  einem einzelnen Fehlschlag) hatte — seit ADR 0081 markiert der Hub einen einzelnen Fehlschlag als
-  retry-fähiges `"pending_retry"`, erst nach Erschöpfung `max_handover_delivery_attempts` als
-  `"delivery_failed"`. `workflow-service`s `federation_task.status` übernimmt `handover["status"]`
-  unverändert (`repository.update_federation_task_status`), war also technisch bereits korrekt — nur
-  der Test war seit P20-S5 stillschweigend veraltet, unbemerkt, weil `workflow-service`s Tests seither
-  nie in vollem Umfang liefen. Behoben durch Anpassung der Testerwartung auf `"pending_retry"`.
-- **Tests**: `workflow-service` 177 (vorher 170, +7: neue `test_consumer.py` mit 5 Tests, ein neuer
-  API-Integrationstest gegen den echten `permission-service`, sowie die oben beschriebene
-  Regressionskorrektur). `process-designer`: bestehende 39 Tests unverändert grün (kein dedizierter
-  neuer Test für den `pending_approval`-Zweig der `designer/page.tsx`-Speicherfunktion — dieser
-  Save-Flow hatte bereits vor dieser Session keine Testabdeckung; `tsc`/`eslint`/`next build` bestätigen
-  Typkorrektheit, kein echter Browser in dieser Entwicklungsumgebung verfügbar für eine visuelle
-  Prüfung, siehe `docs/services/admin-ui.md` "Kein Browser..." für dieselbe projektweite Einschränkung).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
-  `workflow-service`): ein Test-Principal erhielt live die Rolle `domain-admin-config`, Genehmigungspflicht
-  für `workflow.process_definition.import` aktiviert, ein echtes BPMN hochgeladen — lieferte `202` +
-  `pending_approval`, die Prozessfamilie existierte danach nachweislich noch nicht
-  (`GET /process-definitions?name=...` leer); nach echtem `POST .../approve` gegen den laufenden
-  `permission-service` wurde die Definition innerhalb weniger Sekunden vom neuen Konsumenten tatsächlich
-  angelegt (`bpmn_process_id` korrekt aus dem BPMN extrahiert) — bestätigt den vollständigen
-  Anfrage→Genehmigung→Konsum-Kreislauf gegen echte, unabhängig laufende Container.
-- Doku: neues [ADR 0087](0087-bpmn-import-review-gate.md), `docs/services/workflow-service.md`
-  (API-Tabelle, neue Sektion, "Offene Punkte" als behoben markiert), `docs/services/process-designer.md`
-  (neues Verhalten beim Speichern) ergänzt.
+- **Migration**: none needed (no new field on `ProcessDefinition` — the approval request itself, not a DB
+  row, is the "pending" state, identical pattern to `config-service`, where likewise no row exists prior
+  to approval).
+- **`scripts/run-tests.sh`**: added `workflow-service` to the `CONSUMER_SERVICES` list (services with
+  their own NATS consumer whose tests run standalone via an in-process `TestClient`) — previously
+  `workflow-service` had no consumer of its own at all (only a producer for its `"workflow"` stream);
+  since this session, its test run needs the same container-stop protection as `document-service`/
+  `notification-service`/etc., otherwise the running container consumer and the in-process test consumer
+  compete for the same durable name.
+- **Real regression from an earlier session, found and fixed during this session**: the full
+  `workflow-service` test suite (run in full for the first time since post-roadmap Phase 20 Session 5)
+  revealed that `test_dispatch_records_delivery_failed_for_unreachable_target`
+  (`test_federation.py`) still had the pre-ADR-0081 status expectation (`"delivery_failed"` immediately on
+  a single failure) — since ADR 0081, the hub marks a single failure as retry-capable `"pending_retry"`,
+  reaching `"delivery_failed"` only after `max_handover_delivery_attempts` is exhausted.
+  `workflow-service`'s `federation_task.status` adopts `handover["status"]` unchanged
+  (`repository.update_federation_task_status`), so it was technically already correct — only the test had
+  silently gone stale since P20-S5, unnoticed because `workflow-service`'s tests had never run in full
+  since. Fixed by adjusting the test expectation to `"pending_retry"`.
+- **Tests**: `workflow-service` 177 (previously 170, +7: new `test_consumer.py` with 5 tests, one new API
+  integration test against the real `permission-service`, plus the regression fix described above).
+  `process-designer`: existing 39 tests remain green unchanged (no dedicated new test for the
+  `pending_approval` branch of the `designer/page.tsx` save function — this save flow already had no test
+  coverage before this session; `tsc`/`eslint`/`next build` confirm type correctness, no real browser
+  available in this development environment for a visual check, see `docs/services/admin-ui.md`
+  "No browser..." for the same project-wide limitation).
+- **Verified live against the actual running stack** (image rebuild + restart of `workflow-service`): a
+  test principal was live-granted the `domain-admin-config` role, approval requirement for
+  `workflow.process_definition.import` was enabled, a real BPMN was uploaded — this returned `202` +
+  `pending_approval`, and the process family demonstrably did not yet exist afterward
+  (`GET /process-definitions?name=...` empty); after a real `POST .../approve` against the running
+  `permission-service`, the definition was actually created by the new consumer within a few seconds
+  (`bpmn_process_id` correctly extracted from the BPMN) — confirming the full
+  request→approval→consumption loop against real, independently running containers.
+- Docs: new [ADR 0087](0087-bpmn-import-review-gate.md), `docs/services/workflow-service.md`
+  (API table, new section, "Open Points" marked resolved), `docs/services/process-designer.md`
+  (new save behavior) added.

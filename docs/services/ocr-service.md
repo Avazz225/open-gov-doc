@@ -1,183 +1,125 @@
 # ocr-service
 
-**Verantwortung:** Texterkennung inkl. Wort-Bounding-Boxen für bild-/PDF-basierte Dokumente (Konzept 3.9) — erkennt automatisch, ob ein Dokument überhaupt OCR braucht (vorhandener nutzbarer Textlayer ja/nein), speist den künftigen Search Service (P5-S4) sowie einen Nachzieheffekt im Rendering Service, und liefert die Wort-Positionen für die positionsgenaue Text-Markierung in der Vorschau (Nutzer-Feedback nach P5-S2).
+**Responsibility:** Text recognition including word bounding boxes for image-/PDF-based documents (Concept 3.9) — automatically detects whether a document needs OCR at all (existing usable text layer yes/no), feeds the future Search Service (P5-S4) as well as a follow-on effect in the Rendering Service, and delivers word positions for position-accurate text highlighting in the preview (user feedback after P5-S2).
 
-**Konzept-Referenz:** 3.9
-**Eigenes Postgres-Schema:** `ocr` (`ocr_result`, `ocr_config`).
+**Concept reference:** 3.9
+**Own Postgres schema:** `ocr` (`ocr_result`, `ocr_config`).
 
 ## API
 
-| Methode | Pfad | Beschreibung |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/ocr-results?document_id=...&version_number=...&status=...` | OCR-Ergebnisse zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) — seit **P19-S8** `ocr.read`-gegated. Seit **Post-Roadmap Phase 20 Session 7** ist auch `document_id` optional (vorher Pflicht) und ein neuer `status`-Filter kam dazu — ohne `document_id` liefert dies eine dokumentübergreifende Liste, Grundlage für die neue Admin-UI-Sicht auf `failed_permanent`-Ergebnisse ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)) |
-| `GET` | `/ocr-results/{id}` | Einzelnes OCR-Ergebnis (Volltext, Wort-Bounding-Boxen, Konfidenz) — 404 bei unbekannter `id`; seit **P19-S8** `ocr.read`-gegated |
-| `GET` | `/ocr-results/{id}/page-image?page_number=...` | Vom OCR Service selbst gerastertes Seitenbild einer Seite (nur PDFs, siehe unten; `page_number` optional, Default `1`) — 404 bei unbekannter `id` oder außerhalb des gültigen Seitenbereichs, 409 wenn kein eigenständiges Seitenbild existiert (Rasterbild-Fall); seit **P19-S8** `ocr.read`-gegated |
-| `GET` | `/config` | Aktuelle Konfiguration (`max_word_count`, `batch_size`, `allowed_content_types`, `updated_at`) — legt beim allerersten Aufruf die Default-Zeile an (P5b-S5); seit **P19-S8** `ocr.read`-gegated |
-| `PUT` | `/config` | Aktualisiert `max_word_count`/`batch_size`/`allowed_content_types`, wirkt ohne Neustart auf das nächste verarbeitete Dokument (Admin-UI "OCR-Einstellungen"); seit **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `ocr.write`-gegated |
-| `POST` | `/ocr-results/{id}/retry` | Manueller Neustart eines `failed_permanent`-Ergebnisses (seit **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` bei unbekannter `id`, `409` wenn `status != "failed_permanent"`, sonst sofortiger erneuter Verarbeitungsversuch; `ocr.write`-gegated |
-| `GET` | `/healthz` | Health-Check |
+| `GET` | `/ocr-results?document_id=...&version_number=...&status=...` | OCR results for a version (`version_number` optional — without it: all versions of the document) — since **P19-S8** gated by `ocr.read`. Since **Post-Roadmap Phase 20 Session 7**, `document_id` is also optional (previously required) and a new `status` filter was added — without `document_id` this returns a cross-document list, the basis for the new Admin UI view of `failed_permanent` results ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)) |
+| `GET` | `/ocr-results/{id}` | Single OCR result (full text, word bounding boxes, confidence) — 404 on unknown `id`; since **P19-S8** gated by `ocr.read` |
+| `GET` | `/ocr-results/{id}/page-image?page_number=...` | A page image, rasterized by the OCR Service itself (PDFs only, see below; `page_number` optional, default `1`) — 404 on unknown `id` or outside the valid page range, 409 if no standalone page image exists (raster image case); since **P19-S8** gated by `ocr.read` |
+| `GET` | `/config` | Current configuration (`max_word_count`, `batch_size`, `allowed_content_types`, `updated_at`) — creates the default row on the very first call (P5b-S5); since **P19-S8** gated by `ocr.read` |
+| `PUT` | `/config` | Updates `max_word_count`/`batch_size`/`allowed_content_types`, takes effect on the next processed document without a restart (Admin UI "OCR Settings"); since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) gated by `ocr.write` |
+| `POST` | `/ocr-results/{id}/retry` | Manual restart of a `failed_permanent` result (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate reprocessing attempt; gated by `ocr.write` |
+| `GET` | `/healthz` | Health check |
 
-`id` eines OCR-Ergebnisses ist ein natürlicher Schlüssel `{document_id}:{version_number}` (siehe Datenmodell) — anders als bei rendering-service gibt es hier bewusst nur ein autoritatives Ergebnis je Version, kein Diskriminator für mehrere Regeln.
+The `id` of an OCR result is a natural key `{document_id}:{version_number}` (see Data Model) — unlike rendering-service, there is deliberately only one authoritative result per version here, no discriminator for multiple rules.
 
-## Automatische OCR-Pipeline (3.9)
+## Automatic OCR Pipeline (3.9)
 
-Konsumiert `document.created`/`document.version.created` vom Document Service — identisches Muster wie rendering-service (ein breites `document.>`-Abo, In-Handler-Dispatch nach `event_type`, Backfill beim ersten Start). Für jede neue Version:
+Consumes `document.created`/`document.version.created` from the Document Service — an identical pattern to rendering-service (one broad `document.>` subscription, in-handler dispatch by `event_type`, backfill on first start). For every new version:
 
-1. Metadaten/Originalinhalt werden über die HTTP-API des Document Service bezogen (kein direkter Zugriff auf dessen Schema/Storage-Key, 3.1).
-2. **Automatische Erkennung, ob OCR überhaupt nötig ist** (3.9): Bei PDFs wird zuerst versucht, den vorhandenen Textlayer direkt auszulesen (PyMuPDF `get_text("words")`) — liefert Seite 1 mindestens 20 nicht-leere Zeichen, gilt der Textlayer als nutzbar, es findet **keine** Bilderkennung statt (`NativeTextLayerEngine`, Konfidenz immer 100.0, exakt statt geschätzt). Sonst (gescanntes PDF ohne Textlayer, oder ein Rasterbild direkt) läuft `TesseractEngine`.
-3. Andere Formate (`.docx`, `.pptx`, Video, ...) werden von keiner Engine unterstützt — es entsteht kein OCR-Ergebnis, kein Event (deren Textextraktion übernimmt bereits `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer` aus P5-S2).
-4. Für PDFs rastert der jeweilige Engine-Pfad zusätzlich **ein eigenständiges Seitenbild je Seite** (`raster_dpi=150`) und legt sie über den Storage Service ab — rendering-service erzeugt **keine** PDF-Thumbnails (`ThumbnailRenderer.supports()` prüft nur `image/*`), diese Seitenbilder sind aktuell die einzige Bildvorschau für PDFs im System. Für Rasterbilder entsteht kein eigenständiges Seitenbild — die Vorschau nutzt die bereits vorhandene `thumbnail`-Rendition aus rendering-service, OCR liefert dafür die nativen Pixelmaße des Originalbilds als Referenzgröße für die Wort-Koordinaten.
-5. Ergebnis wird dauerhaft unter dem natürlichen Schlüssel gespeichert (Upsert, idempotent bei Redelivery) und als `ocr.completed`/`ocr.failed` veröffentlicht.
+1. Metadata/original content is fetched via the Document Service's HTTP API (no direct access to its schema/storage key, 3.1).
+2. **Automatic detection of whether OCR is needed at all** (3.9): for PDFs, an attempt is first made to read the existing text layer directly (PyMuPDF `get_text("words")`) — if page 1 yields at least 20 non-empty characters, the text layer is considered usable and **no** image recognition takes place (`NativeTextLayerEngine`, confidence always 100.0, exact rather than estimated). Otherwise (a scanned PDF without a text layer, or a raster image directly), `TesseractEngine` runs.
+3. Other formats (`.docx`, `.pptx`, video, ...) are not supported by any engine — no OCR result is produced, no event (their text extraction is already handled by `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer` from P5-S2).
+4. For PDFs, the respective engine path additionally rasterizes **a standalone page image per page** (`raster_dpi=150`) and stores it via the Storage Service — rendering-service produces **no** PDF thumbnails (`ThumbnailRenderer.supports()` only checks `image/*`), so these page images are currently the only image preview for PDFs in the system. For raster images, no standalone page image is produced — the preview uses the already existing `thumbnail` rendition from rendering-service, and OCR delivers the original image's native pixel dimensions as the reference size for the word coordinates.
+5. The result is stored durably under the natural key (upsert, idempotent on redelivery) and published as `ocr.completed`/`ocr.failed`.
 
 ### Retry & Backoff (Post-Roadmap Phase 20 Session 4, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md))
 
-Ein `status="failed"`-Ergebnis (Engine-Fehler, unlesbares Dokument) ist seither **nicht mehr sofort
-terminal**: `attempts` wird erhöht, `next_retry_at` per `compute_backoff_seconds` (`libs/dms-retry`,
-Full-Jitter-Backoff) gesetzt — ein neuer, eigenständiger `_ocr_retry_poll_loop` (Intervall
-`ocr_retry_poll_interval_seconds`, Default 60s) greift fällige Ergebnisse auf und ruft
-`pipeline.process_version` erneut auf. Der ERSTE Versuch bleibt synchron im NATS-Handler, nur die
-WIEDERHOLUNG läuft asynchron, um den Handler nicht zu blockieren. Erst nach `max_ocr_attempts` (Default
-5) erfolglosen Versuchen wechselt `status` auf das echte Terminalstatus `failed_permanent`, ab dem
-`POST /ocr-results/{id}/retry` einen sofortigen manuellen Neustart erlaubt (setzt zuerst `attempts`/
-`error_message`/`next_retry_at` zurück, dann ein echter neuer Verarbeitungsversuch). `status="skipped"`
-(Wortobergrenze/Content-Type-Positivliste) ist davon bewusst unberührt — eine administrative
-Entscheidung, kein technischer Fehler, nie retry-fähig.
+A `status="failed"` result (engine error, unreadable document) is no longer immediately terminal since then: `attempts` is incremented, `next_retry_at` is set via `compute_backoff_seconds` (`libs/dms-retry`, full-jitter backoff) — a new, standalone `_ocr_retry_poll_loop` (interval `ocr_retry_poll_interval_seconds`, default 60s) picks up due results and calls `pipeline.process_version` again. The FIRST attempt remains synchronous in the NATS handler, only the RETRY runs asynchronously, so as not to block the handler. Only after `max_ocr_attempts` (default 5) failed attempts does `status` switch to the real terminal status `failed_permanent`, from which `POST /ocr-results/{id}/retry` allows an immediate manual restart (first resets `attempts`/`error_message`/`next_retry_at`, then a genuine new processing attempt). `status="skipped"` (word ceiling/content-type allowlist) is deliberately unaffected by this — an administrative decision, not a technical error, never eligible for retry.
 
-**Alle Seiten, nicht nur die erste** (Bugfix nach Nutzer-Feedback, ursprünglich nur Seite 1 unterstützt): `NativeTextLayerEngine`/`TesseractEngine` durchlaufen alle Seiten des Dokuments (`OcrExtractionResult.page_images: list[bytes]`, 1:1 zu `pages`), die Pipeline legt ein Bild je Seite ab. Der Textlayer-Verfügbarkeitscheck (`_native_text_available()`) prüft weiterhin nur Seite 1 als Heuristik für die Engine-Auswahl — ein Dokument gilt damit ganz oder gar nicht als "hat nutzbaren Textlayer", eine Seiten-gemischte Erkennung (z. B. Seite 1 nativ, Seite 2 gescannt) ist nicht vorgesehen.
+**All pages, not just the first** (bugfix following user feedback, originally only page 1 was supported): `NativeTextLayerEngine`/`TesseractEngine` now process all pages of the document (`OcrExtractionResult.page_images: list[bytes]`, 1:1 with `pages`), and the pipeline stores an image per page. The text-layer availability check (`_native_text_available()`) still only checks page 1 as a heuristic for engine selection — a document therefore counts entirely or not at all as "having a usable text layer"; a page-mixed detection (e.g. page 1 native, page 2 scanned) is not supported.
 
-## Konfigurierbarkeit (3.9, P5b-S5, [ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md))
+## Configurability (3.9, P5b-S5, [ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md))
 
-Drei in 3.9 geforderte Stellschrauben, bewusst über zwei unterschiedliche Mechanismen umgesetzt (Begründung siehe ADR):
+Three knobs required by 3.9, deliberately implemented via two different mechanisms (see ADR for the rationale):
 
-- **`ocrEnabled`** — Docker-Compose-Profil-Opt-out, **kein** Feld in `/config`: `ocr-service` trägt `profiles: ["ocr"]`; ist das Profil (`COMPOSE_PROFILES`, Default `ocr`) nicht aktiv, wird der Container gar nicht erst deployt. `rendering-service`/`search-service` hängen deshalb bewusst nicht per `depends_on` an `ocr-service` und tolerieren dessen Abwesenheit über ihre HTTP-Clients (`get_full_text()`).
-- **Maximale Wortobergrenze** (`max_word_count`, `null` = keine Grenze) — vor dem eigentlichen Engine-Aufruf wird die Wortzahl **geschätzt** (`engines.estimate_word_count()`: PDF-Seitenzahl × 250, Rasterbilder zählen immer als eine Seite) und mit der konfigurierten Grenze verglichen. Überschritten → `status="skipped"`, Event `ocr.skipped`, **keine** Engine läuft (das ist der eigentliche Zweck: teure Tesseract-Läufe auf sehr große Scans vermeiden).
-- **Verarbeitungs-Batch-Size** (`batch_size`, Default `4`) — Nebenläufigkeitsgrenze für gleichzeitig laufende `process_version()`-Aufrufe. `NatsEventBusClient.subscribe()` (`dms-eventbus-client`) bekam dafür einen neuen optionalen `max_concurrency`-Parameter (Default `1`, für alle anderen Konsumenten unverändert); `ocr-service` übergibt ein Callable, das `OcrConfig.batch_size` bei jeder Nachricht live aus der DB liest.
-- **Content-Type-Positivliste** (`allowed_content_types`, leer = keine Einschränkung, seit P5d-S1; **Default seit einem weiteren Nutzer-Feedback-Durchgang `["application/pdf"]`** statt leer — OCR soll standardmäßig nur für PDFs laufen, alles andere (insbesondere Bilder) erfordert eine bewusste Admin-Freigabe über `PUT /config`) — greift **zusätzlich** zur technischen `select_engine()`-Auswahl: ist die Liste nicht leer, läuft OCR nur noch für die dort genannten Content-Types, z. B. "nur `application/pdf`, nicht `image/tiff`", obwohl Letzteres technisch möglich wäre. Prüft `metadata.content_type` (vom Document Service per Sniffing ermittelt, siehe `docs/services/document-service.md`) gegen die Liste, bevor die Wortobergrenze geprüft wird. Kein Treffer → `status="skipped"`, Event `ocr.skipped` mit `content_type` statt `estimated_words` im Payload. Der neue Default gilt nur für **frisch angelegte** Konfigurationszeilen (`get_config()`s Erstanlage) — bereits bestehende Installationen mit einer zuvor gespeicherten `[]`-Zeile behalten diese unverändert, bis ein Admin sie explizit über `PUT /config` ändert.
+- **`ocrEnabled`** — a Docker Compose profile opt-out, **not** a field in `/config`: `ocr-service` carries `profiles: ["ocr"]`; if the profile (`COMPOSE_PROFILES`, default `ocr`) is not active, the container is never deployed in the first place. `rendering-service`/`search-service` therefore deliberately do not depend on `ocr-service` via `depends_on` and tolerate its absence via their HTTP clients (`get_full_text()`).
+- **Maximum word ceiling** (`max_word_count`, `null` = no limit) — before the actual engine call, the word count is **estimated** (`engines.estimate_word_count()`: PDF page count × 250, raster images always count as one page) and compared against the configured limit. If exceeded → `status="skipped"`, event `ocr.skipped`, **no** engine runs (this is the actual purpose: avoiding expensive Tesseract runs on very large scans).
+- **Processing batch size** (`batch_size`, default `4`) — a concurrency limit for simultaneously running `process_version()` calls. `NatsEventBusClient.subscribe()` (`dms-eventbus-client`) received a new optional `max_concurrency` parameter for this (default `1`, unchanged for all other consumers); `ocr-service` passes a callable that reads `OcrConfig.batch_size` live from the DB on every message.
+- **Content-type allowlist** (`allowed_content_types`, empty = no restriction, since P5d-S1; **default since a further user feedback round is `["application/pdf"]`** instead of empty — OCR should by default only run for PDFs, everything else (especially images) requires deliberate admin approval via `PUT /config`) — this applies **in addition to** the technical `select_engine()` selection: if the list is non-empty, OCR only runs for the content types listed there, e.g. "only `application/pdf`, not `image/tiff`", even though the latter would be technically possible. Checks `metadata.content_type` (determined by the Document Service via sniffing, see `docs/services/document-service.md`) against the list before checking the word ceiling. No match → `status="skipped"`, event `ocr.skipped` with `content_type` instead of `estimated_words` in the payload. The new default only applies to **freshly created** configuration rows (`get_config()`'s first-time creation) — already existing installations with a previously stored `[]` row keep it unchanged until an admin explicitly changes it via `PUT /config`.
 
-Alle drei DB-gestützten Werte (`max_word_count`/`batch_size`/`allowed_content_types`) liegen in der einzeiligen `OcrConfig`-Tabelle (feste `id=1`, per `GET`/`PUT /config` administrierbar) und wirken **ohne Neustart** — anders als jede bisherige `Settings`-Umgebungsvariable in diesem Repo.
+All three DB-backed values (`max_word_count`/`batch_size`/`allowed_content_types`) live in the single-row `OcrConfig` table (fixed `id=1`, administrable via `GET`/`PUT /config`) and take effect **without a restart** — unlike every previous `Settings` environment variable in this repo.
 
-## Engine-Plugins (3.3/3.8, gleiches Prinzip wie Storage-Backends/Renderer)
+## Engine Plugins (3.3/3.8, same principle as storage backends/renderers)
 
-| Engine | Wann | Konfidenz | Implementierung |
+| Engine | When | Confidence | Implementation |
 |---|---|---|---|
-| `NativeTextLayerEngine` (`native_text_layer`) | PDF mit nutzbarem Textlayer | immer `100.0` (exakt, nicht OCR'd) | PyMuPDF `get_text("words")`, skaliert von PDF-Punkten in Pixel des gleichzeitig gerasterten Seitenbilds |
-| `TesseractEngine` (`tesseract`) | Gescanntes PDF ohne Textlayer, oder Rasterbild direkt | Mittelwert der Tesseract-Wort-Konfidenzen (`0`–`100`) | `pytesseract.image_to_data(..., lang="deu+eng")` |
-| PaddleOCR | — | — | **nicht implementiert**, siehe [ADR 0011](../adr/0011-ocr-tesseract-over-paddleocr.md) |
+| `NativeTextLayerEngine` (`native_text_layer`) | PDF with a usable text layer | always `100.0` (exact, not OCR'd) | PyMuPDF `get_text("words")`, scaled from PDF points into pixels of the simultaneously rasterized page image |
+| `TesseractEngine` (`tesseract`) | Scanned PDF without a text layer, or a raster image directly | average of the Tesseract word confidences (`0`–`100`) | `pytesseract.image_to_data(..., lang="deu+eng")` |
+| PaddleOCR | — | — | **not implemented**, see [ADR 0011](../adr/0011-ocr-tesseract-over-paddleocr.md) |
 
-`select_engine()` (`engines/__init__.py`) wählt anhand der Textlayer-Erkennung **genau eine** Engine (nicht wie `select_renderers()` eine Liste unabhängiger Regeln) — OCR erzeugt ein autoritatives Ergebnis je Version.
+`select_engine()` (`engines/__init__.py`) picks **exactly one** engine based on text-layer detection (not, like `select_renderers()`, a list of independent rules) — OCR produces one authoritative result per version.
 
-**Bewusste Abweichung vom Konzept-Beispieltext, dieselbe Abwägung wie ClamdEngine vs. EicarSignatureEngine (ADR 0010)**: Das Konzept nennt PaddleOCR als Standard-Engine — `paddlepaddle` ist als vollständiges ML-Framework (mehrere hundert MB) in dieser Umgebung nicht praktikabel. Tatsächlich verdrahtete Standard-Engine ist **Tesseract** (`apt-get install tesseract-ocr tesseract-ocr-deu` im Dockerfile, `pytesseract` als Python-Wrapper) — anders als bei ClamdEngine (ein dünner Protokoll-Client, der vollständig implementiert wurde) gibt es für PaddleOCR keine leichtgewichtige Teilimplementierung, die das schwere Framework vermeidet; es ist daher nur dokumentiert, nicht gebaut. Details siehe ADR 0011.
+**Deliberate deviation from the concept's example text, the same trade-off as ClamdEngine vs. EicarSignatureEngine (ADR 0010)**: the concept names PaddleOCR as the default engine — `paddlepaddle`, as a complete ML framework (several hundred MB), is not practical in this environment. The actually wired default engine is **Tesseract** (`apt-get install tesseract-ocr tesseract-ocr-deu` in the Dockerfile, `pytesseract` as the Python wrapper) — unlike ClamdEngine (a thin protocol client that was fully implemented), there is no lightweight partial implementation for PaddleOCR that avoids the heavy framework; it is therefore only documented, not built. See ADR 0011 for details.
 
-## Durchsuchbare PDF statt reinem Scan (Nutzer-Feedback)
+## Searchable PDF Instead of a Plain Scan (User Feedback)
 
-Nutzer-Feedback (Vermutung, die sich bei der Recherche als falsch herausstellte — OCR erzeugte
-noch nie eine Dokumentversion, nur eigene `OcrResult`-Zeilen): der eigentliche Wunsch dahinter
-war ein echtes, bis dahin fehlendes Feature — ein Scan ohne nutzbaren Textlayer soll eine neue,
-**durchsuchbare** PDF-Version bekommen (Original + Original-Bytes bleiben als Version davor
-unverändert erhalten), statt nur Wort-Koordinaten für das bestehende Overlay zu liefern.
+User feedback (an assumption that turned out to be wrong upon investigation — OCR never produced a document version, only its own `OcrResult` rows): the actual underlying wish was a genuine, previously missing feature — a scan without a usable text layer should get a new, **searchable** PDF version (the original + original bytes remain unchanged as the preceding version), instead of only delivering word coordinates for the existing overlay.
 
-- **Mechanismus** (`text_layer.py`, `embed_text_layer()`): fügt Tesseracts erkannte Wörter als
-  **unsichtbaren Textlayer** (`page.insert_text(..., render_mode=3)`, PDF-Standard-Textrendermodus
-  3 — exakt das Prinzip, mit dem auch `ocrmypdf` seinen OCR-Textlayer einbettet) an den korrekten
-  Positionen in eine Kopie der Original-PDF-Bytes ein. Tesseracts Wortboxen liegen in
-  Pixel-Koordinaten bei `raster_dpi` (Default 150) — Umrechnung in PDF-Punkte über
-  `scale = 72 / raster_dpi`, derselbe Koordinatenursprung (oben links, y wächst nach unten) in
-  Pixmap und PDF-Seite, keine Achsenspiegelung nötig. Das sichtbare Erscheinungsbild der Seite
-  bleibt unverändert — nur ihre Durchsuchbarkeit ändert sich.
-- **Neue Version statt neuer Rendition** (Rückfrage bei Sessionstart, Nutzer wählte die
-  empfohlene Option): `document_client.create_version()` checkt die veränderten Bytes über
-  `POST /documents/{id}/versions` ein — 1:1 dasselbe Muster wie
-  `signature_service.document_client.checkin_signed_version()` (ADR 0025: Verarbeitung, die PDF-
-  Bytes tatsächlich verändert, erzeugt serverseitig eine neue Version statt die Originalversion
-  zu überschreiben). `created_by="system:ocr-service"`, `comment="OCR: durchsuchbarer Textlayer
-  eingebettet"`.
-- **Nur für PDFs, nicht für Bilder** (Rückfrage bei Sessionstart): für Rasterbilder gibt es kein
-  äquivalentes "unsichtbarer Textlayer im Bildformat"-Konzept. Bilder behalten ihr Format
-  unverändert; ihr erkannter Text bleibt stattdessen über `OcrResult.full_text` abrufbar, den
-  `PreviewPane.tsx` seit demselben Durchgang zusätzlich als eigenen, klar getrennten Textextrakt
-  neben dem Bild anzeigt (siehe `docs/services/user-ui.md`).
-- **Zwei reale, beim Testen gefundene Bugs, beide vor dem Live-Rollout behoben:**
-  1. Eine Seite ganz ohne erkannte Wörter (`extraction.pages` ohne ein einziges Wort, z. B. eine
-     wirklich leere Testseite) bekam trotzdem eine neue, sinnlose Version mit leerem Textlayer —
-     entdeckt, weil eine genau solche Test-Fixture-PDF in `signature-service`s eigener Testsuite
-     dessen Versionsnummern-Annahmen durcheinanderbrachte (der `ocr-service`-Container läuft
-     während der Testläufe **anderer** Services live weiter und verarbeitet jedes hochgeladene
-     PDF, auch aus fremden Testsuiten). Fix: die Einbettung läuft nur noch, wenn mindestens ein
-     Wort erkannt wurde (`has_recognized_words`).
-  2. **Fehlende Terminierung des Reprocessing-Kreislaufs bei kurzem erkanntem Text**: die neu
-     erzeugte Version löst selbst wieder `document.version.created` aus und wird erneut
-     verarbeitet. Die ursprüngliche Annahme war, dass `_native_text_available()`s
-     Zeichen-Schwelle (`min_native_text_chars=20`) das nach einem Durchlauf zuverlässig beendet,
-     da die neue Version dann echten Text hat. Real beobachtet: ein einzelnes kurzes Wort (unter
-     20 Zeichen) reichte dafür nicht — die unsichtbar eingebetteten Wörter verändern die von
-     Tesseract beim erneuten Rastern gesehenen Pixel nicht, `TesseractEngine` lief also ein
-     zweites Mal, erkannte dasselbe sichtbare Wort erneut und bettete eine **zweite** Kopie
-     davon ein, bis die Schwelle erst dadurch überschritten wurde — bei noch kürzerem Text hätte
-     sich das unbegrenzt fortgesetzt. Fix: `VersionMetadata` trägt jetzt zusätzlich
-     `created_by`; die Einbettung läuft nicht, wenn die aktuell verarbeitete Version bereits von
-     `system:ocr-service` selbst stammt (`OCR_SERVICE_ACTOR`-Sentinel) — eine explizite,
-     inhaltsunabhängige Sperre statt sich auf einen inzidentellen Zeichen-Schwellenwert zu
-     verlassen.
-- **Bekannte, akzeptierte Randfall-Einschränkung aus Bug 2**: bei sehr kurzem erkanntem Text
-  (unter den 20 Zeichen von `min_native_text_chars`) bleibt die per Textlayer-Einbettung erzeugte
-  neue Version bei einem erneuten `OcrResult` mit `engine="tesseract"` stehen (nicht
-  `"native_text_layer"`), obwohl sie technisch bereits einen echten, durchsuchbaren Textlayer
-  hat — `PreviewPane.tsx`s Engine-Weiche würde für diesen schmalen Fall weiterhin das
-  Seitenbild-Overlay statt der nativen Ansicht zeigen. Für reale, mehrzeilige Scans (weit über
-  20 Zeichen) tritt dieser Fall nicht auf; als bewusste, dokumentierte Grenze akzeptiert statt
-  mit zusätzlicher Komplexität (z. B. einer eigenen "wurde bereits eingebettet"-Markierung
-  unabhängig vom Zeichen-Schwellenwert) beseitigt.
+- **Mechanism** (`text_layer.py`, `embed_text_layer()`): embeds Tesseract's recognized words as an **invisible text layer** (`page.insert_text(..., render_mode=3)`, PDF standard text render mode 3 — exactly the principle `ocrmypdf` also uses to embed its OCR text layer) at the correct positions into a copy of the original PDF bytes. Tesseract's word boxes are in pixel coordinates at `raster_dpi` (default 150) — conversion to PDF points via `scale = 72 / raster_dpi`, the same coordinate origin (top left, y grows downward) in pixmap and PDF page, no axis mirroring needed. The page's visible appearance remains unchanged — only its searchability changes.
+- **New version instead of a new rendition** (a follow-up question at session start, the user chose the recommended option): `document_client.create_version()` checks in the changed bytes via `POST /documents/{id}/versions` — 1:1 the same pattern as `signature_service.document_client.checkin_signed_version()` (ADR 0025: processing that actually changes PDF bytes produces a new version server-side instead of overwriting the original version). `created_by="system:ocr-service"`, `comment="OCR: searchable text layer embedded"`.
+- **Only for PDFs, not for images** (a follow-up question at session start): for raster images there is no equivalent "invisible text layer in image format" concept. Images keep their format unchanged; their recognized text instead remains available via `OcrResult.full_text`, which `PreviewPane.tsx` has, since the same round, additionally displayed as its own, clearly separate text extract next to the image (see `docs/services/user-ui.md`).
+- **Two real bugs found during testing, both fixed before the live rollout:**
+  1. A page with no recognized words at all (`extraction.pages` without a single word, e.g. a genuinely empty test page) still got a new, pointless version with an empty text layer — discovered because exactly such a test fixture PDF, in `signature-service`'s own test suite, threw off its version-number assumptions (the `ocr-service` container keeps running live during **other** services' test runs and processes every uploaded PDF, even from foreign test suites). Fix: the embedding now only runs if at least one word was recognized (`has_recognized_words`).
+  2. **Missing termination of the reprocessing cycle for short recognized text**: the newly created version itself triggers `document.version.created` again and is reprocessed. The original assumption was that `_native_text_available()`'s character threshold (`min_native_text_chars=20`) would reliably end this after one pass, since the new version then has real text. Observed in reality: a single short word (under 20 characters) was not enough — the invisibly embedded words do not change the pixels Tesseract sees on re-rastering, so `TesseractEngine` ran a second time, recognized the same visible word again, and embedded a **second** copy of it, until the threshold was exceeded only by that — with even shorter text, this would have continued indefinitely. Fix: `VersionMetadata` now additionally carries `created_by`; the embedding does not run if the version currently being processed already originates from `system:ocr-service` itself (`OCR_SERVICE_ACTOR` sentinel) — an explicit, content-independent lock instead of relying on an incidental character threshold.
+- **Known, accepted edge-case limitation from bug 2**: for very short recognized text (under the 20 characters of `min_native_text_chars`), the new version produced by text-layer embedding remains, on reprocessing, with an `OcrResult` of `engine="tesseract"` (not `"native_text_layer"`), even though it technically already has a real, searchable text layer — `PreviewPane.tsx`'s engine switch would, for this narrow case, still show the page-image overlay instead of the native view. For real, multi-line scans (well over 20 characters), this case does not occur; accepted as a deliberate, documented boundary rather than eliminated with additional complexity (e.g. a dedicated "already embedded" marker independent of the character threshold).
 
-## `needs_review` statt echter BPMN-Anbindung (3.9)
+## `needs_review` Instead of Real BPMN Integration (3.9)
 
-3.9 sieht bei niedrigem Konfidenzwert optional eine manuelle Nachprüfung als BPMN-Prozessschritt vor — die Workflow Engine existiert aber erst ab P6-S1. Diese Session baut daher nur einen einfachen Zwischenzustand: `average_confidence < 70.0` → `status="needs_review"`, veröffentlicht als Event, **ohne** die Verfügbarkeit des Dokuments zu blockieren (anders als beim Virenscan, ADR 0010 — Rendering/OCR sind immer nicht-blockierende Nebeneffekte). Die echte BPMN-Anbindung folgt vermutlich zusammen mit dem für P6-S4 vorgesehenen generischen Approval-Mechanismus.
+3.9 optionally envisions manual review as a BPMN process step for low confidence values — but the Workflow Engine only exists from P6-S1 onward. This session therefore only builds a simple intermediate state: `average_confidence < 70.0` → `status="needs_review"`, published as an event, **without** blocking the document's availability (unlike the virus scan, ADR 0010 — Rendering/OCR are always non-blocking side effects). The real BPMN integration presumably follows together with the generic approval mechanism planned for P6-S4.
 
-## Nachzieheffekt in rendering-service (2.4/3.9)
+## Follow-On Effect in rendering-service (2.4/3.9)
 
-rendering-service abonniert zusätzlich `ocr.completed` (eigener Durable-Name `rendering-service-ocr`, getrennt vom `document.>`-Abo) und erzeugt daraus eine `substitute_text`-Rendition aus dem OCR-Volltext, sofern noch keine existiert — schließt die in P5-S2 bewusst offen gelassene Lücke für gescannte/bildbasierte Dokumente (und, als Nebeneffekt, auch für PDFs mit echtem Textlayer, für die es bislang nur die `pdf_archive`-Kopie gab, keine Textextraktion). `ocr.completed`-Events tragen bewusst nur Statusfelder, nicht den potenziell großen Volltext selbst — rendering-service holt ihn per HTTP nach (`GET /ocr-results/{id}`), um NATS-Payloads und die Audit-Hashkette klein zu halten. Details siehe `docs/services/rendering-service.md`.
+rendering-service additionally subscribes to `ocr.completed` (its own durable name `rendering-service-ocr`, separate from the `document.>` subscription) and produces a `substitute_text` rendition from the OCR full text, provided none exists yet — closing the gap deliberately left open in P5-S2 for scanned/image-based documents (and, as a side effect, also for PDFs with a real text layer, for which there was previously only the `pdf_archive` copy, no text extraction). `ocr.completed` events deliberately carry only status fields, not the potentially large full text itself — rendering-service fetches it afterward via HTTP (`GET /ocr-results/{id}`), to keep NATS payloads and the audit hash chain small. See `docs/services/rendering-service.md` for details.
 
-## Anbindung an das Backend
+## Backend Integration
 
-- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (Metadaten) und `.../content` (Originalbytes) — kein direkter Zugriff auf dessen Schema/Storage-Key. Seit dem Textlayer-Feature (siehe oben) zusätzlich schreibend: `POST /documents/{id}/versions` zum Einchecken der textlayer-eingebetteten PDF als neue Version (`document_client.create_version()`, gleiches Muster wie `signature-service`, das bislang der einzige Aufrufer dieses Endpunkts außerhalb des Document Service selbst war).
-- **Storage Service** (3.6): `PUT`/`GET /objects/ocr/{document_id}/{version_number}/page-{seitenzahl}.png` — Persistenz der eigenständigen PDF-Seitenbilder, ein Objekt je Seite (`OcrResult.page_image_storage_key` speichert dabei nur das Präfix ohne Seitensuffix).
+- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key. Since the text-layer feature (see above), additionally write access: `POST /documents/{id}/versions` to check in the text-layer-embedded PDF as a new version (`document_client.create_version()`, same pattern as `signature-service`, which was previously the only caller of this endpoint outside the Document Service itself).
+- **Storage Service** (3.6): `PUT`/`GET /objects/ocr/{document_id}/{version_number}/page-{seitenzahl}.png` — persistence of the standalone PDF page images, one object per page (`OcrResult.page_image_storage_key` only stores the prefix without the page suffix).
 
 ## Events
 
-| Event | Payload | Wann |
+| Event | Payload | When |
 |---|---|---|
-| `ocr.completed` | `{version_number, status: "ready"\|"needs_review", engine, average_confidence}` | Nach erfolgreicher Extraktion |
-| `ocr.failed` | `{version_number, error}` | Bei nicht lesbarem PDF oder einer Engine-Exception |
-| `ocr.skipped` | `{version_number, estimated_words}` | Geschätzte Wortzahl übersteigt die konfigurierte Obergrenze (P5b-S5) — keine Engine lief |
-| `ocr.skipped` | `{version_number, content_type}` | Content-Type steht nicht auf der Positivliste (P5d-S1) — keine Engine lief |
+| `ocr.completed` | `{version_number, status: "ready"\|"needs_review", engine, average_confidence}` | After successful extraction |
+| `ocr.failed` | `{version_number, error}` | On an unreadable PDF or an engine exception |
+| `ocr.skipped` | `{version_number, estimated_words}` | Estimated word count exceeds the configured ceiling (P5b-S5) — no engine ran |
+| `ocr.skipped` | `{version_number, content_type}` | Content type is not on the allowlist (P5d-S1) — no engine ran |
 
-Der Audit Service konsumiert `ocr.>` seit dieser Session (siehe `docs/services/audit-service.md`).
+The Audit Service has consumed `ocr.>` since this session (see `docs/services/audit-service.md`).
 
-## Selbst-Registrierung (Konzept 3.2a)
+## Self-Registration (Concept 3.2a)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an — Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
+Registers itself with the registry on startup via `dms-registry-client` — opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
 
-## Sensoren (Konzept 10.1)
+## Sensors (Concept 10.1)
 
-Noch keine — folgt in Phase 11.
+None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/ocr-service/tests` (**53 Tests**, vorher 51, +2 seit **Post-Roadmap Phase 20
+- `uv run pytest services/ocr-service/tests` (**53 tests**, previously 51, +2 since **Post-Roadmap Phase 20
   Session 7** ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)): `document_id`
-  optional in `GET /ocr-results` — ein Repository- und ein API-Test bestätigen den dokumentübergreifenden
-  Aufruf mit `status`-Filter, ohne dass ein `422` zurückkommt; davor 51, vorher 48, +3 seit **Post-Roadmap Phase 20 Session 4**: Backoff-Verhalten unterhalb/bei Erschöpfung von `max_ocr_attempts`, `list_due_for_retry`-Filterung, `reset_for_retry`-Regressionstest — plus neue `test_main.py`/erweiterte `test_api.py` für den neuen `/retry`-Endpunkt und `_run_retry_tick`, siehe [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): Engines (`NativeTextLayerEngine`/`TesseractEngine` gegen echte, in-memory erzeugte PDFs/Bilder, `select_engine()`-Dispatch für alle Fälle inkl. korruptem PDF, `estimate_word_count()` für Mehrseiten-PDF/Rasterbild/kaputtes PDF), **neue `test_text_layer.py`** (4 Tests, keine Tesseract-/Document-Service-Abhängigkeit — reine `fitz`-Funktionstests: eingebetteter Text ist extrahierbar, Whitespace-Wörter werden übersprungen, ein Seitenindex jenseits des Dokuments bricht nicht ab, korrupte PDF-Bytes lösen `fitz.FileDataError` aus, wie es `pipeline.py`s Try/Except erwartet), Repository (Upsert/Überschreiben/Filter, `OcrConfig` Default-Anlage inkl. des neuen `["application/pdf"]`-Defaults/Update/Zurücksetzen), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. `DocumentNotFoundError`-Pfad ohne NATS-Redelivery-Risiko, dem `skipped`-Pfad bei niedrig konfigurierter Wortobergrenze bzw. bei per `allowed_content_types`-Positivliste nicht abgedecktem Content-Type inkl. Gegenprobe, sowie **vier neue Tesseract-gegateten Tests**: ein Scan mit erkennbarem Text bekommt real eine neue, textlayer-eingebettete Version mit `created_by="system:ocr-service"`; eine leere Scan-PDF ohne erkennbare Wörter bekommt **keine** neue Version; die neu erzeugte Version selbst wird bei erneuter Verarbeitung **nicht** ein zweites Mal eingebettet (Regressionstest für den beim Testen gefundenen Endlos-Reprocessing-Bug, siehe "Durchsuchbare PDF" oben); ein Rasterbild bekommt trotz Tesseract-Lauf ebenfalls keine neue Version), API (inkl. `GET`/`PUT /config`, Validierungsfehler bei `batch_size` außerhalb `1..64`, Persistenz von `allowed_content_types`, neuer `["application/pdf"]`-Default), Consumer-Integration (echtes NATS-Event löst echte OCR aus). Alle fünf `TesseractEngine`-abhängigen Tests (der ursprüngliche Rasterbild-Test plus die vier neuen) sind mit `pytest.mark.skipif(shutil.which("tesseract") is None, ...)` versehen, da diese Entwicklungsumgebung selbst keinen `tesseract`-Systembinary hat (nur der Docker-Container, siehe Dockerfile) — Verifikation erfolgt dort per Live-E2E. Der `max_concurrency`-Parameter von `NatsEventBusClient.subscribe()` wird weiterhin eigenständig in `libs/dms-eventbus-client/tests/test_nats_backend.py` getestet.
-- **Live-E2E über den echten Gateway-Stack** (Session-Abschluss): echtes PDF mit Textlayer hochgeladen → `native_text_layer`-Ergebnis mit korrekten Wort-Bounding-Boxen und passendem Seitenbild (834×625 PNG), `average_confidence=100.0` → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Text → Audit-Trail zeigt sowohl `ocr.completed` als auch `rendering.completed`, Hash-Kette bleibt intakt. Gateway-Routing erzwingt Auth (401 ohne/mit ungültigem Token) wie bei allen anderen Services. P5b-S5 ergänzt: `PUT /config` mit niedriger Wortobergrenze → Upload eines Dokuments → `status="skipped"` sichtbar über `GET /ocr-results`.
-- **Live-E2E für die Textlayer-Einbettung** (Nutzer-Feedback-Durchgang): eine synthetische Scan-PDF (Bild mit Text, kein nativer Textlayer) real hochgeladen — `tesseract`-Engine erkannte das Wort, es entstand automatisch genau eine neue Version (`created_by="system:ocr-service"`, `comment="OCR: durchsuchbarer Textlayer eingebettet"`), deren Inhalt per `fitz` nachweislich extrahierbaren Text enthielt, während die sichtbaren Pixel unverändert blieben. Die real beim ersten Versuch beobachtete Fehlfunktion (drei statt zwei Versionen durch den oben beschriebenen Reprocessing-Bug) wurde nach dem Fix erneut real verifiziert — genau zwei Versionen. Ein hochgeladenes Bild wurde mit dem neuen Default (`allowed_content_types=["application/pdf"]`) korrekt mit `status="skipped"` übersprungen; nach expliziter Admin-Freigabe (`PUT /config`) lief OCR real dafür, ohne eine neue Version zu erzeugen (Rückfrage-Entscheidung: Bilder behalten ihr Format).
+  optional in `GET /ocr-results` — a repository test and an API test confirm the cross-document
+  call with the `status` filter, without a `422` coming back; before that 51, previously 48, +3 since **Post-Roadmap Phase 20 Session 4**: backoff behavior below/at exhaustion of `max_ocr_attempts`, `list_due_for_retry` filtering, `reset_for_retry` regression test — plus a new `test_main.py`/extended `test_api.py` for the new `/retry` endpoint and `_run_retry_tick`, see [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): engines (`NativeTextLayerEngine`/`TesseractEngine` against real, in-memory generated PDFs/images, `select_engine()` dispatch for all cases including a corrupt PDF, `estimate_word_count()` for multi-page PDF/raster image/broken PDF), **new `test_text_layer.py`** (4 tests, no Tesseract/Document Service dependency — pure `fitz` function tests: embedded text is extractable, whitespace words are skipped, a page index beyond the document does not abort, corrupt PDF bytes raise `fitz.FileDataError` as expected by `pipeline.py`'s try/except), repository (upsert/overwrite/filter, `OcrConfig` default creation including the new `["application/pdf"]` default/update/reset), pipeline (`process_version` directly against the real running Document/Storage Service, including the `DocumentNotFoundError` path without NATS redelivery risk, the `skipped` path for a low configured word ceiling or a content type not covered by the `allowed_content_types` allowlist including a counter-check, as well as **four new Tesseract-gated tests**: a scan with recognizable text really gets a new, text-layer-embedded version with `created_by="system:ocr-service"`; an empty scan PDF with no recognizable words gets **no** new version; the newly created version itself is **not** embedded a second time on reprocessing (a regression test for the endless-reprocessing bug found during testing, see "Searchable PDF" above); a raster image likewise gets no new version despite a Tesseract run), API (including `GET`/`PUT /config`, validation errors for `batch_size` outside `1..64`, persistence of `allowed_content_types`, new `["application/pdf"]` default), consumer integration (a real NATS event triggers real OCR). All five `TesseractEngine`-dependent tests (the original raster-image test plus the four new ones) are marked with `pytest.mark.skipif(shutil.which("tesseract") is None, ...)`, since this development environment itself has no `tesseract` system binary (only the Docker container, see Dockerfile) — verification happens there via live E2E. The `max_concurrency` parameter of `NatsEventBusClient.subscribe()` continues to be tested independently in `libs/dms-eventbus-client/tests/test_nats_backend.py`.
+- **Live E2E against the real gateway stack** (session wrap-up): a real PDF with a text layer uploaded → `native_text_layer` result with correct word bounding boxes and a matching page image (834×625 PNG), `average_confidence=100.0` → rendering-service automatically produces a `substitute_text` rendition with exactly the same text → the audit trail shows both `ocr.completed` and `rendering.completed`, the hash chain remains intact. Gateway routing enforces auth (401 without/with an invalid token) like every other service. P5b-S5 additionally: `PUT /config` with a low word ceiling → document upload → `status="skipped"` visible via `GET /ocr-results`.
+- **Live E2E for the text-layer embedding** (user feedback round): a synthetic scan PDF (image with text, no native text layer) was really uploaded — the `tesseract` engine recognized the word, and exactly one new version was automatically produced (`created_by="system:ocr-service"`, `comment="OCR: searchable text layer embedded"`), whose content was demonstrably extractable via `fitz`, while the visible pixels remained unchanged. The malfunction actually observed on the first attempt (three versions instead of two, due to the reprocessing bug described above) was re-verified live after the fix — exactly two versions. An uploaded image was correctly skipped with `status="skipped"` under the new default (`allowed_content_types=["application/pdf"]`); after explicit admin approval (`PUT /config`), OCR really ran for it without producing a new version (follow-up decision: images keep their format).
 
-## Offene Punkte
+## Open Points
 
-- **PaddleOCR nicht implementiert**: nur die Plugin-Schnittstelle lässt es zu, siehe ADR 0011.
-- **Textlayer-Verfügbarkeit wird nur anhand Seite 1 entschieden**: `select_engine()` prüft nicht seitenweise, ob ein nutzbarer Textlayer existiert — ein PDF mit z. B. nativer Seite 1 und gescannter Seite 2 bekäme fälschlich `NativeTextLayerEngine` für das gesamte Dokument (Seite 2 hätte dann keine erkannten Wörter). Bewusste Vereinfachung, kein bekannter Anwendungsfall dafür bisher.
-- **`needs_review` ohne echte Workflow-Anbindung**: BPMN-gestützte manuelle Nachprüfung folgt frühestens mit P6-S1/P6-S4.
-- ~~**Keine automatische Nachverarbeitung bei dauerhaftem `failed`**~~ — **behoben in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatischer Retry mit Full-Jitter-Backoff bis `max_ocr_attempts`, danach `failed_permanent` + manueller Neustart über `POST .../retry`.
-- ~~Keine Autorisierung~~ — **behoben in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): alle Endpunkte prüfen jetzt `ocr.read`/`ocr.write` über `permission-service`.
-- **Wortobergrenze ist eine grobe Schätzung** (P5b-S5): `Seitenzahl × 250` statt exakter Zählung — kann bei textarmen mehrseitigen PDFs zu früh und bei textdichten Einzelbildern nie greifen (Details/Begründung siehe ADR 0016).
-- **Batch-Size begrenzt nur die Anzahl gleichzeitiger Aufrufe, nicht den Ressourcenverbrauch je Aufruf** — kein echter Worker-Pool mit Speicher-/CPU-Accounting.
-- **`ocrEnabled` ist nur als Compose-Profil sichtbar/steuerbar** — die Admin-UI zeigt lediglich "erreichbar"/"nicht erreichbar", kein Schalter (Begründung siehe ADR 0016).
-- **Textlayer-Einbettung bei sehr kurzem erkanntem Text (unter 20 Zeichen) bleibt im Overlay-Fallback hängen** — siehe "Durchsuchbare PDF" oben für die Begründung; betrifft praktisch keine realen mehrzeiligen Scans.
-- **Kein Retry/keine Vier-Augen-Prüfung für die Textlayer-Versionierung selbst** — ein fehlgeschlagener `create_version()`-Aufruf (z. B. Netzwerkfehler) wird nur geloggt, der Scan bleibt dauerhaft ohne durchsuchbare Version, bis eine erneute Verarbeitung (z. B. durch einen künftigen Retry-Mechanismus, siehe oben) sie nachholt.
+- **PaddleOCR not implemented**: only the plugin interface allows for it, see ADR 0011.
+- **Text-layer availability is decided based on page 1 only**: `select_engine()` does not check page by page whether a usable text layer exists — a PDF with, e.g., a native page 1 and a scanned page 2 would incorrectly get `NativeTextLayerEngine` for the entire document (page 2 would then have no recognized words). A deliberate simplification, no known use case for it so far.
+- **`needs_review` without real workflow integration**: BPMN-based manual review follows at the earliest with P6-S1/P6-S4.
+- ~~**No automatic reprocessing on permanent `failed`**~~ — **fixed in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_ocr_attempts`, after that `failed_permanent` + manual restart via `POST .../retry`.
+- ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `ocr.read`/`ocr.write` via `permission-service`.
+- **Word ceiling is a rough estimate** (P5b-S5): `page count × 250` instead of an exact count — can trigger too early for text-sparse multi-page PDFs and never for text-dense single images (see ADR 0016 for details/rationale).
+- **Batch size only limits the number of concurrent calls, not the resource usage per call** — no real worker pool with memory/CPU accounting.
+- **`ocrEnabled` is only visible/controllable as a Compose profile** — the Admin UI only shows "reachable"/"not reachable", no toggle (see ADR 0016 for the rationale).
+- **Text-layer embedding for very short recognized text (under 20 characters) stays stuck in the overlay fallback** — see "Searchable PDF" above for the rationale; in practice affects no real multi-line scans.
+- **No retry/no four-eyes check for the text-layer versioning itself** — a failed `create_version()` call (e.g. network error) is only logged, the scan remains permanently without a searchable version until reprocessing (e.g. by a future retry mechanism, see above) catches up on it.

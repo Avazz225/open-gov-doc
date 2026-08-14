@@ -1,41 +1,41 @@
 # folder-service
 
-Ordner-Hierarchie (Konzept 2.1): Anlegen, Umbenennen, Verschieben, Löschen
-(nur wenn leer). Publiziert Struktur-Events, über die der Permission Service
-seine Rechte-Vererbung synchron hält.
+Folder hierarchy (concept 2.1): create, rename, move, delete
+(only when empty). Publishes structural events, through which the Permission Service
+keeps its permission inheritance in sync.
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/folders` | Anlegen (`name`, `parent_id` default `"root"`, `created_by`, optional `object_type_id`/`attributes`) |
-| `GET` | `/folders/{id}` | Metadaten |
-| `GET` | `/folders/{id}/children` | Direkte Unterordner |
-| `PATCH` | `/folders/{id}` | Umbenennen/Verschieben/Attribute ändern |
-| `DELETE` | `/folders/{id}` | Löschen (409, falls nicht leer) |
-| `GET` | `/healthz` | Health-Check |
+| `POST` | `/folders` | Create (`name`, `parent_id` default `"root"`, `created_by`, optional `object_type_id`/`attributes`) |
+| `GET` | `/folders/{id}` | Metadata |
+| `GET` | `/folders/{id}/children` | Direct subfolders |
+| `PATCH` | `/folders/{id}` | Rename/move/change attributes |
+| `DELETE` | `/folders/{id}` | Delete (409 if not empty) |
+| `GET` | `/healthz` | Health check |
 
-Details/Events: siehe `../../docs/services/folder-service.md`.
+Details/events: see `../../docs/services/folder-service.md`.
 
-## Struktur-Vertrag mit dem Permission Service
+## Structural contract with the Permission Service
 
-Dieser Service implementiert exakt den Vertrag, den `permission-service` seit
-P2-S2 provisorisch erwartet hat (`folder.resource.created/.moved/.deleted`) -
-keine Anpassung war nötig. In P3-S3 live end-to-end verifiziert: ein über
-diese API angelegter Ordner erscheint unmittelbar im `resource_node`-Baum des
-Permission Service.
+This service implements exactly the contract that `permission-service` has
+provisionally expected since P2-S2 (`folder.resource.created/.moved/.deleted`) -
+no adjustment was needed. Verified live end-to-end in P3-S3: a folder created
+via this API appears immediately in the Permission Service's
+`resource_node` tree.
 
-## Objekttyp-Validierung
+## Object-type validation
 
-Trägt ein Ordner einen `object_type_id`, validiert dieser Service die
-Attribute vor dem Anlegen gegen den Object-Type Service (`POST
-/object-types/{id}/validate`) - ohne `object_type_id` entfällt die Prüfung.
+If a folder carries an `object_type_id`, this service validates the
+attributes against the Object-Type Service before creation (`POST
+/object-types/{id}/validate`) - without `object_type_id` the check is skipped.
 
-## Registry-Registrierung (seit P4-S1)
+## Registry registration (since P4-S1)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+Registers itself with the registry on startup via `dms-registry-client` (heartbeat, deregister on shutdown) - opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, see `docs/services/gateway-service.md` for the consumer (API gateway, dynamic routing).
 
-## Lokale Ausführung
+## Running locally
 
 ```bash
 cd infra && docker compose up -d postgres nats object-type-service folder-service
@@ -49,4 +49,4 @@ cd infra && docker compose up -d postgres nats object-type-service && cd ..
 uv run pytest services/folder-service/tests
 ```
 
-`test_object_type_validation.py` braucht einen laufenden Object-Type Service.
+`test_object_type_validation.py` requires a running Object-Type Service.

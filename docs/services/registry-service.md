@@ -1,77 +1,77 @@
 # registry-service
 
-**Verantwortung:** Service Discovery — Registrierung, Heartbeat, aktive Routingtabelle je Servicetyp (Konzept 3.2a). Seit P9-S2 zusätzlich Lizenzvermittlung (3.2b/9.3): fragt `license-service` ab und reicht einen berechneten Lizenzstatus (`licensed`/`demo`/`unlicensed`) je `service_type` an registrierende/heartbeatende Services weiter, ohne selbst eine Lizenzprüfung durchzuführen. Seit P10-S2 zusätzlich der **Drain-Mechanismus** (10.5/3.8): eine Instanz kann als `draining` markiert werden, bleibt dabei erreichbar, bekommt aber keine neuen Anfragen mehr über das Gateway. Seit P13-S1 zusätzlich einziger HTTP-abfragbarer Auskunftspunkt für die **Installations-Identität** dieser Installation (3a).
+**Responsibility:** Service discovery — registration, heartbeat, active routing table per service type (Concept 3.2a). Since P9-S2 additionally license brokering (3.2b/9.3): queries `license-service` and passes a computed license status (`licensed`/`demo`/`unlicensed`) per `service_type` to registering/heartbeating services, without performing any license check itself. Since P10-S2 additionally the **drain mechanism** (10.5/3.8): an instance can be marked as `draining`, remains reachable during this, but no longer receives new requests via the gateway. Since P13-S1 additionally the sole HTTP-queryable source of information for this installation's **installation identity** (3a).
 
-**Konzept-Referenz:** 3.2a, 3.2b, 3a, 9.3, 10.5
-**Eigenes Postgres-Schema:** `registry` (Tabelle `service_instance`)
+**Concept Reference:** 3.2a, 3.2b, 3a, 9.3, 10.5
+**Own Postgres schema:** `registry` (table `service_instance`)
 
 ## API
 
-| Methode | Pfad | Beschreibung |
+| Method | Path | Description |
 |---|---|---|
-| `POST` | `/instances` | Registrieren/Aktualisieren (Upsert nach `instance_id`) |
-| `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat, aktualisiert `last_heartbeat_at` |
-| `DELETE` | `/instances/{instance_id}` | Deregistrieren |
-| `POST` | `/instances/{instance_id}/drain` | Drain-Mechanismus (10.5/3.8, P10-S2): setzt `status="draining"` — ungegatet, WANN gedraint wird entscheidet ein externes Deploy-Werkzeug/`scripts/rolling-update.sh`, nicht die Registry selbst. |
-| `POST` | `/instances/{instance_id}/activate` | Umkehrung von `/drain` (10.5, P10-S3): setzt `status="active"` zurück — Grundlage für einen echten Rollback-Pfad, siehe `docs/operations/rolling-updates.md`. |
-| `GET` | `/instances/{service_type}` | Nur aktuell erreichbare Instanzen dieses Typs |
-| `GET` | `/instances` | Alle Instanzen inkl. berechnetem `healthy`-Flag |
-| `GET` | `/license-status/{service_type}` | Berechneter Lizenzstatus (`licensed`/`demo`/`unlicensed`) für diesen Servicetyp — ungegatet, für interne Poll-Clients (z. B. `workflow-service`, siehe unten). |
-| `GET` | `/metrics` | Eigene Sensoren im Prometheus-Format (10.1, P11-S1) — wird von `monitoring-service` gescraped, nicht direkt von Prometheus. |
-| `GET` | `/installation` | Installations-Identität (3a, P13-S1): `{id, display_name}` aus `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME` (`dms_common.BaseServiceSettings`) — ungegatet, reine Konfigurationswerte, kein DB-Zugriff. |
-| `GET` | `/healthz` | Eigener Health-Check |
+| `POST` | `/instances` | Register/update (upsert by `instance_id`) |
+| `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat, updates `last_heartbeat_at` |
+| `DELETE` | `/instances/{instance_id}` | Deregister |
+| `POST` | `/instances/{instance_id}/drain` | Drain mechanism (10.5/3.8, P10-S2): sets `status="draining"` — ungated; WHEN draining happens is decided by an external deploy tool/`scripts/rolling-update.sh`, not by the registry itself. |
+| `POST` | `/instances/{instance_id}/activate` | Reversal of `/drain` (10.5, P10-S3): resets `status="active"` — the basis for a real rollback path, see `docs/operations/rolling-updates.md`. |
+| `GET` | `/instances/{service_type}` | Only currently reachable instances of this type |
+| `GET` | `/instances` | All instances incl. computed `healthy` flag |
+| `GET` | `/license-status/{service_type}` | Computed license status (`licensed`/`demo`/`unlicensed`) for this service type — ungated, for internal poll clients (e.g. `workflow-service`, see below). |
+| `GET` | `/metrics` | Own sensors in Prometheus format (10.1, P11-S1) — scraped by `monitoring-service`, not directly by Prometheus. |
+| `GET` | `/installation` | Installation identity (3a, P13-S1): `{id, display_name}` from `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME` (`dms_common.BaseServiceSettings`) — ungated, pure configuration values, no DB access. |
+| `GET` | `/healthz` | Own health check |
 
-## Datenmodell
+## Data Model
 
-`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON-Liste), `sensors` (JSON-Liste, seit P11-S1 — rein durchgereichte Sensor-Selbstdeklaration, siehe unten), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, Default `"active"`, seit P10-S2 — additiv per `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` nachgerüstet, kein Alembic in dieser Phase). `healthy` ist kein gespeichertes Feld, sondern wird bei jeder Abfrage aus `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (Default 15s, konfigurierbar über `DMS_HEARTBEAT_TIMEOUT_SECONDS`) berechnet. `license_status` (in `InstanceOut`) ist ebenfalls kein gespeichertes Feld, sondern wird bei jeder Antwort per `ComponentLicenseCache` nachgetragen.
+`service_instance`: `instance_id` (PK), `service_type`, `version`, `capabilities` (JSON list), `sensors` (JSON list, since P11-S1 — purely passed-through sensor self-declaration, see below), `health_endpoint`, `address`, `registered_at`, `last_heartbeat_at`, `status` (`"active"`/`"draining"`, default `"active"`, since P10-S2 — added additively via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, no Alembic in this phase). `healthy` is not a stored field but computed on every query from `last_heartbeat_at` vs. `heartbeat_timeout_seconds` (default 15s, configurable via `DMS_HEARTBEAT_TIMEOUT_SECONDS`). `license_status` (in `InstanceOut`) is likewise not a stored field but appended to every response via `ComponentLicenseCache`.
 
-## Drain-Mechanismus (10.5/3.8, P10-S2/S3)
+## Drain Mechanism (10.5/3.8, P10-S2/S3)
 
-- **Zustand, keine automatische Auslösung**: `POST /instances/{instance_id}/drain` setzt `status="draining"` — die Registry entscheidet selbst nicht, *wann* gedraint wird. Das übernimmt seit P10-S3 `scripts/rolling-update.sh`, das denselben Mechanismus für Update-Rollouts wiederverwendet, statt ihn neu zu bauen (Konzept 10.5: "denselben Drain-Mechanismus... nur zu einem anderen Anlass").
-- **Wirkung ausschließlich beim Routing**: eine `draining`-Instanz bleibt in `GET /instances/{type}` sichtbar (nicht deregistriert, kein Kill), verschwindet aber aus dem Auswahl-Pool des Gateways für **neue** Anfragen (`gateway_service.upstream.InstanceResolver.resolve()` filtert zusätzlich zu `healthy` auf `status == "active"`). Bereits laufende Anfragen sind nie betroffen — entspricht 10.5 wörtlich ("nimmt keine neuen Aufgaben mehr an, schließt aber laufende Vorgänge ab").
-- **Ungegatet**, wie jeder andere Registry-Endpunkt — die Registry hat nirgends ein Rollen-Gate, das wäre an dieser Stelle keine Konsistenzverbesserung.
-- Eine **neue** Registrierung (Zeile existiert noch nicht) startet immer mit `status="active"`; eine Re-Registrierung derselben `instance_id` (Selbstheilung nach `404`, kein echter Neustart, siehe `dms-registry-client`) lässt einen bestehenden `status` unverändert — nur Heartbeat/Register ändern ihn nie automatisch zurück, ausschließlich `/drain`/`/activate` setzen ihn.
-- **Rollback (10.5, P10-S3)**: `POST /instances/{instance_id}/activate` setzt `status` zurück auf `"active"` — ohne diese Umkehrung gäbe es keinen Weg, eine bereits gedrainte Instanz wieder ansprechbar für neue Anfragen zu machen. Konzept 10.5 verlangt ausdrücklich, dass ein Rollback möglich bleibt, solange der Drain noch nicht vollständig abgeschlossen (die Instanz also noch nicht gestoppt) ist. Genutzt von `scripts/rolling-update.sh`s manuellem Rollback-Verfahren, siehe `docs/operations/rolling-updates.md`.
+- **State, no automatic trigger**: `POST /instances/{instance_id}/drain` sets `status="draining"` — the registry itself does not decide *when* draining happens. Since P10-S3 this is handled by `scripts/rolling-update.sh`, which reuses the same mechanism for update rollouts instead of building it anew (Concept 10.5: "the same drain mechanism... just for a different occasion").
+- **Effect only in routing**: a `draining` instance remains visible in `GET /instances/{type}` (not deregistered, no kill) but disappears from the gateway's selection pool for **new** requests (`gateway_service.upstream.InstanceResolver.resolve()` filters on `status == "active"` in addition to `healthy`). Already-running requests are never affected — this literally matches 10.5 ("no longer accepts new tasks but completes running operations").
+- **Ungated**, like every other registry endpoint — the registry has no role gate anywhere, and this would not be a consistency improvement here.
+- A **new** registration (row does not yet exist) always starts with `status="active"`; a re-registration of the same `instance_id` (self-healing after `404`, not a real restart, see `dms-registry-client`) leaves an existing `status` unchanged — only heartbeat/register never automatically revert it, only `/drain`/`/activate` set it.
+- **Rollback (10.5, P10-S3)**: `POST /instances/{instance_id}/activate` resets `status` back to `"active"` — without this reversal there would be no way to make an already-drained instance reachable for new requests again. Concept 10.5 explicitly requires that a rollback remains possible as long as the drain is not yet fully completed (i.e. the instance has not yet stopped). Used by `scripts/rolling-update.sh`'s manual rollback procedure, see `docs/operations/rolling-updates.md`.
 
-## Lizenzvermittlung (3.2b/9.3, P9-S2)
+## License Brokering (3.2b/9.3, P9-S2)
 
-- **Nur konfigurierte Komponenten sind überhaupt lizenzpflichtig**: `settings.licensable_components` (Default `{"workflow-service": "demo", "webdav-connector": "demo", "migration-service": "demo"}`, die letzten beiden seit P12-S1/P12-S2) ordnet jedem separat lizenzierbaren `service_type` eine Policy zu (`"demo"` oder `"lock"`), die greift, wenn keine gültige Lizenz installiert ist oder die Komponente nicht in `licensed_components` der Lizenz enthalten ist. Jeder nicht gelistete `service_type` ist "core" und bekommt immer `"licensed"` — Konzept 9.1 nennt CMIS-Connector/Migration-Service/Workflow-Automatisierung wörtlich als Beispiele für separat lizenzierbare Komponenten. Konzept 3.3 nennt Connectoren wörtlich als Beispiel, daher `webdav-connector` seit P12-S1 mit demselben `"demo"`-Muster wie `workflow-service` (siehe `docs/services/webdav-connector.md`); `migration-service` seit P12-S2 ebenso (siehe `docs/services/migration-service.md`).
-- **`ComponentLicenseCache`** (`licensing.py`): TTL-Cache (`license_status_cache_ttl_seconds`, Default 60s) um den rohen `license-service`-Status, plus Invalidierung durch den neuen `license.>`-NATS-Konsumenten (`consumer.py`, erster eigener Konsument dieses Service, durable `registry-service`) — reagiert damit sowohl ereignisgetrieben als auch mit einer harten Obergrenze auf Statusänderungen.
-- `InstanceOut` (Register-/Heartbeat-/Listing-Antworten) trägt zusätzlich `license_status`. Ein dedizierter `GET /license-status/{service_type}` erlaubt bereits laufenden Services, ihren eigenen Status ohne Neustart erneut abzufragen (z. B. `workflow-service`s `license_client.LicenseStatusClient`, siehe `docs/services/workflow-service.md`).
-- Fail-open bei nicht erreichbarem `license-service` (`"licensed"` für core, konfigurierte Policy für licensierbare Komponenten bleibt zuletzt bekannter Wert) — ein Lizenzdienst-Ausfall soll die Registry nicht lahmlegen.
+- **Only configured components are subject to licensing at all**: `settings.licensable_components` (default `{"workflow-service": "demo", "webdav-connector": "demo", "migration-service": "demo"}`, the latter two since P12-S1/P12-S2) assigns each separately licensable `service_type` a policy (`"demo"` or `"lock"`) that applies when no valid license is installed or the component is not included in the license's `licensed_components`. Every unlisted `service_type` is "core" and always gets `"licensed"` — Concept 9.1 explicitly names the CMIS connector/migration service/workflow automation as examples of separately licensable components. Concept 3.3 explicitly names connectors as an example, hence `webdav-connector` since P12-S1 follows the same `"demo"` pattern as `workflow-service` (see `docs/services/webdav-connector.md`); `migration-service` likewise since P12-S2 (see `docs/services/migration-service.md`).
+- **`ComponentLicenseCache`** (`licensing.py`): a TTL cache (`license_status_cache_ttl_seconds`, default 60s) around the raw `license-service` status, plus invalidation by the new `license.>` NATS consumer (`consumer.py`, this service's first own consumer, durable `registry-service`) — reacts to status changes both event-driven and with a hard upper bound.
+- `InstanceOut` (register/heartbeat/listing responses) additionally carries `license_status`. A dedicated `GET /license-status/{service_type}` lets already-running services re-query their own status without restarting (e.g. `workflow-service`'s `license_client.LicenseStatusClient`, see `docs/services/workflow-service.md`).
+- Fail-open when `license-service` is unreachable (`"licensed"` for core, configured policy for licensable components remains at its last known value) — a license service outage should not disable the registry.
 
 ## Events
 
-Publiziert (Stream `registry`, `dms-eventbus-client`, nach Commit):
+Published (stream `registry`, `dms-eventbus-client`, after commit):
 
 - `registry.instance.registered` — `subject`=`instance_id`, `payload`={`service_type`, `version`}
 - `registry.instance.deregistered` — `subject`=`instance_id`, `payload`={`service_type`}
 
-Kein Event pro Heartbeat. Konsumiert wird dieser Strom vom Audit Service (`docs/services/audit-service.md`). Seit P9-S2 konsumiert `registry-service` selbst `license.>` (siehe oben) — reiner Cache-Invalidierungs-Trigger, kein Payload-Parsing.
+No event per heartbeat. This stream is consumed by the Audit Service (`docs/services/audit-service.md`). Since P9-S2, `registry-service` itself consumes `license.>` (see above) — a pure cache-invalidation trigger, no payload parsing.
 
-## Nutzung (seit P4-S1)
+## Usage (since P4-S1)
 
-Bis P4-S1 existierte nur diese API, ohne einen einzigen Aufrufer. Seitdem
-registrieren sich sieben Backend-Services selbst hier (über die neue geteilte
-Lib `libs/dms-registry-client`: Register-beim-Start, periodischer Heartbeat,
-Deregister-beim-Shutdown) — siehe `docs/services/gateway-service.md`, das
-`/instances/{service_type}` nutzt, um Requests dynamisch weiterzuleiten,
-statt Backend-Adressen statisch zu konfigurieren.
+Until P4-S1, only this API existed, with no caller at all. Since then,
+seven backend services register themselves here (via the new shared
+library `libs/dms-registry-client`: register at startup, periodic heartbeat,
+deregister at shutdown) — see `docs/services/gateway-service.md`, which
+uses `/instances/{service_type}` to route requests dynamically instead of
+statically configuring backend addresses.
 
-**Registriert sich seit P4-S3 auch bei sich selbst** (`DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS` zeigen beide auf die eigene Adresse): Ohne das gäbe es für `service_type=registry-service` keine auflösbare Instanz, und das Gateway könnte `/api/registry-service/...` (z. B. für die Admin-UI-Registry-Übersicht) nie auflösen. Die allererste Registrierung schlägt dabei unvermeidlich fehl (der eigene Uvicorn-Server nimmt erst nach Abschluss des Lifespan-Startups Verbindungen an) — der Selbstheilungs-Fix aus `dms-registry-client` (Re-Registrierung bei `404` im nächsten Heartbeat, siehe P4-S1) greift hier für den denkbar häufigsten Anwendungsfall dieses Mechanismus.
+**Since P4-S3 also registers itself with itself** (`DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS` both point to its own address): without this, there would be no resolvable instance for `service_type=registry-service`, and the gateway could never resolve `/api/registry-service/...` (e.g. for the Admin UI's registry overview). The very first registration inevitably fails (its own Uvicorn server only accepts connections after lifespan startup completes) — the self-healing fix from `dms-registry-client` (re-registration on `404` at the next heartbeat, see P4-S1) kicks in here for what is arguably the most common use case of this mechanism.
 
-## Sensoren (Konzept 10.1, P11-S1)
+## Sensors (Concept 10.1, P11-S1)
 
-`registry-service` ist selbst einer der zwei Sensor-Piloten (kein Vollretrofit aller Services, siehe P11-S0-Befund): meldet bei der eigenen Selbstregistrierung zwei Sensoren an (`registry.instances.active_total`, `registry.service.heartbeat.miss` — beide Namen wörtlich aus Konzept 10.1s Beispielliste) und exponiert sie über einen eigenen `GET /metrics` (Prometheus-Format, `libs/dms-metrics-client`). **Die eigentliche Sensor-Registry (Katalog-Aggregation + Aktivierungskonfiguration) lebt bewusst NICHT hier**, sondern im neuen `monitoring-service` (P11-S1-Architekturentscheidung nach Rückfrage bei Sessionstart — Prometheus scraped ausschließlich `monitoring-service`, das seinerseits `GET /instances` hier abfragt, um die deklarierten `sensors` jeder Instanz zu lesen und deren `/metrics`-Endpunkte selbst zu scrapen). `registry-service`s Footprint bleibt entsprechend minimal: ein durchgereichtes `sensors`-Feld, keine neue Businesslogik, kein neues Gate. Details siehe `docs/services/monitoring-service.md` und `docs/operations/monitoring.md`.
+`registry-service` is itself one of the two sensor pilots (no full retrofit of all services, see the P11-S0 finding): declares two sensors at its own self-registration (`registry.instances.active_total`, `registry.service.heartbeat.miss` — both names taken literally from Concept 10.1's example list) and exposes them via its own `GET /metrics` (Prometheus format, `libs/dms-metrics-client`). **The actual sensor registry (catalog aggregation + activation configuration) deliberately does NOT live here**, but in the new `monitoring-service` (a P11-S1 architecture decision made after a clarifying question at the start of the session — Prometheus scrapes exclusively `monitoring-service`, which in turn queries `GET /instances` here to read each instance's declared `sensors` and scrapes their `/metrics` endpoints itself). `registry-service`'s footprint accordingly stays minimal: a passed-through `sensors` field, no new business logic, no new gate. See `docs/services/monitoring-service.md` and `docs/operations/monitoring.md` for details.
 
-## Installations-Identität (3a, P13-S1)
+## Installation Identity (3a, P13-S1)
 
-- `GET /installation` liest ausschließlich `settings.installation_id`/`settings.installation_display_name` (`dms_common.BaseServiceSettings`, seit P13-S1 für jeden Service verfügbar über dieselben zwei Umgebungsvariablen `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME`) — kein eigenes Datenmodell, keine Persistenz hier, reine Konfigurationsauskunft.
-- Ersetzt die zuvor uneinheitliche Praxis, bei der nur `workflow-service` eine eigene, isoliert konfigurierte `installation_display_name` kannte (für die Föderations-Registrierung, 7.4) und jeder andere Service — insbesondere `license-service` — gar keine Installationskennung besaß, obwohl Konzept 3a das explizit für die Lizenzprüfung verlangt ("Jede Installation registriert sich beim License Service ... mit einer eigenen Installations-ID"). `license-service` bindet seit P13-S1 die Lizenzprüfung an dieses Feld, siehe `docs/services/license-service.md` und [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md) (Nachtrag).
-- Seit P13-S2 tatsächlich genutzt von `docs/services/fleet-management-service.md` (3a "optional, separater Baustein") — dieser Endpunkt ist der Ort, an dem der Fleet-Service mehrere Installationen nach ihrer Identität abfragt, ohne eine eigene Discovery-Logik je Installation zu bauen. Der Aufruf läuft über den Gateway der jeweiligen Installation (`registry-service:installation` in `gateway_service.settings.public_routes`, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)).
-- **Bewusst getrennt von der Federation-Hub-Kennung** (7.4): `workflow-service` meldet sich beim Hub weiterhin mit einer eigenen, zufällig erzeugten, rein opt-in genutzten Installations-ID an (`federation_client.py`), nicht mit `installation_id` aus dieser Antwort — Föderationspartner sollen nicht automatisch die interne Fleet-Identität einer Installation erfahren.
+- `GET /installation` reads only `settings.installation_id`/`settings.installation_display_name` (`dms_common.BaseServiceSettings`, available to every service since P13-S1 via the same two environment variables `DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME`) — no own data model, no persistence here, purely a configuration lookup.
+- Replaces the previously inconsistent practice where only `workflow-service` knew its own, separately configured `installation_display_name` (for federation registration, 7.4), and every other service — in particular `license-service` — had no installation identifier at all, even though Concept 3a explicitly requires this for license checking ("Each installation registers with the License Service... with its own installation ID"). Since P13-S1, `license-service` ties license checking to this field, see `docs/services/license-service.md` and [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md) (addendum).
+- Actually used since P13-S2 by `docs/services/fleet-management-service.md` (3a, "optional, separate building block") — this endpoint is where the fleet service queries multiple installations for their identity, without building its own discovery logic per installation. The call runs via the respective installation's gateway (`registry-service:installation` in `gateway_service.settings.public_routes`, [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)).
+- **Deliberately separate from the federation hub identifier** (7.4): `workflow-service` still registers with the hub using its own, randomly generated, purely opt-in installation ID (`federation_client.py`), not the `installation_id` from this response — federation partners should not automatically learn an installation's internal fleet identity.
 
-## Offene Punkte
+## Open Points
 
-- Aktives Anpingen des gemeldeten `health_endpoint` (statt reinem Heartbeat-Push) als mögliche spätere Ergänzung, nicht Teil dieser Session.
-- **Kein Aufräumen dauerhaft unerreichbarer Instanzen** (seit P4-S1 beobachtet: Container-Neustarts ohne sauberes `DELETE /instances/{id}`, z. B. bei `docker compose down` ohne vorheriges Deregistrieren, hinterlassen dauerhaft `healthy=false`-Zeilen). Unkritisch für das Routing (`GET /instances/{service_type}` filtert sie bereits heraus), sammelt sich aber unbegrenzt in der Tabelle an — eine periodische Bereinigung (z. B. Löschen nach X Tagen ohne Heartbeat) ist nicht Teil dieser Session.
+- Actively pinging the reported `health_endpoint` (instead of pure heartbeat push) as a possible later addition, not part of this session.
+- **No cleanup of permanently unreachable instances** (observed since P4-S1: container restarts without a clean `DELETE /instances/{id}`, e.g. on `docker compose down` without prior deregistration, leave permanent `healthy=false` rows behind). Not critical for routing (`GET /instances/{service_type}` already filters them out), but they accumulate unbounded in the table — periodic cleanup (e.g. deletion after X days without a heartbeat) is not part of this session.

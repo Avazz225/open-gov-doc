@@ -1,13 +1,13 @@
 # dms-auth-client
 
-Zustandslose OIDC/JWT-Validierung gegen Keycloak (Konzept 4.4) — jeder Service prüft
-Tokens selbst gegen das JWKS, ohne bei jedem Request beim Auth Service nachzufragen.
+Stateless OIDC/JWT validation against Keycloak (Concept 4.4) — each service checks
+tokens itself against the JWKS, without querying the Auth Service on every request.
 
-- `TokenValidator` — prüft Signatur (RS256 über JWKS), `iss`/`aud`/`exp`; wirft `InvalidTokenError`.
-- `MultiIssuerTokenValidator` (Post-Roadmap-Feature, Phase 18, ADR 0063) — delegiert an eine von mehreren `TokenValidator`-Instanzen, ausgewählt über den `iss`-Claim. Nötig, seit `auth-service` zusätzlich zu Keycloak selbst Tokens für lokale technische Konten (Superuser/Domain-Admins, unabhängig von Keycloaks Erreichbarkeit) ausstellen kann — dieselbe `.validate(token) -> dict`-Schnittstelle wie `TokenValidator`, `make_current_user_dependency` unterscheidet nicht.
-- `make_current_user_dependency(validator)` — baut eine FastAPI-Dependency, die den Bearer-Token prüft und bei Erfolg die Claims liefert, sonst 401. Nimmt jedes Objekt mit `.validate()` entgegen, funktioniert also mit beiden Validator-Typen.
+- `TokenValidator` — checks signature (RS256 via JWKS), `iss`/`aud`/`exp`; raises `InvalidTokenError`.
+- `MultiIssuerTokenValidator` (post-roadmap feature, Phase 18, ADR 0063) — delegates to one of several `TokenValidator` instances, selected via the `iss` claim. Needed since `auth-service` can additionally issue tokens itself, alongside Keycloak, for local technical accounts (superuser/domain admins, independent of Keycloak's availability) — same `.validate(token) -> dict` interface as `TokenValidator`, `make_current_user_dependency` does not distinguish.
+- `make_current_user_dependency(validator)` — builds a FastAPI dependency that checks the bearer token and returns the claims on success, otherwise 401. Accepts any object with `.validate()`, so works with both validator types.
 
-## Nutzung
+## Usage
 
 ```python
 from dms_auth_client import TokenValidator, make_current_user_dependency
@@ -26,9 +26,9 @@ def list_documents(user: dict = Depends(get_current_user)): ...
 
 ## Tests
 
-Rein auf Unit-Ebene mit einem selbst signierten Testschlüssel (kein echter Keycloak
-nötig) — Validierung gegen echte Keycloak-Tokens folgt automatisch mit, sobald
-Auth Service (P2-S1) reale Tokens ausstellt:
+Purely at the unit level with a self-signed test key (no real Keycloak
+needed) — validation against real Keycloak tokens will follow automatically
+once Auth Service (P2-S1) issues real tokens:
 
 ```bash
 uv run pytest libs/dms-auth-client/tests

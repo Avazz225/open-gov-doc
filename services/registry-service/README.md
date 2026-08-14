@@ -1,37 +1,36 @@
 # registry-service
 
-Service Discovery (Konzept 3.2a): Registrierung, Heartbeat und die aktive
-Routingtabelle je Servicetyp. Lizenzvermittlung (3.2b) folgt erst mit dem
-License Service (Phase 9) und ist hier bewusst noch nicht enthalten.
+Service Discovery (Concept 3.2a): registration, heartbeat, and the active
+routing table per service type. License brokering (3.2b) only follows with
+the License Service (Phase 9) and is deliberately not included here yet.
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/instances` | Registrieren (Upsert nach `instance_id`) |
-| `POST` | `/instances/{instance_id}/heartbeat` | Heartbeat senden |
-| `DELETE` | `/instances/{instance_id}` | Deregistrieren |
-| `GET` | `/instances/{service_type}` | Aktive Routingtabelle für einen Servicetyp |
-| `GET` | `/instances` | Alle Instanzen inkl. `healthy`-Flag (Debug/Admin) |
-| `GET` | `/healthz` | Eigener Health-Check |
+| `POST` | `/instances` | Register (upsert by `instance_id`) |
+| `POST` | `/instances/{instance_id}/heartbeat` | Send heartbeat |
+| `DELETE` | `/instances/{instance_id}` | Deregister |
+| `GET` | `/instances/{service_type}` | Active routing table for a service type |
+| `GET` | `/instances` | All instances incl. `healthy` flag (debug/admin) |
+| `GET` | `/healthz` | Own health check |
 
-**Ausfallerkennung ohne Hintergrundjob**: Eine Instanz gilt als ausgefallen,
-wenn ihr letzter Heartbeat länger als `heartbeat_timeout_seconds`
-(Default 15s) zurückliegt. Das wird beim Lesen berechnet, nicht durch einen
-mutierenden Sweep-Prozess - vermeidet Race Conditions und ist einfacher zu
-testen, bei identischem Ergebnis ("ausgefallene Instanzen erscheinen nicht in
-der aktiven Routingtabelle").
+**Failure detection without a background job**: an instance is considered
+failed if its last heartbeat is older than `heartbeat_timeout_seconds`
+(default 15s). This is computed on read, not via a mutating sweep process -
+avoids race conditions and is simpler to test, with an identical result
+("failed instances do not appear in the active routing table").
 
-## Events (Konzept 3.4)
+## Events (Concept 3.4)
 
-Publiziert nach erfolgreichem Commit (`dms-eventbus-client`, Stream `registry`):
+Published after successful commit (`dms-eventbus-client`, stream `registry`):
 
 - `registry.instance.registered` — `subject` = `instance_id`, `payload` = `{service_type, version}`
 - `registry.instance.deregistered` — `subject` = `instance_id`, `payload` = `{service_type}`
 
-Kein Event pro Heartbeat (zu hochfrequent, kein Audit-relevanter Vorgang).
+No event per heartbeat (too high-frequency, not an audit-relevant operation).
 
-## Lokale Ausführung
+## Running Locally
 
 ```bash
 cd infra && docker compose up -d postgres nats registry-service

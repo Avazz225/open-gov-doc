@@ -1,22 +1,76 @@
-# 0004 — Storage-Redundanz: zwei Ziele statt Ziel-Menge, Retry-Queue per Endpunkt
+# 0004 — Storage redundancy: two targets instead of a target set, per-endpoint retry queue
 
-**Status:** akzeptiert
-**Kontext:** Konzept 3.6, Session P3-S4
+**Status:** accepted
+**Context:** Concept 3.6, Session P3-S4
 
-## Entscheidung
+## Decision
 
-Storage-Redundanz wird auf genau **zwei gleichzeitige Ziele** begrenzt (Primär- und optionales Sekundärziel, je eines der beiden vorhandenen Backend-Typen `local`/`s3`) statt einer generischen Liste beliebig vieler Ziele. Asynchrone Replikation läuft nicht über einen In-Prozess-Hintergrundtask, sondern über eine Retry-Queue (`object_copy`-Tabelle) plus einen expliziten Endpunkt `POST /replication/process-pending`, der von außen (Scheduler/Cron, künftig ggf. dem Plugin Orchestration Service) periodisch aufgerufen wird.
+Storage redundancy is limited to exactly **two simultaneous targets**
+(primary and an optional secondary target, each one of the two existing
+backend types `local`/`s3`) instead of a generic list of arbitrarily many
+targets. Asynchronous replication does not run via an in-process background
+task, but via a retry queue (`object_copy` table) plus an explicit endpoint
+`POST /replication/process-pending`, which is called periodically from the
+outside (scheduler/cron, in the future possibly the Plugin Orchestration
+Service).
 
-## Begründung
+## Rationale
 
-- **Zwei Ziele statt Ziel-Menge**: Das Konzept nennt als Beispiel "2× S3 unterschiedlicher Provider + 1× NFS". Eine generische Ziel-Liste würde eine Mehrfach-Instanziierung desselben Backend-Typs mit je eigener Konfiguration (mehrere S3-Endpunkte/Buckets/Credentials) voraussetzen — dafür existiert noch keine Konfigurationsstruktur (`Settings` ist heute ein flaches Modell pro Service, keine Liste verschachtelter Backend-Configs). Mit den zwei tatsächlich vorhandenen Backend-Implementierungen (`local`, `s3`) lässt sich die geforderte Kernsemantik (Quorum, primär-synchron/sekundär-asynchron, Lese-Fallback, Fixity je Kopie) bereits vollständig und real end-to-end demonstrieren, ohne eine size-mäßig deutlich größere Konfigurationsschicht vorab zu bauen. Eine echte n-Ziele-Liste ist eine spätere, additive Erweiterung (neue Settings-Struktur + `build_backends`/`resolve_targets` anpassen), kein Bruch der jetzt gebauten Schnittstellen (`replication.py` arbeitet bereits generisch mit `dict[str, StorageBackend]` + `list[str]`).
-- **Retry-Queue per Endpunkt statt Hintergrundtask**: Bereits in P1-S1 wurde bewusst gegen mutierende Hintergrund-Sweeps entschieden (Registry Service: Ausfallerkennung wird beim Lesen berechnet). Hier gilt dieselbe Überlegung in umgekehrter Richtung — ein In-Prozess-`asyncio`-Hintergrundtask für Replikation wäre nicht deterministisch testbar (Timing-abhängig) und hätte keinen klar definierten Lebenszyklus (Prozessneustart mitten in der Replikation, kein Fortschritt sichtbar). Ein expliziter Endpunkt ist vollständig deterministisch testbar, lässt sich manuell oder von einem externen Scheduler auslösen und passt konzeptionell zum ohnehin für Phase 10 geplanten Plugin Orchestration Service (zeitprofil-bewusste Platzierung von genau solchen periodischen Jobs, 3.8).
-- **Best-Effort-Rollback bei Quorum-Fehlschlag**: Wird das konfigurierte Quorum nicht erreicht, werden bereits erfolgreich geschriebene Teilkopien physisch wieder gelöscht (kein Verwaisen von Bytes ohne zugehörige Metadaten), die fehlgeschlagenen Ziele bleiben als Diagnose-Eintrag (`status=failed`, `last_error`) in `object_copy` bestehen.
-- **"Alarmierung" als Log-Zeile statt Notification**: Das Konzept fordert bei dauerhaftem Fehlschlag eines Ziels eine Alarmierung. Da der Notification Service erst in Phase 6 entsteht, wird nach `max_replication_attempts` erfolglosen Versuchen stattdessen eine strukturierte Error-Log-Zeile ausgegeben (`status=failed_permanent`) — leicht durch eine echte Benachrichtigung zu ersetzen, sobald der Notification Service existiert.
+- **Two targets instead of a target set**: The concept gives as an example
+  "2× S3 from different providers + 1× NFS". A generic target list would
+  require multiple instantiation of the same backend type, each with its own
+  configuration (multiple S3 endpoints/buckets/credentials) — no
+  configuration structure for that exists yet (`Settings` is currently a flat
+  model per service, not a list of nested backend configs). With the two
+  backend implementations that actually exist (`local`, `s3`), the required
+  core semantics (quorum, primary-synchronous/secondary-asynchronous, read
+  fallback, fixity per copy) can already be fully and genuinely demonstrated
+  end-to-end, without building a significantly larger configuration layer
+  upfront. A real n-target list is a later, additive extension (new Settings
+  structure + adjusting `build_backends`/`resolve_targets`), not a break of
+  the interfaces built now (`replication.py` already works generically with
+  `dict[str, StorageBackend]` + `list[str]`).
+- **Retry queue per endpoint instead of a background task**: P1-S1 already
+  made a deliberate decision against mutating background sweeps (Registry
+  Service: outage detection is computed on read). The same reasoning applies
+  here in the reverse direction — an in-process `asyncio` background task for
+  replication would not be deterministically testable (timing-dependent) and
+  would have no clearly defined lifecycle (process restart mid-replication,
+  no visible progress). An explicit endpoint is fully deterministically
+  testable, can be triggered manually or by an external scheduler, and fits
+  conceptually with the Plugin Orchestration Service already planned for
+  Phase 10 (schedule-aware placement of exactly this kind of periodic job,
+  3.8).
+- **Best-effort rollback on quorum failure**: If the configured quorum is not
+  reached, partial copies already written successfully are physically
+  deleted again (no orphaned bytes without associated metadata); the failed
+  targets remain as a diagnostic entry (`status=failed`, `last_error`) in
+  `object_copy`.
+- **"Alerting" as a log line instead of a notification**: The concept
+  requires alerting on the permanent failure of a target. Since the
+  Notification Service does not exist until Phase 6, a structured error log
+  line is emitted instead after `max_replication_attempts` unsuccessful
+  attempts (`status=failed_permanent`) — easily replaced by a real
+  notification once the Notification Service exists.
 
-## Konsequenzen
+## Consequences
 
-- Ein drittes/viertes Redundanzziel (z. B. zwei S3-Provider gleichzeitig) erfordert eine Erweiterung von `Settings` auf eine echte Liste konfigurierter Backend-Instanzen (Typ + Zugangsdaten je Eintrag) sowie eine entsprechende Anpassung von `resolve_targets`/`build_backends` — die Kernlogik in `replication.py` muss dafür nicht geändert werden, da sie bereits mit beliebig vielen benannten Zielen arbeitet.
-- Rebalancing beim Hinzufügen/Entfernen eines Ziels aus einem laufenden Ziel-Set (Konzept 3.6, "technisch verwandt mit dem Migrationsprozess aus 7.2") ist bewusst nicht Teil dieser Session — es setzt eine n-Ziele-Konfiguration voraus und ist eigenständig groß genug für eine spätere Session.
-- Die Konfiguration ist aktuell service-weit (ein Schreibstrategie-/Ziel-Paar für den gesamten Storage Service), nicht wie im Konzept vorgesehen je Objekttyp/Ordner überschreibbar — eine Override-Ebene bräuchte eine Verbindung zwischen Object-Type/Folder Service und Storage Service, die heute nicht existiert.
-- Ohne einen externen Scheduler bleibt `POST /replication/process-pending` bis zur Einführung eines solchen (frühestens Phase 10, Plugin Orchestration Service) ein manuell/extern anzustoßender Vorgang — Sekundärkopien bleiben bis dahin "pending", falls niemand den Endpunkt aufruft.
+- A third/fourth redundancy target (e.g. two S3 providers simultaneously)
+  requires extending `Settings` to a real list of configured backend
+  instances (type + credentials per entry) as well as a corresponding
+  adjustment to `resolve_targets`/`build_backends` — the core logic in
+  `replication.py` does not need to change for this, since it already works
+  with arbitrarily many named targets.
+- Rebalancing when adding/removing a target from a running target set
+  (Concept 3.6, "technically related to the migration process from 7.2") is
+  deliberately not part of this session — it presupposes an n-target
+  configuration and is independently large enough for a later session.
+- The configuration is currently service-wide (one write-strategy/target pair
+  for the entire Storage Service), not overridable per object type/folder as
+  envisioned in the concept — an override layer would need a connection
+  between Object-Type/Folder Service and Storage Service that does not exist
+  today.
+- Without an external scheduler, `POST /replication/process-pending` remains,
+  until one is introduced (Phase 10 at the earliest, Plugin Orchestration
+  Service), a manually/externally triggered operation — secondary copies
+  remain "pending" until then if nobody calls the endpoint.

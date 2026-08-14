@@ -1,30 +1,30 @@
 # process-designer
 
-Eigenständige Frontend-Anwendung für die grafische BPMN-2.0-Modellierung
-(Konzept 7.1/8) — **nicht** Teil der Admin-UI. Modelliert Prozessdefinitionen
-über [`bpmn-js`](https://bpmn.io) gegen die Workflow Engine aus
-`workflow-service` (P6-S1), inkl. eines eigenen Properties-Panel-Providers für
-den Signature Task (3.10, P6-S7). Reines Client-Side-Rendering, kein
-Node-Prozess in Produktion (identisches Muster wie `apps/user-ui`, siehe
+Standalone frontend application for graphical BPMN 2.0 modeling
+(Concept 7.1/8) — **not** part of the admin UI. Models process definitions
+via [`bpmn-js`](https://bpmn.io) against the workflow engine from
+`workflow-service` (P6-S1), including its own properties panel provider for
+the Signature Task (3.10, P6-S7). Pure client-side rendering, no
+Node process in production (identical pattern to `apps/user-ui`, see
 [ADR 0006](../../docs/adr/0006-user-ui-static-export-spa.md)).
 
-Ausführliche Doku: [`docs/services/process-designer.md`](../../docs/services/process-designer.md).
-Bibliotheksentscheidung (kein `bpmn-js-spiffworkflow`): [ADR 0026](../../docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md).
+Detailed documentation: [`docs/services/process-designer.md`](../../docs/services/process-designer.md).
+Library decision (not `bpmn-js-spiffworkflow`): [ADR 0026](../../docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md).
 
-## Lokale Entwicklung
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Erwartet ein laufendes Gateway auf `http://localhost:8009`:
+Expects a running gateway at `http://localhost:8009`:
 
 ```bash
 cd ../../infra && docker compose up -d
 ```
 
-## Build (statischer Export)
+## Build (static export)
 
 ```bash
 npm run build

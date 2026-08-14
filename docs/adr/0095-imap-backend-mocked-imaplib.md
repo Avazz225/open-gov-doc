@@ -1,51 +1,50 @@
-# 0095 — IMAP-Backend: Test gegen gemocktes `imaplib`, nicht gegen einen echten IMAP-Server
+# 0095 — IMAP backend: tested against mocked `imaplib`, not against a real IMAP server
 
-**Status:** akzeptiert (Post-Roadmap Phase 24 Session 3)
-**Kontext:** P24-S3, betrifft `mail-connector`
+**Status:** accepted (Post-roadmap Phase 24 Session 3)
+**Context:** P24-S3, affects `mail-connector`
 
-## Entscheidung
+## Decision
 
-`ImapBackend` (`backends/imap_backend.py`) wird in `tests/test_imap_backend.py` gegen eine an der
-`imaplib`-Grenze gemockte Fake-Implementierung getestet, NICHT gegen einen echten, im Compose-Stack
-laufenden IMAP-Server — abweichend von der projektweit sonst durchgehend gelebten Konvention "gegen den
-echten Nachbar-Dienst testen, kein Mocking" (siehe `Pop3Backend`, das bereits gegen den echten
-`mailpit`-Container getestet wird, und `docs/services/mail-connector.md`s Tests-Sektion).
+`ImapBackend` (`backends/imap_backend.py`) is tested in `tests/test_imap_backend.py` against a fake
+implementation mocked at the `imaplib` boundary, NOT against a real IMAP server running in the compose
+stack — a departure from the convention otherwise consistently followed across this project, "test
+against the real neighboring service, no mocking" (see `Pop3Backend`, which is already tested against the
+real `mailpit` container, and `docs/services/mail-connector.md`'s tests section).
 
-## Begründung
+## Rationale
 
-- **`mailpit` (der in diesem Projekt als Dev-Mailserver etablierte Container, Stand `v1.30.6`) hat
-  keinen IMAP-Server.** Verifiziert über `docker run --rm axllent/mailpit:v1.30.6 --help`: die Ausgabe
-  listet `--pop3`/`--pop3-auth-file`/`--pop3-tls-*` (den bereits von `Pop3Backend` genutzten Server),
-  aber keinerlei `--imap*`-Flag. Anders als beim POP3-Fall (mailpit v1.15 ergänzte einen POP3-Server
-  genau für diesen Selbst-Loopback-Zweck) gibt es hier keinen strukturellen Gegenpart.
-- **Ein neuer, IMAP-fähiger Container wäre eine Änderung an `infra/docker-compose.yml`** — dieser
-  Session-Zuschnitt (P24-S3, eine von vier parallel arbeitenden Phase-24-Sessions) ist explizit auf
-  `services/mail-connector/` und dessen eigene Doku-Datei begrenzt, um Merge-Konflikte zwischen den vier
-  parallelen Sessions zu vermeiden. Einen dritten Mail-Test-Container (z. B. `greenmail`/`dovecot`)
-  dauerhaft ins gemeinsame Compose-Setup einzuführen, gehört nicht in eine einzelne, isoliert
-  überprüfbare Session dieses Zuschnitts.
-- **Kein bestehendes Muster für Test-lokale Ad-hoc-Container**: keine der `conftest.py`-Dateien in
-  diesem Projekt startet eigenständig Docker-Container aus einer Pytest-Fixture heraus (Stichprobe über
-  alle `services/*/tests/conftest.py`) — ein solches Muster hier neu einzuführen, nur für einen
-  einzelnen Test, wäre eine eigene, nicht triviale Testinfrastruktur-Entscheidung.
-- Die Fake-Implementierung bildet die tatsächlich von `ImapBackend` genutzte `imaplib`-Teilmenge
+- **`mailpit` (the dev mail server container established in this project, at `v1.30.6`) has no IMAP
+  server.** Verified via `docker run --rm axllent/mailpit:v1.30.6 --help`: the output lists
+  `--pop3`/`--pop3-auth-file`/`--pop3-tls-*` (the server already used by `Pop3Backend`), but no `--imap*`
+  flag whatsoever. Unlike the POP3 case (mailpit v1.15 added a POP3 server for exactly this self-loopback
+  purpose), there is no structural counterpart here.
+- **A new, IMAP-capable container would be a change to `infra/docker-compose.yml`** — this session's
+  scope (P24-S3, one of four parallel-running Phase 24 sessions) is explicitly limited to
+  `services/mail-connector/` and its own doc file, in order to avoid merge conflicts between the four
+  parallel sessions. Permanently introducing a third mail test container (e.g. `greenmail`/`dovecot`)
+  into the shared compose setup doesn't belong in a single, isolated, independently reviewable session of
+  this scope.
+- **No existing pattern for test-local ad-hoc containers**: none of the `conftest.py` files in this
+  project independently spin up Docker containers from a pytest fixture (spot-checked across all
+  `services/*/tests/conftest.py`) — introducing such a pattern here, just for a single test, would be its
+  own, non-trivial test infrastructure decision.
+- The fake implementation replicates the subset of `imaplib` actually used by `ImapBackend`
   (`login`/`status`/`select(..., readonly=True)`/`uid("search", ...)`/`uid("fetch", ...)`/`close`/
-  `logout`) exakt in ihrer realen RFC-3501-Antwortform nach (insbesondere `uid("fetch", ...)`s
-  Tupel-in-Liste-Struktur), nicht nur ein generisches Duck-Typing — reduziert das Risiko, dass der Mock
-  ein Verhalten vortäuscht, das ein echter Server nicht hätte.
+  `logout`) exactly in its real RFC 3501 response shape (in particular `uid("fetch", ...)`'s
+  tuple-in-list structure), not just generic duck typing — reducing the risk of the mock faking behavior
+  a real server wouldn't actually have.
 
-## Konsequenzen
+## Consequences
 
-- Die Tests beweisen, dass `ImapBackend` korrekt mit `imaplib`s Antwortformen umgeht (Parsing von
-  `UIDVALIDITY`/UID-Listen/Fetch-Tupeln, `BODY.PEEK[]` statt `RFC822` zur Vermeidung von
-  `\Seen`-Seiteneffekten, `readonly=True` beim `select`) — sie beweisen NICHT, dass ein bestimmter
-  echter IMAP-Server (Dovecot, Exchange, Gmail, ...) exakt dieselben Antwortformen liefert. Für
-  `poplib`/`Pop3Backend` entfällt dieses Restrisiko, weil dort echt gegen `mailpit` getestet wird.
-- Die Live-Verifikation dieser Session (siehe PROGRESS.md) schließt diese Lücke bestmöglich: ein
-  temporärer, NICHT in `infra/docker-compose.yml` eingetragener `greenmail`-Container (nur für die Dauer
-  der manuellen Verifikation, danach entfernt) bestätigt den vollständigen Empfangspfad gegen einen
-  echten IMAP-Server.
-- **Offener Punkt für eine spätere Session**: sollte `mail-connector` produktiv gegen IMAP betrieben
-  werden, wäre ein dauerhafter IMAP-Testserver im Compose-Stack (analog zu mailpits POP3-Server) eine
-  sinnvolle Ergänzung — dann ließe sich `test_imap_backend.py` durch echte End-zu-Ende-Tests ersetzen
-  oder ergänzen, exakt wie bei `Pop3Backend`.
+- The tests prove that `ImapBackend` correctly handles `imaplib`'s response shapes (parsing of
+  `UIDVALIDITY`/UID lists/fetch tuples, `BODY.PEEK[]` instead of `RFC822` to avoid `\Seen` side effects,
+  `readonly=True` on `select`) — they do NOT prove that any specific real IMAP server (Dovecot, Exchange,
+  Gmail, ...) delivers exactly the same response shapes. For `poplib`/`Pop3Backend` this residual risk
+  doesn't apply, because that one is tested for real against `mailpit`.
+- This session's live verification (see PROGRESS.md) closes this gap as best as possible: a temporary
+  `greenmail` container, NOT entered into `infra/docker-compose.yml` (only for the duration of the manual
+  verification, removed afterward), confirmed the full receive path against a real IMAP server.
+- **Open point for a future session**: should `mail-connector` be operated against IMAP in production, a
+  permanent IMAP test server in the compose stack (analogous to mailpit's POP3 server) would be a
+  worthwhile addition — `test_imap_backend.py` could then be replaced or supplemented with real
+  end-to-end tests, exactly as with `Pop3Backend`.

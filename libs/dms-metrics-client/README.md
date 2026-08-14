@@ -1,24 +1,24 @@
 # dms-metrics-client
 
-Sensor-Konzept (Konzept 10.1, P11-S1): konfigurierbare, kostenbewusste Prometheus-Sensoren für DMS-Services.
+Sensor concept (Concept 10.1, P11-S1): configurable, cost-aware Prometheus sensors for DMS services.
 
-Ein Sensor ist ein `SensorSpec` (Name/Gruppe/Kosten/Beschreibung), registriert über eine
-`SensorRegistry`, die daraus `Guarded*`-Wrapper (`GuardedCounter`/`GuardedGauge`/`GuardedHistogram`)
-um `prometheus_client`-Objekte baut. Ist ein Sensor deaktiviert, unterbleibt die Erfassung
-**vollständig** (kein `inc()`/`observe()`/`set()` auf dem zugrunde liegenden Prometheus-Objekt,
-keine teure Datenbankabfrage im periodischen Sampler) — nicht nur die Sichtbarkeit im Export.
+A sensor is a `SensorSpec` (name/group/cost/description), registered via a
+`SensorRegistry`, which builds `Guarded*` wrappers (`GuardedCounter`/`GuardedGauge`/`GuardedHistogram`)
+around `prometheus_client` objects from it. If a sensor is disabled, collection is
+**entirely** skipped (no `inc()`/`observe()`/`set()` on the underlying Prometheus object,
+no expensive database query in the periodic sampler) — not just visibility in the export.
 
-Der Aktivierungsstatus kommt von einer `is_active(name) -> bool`-Funktion, die die
-`SensorRegistry` beim Bau erhält:
+The activation status comes from an `is_active(name) -> bool` function that the
+`SensorRegistry` receives at build time:
 
-- Für entfernte Services: `SensorConfigClient` pollt `monitoring-service`s `GET /sensor-config`
-  (TTL-Cache, Default 15s, fail-open auf "alles aktiv").
-- `run_gauge_sampler_loop()` ist ein generischer Poll-Loop für "aktueller Zustand"-Gauges
-  (z. B. "wie viele aktive Dokumente gibt es gerade") — ruft die teure Berechnung nur für
-  aktuell aktive Sensoren auf.
-- `metrics_payload(registry)` liefert rohe Bytes + Content-Type im Prometheus-Exposition-Format
-  (kein FastAPI-Abhängigkeit in dieser Lib — der Service baut die `Response` selbst).
+- For remote services: `SensorConfigClient` polls `monitoring-service`'s `GET /sensor-config`
+  (TTL cache, default 15s, fails open to "everything active").
+- `run_gauge_sampler_loop()` is a generic poll loop for "current state" gauges
+  (e.g. "how many active documents are there right now") — invokes the expensive computation
+  only for currently active sensors.
+- `metrics_payload(registry)` returns raw bytes + content type in Prometheus exposition format
+  (no FastAPI dependency in this lib — the service builds the `Response` itself).
 
-Siehe `docs/operations/monitoring.md` für das Gesamtbild (Scrape-Proxy über `monitoring-service`,
-Sensor-Registry, Konfigurationsverwaltung) und `services/registry-service`/`services/document-service`
-für die zwei Piloten, die diese Lib nutzen.
+See `docs/operations/monitoring.md` for the overall picture (scrape proxy via `monitoring-service`,
+sensor registry, configuration management) and `services/registry-service`/`services/document-service`
+for the two pilots that use this lib.

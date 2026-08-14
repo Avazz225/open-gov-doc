@@ -1,12 +1,12 @@
 # dms-common
 
-Geteilte technische Basis für alle DMS-Services (keine Fachlogik):
+Shared technical foundation for all DMS services (no business logic):
 
-- `settings.BaseServiceSettings` — pydantic-settings-Basis (Env-Prefix `DMS_`); jeder Service leitet ab und setzt `service_name`. Seit P13-S1 zusätzlich `installation_id`/`installation_display_name` (3a) — ein gemeinsamer Wert für die gesamte Installation (`DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME`), z. B. von `registry-service`s `GET /installation` exponiert und von `license-service` zur Lizenzbindung genutzt.
-- `logging.configure_logging(settings)` — strukturiertes JSON-Logging nach stdout, reichert jeden Eintrag automatisch mit `service_name`/`environment` an.
-- `otel.configure_tracing(settings, exporter)` — globaler TracerProvider; der Exporter (Console lokal, OTLP ab Phase 11) wird bewusst vom Aufrufer übergeben.
+- `settings.BaseServiceSettings` — pydantic-settings base (env prefix `DMS_`); each service derives from it and sets `service_name`. Since P13-S1 also `installation_id`/`installation_display_name` (3a) — a shared value for the entire installation (`DMS_INSTALLATION_ID`/`DMS_INSTALLATION_DISPLAY_NAME`), e.g. exposed by `registry-service`'s `GET /installation` and used by `license-service` for license binding.
+- `logging.configure_logging(settings)` — structured JSON logging to stdout, automatically enriches each entry with `service_name`/`environment`.
+- `otel.configure_tracing(settings, exporter)` — global TracerProvider; the exporter (console locally, OTLP from Phase 11 onward) is deliberately passed in by the caller.
 
-## Nutzung
+## Usage
 
 ```python
 from dms_common import BaseServiceSettings, configure_logging

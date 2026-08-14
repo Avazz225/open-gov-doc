@@ -1,88 +1,88 @@
-# 0062 — SSO/automatischer Login: OIDC-Redirect-Flow mit optionalem Kerberos/SPNEGO als Erweiterung
+# 0062 — SSO/automatic login: OIDC redirect flow with optional Kerberos/SPNEGO as an extension
 
-**Status:** akzeptiert
-**Kontext:** Ad-hoc Post-Roadmap-Feature (Nutzeranfrage nach Abschluss der 107-Session-Roadmap), betrifft
+**Status:** accepted
+**Context:** Ad-hoc post-roadmap feature (user request after completion of the 107-session roadmap), affects
 `auth-service`, `gateway-service`, `user-ui`
 
-## Entscheidung
+## Decision
 
-Optional, installationsweit aktivierbar (`GET/PUT /sso-config`, gleiches Singleton-Zeilen-Muster wie
-`ShareLinkConfig`, gegated auf `admin.user_management`). Ist SSO aktiv, leitet `login/page.tsx` den
-Browser VOR dem Anzeigen des Passwort-Formulars zu Keycloaks eigener Login-Seite um (`GET
-/oidc/authorize`). Besitzt der Rechner ein gültiges Kerberos-Ticket UND ist Kerberos konfiguriert, meldet
-Keycloaks SPNEGO-Mechanismus automatisch an, ohne dass ein Formular je sichtbar wird; andernfalls (der
-Normalfall in dieser Sandbox) zeigt Keycloak selbst sein gehostetes Formular - kein Bruch, reiner
-Fallback. Der Rückweg (`POST /oidc/callback`) tauscht den Code serverseitig gegen Tokens im bereits
-bestehenden `TokenResponse`-Format, sodass sich am Frontend-Session-Handling nichts ändert.
+Optional, installation-wide togglable (`GET/PUT /sso-config`, same singleton-row pattern as
+`ShareLinkConfig`, gated on `admin.user_management`). If SSO is active, `login/page.tsx` redirects
+the browser BEFORE showing the password form to Keycloak's own login page (`GET
+/oidc/authorize`). If the machine holds a valid Kerberos ticket AND Kerberos is configured, Keycloak's
+SPNEGO mechanism logs in automatically without a form ever being shown; otherwise (the normal case
+in this sandbox) Keycloak itself shows its hosted form - no breakage, pure fallback. The return leg
+(`POST /oidc/callback`) exchanges the code server-side for tokens in the already existing
+`TokenResponse` format, so nothing changes in the frontend's session handling.
 
-Drei Bausteine:
+Three building blocks:
 
-1. **`_ensure_client_updated` (bootstrap.py, läuft bei JEDEM Start, nicht nur Ersteinrichtung)** - behebt
-   eine bereits im Code selbst dokumentierte Lücke: `admin.create_client(..., skip_exists=True)`
-   aktualisiert einen bereits existierenden Client nie. Aktiviert `standardFlowEnabled` und registriert
-   die Redirect-URIs (`{origin}/login/callback/` je erlaubtem Origin,
-   `sso_redirect_uri_allowed_origins`). Läuft UNABHÄNGIG von Kerberos - das ist der Teil, der den
-   Redirect-zu-Keycloaks-eigenem-Formular-Fallback überhaupt erst ermöglicht.
-2. **`_ensure_kerberos` (bootstrap.py, bedingt)** - nur wenn `kerberos_enabled` UND alle drei
-   Kerberos-Einstellungen (`kerberos_realm`/`kerberos_server_principal`/`kerberos_keytab_path`) gesetzt
-   sind. Dupliziert Keycloaks eingebauten `browser`-Flow (der bereits eine standardmäßig deaktivierte
-   `auth-spnego`-Ausführung mitbringt) zu `dms-browser-kerberos`, setzt deren `requirement` auf
-   `ALTERNATIVE`, verweist den Realm per `browserFlow` darauf und legt eine Kerberos-User-Federation-
-   Komponente an (`config`-Werte als Einzelelement-Listen - Keycloaks Component-API-Eigenheit).
+1. **`_ensure_client_updated` (bootstrap.py, runs on EVERY startup, not just initial setup)** - fixes
+   a gap already documented in the code itself: `admin.create_client(..., skip_exists=True)`
+   never updates an already-existing client. Enables `standardFlowEnabled` and registers the
+   redirect URIs (`{origin}/login/callback/` per allowed origin,
+   `sso_redirect_uri_allowed_origins`). Runs INDEPENDENTLY of Kerberos - this is the part that
+   makes the redirect-to-Keycloak's-own-form fallback possible in the first place.
+2. **`_ensure_kerberos` (bootstrap.py, conditional)** - only if `kerberos_enabled` AND all three
+   Kerberos settings (`kerberos_realm`/`kerberos_server_principal`/`kerberos_keytab_path`) are set.
+   Duplicates Keycloak's built-in `browser` flow (which already ships a by-default-disabled
+   `auth-spnego` execution) into `dms-browser-kerberos`, sets its `requirement` to
+   `ALTERNATIVE`, points the realm's `browserFlow` at it, and creates a Kerberos user federation
+   component (`config` values as single-element lists - a quirk of Keycloak's component API).
 3. **`GET /oidc/authorize` / `POST /oidc/callback` / `GET+PUT /sso-config` / `POST /logout`
-   (auth-service, öffentlich bis auf `PUT /sso-config`)** - `redirect_uri` wird gegen eine feste
-   Origin-Allow-Liste geprüft (Open-Redirect-Absicherung, gleiches Prinzip wie gateway-services
-   `cors_allowed_origins`). `POST /logout` ist ein komplett neuer Endpunkt - vorher gab es GAR KEINEN
-   serverseitigen Logout-Mechanismus, "Abmelden" löschte nur lokale Tokens.
+   (auth-service, public except for `PUT /sso-config`)** - `redirect_uri` is checked against a fixed
+   origin allow-list (open-redirect protection, same principle as gateway-service's
+   `cors_allowed_origins`). `POST /logout` is a completely new endpoint - previously there was NO
+   server-side logout mechanism at all, "log out" only cleared local tokens.
 
-## Begründung
+## Rationale
 
-- **Warum Umfang "vollständig umsetzen, mit bekannter Testlücke" statt nur OIDC-Redirect ohne
-  Kerberos**: mit dem Nutzer abgestimmt (Empfehlung angenommen) - Kerberos/SPNEGO ist der eigentliche
-  "automatisch mit lokalem User eingeloggt"-Mechanismus aus der Anfrage, der reine OIDC-Redirect allein
-  würde diesen Kernwunsch nicht erfüllen. Da diese Sandbox keinen echten Domain-Controller/KDC besitzt,
-  ist die tatsächliche automatische Anmeldung über ein echtes Ticket hier nicht beweisbar - das
-  bestehende Passwort-Formular bleibt vollständig als Fallback erhalten, kein Nutzer wird durch die
-  Konfiguration ausgesperrt.
-- **Warum der Code-Austausch serverseitig in `auth-service` läuft, kein PKCE**: `dms-api` ist ein
-  confidential Client (hält `client_secret`, `directAccessGrantsEnabled` bereits seit jeher für das
-  bestehende ROPC-Login) - der Austausch kann und soll deshalb serverseitig erfolgen, PKCE ist für
-  confidential Clients mit serverseitigem Austausch nicht nötig. `state` allein genügt als
-  CSRF-/Replay-Schutz (in `sessionStorage` gehalten, gegen den von Keycloak zurückgegebenen Wert
-  geprüft).
-- **Warum `POST /oidc/callback` die Wartungsmodus-Sperre ERST NACH dem Code-Austausch prüft** (anders als
-  `/login`, das VORHER prüft): der Benutzername ist vor dem Austausch nicht bekannt (er steckt nur im
-  `code`, nicht im Request-Body) - dies wurde als echte, sonst existierende Lücke selbst identifiziert
-  (SSO hätte sonst die Not-Shutdown-Sperre komplett umgangen) und behoben: nach dem Austausch wird der
-  Access-Token per `_validator.validate()` dekodiert und `preferred_username` gegen
-  `superuser.SUPERUSER_USERNAME` geprüft; bei aktivem Wartungsmodus und Nicht-Superuser werden die frisch
-  ausgestellten Tokens verworfen statt zurückgegeben.
-- **Warum `POST /logout` neu eingeführt wurde**: ohne echtes serverseitiges Sitzungsende bliebe Keycloaks
-  eigene SSO-Sitzung nach einem lokalen "Abmelden" bestehen - ein SPNEGO-fähiger Browser (oder einer mit
-  noch gültigem Keycloak-Session-Cookie) würde sich beim nächsten Besuch sofort wieder automatisch
-  anmelden. Ruft Keycloaks `.../protocol/openid-connect/logout` mit dem Refresh-Token auf (kein
-  `id_token_hint` nötig, da `TokenResponse` kein ID-Token führt, kein Schema-Umbau nötig).
-- **Warum zunächst nur `user-ui`**: die übrigen fünf Apps teilen zwar dieselbe `auth-context.tsx`-Struktur
-  kopiert, aber ohne gemeinsames Paket - eine Ausweitung ist mit demselben Muster mechanisch, aber
-  bewusst nicht Teil dieser Ad-hoc-Session (kein expliziter Nutzerwunsch für die übrigen Apps).
+- **Why the scope is "implement fully, with a known test gap" rather than just an OIDC redirect
+  without Kerberos**: agreed with the user (recommendation accepted) - Kerberos/SPNEGO is the actual
+  "automatically logged in with local user" mechanism from the request; a plain OIDC redirect alone
+  would not fulfil this core requirement. Since this sandbox has no real domain controller/KDC,
+  actual automatic login via a real ticket cannot be proven here - the existing password form
+  remains fully in place as a fallback, no user is locked out by the configuration.
+- **Why the code exchange runs server-side in `auth-service`, no PKCE**: `dms-api` is a
+  confidential client (holds `client_secret`, `directAccessGrantsEnabled` has been in place since
+  the existing ROPC login) - the exchange can and should therefore happen server-side; PKCE is not
+  necessary for confidential clients with server-side exchange. `state` alone suffices as
+  CSRF/replay protection (held in `sessionStorage`, checked against the value returned by
+  Keycloak).
+- **Why `POST /oidc/callback` checks the maintenance-mode lock ONLY AFTER the code exchange** (unlike
+  `/login`, which checks BEFORE): the username is not known before the exchange (it's only embedded
+  in the `code`, not in the request body) - this was identified as a real, otherwise existing gap
+  (SSO would otherwise completely bypass the emergency-shutdown lock) and fixed: after the exchange,
+  the access token is decoded via `_validator.validate()` and `preferred_username` is checked against
+  `superuser.SUPERUSER_USERNAME`; if maintenance mode is active and the user is not the superuser, the
+  freshly issued tokens are discarded instead of returned.
+- **Why `POST /logout` was newly introduced**: without a real server-side session end, Keycloak's
+  own SSO session would remain after a local "log out" - a SPNEGO-capable browser (or one with a
+  still-valid Keycloak session cookie) would log in automatically again on the next visit. Calls
+  Keycloak's `.../protocol/openid-connect/logout` with the refresh token (no `id_token_hint` needed,
+  since `TokenResponse` carries no ID token, no schema change needed).
+- **Why `user-ui` only for now**: the remaining five apps do share the same `auth-context.tsx`
+  structure, copied, but without a shared package - extending this is mechanical with the same
+  pattern but deliberately not part of this ad-hoc session (no explicit user request for the other
+  apps).
 
-## Konsequenzen
+## Consequences
 
-- **Neue `keycloak_public_base_url`-Einstellung (`DMS_KEYCLOAK_PUBLIC_BASE_URL`)** - selbst identifizierter Bug bei der Umsetzung: `auth-service` spricht Keycloak im Compose-Stack intern über `http://keycloak:8080` an (`DMS_KEYCLOAK_BASE_URL`), dieser Hostname ist für den BROWSER, der zu `GET /oidc/authorize`s `authorization_url` navigieren soll, aber nicht auflösbar. Der bereits vor diesem Feature in `docs/services/auth-service.md` dokumentierte "Offene Punkt" ("Issuer-Hostname-Konsistenz ... sobald ein browserbasierter Redirect-Flow hinzukommt") wurde damit real - behoben über eine separate, nur von `_authorization_endpoint` genutzte öffentliche Basis-URL (`http://localhost:8080` im Compose-Stack), Token-/Logout-Endpunkte bleiben auf der internen URL.
-- **`auth-service` bekommt sein zweites echtes Postgres-Schema-Objekt** (`SsoConfig`, nach
-  `FederationIdentity` seit P15-S4) - gleiches `create_all`-Bootstrapping, kein Alembic in diesem Projekt.
-- **`gateway-service`s `public_routes`/`maintenance_mode_allowed_routes`** um
-  `auth-service:oidc/authorize`/`auth-service:oidc/callback` ergänzt (exaktes String-Match, kein
-  Wildcard, existierendes Muster) - beide Endpunkte laufen vor jeder Token-Prüfung, analog zu `/login`.
-- **Nicht in dieser Sandbox live verifizierbar**: das eigentliche automatische Einloggen über ein echtes
-  Kerberos-Ticket (kein Domain-Controller/KDC vorhanden) - dokumentierte, mit dem Nutzer abgestimmte
-  Grenze. **Vollständig verifizierbar**: die Bootstrap-Konfiguration gegen das echte laufende Keycloak,
-  der komplette Redirect+Callback-Fluss über Keycloaks eigenes gehostetes Formular (der Fallback-Pfad,
-  den die meisten Installationen zuerst durchlaufen), sauberes Zurückfallen bei fehlender/unvollständiger
-  Kerberos-Konfiguration sowie ein echtes serverseitiges Session-Ende über `/logout` - alle Teil der neuen
-  `test_bootstrap.py`-/`test_sso_flow.py`-Tests.
-- **Vor der `_ensure_kerberos`-Umsetzung offen gebliebener, noch zu bestätigender Punkt**: dass
-  Keycloaks eingebauter `browser`-Flow die `auth-spnego`-Ausführung tatsächlich (deaktiviert) bereits
-  mitbringt, wie hier basierend auf etabliertem Keycloak-Domänenwissen angenommen - einmalig gegen das
-  echte laufende Keycloak zu verifizieren, sobald der Stack wieder erreichbar ist (siehe
-  `test_kerberos_enabled_creates_flow_execution_and_component`, das genau das mitprüft).
+- **New `keycloak_public_base_url` setting (`DMS_KEYCLOAK_PUBLIC_BASE_URL`)** - a bug identified during implementation: `auth-service` talks to Keycloak within the compose stack internally via `http://keycloak:8080` (`DMS_KEYCLOAK_BASE_URL`); this hostname is not resolvable, however, for the BROWSER that needs to navigate to `GET /oidc/authorize`'s `authorization_url`. The "Open Point" already documented in `docs/services/auth-service.md` before this feature ("issuer hostname consistency ... once a browser-based redirect flow is added") thereby became real - fixed via a separate public base URL used only by `_authorization_endpoint` (`http://localhost:8080` in the compose stack); token/logout endpoints remain on the internal URL.
+- **`auth-service` gets its second real Postgres schema object** (`SsoConfig`, after
+  `FederationIdentity` since P15-S4) - same `create_all` bootstrapping, no Alembic in this project.
+- **`gateway-service`'s `public_routes`/`maintenance_mode_allowed_routes`** extended with
+  `auth-service:oidc/authorize`/`auth-service:oidc/callback` (exact string match, no
+  wildcard, existing pattern) - both endpoints run ahead of any token check, analogous to `/login`.
+- **Not verifiable live in this sandbox**: actually logging in automatically via a real
+  Kerberos ticket (no domain controller/KDC present) - a documented limitation agreed with the
+  user. **Fully verifiable**: the bootstrap configuration against the real running Keycloak,
+  the complete redirect+callback flow through Keycloak's own hosted form (the fallback path
+  most installations will go through first), clean fallback for missing/incomplete
+  Kerberos configuration, and a real server-side session end via `/logout` - all part of the new
+  `test_bootstrap.py`/`test_sso_flow.py` tests.
+- **Point left open before the `_ensure_kerberos` implementation, still to be confirmed**: that
+  Keycloak's built-in `browser` flow actually already ships the `auth-spnego` execution
+  (disabled), as assumed here based on established Keycloak domain knowledge - to be verified once
+  against the real running Keycloak once the stack is reachable again (see
+  `test_kerberos_enabled_creates_flow_execution_and_component`, which checks exactly that).

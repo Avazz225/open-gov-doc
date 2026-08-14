@@ -1,75 +1,74 @@
-# 0067 — "everyone"-Gruppe in permission-service
+# 0067 — "everyone" group in permission-service
 
-**Status:** akzeptiert (Session 2 von 11, siehe Phase 19 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 19 Session 2, betrifft `permission-service`
+**Status:** accepted (session 2 of 11, see phase 19 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap phase 19 session 2, affects `permission-service`
 
-## Entscheidung
+## Decision
 
-`RoleAssignment.principal_type` kannte bislang nur den Kommentar `# "user" | "group"` als Absichtserklärung
-— `"group"` wurde von `_collect_effective_roles` nie ausgewertet, ein solcher Wert war faktisch totes
-Schema. Diese Session macht `principal_type="group"` für genau einen reservierten Wert
-(`principal_id="everyone"`) zu echter Funktion:
+`RoleAssignment.principal_type` previously only had the comment `# "user" | "group"` as a stated
+intent — `"group"` was never evaluated by `_collect_effective_roles`, such a value was effectively
+dead schema. This session turns `principal_type="group"` for exactly one reserved value
+(`principal_id="everyone"`) into real functionality:
 
-1. **`repository._collect_effective_roles`** prüft an jedem durchlaufenen Resource-Knoten zusätzlich zur
-   bisherigen `RoleAssignment.principal_id == principal_id`-Bedingung, ob eine
-   `(principal_type="group", principal_id="everyone")`-Zuweisung existiert — per `or_`/`and_`-Erweiterung
-   der bestehenden Query, keine zweite Abfrage. Jeder Aufrufer (unabhängig von seiner eigenen
-   `principal_id`) gilt damit implizit als Mitglied der "everyone"-Gruppe.
-2. **Neue `repository.ensure_everyone_role`** (Bootstrap, gleiches Idiom wie `ensure_domain_admin_roles`):
-   legt idempotent eine `Role("everyone", permissions=["users.lookup", "users.directory"])` UND die
-   zugehörige `RoleAssignment(principal_type="group", principal_id="everyone", resource_id=ROOT)` an —
-   anders als Domain-Admin-Rollen hat "everyone" kein externes Konto, dem die Zuweisung sonst zugeordnet
-   würde, daher wird die Zuweisung selbst mitgeseedet, nicht nur die Rolle.
-3. **`schemas.RoleAssignmentCreate`/`RoleAssignmentOut`s `principal_type`** von `str` auf
-   `Literal["user", "group"]` verschärft — passt zum bereits etablierten `Literal`-Stil dieser Datei
-   (`BatchCheckRequest.access_type`, `RoleAssignmentActionResult.status`) und macht "group" als echten,
-   validierten Wert statt eines reinen Kommentars sichtbar. **Nachträglich korrigiert in P19-S3** (ADR
-   0068): `"service"` ist ein drittes, bereits produktiv genutztes `principal_type` (`config-service`,
-   `migration-service`) — das ursprüngliche `Literal["user", "group"]` war zu eng und hätte deren
-   Rollenzuweisungen abgelehnt, siehe ADR 0068 "Ein echter Bug gefunden".
-4. **`main.py`s Lifespan** ruft `ensure_everyone_role` direkt nach `ensure_domain_admin_roles` auf.
+1. **`repository._collect_effective_roles`** now checks, at every resource node traversed, in
+   addition to the existing `RoleAssignment.principal_id == principal_id` condition, whether a
+   `(principal_type="group", principal_id="everyone")` assignment exists — via an `or_`/`and_`
+   extension of the existing query, no second query. Every caller (regardless of its own
+   `principal_id`) is thereby implicitly treated as a member of the "everyone" group.
+2. **New `repository.ensure_everyone_role`** (bootstrap, same idiom as `ensure_domain_admin_roles`):
+   idempotently creates a `Role("everyone", permissions=["users.lookup", "users.directory"])` AND the
+   corresponding `RoleAssignment(principal_type="group", principal_id="everyone", resource_id=ROOT)` —
+   unlike domain admin roles, "everyone" has no external account to which the assignment would
+   otherwise be attributed, so the assignment itself is seeded, not just the role.
+3. **`schemas.RoleAssignmentCreate`/`RoleAssignmentOut`'s `principal_type`** tightened from `str` to
+   `Literal["user", "group"]` — matches the already established `Literal` style of this file
+   (`BatchCheckRequest.access_type`, `RoleAssignmentActionResult.status`) and makes "group" visible
+   as a real, validated value instead of a mere comment. **Subsequently corrected in P19-S3** (ADR
+   0068): `"service"` is a third, already production-used `principal_type` (`config-service`,
+   `migration-service`) — the original `Literal["user", "group"]` was too narrow and would have
+   rejected their role assignments, see ADR 0068 "A real bug found".
+4. **`main.py`'s lifespan** calls `ensure_everyone_role` directly after `ensure_domain_admin_roles`.
 
-## Begründung
+## Rationale
 
-- **Warum genau diese beiden Berechtigungen (`users.lookup`, `users.directory`) geseedet werden**: sie
-  entsprechen den beiden heute in `auth-service` hartkodiert offenen Endpunkten (`GET /users/lookup`,
-  `GET /users/directory` — beide bewusst OHNE `admin.user_management`-Gate, siehe deren Docstrings, "jeder
-  authentifizierte Nutzer darf..."). Diese Session ändert an `auth-service` selbst noch NICHTS (das ist
-  P19-S3) — die Rolle wird hier nur bereits mit den passenden Berechtigungsnamen vorbereitet, damit P19-S3
-  direkt `has_permission(principal_id, "users.lookup")` aufrufen kann, ohne selbst noch eine Rolle
-  anlegen zu müssen.
-- **Warum die Zuweisung direkt gegen die Session statt über den (Vier-Augen-fähigen)
-  `POST /role-assignments`-Endpunkt erfolgt**: `ensure_everyone_role` läuft als Bootstrap-Infrastruktur im
-  Lifespan, exakt wie `ensure_domain_admin_roles` seit jeher - eine Laufzeit-Admin-Aktion ist das nicht,
-  eine Genehmigungspflicht wäre hier unpassend (und würde bei einer frisch installierten Instanz mangels
-  eines zweiten Admins nie erfüllbar sein).
-- **Warum `principal_id="everyone"` statt eines eigenen Gruppen-Konzepts mit mehreren benannten
-  Gruppen**: die Roadmap sieht bewusst nur EINE reservierte Gruppen-Kennung vor ("jeder authentifizierte
-  Principal ist implizit Mitglied") - ein vollständiges Gruppenverwaltungssystem (benutzerdefinierte
-  Gruppen, Mitgliederverwaltung) ist nicht Teil dieser Session und laut Roadmap auch nicht für Phase 19
-  vorgesehen. `principal_type="group"` bleibt als Schema-Feld offen für eine spätere Erweiterung, ohne
-  dass diese Entscheidung sie vorwegnimmt.
-- **Warum keine Änderung an `auth-service` in dieser Session**: die Roadmap trennt bewusst "Mechanismus
-  bauen" (P19-S2) von "bestehenden Bypass tatsächlich ersetzen" (P19-S3) — kleinere, unabhängig
-  überprüfbare Sessions statt einer großen kombinierten Änderung.
+- **Why exactly these two permissions (`users.lookup`, `users.directory`) are seeded**: they
+  correspond to the two endpoints currently hardcoded open in `auth-service` (`GET /users/lookup`,
+  `GET /users/directory` — both deliberately WITHOUT an `admin.user_management` gate, see their
+  docstrings, "every authenticated user may..."). This session does NOT yet change `auth-service`
+  itself (that's P19-S3) — the role is only prepared here with the matching permission names so that
+  P19-S3 can directly call `has_permission(principal_id, "users.lookup")` without having to create a
+  role itself first.
+- **Why the assignment is made directly against the session instead of via the (four-eyes-capable)
+  `POST /role-assignments` endpoint**: `ensure_everyone_role` runs as bootstrap infrastructure in
+  the lifespan, exactly like `ensure_domain_admin_roles` always has - this is not a runtime admin
+  action, an approval requirement would be inappropriate here (and would never be satisfiable on a
+  freshly installed instance for lack of a second admin).
+- **Why `principal_id="everyone"` instead of a dedicated group concept with multiple named
+  groups**: the roadmap deliberately only foresees ONE reserved group identifier ("every
+  authenticated principal is implicitly a member") - a full group management system (custom
+  groups, membership management) is not part of this session and is not planned for phase 19
+  according to the roadmap either. `principal_type="group"` remains open as a schema field for a
+  later extension, without this decision preempting it.
+- **Why no change to `auth-service` in this session**: the roadmap deliberately separates "build
+  the mechanism" (P19-S2) from "actually replace the existing bypass" (P19-S3) — smaller,
+  independently verifiable sessions instead of one large combined change.
 
-## Konsequenzen
+## Consequences
 
-- **Echte Verhaltensänderung in `permission-service` selbst**: JEDER Principal (auch ein nie zuvor
-  gesehener, beliebiger String) hat ab sofort `users.lookup`/`users.directory` in seinen effektiven
-  Berechtigungen an der Wurzelressource — bestätigt live gegen den echten Stack (`GET
-  /effective-permissions/<nie gesehener Principal>/root` liefert `roles: ["everyone"]`,
-  `permissions: ["users.directory", "users.lookup"]`). Zwei bestehende `permission-service`-eigene
-  API-Tests (`test_full_flow_via_api`, `test_list_role_assignments_filters_by_principal_id`) prüften
-  bislang exakte Gleichheit gegen eine leere bzw. rollenspezifische Berechtigungsmenge an der
-  Wurzelressource — beide angepasst, um die neue "everyone"-Basismenge einzuschließen, kein
-  Verhaltensfehler.
-- **Kein anderer Service ist betroffen**: `users.lookup`/`users.directory` sind neue, bislang nirgends im
-  Projekt verwendete Berechtigungsstrings (per Grep bestätigt) - jeder bestehende `/check`/`/check/batch`-
-  Aufruf prüft eine ANDERE, spezifische Berechtigung und bleibt dadurch unverändert, unabhängig davon,
-  dass die zugrundeliegende `permissions`-Liste jetzt zwei zusätzliche Einträge enthält.
-- **Idempotent über einen echten Neustart hinweg verifiziert**: `docker compose restart
-  permission-service` zweimal hintereinander (nach Image-Neubau) erzeugt keine doppelten `everyone`-
-  Rollen/-Zuweisungen (gleiche `id` vor/nach dem zweiten Neustart).
-- **`auth-service`s hartkodierte Bypässe (`GET /users/lookup`, `GET /users/directory`) bleiben bis P19-S3
-  unverändert bestehen** — diese Session liefert nur die Grundlage, keine Durchsetzung.
+- **Real behavioral change in `permission-service` itself**: EVERY principal (even one never seen
+  before, an arbitrary string) has, as of now, `users.lookup`/`users.directory` in its effective
+  permissions at the root resource — confirmed live against the real stack (`GET
+  /effective-permissions/<never-seen principal>/root` returns `roles: ["everyone"]`,
+  `permissions: ["users.directory", "users.lookup"]`). Two existing `permission-service`-owned
+  API tests (`test_full_flow_via_api`, `test_list_role_assignments_filters_by_principal_id`)
+  previously checked exact equality against an empty or role-specific permission set at the
+  root resource — both adjusted to include the new "everyone" baseline, not a behavioral bug.
+- **No other service is affected**: `users.lookup`/`users.directory` are new permission strings not
+  previously used anywhere in the project (confirmed via grep) - every existing `/check`/`/check/batch`
+  call checks a DIFFERENT, specific permission and thereby remains unchanged, regardless of the
+  underlying `permissions` list now containing two additional entries.
+- **Verified idempotent across a real restart**: `docker compose restart
+  permission-service` run twice in a row (after an image rebuild) produces no duplicate `everyone`
+  roles/assignments (same `id` before/after the second restart).
+- **`auth-service`'s hardcoded bypasses (`GET /users/lookup`, `GET /users/directory`) remain
+  unchanged until P19-S3** — this session only delivers the foundation, no enforcement.

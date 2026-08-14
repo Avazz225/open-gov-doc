@@ -1,73 +1,73 @@
 # migration-console
 
-**Verantwortung:** Eigenständige Frontend-Anwendung für Transfer-Vorgänge gegen `migration-service` (7.2/8, wörtlich: "eine Migrations-Konsole für Transfer-Vorgänge"), P14-S2. Zwei Bereiche: Installations-Paarung verwalten und Transfers starten/beobachten.
-**Konzept-Referenz:** 8, 7.2
-**Kein eigenes Postgres-Schema** — reine clientseitig gerenderte SPA (statischer Export, gleiches Muster wie `apps/user-ui`, siehe [ADR 0006](../adr/0006-user-ui-static-export-spa.md)), kein eigener Backend-Prozess.
-**ADR:** [0041 — Scope + neue Cross-Instanz-Aufgabenliste, keine neue Autorisierungsschicht](../adr/0041-reviewer-ui-migration-console-scope-and-cross-instance-tasks.md)
+**Responsibility:** Standalone frontend application for transfer operations against `migration-service` (7.2/8, literally: "a migration console for transfer operations"), P14-S2. Two areas: managing installation pairing and starting/observing transfers.
+**Concept reference:** 8, 7.2
+**No own Postgres schema** — pure client-side rendered SPA (static export, same pattern as `apps/user-ui`, see [ADR 0006](../adr/0006-user-ui-static-export-spa.md)), no own backend process.
+**ADR:** [0041 — Scope + new cross-instance task list, no new authorization layer](../adr/0041-reviewer-ui-migration-console-scope-and-cross-instance-tasks.md)
 
-## Ort im Repo
+## Location in the repo
 
-`apps/migration-console/` — bewusst **nicht** unter `services/` (Node/React-Toolchain statt Python-Service-Template, ADR 0006) und bewusst **nicht** Teil der Admin-UI (wörtliche Konzept-Vorgabe: "eigenständige ... Migrations-Konsole").
+`apps/migration-console/` — deliberately **not** under `services/` (Node/React toolchain instead of the Python service template, ADR 0006) and deliberately **not** part of the Admin UI (literal concept requirement: "standalone ... migration console").
 
-## Seiten
+## Pages
 
-| Route | Zweck |
+| Route | Purpose |
 |---|---|
-| `/login/` | Anmeldung (identisch zu user-ui/admin-ui/process-designer/reviewer-ui) |
-| `/` | `TransferConsole` — Transfer-Übersicht/-Start, nur erreichbar mit gültiger Session |
-| `/paired-installations/` | `PairedInstallationList` — Installations-Paarung |
+| `/login/` | Login (identical to user-ui/admin-ui/process-designer/reviewer-ui) |
+| `/` | `TransferConsole` — transfer overview/start, only reachable with a valid session |
+| `/paired-installations/` | `PairedInstallationList` — installation pairing |
 
-`RequireAuth` rendert eine gemeinsame `Shell` (Kopfzeile mit Tab-Navigation, Theme-Umschalter, Logout) sowie zuvor ein `MaintenanceBanner` (Not-Shutdown, 4.8).
+`RequireAuth` renders a shared `Shell` (header with tab navigation, theme switcher, logout) as well as, before that, a `MaintenanceBanner` (emergency shutdown, 4.8).
 
-## Gepaarte Installationen (7.2, `components/PairedInstallationList.tsx`)
+## Paired installations (7.2, `components/PairedInstallationList.tsx`)
 
-Direkte Installations-Paarung statt Hub-Vermittlung ([ADR 0034](../adr/0034-migration-service-direct-pairing-and-generic-connector-service-tasks.md)) — anlegen (`POST /paired-installations`, leerer `api_key` lässt `migration-service` einen neuen generieren), auflisten, entfernen. Der generierte API-Key wird **nur unmittelbar nach dem Anlegen einmalig angezeigt** (nie wieder über `GET` abrufbar, identisches Prinzip wie `federation-hub-service`) — die Konsole zeigt ihn direkt im Formularbereich als Erfolgsmeldung an, nicht in der Tabelle.
+Direct installation pairing instead of hub mediation ([ADR 0034](../adr/0034-migration-service-direct-pairing-and-generic-connector-service-tasks.md)) — create (`POST /paired-installations`, an empty `api_key` lets `migration-service` generate a new one), list, remove. The generated API key is **shown only once, immediately after creation** (never retrievable again via `GET`, identical principle to `federation-hub-service`) — the console displays it directly in the form area as a success message, not in the table.
 
 ## Transfers (7.2, `components/TransferConsole.tsx`)
 
-Startformular (Quellordner-ID, Ziel-Installation aus der Paarungsliste, Dry-Run-Schalter, optionale Löschfrist in Tagen) ruft `POST /transfers`. Zwei mögliche Ausgänge:
+The start form (source folder ID, target installation from the pairing list, dry-run toggle, optional deletion period in days) calls `POST /transfers`. Two possible outcomes:
 
-- **`status: "started"`** — Transfer läuft direkt los, taucht sofort in der Liste auf.
-- **`status: "pending_approval"`** — Vier-Augen (4.3) ist für `migration.transfer.start` aktiv konfiguriert (`permission-service`s `approval-config`); die Konsole zeigt einen Hinweis mit der erzeugten `approval_request_id` — die eigentliche Freigabe/Ablehnung läuft über die generische Freigabe-Inbox in `reviewer-ui`, nicht über diese Konsole selbst (keine doppelte Freigabe-UI).
+- **`status: "started"`** — the transfer starts directly, appearing immediately in the list.
+- **`status: "pending_approval"`** — four-eyes principle (4.3) is actively configured for `migration.transfer.start` (`permission-service`'s `approval-config`); the console shows a notice with the generated `approval_request_id` — the actual approval/rejection runs via the generic approval inbox in `reviewer-ui`, not via this console itself (no duplicate approval UI).
 
-Die Transferliste zeigt Status-Badge (grün für `released`/`deleted`/`dry_run_completed`, rot für `failed`, sonst neutral "in Bearbeitung"), Dokument-Fortschritt (`documents_copied`/`documents_total`/`documents_verified`), und eine aufklappbare Detailzeile mit Fehlermeldung (falls `failed`) sowie dem vollständigen Phasen-Zeitverlauf (`locked_at`/`copied_at`/`verified_at`/`released_at`/`deletion_scheduled_at`/`deleted_at`). **Leichtgewichtiges Polling alle 5 Sekunden** (`setInterval`, gleiches Muster wie `MaintenanceBanner`s 30s-Poll) — ein Transfer läuft als asynchrone `workflow-service`-Instanz im Hintergrund weiter, ohne erneutes Laden bliebe die Konsole auf dem Stand des letzten Aufrufs stehen.
+The transfer list shows a status badge (green for `released`/`deleted`/`dry_run_completed`, red for `failed`, otherwise neutral "in progress"), document progress (`documents_copied`/`documents_total`/`documents_verified`), and an expandable detail row with the error message (if `failed`) as well as the complete phase timeline (`locked_at`/`copied_at`/`verified_at`/`released_at`/`deletion_scheduled_at`/`deleted_at`). **Lightweight polling every 5 seconds** (`setInterval`, same pattern as `MaintenanceBanner`'s 30s poll) — a transfer continues to run in the background as an asynchronous `workflow-service` instance; without a re-fetch the console would remain stuck at the state of the last call.
 
-**Bewusst nicht in der Konsole abgebildet**: die `.../steps/{lock|copy|verify|release|delete-source|dry-run-check}`-Endpunkte (interne Ziele automatischer `connector_call`-Service-Tasks, 7.1/P12-S2) und die gesamte `/inbound/*`-API (wird von der gepaarten Gegenseite aufgerufen, nie vom lokalen Bedienpersonal) — beides reine Workflow-/Protokoll-Mechanik ohne Bedienoberfläche.
+**Deliberately not represented in the console**: the `.../steps/{lock|copy|verify|release|delete-source|dry-run-check}` endpoints (internal targets of automatic `connector_call` service tasks, 7.1/P12-S2) and the entire `/inbound/*` API (called by the paired counterpart, never by local operating staff) — both are pure workflow/protocol mechanics without an operator interface.
 
-## Autorisierung
+## Authorization
 
-**Keine capability-gegateten Aktionen in dieser App** — `migration-service` gated seine schreibenden Endpunkte ausschließlich über die eigene Lizenzprüfung (`license_gate`, Konzept 9.3: Demo-Modus sperrt `POST /transfers`/`POST /paired-installations`, nicht das Lesen), keine domänengetrennte Admin-Rolle. `RequireAuth` prüft nur, ob überhaupt eine gültige Sitzung vorliegt. Eine unlizenzierte oder im Demo-Modus befindliche Installation zeigt die entsprechende `403`-Fehlermeldung direkt im jeweiligen Formular an (kein eigener Lizenzstatus-Banner wie in der Admin-UI, aus Scope-Gründen dieser Session nicht ergänzt).
+**No capability-gated actions in this app** — `migration-service` gates its write endpoints exclusively via its own license check (`license_gate`, Concept 9.3: demo mode blocks `POST /transfers`/`POST /paired-installations`, not reading), no domain-separated admin role. `RequireAuth` only checks whether a valid session exists at all. An unlicensed installation or one in demo mode shows the corresponding `403` error message directly in the respective form (no dedicated license status banner as in the Admin UI, not added for scope reasons in this session).
 
-## Anbindung an das Backend
+## Connection to the backend
 
-Ausschließlich über das API-Gateway (3.5):
+Exclusively via the API gateway (3.5):
 
-| Aktion | Gateway-Aufruf |
+| Action | Gateway call |
 |---|---|
-| Anmelden | `POST /api/auth-service/login` |
-| Identität nach Login | `GET /api/auth-service/me` |
-| Gepaarte Installationen listen/anlegen/entfernen | `GET/POST/DELETE /api/migration-service/paired-installations[/{id}]` |
-| Transfers listen/anlegen/Detail | `GET/POST /api/migration-service/transfers`, `GET /api/migration-service/transfers/{id}` |
-| Theme-Präferenz lesen/schreiben | `GET/PUT /api/auth-service/me/preferences` |
-| Not-Shutdown / Wartungsmodus-Status | `GET /api/permission-service/maintenance-mode` |
+| Login | `POST /api/auth-service/login` |
+| Identity after login | `GET /api/auth-service/me` |
+| List/create/remove paired installations | `GET/POST/DELETE /api/migration-service/paired-installations[/{id}]` |
+| List/create/detail transfers | `GET/POST /api/migration-service/transfers`, `GET /api/migration-service/transfers/{id}` |
+| Read/write theme preference | `GET/PUT /api/auth-service/me/preferences` |
+| Emergency shutdown / maintenance mode status | `GET /api/permission-service/maintenance-mode` |
 
-## Theming/i18n/Auth-Zustand
+## Theming/i18n/auth state
 
-Identische Provider-Kopie aus user-ui/admin-ui/process-designer/reviewer-ui (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), eigenes `src/i18n/de.json`, globaler `dms.tokens`-Storage-Key (Single-Installation).
+Identical provider copy from user-ui/admin-ui/process-designer/reviewer-ui (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), own `src/i18n/de.json`, global `dms.tokens` storage key (single installation).
 
-## Build & Auslieferung
+## Build & deployment
 
-Zweistufiges Docker-Image (`apps/migration-console/Dockerfile`, `node:22-alpine` Build-Stage → `nginx:alpine` Laufzeit), `NEXT_PUBLIC_GATEWAY_BASE_URL` als Build-Arg, überschreibbar über `MIGRATION_CONSOLE_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: Port `${MIGRATION_CONSOLE_PORT:-3004}:80`.
+Two-stage Docker image (`apps/migration-console/Dockerfile`, `node:22-alpine` build stage → `nginx:alpine` runtime), `NEXT_PUBLIC_GATEWAY_BASE_URL` as a build arg, overridable via `MIGRATION_CONSOLE_GATEWAY_BASE_URL` in `infra/.env`. `infra/docker-compose.yml`: port `${MIGRATION_CONSOLE_PORT:-3004}:80`.
 
 ## Tests
 
-- `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript-Prüfung, ESLint, produktionsfähiger statischer Export.
-- `npm test` (Vitest + Testing Library, **14 Tests**): `AuthProvider` (4 Tests, identisch zum Muster der übrigen Apps), `PairedInstallationList` (leere Liste, Auflistung, Anlegen inkl. einmaliger API-Key-Anzeige, Löschen nach Bestätigung, 4 Tests), `TransferConsole` (leere Liste, Auflistung mit aufgelöstem Ziel-Installationsnamen + Fortschritt, Detail-Zeitverlauf aufklappen, Transfer starten inkl. Neuladen, Vier-Augen-Hinweis bei `pending_approval`, Polling-Intervall feuert erneutes Laden, 6 Tests).
-- Live gegen den gebauten Container in einem echten (headless) Browser verifiziert (Login, Transfer-Liste inkl. Detail-Zeitverlauf aufklappen, Installations-Paarung inkl. vollständigem Anlegen→Anzeigen-des-Einmal-Schlüssels→Löschen-Zyklus, Design-Umschalter auf Dunkel — jeweils ohne Konsolenfehler; die Listen zeigten dabei reale, aus früheren Testläufen (u. a. dem Selbst-Loopback-Test von P12-S2) liegen gebliebene Installationen/Transfers).
+- `npm run typecheck` / `npm run lint` / `npm run build` — TypeScript check, ESLint, production-ready static export.
+- `npm test` (Vitest + Testing Library, **14 tests**): `AuthProvider` (4 tests, identical to the pattern of the other apps), `PairedInstallationList` (empty list, listing, creation incl. one-time API key display, deletion after confirmation, 4 tests), `TransferConsole` (empty list, listing with resolved target installation name + progress, expanding the detail timeline, starting a transfer incl. reload, four-eyes notice on `pending_approval`, polling interval triggers a re-fetch, 6 tests).
+- Live verified against the built container in a real (headless) browser (login, transfer list incl. expanding the detail timeline, installation pairing incl. the full create→show-one-time-key→delete cycle, theme switch to dark — each without console errors; the lists showed real installations/transfers left over from earlier test runs, including the self-loopback test from P12-S2).
 
-## Offene Punkte
+## Open Points
 
-- **Kein Server-Push** — reines Polling alle 5s statt WebSocket/SSE (siehe ADR 0041 "Konsequenzen").
-- **Kein eigener Lizenzstatus-Banner** — anders als die Admin-UI zeigt diese Konsole den `migration-service`-Lizenzstatus nicht proaktiv an, nur reaktiv als Fehlermeldung bei einem gesperrten Schreibversuch.
-- **Freigabe von `pending_approval`-Transfers läuft ausschließlich über `reviewer-ui`** — bewusst keine eigene, zweite Freigabe-UI in dieser Konsole (siehe "Transfers" oben).
-- Übernimmt dieselben bereits dokumentierten Grenzen von `migration-service` selbst (siehe `docs/services/migration-service.md` "Bewusste Grenzen"): kein Ziel-Ordner-Auswahldialog (Zielordner landet immer an der Wurzel der Zielinstallation), keine historischen Zeitstempel bei kopierten Dokumentversionen.
+- **No server push** — pure polling every 5s instead of WebSocket/SSE (see ADR 0041 "Consequences").
+- **No own license status banner** — unlike the Admin UI, this console does not proactively display the `migration-service` license status, only reactively as an error message on a blocked write attempt.
+- **Approval of `pending_approval` transfers runs exclusively via `reviewer-ui`** — deliberately no own, second approval UI in this console (see "Transfers" above).
+- Inherits the same already documented limitations of `migration-service` itself (see `docs/services/migration-service.md` "Deliberate limitations"): no target folder selection dialog (target folder always lands at the root of the target installation), no historical timestamps on copied document versions.

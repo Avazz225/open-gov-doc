@@ -1,107 +1,100 @@
-# 0085 — federation-hub-service: Zertifikatsebene statt echtem Transport-mTLS
+# 0085 — federation-hub-service: certificate layer instead of real transport mTLS
 
-**Status:** akzeptiert (Session 2 von 4, siehe Phase 21 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 21 Session 2, betrifft `federation-hub-service`
+**Status:** accepted (Session 2 of 4, see Phase 21 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 21 Session 2, affects `federation-hub-service`
 
-## Entscheidung
+## Decision
 
-Der Plan beschreibt diese Session als "mTLS / echte Installations-Identität": Installationen sollen sich
-über Client-Zertifikate statt nur signaturbasiert authentisieren, mit einer kleinen eigenen CA analog zu
-`signature-service`s bereits vorhandener interner CA ([ADR 0025](0025-signature-service-internal-ca-and-connector-plugin.md))
-als Vorbild. Eine genaue Prüfung ergab: [ADR 0039](0039-federation-trust-hardening-request-signing-over-mtls.md)
-hat echtes Transport-mTLS für genau diesen Hub bereits einmal explizit geprüft und verworfen, mit einer
-Begründung, die unverändert gilt — **kein einziger Service dieses Repos terminiert TLS selbst oder
-verifiziert Client-Zertifikate**, alle internen Aufrufe laufen über einfaches HTTP im Docker-Compose-Netz;
-ein isolierter mTLS-Sonderfall allein für den Hub (eigene Zertifikatsausstellung/-verteilung,
-`ssl_cert_reqs=CERT_REQUIRED` in uvicorn, Zertifikats-Mounting in `infra/docker-compose.yml`) hätte keinen
-Wiederverwendungswert für den Rest des Systems und würde eine im Projekt bislang nicht existierende
-Betriebs-/Zertifikatsverwaltungs-Disziplin einführen. Eine erneute Prüfung des gesamten Repos bestätigt:
-daran hat sich nichts geändert — keine TLS-Terminierung, kein Reverse Proxy/Ingress existiert irgendwo im
-Stack.
+The plan describes this session as "mTLS / real installation identity": installations are supposed to
+authenticate via client certificates instead of purely signature-based auth, with a small dedicated CA
+modeled on `signature-service`'s already-existing internal CA ([ADR 0025](0025-signature-service-internal-ca-and-connector-plugin.md))
+as a template. A closer review found: [ADR 0039](0039-federation-trust-hardening-request-signing-over-mtls.md)
+already explicitly evaluated and rejected real transport mTLS for this exact hub once before, for reasons
+that still hold unchanged — **not a single service in this repo terminates TLS itself or verifies client
+certificates**, all internal calls run over plain HTTP within the Docker Compose network; an isolated
+mTLS special case just for the hub (its own certificate issuance/distribution,
+`ssl_cert_reqs=CERT_REQUIRED` in uvicorn, certificate mounting in `infra/docker-compose.yml`) would have
+no reuse value for the rest of the system and would introduce an operational/certificate-management
+discipline that doesn't otherwise exist in this project. A renewed review of the entire repo confirms:
+nothing has changed on that front — no TLS termination, no reverse proxy/ingress exists anywhere in the
+stack.
 
-Diese Session löst das auf, indem sie den Plan-Wortlaut **wörtlich beim Wort "Zertifikatsebene ergänzt"**
-nimmt, nicht bei "mTLS": eine echte Zertifikatsebene wird ergänzt, aber weiterhin vollständig auf
-Anwendungsebene, genau wie die bereits bestehende Signaturprüfung (ADR 0039 "mTLS-äquivalent auf
-Anwendungsebene").
+This session resolves that by taking the plan wording **literally at the phrase "add a certificate
+layer"**, not at "mTLS": a real certificate layer is added, but it stays entirely at the application
+layer, exactly like the already-existing signature verification (ADR 0039 "mTLS-equivalent at the
+application layer").
 
-1. **`HubIdentity` wird zusätzlich zur eigenen kleinen Root-CA** - dasselbe RSA-2048-Schlüsselpaar, das
-   der Hub ohnehin schon für `X-Federation-Hub-Signature` besitzt, wird zusätzlich als selbstsigniertes
-   X.509-Zertifikat verpackt (`ca_certificate_pem`, neues Feld) - KEIN separates Schlüsselpaar, reine
-   Zertifikatshülle, gleiche Bibliothek/Konvention wie `signature-service.connectors.internal.
-   generate_root_ca` (ADR 0025).
-2. **Jede Installation bekommt bei Registrierung UND bei jeder Schlüsselrotation ein vom Hub signiertes
-   X.509-Zertifikat** (`Installation.certificate_pem`/`certificate_not_after`), das ihren öffentlichen
-   Schlüssel bindet - vereinfachtes CSR-Äquivalent: der Hub erzeugt kein neues Schlüsselpaar, sondern
-   zertifiziert den von der Installation selbst eingereichten, bereits per Signatur nachgewiesenen
-   öffentlichen Schlüssel. Gültigkeit 1 Jahr (deutlich kürzer als `signature-service`s 5 Jahre, ADR 0025 -
-   dort verhindert eine lange Laufzeit ein fälschliches "abgelaufen" bei späterer Prüfung ohne
-   Zeitstempeldienst; dieses Problem gibt es hier nicht, eine kürzere Laufzeit gibt der Zertifikatsebene
-   stattdessen einen echten, wiederkehrenden Erneuerungs-Rhythmus).
-3. **`authenticate_signed_request` prüft zusätzlich zur bestehenden Signatur die vollständige
-   Zertifikatskette bis zur Hub-CA, das Gültigkeitsfenster, UND dass Zertifikats-`CommonName` sowie
-   eingebetteter öffentlicher Schlüssel tatsächlich zur aufrufenden Installation gehören** - bewusst
-   ZUSÄTZLICH, nicht als Ersatz für die Signaturprüfung.
-4. **Neuer `GET /ca-certificate`-Endpunkt** (Pendant zu `GET /public-key`) - Installationen können das
-   Root-CA-Zertifikat beim ersten Kontakt abrufen und lokal pinnen (Trust-on-First-Use, Certificate-
-   Pinning-Äquivalent).
-5. **Nachhol-Migration**: alle vor dieser Session registrierten Installationen (`certificate_pem IS
-   NULL`) bekommen beim nächsten Hub-Start automatisch ein Zertifikat ausgestellt (`main.lifespan`) -
-   `authenticate_signed_request` überspringt die Zertifikatsprüfung nur für den kurzen Zeitraum, in dem
-   eine Zeile noch kein Zertifikat hat (Bestandsschutz, sollte danach nicht mehr vorkommen).
+1. **`HubIdentity` gains its own small root CA in addition** — the same RSA-2048 key pair the hub already
+   uses for `X-Federation-Hub-Signature` is additionally wrapped as a self-signed X.509 certificate
+   (`ca_certificate_pem`, new field) — NO separate key pair, purely a certificate wrapper, same
+   library/convention as `signature-service.connectors.internal.generate_root_ca` (ADR 0025).
+2. **Every installation gets an X.509 certificate signed by the hub, both at registration AND at every
+   key rotation** (`Installation.certificate_pem`/`certificate_not_after`), binding its public key — a
+   simplified CSR equivalent: the hub does not generate a new key pair, but certifies the public key the
+   installation itself submitted, already proven via signature. Validity 1 year (notably shorter than
+   `signature-service`'s 5 years, ADR 0025 — there a long lifetime prevents a false "expired" result on
+   later verification without a timestamping service; that problem doesn't exist here, so a shorter
+   lifetime instead gives the certificate layer a real, recurring renewal cadence).
+3. **`authenticate_signed_request` additionally verifies, alongside the existing signature check, the
+   full certificate chain up to the hub CA, the validity window, AND that the certificate's `CommonName`
+   plus embedded public key actually belong to the calling installation** — deliberately ADDITIONAL, not
+   a replacement for the signature check.
+4. **New `GET /ca-certificate` endpoint** (counterpart to `GET /public-key`) — installations can fetch
+   the root CA certificate on first contact and pin it locally (trust-on-first-use, certificate-pinning
+   equivalent).
+5. **Backfill migration**: all installations registered before this session (`certificate_pem IS NULL`)
+   automatically get a certificate issued on the next hub startup (`main.lifespan`) —
+   `authenticate_signed_request` skips the certificate check only for the brief window in which a row
+   still has no certificate (grandfathering, should not occur afterward).
 
-## Begründung
+## Rationale
 
-- **Warum die Zertifikatsebene rein auf Anwendungsebene bleibt statt echtem Transport-mTLS**: siehe oben
-  - ADR 0039s Begründung gilt unverändert, nichts an der Infrastruktur dieses Projekts hat sich seither
-  geändert. Echtes Transport-TLS/mTLS bleibt weiterhin eine reine Deployment-Entscheidung des Betreibers
-  (Reverse Proxy/Ingress), wie für jeden anderen Service auch (Konzept 10.3) - unverändert gegenüber
-  ADR 0039s eigener Schlussfolgerung.
-- **Warum das Hub-eigene Schlüsselpaar als CA wiederverwendet wird statt eines neuen, separaten
-  CA-Schlüssels**: der Hub hat bereits eine vertrauenswürdige, per Trust-on-First-Use verteilte Identität
-  (`GET /public-key`) - ein zweites, unabhängiges Schlüsselpaar allein für die CA-Rolle hätte keinen
-  Sicherheitsgewinn (beide müssten gleichermaßen gegen Kompromittierung geschützt werden) und nur die
-  Betriebskomplexität erhöht (zwei statt eines Schlüssels zu sichern/rotieren).
-- **Warum die Zertifikatsprüfung Kette+Gültigkeit+Identitätsbindung ALLE VIER zusammen prüft**: eine erste
-  Fassung dieser Session prüfte nur Kette+Gültigkeit, ohne zu verifizieren, dass das Zertifikat tatsächlich
-  zur aufrufenden Installation gehört - beim Schreiben der Tests fiel auf, dass sich dadurch ein beliebiges,
-  gültig vom Hub ausgestelltes Zertifikat (z. B. das einer anderen, unabhängigen Installation) unbemerkt
-  hätte unterschieben lassen können, ohne dass die reine Kettenprüfung das bemerkt hätte (die
-  Signaturprüfung mit dem tatsächlichen privaten Schlüssel bleibt zwar weiterhin die eigentliche
-  Besitz-Beweisführung und verhindert einen vollständigen Auth-Bypass, aber die Zertifikatsebene selbst
-  hätte ihr eigentliches Versprechen - "dieser Schlüssel gehört geprüft zu dieser Installation" - nicht
-  eingehalten). Behoben, bevor es in den Code gelangte.
-- **Warum `certificate_not_after` nur ein denormalisierter Anzeigewert ist, keine eigenständige Prüfung**:
-  die tatsächliche Sicherheitsprüfung passiert immer aus den Zertifikats-Bytes selbst
-  (`crypto_utils.verify_installation_certificate`), das gespeicherte Datum ist nur eine für Admin-UI/
-  Migrationserkennung praktische Kopie desselben Werts.
-- **Warum `POST /installations/{id}/rotate-key` zwingend ein neues Zertifikat ausstellen MUSS**: ein
-  Zertifikat für den alten Schlüssel bliebe nach der Rotation gültig ausstellbar-geprüft, würde aber einen
-  nicht mehr aktuellen Schlüssel binden - dieselbe Kategorie Bug wie der in ADR 0080 dokumentierte
-  `reset_for_retry`-Fund dieser Roadmap-Phase, hier aber vor der Live-Verifikation im Design bereits
-  vermieden.
+- **Why the certificate layer stays purely at the application layer instead of real transport mTLS**: see
+  above — ADR 0039's rationale still holds unchanged, nothing about this project's infrastructure has
+  changed since then. Real transport TLS/mTLS remains purely an operator deployment decision (reverse
+  proxy/ingress), same as for any other service (Concept 10.3) — unchanged from ADR 0039's own conclusion.
+- **Why the hub's own key pair is reused as the CA instead of a new, separate CA key**: the hub already
+  has a trusted identity distributed via trust-on-first-use (`GET /public-key`) — a second, independent
+  key pair solely for the CA role would provide no security benefit (both would need to be equally
+  protected against compromise) and would only increase operational complexity (two keys to secure/rotate
+  instead of one).
+- **Why the certificate check verifies chain+validity+identity binding ALL FOUR together**: an early draft
+  of this session checked only chain+validity, without verifying that the certificate actually belongs to
+  the calling installation — while writing the tests it became apparent that this would have allowed any
+  certificate validly issued by the hub (e.g. one belonging to a different, unrelated installation) to be
+  substituted unnoticed, without the pure chain check catching it (the signature check with the actual
+  private key remains the real proof of possession and prevents a full auth bypass, but the certificate
+  layer itself would not have kept its actual promise — "this key is verified to belong to this
+  installation"). Fixed before it reached the code.
+- **Why `certificate_not_after` is only a denormalized display value, not an independent check**: the
+  actual security check always happens from the certificate bytes themselves
+  (`crypto_utils.verify_installation_certificate`), the stored date is only a convenient copy of the same
+  value for the admin UI / migration detection.
+- **Why `POST /installations/{id}/rotate-key` MUST issue a new certificate**: a certificate for the old
+  key would remain issuable-verifiable after rotation, but would bind a key that is no longer current —
+  the same category of bug as the `reset_for_retry` finding documented in ADR 0080 for this roadmap
+  phase, here avoided already at design time, before live verification.
 
-## Konsequenzen
+## Consequences
 
-- **Migration bereits laufender Installationen**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` im Lifespan
-  für `ca_certificate_pem` (`hub_identity`) sowie `certificate_pem`/`certificate_not_after`
-  (`installation`), gefolgt von einer Nachhol-Ausstellung für alle bereits bestehenden Installationen
-  ohne Zertifikat.
-- **Tests**: 55 (vorher 43, +12) - Hub-CA ist selbstsigniert und stabil über wiederholte Aufrufe,
-  Registrierung stellt ein von der Hub-CA signiertes Zertifikat mit korrektem `CommonName` aus, ein
-  selbstsigniertes (nicht vom Hub ausgestelltes) Zertifikat wird abgelehnt, ein abgelaufenes Zertifikat
-  wird abgelehnt, Rotation stellt ein neues, an den neuen Schlüssel gebundenes Zertifikat aus,
-  `list_installations_without_certificate` filtert korrekt, Bestandsschutz für Installationen ohne
-  Zertifikat, ein für eine ANDERE Installation ausgestelltes (aber gültig vom Hub signiertes) Zertifikat
-  wird bei fehlender Identitätsbindung abgelehnt, `GET /ca-certificate` liefert ein gültiges
-  selbstsigniertes Zertifikat, Registrierungsantwort enthält ein prüfbares Zertifikat, Rotation reicht
-  ein neues Zertifikat über die API durch.
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart): die
-  Nachhol-Migration lief gegen **219 real bereits bestehende Installationen** aus früheren
-  Live-Verifikationen dieser und vorheriger Sessions (Startup-Dauer 6,2s statt der üblichen ~150ms,
-  danach alle 219 Zeilen mit `certificate_pem` bestätigt); `GET /ca-certificate` liefert ein echtes,
-  selbstsigniertes Zertifikat; eine frisch registrierte Installation bekam ein Zertifikat, das
-  nachweislich bis zur Hub-CA kettet, den korrekten `CommonName` trägt und den eingereichten öffentlichen
-  Schlüssel bindet; eine anschließende Schlüsselrotation stellte ein neues, an den neuen Schlüssel
-  gebundenes Zertifikat aus, weiterhin kettend zur selben Hub-CA.
-- Doku: `docs/services/federation-hub-service.md` (Vertrauensmodell-Abschnitt, API-Tabelle, Datenmodell,
-  "Offene Punkte" — die dort bereits als veraltet erkannte "Kein mTLS"-Zeile korrigiert, Test-Übersicht).
+- **Migration of already-running installations**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in the
+  lifespan for `ca_certificate_pem` (`hub_identity`) and `certificate_pem`/`certificate_not_after`
+  (`installation`), followed by a backfill issuance for all already-existing installations without a
+  certificate.
+- **Tests**: 55 (previously 43, +12) — hub CA is self-signed and stable across repeated calls,
+  registration issues a certificate signed by the hub CA with the correct `CommonName`, a self-signed
+  (not hub-issued) certificate is rejected, an expired certificate is rejected, rotation issues a new
+  certificate bound to the new key, `list_installations_without_certificate` filters correctly,
+  grandfathering for installations without a certificate, a certificate issued for a DIFFERENT
+  installation (but validly hub-signed) is rejected due to missing identity binding, `GET /ca-certificate`
+  returns a valid self-signed certificate, the registration response includes a verifiable certificate,
+  rotation passes through a new certificate via the API.
+- **Verified live against the actual running stack** (image rebuild + restart): the backfill migration
+  ran against **219 real, already-existing installations** from earlier live verifications of this and
+  previous sessions (startup duration 6.2s instead of the usual ~150ms, after which all 219 rows were
+  confirmed to have `certificate_pem`); `GET /ca-certificate` returns a real, self-signed certificate; a
+  freshly registered installation received a certificate that demonstrably chains to the hub CA, carries
+  the correct `CommonName`, and binds the submitted public key; a subsequent key rotation issued a new
+  certificate bound to the new key, still chaining to the same hub CA.
+- Docs: `docs/services/federation-hub-service.md` (trust model section, API table, data model,
+  "Open Points" — corrected the "No mTLS" line already flagged there as outdated, test overview).

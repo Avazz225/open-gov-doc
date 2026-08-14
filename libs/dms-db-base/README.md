@@ -1,12 +1,12 @@
 # dms-db-base
 
-Async-SQLAlchemy-Basis, die die Schema-pro-Service-Konvention (Konzept 3.1) durchsetzt.
+Async SQLAlchemy base that enforces the schema-per-service convention (Concept 3.1).
 
-- `build_engine(dsn)` — Async-Engine (`postgresql+asyncpg://`).
-- `make_declarative_base(schema)` — Declarative-Base, deren Metadata fest an ein Postgres-Schema gebunden ist. Jeder Service ruft dies **einmal** mit seinem eigenen Schemanamen auf.
-- `make_session_factory(engine)` / `session_scope(factory)` — Session-Erzeugung inkl. Commit-oder-Rollback-Block.
+- `build_engine(dsn)` — async engine (`postgresql+asyncpg://`).
+- `make_declarative_base(schema)` — declarative base whose metadata is fixed to a Postgres schema. Every service calls this **once** with its own schema name.
+- `make_session_factory(engine)` / `session_scope(factory)` — session creation including a commit-or-rollback block.
 
-## Nutzung
+## Usage
 
 ```python
 from dms_db_base import build_engine, make_declarative_base, make_session_factory, session_scope
@@ -28,11 +28,11 @@ async with session_scope(factory) as session:
 
 ## Tests
 
-Integrationstest gegen echtes Postgres (nutzt `infra/docker-compose.yml`):
+Integration test against real Postgres (uses `infra/docker-compose.yml`):
 
 ```bash
 cd infra && docker compose up -d postgres && cd ..
 uv run pytest libs/dms-db-base/tests
 ```
 
-`TEST_POSTGRES_DSN` überschreibt die DSN bei Bedarf (Default passt zu `infra/.env.example`).
+`TEST_POSTGRES_DSN` overrides the DSN if needed (default matches `infra/.env.example`).

@@ -1,89 +1,86 @@
-# 0088 — permission-service: admin-anlegbare Gruppen mit echter Mitgliedschaft
+# 0088 — permission-service: admin-creatable groups with real membership
 
-**Status:** akzeptiert (Post-Roadmap Phase 22 Session 2)
-**Kontext:** Post-Roadmap Phase 22 Session 2, betrifft `permission-service`, `admin-ui`
+**Status:** accepted (Post-roadmap Phase 22 Session 2)
+**Context:** Post-roadmap Phase 22 Session 2, affects `permission-service`, `admin-ui`
 
-## Entscheidung
+## Decision
 
-`RoleAssignment.principal_type="group"` war seit Phase 19 Session 2 ([ADR 0067](0067-everyone-gruppe-permission-service.md))
-für genau einen reservierten Wert wirksam (`principal_id="everyone"`, jeder authentifizierte Principal
-implizit Mitglied, keine eigene Datenzeile) — jeder andere `"group"`-Wert war weiterhin reine Schema-Deko,
-nie ausgewertet. Diese Session ergänzt echte, admin-anlegbare Gruppen mit expliziter Mitgliedschaft:
+`RoleAssignment.principal_type="group"` had, since Phase 19 Session 2 ([ADR 0067](0067-everyone-gruppe-permission-service.md)),
+been effective for exactly one reserved value (`principal_id="everyone"`, every authenticated principal
+implicitly a member, no dedicated data row) — any other `"group"` value remained pure schema decoration,
+never evaluated. This session adds real, admin-creatable groups with explicit membership:
 
-1. **Zwei neue Tabellen**: `group` (`id` UUID-str, `name` unique, `description`, `created_at`) und
-   `group_membership` (`id`, `group_id` FK, `principal_id`, unique auf `(group_id, principal_id)`).
-2. **`_collect_effective_roles` erweitert**: sammelt vor dem Durchlaufen der Ressourcen-Vorfahrenkette
-   einmalig alle `group_id`s, denen der angefragte `principal_id` per `group_membership` angehört, und
-   behandelt an jedem Knoten zusätzlich zu `principal_id == principal_id` und der "everyone"-Bedingung
-   jede Zuweisung mit `principal_type="group", principal_id IN (Mitgliedsgruppen)` als zutreffend.
-3. **Neue Endpunkte**: `POST`/`GET`/`DELETE /groups`, `GET`/`POST /groups/{id}/members`,
-   `DELETE /groups/{id}/members/{principal_id}` — `POST`/`DELETE` gegated über dasselbe
-   `_require_role_management` (`admin.user_management`) wie `POST`/`PUT /roles` ([ADR 0071](0071-permission-service-self-gating.md)),
-   `GET`-Endpunkte bewusst weiterhin ungegatet (gleiche Begründung wie `GET /roles`).
-4. **`apps/admin-ui`**: neue "Gruppen"-Sektion in `UserManagement.tsx` (`/users/`) — Anlegen, Löschen,
-   aufklappbare Mitgliederliste je Gruppe (Hinzufügen per freier `principal_id`-Eingabe, Entfernen je
-   Zeile).
+1. **Two new tables**: `group` (`id` UUID string, `name` unique, `description`, `created_at`) and
+   `group_membership` (`id`, `group_id` FK, `principal_id`, unique on `(group_id, principal_id)`).
+2. **`_collect_effective_roles` extended**: before walking the resource ancestor chain, it collects once
+   all `group_id`s the requested `principal_id` belongs to via `group_membership`, and at every node,
+   in addition to `principal_id == principal_id` and the "everyone" condition, treats any assignment with
+   `principal_type="group", principal_id IN (member groups)` as matching.
+3. **New endpoints**: `POST`/`GET`/`DELETE /groups`, `GET`/`POST /groups/{id}/members`,
+   `DELETE /groups/{id}/members/{principal_id}` — `POST`/`DELETE` gated via the same
+   `_require_role_management` (`admin.user_management`) as `POST`/`PUT /roles` ([ADR 0071](0071-permission-service-self-gating.md)),
+   `GET` endpoints deliberately remain ungated (same rationale as `GET /roles`).
+4. **`apps/admin-ui`**: new "Groups" section in `UserManagement.tsx` (`/users/`) — create, delete,
+   expandable member list per group (add via free-text `principal_id` entry, remove per row).
 
-## Begründung
+## Rationale
 
-- **Warum eine eigene Tabelle statt einer Erweiterung des `"everyone"`-Musters**: "everyone" hat bewusst
-  KEINE eigene Mitgliederzeile (jeder Principal gilt implizit als Mitglied) — das Muster lässt sich nicht
-  auf "eine begrenzte, admin-definierte Teilmenge von Principals" übertragen, ohne eine echte
-  Mitgliederliste zu führen. `group`/`group_membership` sind deshalb komplementär zu, nicht anstelle von
+- **Why a dedicated table instead of extending the `"everyone"` pattern**: "everyone" deliberately has NO
+  dedicated membership row (every principal is implicitly considered a member) — that pattern cannot be
+  transferred to "a bounded, admin-defined subset of principals" without maintaining a real membership
+  list. `group`/`group_membership` are therefore complementary to, not a replacement for,
   `EVERYONE_PRINCIPAL_ID`.
-- **Warum `_group_ids_for_principal` VOR der Schleife über die Vorfahrenkette aufgelöst wird, nicht pro
-  Knoten neu**: die Mitgliedschaft eines Principals ist unabhängig von der gerade abgefragten Ressource —
-  eine einmalige Auflösung pro `_collect_effective_roles`-Aufruf vermeidet N identische Datenbankabfragen
-  bei einer tiefen Ressourcen-Hierarchie, ohne die Semantik zu verändern.
-- **Warum Löschen einer Gruppe keine Referenzprüfung gegen bestehende `RoleAssignment`-Zeilen macht**:
-  `role_assignment.principal_id` ist ein freier String, keine FK auf `group.id` (`principal_type` kann
-  ebenso `"user"`/`"service"` sein) — eine Referenzprüfung würde eine FK-Beziehung vortäuschen, die es
-  nicht gibt. Eine verwaiste Zuweisung matcht nach dem Löschen schlicht keinen Principal mehr (leere
-  Mitgliederliste), identisches Verhalten zu einer Gruppe, der nie ein Mitglied zugewiesen wurde.
-  Konsistent mit `Role`, das ebenfalls keinen Lösch-Endpunkt/keine Referenzprüfung kennt.
-- **Warum Mitglied-Hinzufügen idempotent ist statt einen Konflikt zu melden**: passt zum übrigen,
-  bewusst fehlerarmen Stil dieses Service (vgl. `ensure_everyone_role`, das ebenfalls prüft-vor-anlegt
-  statt auf eine DB-Unique-Constraint-Exception zu vertrauen) — ein Admin, der versehentlich zweimal
-  "hinzufügen" klickt, soll keine Fehlermeldung sehen.
-- **Warum dieselbe Capability (`admin.user_management`) statt einer neuen, dedizierten Gruppen-Capability**:
-  Gruppen sind ein weiterer Baustein der Rechteverwaltung, keine eigenständige Domäne — dieselbe
-  Begründung wie ADR 0071 für `POST`/`PUT /roles`. Eine feinere Aufteilung (z. B. "darf Gruppen anlegen,
-  aber keine Rollen") ist nicht Teil dieser Session, könnte bei Bedarf später ergänzt werden.
-- **Warum keine automatische AD-Gruppen-Synchronisation**: das ist ein separates, größeres Feature
-  ("AD-Gruppe → interne Rolle Mapping-Regelengine", geplant als eigenständige **Phase 24 Session 2**) —
-  diese Session liefert nur die admin-manuelle Grundlage (echte Gruppen mit Mitgliedschaft), auf der eine
-  künftige automatische Synchronisation aufsetzen könnte, ohne selbst schon zu synchronisieren.
+- **Why `_group_ids_for_principal` is resolved BEFORE the loop over the ancestor chain, not freshly per
+  node**: a principal's membership is independent of the resource currently being queried — resolving it
+  once per `_collect_effective_roles` call avoids N identical database queries for a deep resource
+  hierarchy without changing the semantics.
+- **Why deleting a group performs no reference check against existing `RoleAssignment` rows**:
+  `role_assignment.principal_id` is a free string, not an FK to `group.id` (`principal_type` can equally
+  be `"user"`/`"service"`) — a reference check would pretend an FK relationship that doesn't exist. An
+  orphaned assignment simply matches no principal after deletion (empty member list), identical behavior
+  to a group that was never assigned a member. Consistent with `Role`, which likewise has no delete
+  endpoint/reference check.
+- **Why adding a member is idempotent instead of reporting a conflict**: matches this service's otherwise
+  deliberately low-friction style (cf. `ensure_everyone_role`, which likewise checks-before-creating
+  instead of relying on a DB unique-constraint exception) — an admin who accidentally clicks "add" twice
+  should not see an error.
+- **Why the same capability (`admin.user_management`) instead of a new, dedicated groups capability**:
+  groups are another building block of rights management, not a standalone domain — same rationale as
+  ADR 0071 for `POST`/`PUT /roles`. A finer split (e.g. "may create groups but not roles") is not part of
+  this session, could be added later if needed.
+- **Why no automatic AD group synchronization**: that's a separate, larger feature ("AD group → internal
+  role mapping rule engine", planned as a standalone **Phase 24 Session 2**) — this session delivers only
+  the admin-manual foundation (real groups with membership) on which a future automatic synchronization
+  could build, without itself synchronizing anything.
 
-## Konsequenzen
+## Consequences
 
-- **Migration**: keine (zwei brandneue Tabellen, `Base.metadata.create_all` legt sie automatisch an —
-  kein `ALTER TABLE` nötig, da keine bestehende Tabelle verändert wird).
-- **Testinfrastruktur-Bug gefunden und behoben**: `tests/conftest.py`s `_clean_tables`-Fixture listet die
-  zu leerenden Tabellen einer festen `TRUNCATE`-Anweisung statt sie aus `Base.metadata` abzuleiten — die
-  beiden neuen Tabellen fehlten dort zunächst. Ein erster Testlauf lief zufällig grün (keine
-  Namenskollision innerhalb des Laufs), ein zweiter, unabhängiger Lauf schlug mit
-  `UniqueViolationError` auf `group.name` fehl, da Gruppen aus dem ersten Lauf in der Test-DB
-  überlebt hatten. Behoben durch Ergänzen von `permission.group_membership`/`permission.group` in der
-  `TRUNCATE`-Liste, danach zwei aufeinanderfolgende Läufe bestätigt grün.
-- **Cache-Invalidierung**: jede Mitgliedschafts-/Löschänderung leert den gesamten
-  `effective_permission_cache` (gleiche grobkörnige Strategie wie jede andere rechteverändernde
-  Operation in diesem Service, siehe README/Docstring an `EffectivePermissionCache`) — ein entferntes
-  Mitglied verliert die über die Gruppe gehaltenen Berechtigungen sofort, live bestätigt (siehe unten).
-- **Tests**: `permission-service` 137 (vorher 128, +9: Gruppen anlegen/auflisten/löschen inkl.
-  Authentisierungs-/Berechtigungsprüfung, Mitglied hinzufügen/idempotent/entfernen inkl. `404`-Fälle, und
-  der Kerntest `test_group_membership_grants_role_to_every_member` — eine einzelne Rollenzuweisung an
-  eine Gruppe mit zwei Mitgliedern gewährt beiden die Berechtigung, ein Nicht-Mitglied bleibt unbetroffen,
-  Entfernen eines Mitglieds entzieht die Berechtigung sofort). `admin-ui` 179 (vorher 175, +4).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
-  `permission-service`/`admin-ui`): eine Gruppe live angelegt, zwei Principals als Mitglieder
-  hinzugefügt, eine neue Rolle EINMALIG an die Gruppe (nicht an jeden Principal einzeln) zugewiesen —
-  `GET /check` bestätigte die Berechtigung für BEIDE Mitglieder und deren Fehlen für einen Nicht-Mitglied;
-  Entfernen eines Mitglieds entzog die Berechtigung sofort (Cache-Invalidierung bestätigt), das
-  verbleibende Mitglied behielt sie; Löschen der Gruppe bestätigt über `GET /groups`. Kein interaktiver
-  Browser-Test der neuen Admin-UI-Sektion (kein Browser/Playwright in dieser Entwicklungsumgebung
-  verfügbar, projektweit etablierte Praxis) — stattdessen über Vitest-Komponententests sowie die
-  Backend-API-Verifikation über exakt dieselben Gateway-Aufrufe abgesichert.
-- Doku: neues [ADR 0088](0088-admin-defined-groups.md), `docs/services/permission-service.md`
-  (API-Tabelle, Datenmodell, neue Sektion "Admin-anlegbare Gruppen", "Offene Punkte" teilweise als
-  behoben markiert), `docs/services/admin-ui.md` (Seiten-Tabelle, neue Sektion "Gruppen-Verwaltung",
-  Backend-Anbindungstabelle, Tests-Sektion) ergänzt.
+- **Migration**: none (two brand-new tables, `Base.metadata.create_all` creates them automatically — no
+  `ALTER TABLE` needed since no existing table is modified).
+- **Test infrastructure bug found and fixed**: `tests/conftest.py`'s `_clean_tables` fixture lists the
+  tables to truncate in a fixed `TRUNCATE` statement instead of deriving them from `Base.metadata` — the
+  two new tables were initially missing there. A first test run happened to pass (no name collision
+  within that run), a second, independent run failed with `UniqueViolationError` on `group.name`, since
+  groups from the first run had survived in the test DB. Fixed by adding `permission.group_membership`/
+  `permission.group` to the `TRUNCATE` list, after which two consecutive runs were confirmed green.
+- **Cache invalidation**: every membership/deletion change clears the entire `effective_permission_cache`
+  (same coarse-grained strategy as every other permission-changing operation in this service, see
+  README/docstring on `EffectivePermissionCache`) — a removed member loses permissions held via the group
+  immediately, confirmed live (see below).
+- **Tests**: `permission-service` 137 (previously 128, +9: create/list/delete groups including
+  authentication/authorization checks, add/idempotent-add/remove member including `404` cases, and the
+  core test `test_group_membership_grants_role_to_every_member` — a single role assignment to a group
+  with two members grants the permission to both, a non-member remains unaffected, removing a member
+  revokes the permission immediately). `admin-ui` 179 (previously 175, +4).
+- **Verified live against the actual running stack** (image rebuild + restart of
+  `permission-service`/`admin-ui`): a group was created live, two principals added as members, a new role
+  assigned ONCE to the group (not to each principal individually) — `GET /check` confirmed the permission
+  for BOTH members and its absence for a non-member; removing a member revoked the permission immediately
+  (cache invalidation confirmed), the remaining member kept it; group deletion confirmed via
+  `GET /groups`. No interactive browser test of the new admin UI section (no browser/Playwright available
+  in this development environment, project-wide established practice) — instead covered via Vitest
+  component tests plus the backend API verification through the exact same gateway calls.
+- Docs: new [ADR 0088](0088-admin-defined-groups.md), `docs/services/permission-service.md`
+  (API table, data model, new section "Admin-Creatable Groups", "Open Points" partially marked resolved),
+  `docs/services/admin-ui.md` (page table, new section "Group Management", backend integration table,
+  tests section) added.

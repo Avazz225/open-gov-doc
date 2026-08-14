@@ -1,135 +1,135 @@
 # rendering-service
 
-**Verantwortung:** Rendering/Preview + Ersatzdarstellungen (Konzept 3.7/2.4) — erzeugt automatisch dauerhaft persistierte Vorschauen/Ersatzdarstellungen für neue Dokumentversionen und stellt On-Demand-Rendering-Funktionen (Wasserzeichen) bereit.
-**Konzept-Referenz:** 3.7, 2.4
-**Eigenes Postgres-Schema:** `rendering` (`rendition`).
+**Responsibility:** Rendering/preview + renditions (Concept 3.7/2.4) — automatically generates permanently persisted previews/renditions for new document versions and provides on-demand rendering functions (watermarking).
+**Concept Reference:** 3.7, 2.4
+**Own Postgres schema:** `rendering` (`rendition`).
 
 ## API
 
-| Methode | Pfad | Beschreibung |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/renditions?document_id=...&version_number=...&status=...` | Erzeugte Ersatzdarstellungen/Vorschauen zu einer Version (`version_number` optional — ohne Angabe: alle Versionen des Dokuments) — seit **P19-S8** `rendering.read`-gegated. Seit **Post-Roadmap Phase 20 Session 7** ist auch `document_id` optional (vorher Pflicht) und ein neuer `status`-Filter kam dazu — ohne `document_id` liefert dies eine dokumentübergreifende Liste, Grundlage für die neue Admin-UI-Sicht auf `failed_permanent`-Renditions ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)) |
-| `GET` | `/renditions/{id}` | Einzelne Ersatzdarstellung (Metadaten) — 404 bei unbekannter `id`; seit **P19-S8** `rendering.read`-gegated |
-| `GET` | `/renditions/{id}/content` | Bytes der Ersatzdarstellung (Proxy auf den Storage Service) — 404 bei unbekannter `id`, 409 bei Status `failed`/`failed_permanent`; seit **P19-S8** `rendering.read`-gegated |
-| `POST` | `/renditions/{id}/retry` | Manueller Neustart einer `failed_permanent`-Ersatzdarstellung (seit **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` bei unbekannter `id`, `409` wenn `status != "failed_permanent"`, sonst sofortiger erneuter Versuch NUR für den betroffenen Renderer; `rendering.write`-gegated |
-| `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → On-Demand-Wasserzeichen, liefert das gestempelte PDF direkt zurück, **ohne** es zu persistieren; seit **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gegated |
-| `GET` | `/healthz` | Health-Check |
+| `GET` | `/renditions?document_id=...&version_number=...&status=...` | Generated renditions/previews for a version (`version_number` optional — without it: all versions of the document) — since **P19-S8** `rendering.read`-gated. Since **Post-Roadmap Phase 20 Session 7**, `document_id` is also optional (previously required) and a new `status` filter was added — without `document_id` this returns a cross-document list, the basis for the new Admin UI view of `failed_permanent` renditions ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)) |
+| `GET` | `/renditions/{id}` | Single rendition (metadata) — 404 on unknown `id`; since **P19-S8** `rendering.read`-gated |
+| `GET` | `/renditions/{id}/content` | Bytes of the rendition (proxy to the Storage Service) — 404 on unknown `id`, 409 on status `failed`/`failed_permanent`; since **P19-S8** `rendering.read`-gated |
+| `POST` | `/renditions/{id}/retry` | Manual restart of a `failed_permanent` rendition (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate retry for ONLY the affected renderer; `rendering.write`-gated |
+| `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → on-demand watermarking, returns the stamped PDF directly, **without** persisting it; since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gated |
+| `GET` | `/healthz` | Health check |
 
-`id` einer Ersatzdarstellung ist ein natürlicher Schlüssel `{document_id}:{version_number}:{rendition_type}` (siehe Datenmodell) — kein zufälliger UUID.
+The `id` of a rendition is a natural key `{document_id}:{version_number}:{rendition_type}` (see Data Model) — not a random UUID.
 
-## Automatische Ersatzdarstellungs-Pipeline (2.4) statt Cache
+## Automatic Rendition Pipeline (2.4) Instead of a Cache
 
-Der Rendering Service konsumiert `document.created` (erste Version, `version_number` implizit `1`) und `document.version.created` (Check-in, `version_number` im Payload) vom Document Service — beide docken **nach** dem Scan-Gating aus P5-S1 an, da Document Service diese Events erst nach erfolgreichem Virenscan und erfolgreichem Schreiben publiziert (ADR 0010). Für jede neue Version:
+The Rendering Service consumes `document.created` (first version, `version_number` implicitly `1`) and `document.version.created` (check-in, `version_number` in the payload) from the Document Service — both dock in **after** the scan gating from P5-S1, since Document Service only publishes these events after a successful virus scan and successful write (ADR 0010). For each new version:
 
-1. Metadaten (`filename`, `content_type`) und Originalinhalt werden über die **HTTP-API des Document Service** bezogen (`GET .../versions/{n}` bzw. `.../versions/{n}/content`) — der Rendering Service kennt weder dessen Datenmodell noch den content-addressierten Storage-Key direkt (3.1).
-2. Alle Regeln, deren Quellformat passt (`renderers/__init__.py`, siehe Tabelle unten), werden unabhängig voneinander angewendet — schlägt eine fehl (z. B. korruptes `.pdf`), werden die übrigen trotzdem erzeugt; die fehlgeschlagene Regel wird mit `status="failed"` und `error_message` festgehalten statt die ganze Verarbeitung abzubrechen.
-3. Jedes Ergebnis wird dauerhaft über den **Storage Service** abgelegt (`renditions/{document_id}/{version_number}/{rendition_type}`) — **kein** Cache/Redis/In-Memory, wie in 2.4 explizit gefordert: Ausfallsicherheit darf nicht von der Funktionsfähigkeit desselben Renderers abhängen, der sie eigentlich absichern soll.
-4. Erneutes Verarbeiten derselben Version (z. B. NATS-Redelivery) überschreibt die vorhandene Zeile (natürlicher Primärschlüssel), statt Duplikate anzuhäufen.
+1. Metadata (`filename`, `content_type`) and original content are obtained via the **Document Service's HTTP API** (`GET .../versions/{n}` and `.../versions/{n}/content` respectively) — the Rendering Service knows neither its data model nor the content-addressed storage key directly (3.1).
+2. All rules whose source format matches (`renderers/__init__.py`, see table below) are applied independently — if one fails (e.g. a corrupted `.pdf`), the others are still generated; the failed rule is recorded with `status="failed"` and `error_message` instead of aborting the whole process.
+3. Every result is stored permanently via the **Storage Service** (`renditions/{document_id}/{version_number}/{rendition_type}`) — **no** cache/Redis/in-memory storage, as explicitly required by 2.4: resilience must not depend on the functioning of the very renderer it is meant to safeguard.
+4. Reprocessing the same version (e.g. NATS redelivery) overwrites the existing row (natural primary key) instead of accumulating duplicates.
 
-Ein einziges breites Subject-Abo (`document.>`, nicht zwei Einzel-Subscriptions) mit In-Handler-Dispatch nach `event_type` — dasselbe Muster wie `permission-service/structure_consumer.py`, da ein JetStream-Durable-Consumer-Name pro abonniertem Subject reserviert wäre. Andere `document.>`-Events (Metadaten-Update, Löschung, Force-Unlock) lösen kein Rendering aus.
+A single broad subject subscription (`document.>`, not two individual subscriptions) with in-handler dispatch by `event_type` — the same pattern as `permission-service/structure_consumer.py`, since a JetStream durable consumer name would be reserved per subscribed subject. Other `document.>` events (metadata update, deletion, force unlock) do not trigger rendering.
 
 ### Retry & Backoff (Post-Roadmap Phase 20 Session 4, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md))
 
-Ein `status="failed"` (Renderer-Plugin-Fehler) ist seither **nicht mehr sofort terminal**: `attempts`
-wird erhöht, `next_retry_at` per `compute_backoff_seconds` (`libs/dms-retry`) gesetzt — ein neuer,
-eigenständiger `_rendition_retry_poll_loop` (Intervall `rendering_retry_poll_interval_seconds`, Default
-60s) greift fällige Renditions auf. **Besonderheit gegenüber `ocr-service`**: da eine Version MEHRERE
-Rendition-Zeilen haben kann (eine je zutreffender Regel), ruft der Retry gezielt NUR den einen
-betroffenen Renderer erneut auf (`renderers.get_renderer_by_type`/`pipeline.retry_rendition`), nicht die
-gesamte `process_version`-Regelkaskade — sonst würden bereits erfolgreiche Renditions unnötig neu
-erzeugt. Erst nach `max_rendering_attempts` (Default 5) erfolglosen Versuchen wechselt `status` auf das
-echte Terminalstatus `failed_permanent`, ab dem `POST /renditions/{id}/retry` einen sofortigen manuellen
-Neustart erlaubt (setzt zuerst `attempts`/`error_message`/`next_retry_at` zurück, dann ein echter neuer
-Versuch).
+A `status="failed"` (renderer plugin error) is no longer **immediately terminal** since then: `attempts`
+is incremented, `next_retry_at` is set via `compute_backoff_seconds` (`libs/dms-retry`) — a new,
+standalone `_rendition_retry_poll_loop` (interval `rendering_retry_poll_interval_seconds`, default
+60s) picks up due renditions. **Difference from `ocr-service`**: since a version CAN have MULTIPLE
+rendition rows (one per applicable rule), the retry specifically calls back ONLY the one
+affected renderer (`renderers.get_renderer_by_type`/`pipeline.retry_rendition`), not the
+entire `process_version` rule cascade — otherwise already-successful renditions would be needlessly
+regenerated. Only after `max_rendering_attempts` (default 5) unsuccessful attempts does `status` switch to the
+true terminal status `failed_permanent`, at which point `POST /renditions/{id}/retry` allows an immediate manual
+restart (first resets `attempts`/`error_message`/`next_retry_at`, then performs a genuine new
+attempt).
 
-**Rückwirkende Verarbeitung beim ersten Start**: Da kein `deliver_new` gesetzt ist (wie bei `permission-service`/`audit-service`), holt ein frischer Durable Consumer beim allerersten Start die komplette bisherige Event-Historie nach — bereits vor dieser Session hochgeladene Dokumente werden also rückwirkend mit Ersatzdarstellungen versehen, sobald der Service erstmals läuft. Gewolltes Verhalten (Backfill), keine Race Condition.
+**Retroactive processing on first start**: since no `deliver_new` is set (unlike `permission-service`/`audit-service`), a fresh durable consumer catches up on the entire past event history on its very first start — documents uploaded before this session are thus retroactively fitted with renditions once the service runs for the first time. This is intended behavior (backfill), not a race condition.
 
-## Ersatzdarstellungs-Regeln (Plugin-Prinzip wie Storage-Backends, 3.3/3.8)
+## Rendition Rules (Plugin Principle Like Storage Backends, 3.3/3.8)
 
-| Quellformat | Ziel | Renderer | `rendition_type` |
+| Source Format | Target | Renderer | `rendition_type` |
 |---|---|---|---|
-| Rasterbilder (`image/*`) | PNG-Thumbnail, max. 256×256 | `ThumbnailRenderer` (Pillow) | `thumbnail` |
-| `.docx` | `.txt`-Textextraktion | `DocxTextExtractionRenderer` (python-docx) | `substitute_text` |
-| `.pptx` | `.txt`-Textextraktion je Folie | `PptxTextExtractionRenderer` (python-pptx) | `substitute_text` |
-| `.ods` | `.txt`-Textextraktion je Tabellenblatt | `OdsTextExtractionRenderer` (odfpy, nachgezogen per Bugfix nach Nutzer-Feedback — `.ods` hatte zuvor überhaupt keinen Renderer) | `substitute_text` |
-| `.pdf`/Rasterbilder/Office-Formate (`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp`/`.rtf`/`.txt`) | Universelle PDF/A-Archivkopie | `PdfArchiveRenderer` (s. u.) | `pdf_archive` |
+| Raster images (`image/*`) | PNG thumbnail, max. 256×256 | `ThumbnailRenderer` (Pillow) | `thumbnail` |
+| `.docx` | `.txt` text extraction | `DocxTextExtractionRenderer` (python-docx) | `substitute_text` |
+| `.pptx` | `.txt` text extraction per slide | `PptxTextExtractionRenderer` (python-pptx) | `substitute_text` |
+| `.ods` | `.txt` text extraction per sheet | `OdsTextExtractionRenderer` (odfpy, added later as a bugfix after user feedback — `.ods` previously had no renderer at all) | `substitute_text` |
+| `.pdf`/raster images/office formats (`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp`/`.rtf`/`.txt`) | Universal PDF/A archive copy | `PdfArchiveRenderer` (see below) | `pdf_archive` |
 
-Neue Regeln werden ergänzt, indem eine weitere `Renderer`-Klasse in `renderers/__init__.py` registriert wird, ohne bestehenden Code zu ändern (`RENDERERS`-Liste, `select_renderers()`).
+New rules are added by registering another `Renderer` class in `renderers/__init__.py`, without changing existing code (`RENDERERS` list, `select_renderers()`).
 
-**Bewusste Abweichungen vom Konzept-Beispieltext, dieselbe Abwägung wie ClamdEngine vs. EicarSignatureEngine in P5-S1/ADR 0010** — echte, ohne externe Systemabhängigkeit erreichbare Funktionalität statt eines Platzhalters:
+**Deliberate deviations from the concept's example text, the same trade-off as ClamdEngine vs. EicarSignatureEngine in P5-S1/ADR 0010** — real functionality reachable without an external system dependency instead of a placeholder:
 
-- **Bildbasierte/gescannte Dokumente wurden in P5-S2 bewusst nicht bedient** (sie hätten einen OCR-Textlayer als Grundlage gebraucht, 3.9) — der Nachzieheffekt aus P5-S3 (siehe Abschnitt unten) schließt diese Lücke nachträglich.
-- **Kein Video-Transkriptions-Plugin**: laut 2.4 selbst optional ("sofern ein Transkriptions-Plugin verfügbar ist") — es existiert noch keine Transkriptions-Engine, daher keine Regel für Video-Formate in dieser Session.
+- **Image-based/scanned documents were deliberately not served in P5-S2** (they would have needed an OCR text layer as a basis, 3.9) — the follow-up effect from P5-S3 (see section below) closes this gap retroactively.
+- **No video transcription plugin**: 2.4 itself calls this optional ("provided a transcription plugin is available") — no transcription engine exists yet, so there is no rule for video formats in this session.
 
-## Universelle PDF/A-Konvertierung (5.6, seit P7-S3)
+## Universal PDF/A Conversion (5.6, since P7-S3)
 
-`PdfArchiveRenderer` erzeugte bis P5-S2 nur für bereits-PDF-Dokumente eine Archivkopie (reines `pypdf`-Metadaten-Tagging) — Begründung damals: "LibreOffice headless nicht verlässlich verfügbar". Diese Annahme wurde in P7-S3 explizit **korrigiert**: LibreOffice ist auf dem Zielhost tatsächlich installiert (nur nicht auf `PATH`) und wurde live gegen echte Konvertierungen verifiziert. Nutzervorgabe aus P7-S3 (Aussonderung, 5.6): **alle gängigen Dokumenttypen müssen archivierbar sein**, PDF/A bevorzugt, reines PDF als Fallback akzeptabel — kein stiller "Original-Format"-Fallback für nicht konvertierte Dokumente.
+Until P5-S2, `PdfArchiveRenderer` only produced an archive copy for already-PDF documents (pure `pypdf` metadata tagging) — the rationale at the time: "LibreOffice headless not reliably available." This assumption was explicitly **corrected** in P7-S3: LibreOffice is in fact installed on the target host (just not on `PATH`) and was verified live against real conversions. User directive from P7-S3 (records disposal, 5.6): **all common document types must be archivable**, PDF/A preferred, plain PDF acceptable as a fallback — no silent "original format" fallback for documents that fail to convert.
 
-`PdfArchiveRenderer.render()` dispatcht nach Quellformat in drei Pfade:
+`PdfArchiveRenderer.render()` dispatches by source format into three paths:
 
-1. **Bereits PDF** — unverändert die bestehende `pypdf`-Tagging-Logik (Info-Metadaten, PDF-Strukturbaum neu geschrieben).
-2. **Rasterbilder** (`.png`/`.jpg`/`.bmp`/`.tiff`/...) — direkt über **Pillow** (`Image.save(buffer, format="PDF")`), keine neue Bibliothek, schneller als ein LibreOffice-Subprozess für den einfachsten Fall.
-3. **Office-/Textformate** (`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp`/`.rtf`/`.txt`) — `renderers/_libreoffice.py` ruft `soffice --headless --convert-to pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":1}}` per Subprozess auf (PDF/A-1b-Export-Filter, eingebettete Fonts/XMP-Metadaten). Jeder Aufruf bekommt ein isoliertes `-env:UserInstallation=file://<tmp-profil>`, um "another instance running"-Lock-Konflikte bei Parallelaufrufen zu vermeiden. Binärpfad-Auflösung zuerst über `PATH` (`soffice`/`libreoffice`), sonst bekannte Absolutpfade (`/opt/libreoffice*/program/soffice`) — deckt sowohl das schlanke Docker-Image (`apt-get install libreoffice-writer libreoffice-calc libreoffice-impress`) als auch diese Dev-Umgebung ab.
+1. **Already PDF** — unchanged, the existing `pypdf` tagging logic (info metadata, PDF structure tree rewritten).
+2. **Raster images** (`.png`/`.jpg`/`.bmp`/`.tiff`/...) — directly via **Pillow** (`Image.save(buffer, format="PDF")`), no new library, faster than a LibreOffice subprocess for the simplest case.
+3. **Office/text formats** (`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp`/`.rtf`/`.txt`) — `renderers/_libreoffice.py` invokes `soffice --headless --convert-to pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":1}}` via subprocess (PDF/A-1b export filter, embedded fonts/XMP metadata). Every call gets an isolated `-env:UserInstallation=file://<tmp-profile>` to avoid "another instance running" lock conflicts on parallel calls. Binary path resolution first via `PATH` (`soffice`/`libreoffice`), then known absolute paths (`/opt/libreoffice*/program/soffice`) — covers both the slim Docker image (`apt-get install libreoffice-writer libreoffice-calc libreoffice-impress`) and this dev environment.
 
-Scheitert eine Konvertierung technisch (fehlender Binärpfad, Timeout), wirft `_libreoffice.ConversionError` — die Rendition bekommt `status="failed"` mit `error_message`, kein stiller Fallback. LibreOffice selbst ist überraschend permissiv beim Parsen beschädigter Eingaben (versucht auch Datenmüll mit falscher Endung als Text zu importieren, statt zuverlässig fehlzuschlagen) — der einzige zuverlässig testbare Fehlerfall ist ein fehlender/falscher Binärpfad.
+If a conversion technically fails (missing binary path, timeout), `_libreoffice.ConversionError` is raised — the rendition gets `status="failed"` with `error_message`, no silent fallback. LibreOffice itself is surprisingly permissive when parsing corrupted input (it even tries to import garbage data with the wrong extension as text, rather than reliably failing) — the only reliably testable failure case is a missing/wrong binary path.
 
-**Weiterhin nicht unabhängig veraPDF-validiert**: LibreOffices eigener PDF/A-Export-Filter ist technisch konformer als die vorherige reine `pypdf`-Nachbearbeitung, bleibt aber eine unveränderte, nur jetzt transparent kommunizierte Einschränkung.
+**Still not independently veraPDF-validated**: LibreOffice's own PDF/A export filter is technically more conformant than the previous pure `pypdf` post-processing, but this remains an unchanged limitation, now merely communicated transparently.
 
-## Nachzieheffekt: OCR-Volltext als `substitute_text`-Rendition (P5-S3, 2.4/3.9)
+## Follow-up Effect: OCR Full Text as a `substitute_text` Rendition (P5-S3, 2.4/3.9)
 
-Zusätzlich zum `document.>`-Abo konsumiert rendering-service seit P5-S3 `ocr.completed` vom neuen `ocr-service` (eigener Durable-Name `rendering-service-ocr`, getrennt vom `document.>`-Abo, da beide auf unterschiedlichen Streams liegen — derselbe `event_bus`-Client, zwei Subscriptions). Für jedes `ocr.completed` mit `status` `ready`/`needs_review`:
+In addition to the `document.>` subscription, rendering-service has consumed `ocr.completed` from the new `ocr-service` since P5-S3 (its own durable name `rendering-service-ocr`, separate from the `document.>` subscription, since both live on different streams — the same `event_bus` client, two subscriptions). For every `ocr.completed` with status `ready`/`needs_review`:
 
-1. Prüft per `repository.get_rendition_optional()`, ob für `(document_id, version_number, "substitute_text")` bereits eine Rendition existiert (z. B. durch `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer` erzeugt) — falls ja, nichts tun (kein Duplikat, keine unnötige Arbeit).
-2. Holt den OCR-Volltext per HTTP vom OCR Service nach (`GET /ocr-results/{document_id}:{version_number}`, neuer `OcrServiceClient`) — `ocr.completed`-Events tragen bewusst nur Statusfelder (`version_number`, `status`, `engine`, `average_confidence`), nicht den potenziell großen Volltext selbst, um NATS-Payloads und die Audit-Hashkette klein zu halten.
-3. Legt bei nicht-leerem Text eine `substitute_text`-Rendition an (`pipeline.process_ocr_text()`) — derselbe Rendition-Typ-String wie bei `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer`, konsistent als "die textbasierte Ersatzdarstellung dieser Version, gleich welcher Herkunft".
+1. Checks via `repository.get_rendition_optional()` whether a rendition already exists for `(document_id, version_number, "substitute_text")` (e.g. generated by `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer`) — if so, does nothing (no duplicate, no unnecessary work).
+2. Fetches the OCR full text via HTTP from the OCR Service (`GET /ocr-results/{document_id}:{version_number}`, new `OcrServiceClient`) — `ocr.completed` events deliberately carry only status fields (`version_number`, `status`, `engine`, `average_confidence`), not the potentially large full text itself, to keep NATS payloads and the audit hash chain small.
+3. Creates a `substitute_text` rendition if the text is non-empty (`pipeline.process_ocr_text()`) — the same rendition type string as `DocxTextExtractionRenderer`/`PptxTextExtractionRenderer`, consistently treated as "the text-based rendition of this version, regardless of origin."
 
-Schließt damit die in P5-S2 bewusst offen gelassene Lücke: gescannte/bildbasierte Dokumente bekommen jetzt ebenfalls eine textbasierte Ersatzdarstellung, sobald OCR abgeschlossen ist — und, als beabsichtigter Nebeneffekt, auch PDFs mit echtem Textlayer, für die es bislang nur die `pdf_archive`-Archivkopie gab, keine Textextraktion.
+This closes the gap deliberately left open in P5-S2: scanned/image-based documents now also get a text-based rendition once OCR completes — and, as an intended side effect, so do PDFs with a real text layer, for which previously only the `pdf_archive` archive copy existed, no text extraction.
 
-**Seit P5b-S5 tolerant gegenüber fehlendem `ocr-service`** ([ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md)): `ocr-service` ist jetzt per Docker-Compose-Profil optional deploybar (`ocrEnabled`). Ein `ocr.completed`-Alt-Event aus der Zeit, als OCR noch lief, würde beim HTTP-Nachschlag sonst eine unbehandelte Exception werfen und endlos redeliver-t werden, ohne je verarbeitbar zu sein — `get_full_text()` ist deshalb jetzt in `try`/`except` gefasst (gleiches Muster wie search-service, das dies bereits vorher hatte).
+**Since P5b-S5, tolerant of a missing `ocr-service`** ([ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md)): `ocr-service` is now optionally deployable via a Docker Compose profile (`ocrEnabled`). A legacy `ocr.completed` event from when OCR was still running would otherwise throw an unhandled exception during the HTTP lookup and be redelivered endlessly without ever being processable — `get_full_text()` is therefore now wrapped in `try`/`except` (the same pattern search-service already had beforehand).
 
-## Wasserzeichen als On-Demand-Funktion, nicht als automatische Regel (3.7)
+## Watermarking as an On-Demand Function, Not an Automatic Rule (3.7)
 
-Anders als die Ersatzdarstellungen ist `POST /render/watermark` bewusst **kein** automatischer Pipelineschritt und wird **nicht** persistiert: ein Wasserzeichen (z. B. "VERTRAULICH", ein Empfängername bei einem Export) ist typischerweise eine bewusste Einzelaktion für einen konkreten Anlass, kein Standardschritt für jedes hochgeladene PDF. Die Implementierung (`watermark.py`, reportlab + pypdf) ist bewusst einfach gehalten: ein einziger diagonaler, halbtransparenter Textstempel über jede Seite, keine Positions-/Farb-/Wiederholungs-Konfiguration.
+Unlike renditions, `POST /render/watermark` is deliberately **not** an automatic pipeline step and is **not** persisted: a watermark (e.g. "CONFIDENTIAL", a recipient name on an export) is typically a deliberate one-off action for a specific occasion, not a default step for every uploaded PDF. The implementation (`watermark.py`, reportlab + pypdf) is deliberately kept simple: a single diagonal, semi-transparent text stamp on every page, no position/color/repetition configuration.
 
-## Anbindung an das Backend
+## Backend Integration
 
-- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (Metadaten) und `.../content` (Originalbytes) — kein direkter Zugriff auf dessen Schema/Storage-Key.
-- **Storage Service** (3.6): `PUT`/`GET /objects/renditions/{document_id}/{version_number}/{rendition_type}` — Persistenz aller Ergebnisse.
-- **OCR Service** (3.9, seit P5-S3): `GET /ocr-results/{document_id}:{version_number}` — Volltext-Nachschlag für den Nachzieheffekt oben.
+- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key.
+- **Storage Service** (3.6): `PUT`/`GET /objects/renditions/{document_id}/{version_number}/{rendition_type}` — persistence of all results.
+- **OCR Service** (3.9, since P5-S3): `GET /ocr-results/{document_id}:{version_number}` — full-text lookup for the follow-up effect above.
 
 ## Events
 
-| Event | Payload | Wann |
+| Event | Payload | When |
 |---|---|---|
-| `rendering.completed` | `{version_number, rendition_type, target_filename, status: "ready"\|"failed", error}` | Nach **jeder** angewendeten Regel — auch bei `status="failed"`, damit der Audit-Trail (5.3) auch Fehlschläge lückenlos zeigt. Auch nach dem OCR-Nachzieheffekt (`rendition_type="substitute_text"`). |
+| `rendering.completed` | `{version_number, rendition_type, target_filename, status: "ready"\|"failed", error}` | After **every** applied rule — even on `status="failed"`, so the audit trail (5.3) shows failures without gaps too. Also after the OCR follow-up effect (`rendition_type="substitute_text"`). |
 
-Zusätzlich konsumiert (nicht publiziert): `ocr.completed` vom OCR Service (siehe Nachzieheffekt oben).
+Additionally consumed (not published): `ocr.completed` from the OCR Service (see follow-up effect above).
 
-Der Audit Service konsumiert `rendering.>` seit dieser Session (siehe `docs/services/audit-service.md`).
+The Audit Service has consumed `rendering.>` since this session (see `docs/services/audit-service.md`).
 
-## Selbst-Registrierung (Konzept 3.2a)
+## Self-Registration (Concept 3.2a)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an — Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
+Registers itself with the registry at startup via `dms-registry-client` — opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
 
-## Sensoren (Konzept 10.1)
+## Sensors (Concept 10.1)
 
-Noch keine — folgt in Phase 11.
+None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests` (**46 Tests**, vorher 44, +2 seit **Post-Roadmap Phase
+- `uv run pytest services/rendering-service/tests` (**46 tests**, previously 44, +2 since **Post-Roadmap Phase
   20 Session 7** ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)): `document_id`
-  optional in `GET /renditions` — ein Repository- und ein API-Test bestätigen den dokumentübergreifenden
-  Aufruf mit `status`-Filter, ohne dass ein `422` zurückkommt; davor 44, +11 seit **Post-Roadmap Phase 20 Session 4** — Backoff-Verhalten, `list_due_for_retry`-Filterung, `reset_for_retry`-Regressionstest, `process_version`s `failed_permanent`-Pfad, neuer `/retry`-Endpunkt, neue `test_main.py` für `_run_retry_tick`, siehe [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): Renderer-Verhalten gegen echte, in-memory erzeugte Dateien (echtes PNG/`.docx`/`.pptx`/PDF, keine Fixture-Dateien, keine Mocks), Repository (Upsert/Überschreiben/Filter), Pipeline (`process_version` direkt gegen den echten laufenden Document/Storage Service, inkl. Fehler-Isolation bei korruptem PDF; seit P5-S3 zusätzlich `process_ocr_text` für den Nachzieheffekt), API (`/renditions`-Endpunkte, Wasserzeichen inkl. Ablehnung bei ungültigem PDF), Consumer-Integration (echtes NATS-Event `document.created`/`document.version.created` löst echtes Rendering aus; seit P5-S3 zusätzlich `test_ocr_consumer.py` für den `ocr.completed`-Dispatch inkl. Duplikatsprüfung, mit einem Fake-`OcrServiceClient` statt eines echten OCR-Service-Aufrufs; seit P5b-S5 zusätzlich ein Regressionstest mit einem `OcrServiceClient`, der einen Verbindungsfehler simuliert — der Handler darf dabei nicht crashen).
-- Live gegen den echten Stack über das API-Gateway verifiziert: Upload → automatische Thumbnail-Erzeugung → Download der Ersatzdarstellung (korrekt herunterskaliertes echtes PNG) → `rendering.completed` im Audit-Trail sichtbar, Hash-Kette weiterhin intakt. Seit P5-S3 zusätzlich: PDF mit Textlayer hochgeladen → OCR Service erzeugt `native_text_layer`-Ergebnis → rendering-service erzeugt automatisch eine `substitute_text`-Rendition mit exakt demselben Volltext. Seit P7-S3 zusätzlich: `.txt`- und echte `.docx`-Datei (via `python-docx` erzeugt) live über `soffice --headless` zu validem PDF/A-getaggtem PDF konvertiert.
-- Seit P7-S3 zusätzlich `_libreoffice.py`-Tests (Binärpfad-Auflösung inkl. Fehlerfall bei fehlendem Binary via `monkeypatch` auf `_BINARY_CANDIDATES`) sowie erweiterte `PdfArchiveRenderer`-Tests für Bild-/Office-Formate.
+  optional in `GET /renditions` — a repository test and an API test confirm the cross-document
+  call with the `status` filter, without a `422` being returned; before that 44, +11 since **Post-Roadmap Phase 20 Session 4** — backoff behavior, `list_due_for_retry` filtering, `reset_for_retry` regression test, `process_version`'s `failed_permanent` path, new `/retry` endpoint, new `test_main.py` for `_run_retry_tick`, see [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): renderer behavior against real, in-memory generated files (real PNG/`.docx`/`.pptx`/PDF, no fixture files, no mocks), repository (upsert/overwrite/filter), pipeline (`process_version` directly against the real running Document/Storage Service, incl. error isolation on a corrupted PDF; since P5-S3 additionally `process_ocr_text` for the follow-up effect), API (`/renditions` endpoints, watermarking incl. rejection on an invalid PDF), consumer integration (a real NATS event `document.created`/`document.version.created` triggers real rendering; since P5-S3 additionally `test_ocr_consumer.py` for the `ocr.completed` dispatch incl. duplicate check, with a fake `OcrServiceClient` instead of a real OCR service call; since P5b-S5 additionally a regression test with an `OcrServiceClient` that simulates a connection error — the handler must not crash in that case).
+- Verified live against the real stack via the API gateway: upload → automatic thumbnail generation → download of the rendition (correctly downscaled real PNG) → `rendering.completed` visible in the audit trail, hash chain still intact. Since P5-S3, additionally: PDF with a text layer uploaded → OCR Service produces a `native_text_layer` result → rendering-service automatically produces a `substitute_text` rendition with exactly the same full text. Since P7-S3, additionally: a `.txt` file and a real `.docx` file (generated via `python-docx`) converted live via `soffice --headless` into a valid PDF/A-tagged PDF.
+- Since P7-S3, additionally `_libreoffice.py` tests (binary path resolution incl. the failure case of a missing binary via `monkeypatch` on `_BINARY_CANDIDATES`) as well as extended `PdfArchiveRenderer` tests for image/office formats.
 
-## Offene Punkte
+## Open Points
 
-- **Bildbasierte/gescannte Dokumente**: seit P5-S3 über den Nachzieheffekt (Text) bedient — eine echte Bild-Ersatzdarstellung (Thumbnail) für gescannte/bildbasierte PDFs entsteht weiterhin nicht in rendering-service selbst, sondern nur als OCR-eigenes Seitenbild (siehe `docs/services/ocr-service.md`).
-- **PDF/A weiterhin nicht ISO-19005-validiert** (s. o., seit P7-S3 zumindest über LibreOffices eigenen Export-Filter statt reinem `pypdf`-Tagging) — eine unabhängige veraPDF-Prüfung ist nicht Teil dieses Service.
-- **Größeres Docker-Image** durch die LibreOffice-Installation (seit P7-S3) — bewusster Trade-off für die geforderte Formatabdeckung (5.6), kein Weg daran vorbei ohne proprietäre Cloud-APIs.
-- **Kein Video-Transkriptions-Plugin**: laut Konzept selbst optional, keine Engine vorhanden.
-- ~~**Keine Bereinigung fehlgeschlagener Renditions**~~ — **behoben in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatischer Retry mit Full-Jitter-Backoff bis `max_rendering_attempts`, danach `failed_permanent` + manueller Neustart über `POST .../retry` (gezielt nur für den betroffenen Renderer).
-- ~~Keine Autorisierung~~ — **behoben in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): alle Endpunkte prüfen jetzt `rendering.read`/`rendering.write` über `permission-service`. Weiterhin offen: Ersatzdarstellungen erben laut 2.4 dieselben Berechtigungen wie das Original (feingranular, dokumentspezifisch) — die neue Prüfung ist ein grobes, service-weites `read`/`write`, keine Vererbung der konkreten Dokument-Berechtigung.
-- **Wasserzeichen-Endpunkt bewusst minimal**: fester diagonaler Stempel, keine Positions-/Wiederholungs-/Farbkonfiguration.
+- **Image-based/scanned documents**: served since P5-S3 via the follow-up effect (text) — a real image rendition (thumbnail) for scanned/image-based PDFs still does not originate in rendering-service itself, only as OCR's own page image (see `docs/services/ocr-service.md`).
+- **PDF/A still not ISO 19005 validated** (see above, since P7-S3 at least via LibreOffice's own export filter instead of pure `pypdf` tagging) — an independent veraPDF check is not part of this service.
+- **Larger Docker image** due to the LibreOffice installation (since P7-S3) — a deliberate trade-off for the required format coverage (5.6), no way around it without proprietary cloud APIs.
+- **No video transcription plugin**: optional per the concept itself, no engine available.
+- ~~**No cleanup of failed renditions**~~ — **fixed in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_rendering_attempts`, after that `failed_permanent` + manual restart via `POST .../retry` (targeted only at the affected renderer).
+- ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `rendering.read`/`rendering.write` via `permission-service`. Still open: per 2.4, renditions should inherit the same permissions as the original (fine-grained, document-specific) — the new check is a coarse, service-wide `read`/`write`, not inheritance of the concrete document permission.
+- **Watermark endpoint deliberately minimal**: fixed diagonal stamp, no position/repetition/color configuration.

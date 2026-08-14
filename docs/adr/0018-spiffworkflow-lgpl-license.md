@@ -1,21 +1,21 @@
-# 0018 — SpiffWorkflow als LGPLv3-Abhängigkeit akzeptiert
+# 0018 — SpiffWorkflow accepted as an LGPLv3 dependency
 
-**Status:** akzeptiert
-**Kontext:** Konzept 13 (offener Punkt "SpiffWorkflow-Lizenz"), `IMPLEMENTATION_PLAN.md` benannte den Lizenz-Check explizit als Voraussetzung vor P6-S1 (Workflow Engine Grundgerüst). Getroffen im Rahmen einer Konsolidierungs-Session offener Entscheidungen nach Abschluss von Phase 5b, nicht innerhalb einer eigenen P-Session.
+**Status:** accepted
+**Context:** Concept 13 (open point "SpiffWorkflow license"), `IMPLEMENTATION_PLAN.md` explicitly named the license check as a prerequisite before P6-S1 (Workflow Engine foundation). Made as part of a consolidation session for open decisions after the completion of Phase 5b, not within a dedicated P-session.
 
-## Entscheidung
+## Decision
 
-`SpiffWorkflow` (LGPLv3) wird als unveränderte Python-Dependency für die Workflow Engine (P6-S1) akzeptiert. Kein Wechsel auf eine alternative Engine, keine Verzögerung von P6-S1 auf eine förmliche externe Rechtsprüfung.
+`SpiffWorkflow` (LGPLv3) is accepted as an unmodified Python dependency for the Workflow Engine (P6-S1). No switch to an alternative engine, no delaying P6-S1 pending a formal external legal review.
 
-## Begründung
+## Rationale
 
-- **LGPLv3 unterscheidet zwischen der Bibliothek selbst und ihrer Nutzung als Abhängigkeit**: Die Copyleft-Pflicht (Quelloffenlegung bei Verbreitung) greift bei unveränderter Nutzung als Library-Dependency nicht auf den Gesamtcode des nutzenden Systems durch — sie greift nur, wenn `SpiffWorkflow` selbst modifiziert und diese Modifikation verbreitet wird. Dieses Projekt bindet `SpiffWorkflow` unverändert über `uv`/PyPI ein (kein Fork, kein Patch), genau der Fall, den LGPL von der stärkeren GPL-Copyleft-Wirkung ausnimmt.
-- **Kein struktureller Unterschied zu bereits bestehenden Abhängigkeiten dieses Repos**: Das Projekt nutzt bereits diverse Open-Source-Bibliotheken unter verschiedenen Lizenzen (Apache-2.0, MIT, BSD) als reine Dependencies, ohne deren Lizenzbedingungen auf den eigenen Code durchschlagen zu lassen — SpiffWorkflow als Dependency unterscheidet sich lizenzrechtlich nicht in der Kategorie, nur in der spezifischen Lizenzfamilie (Copyleft statt permissiv).
-- **Kein Ersatz mit vergleichbarer Reife verfügbar**: `bpmn-js-spiffworkflow` (Frontend-Gegenstück für P6-S8, ehemals P6-S6) ist speziell für SpiffWorkflow gebaut — ein Wechsel der Engine hätte auch den Process-Designer-Ansatz betroffen (`bpmn-js` selbst hat übrigens eine eigene Lizenzbesonderheit, siehe [ADR 0021](0021-bpmn-io-license-watermark.md)). Keine andere Python-BPMN-Engine mit vergleichbarem Funktionsumfang (Manual/Automatic Tasks, Timer/Boundary Events für P6-S2, Signature-Task-Typ-Erweiterbarkeit für P6-S7, ehemals P6-S5) wurde identifiziert, die eine permissivere Lizenz hätte.
-- **Diese Einschätzung ist keine Rechtsberatung**: Sie ist eine technische/pragmatische Bewertung im Rahmen der Projektentwicklung, keine Ersetzung einer förmlichen juristischen Prüfung. Falls das System künftig extern (an Dritte, als Closed-Source-Produkt) vertrieben werden soll, ist diese Einschätzung vor einem solchen Schritt erneut zu prüfen — für den aktuellen internen Entwicklungs-/Testbetrieb wird sie als ausreichend angesehen, um P6-S1 nicht länger zu blockieren.
+- **LGPLv3 distinguishes between the library itself and its use as a dependency**: the copyleft obligation (source disclosure on distribution) does not extend to the overall code of the consuming system when used unmodified as a library dependency — it only applies if `SpiffWorkflow` itself is modified and that modification is distributed. This project incorporates `SpiffWorkflow` unmodified via `uv`/PyPI (no fork, no patch), exactly the case that LGPL exempts from the stronger GPL copyleft effect.
+- **No structural difference from dependencies this repo already has**: the project already uses various open-source libraries under different licenses (Apache-2.0, MIT, BSD) as pure dependencies, without their license terms bleeding into its own code — SpiffWorkflow as a dependency does not differ in category from a licensing standpoint, only in the specific license family (copyleft instead of permissive).
+- **No replacement of comparable maturity available**: `bpmn-js-spiffworkflow` (the frontend counterpart for P6-S8, formerly P6-S6) is built specifically for SpiffWorkflow — switching the engine would also have affected the Process Designer approach (`bpmn-js` itself, incidentally, has its own license quirk, see [ADR 0021](0021-bpmn-io-license-watermark.md)). No other Python BPMN engine with comparable feature scope (manual/automatic tasks, timer/boundary events for P6-S2, signature task-type extensibility for P6-S7, formerly P6-S5) was identified that would have a more permissive license.
+- **This assessment is not legal advice**: it is a technical/pragmatic evaluation within the scope of project development, not a substitute for a formal legal review. Should the system ever be distributed externally in the future (to third parties, as a closed-source product), this assessment must be revisited before such a step — for the current internal development/test operation, it is considered sufficient to no longer block P6-S1.
 
-## Konsequenzen
+## Consequences
 
-- P6-S1 kann ohne weitere Vorbedingung starten — der bisher in `IMPLEMENTATION_PLAN.md` als Gate formulierte "Lizenz-Check LGPLv3 zuerst"-Zusatz entfällt.
-- Falls SpiffWorkflow künftig selbst modifiziert werden müsste (z. B. ein Patch für einen fehlenden BPMN-Task-Typ), greift die LGPL-Copyleft-Pflicht für genau diese Modifikation — dieser Fall ist aktuell nicht geplant, aber als Bedingung dieser Entscheidung festgehalten.
-- Bei einem künftigen Fremdvertrieb des Gesamtsystems ist diese ADR als "vorläufig, für internen Betrieb" zu kennzeichnen und die Lizenzfrage erneut mit tatsächlicher Rechtsberatung zu klären.
+- P6-S1 can start without further preconditions — the "LGPLv3 license check first" gate previously stated in `IMPLEMENTATION_PLAN.md` is dropped.
+- Should SpiffWorkflow itself ever need to be modified (e.g. a patch for a missing BPMN task type), the LGPL copyleft obligation applies to exactly that modification — this case is not currently planned but is recorded as a condition of this decision.
+- In the event of future third-party distribution of the overall system, this ADR must be marked "provisional, for internal operation" and the license question must be clarified again with actual legal counsel.

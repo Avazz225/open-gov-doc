@@ -1,77 +1,78 @@
-# 0069 — Rückwärts-Identitätsauflösung (UUID → Nutzername)
+# 0069 — Reverse identity resolution (UUID → username)
 
-**Status:** akzeptiert (Session 4 von 11, siehe Phase 19 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 19 Session 4, betrifft `auth-service`, `apps/user-ui`
+**Status:** accepted (session 4 of 11, see phase 19 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap phase 19 session 4, affects `auth-service`, `apps/user-ui`
 
-## Entscheidung
+## Decision
 
-Neuer Endpunkt `GET /users/{user_id}` in `auth-service` — Gegenstück zum bestehenden `GET
-/users/lookup?username=` (Name → UUID, seit P14-S6). `principal_id`-Felder sind überall im System die
-Keycloak-`sub`-UUID (Delegationen, Teamspace-Mitgliederlisten, `X-DMS-Principal`) — kein Nutzer kennt sie
-auswendig, Frontends zeigten sie bislang roh an, mangels einer Rückwärtsauflösung.
+New endpoint `GET /users/{user_id}` in `auth-service` — the counterpart to the existing `GET
+/users/lookup?username=` (name → UUID, since P14-S6). `principal_id` fields are the Keycloak
+`sub` UUID everywhere in the system (delegations, teamspace member lists, `X-DMS-Principal`) — no
+user knows them by heart, frontends previously displayed them raw, for lack of reverse resolution.
 
-1. **`admin_users.find_user_by_id(admin, user_id)`** (neu) — spiegelt `find_user_by_username`, nutzt
-   `KeycloakAdmin.get_user(user_id)` (Einzel-Abruf, nicht `get_users(query=...)`), fängt
-   `KeycloakGetError` mit `response_code == 404` ab und liefert `None`. Gleiche minimale
-   `{id, username}`-Antwortform wie die Vorwärtsauflösung.
-2. **`GET /users/{user_id}`** (neu, `main.py`) — gleiches Gate wie `GET /users/lookup`
-   (`_require_permission(user, "users.lookup", ...)`, "everyone"-Gruppe aus ADR 0067/0068): dieselbe
-   Vertrauensstufe, nur die Suchrichtung ist umgekehrt, kein neues Berechtigungswort nötig.
-   **Registrierungsreihenfolge beachtet**: muss nach allen statischen `/users/...`-Pfaden
-   (`/users/lookup`, `/users/directory`, `/users/count`) stehen, da FastAPI/Starlette Routen in
-   Registrierungsreihenfolge matcht — ein früher registriertes `/users/{user_id}` hätte sie sonst
-   verdeckt. Direkt neben `DELETE /users/{user_id}` platziert (symmetrisch, beide adressieren ein
-   einzelnes Konto per ID).
-3. **`apps/user-ui/src/lib/api.ts`**: neue `lookupUserById(token, userId)`-Funktion, gleiche
-   Konventionen wie `lookupUserByUsername` (gleiches `UserLookup`-Interface, `request()`-Helfer).
-4. **Neuer Hook `apps/user-ui/src/lib/usePrincipalNames.ts`**: löst eine Liste roher `principal_id`s in
-   Nutzernamen auf, mit einfachem In-Memory-Cache über den Hook-Aufruf hinweg (keine erneute Anfrage für
-   bereits aufgelöste IDs) und Fallback auf die rohe UUID bei einem Fehlschlag (z. B. `users.lookup`
-   entzogen, oder ein zwischenzeitlich gelöschtes Konto) — blockiert die Anzeige nie.
-5. **`DelegationsPane.tsx`/`TeamspacesPane.tsx`** nutzen den neuen Hook, um `deputy_principal_id`/
-   `delegator_principal_id`/`member.principal_id` als aufgelösten Namen statt roher UUID anzuzeigen.
+1. **`admin_users.find_user_by_id(admin, user_id)`** (new) — mirrors `find_user_by_username`, uses
+   `KeycloakAdmin.get_user(user_id)` (single fetch, not `get_users(query=...)`), catches
+   `KeycloakGetError` with `response_code == 404` and returns `None`. Same minimal
+   `{id, username}` response shape as the forward resolution.
+2. **`GET /users/{user_id}`** (new, `main.py`) — same gate as `GET /users/lookup`
+   (`_require_permission(user, "users.lookup", ...)`, the "everyone" group from ADR 0067/0068): same
+   trust level, only the search direction is reversed, no new permission word needed.
+   **Registration order matters**: must come after all the static `/users/...` paths
+   (`/users/lookup`, `/users/directory`, `/users/count`), since FastAPI/Starlette matches routes in
+   registration order — an earlier registered `/users/{user_id}` would otherwise have shadowed them.
+   Placed directly next to `DELETE /users/{user_id}` (symmetric, both address a single
+   account by ID).
+3. **`apps/user-ui/src/lib/api.ts`**: new `lookupUserById(token, userId)` function, same
+   conventions as `lookupUserByUsername` (same `UserLookup` interface, `request()` helper).
+4. **New hook `apps/user-ui/src/lib/usePrincipalNames.ts`**: resolves a list of raw `principal_id`s
+   into usernames, with a simple in-memory cache across the hook's lifetime (no repeated
+   request for already-resolved IDs) and a fallback to the raw UUID on failure (e.g.
+   `users.lookup` revoked, or an account deleted in the meantime) — never blocks the
+   display.
+5. **`DelegationsPane.tsx`/`TeamspacesPane.tsx`** use the new hook to show `deputy_principal_id`/
+   `delegator_principal_id`/`member.principal_id` as a resolved name instead of a raw UUID.
 
-## Begründung
+## Rationale
 
-- **Warum keine neue Berechtigung, sondern Wiederverwendung von `users.lookup`**: die Rückwärtsauflösung
-  ist konzeptionell dieselbe Operation wie die Vorwärtsauflösung (ein bekannter Identifikator wird in
-  einen öffentlichen Nutzernamen übersetzt) - eine zweite, separate Berechtigung hätte keinen
-  zusätzlichen Sicherheitswert geboten, nur mehr Verwaltungsaufwand für Admins.
-- **Warum ein eigener Hook statt Inline-Logik in beiden Komponenten**: `DelegationsPane` und
-  `TeamspacesPane` brauchen exakt dasselbe Verhalten (Liste roher IDs → aufgelöste Namen, Cache,
-  Fehlschlag-Fallback) - eine dritte Kopie derselben ~20 Zeilen wäre reine Duplikation.
-- **Warum Fallback auf die rohe UUID statt eines Ladeindikators/Fehlertexts**: die Anzeige einer
-  Delegation/Mitgliedschaft darf nicht dadurch blockiert werden, dass eine einzelne
-  Namensauflösung fehlschlägt (Netzwerkfehler, entzogene Berechtigung, gelöschtes Konto) - die rohe UUID
-  ist im schlimmsten Fall genauso informativ wie der bisherige Ist-Zustand, nie schlechter.
-- **Warum kein Batch-Endpunkt** (`POST /users/resolve` o. ä.) **statt N Einzelaufrufen**: die
-  betroffenen Listen (eigene Delegationen, Teamspace-Mitglieder) sind in der Praxis klein (typischerweise
-  einstellig) - ein Batch-Endpunkt wäre Overengineering für den aktuellen Umfang, kann bei Bedarf später
-  nachgezogen werden, ohne den Hook selbst zu ändern (reiner Implementierungsdetail-Austausch).
+- **Why no new permission, but reuse of `users.lookup`**: reverse resolution is
+  conceptually the same operation as forward resolution (a known identifier is translated
+  into a public username) - a second, separate permission would have offered no
+  additional security value, only more administrative overhead for admins.
+- **Why a dedicated hook instead of inline logic in both components**: `DelegationsPane` and
+  `TeamspacesPane` need exactly the same behavior (list of raw IDs → resolved names, cache,
+  failure fallback) - a third copy of the same ~20 lines would be pure duplication.
+- **Why fallback to the raw UUID instead of a loading indicator/error text**: displaying a
+  delegation/membership must not be blocked by a single
+  name resolution failing (network error, revoked permission, deleted account) - the raw UUID
+  is, in the worst case, exactly as informative as the previous status quo, never worse.
+- **Why no batch endpoint** (`POST /users/resolve` or similar) **instead of N individual calls**: the
+  affected lists (own delegations, teamspace members) are small in practice (typically
+  single digits) - a batch endpoint would be overengineering for the current scope, and can be
+  added later if needed, without changing the hook itself (a pure implementation-detail swap).
 
-## Konsequenzen
+## Consequences
 
-- **Tests**: `auth-service` 96 (vorher 92, +4: Positiv-/Negativ-Pfad für `GET /users/{id}`, gleiche
-  Struktur wie die `GET /users/lookup`-Tests). `apps/user-ui` 169 Vitest-Tests grün (+2 neue, je ein
-  Auflösungstest in `delegations-pane.test.tsx`/`teamspaces-pane.test.tsx`) - bestehende Tests bleiben
-  unverändert gültig, da `lookupUserById` in ihnen standardmäßig fehlschlägt (nicht gemockt) und der Hook
-  in diesem Fall auf die rohe ID zurückfällt, exakt das bisher erwartete Verhalten. `tsc --noEmit`,
+- **Tests**: `auth-service` 96 (previously 92, +4: positive/negative path for `GET /users/{id}`, same
+  structure as the `GET /users/lookup` tests). `apps/user-ui` 169 Vitest tests green (+2 new, one
+  resolution test each in `delegations-pane.test.tsx`/`teamspaces-pane.test.tsx`) - existing tests
+  remain valid unchanged, since `lookupUserById` fails by default in them (not mocked) and the hook
+  falls back to the raw ID in that case, exactly the previously expected behavior. `tsc --noEmit`,
   `eslint .`, `next build` clean.
-- **Ein Bug bei der Live-Verifikation gefunden und sofort behoben** (kein Code-Fehler, ein
-  Deployment-Schritt vergessen): der erste Live-Check gegen den Gateway lieferte `405 Method Not
-  Allowed` für `GET /users/{id}` - `auth-service`s Docker-Image war noch nicht neu gebaut (reiner
-  Restart übernimmt Code-Änderungen nicht, wiederholt sich als Lektion aus P18-S3/P19-S3). Nach
-  `docker compose build auth-service` funktionierte der Aufruf wie erwartet.
-- **Vollständig live gegen den echten laufenden Stack verifiziert** (nach Image-Neubau): `GET
-  /users/lookup` liefert die eigene ID von `users-admin`, `GET /users/{id}` löst dieselbe ID zurück in
-  `{"id": ..., "username": "users-admin"}` auf, ein unbekannter UUID liefert `404`. Alle drei
-  vorbestehenden statischen `/users/...`-Routen (`count`, `lookup`, `directory`) funktionieren
-  unverändert - keine Verdeckung durch die neue `/users/{user_id}`-Route bestätigt.
-- **Keine Browser-Verifikation dieser Session möglich**: diese Sandbox-Umgebung hat kein
-  Browser-Automatisierungswerkzeug (kein Playwright/Chromium) verfügbar - die Frontend-Korrektheit
-  stützt sich auf `tsc`/`eslint`/`vitest`/`next build` (alle grün) plus die oben beschriebene
-  Live-Verifikation des Backend-Vertrags, den `lookupUserById` tatsächlich aufruft. Keine tatsächliche
-  Anzeige im Browser bestätigt - eine spätere Session mit Browser-Zugriff sollte das nachholen.
-- Doku: `docs/services/user-ui.md`s "Offene Punkte"-Bullet zur rohen `principal_id`-Anzeige und
-  `docs/services/permission-service.md`s "Ich vertrete"-Bullet als behoben markiert,
-  `docs/services/auth-service.md`s API-Tabelle um `GET /users/{user_id}` ergänzt.
+- **A bug found and immediately fixed during live verification** (not a code bug, a forgotten
+  deployment step): the first live check against the gateway returned `405 Method Not
+  Allowed` for `GET /users/{id}` - `auth-service`'s Docker image had not yet been rebuilt (a plain
+  restart doesn't pick up code changes, a repeat of the lesson from P18-S3/P19-S3). After
+  `docker compose build auth-service`, the call worked as expected.
+- **Fully verified live against the real running stack** (after image rebuild): `GET
+  /users/lookup` returns `users-admin`'s own ID, `GET /users/{id}` resolves that same ID back to
+  `{"id": ..., "username": "users-admin"}`, an unknown UUID returns `404`. All three
+  pre-existing static `/users/...` routes (`count`, `lookup`, `directory`) work
+  unchanged - no shadowing by the new `/users/{user_id}` route confirmed.
+- **No browser verification of this session possible**: this sandbox environment has no
+  browser automation tool available (no Playwright/Chromium) - frontend correctness relies on
+  `tsc`/`eslint`/`vitest`/`next build` (all green) plus the backend contract's live
+  verification described above, which `lookupUserById` actually calls. No actual
+  display confirmed in a browser - a later session with browser access should catch up on this.
+- Docs: `docs/services/user-ui.md`'s "Open Points" bullet about the raw `principal_id` display and
+  `docs/services/permission-service.md`'s "I represent" bullet marked as resolved,
+  `docs/services/auth-service.md`'s API table extended with `GET /users/{user_id}`.

@@ -1,70 +1,70 @@
-# 0061 — Office-Direktbearbeitung: kurzlebiges WebDAV-Edit-Token in der Office-URI-Startadresse
+# 0061 — Direct Office editing: short-lived WebDAV edit token in the Office URI start address
 
-**Status:** akzeptiert
-**Kontext:** Ad-hoc Post-Roadmap-Feature (Nutzeranfrage nach Abschluss der 107-Session-Roadmap), betrifft `document-service`, `webdav-connector`, `user-ui`
+**Status:** accepted
+**Context:** Ad-hoc post-roadmap feature (user request after completion of the 107-session roadmap), affects `document-service`, `webdav-connector`, `user-ui`
 
-## Entscheidung
+## Decision
 
-Ein Klick auf ein Office-Dokument (`PreviewPane.tsx`) fordert einen neuen, kurzlebigen `WebdavEditToken`
-(`POST /documents/{id}/webdav-edit-tokens`, 8h TTL) bei `document-service` an und navigiert den Browser
-zu `ms-word:ofe|u|https://<token>:@<webdav-connector-host>/webdav/by-id/<document-id>.<ext>` (analog
-`ms-excel:`/`ms-powerpoint:`). Das lokal installierte Office-Programm öffnet die Datei per WebDAV direkt
-zum Bearbeiten; Speichern schreibt per WebDAV-`PUT` in den bereits bestehenden Check-in-Mechanismus von
-`webdav-connector` zurück.
+Clicking on an Office document (`PreviewPane.tsx`) requests a new, short-lived `WebdavEditToken`
+(`POST /documents/{id}/webdav-edit-tokens`, 8h TTL) from `document-service` and navigates the browser
+to `ms-word:ofe|u|https://<token>:@<webdav-connector-host>/webdav/by-id/<document-id>.<ext>` (analogous
+to `ms-excel:`/`ms-powerpoint:`). The locally installed Office application opens the file via WebDAV
+directly for editing; saving writes back via WebDAV `PUT` into `webdav-connector`'s already existing
+check-in mechanism.
 
-Drei Bausteine:
+Three building blocks:
 
-1. **`WebdavEditToken` (document-service)** - neue Tabelle, strukturell 1:1 an `ShareLink` angelehnt
-   (`token` als PK, `expires_at`/`revoked_at`), aber zusätzlich mit `principal_id` (die Identität, die
-   beim Check-in als Sperrinhaber verwendet wird - `ShareLink` braucht das nicht, da rein lesend).
-   Ausstellung verlangt `document.write` (`check_write`, neu in `permission_client.py`), nicht nur
-   `document.read` - ein Edit-Token gewährt Schreibzugriff.
-2. **`by-id/`-Pfadauflösung (webdav-connector)** - `DmsDavProvider.get_resource_inst()` bekommt einen
-   neuen, additiven Zweig vor dem bestehenden pfadbasierten `resolve_path()`: Pfade mit Präfix `by-id/`
-   werden direkt über `self.tree.get_document(document_id)` aufgelöst (Methode existiert in
-   `DmsTreeClient` bereits vollständig) statt über den O(Tiefe)-Pfad-Walk. Die `.ext`-Endung ist rein
-   kosmetisch/für Office' Dateityperkennung und wird serverseitig verworfen.
-3. **Token-als-Benutzername-Zweig (`DmsAuthDomainController.basic_auth_user`)** - ist das übergebene
-   Passwort leer, wird der Benutzername als Edit-Token behandelt und gegen einen neuen, rein
-   Ost-West-internen Endpunkt (`GET /internal/webdav-edit-tokens/{token}`, kein Gateway, kein
-   `X-DMS-Principal`, exakt wie `DmsTreeClient` es bereits für alle anderen Aufrufe tut) aufgelöst. Bei
-   Erfolg wird `environ["wsgidav.auth.user_name"]` auf die aufgelöste `principal_id` überschrieben, nicht
-   das rohe Token belassen - sonst würde der Check-in fälschlich das Token statt der echten Identität als
-   `created_by` verwenden. Der bestehende Benutzername+Passwort-Zweig (echter WebDAV-Mount) bleibt
-   unverändert.
+1. **`WebdavEditToken` (document-service)** - new table, structurally 1:1 modeled on `ShareLink`
+   (`token` as PK, `expires_at`/`revoked_at`), but additionally with `principal_id` (the identity used
+   as lock holder at check-in - `ShareLink` doesn't need this since it's read-only).
+   Issuance requires `document.write` (`check_write`, new in `permission_client.py`), not just
+   `document.read` - an edit token grants write access.
+2. **`by-id/` path resolution (webdav-connector)** - `DmsDavProvider.get_resource_inst()` gets a
+   new, additive branch ahead of the existing path-based `resolve_path()`: paths with the `by-id/`
+   prefix are resolved directly via `self.tree.get_document(document_id)` (method already exists
+   fully in `DmsTreeClient`) instead of via the O(depth) path walk. The `.ext` extension is purely
+   cosmetic/for Office's file type recognition and is discarded server-side.
+3. **Token-as-username branch (`DmsAuthDomainController.basic_auth_user`)** - if the password passed
+   in is empty, the username is treated as an edit token and resolved against a new, purely
+   east-west-internal endpoint (`GET /internal/webdav-edit-tokens/{token}`, no gateway, no
+   `X-DMS-Principal`, exactly as `DmsTreeClient` already does for all other calls). On success,
+   `environ["wsgidav.auth.user_name"]` is overwritten with the resolved `principal_id`, rather than
+   leaving the raw token in place - otherwise check-in would incorrectly use the token instead of the
+   real identity as `created_by`. The existing username+password branch (real WebDAV mount) remains
+   unchanged.
 
-## Begründung
+## Rationale
 
-- **Warum ein Token in der URL statt eines Passwort-Dialogs**: mit dem Nutzer abgestimmt (Empfehlung
-  angenommen) - Office/Windows sollen die Bearbeitung ohne manuellen Zwischenschritt starten. Das
-  `token:@`-Userinfo-in-der-URL-Muster ist real genutzt (u. a. Nextcloud/ownCloud-artige "In Office
-  öffnen"-Integrationen), aber in dieser Sandbox ohne echtes Windows/Office nicht abschließend
-  verifizierbar, ob der Zugangsdaten-Dialog dadurch zuverlässig unterdrückt wird - dieselbe, bereits bei
-  `apps/office-addin` (ADR 0045) akzeptierte Sandbox-Grenze, hier bewusst dokumentiert statt stillschweigend
-  vorausgesetzt.
-- **Warum `principal_id` nicht an den Client zurückgegeben wird** (`WebdavEditTokenOut` liefert nur
-  `token`/`expires_at`): der Client (Browser) braucht die Identität nicht, nur `webdav-connector`
-  (Ost-West) - unnötige Datenweitergabe an einen weniger vertrauenswürdigen Kontext vermeiden.
-  Ausdrückliche Rechteprüfung bei jeder WebDAV-Aktion während der Sitzung erfolgt bewusst NICHT erneut -
-  nur bei Ausstellung geprüft, ein zwischenzeitlicher Rechteentzug wirkt sich erst nach
-  Tokenablauf/-widerruf aus. Gleiche Kategorie Einschränkung, die dieses Projekt an anderer Stelle
-  (Freigabelinks) bereits so akzeptiert.
-- **Warum `apps/office-addin` (ADR 0045) kein Duplikat ist**: löst ein anderes Problem (Task-Pane-Add-in
-  in einem bereits geöffneten, leeren Word-Dokument, kein WebDAV, kein URI-Schema, nur Word). Dieses
-  Feature startet die Bearbeitung eines EXISTIERENDEN DMS-Dokuments direkt aus dem Browser heraus, für
-  alle drei Office-Formate. Komplementär, kein Ersatz.
-- **Warum `webdav-connector` eine neue, dem Browser bislang nie mitgeteilte Basis-URL braucht**
-  (`NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL`): anders als alle übrigen `api.ts`-Aufrufe, die durchgängig
-  über den Gateway laufen, muss der Office-URI-Handler direkt gegen den WebDAV-Endpunkt navigieren (kein
-  WebDAV-Proxying über den Gateway vorgesehen) - analoges Buildzeit-Variablen-Muster wie
+- **Why a token in the URL instead of a password dialog**: agreed with the user (recommendation
+  accepted) - Office/Windows should start editing without a manual intermediate step. The
+  `token:@` userinfo-in-URL pattern is used in practice (e.g. Nextcloud/ownCloud-style "open in
+  Office" integrations), but in this sandbox without a real Windows/Office it cannot be conclusively
+  verified whether the credentials dialog is reliably suppressed by it - the same sandbox boundary
+  already accepted for `apps/office-addin` (ADR 0045), here deliberately documented rather than
+  silently assumed.
+- **Why `principal_id` is not returned to the client** (`WebdavEditTokenOut` only delivers
+  `token`/`expires_at`): the client (browser) doesn't need the identity, only `webdav-connector`
+  (east-west) does - avoids unnecessary data disclosure to a less trusted context.
+  Explicit permission checking on every WebDAV action during the session is deliberately NOT
+  repeated - checked only at issuance; a permission revocation in the interim only takes effect
+  after token expiry/revocation. Same category of limitation this project has already accepted
+  elsewhere (share links).
+- **Why `apps/office-addin` (ADR 0045) is not a duplicate**: solves a different problem (task-pane
+  add-in in an already-open, empty Word document, no WebDAV, no URI scheme, Word only). This
+  feature starts editing an EXISTING DMS document directly from the browser, for all three Office
+  formats. Complementary, not a replacement.
+- **Why `webdav-connector` needs a new base URL never previously communicated to the browser**
+  (`NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL`): unlike all other `api.ts` calls, which consistently go
+  through the gateway, the Office URI handler must navigate directly against the WebDAV endpoint (no
+  WebDAV proxying through the gateway is planned) - a build-time variable pattern analogous to
   `NEXT_PUBLIC_GATEWAY_BASE_URL`.
 
-## Konsequenzen
+## Consequences
 
-- **Bewusst zurückgestellt**: Admin-UI/`MetadataPanel`-Oberfläche zum Anzeigen/Widerrufen aktiver
-  Edit-Tokens - der Lese-Endpunkt (`GET .../webdav-edit-tokens`) existiert bereits, die UI dafür nicht in
-  dieser Session gebaut (`ShareLinkModal.tsx` ist strukturell fast identisch übertragbar).
-- **Nicht in dieser Sandbox live verifizierbar**: der eigentliche Office-Start und ob der
-  Zugangsdaten-Dialog unterdrückt wird (kein Windows/Office hier vorhanden) - wird als dokumentierte
-  Grenze behandelt, nicht als Blocker. Der Token-Ausstellungs-/Auflösungs-Roundtrip selbst (per `curl`
-  gegen `webdav-connector`) ist hingegen vollständig verifizierbar und Teil der Regression.
+- **Deliberately deferred**: an admin UI/`MetadataPanel` surface for viewing/revoking active edit
+  tokens - the read endpoint (`GET .../webdav-edit-tokens`) already exists, but the UI for it was not
+  built in this session (`ShareLinkModal.tsx` is structurally almost identical and transferable).
+- **Not verifiable live in this sandbox**: the actual Office start and whether the credentials dialog
+  is suppressed (no Windows/Office available here) - treated as a documented limitation, not a
+  blocker. The token issuance/resolution round trip itself (via `curl` against `webdav-connector`),
+  however, is fully verifiable and part of the regression suite.

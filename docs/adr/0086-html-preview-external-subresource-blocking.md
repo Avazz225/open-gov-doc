@@ -1,86 +1,81 @@
-# 0086 — HTML-Vorschau: serverseitige Blockade externer Subressourcen
+# 0086 — HTML preview: server-side blocking of external subresources
 
-**Status:** akzeptiert (Session 3 von 4, siehe Phase 21 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 21 Session 3, betrifft `document-service`, dokumentiert für `user-ui`
+**Status:** accepted (Session 3 of 4, see Phase 21 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 21 Session 3, affects `document-service`, documented for `user-ui`
 
-## Entscheidung
+## Decision
 
-`user-ui`s `PreviewPane` rendert HTML-Dokumente über ein `sandbox=""`-iframe mit `srcDoc` (kein `src` auf
-eine eigene Origin). `sandbox=""` blockiert Skriptausführung/Formulare/Top-Navigation, aber NICHT das
-normale Nachladen von Subressourcen (Bilder, Stylesheets, ...) — ein hochgeladenes HTML-Dokument mit z. B.
-`<img src="https://tracker.example/pixel.gif?...">` löst diese Anfrage beim bloßen Öffnen der Vorschau
-aus, unabhängig vom Sandbox-Attribut (Tracking-/Datenleck-Risiko). Ein `Content-Security-Policy`-Header
-wäre die naheliegende Lösung, wirkt bei `srcDoc`-Inhalten ohne eigene Origin aber nur eingeschränkt
-(kein fester Origin, an den sich ein Header zuverlässig binden ließe — abhängig von Browser/Engine).
+`user-ui`'s `PreviewPane` renders HTML documents via a `sandbox=""` iframe with `srcDoc` (no `src`
+pointing to its own origin). `sandbox=""` blocks script execution/forms/top-level navigation, but NOT
+the normal loading of subresources (images, stylesheets, ...) — an uploaded HTML document with, e.g.,
+`<img src="https://tracker.example/pixel.gif?...">` triggers this request merely by opening the preview,
+regardless of the sandbox attribute (tracking/data-leak risk). A `Content-Security-Policy` header would
+be the obvious fix, but it only has limited effect on `srcDoc` content without its own origin (no fixed
+origin a header could reliably bind to — depends on browser/engine).
 
-`document-service` neutralisiert externe `src`/`href`-Referenzen deshalb **serverseitig, an der Quelle**,
-statt am Rendering-Ort: `GET /documents/{id}/content` und `GET /documents/{id}/versions/{n}/content`
-prüfen den (bereits per Magic-Byte-Sniffing bestimmten, nicht dem Client vertrauten) `content_type` —
-bei `"text/html"` läuft der Inhalt vor der Auslieferung durch eine neue Funktion
-`html_preview_guard.rewrite_external_references`.
+`document-service` therefore neutralizes external `src`/`href` references **server-side, at the source**,
+rather than at render time: `GET /documents/{id}/content` and `GET /documents/{id}/versions/{n}/content`
+check the (already determined via magic-byte sniffing, not trusted from the client) `content_type` — for
+`"text/html"`, the content passes through a new function, `html_preview_guard.rewrite_external_references`,
+before being served.
 
-1. **Parsing mit `BeautifulSoup`/`html.parser`** (neue Abhängigkeit) — entfernt jede `src`/`href`-
-   Referenz, die nicht `data:`/`mailto:`/`tel:` oder ein reiner Fragment-Anker (`#...`) ist.
-   Attribut-getrieben statt Tag-Namen-getrieben (kein hartkodiertes `img`/`script`/`iframe`/...-Set) —
-   erfasst automatisch auch unübliche Tags mit `src`/`href`.
-2. **Relative Pfade werden ebenfalls blockiert**, nicht nur absolute URLs — ein `srcDoc`-Inhalt hat keine
-   sichere, im Vorschaukontext auflösbare Basis-URL (abhängig von Browser-Implementierung könnten
-   relative/schema-relative Pfade unvorhersehbar auf die übergeordnete Seite oder unerwartete Ziele
-   auflösen).
-3. **Sichtbare Markierung statt stillschweigender Entfernung** — direkt nach jeder entfernten Referenz
-   wird `[Blockierte externe Anfrage: <ursprüngliche-URL>]` als sichtbares `<span>` eingefügt, wörtliche
-   Plan-Vorgabe.
-4. **`<meta charset>` wird auf `utf-8` normalisiert** — die Funktion liefert immer UTF-8-Bytes zurück,
-   unabhängig vom ursprünglich deklarierten Encoding des hochgeladenen Dokuments.
+1. **Parsing with `BeautifulSoup`/`html.parser`** (new dependency) — removes any `src`/`href` reference
+   that isn't `data:`/`mailto:`/`tel:` or a pure fragment anchor (`#...`). Attribute-driven rather than
+   tag-name-driven (no hardcoded `img`/`script`/`iframe`/... set) — automatically also catches unusual
+   tags with `src`/`href`.
+2. **Relative paths are also blocked**, not just absolute URLs — `srcDoc` content has no safe base URL
+   resolvable within the preview context (depending on browser implementation, relative/scheme-relative
+   paths could resolve unpredictably to the parent page or unexpected targets).
+3. **Visible marker instead of silent removal** — immediately after every removed reference, a visible
+   `<span>` reading `[Blocked external request: <original-URL>]` is inserted, per explicit plan
+   requirement.
+4. **`<meta charset>` is normalized to `utf-8`** — the function always returns UTF-8 bytes, regardless of
+   the originally declared encoding of the uploaded document.
 
-## Begründung
+## Rationale
 
-- **Warum serverseitiges Rewriting statt eines CSP-Headers** (explizite Plan-Vorgabe, hier bestätigt):
-  ein `srcDoc`-iframe hat keinen eigenen, adressierbaren Origin/keine eigene URL, an die sich ein
-  `Content-Security-Policy`-Header zuverlässig binden ließe — Verhalten ist browserabhängig und nicht
-  robust genug für diesen Zweck. Das Entfernen der Referenz an der Quelle (bevor der Browser sie
-  überhaupt sieht) ist unabhängig von Browser-CSP-Eigenheiten wirksam.
-- **Warum `BeautifulSoup` als neue Abhängigkeit statt eines regex-basierten Ansatzes oder purer
-  `html.parser`-Handler**: attributweises Rewriting mit korrekter Serialisierung (Quoting, Selbstschluss-
-  Tags, Entity-Behandlung) ist mit rohem Regex auf verschachteltem, potenziell fehlerhaftem HTML
-  fehleranfällig; `html.parser.HTMLParser` (Stdlib) ist ein reiner SAX-artiger Event-Handler ohne
-  eingebaute Baumrepräsentation/Serialisierung, ein korrektes Wieder-Zusammensetzen müsste von Hand
-  nachgebaut werden. `BeautifulSoup` mit dem `html.parser`-Backend braucht keine zusätzliche
-  C-Erweiterung (anders als `lxml`), ist ein extrem etablierter Pfad für genau diese Aufgabe
-  (untrusted HTML parsen, gezielt Attribute mutieren, zurückserialisieren) und rechtfertigt die neue
-  Abhängigkeit angesichts der sicherheitsrelevanten Korrektheitsanforderung.
-- **Warum attribut- statt tag-getrieben**: ein festes Tag-Set (`img`/`script`/`iframe`/...) müsste bei
-  jedem neuen/unüblichen Tag mit `src`/`href` (z. B. `<object data=...>` wäre ohnehin ein Sonderfall,
-  aber `<portal>`, benutzerdefinierte Elemente mit `src`-artigen Attributen) einzeln nachgepflegt werden
-  - die attributgetriebene Prüfung ist dagegen vollständig unabhängig vom konkreten Tag-Namen.
-- **Warum relative Pfade ebenfalls blockiert werden** (nicht nur absolute externe URLs): ein
-  hochgeladenes HTML-Dokument in diesem System hat kein legitimes Zielverzeichnis mit Geschwisterdateien,
-  die über einen relativen Pfad erreichbar wären (das Dokument ist ein einzelnes gespeichertes Objekt,
-  keine Verzeichnisstruktur) — ein relativer Pfad kann also ohnehin nie auf einen echten, beabsichtigten
-  Inhalt zeigen, nur auf etwas Unvorhergesehenes.
-- **Warum bewusst nur `src`/`href`, nicht auch `srcset`/`poster`/`background`/CSS-`url(...)`**: explizite
-  Plan-Vorgabe ("externe `src`/`href`") — eine vollständige Abdeckung aller denkbaren
-  Subressourcen-Vektoren wäre eine deutlich größere Aufgabe (CSS-Parsing für `url()` in `<style>`-Blöcken
-  und `style`-Attributen); als bewusst unvollständige, aber dokumentierte erste Härtungsstufe umgesetzt,
-  konsistent mit diesem Projekts Muster, Grenzen ehrlich zu dokumentieren statt stillschweigend
-  Vollständigkeit vorzutäuschen.
+- **Why server-side rewriting instead of a CSP header** (explicit plan requirement, confirmed here): a
+  `srcDoc` iframe has no addressable origin/URL of its own that a `Content-Security-Policy` header could
+  reliably bind to — behavior is browser-dependent and not robust enough for this purpose. Removing the
+  reference at the source (before the browser even sees it) works regardless of browser CSP quirks.
+- **Why `BeautifulSoup` as a new dependency instead of a regex-based approach or bare `html.parser`
+  handlers**: attribute-wise rewriting with correct serialization (quoting, self-closing tags, entity
+  handling) is error-prone with raw regex on nested, potentially malformed HTML; `html.parser.HTMLParser`
+  (stdlib) is a purely SAX-style event handler with no built-in tree representation/serialization —
+  correct reassembly would have to be built by hand. `BeautifulSoup` with the `html.parser` backend
+  needs no extra C extension (unlike `lxml`), is an extremely well-established path for exactly this task
+  (parsing untrusted HTML, mutating specific attributes, re-serializing), and justifies the new dependency
+  given the security-relevant correctness requirement.
+- **Why attribute-driven rather than tag-driven**: a fixed tag set (`img`/`script`/`iframe`/...) would
+  need to be manually maintained for every new/unusual tag with `src`/`href` (e.g. `<object data=...>`
+  would be a special case anyway, but also `<portal>`, custom elements with `src`-like attributes) — the
+  attribute-driven check, by contrast, is entirely independent of the concrete tag name.
+- **Why relative paths are also blocked** (not just absolute external URLs): an HTML document uploaded to
+  this system has no legitimate target directory with sibling files reachable via a relative path (the
+  document is a single stored object, not a directory structure) — so a relative path can never point to
+  real, intended content anyway, only to something unforeseen.
+- **Why deliberately only `src`/`href`, not also `srcset`/`poster`/`background`/CSS `url(...)`**: explicit
+  plan requirement ("external `src`/`href`") — full coverage of every conceivable subresource vector
+  would be a substantially larger task (CSS parsing for `url()` in `<style>` blocks and `style`
+  attributes); implemented as a deliberately incomplete but documented first hardening layer, consistent
+  with this project's pattern of honestly documenting limits instead of silently feigning completeness.
 
-## Konsequenzen
+## Consequences
 
-- **Neue Abhängigkeit** `beautifulsoup4` in `services/document-service/pyproject.toml` — erstes
-  HTML-Parsing-Tool in diesem Repo (bisher nur `lxml` für XML/BPMN in anderen Services, kein Präzedenzfall
-  für HTML).
-- **Betrifft nur `document-service`s `GET /documents/{id}/content`/`.../versions/{n}/content`** — die
-  separate `GET /public/share-links/content` (öffentlicher Freigabelink-Download) rendert nicht inline
-  (reiner `<a href download>`-Browser-Download in `user-ui`s `SharePage`, kein `srcDoc`-iframe), daher
-  bewusst außerhalb des Sessionsumfangs.
-- **Nicht-HTML-Inhalte bleiben byte-identisch** — die Umschreibung greift ausschließlich bei
-  `content_type == "text/html"` (Magic-Byte-Sniffing-Ergebnis, nicht der ungeprüfte Client-Header).
-- **Tests**: `document-service` 247 (vorher 234, +13) — neue Testdatei `test_html_preview_guard.py` (11
-  reine Funktionstests: externe HTTPS-/protokollrelative-/relative-Referenzen blockiert, `data:`/
-  `mailto:`/`tel:`/Fragment-Anker erlaubt, `javascript:`-URIs blockiert, leerer `src` blockiert,
-  `<meta charset>`-Normalisierung, unveränderter Inhalt ohne Referenzen), plus 2 neue `test_api.py`-Tests
-  (Ende-zu-Ende über beide Download-Endpunkte inkl. Markierungstext, Byte-Identität für Nicht-HTML-Inhalte
-  mit zufällig HTML-ähnlichem Text als Regressionsschutz).
-- Doku: `docs/services/document-service.md` (neue "HTML-Vorschau-Härtung"-Sektion, API-Tabelle),
-  `docs/services/user-ui.md` ("Offene Punkte" als behoben markiert).
+- **New dependency** `beautifulsoup4` in `services/document-service/pyproject.toml` — the first HTML
+  parsing tool in this repo (previously only `lxml` for XML/BPMN in other services, no precedent for
+  HTML).
+- **Only affects `document-service`'s `GET /documents/{id}/content`/`.../versions/{n}/content`** — the
+  separate `GET /public/share-links/content` (public share-link download) doesn't render inline (a plain
+  `<a href download>` browser download in `user-ui`'s `SharePage`, no `srcDoc` iframe), so it is
+  deliberately out of scope for this session.
+- **Non-HTML content stays byte-identical** — the rewrite only applies when `content_type == "text/html"`
+  (magic-byte-sniffing result, not the unverified client header).
+- **Tests**: `document-service` 247 (previously 234, +13) — new test file `test_html_preview_guard.py`
+  (11 pure function tests: external HTTPS/protocol-relative/relative references blocked, `data:`/
+  `mailto:`/`tel:`/fragment anchors allowed, `javascript:` URIs blocked, empty `src` blocked,
+  `<meta charset>` normalization, unchanged content with no references), plus 2 new `test_api.py` tests
+  (end-to-end across both download endpoints including the marker text, byte identity for non-HTML
+  content with randomly HTML-like text as a regression guard).
+- Docs: `docs/services/document-service.md` (new "HTML Preview Hardening" section, API table),
+  `docs/services/user-ui.md` ("Open Points" marked resolved).

@@ -1,18 +1,18 @@
-# Service-Template
+# Service template
 
-Verbindliches Muster für jeden neuen Service unter `services/<name>/`. Ziel: neue
-Services entstehen durch Kopieren dieses Musters, nicht durch Neuerfinden der
-Struktur — passt zum "Dazustellen"-Prinzip (Konzept 1.).
+Binding pattern for every new service under `services/<name>/`. Goal: new
+services are created by copying this pattern, not by reinventing the
+structure — consistent with the "add-on" principle (Concept 1.).
 
-## Verzeichnislayout
+## Directory layout
 
 ```
 services/<name>/
   src/<name>/
     __init__.py
-    main.py           # FastAPI-App-Factory, Health-Endpoint
+    main.py           # FastAPI app factory, health endpoint
     settings.py        # <Name>Settings(BaseServiceSettings)
-    ...                 # fachlicher Code
+    ...                 # domain code
   tests/
   Dockerfile
   pyproject.toml
@@ -50,8 +50,8 @@ build-backend = "hatchling.build"
 packages = ["src/<name>"]
 ```
 
-Nur die Libs eintragen, die der Service tatsächlich braucht (nicht jeder Service
-spricht zwingend die DB direkt an, z. B. reine Gateway-Services).
+Only list the libs the service actually needs (not every service necessarily
+talks to the DB directly, e.g. pure gateway services).
 
 ## settings.py
 
@@ -79,7 +79,7 @@ configure_logging(settings)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Registry-Registrierung (3.2), DB-Engine, Event-Bus-Connect etc. hier.
+    # Registry registration (3.2), DB engine, event bus connect etc. go here.
     yield
 
 
@@ -91,8 +91,8 @@ def healthz():
     return {"status": "ok", "service": settings.service_name}
 ```
 
-## Dockerfile (self-contained: Libs werden aus dem Monorepo kopiert und lokal
-installiert, keine Abhängigkeit von einem internen Package-Index)
+## Dockerfile (self-contained: libs are copied from the monorepo and installed
+locally, with no dependency on an internal package index)
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -111,8 +111,8 @@ EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "<name>.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-**Wichtig:** Der Docker-Build-Kontext ist die Repo-Wurzel (`dms/`), nicht der
-Service-Ordner — sonst sind `libs/` und `uv.lock` für `COPY` nicht erreichbar.
+**Important:** The Docker build context is the repo root (`dms/`), not the
+service folder — otherwise `libs/` and `uv.lock` are not reachable for `COPY`.
 In `infra/docker-compose.yml`:
 
 ```yaml
@@ -128,18 +128,18 @@ services:
       - dms-net
 ```
 
-Dadurch enthält jedes Image den exakten, zum Build-Zeitpunkt im Repo vorhandenen
-Lib-Code plus alle Fremdabhängigkeiten fixiert über `uv.lock` — ein späteres
-Update einer Lib erfordert kein manuelles Nachziehen einer Registry-Version,
-und ein Rebuild zu einem beliebigen späteren Zeitpunkt reproduziert exakt denselben Stand.
+This way, each image contains the exact lib code present in the repo at
+build time, plus all third-party dependencies pinned via `uv.lock` — a later
+update to a lib requires no manual bump of a registry version,
+and a rebuild at any later point reproduces exactly the same state.
 
 ## Tests
 
-`pytest` gegen die im Service benötigte reale Infrastruktur (Postgres/NATS via
-`infra/docker-compose.yml`), analog zu den Lib-Tests unter `libs/*/tests`.
+`pytest` against the real infrastructure the service needs (Postgres/NATS via
+`infra/docker-compose.yml`), analogous to the lib tests under `libs/*/tests`.
 
-## Nicht vergessen (Definition of Done, `../CONTRIBUTING.md`)
+## Don't forget (Definition of Done, `../CONTRIBUTING.md`)
 
-- `docs/services/<name>.md` anlegen (Template in `docs/services/README.md`)
-- Eintrag in `infra/docker-compose.yml`
-- `graphify dms/ --update` am Ende der Phase
+- Create `docs/services/<name>.md` (template in `docs/services/README.md`)
+- Entry in `infra/docker-compose.yml`
+- `graphify dms/ --update` at the end of the phase

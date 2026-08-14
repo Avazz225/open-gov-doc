@@ -1,127 +1,124 @@
-# 0034 — Migration Service: direktes Installations-Paar + generische Connector-Service-Tasks in workflow-service
+# 0034 — Migration Service: direct installation pairing + generic connector service tasks in workflow-service
 
-**Status:** akzeptiert
-**Kontext:** P12-S2 (Konzept 7.2, "Migration/Transfer"). Ein Transfer läuft zwischen zwei
-**Installationen** dieser Software (Sperren → Kopieren ins Zielsystem → Verifizieren → Freigabe
-im Zielsystem → Löschung im Quellsystem nach Übergangsfrist) und muss **selbst als
-auditierbarer, resumable Workflow über die Workflow Engine laufen** ("nicht als Sonderfall
-daneben") — anders als `archival-service` (5.6), das denselben Ablauf bewusst über einen
-Poll-Loop statt echtem BPMN abbildet, weil 5.6 diese Vorgabe nicht macht. Bei P12-S0 wurde als
-echter Fund notiert: `workflow-service` hatte noch keine Automatic/Service-Task-Konnektor-
-Aufruf-Plumbing (7.1 nennt "Auslösen eines Connector-Aufrufs" als Beispiel für einen Service
-Task) — diese Session musste sie bauen, generisch statt migrationsspezifisch. Rückfrage bei
-Sessionstart: 7.2 nennt anders als 7.4 (Federation Hub) keine vermittelnde Instanz — Nutzer
-entschied sich für ein **direktes Installations-Paar mit API-Key** statt Hub-Vermittlung.
+**Status:** accepted
+**Context:** P12-S2 (Concept 7.2, "Migration/Transfer"). A transfer runs between two
+**installations** of this software (lock → copy to target system → verify → release
+in the target system → deletion in the source system after a transition period) and must
+**itself run as an auditable, resumable workflow via the Workflow Engine** ("not as a special
+case on the side") — unlike `archival-service` (5.6), which deliberately maps the same flow
+via a poll loop instead of real BPMN, because 5.6 makes no such requirement. At P12-S0, a
+genuine finding was noted: `workflow-service` had no Automatic/Service-Task connector-call
+plumbing yet (7.1 names "triggering a connector call" as an example of a Service Task) — this
+session had to build it, generically rather than migration-specific. Check-in at session start:
+7.2, unlike 7.4 (Federation Hub), names no mediating instance — the user opted for a
+**direct installation pair with an API key** instead of hub mediation.
 
-## Entscheidung
+## Decision
 
-**Generische `connector_call`-Service-Tasks in `workflow-service`** (`spiff_adapter.py`): ein
-`bpmn:serviceTask` mit `camunda:properties` `taskType=connector_call`/`serviceUrl=...` wird über
-`OVERRIDE_PARSER_CLASSES` (von SpiffWorkflows `BpmnParser` selbst dokumentierter
-Erweiterungspunkt) auf eine eigene `ConnectorServiceTask`-Spec-Klasse gemappt, die bei
-`_execute()` einen modul-weiten, per `register_connector_task_handler()` injizierbaren Callback
-aufruft. `main.py` registriert dafür einen Handler, der synchron `httpx.post(serviceUrl,
-json=task.data)` ausführt und die JSON-Antwort in die Prozessdaten zurückmerged. `serviceUrl`
-unterstützt `{platzhalter}`-Substitution aus den aktuellen Prozessdaten (`str.format(**data)`),
-damit z. B. eine pro Instanz unterschiedliche `transfer_id` in die URL einfließen kann, ohne die
-BPMN-Datei pro Instanz individuell erzeugen zu müssen. Komplett generisch — `workflow-service`
-kennt `migration-service` nicht, jeder künftige Service kann einen automatischen BPMN-Schritt
-treiben.
+**Generic `connector_call` service tasks in `workflow-service`** (`spiff_adapter.py`): a
+`bpmn:serviceTask` with `camunda:properties` `taskType=connector_call`/`serviceUrl=...` is mapped,
+via `OVERRIDE_PARSER_CLASSES` (an extension point self-documented by SpiffWorkflow's
+`BpmnParser`), onto a dedicated `ConnectorServiceTask` spec class, which on `_execute()` calls a
+module-wide callback injectable via `register_connector_task_handler()`. `main.py` registers a
+handler for this that synchronously executes `httpx.post(serviceUrl, json=task.data)` and merges
+the JSON response back into the process data. `serviceUrl` supports `{placeholder}` substitution
+from the current process data (`str.format(**data)`), so that e.g. a per-instance `transfer_id`
+can flow into the URL without having to generate the BPMN file individually per instance.
+Completely generic — `workflow-service` has no knowledge of `migration-service`; any future
+service can drive an automatic BPMN step.
 
-**Resumability über `POST /instances/{id}/retry`** (ebenfalls generisch): ein fehlgeschlagener
-`connector_call` versetzt den Task nach `ERROR` (SpiffWorkflow-eigene Semantik). Der neue
-Endpunkt setzt `ERROR`-Tasks über `reset_branch()` zurück auf `READY`/`FUTURE` und lässt
-`do_engine_steps()` erneut laufen — unter Beibehaltung der bisherigen Task-Daten. `start_instance`/
-`complete_task`/`retry_instance` in `repository.py` persistieren den `workflow_state`-Blob dafür
-jeweils in einem `try`/`finally` (nicht erst nach erfolgreichem Abschluss) — sonst gäbe es bei
-einem Fehlschlag des allerersten Schritts gar keine Instanz-Zeile zum Fortsetzen.
+**Resumability via `POST /instances/{id}/retry`** (also generic): a failed `connector_call`
+moves the task to `ERROR` (SpiffWorkflow's own semantics). The new endpoint resets `ERROR` tasks
+back to `READY`/`FUTURE` via `reset_branch()` and re-runs `do_engine_steps()` — retaining the
+task data collected so far. `start_instance`/`complete_task`/`retry_instance` in `repository.py`
+persist the `workflow_state` blob for this in a `try`/`finally` each (not only after successful
+completion) — otherwise there would be no instance row to resume at all if the very first step
+failed.
 
-**Caller-bestimmte Instanz-ID** (`ProcessInstanceCreate.instance_id`, optional): derselbe
-Beweggrund wie bei `federation-hub-service`s `handover_id` (ADR 0028) — ein Aufrufer, der die ID
-bereits vor dem eigentlichen Start persistieren will, braucht eine im Voraus bekannte ID. Ohne
-diese hätte `migration-service` bei einem Fehlschlag des allerersten automatischen Schritts
-(z. B. "Sperren" nicht erreichbar) keine Möglichkeit gehabt, die dennoch in `workflow-service`
-angelegte Instanz für einen späteren `/retry`-Aufruf wiederzufinden — real aufgetreten, bevor
-dieser Ablauf umgestellt wurde.
+**Caller-determined instance ID** (`ProcessInstanceCreate.instance_id`, optional): the same
+motivation as `federation-hub-service`'s `handover_id` (ADR 0028) — a caller that wants to
+persist the ID before the actual start needs an ID known in advance. Without this,
+`migration-service` would have had no way, upon a failure of the very first automatic step
+(e.g. "lock" unreachable), to find the instance that was nonetheless created in `workflow-service`
+in order to make a later `/retry` call — this actually occurred before this flow was changed.
 
-**Timer-Ausdruck statt statischem Literal für die Löschfrist**: `migration-service`s
-`bpmn:intermediateCatchEvent`-`timeDuration` referenziert die Prozessvariable
-`retention_duration` (`retention_duration` als Bare-Identifier statt eines gequoteten
-ISO-8601-Literals) — SpiffWorkflows `DurationTimerEventDefinition.has_fired()` evaluiert
-`self.expression` über den Script-Engine, real verifiziert. Die bereits bestehende SLA-Poll-
-Schleife (`_sla_poll_loop`/`repository.advance_timers`, P6-S2) lässt fällige Timer für **jede**
-laufende Instanz unabhängig vom Prozesstyp feuern — keine neue Poll-Infrastruktur nötig.
+**Timer expression instead of a static literal for the deletion deadline**: `migration-service`'s
+`bpmn:intermediateCatchEvent` `timeDuration` references the process variable
+`retention_duration` (`retention_duration` as a bare identifier instead of a quoted
+ISO-8601 literal) — SpiffWorkflow's `DurationTimerEventDefinition.has_fired()` evaluates
+`self.expression` through the script engine, verified for real. The already-existing SLA poll
+loop (`_sla_poll_loop`/`repository.advance_timers`, P6-S2) fires due timers for **every**
+running instance regardless of process type — no new poll infrastructure needed.
 
-**Direktes Installations-Paar statt Hub** (`migration-service`): `paired_installation`
-(`id`, `display_name`, `base_url`, `api_key`) wird — anders als `federation-hub-service`s
-`Installation`, die nur einen Hash speichert — im **Klartext** gespeichert: diese Installation
-muss den Key sowohl beim ausgehenden Aufruf als Quelle präsentieren als auch beim eingehenden
-Aufruf als Ziel verifizieren (`hmac.compare_digest`, konstante Zeit) — ein reiner Hash würde die
-erste Rolle unmöglich machen. `POST /paired-installations` generiert bei fehlendem `api_key`
-einen neuen (einmalig zurückgegeben, analog `federation-hub-service`s `POST /installations`),
-oder übernimmt einen von der Gegenseite bereits ausgegebenen Key unverändert.
+**Direct installation pair instead of a hub** (`migration-service`): `paired_installation`
+(`id`, `display_name`, `base_url`, `api_key`) is stored — unlike `federation-hub-service`'s
+`Installation`, which stores only a hash — in **plain text**: this installation must present the
+key both on outgoing calls as the source and verify it on incoming calls as the target
+(`hmac.compare_digest`, constant time) — a pure hash would make the first role impossible.
+`POST /paired-installations` generates a new key when `api_key` is missing (returned once,
+analogous to `federation-hub-service`'s `POST /installations`), or adopts a key already issued
+by the counterpart unchanged.
 
-**`asyncio.to_thread()` für jeden `DmsTreeClient`/`PeerClient`-Aufruf** (beide synchron, siehe
-`dms_client.py`): ein synchroner HTTP-Aufruf direkt in einem `async def`-Endpoint blockiert den
-gesamten Event-Loop-Thread. Beim Selbst-Loopback-Test (dieselbe Instanz ruft sich selbst als Ziel
-auf) führt das zu einem echten Deadlock — der blockierende Aufruf wartet auf eine Antwort von
-genau dem Thread, den er selbst blockiert und der die eingehende Anfrage sonst verarbeiten würde.
-Real aufgetreten (`httpx.ReadTimeout`), behoben durch `asyncio.to_thread()` (sync-Arbeit AUS
-einem async-Kontext heraus auslagern — die unproblematische Richtung, anders als das in P12-S1
-bewusst vermiedene `asgiref.async_to_sync`).
+**`asyncio.to_thread()` for every `DmsTreeClient`/`PeerClient` call** (both synchronous, see
+`dms_client.py`): a synchronous HTTP call directly in an `async def` endpoint blocks the entire
+event-loop thread. In the self-loopback test (the same installation calls itself as the target),
+this leads to a real deadlock — the blocking call waits for a response from exactly the thread it
+is itself blocking, and which would otherwise process the incoming request. This actually
+occurred (`httpx.ReadTimeout`), fixed via `asyncio.to_thread()` (offloading sync work OUT of an
+async context — the unproblematic direction, unlike the `asgiref.async_to_sync` deliberately
+avoided in P12-S1).
 
-**Explizites `session.commit()` in jedem Schritt-Endpunkt**: `Depends(get_session)` liefert pro
-Anfrage eine neue `AsyncSession`; schließt FastAPI sie am Ende einer Anfrage ohne vorherigen
-`commit()`, wird eine nur geflushte Transaktion automatisch zurückgerollt. Real aufgetreten: alle
-fünf Schritt-Endpunkte (`lock`/`copy`/`verify`/`release`/`delete-source`) riefen ursprünglich nur
-`_mark()`s internes `flush()` auf, nie `commit()` — der gesamte Transfer lief dadurch scheinbar
-fehlerfrei durch (jeder Schritt antwortete 200), aber **keine** der Statusänderungen wurde
-tatsächlich persistiert (die Transfer-Zeile blieb für immer bei `"pending"` stehen).
+**Explicit `session.commit()` in every step endpoint**: `Depends(get_session)` provides a fresh
+`AsyncSession` per request; if FastAPI closes it at the end of a request without a prior
+`commit()`, a merely flushed transaction is automatically rolled back. This actually occurred:
+all five step endpoints (`lock`/`copy`/`verify`/`release`/`delete-source`) originally only called
+`_mark()`'s internal `flush()`, never `commit()` — the entire transfer appeared to run without
+errors (every step responded 200), but **none** of the status changes were actually persisted
+(the transfer row remained stuck at `"pending"` forever).
 
-## Begründung
+## Rationale
 
-- **Generische Connector-Service-Tasks statt migrationsspezifischer Sonderlösung**: der P12-S0-
-  Fund bezog sich ausdrücklich auf 7.1 (Workflow Engine allgemein), nicht auf 7.2 — eine in
-  `workflow-service` fest verdrahtete Kenntnis von `migration-service` wäre eine Abkürzung
-  gewesen, die den nächsten Anwendungsfall (z. B. Aussonderung, die laut 5.6 "technisch eng
-  verwandt" mit 7.2 ist) wieder vor genau demselben Problem stehen ließe.
-- **Direktes Paar statt Hub**: 7.4 beschreibt sich selbst als Ergänzung zur "reinen Migration
-  (7.2, die einen einmaligen, endgültigen Transfer beschreibt)" — ein Hub wäre für einen
-  einmaligen, von einem Admin explizit konfigurierten Vorgang unnötige Vermittlungs-Infrastruktur.
-- **Klartext-API-Key statt Hash**: einzig, weil diese Installation den Key selbst aktiv
-  präsentieren muss (Quellrolle) — ein Hash hätte dafür keinen Sicherheitsgewinn geboten (das
-  Geheimnis müsste ohnehin irgendwo im Klartext greifbar sein), nur die Zielrollen-Prüfung
-  unnötig erschwert.
-- **`asyncio.to_thread()` statt Dokumentation als Performance-Grenze**: ursprünglich als reine
-  Performance-Abwägung eingeplant (siehe P12-S1s ähnliche Fälle) — der Selbst-Loopback-Test
-  deckte auf, dass es hier keine bloße Abwägung, sondern ein echter Deadlock ist, sobald Quelle
-  und Ziel dieselbe Prozess-/Event-Loop-Instanz sind.
+- **Generic connector service tasks instead of a migration-specific special solution**: the
+  P12-S0 finding referred explicitly to 7.1 (the Workflow Engine in general), not to 7.2 — hard-
+  wiring knowledge of `migration-service` into `workflow-service` would have been a shortcut
+  leaving the next use case (e.g. records disposal, which per 5.6 is "technically closely related"
+  to 7.2) facing exactly the same problem again.
+- **Direct pair instead of a hub**: 7.4 describes itself as a complement to "pure migration
+  (7.2, which describes a one-time, final transfer)" — a hub would be unnecessary mediation
+  infrastructure for a one-time process explicitly configured by an admin.
+- **Plain-text API key instead of a hash**: solely because this installation must itself actively
+  present the key (source role) — a hash would offer no security benefit for this (the secret
+  would have to be available in plain text somewhere regardless), only unnecessarily complicate
+  the target-role check.
+- **`asyncio.to_thread()` instead of documenting it as a performance limit**: originally planned
+  purely as a performance trade-off (see P12-S1's similar cases) — the self-loopback test
+  revealed that this is not a mere trade-off here but a genuine deadlock, as soon as source and
+  target are the same process/event-loop instance.
 
-## Konsequenzen
+## Consequences
 
-- **Bewusste Grenze: keine historischen Zeitstempel für migrierte Versionen** — `document-
-  service`s `POST /documents/{id}/versions` setzt `created_at`/`created_by` serverseitig, kein
-  Parameter zum Überschreiben. Migrierte Versionen tragen auf der Ziel-Installation den
-  Migrationszeitpunkt, nicht das Original. Ein "historischer Import"-Zugang wäre ein
-  eigenständiges, riskantes Feature (potenzielle Audit-Trail-Verwässerung) und ist bewusst nicht
-  Teil dieser Session.
-- **Bewusste Grenze: `principal_id` bleibt opak bei kopierten Berechtigungen** — kein
-  Identitätsabgleich zwischen den Nutzerpopulationen zweier Installationen (7.4s Grundsatz
-  "jede Installation bleibt bezüglich ihrer eigenen Daten autonom" gilt analog). Funktioniert
-  korrekt, wenn beide Installationen dieselbe Nutzerbasis teilen, sonst müssen Rollen nach der
-  Migration manuell nachgepflegt werden.
-- **Bewusste Grenze: nur die aktuelle Dokumentversion wird migriert**, nicht die volle
-  Versionshistorie — eine Schleife über alle historischen Versionen wäre möglich gewesen, wurde
-  aber angesichts der ohnehin fehlenden Zeitstempeltreue (s. o.) für eine Referenzimplementierung
-  zurückgestellt.
-- **Bewusste Grenze: `dry-run-check` prüft nur Erreichbarkeit/Existenz des Zielordners**, keine
-  vollständige Objekttyp-/Constraint-Kompatibilitätsanalyse — 7.2 nennt Letzteres als Beispiel
-  ("z. B. passende Objekttypen vorhanden?"), eine vollständige Schema-Vergleichs-Engine wäre ein
-  eigenständiges, großes Feature.
-- **Selbst-Loopback-Test statt echter Zwei-Installationen-Test** — gleiche, bereits bei
-  `federation-hub-service` etablierte und dokumentierte Grenze (ein zweiter unabhängiger Stack ist
-  im Sandbox nicht sinnvoll aufsetzbar).
-- **`asyncio.to_thread()` gilt jetzt als Präzedenzfall**: jeder künftige Service, der synchrone
-  SDK-Aufrufe (z. B. `dms-connector-sdk`, für den geplanten CMIS-Connector P12-S4) aus `async
-  def`-FastAPI-Endpunkten heraus tätigt UND dabei potenziell sich selbst aufrufen kann
-  (Selbst-Loopback oder echte Zwei-Wege-Installationspaare), muss dasselbe Muster anwenden.
+- **Deliberate limit: no historical timestamps for migrated versions** — `document-
+  service`'s `POST /documents/{id}/versions` sets `created_at`/`created_by` server-side, with no
+  parameter to override them. Migrated versions carry the migration timestamp on the target
+  installation, not the original one. A "historical import" path would be a standalone, risky
+  feature (potential audit-trail dilution) and is deliberately not part of this session.
+- **Deliberate limit: `principal_id` remains opaque for copied permissions** — no identity
+  matching between the user populations of two installations (7.4's principle "each installation
+  remains autonomous with respect to its own data" applies analogously). Works correctly when
+  both installations share the same user base; otherwise roles must be manually reconciled after
+  migration.
+- **Deliberate limit: only the current document version is migrated**, not the full
+  version history — looping over all historical versions would have been possible, but was
+  deferred for a reference implementation given the timestamp fidelity already missing (see
+  above).
+- **Deliberate limit: `dry-run-check` only checks reachability/existence of the target folder**,
+  not a full object-type/constraint compatibility analysis — 7.2 names the latter as an example
+  ("e.g. matching object types present?"); a full schema-comparison engine would be a standalone,
+  large feature.
+- **Self-loopback test instead of a real two-installation test** — the same limitation already
+  established and documented for `federation-hub-service` (a second independent stack cannot
+  reasonably be set up in the sandbox).
+- **`asyncio.to_thread()` now stands as a precedent**: any future service that makes synchronous
+  SDK calls (e.g. `dms-connector-sdk`, for the planned CMIS connector P12-S4) from `async
+  def` FastAPI endpoints AND can potentially call itself (self-loopback or real two-way
+  installation pairs) must apply the same pattern.

@@ -1,116 +1,111 @@
-# 0081 — federation-hub-service: Handover-Zustellung Retry/Backoff, `pending_retry`
+# 0081 — federation-hub-service: handover delivery retry/backoff, `pending_retry`
 
-**Status:** akzeptiert (Session 5 von 7, siehe Phase 20 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 20 Session 5, betrifft `federation-hub-service`
+**Status:** accepted (Session 5 of 7, see Phase 20 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 20 Session 5, affects `federation-hub-service`
 
-## Entscheidung
+## Decision
 
-`POST /handovers` stellte den vom Ende-zu-Ende verschlüsselten Payload bislang vollständig **synchron im
-Request** an `to_installation_id`s Callback-URL zu — ein einzelner Fehlschlag (Netzwerkfehler,
-Nicht-2xx-Antwort) setzte sofort `status="delivery_failed"` (terminal), ohne jede Wiederholung. Diese
-Session überträgt das aus `notification-service` (ADR 0079) und `ocr-service`/`rendering-service`
-(ADR 0080) bekannte Muster auf die `Handover`-Erstzustellung — **nur** auf `POST /handovers`, NICHT auf
-die separate, symmetrische `POST /handovers/{id}/result`-Rückleitung (out of scope für diese Session).
+`POST /handovers` previously delivered the end-to-end encrypted payload fully **synchronously within the
+request** to `to_installation_id`'s callback URL — a single failure (network error, non-2xx response)
+immediately set `status="delivery_failed"` (terminal), with no retry whatsoever. This session carries
+the pattern known from `notification-service` (ADR 0079) and `ocr-service`/`rendering-service`
+(ADR 0080) over to the `Handover` initial delivery — **only** for `POST /handovers`, NOT for the
+separate, symmetric `POST /handovers/{id}/result` return path (out of scope for this session).
 
-1. **Neue Felder** `attempts: int` (Default 0) und `next_retry_at: datetime | None` auf `Handover`.
-   Neuer Zwischenstatus **`pending_retry`** (Statusfluss jetzt: `"pending"` → `"delivered"` |
+1. **New fields** `attempts: int` (default 0) and `next_retry_at: datetime | None` on `Handover`.
+   New intermediate status **`pending_retry`** (status flow now: `"pending"` → `"delivered"` |
    `"pending_retry"` → ... → `"delivery_failed"` → `"completed"` | `"result_delivery_failed"`) —
-   bewusst ein neuer Name für den Zwischenstatus, aber `"delivery_failed"` bleibt als Name des
-   **terminalen** (erschöpften) Zustands erhalten, statt wie in ADR 0078–0080 einen neuen
-   `..._permanent`-Namen einzuführen (Abweichung ausdrücklich so vom Plan vorgegeben).
-2. **Retry-aware Zustellungs-Buchführung**: `repository.mark_handover_delivered` bekommt einen neuen
-   Pflichtparameter `max_attempts` — bei Erfolg unverändert `"delivered"`; bei Fehlschlag unterhalb von
-   `max_attempts` (Default 5, `settings.max_handover_delivery_attempts`) `status="pending_retry"` mit
-   einem per `compute_backoff_seconds` gesetzten `next_retry_at`; erst bei Erschöpfung
-   `status="delivery_failed"`. Neue `repository.list_due_for_retry`/`repository.reset_for_retry`
-   (identisches Muster wie in ADR 0079/0080).
-3. **Neuer, eigenständiger Retry-Poll-Loop** (`_handover_retry_poll_loop`, Intervall 60s wie
-   `notification-service`) — der erste Zustellversuch bleibt synchron in `POST /handovers`, nur die
-   WIEDERHOLUNG läuft asynchron.
-4. **Neuer Endpunkt** `POST /handovers/{id}/retry` — `409` außer bei `delivery_failed`, sonst
-   `repository.reset_for_retry` gefolgt von einem sofortigen synchronen Wiederholungsversuch (gleiche
-   Begründung wie ADR 0079/0080: ein einzelner HTTP-Zustellschritt, kein mehrphasiger Prozess). Bewusst
-   **ohne** RBAC-Gate — `federation-hub-service` hat wie `notification-service` (vor ADR 0079) keine
-   `permission-service`-Integration; eine hinzuzufügen wäre Scope-Creep über eine reine
-   Resilienz-Session hinaus.
-5. **Der architektonische Kernkonflikt dieser Session — "nie persistierter Payload" vs. "Payload für
-   späteren Retry nötig"**: `Handover` speichert bewusst **nie** den Ende-zu-Ende verschlüsselten Payload
-   selbst (7.4, ADR 0028 "Selbst-Loopback" — der Hub protokolliert nur Vermittlungs-**Metadaten**). Ein
-   Retry-Poll-Tick braucht den Payload aber, um ihn erneut zuzustellen. Lösung: ein rein **flüchtiger
-   Prozessspeicher-Cache** `app.state.pending_handover_payloads: dict[str, dict]` (keyed by
-   `handover_id`), befüllt nur solange ein Handover tatsächlich `pending_retry` ist, geleert bei Erfolg
-   oder Erschöpfung. **Kein neues Feld auf `Handover` selbst** — das architektonische Prinzip "kein
-   Payload wird je persistiert" bleibt vollständig gültig, nicht stillschweigend umgangen.
+   deliberately a new name for the intermediate status, but `"delivery_failed"` is retained as the name
+   of the **terminal** (exhausted) state, instead of introducing a new `..._permanent` name as in
+   ADR 0078–0080 (this deviation was explicitly specified by the plan).
+2. **Retry-aware delivery bookkeeping**: `repository.mark_handover_delivered` gets a new required
+   parameter `max_attempts` — on success, unchanged `"delivered"`; on failure below `max_attempts`
+   (default 5, `settings.max_handover_delivery_attempts`), `status="pending_retry"` with `next_retry_at`
+   set via `compute_backoff_seconds`; only upon exhaustion `status="delivery_failed"`. New
+   `repository.list_due_for_retry`/`repository.reset_for_retry` (identical pattern to ADR 0079/0080).
+3. **New, standalone retry poll loop** (`_handover_retry_poll_loop`, interval 60s like
+   `notification-service`) — the first delivery attempt stays synchronous in `POST /handovers`, only the
+   RETRY runs asynchronously.
+4. **New endpoint** `POST /handovers/{id}/retry` — `409` unless `delivery_failed`, otherwise
+   `repository.reset_for_retry` followed by an immediate synchronous retry attempt (same rationale as
+   ADR 0079/0080: a single HTTP delivery step, not a multi-phase process). Deliberately **without** an
+   RBAC gate — `federation-hub-service`, like `notification-service` (before ADR 0079), has no
+   `permission-service` integration; adding one would be scope creep beyond a pure resilience session.
+5. **The architectural core conflict of this session — "payload never persisted" vs. "payload needed for
+   later retry"**: `Handover` deliberately **never** stores the end-to-end encrypted payload itself
+   (7.4, ADR 0028 "self-loopback" — the hub only logs mediation **metadata**). A retry poll tick,
+   however, needs the payload to redeliver it. Solution: a purely **volatile in-process memory cache**
+   `app.state.pending_handover_payloads: dict[str, dict]` (keyed by `handover_id`), populated only as
+   long as a handover is actually `pending_retry`, cleared on success or exhaustion. **No new field on
+   `Handover` itself** — the architectural principle "no payload is ever persisted" remains fully
+   intact, not silently circumvented.
 
-## Begründung
+## Rationale
 
-- **Warum das notification-service-Muster (ADR 0079) statt des archival-service-Musters (ADR 0078)**:
-  `POST /handovers` verarbeitet synchron im HTTP-Request, keine mehrphasige Zustandsmaschine — ein
-  Backoff-Warten direkt im Request würde den Aufrufer blockieren, exakt dieselbe Erwägung wie bei
+- **Why the notification-service pattern (ADR 0079) instead of the archival-service pattern (ADR 0078)**:
+  `POST /handovers` processes synchronously within the HTTP request, no multi-phase state machine — a
+  backoff wait directly in the request would block the caller, exactly the same consideration as with
   `notification-service`/`ocr-service`/`rendering-service`.
-- **Warum ein In-Memory-Cache statt eines neuen persistierten Payload-Felds**: die Alternative (Payload
-  doch in der DB ablegen, nur für die Dauer des Retry-Fensters) würde das in ADR 0028 explizit
-  begründete Privacy-/Audit-Prinzip unterlaufen — genau der Datensatz, den der Hub laut Konzept NIE sehen
-  soll, läge dann (wenn auch temporär) in dessen Datenbank. Ein Neustart-Verlust ist die ehrliche,
-  dokumentierte Konsequenz aus diesem Prinzip, kein Implementierungsversehen.
-- **Warum die manuelle Retry-Rückmeldung bei fehlendem Cache-Eintrag `409` statt eines stillen No-Ops
-  liefert**: der Aufrufer (ein Hub-Betreiber oder eine Admin-UI) muss erfahren, dass eine automatische
-  Nachstellung hier NICHT möglich ist, damit er die Absenderinstallation zu einem neuen Handover mit
-  neuer `handover_id` anstoßen kann — `repository.create_handover` legt Zeilen ohne Existenzprüfung an
-  (bloßes `session.add`), ein Retry mit derselben `handover_id` nach Cache-Verlust ist daher ohnehin
-  keine Option (`IntegrityError` auf dem Primärschlüssel).
-- **Warum `"delivery_failed"` als Name des terminalen Zustands beibehalten wird** (Abweichung von
-  ADR 0078–0080s `..._permanent`-Konvention): explizite Plan-Vorgabe für diese Session — der neue
-  Zwischenstatus `"pending_retry"` ist der eigentliche neue Vokabelbestandteil, `"delivery_failed"`
-  existierte bereits als Statuswert und wird nur zeitlich später erreicht (erst nach Erschöpfung statt
-  sofort).
-- **Warum `POST /handovers/{id}/result` (die "Ergebnis"-Rückleitung) NICHT Teil dieser Session ist**:
-  strukturell symmetrisch, aber architektonisch eigenständig (andere Richtung, andere Installation ruft
-  zurück) — der Plan grenzt den Umfang dieser Session explizit auf die Erstzustellung ein; eine gleiche
-  Behandlung der Ergebnis-Rückleitung wäre eine sinnvolle Folgesession, kein Bestandteil dieser.
+- **Why an in-memory cache instead of a new persisted payload field**: the alternative (storing the
+  payload in the DB after all, only for the duration of the retry window) would undermine the
+  privacy/audit principle explicitly justified in ADR 0028 — exactly the record the hub, per the
+  concept, must NEVER see would then reside (even if temporarily) in its database. A loss on restart is
+  the honest, documented consequence of this principle, not an implementation oversight.
+- **Why the manual retry response returns `409` instead of a silent no-op when the cache entry is
+  missing**: the caller (a hub operator or an admin UI) must learn that an automatic retry is NOT
+  possible here, so they can prompt the sending installation to initiate a new handover with a new
+  `handover_id` — `repository.create_handover` creates rows without an existence check (plain
+  `session.add`), so a retry with the same `handover_id` after cache loss is not an option anyway
+  (`IntegrityError` on the primary key).
+- **Why `"delivery_failed"` is kept as the name of the terminal state** (a deviation from ADR
+  0078–0080's `..._permanent` convention): explicit plan requirement for this session — the new
+  intermediate status `"pending_retry"` is the actual new vocabulary addition; `"delivery_failed"`
+  already existed as a status value and is now just reached later in time (only after exhaustion
+  instead of immediately).
+- **Why `POST /handovers/{id}/result` (the "result" return path) is NOT part of this session**:
+  structurally symmetric, but architecturally independent (opposite direction, a different installation
+  calls back) — the plan explicitly scopes this session to the initial delivery; equal treatment of the
+  result return path would be a sensible follow-up session, not part of this one.
 
-## Konsequenzen
+## Consequences
 
-- **Migration bereits laufender Installationen**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` im Lifespan
-  für `attempts`/`next_retry_at` auf `federation.handover`.
-- **Neue, dokumentierte Betriebsgrenze**: ein Neustart des Hub während eines offenen Retry-Fensters
-  (`pending_retry`) verliert den zwischengespeicherten Payload unwiederbringlich — sowohl der
-  automatische Poll-Tick als auch ein manueller `POST .../retry` markieren den betroffenen Handover dann
-  als `delivery_failed`, statt endlos auf einen nie eintreffenden Payload zu warten bzw. mit `409` zu
-  antworten. Dokumentiert in `models.Handover`s Docstring, im Lifespan-Kommentar und in
-  `docs/services/federation-hub-service.md` "Offene Punkte" (ersetzt die bisherige, jetzt erledigte
-  "kein Retry"-Zeile durch diese präzisere, verbleibende Einschränkung).
-- **Echter Design-Bug beim Selbstentwurf gefunden und behoben, VOR der Live-Verifikation**: die
-  ursprüngliche Fassung entfernte den Cache-Eintrag bei JEDEM Übergang nach `delivery_failed`
-  (Erschöpfung), nicht nur bei Erfolg — genau der Moment, in dem `POST .../retry` erstmals erlaubt ist
-  (dessen 409-Gate verlangt `status == "delivery_failed"`). Der Cache wäre damit in der Praxis fast immer
-  bereits leer gewesen, wenn ein Admin den Retry-Endpunkt tatsächlich aufrufen durfte — der "manuelle
-  Neustart"-Pfad hätte fast nie funktioniert, ohne dass ein Test dies aufgedeckt hätte (die ursprünglichen
-  Tests injizierten den Cache-Eintrag manuell, statt das reale Verhalten zu prüfen). Behoben: der
-  Cache-Eintrag wird jetzt ausschließlich bei tatsächlich ERFOLGREICHER Zustellung entfernt (in
-  `create_handover`, `retry_handover` und `_run_retry_tick` einheitlich), bleibt also auch nach
-  Erschöpfung erhalten, bis entweder ein Retry erfolgreich ist oder der Hub neu startet. Ähnliche
-  Fundkategorie wie der `reset_for_retry`-Bug in ADR 0080, hier aber beim eigenen Entwurf vor der
-  Live-Verifikation bemerkt statt erst danach.
-- **Tests**: 43 (vorher 35, +8: `pending_retry`-Verhalten bei unerreichbarem Ziel statt sofortigem
-  `delivery_failed`, Erschöpfung nach `delivery_failed` MIT weiterhin zwischengespeichertem Payload,
-  Regressionstest für den oben beschriebenen Cache-Bug über den Poll-Loop, `/retry`-Endpunkt-Statusgate,
-  erfolgreicher manueller Retry, `409` bei per Simulation verlorenem Cache-Eintrag, neue `test_main.py`
-  mit vier `_run_retry_tick`-Tests inkl. Erschöpfung und Cache-Verlust). Neue `session_factory`-Fixture in
-  `conftest.py` (fehlte bislang, gleiche Lücke wie bei den drei vorherigen Services dieser Phase).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
-  `federation-hub-service`, Migration bestätigt, **zweimal** wegen des oben beschriebenen
-  Cache-Bugfixes): `POST /handovers` gegen eine absichtlich unerreichbare `callback_base_url` liefert
-  `pending_retry` mit `attempts=1`; der reale, laufende `_handover_retry_poll_loop` (60s-Intervall)
-  greift den fälligen Handover eigenständig auf und erhöht `attempts` bei jedem Tick — über **echte
-  ~5 Minuten Wartezeit** (kein beschleunigtes Setting) bis zur tatsächlichen Erschöpfung verfolgt:
-  `attempts` steigt 1→2→3→4→5, `status` wechselt exakt bei Erreichen von `max_handover_delivery_attempts`
-  von `pending_retry` auf `delivery_failed`; der Payload-Cache-Eintrag bleibt dabei nachweislich erhalten
-  (nicht der ursprüngliche Bug); `POST .../retry` gegen das weiterhin unerreichbare Ziel bestätigt live
-  den `reset_for_retry`-Pfad (`attempts` startet wieder bei 0, landet nach dem einen synchronen Versuch
-  bei 1, NICHT bei 6 — derselbe Bugtyp wie in ADR 0080, hier von vornherein korrekt). Die
-  Neustart-Grenze wurde mit einem ECHTEN `docker compose restart federation-hub-service` verifiziert
-  (kein simuliertes Leeren): zwei zu diesem Zeitpunkt noch `pending_retry`-Handover wurden vom
-  Log bestätigt mit `federation_handover_retry_payload_lost` markiert und landeten korrekt bei
-  `delivery_failed`; ein anschließender `POST .../retry` auf einen davon lieferte `409` mit der
-  dokumentierten Meldung, dass die Absenderinstallation einen neuen Handover einreichen muss.
+- **Migration of already-running installations**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in the
+  lifespan for `attempts`/`next_retry_at` on `federation.handover`.
+- **New, documented operational limitation**: a hub restart during an open retry window
+  (`pending_retry`) irrecoverably loses the cached payload — both the automatic poll tick and a manual
+  `POST .../retry` then mark the affected handover as `delivery_failed`, instead of waiting endlessly
+  for a payload that will never arrive or responding with `409`. Documented in `models.Handover`'s
+  docstring, in the lifespan comment, and in `docs/services/federation-hub-service.md` "Open Points"
+  (replaces the previous, now-resolved "no retry" line with this more precise, remaining limitation).
+- **Real design bug found and fixed in self-review, BEFORE live verification**: the original version
+  removed the cache entry on EVERY transition to `delivery_failed` (exhaustion), not only on success —
+  exactly the moment at which `POST .../retry` is first permitted (its 409 gate requires
+  `status == "delivery_failed"`). In practice, the cache would almost always already have been empty
+  by the time an admin was actually allowed to call the retry endpoint — the "manual restart" path
+  would have almost never worked, without any test catching it (the original tests injected the cache
+  entry manually instead of checking the real behavior). Fixed: the cache entry is now removed only on
+  actually SUCCESSFUL delivery (uniformly in `create_handover`, `retry_handover`, and
+  `_run_retry_tick`), so it survives exhaustion as well, until either a retry succeeds or the hub
+  restarts. Similar finding category to the `reset_for_retry` bug in ADR 0080, but here caught during
+  the author's own design review before live verification rather than after.
+- **Tests**: 43 (previously 35, +8: `pending_retry` behavior on an unreachable target instead of
+  immediate `delivery_failed`, exhaustion reaching `delivery_failed` WITH the payload still cached,
+  regression test for the cache bug described above via the poll loop, `/retry` endpoint status gate,
+  successful manual retry, `409` on a simulated lost cache entry, new `test_main.py` with four
+  `_run_retry_tick` tests incl. exhaustion and cache loss). New `session_factory` fixture in
+  `conftest.py` (previously missing, same gap as the three prior services in this phase).
+- **Verified live against the real running stack** (image rebuild + restart of `federation-hub-service`,
+  migration confirmed, **twice** due to the cache bugfix described above): `POST /handovers` against a
+  deliberately unreachable `callback_base_url` returns `pending_retry` with `attempts=1`; the real,
+  running `_handover_retry_poll_loop` (60s interval) autonomously picks up the due handover and
+  increments `attempts` on every tick — tracked over **real ~5 minutes of wait time** (no accelerated
+  setting) to actual exhaustion: `attempts` rises 1→2→3→4→5, `status` transitions exactly upon reaching
+  `max_handover_delivery_attempts` from `pending_retry` to `delivery_failed`; the payload cache entry is
+  demonstrably retained throughout (not the original bug); `POST .../retry` against the still
+  unreachable target live-confirms the `reset_for_retry` path (`attempts` starts again at 0, lands at 1
+  after the one synchronous attempt, NOT at 6 — same bug type as in ADR 0080, here correct from the
+  start). The restart boundary was verified with a REAL `docker compose restart federation-hub-service`
+  (not simulated clearing): two handovers still `pending_retry` at that point were confirmed by the log
+  as marked `federation_handover_retry_payload_lost` and correctly landed at `delivery_failed`; a
+  subsequent `POST .../retry` on one of them returned `409` with the documented message that the
+  sending installation must submit a new handover.

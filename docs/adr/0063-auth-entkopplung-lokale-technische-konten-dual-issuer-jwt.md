@@ -1,85 +1,86 @@
-# 0063 — Auth-Entkopplung von Keycloak: lokale technische Konten mit eigenem Token-Issuer
+# 0063 — Auth decoupling from Keycloak: local technical accounts with their own token issuer
 
-**Status:** akzeptiert (Session 1 von 3, siehe Phase 18 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 18 (Nutzer-Direktive nach der "Offene Punkte"-Triage vom 2026-08-13),
-betrifft `auth-service`, `libs/dms-auth-client`
+**Status:** accepted (session 1 of 3, see phase 18 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap phase 18 (user directive after the "Open Points" triage of 2026-08-13),
+affects `auth-service`, `libs/dms-auth-client`
 
-## Entscheidung
+## Decision
 
-Superuser-Break-Glass (4.6) und Domain-Admin-Konten hingen bislang vollständig an echten
-Keycloak-Nutzerkonten — Login lief über Keycloaks Password-Grant, Break-Glass-Aktivierung über ein
-Keycloak-User-Attribut (`dms_superuser_expires_at`). Ist Keycloak nicht erreichbar, ist damit auch das
-Not-Shutdown-Break-Glass nicht nutzbar — ein Widerspruch zum eigentlichen Zweck eines
-Notfallmechanismus. Auf ausdrücklichen Nutzerwunsch ("der Superuser soll gar nicht im Keycloak leben,
-der soll nur in der App leben") werden diese Konten künftig ausschließlich in `auth-service`s eigener
-Datenbank geführt, unabhängig von Keycloak.
+Superuser break-glass (4.6) and domain admin accounts previously depended entirely on real
+Keycloak user accounts — login ran through Keycloak's password grant, break-glass activation via a
+Keycloak user attribute (`dms_superuser_expires_at`). If Keycloak is unreachable, this also makes the
+emergency-shutdown break-glass unusable — a contradiction of the actual purpose of an
+emergency mechanism. At the user's explicit request ("the superuser shouldn't live in Keycloak at
+all, it should only live in the app"), these accounts will henceforth be kept exclusively in
+`auth-service`'s own database, independent of Keycloak.
 
-Diese erste Session (P18-S1) legt die Infrastruktur, ohne bereits `POST /login`/Break-Glass umzustellen
-(folgt in P18-S2/S3):
+This first session (P18-S1) lays the infrastructure, without yet migrating `POST /login`/break-glass
+(follows in P18-S2/S3):
 
-1. **`TechnicalAccount`** (neues Model, `auth`-Schema) — `username`, `password_hash` (bcrypt, erstes
-   Mal, dass dieser Service selbst ein Passwort hasht), `account_type` (`superuser`|`domain-admin`),
-   `role_name`, `enabled`, `expires_at`. Trägt dieselbe Break-Glass-Semantik wie bisher das
-   Keycloak-Attribut, jetzt app-eigen.
-2. **`LocalSigningKey`** (neues Model, Singleton-Zeile, gleiches Muster wie `FederationIdentity`) — ein
-   eigenes RSA-2048-Schlüsselpaar, idempotent beim ersten Zugriff erzeugt (`local_token_issuer.
-   ensure_signing_key`, nutzt die bereits vorhandene `federation_crypto.generate_keypair()` wieder,
-   keine neue Krypto-Duplikation innerhalb desselben Service). Ein stabiler `kid` sorgt dafür, dass
-   bereits ausgestellte Tokens auch über einen Neustart hinweg gültig bleiben.
-3. **`GET /.well-known/jwks.json`** — liefert den öffentlichen Schlüssel im selben JWKS-Format wie
-   Keycloaks `/protocol/openid-connect/certs`, ungegatet (öffentlicher Schlüssel, keine sensiblen Daten).
-4. **`local_token_issuer.mint_token()`** — stellt ein Token mit identischem Claim-Shape wie Keycloak aus
-   (`sub`, `preferred_username`, `realm_access.roles`, `aud`), damit Downstream-Konsumenten (`GET /me`,
-   `permission-service`-Aufrufe) nichts über die Herkunft wissen müssen.
-5. **`MultiIssuerTokenValidator`** (neu in `libs/dms-auth-client`) — delegiert an eine von mehreren
-   `TokenValidator`-Instanzen, ausgewählt über den `iss`-Claim des jeweiligen Tokens (reines Duck-Typing,
-   dieselbe `.validate(token) -> dict`-Schnittstelle wie `TokenValidator` selbst, `make_current_user_
-   dependency` bemerkt den Unterschied nicht). `auth-service`s eigener `_validator` ist ab dieser Session
-   ein `MultiIssuerTokenValidator` aus Keycloak- und lokalem Validator — vollständig additiv, bestehende
-   Keycloak-Logins/Tokens sind unverändert gültig.
+1. **`TechnicalAccount`** (new model, `auth` schema) — `username`, `password_hash` (bcrypt, the first
+   time this service hashes a password itself), `account_type` (`superuser`|`domain-admin`),
+   `role_name`, `enabled`, `expires_at`. Carries the same break-glass semantics as before via the
+   Keycloak attribute, now owned by the app itself.
+2. **`LocalSigningKey`** (new model, singleton row, same pattern as `FederationIdentity`) — its own
+   RSA-2048 key pair, generated idempotently on first access (`local_token_issuer.
+   ensure_signing_key`, reuses the already existing `federation_crypto.generate_keypair()`,
+   no new crypto duplication within the same service). A stable `kid` ensures that
+   already-issued tokens stay valid across a restart as well.
+3. **`GET /.well-known/jwks.json`** — delivers the public key in the same JWKS format as
+   Keycloak's `/protocol/openid-connect/certs`, ungated (public key, no sensitive data).
+4. **`local_token_issuer.mint_token()`** — issues a token with an identical claim shape to Keycloak's
+   (`sub`, `preferred_username`, `realm_access.roles`, `aud`), so that downstream consumers (`GET /me`,
+   `permission-service` calls) don't need to know anything about its origin.
+5. **`MultiIssuerTokenValidator`** (new in `libs/dms-auth-client`) — delegates to one of several
+   `TokenValidator` instances, selected via the respective token's `iss` claim (pure duck typing,
+   the same `.validate(token) -> dict` interface as `TokenValidator` itself, `make_current_user_
+   dependency` doesn't notice the difference). `auth-service`'s own `_validator` becomes, as of this
+   session, a `MultiIssuerTokenValidator` composed of the Keycloak and local validators — fully
+   additive, existing Keycloak logins/tokens remain valid unchanged.
 
-## Begründung
+## Rationale
 
-- **Warum ein zweiter Issuer statt eines Keycloak-Attributs mit Fallback-Login**: die zentrale
-  Anforderung ist, dass Break-Glass NICHT von Keycloaks Erreichbarkeit abhängt. Ein Keycloak-Attribut
-  bräuchte für die Aktivierungsprüfung selbst einen Keycloak-Zugriff — löst das Problem also nicht. Ein
-  komplett getrennter, lokal signierter Token-Pfad tut das.
-- **Warum derselbe Claim-Shape wie Keycloak statt eines eigenen Formats**: jeder bestehende Aufrufer
-  (`GET /me`, `permission-service`s `sub`-basierte Zuordnung, Gateway-Identitäts-Header) liest bereits
-  `sub`/`preferred_username`/`realm_access.roles` — ein abweichendes Format hätte Änderungen an jedem
-  einzelnen Konsumenten erzwungen, für einen reinen Ausstellungswechsel unverhältnismäßig.
-  `MultiIssuerTokenValidator` macht die Herkunft für alle Downstream-Konsumenten transparent.
-  `libs/dms-auth-client` ist bislang nur direkt in `auth-service`/`gateway-service` instanziiert (per
-  Grep bestätigt) — alle anderen Services konsumieren ausschließlich die vom Gateway weitergereichten
-  `X-DMS-*`-Header, nicht selbst validierte Tokens; die Multi-Issuer-Erweiterung betrifft daher zunächst
-  nur diese zwei Stellen (`gateway-service`s eigene Umstellung folgt in P18-S2, sobald `/login`
-  tatsächlich lokale Tokens ausstellt).
-- **Warum `bcrypt` statt eines neuen `passlib`-Unterbaus**: `bcrypt` war bereits transitiv im venv
-  vorhanden (über eine andere Abhängigkeit), keine neue schwere Abhängigkeit nötig; `passlib`s
-  zusätzliche Abstraktionsebene (mehrere austauschbare Hash-Schemata) hat hier keinen Konsumenten, der
-  sie bräuchte — dieser Service hasht künftig ausschließlich Passwörter technischer Konten, ein einziges
-  Schema genügt.
-- **Warum ein `_LazyValidator`-Wrapper statt des Validators direkt**: `app.state.combined_validator`
-  existiert erst nach dem Lifespan-Start (braucht einen DB-Zugriff für den persistierten
-  Signierschlüssel), `get_current_user` muss aber wie bisher schon beim Modul-Import als fertige
-  FastAPI-Dependency existieren. Der Wrapper verzögert nur den eigentlichen `.validate()`-Aufruf bis zum
-  ersten echten Request (uvicorn nimmt ohnehin erst nach abgeschlossenem Lifespan-Start Verbindungen an)
-  - reines Duck-Typing, keine Änderung an `make_current_user_dependency` selbst nötig.
+- **Why a second issuer instead of a Keycloak attribute with fallback login**: the central
+  requirement is that break-glass NOT depend on Keycloak's availability. A Keycloak attribute would
+  itself need Keycloak access for the activation check — so it wouldn't solve the problem. A
+  fully separate, locally signed token path does.
+- **Why the same claim shape as Keycloak instead of a custom format**: every existing caller
+  (`GET /me`, `permission-service`'s `sub`-based mapping, the gateway identity header) already reads
+  `sub`/`preferred_username`/`realm_access.roles` — a divergent format would have forced changes to
+  every single consumer, disproportionate for a pure issuance-path change.
+  `MultiIssuerTokenValidator` makes the origin transparent to all downstream consumers.
+  `libs/dms-auth-client` is so far only instantiated directly in `auth-service`/`gateway-service`
+  (confirmed via grep) — all other services consume exclusively the `X-DMS-*` headers forwarded by
+  the gateway, not self-validated tokens; the multi-issuer extension therefore initially affects
+  only these two places (`gateway-service`'s own migration follows in P18-S2, once `/login`
+  actually issues local tokens).
+- **Why `bcrypt` instead of a new `passlib` foundation**: `bcrypt` was already present transitively
+  in the venv (via another dependency), no new heavyweight dependency needed; `passlib`'s
+  additional abstraction layer (multiple interchangeable hash schemes) has no consumer here that
+  would need it — this service will henceforth only hash passwords for technical accounts, a single
+  scheme suffices.
+- **Why a `_LazyValidator` wrapper instead of the validator directly**: `app.state.combined_validator`
+  only exists after the lifespan start (needs DB access for the persisted
+  signing key), but `get_current_user` must, as before, already exist as a finished
+  FastAPI dependency at module import time. The wrapper only delays the actual
+  `.validate()` call until the first real request (uvicorn only accepts connections after the
+  lifespan start has completed anyway) - pure duck typing, no change to `make_current_user_dependency`
+  itself is needed.
 
-## Konsequenzen
+## Consequences
 
-- **Zwei Token-Issuer im System, beide von `TokenValidator`/`MultiIssuerTokenValidator` akzeptiert** —
-  bei künftiger Fehlersuche an `iss`-Claims denken, nicht mehr automatisch von Keycloak als einziger
-  Quelle ausgehen.
-- **Noch keine funktionale Änderung für Endnutzer** — `POST /login` stellt weiterhin ausschließlich
-  Keycloak-Tokens aus, Superuser/Domain-Admins existieren weiterhin nur als Keycloak-Konten. Diese
-  Session liefert nur die geprüfte Infrastruktur (Modell, Schlüssel, Minting, Validierung), P18-S2
-  migriert den Superuser tatsächlich, P18-S3 die Domain-Admin-Konten.
-- **`gateway-service`s eigener `TokenValidator` ist noch nicht auf Multi-Issuer umgestellt** — solange
-  keine lokalen Tokens tatsächlich ausgestellt werden (erst ab P18-S2), ist das unkritisch; muss aber vor
-  P18-S2s Abschluss nachgezogen werden, sonst würde ein frisch eingeloggter Superuser am Gateway
-  scheitern, obwohl `auth-service` sein Token selbst korrekt validiert.
-- Live gegen den echten laufenden Stack verifiziert: `GET /.well-known/jwks.json` liefert einen validen
-  JWKS-Eintrag, ein bestehender Keycloak-Login (`users-admin`) funktioniert unverändert über `GET /me`,
-  und der `kid` bleibt über einen echten Container-Neustart hinweg stabil (`local-1` vor und nach
-  `docker compose restart auth-service` identisch).
+- **Two token issuers in the system, both accepted by `TokenValidator`/`MultiIssuerTokenValidator`** —
+  when debugging in the future, think of `iss` claims, no longer automatically assume Keycloak as
+  the sole source.
+- **Still no functional change for end users** — `POST /login` continues to issue exclusively
+  Keycloak tokens, superuser/domain admins still exist only as Keycloak accounts. This session only
+  delivers the verified infrastructure (model, key, minting, validation); P18-S2 actually migrates
+  the superuser, P18-S3 the domain admin accounts.
+- **`gateway-service`'s own `TokenValidator` is not yet switched to multi-issuer** — as long as
+  no local tokens are actually issued (not until P18-S2), this is uncritical; but must be caught up
+  before P18-S2's completion, otherwise a freshly logged-in superuser would fail at the gateway
+  even though `auth-service` itself validates its token correctly.
+- Verified live against the real running stack: `GET /.well-known/jwks.json` delivers a valid
+  JWKS entry, an existing Keycloak login (`users-admin`) continues to work unchanged via `GET /me`,
+  and the `kid` remains stable across a real container restart (`local-1` identical before and after
+  `docker compose restart auth-service`).

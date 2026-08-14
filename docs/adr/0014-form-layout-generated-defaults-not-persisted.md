@@ -1,29 +1,29 @@
-# 0014 — Formular-Layouts: generierte Smart-Layouts bleiben ungespeichert, nur Overrides werden persistiert
+# 0014 — Form layouts: generated smart layouts stay unpersisted, only overrides are stored
 
-**Status:** akzeptiert
-**Kontext:** Konzept 2.2b, Session P5b-S2
+**Status:** accepted
+**Context:** Concept 2.2b, Session P5b-S2
 
-## Entscheidung
+## Decision
 
-Das Formular-Layout-Datenmodell (Zeilen/Spalten-Grid je Objekttyp und Verwendungszweck `display`/`search`/`upload`) wird wie folgt umgesetzt:
+The form layout data model (row/column grid per object type and purpose `display`/`search`/`upload`) is implemented as follows:
 
-- Eine neue Tabelle `object_type_layout` (PK `(object_type_id, purpose)`) speichert **ausschließlich explizit abweichende Layouts** — kein Eintrag bedeutet "noch keine Abweichung vom generierten Standard".
-- `GET /object-types/{id}/layouts/{purpose}` liefert bei fehlendem Eintrag ein **on-the-fly generiertes Smart Layout** (`object_type_service.layout.generate_smart_layout`), erkennbar an `is_custom: false`. Existiert ein Eintrag, wird dieser unverändert zurückgegeben (`is_custom: true`).
-- `PUT .../layouts/{purpose}` schreibt einen expliziten Override; `DELETE .../layouts/{purpose}` entfernt ihn wieder (Reset auf den generierten Standard) — idempotent, kein Fehler, falls nie einer existierte.
-- Feld-Anzeigenamen (`label`) leben **im Layout**, nicht als neues Feld an der Attribut-Definition selbst — das Smart Layout kopiert beim Generieren zunächst den technischen Attributnamen als Label.
+- A new table `object_type_layout` (PK `(object_type_id, purpose)`) stores **only explicitly deviating layouts** — no entry means "no deviation from the generated default yet".
+- `GET /object-types/{id}/layouts/{purpose}` returns an **on-the-fly generated smart layout** (`object_type_service.layout.generate_smart_layout`) when no entry exists, identifiable by `is_custom: false`. If an entry exists, it is returned unchanged (`is_custom: true`).
+- `PUT .../layouts/{purpose}` writes an explicit override; `DELETE .../layouts/{purpose}` removes it again (reset to the generated default) — idempotent, no error if none ever existed.
+- Field display names (`label`) live **in the layout**, not as a new field on the attribute definition itself — when generating, the smart layout initially copies the technical attribute name as the label.
 
-## Begründung
+## Rationale
 
-- **Ein generierter Default, der sofort bei Objekttyp-Anlage persistiert würde, veraltet automatisch bei jeder späteren Attributänderung** (neues Attribut hinzugefügt, `required` geändert) — die gespeicherte Kopie müsste dann bei jeder Attribut-Änderung aktiv nachgeführt werden, inklusive der Frage, was mit einem inzwischen von Hand angepassten Layout passieren soll. Ohne Persistierung des Defaults entfällt dieses Synchronisationsproblem komplett: Ein noch nicht angepasstes Layout ist per Definition immer aktuell, weil es bei jedem Lesezugriff frisch aus der aktuellen Attributliste berechnet wird.
-- **Explizite Overrides sind bewusst ein Snapshot, keine live Referenz.** Sobald eine administrierende Person das generierte Layout im künftigen Layout-Designer (P5b-S3) anpasst und speichert, wird genau dieser Stand eingefroren (inkl. der zum Speicherzeitpunkt gültigen `required`-Flags) — nachträgliche Attributänderungen am Objekttyp aktualisieren ein bereits gespeichertes, individuelles Layout nicht automatisch. Das ist dieselbe bewusste Nicht-Rückwirkung wie bei `allowedParentTypes` (ADR 0013): Konsistenzprüfung nur bei der jeweiligen Schreiboperation, kein Hintergrundabgleich über den gesamten Bestand.
-- **Referenzprüfung beim Schreiben, nicht erst beim Lesen**: `PUT` lehnt Layouts ab, die ein nicht (mehr) existierendes Attribut referenzieren (`422`), analog zur `allowedParentTypes`-Referenzprüfung (ADR 0013) — verhindert stille, nie sichtbare Karteileichen im Layout.
-- **Dieselbe Generierungs-Heuristik für alle drei Verwendungszwecke** (2 Spalten pro Zeile, Attributreihenfolge) statt drei verschiedener Default-Algorithmen — Zweck-spezifische Unterschiede entstehen laut Konzept ausschließlich durch individuelles Nachjustieren im Layout-Designer, nicht durch unterschiedliche Ausgangs-Layouts.
-- **`label` gehört zum Layout, nicht zur Attribut-Definition**: Das Konzept beschreibt die Anzeigename-Vergabe als Teil der Layout-Generierung ("vergibt je Attribut einen sprechenden Anzeigenamen … aus diesen Angaben leitet das System automatisch ein Standardlayout ab"), nicht als eigenständiges Attribut-Schema-Feld. Da ein Attribut potenziell unterschiedliche Labels in Anzeige/Suche/Upload haben könnte (unwahrscheinlich, aber vom Datenmodell nicht ausgeschlossen), passt das besser zum jeweiligen Layout als zur einmal je Objekttyp definierten Attributliste.
-- **Eigene Tabelle statt JSON-Spalte an `object_type`**: Drei unabhängig überschreib-/zurücksetzbare Layouts (je ein `PUT`/`DELETE` pro Zweck) sind mit einer eigenen Zeile pro `(object_type_id, purpose)` einfacher zu handhaben als drei verschachtelte Schlüssel in einer gemeinsamen JSON-Spalte, insbesondere für das granulare `DELETE` (Reset nur eines einzelnen Zwecks).
+- **A generated default that is persisted immediately at object-type creation automatically goes stale on every later attribute change** (new attribute added, `required` changed) — the stored copy would then have to be actively kept in sync on every attribute change, including the question of what should happen to a layout already hand-adjusted by then. Without persisting the default, this synchronization problem disappears entirely: a not-yet-customized layout is by definition always current, because it is freshly computed from the current attribute list on every read.
+- **Explicit overrides are deliberately a snapshot, not a live reference.** As soon as an admin adjusts and saves the generated layout in the future layout designer (P5b-S3), exactly that state is frozen (including the `required` flags valid at save time) — subsequent attribute changes on the object type do not automatically update an already-saved custom layout. This is the same deliberate non-retroactivity as with `allowedParentTypes` (ADR 0013): consistency checking only on the respective write operation, no background reconciliation across the whole dataset.
+- **Reference checking on write, not only on read**: `PUT` rejects layouts that reference an attribute that does not (or no longer) exist (`422`), analogous to the `allowedParentTypes` reference check (ADR 0013) — prevents silent, never-visible dangling references in the layout.
+- **The same generation heuristic for all three purposes** (2 columns per row, attribute order) rather than three different default algorithms — per the concept, purpose-specific differences arise exclusively through individual fine-tuning in the layout designer, not through different starting layouts.
+- **`label` belongs to the layout, not the attribute definition**: the concept describes assigning display names as part of layout generation ("assigns a descriptive display name per attribute … the system automatically derives a default layout from this information"), not as a standalone attribute schema field. Since an attribute could potentially have different labels in display/search/upload (unlikely, but not excluded by the data model), this fits the respective layout better than the attribute list defined once per object type.
+- **A dedicated table instead of a JSON column on `object_type`**: three independently overridable/resettable layouts (one `PUT`/`DELETE` per purpose) are easier to handle with one row per `(object_type_id, purpose)` than with three nested keys in a shared JSON column, especially for the granular `DELETE` (resetting only a single purpose).
 
-## Konsequenzen
+## Consequences
 
-- Neue Tabelle `object_type_layout`, per Fremdschlüssel (`ON DELETE CASCADE`) an `object_type.object_type` gebunden — beim Löschen eines Objekttyps verschwinden dessen Layout-Overrides automatisch mit, keine eigene Aufräumlogik nötig.
-- Kein Rückwirkungs-Check, wenn sich die Attributliste eines Objekttyps ändert, nachdem bereits ein individuelles Layout gespeichert wurde — ein gespeichertes Layout kann danach ein inzwischen entferntes Attribut referenzieren (dieselbe Klasse von Inkonsistenz wie bei `allowedParentTypes`, siehe ADR 0013). Wird als offener Punkt dokumentiert, nicht in dieser Session behoben.
-- Admin-UI-Bedienung (Layout-Designer zum Nachjustieren, Anzeigename-Vergabe) folgt erst mit **P5b-S3** — diese Session deckt ausschließlich Backend-Datenmodell, Smart-Layout-Generierung und die Lese-/Schreib-/Reset-API ab, verifiziert über pytest/curl.
-- User-UI-Konsum der Layouts (Metadaten-Panel, Suchmaske, Upload-Dialog von fest verdrahteten Formularen auf layoutgesteuertes Rendering umstellen) folgt erst mit **P5b-S4**.
+- New table `object_type_layout`, bound to `object_type.object_type` via foreign key (`ON DELETE CASCADE`) — deleting an object type automatically removes its layout overrides, no separate cleanup logic needed.
+- No retroactivity check when an object type's attribute list changes after a custom layout has already been saved — a saved layout can afterward reference an attribute that has since been removed (the same class of inconsistency as with `allowedParentTypes`, see ADR 0013). Documented as an open point, not resolved in this session.
+- Admin UI handling (layout designer for fine-tuning, display-name assignment) follows only with **P5b-S3** — this session covers exclusively the backend data model, smart-layout generation, and the read/write/reset API, verified via pytest/curl.
+- User-UI consumption of the layouts (switching the metadata panel, search form, and upload dialog from hardwired forms to layout-driven rendering) follows only with **P5b-S4**.

@@ -1,92 +1,92 @@
 # signature-service
 
-**Verantwortung:** Signature Service (Konzept 3.10) - eIDAS-konforme elektronische Signatur (SES/AES/QES), Broker vor externen QTSPs über austauschbare Signature-Provider-Connectoren (Plugin-Prinzip wie Storage-Backends/CMIS, 3.3). Diese Session (P6-S7) implementiert das Grundgerüst + einen real funktionierenden internen, selbstsignierten Connector für SES/AES sowie den neuen "Signature Task"-Typ im Workflow Service (7.1) — QES über einen echten akkreditierten QTSP ist bewusst nicht Teil dieser Session (siehe [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md)).
+**Responsibility:** Signature Service (concept 3.10) - eIDAS-compliant electronic signature (SES/AES/QES), a broker in front of external QTSPs via interchangeable signature-provider connectors (plugin principle like storage backends/CMIS, 3.3). This session (P6-S7) implements the basic framework + a genuinely working internal, self-signed connector for SES/AES, as well as the new "signature task" type in the Workflow Service (7.1) — QES via a real accredited QTSP is deliberately not part of this session (see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md)).
 
-**Konzept-Referenz:** 3.10, 2.1a, 7.1
-**Eigenes Postgres-Schema:** `signature` (Tabellen `signature`, `internal_ca`)
+**Concept reference:** 3.10, 2.1a, 7.1
+**Own Postgres schema:** `signature` (tables `signature`, `internal_ca`)
 
 ## API
 
-| Methode | Pfad | Beschreibung |
+| Method | Path | Description |
 |---|---|---|
-| `POST` | `/signatures` | Signiert eine Dokumentversion (`document_id`, `level`: `ses`\|`aes`\|`qes`, `signer_principal_id`, optional `version_number`/`reason`) - `400` bei Nicht-PDF-`content_type`, unbekanntem Principal, zu niedrigem Niveau gegenüber dem Objekttyp-Minimum, oder fehlendem Connector fürs angeforderte Niveau; `404` bei unbekanntem Dokument/unbekannter Version. Erzeugt bei Erfolg eine **neue Dokumentversion** bei document-service (s. u.) |
-| `GET` | `/signatures?document_id=...` | Signaturen eines Dokuments |
-| `GET` | `/signatures/{id}` | Einzelne Signatur - `404` |
-| `GET` | `/signatures/{id}/verify` | Verifiziert die Signatur erneut gegen die aktuell bei document-service hinterlegten Bytes (`valid`, `integrity_intact`, `certificate_expired`, `errors[]`) |
-| `GET` | `/signature-config` | Aktuelle Connector-Niveaus (seit **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) — `id`/`type` strukturell aus `Settings.signature_providers`, `levels` live editierbar, Default-Zeile beim ersten Aufruf aus den bisherigen Env-Var-Werten |
-| `PUT` | `/signature-config` | Aktualisiert `levels` NUR der genannten Connector-`id`s (`[{id, levels}]`, nicht genannte behalten ihren Wert) — wirkt **ohne Neustart**; `422` bei unbekannter `id` ("nur bestehende Einträge bearbeiten"), leeren `levels`, oder `qes` bei `type=internal` (dieselbe Regel wie `SignatureProviderConfig._check_levels`) |
-| `GET` | `/healthz` | Health-Check |
+| `POST` | `/signatures` | Signs a document version (`document_id`, `level`: `ses`\|`aes`\|`qes`, `signer_principal_id`, optional `version_number`/`reason`) - `400` on non-PDF `content_type`, unknown principal, a level too low relative to the object type minimum, or a missing connector for the requested level; `404` on an unknown document/unknown version. On success, creates a **new document version** at document-service (see below) |
+| `GET` | `/signatures?document_id=...` | Signatures of a document |
+| `GET` | `/signatures/{id}` | Single signature - `404` |
+| `GET` | `/signatures/{id}/verify` | Re-verifies the signature against the bytes currently stored at document-service (`valid`, `integrity_intact`, `certificate_expired`, `errors[]`) |
+| `GET` | `/signature-config` | Current connector levels (since **Post-Roadmap Phase 22 Session 6**, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)) — `id`/`type` structurally from `Settings.signature_providers`, `levels` live-editable, default row seeded from the previous env-var values on first call |
+| `PUT` | `/signature-config` | Updates `levels` ONLY for the named connector `id`s (`[{id, levels}]`, ones not named keep their value) — takes effect **without a restart**; `422` on an unknown `id` ("can only edit existing entries"), empty `levels`, or `qes` for `type=internal` (the same rule as `SignatureProviderConfig._check_levels`) |
+| `GET` | `/healthz` | Health check |
 
-## Datenmodell
+## Data Model
 
-- `internal_ca`: Singleton (`id=1`) - `certificate_pem`, `private_key_pem`, `created_at`. Selbstsignierte interne Root-CA (RSA 2048, 20 Jahre Gültigkeit), beim ersten Start generiert (`connectors/internal.generate_root_ca`), danach idempotent wiederverwendet - ein Neustart darf keine neue CA erzeugen, sonst wären zuvor ausgestellte Signaturen nicht mehr verifizierbar.
-- `signature`: `document_id`, `source_version_number` (die signierte Ausgangsversion), `version_number` (die neu entstandene, signierte Version), `level`, `connector_id`, `signer_principal_id`, `signer_display_name`, `certificate_subject`/`certificate_serial`/`certificate_not_before`/`certificate_not_after`, `reason`, `signed_at`.
+- `internal_ca`: singleton (`id=1`) - `certificate_pem`, `private_key_pem`, `created_at`. Self-signed internal root CA (RSA 2048, 20-year validity), generated on first start (`connectors/internal.generate_root_ca`), reused idempotently thereafter - a restart must not generate a new CA, otherwise previously issued signatures would no longer be verifiable.
+- `signature`: `document_id`, `source_version_number` (the signed source version), `version_number` (the newly created, signed version), `level`, `connector_id`, `signer_principal_id`, `signer_display_name`, `certificate_subject`/`certificate_serial`/`certificate_not_before`/`certificate_not_after`, `reason`, `signed_at`.
 
-## Signature-Provider-Connectoren (3.10, Plugin-Prinzip wie 3.3)
+## Signature Provider Connectors (3.10, plugin principle like 3.3)
 
-`SignatureProviderConnector`(ABC, `connectors/interface.py`): `sign(pdf_bytes, signer, level)`/`verify(pdf_bytes)`. Factory (`connectors/__init__.py`) dispatcht auf `type` bei stabiler `id`-Zuordnung (wie `storage_service.backends.build_backend`, ADR 0017), konfiguriert über `DMS_SIGNATURE_PROVIDERS` (JSON-Liste). Default-Seed: `{id: "internal", type: "internal", levels: ["ses","aes"]}`. **Seit Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `levels` ist zusätzlich über `GET`/`PUT /signature-config` live editierbar (neue DB-Singleton-Tabelle `signature_config`, bei jedem Signaturvorgang frisch gelesen) — `id`/`type` bleiben strukturell aus `DMS_SIGNATURE_PROVIDERS`. `resolve_connector_for_level()` (`connectors/__init__.py`) nimmt seither eine bereits gemergte `list[SignatureProviderConfig]` entgegen statt `Settings` direkt zu lesen.
+`SignatureProviderConnector` (ABC, `connectors/interface.py`): `sign(pdf_bytes, signer, level)`/`verify(pdf_bytes)`. The factory (`connectors/__init__.py`) dispatches on `type` with a stable `id` mapping (like `storage_service.backends.build_backend`, ADR 0017), configured via `DMS_SIGNATURE_PROVIDERS` (a JSON list). Default seed: `{id: "internal", type: "internal", levels: ["ses","aes"]}`. **Since Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `levels` is additionally live-editable via `GET`/`PUT /signature-config` (a new DB singleton table `signature_config`, freshly read on every signing operation) — `id`/`type` remain structurally from `DMS_SIGNATURE_PROVIDERS`. Since then, `resolve_connector_for_level()` (`connectors/__init__.py`) takes an already-merged `list[SignatureProviderConfig]` instead of reading `Settings` directly.
 
-- **`InternalSelfSignedConnector`** (`connectors/internal.py`, einzig real implementiert): stellt je Signaturvorgang ein von der internen Root-CA signiertes Leaf-Zertifikat aus - `level="ses"` mit generischem Subject (`CN=DMS System (SES)`), `level="aes"` mit personenbezogenem Subject (`CN=<Anzeigename>`, `emailAddress=<E-Mail>`, aus einer echten `auth-service`-Kontenprüfung). Bettet das Zertifikat per **pyHanko** (`SimpleSigner.load()` + `async_sign_pdf()`, PAdES-B-B) in die PDF-Bytes ein. `verify()` nutzt `async_validate_pdf_signature()` mit einer `ValidationContext`, deren einziger Trust Root die interne CA ist (`allow_fetching=False`, `revocation_mode="soft-fail"` - keine echte OCSP/CRL-Infrastruktur vorhanden). **`IncrementalPdfFileWriter`/`PdfFileReader` laufen mit `strict=False`** (Bugfix nach Nutzer-Feedback: `SigningError: ... hybrid cross-reference sections ...` bei PDFs mit hybrider Querverweistabelle, wie sie u. a. LibreOffice erzeugt) - pyHanko lehnt solche Dokumente im Default-strikten Modus ab (Schutz vor "Shadow Attacks" bei der *Validierung* fremder PDFs); für das Signieren/Verifizieren eines im eigenen System hochgeladenen Dokuments ist das ein zu häufiger, legitimer Fall für eine pauschale Ablehnung, bewusster Trade-off statt Versehen.
-- **`type: "qtsp"`** ist im Konfigurationsschema vorgesehen, aber **nicht implementiert** - ein Konfigurationsversuch schlägt in der Factory mit einer klaren Fehlermeldung fehl. Kein akkreditierter externer Vertrauensdiensteanbieter verfügbar/testbar in dieser Session (siehe "Offene Punkte").
+- **`InternalSelfSignedConnector`** (`connectors/internal.py`, the only one actually implemented): issues a leaf certificate signed by the internal root CA per signing operation - `level="ses"` with a generic subject (`CN=DMS System (SES)`), `level="aes"` with a person-specific subject (`CN=<display name>`, `emailAddress=<email>`, from a real `auth-service` account check). Embeds the certificate into the PDF bytes via **pyHanko** (`SimpleSigner.load()` + `async_sign_pdf()`, PAdES-B-B). `verify()` uses `async_validate_pdf_signature()` with a `ValidationContext` whose only trust root is the internal CA (`allow_fetching=False`, `revocation_mode="soft-fail"` - no real OCSP/CRL infrastructure available). **`IncrementalPdfFileWriter`/`PdfFileReader` run with `strict=False`** (a bug fix after user feedback: `SigningError: ... hybrid cross-reference sections ...` on PDFs with a hybrid cross-reference table, as produced by, among others, LibreOffice) - pyHanko rejects such documents in its default strict mode (protection against "shadow attacks" when *validating* foreign PDFs); for signing/verifying a document uploaded within the own system, that is too common a legitimate case for a blanket rejection, a deliberate trade-off rather than an oversight.
+- **`type: "qtsp"`** is provided for in the configuration schema but **not implemented** - a configuration attempt fails in the factory with a clear error message. No accredited external trust service provider available/testable in this session (see "Open Points").
 
-## Signieren erzeugt eine neue Dokumentversion (2.1a)
+## Signing Creates a New Document Version (2.1a)
 
-Eine PAdES-Signatur verändert zwangsläufig die PDF-Bytes (das ist der springende Punkt der kryptografischen Bindung). `POST /signatures` lädt die zu signierende Version über `document_client.py` von document-service, signiert, und checkt die signierten Bytes als **neue Version** ein (`POST /documents/{id}/versions`, `expected_base_version_number = die signierte Ausgangsversion`) - die unsignierte Ursprungsversion bleibt unangetastet abrufbar. Wird nicht die aktuelle Hauptversion signiert, entsteht dank document-services bestehender optimistischer Konflikterkennung (4.2) automatisch eine Konfliktkopie statt die Hauptversion zu verschieben - keine Sonderbehandlung hier nötig. Der resultierende `Signature`-Datensatz verweist auf `source_version_number` (Eingabe) und `version_number` (das tatsächliche Ergebnis, Haupt- oder Konfliktversion).
+A PAdES signature necessarily changes the PDF bytes (that is the whole point of the cryptographic binding). `POST /signatures` loads the version to be signed from document-service via `document_client.py`, signs it, and checks in the signed bytes as a **new version** (`POST /documents/{id}/versions`, `expected_base_version_number = the signed source version`) - the unsigned original version remains accessible untouched. If the current main version is not the one being signed, document-service's existing optimistic conflict detection (4.2) automatically produces a conflict copy instead of moving the main version - no special handling needed here. The resulting `Signature` record references `source_version_number` (input) and `version_number` (the actual result, main or conflict version).
 
-## Mindest-Signaturniveau je Objekttyp (3.10)
+## Minimum Signature Level per Object Type (3.10)
 
-`object-type-service` bekam eine additive Spalte `required_signature_level` (`ses`/`aes`/`qes`/`NULL`, nur für `applies_to="document"`, siehe `docs/services/object-type-service.md`). `POST /signatures` fragt sie über `object_type_client.py` ab (nur falls das Dokument einen Objekttyp hat) und lehnt ein zu niedriges angefordertes Niveau mit `400` ab.
+`object-type-service` got an additive column `required_signature_level` (`ses`/`aes`/`qes`/`NULL`, only for `applies_to="document"`, see `docs/services/object-type-service.md`). `POST /signatures` queries it via `object_type_client.py` (only if the document has an object type) and rejects a requested level that is too low with `400`.
 
-## Signer-Existenzprüfung (Retrofit-Muster aus P6-S6)
+## Signer Existence Check (retrofit pattern from P6-S6)
 
-`signer_principal_id` bleibt ein selbstberichtetes Body-Feld (konsistent mit `triggered_by`/`approved_by`/`completed_by`/`lifted_by` im gesamten Projekt), wird aber gegen ein echtes `auth-service`-Konto geprüft (`auth_client.py`, `GET /users`, Anmeldung als technisches `users-admin`-Konto - `GET /users` ist seit P6-S5 gegated) und liefert Anzeigename/E-Mail fürs AES-Zertifikat. `400` bei unbekanntem Principal.
+`signer_principal_id` remains a self-reported body field (consistent with `triggered_by`/`approved_by`/`completed_by`/`lifted_by` throughout the project), but is checked against a real `auth-service` account (`auth_client.py`, `GET /users`, authenticating as the technical `users-admin` account - `GET /users` has been gated since P6-S5) and supplies display name/email for the AES certificate. `400` on an unknown principal.
 
-## Signature Task im Workflow Service (7.1, seit P6-S7)
+## Signature Task in the Workflow Service (7.1, since P6-S7)
 
-`workflow-service`s `spiff_adapter.py` wechselt den BPMN-Parser auf `SpiffWorkflow.camunda.parser.CamundaParser` (mappt `manualTask` weiterhin auf `ManualTask`, füllt aber zusätzlich `task_spec.extensions` aus `bpmn:extensionElements/camunda:properties`). Ein `<bpmn:manualTask>` mit `camunda:properties` `taskType=signature`/`requiredLevel=...` wird dadurch als Signature Task erkennbar, bleibt aber technisch ein gewöhnlicher Manual Task - kein neues BPMN-Element, kein Modeler-Tooling-Bruch, kein Prozess-Designer-Palette-Eintrag in dieser Session (folgt mit P6-S8). Die zu signierende `document_id` läuft über die bestehende generische `data`-Prozessvariable.
+`workflow-service`'s `spiff_adapter.py` switches the BPMN parser to `SpiffWorkflow.camunda.parser.CamundaParser` (still maps `manualTask` to `ManualTask`, but additionally populates `task_spec.extensions` from `bpmn:extensionElements/camunda:properties`). A `<bpmn:manualTask>` with `camunda:properties` `taskType=signature`/`requiredLevel=...` thereby becomes recognizable as a signature task, while technically remaining an ordinary manual task - no new BPMN element, no modeler tooling breakage, no process-designer palette entry in this session (follows with P6-S8). The `document_id` to be signed travels via the existing generic `data` process variable.
 
-`GET /instances/{id}/tasks` surfacet `extensions` je Task. `POST .../tasks/{id}/complete` verlangt bei einer Signature Task ein `signature_id`-Feld; ein neuer, dünner `signature_client.py` (Muster wie `permission_client.py` aus P6-S6) prüft bei diesem Service (`GET /signatures/{id}`), dass die Signatur existiert, zum in den Task-Daten hinterlegten `document_id` passt und mindestens das verlangte Niveau hat - sonst `400`. Details/Beispiel-Fixture: `docs/services/workflow-service.md`.
+`GET /instances/{id}/tasks` surfaces `extensions` per task. `POST .../tasks/{id}/complete` requires a `signature_id` field for a signature task; a new, thin `signature_client.py` (pattern like `permission_client.py` from P6-S6) checks with this service (`GET /signatures/{id}`) that the signature exists, matches the `document_id` stored in the task data, and has at least the required level - otherwise `400`. Details/example fixture: `docs/services/workflow-service.md`.
 
-## Not-Shutdown-Interaktion (4.8)
+## Emergency-Shutdown Interaction (4.8)
 
-`POST /signatures` steht **nicht** auf der Gateway-Allow-Liste - während des Wartungsmodus blockt das Gateway diesen (wie jeden anderen nicht gelisteten) Endpunkt automatisch mit `503` (Default-Deny, siehe [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md)). Keine Sonderbehandlung nötig, da Signieren eine schreibende, nicht zeitkritische Admin-/Fachaktion ist.
+`POST /signatures` is **not** on the gateway allow-list - during maintenance mode, the gateway automatically blocks this endpoint (like any other unlisted one) with `503` (default-deny, see [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md)). No special handling needed, since signing is a write, non-time-critical admin/business action.
 
 ## Events
 
-**Publiziert** (Stream `signature`, `ensure_stream=True`):
+**Published** (stream `signature`, `ensure_stream=True`):
 
 | event_type | payload |
 |---|---|
 | `signature.created` | `{version_number, level, signer_principal_id, connector_id}` |
 
-Kein Konsument - reiner Producer, wie `workflow-service`.
+No consumer - a pure producer, like `workflow-service`.
 
-## Selbst-Registrierung (Konzept 3.2a)
+## Self-Registration (Concept 3.2a)
 
-Registriert sich beim Start selbst bei der Registry, identisches Muster wie jeder andere Service.
+Registers itself with the registry on startup, identical pattern to every other service.
 
-## Sensoren (Konzept 10.1)
+## Sensors (Concept 10.1)
 
-Noch keine - folgt in Phase 11.
+None yet - follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/signature-service/tests` - läuft gegen eine echte Postgres-Instanz und echte Aufrufe an document-service/object-type-service/auth-service, kein Mocking von Sibling-Services:
+`uv run pytest services/signature-service/tests` - runs against a real Postgres instance and real calls to document-service/object-type-service/auth-service, no mocking of sibling services:
 
-- Signieren SES/AES mit einer echten, per `pypdf` erzeugten Test-PDF-Fixture, echte pyHanko-Signatur, echte neue Dokumentversion bei document-service, echte Verifikation (`valid: true`).
-- Objekttyp-Mindestniveau-Gate (`400` bei zu niedrigem Niveau, `201` bei ausreichendem).
-- Ablehnung bei Nicht-PDF-Dokument, unbekanntem Dokument, unbekanntem Signer-Principal, `level="qes"` ohne konfigurierten Connector.
-- Liste/Detail/Verify inkl. `404`-Fälle.
-- **16 Tests seit Post-Roadmap Phase 22 Session 6** (vorher 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` liefert die Env-Var-Defaults vor dem ersten `PUT`, `PUT` mit unbekannter Connector-`id`/leeren `levels`/`qes` bei `type=internal` liefert je `422`, ein Ende-zu-Ende-Test entfernt `aes` aus `internal`s Niveaus und beweist live (ohne Neustart), dass ein anschließender AES-Signaturversuch mit `400` fehlschlägt, während SES weiterhin funktioniert.
-- Reine Backend-Session, kein Browser-Test nötig (User-UI-Anbindung siehe `docs/services/user-ui.md`).
+- Signing SES/AES with a real test PDF fixture generated via `pypdf`, a real pyHanko signature, a real new document version at document-service, real verification (`valid: true`).
+- Object-type minimum-level gate (`400` on a level too low, `201` when sufficient).
+- Rejection on a non-PDF document, unknown document, unknown signer principal, `level="qes"` without a configured connector.
+- List/detail/verify incl. `404` cases.
+- **16 tests since Post-Roadmap Phase 22 Session 6** (previously 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` returns the env-var defaults before the first `PUT`, `PUT` with an unknown connector `id`/empty `levels`/`qes` for `type=internal` each return `422`, an end-to-end test removes `aes` from `internal`'s levels and proves live (without a restart) that a subsequent AES signing attempt fails with `400`, while SES continues to work.
+- A pure backend session, no browser test needed (for user-UI integration see `docs/services/user-ui.md`).
 
-## Offene Punkte
+## Open Points
 
-- **QES vollständig unimplementiert** - weder ein echter QTSP-Connector noch ein Testfall dafür existieren; ein Signaturversuch mit `level="qes"` schlägt unabhängig vom Objekttyp mit `400` fehl ("kein Connector konfiguriert"). Erfordert eine externe Geschäftsbeziehung mit einem akkreditierten Vertrauensdiensteanbieter, siehe [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md).
-- **Kein PAdES-B-LTA/Langzeitarchivierung** - nur PAdES-B-B umgesetzt (kein Timestamp-Authority-Countersigning). 3.10 nennt B-LTA explizit für die Aussonderung (5.6) - ein künftiges Nachrüsten bräuchte eine echte Timestamp Authority.
-- **Keine OCSP/CRL-Sperrprüfung** - `GET /signatures/{id}/verify` prüft nur Integrität und Zertifikats-Gültigkeitszeitraum. Für eine selbstsignierte interne CA ohne echte Sperrlisten-Infrastruktur die einzig ehrliche Verifikationstiefe.
-- **Kein Prozess-Designer-Palette-Eintrag für Signature Tasks** - BPMN-Modellierung bleibt roher XML-Upload, ein Signature Task muss die Extension-Attribute von Hand im XML setzen. Folgt mit P6-S8.
-- **Kein PKCS#11/HSM-Support** - 3.10 erwähnt pyHanko explizit auch für Hardware-Token/HSM-Anbindung; diese Session nutzt ausschließlich In-Memory-generierte Software-Schlüssel.
-- **Nur PDF-Dokumente signierbar** - PAdES ist PDF-spezifisch (durch pyHanko selbst vorgegeben); XAdES/CAdES für andere Formate sind nicht umgesetzt.
-- **Technisches Konto `users-admin` dient auch hier als interne Service-Anmeldung** - wie bei notification-service (P6-S6) authentifiziert sich signature-service für die Signer-Existenzprüfung als fremdes technisches Konto statt einer eigenen Identität (siehe ADR 0024 "Konsequenzen" für die bereits vermerkte Revisitierungs-Empfehlung).
-- ~~Keine Admin-UI-Konfiguration für Connectoren - `DMS_SIGNATURE_PROVIDERS` ist reine Env-Var-Konfiguration, konsistent mit Storage-Backends (ebenfalls ohne Admin-UI-Konfiguration)~~ — **`levels` teilweise behoben in Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET`/`PUT /signature-config` + neue Admin-UI-Seite `/signature-config/`. Weiterhin env-var-only (bewusst, siehe ADR 0091 "Begründung"): die Connector-*Liste* selbst (`id`/`type`), da neue Connectoren echte Infrastruktur brauchen, kein reiner Konfigurationswert.
+- **QES completely unimplemented** - neither a real QTSP connector nor a test case for it exists; a signing attempt with `level="qes"` fails with `400` regardless of object type ("no connector configured"). Requires an external business relationship with an accredited trust service provider, see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md).
+- **No PAdES-B-LTA/long-term archiving** - only PAdES-B-B implemented (no timestamp-authority countersigning). 3.10 explicitly names B-LTA for records disposal (5.6) - a future retrofit would need a real timestamp authority.
+- **No OCSP/CRL revocation check** - `GET /signatures/{id}/verify` only checks integrity and the certificate's validity period. For a self-signed internal CA without real revocation-list infrastructure, this is the only honest verification depth.
+- **No process-designer palette entry for signature tasks** - BPMN modeling remains a raw XML upload; a signature task must have its extension attributes set by hand in the XML. Follows with P6-S8.
+- **No PKCS#11/HSM support** - 3.10 explicitly mentions pyHanko also for hardware-token/HSM integration; this session uses exclusively in-memory-generated software keys.
+- **Only PDF documents can be signed** - PAdES is PDF-specific (dictated by pyHanko itself); XAdES/CAdES for other formats are not implemented.
+- **The technical account `users-admin` also serves here as the internal service login** - as with notification-service (P6-S6), signature-service authenticates for the signer existence check as a foreign technical account instead of its own identity (see ADR 0024 "Consequences" for the already-noted recommendation to revisit this).
+- ~~No Admin UI configuration for connectors - `DMS_SIGNATURE_PROVIDERS` is pure env-var configuration, consistent with storage backends (likewise without Admin UI configuration)~~ — **`levels` partially fixed in Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET`/`PUT /signature-config` + new Admin UI page `/signature-config/`. Still env-var-only (deliberately, see ADR 0091 "Rationale"): the connector *list* itself (`id`/`type`), since new connectors need real infrastructure, not a pure configuration value.

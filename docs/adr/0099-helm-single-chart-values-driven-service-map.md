@@ -1,98 +1,94 @@
-# 0099 — Helm: ein Chart mit werte-getriebener `services:`-Map statt 34+ Einzel-Charts
+# 0099 — Helm: one chart with a values-driven `services:` map instead of 34+ individual charts
 
-**Status:** akzeptiert (P26-S1, siehe `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Konzept-übergreifend (Deployment/Betrieb), betrifft `infra/k8s/dms/` (Phase 26, alle Container aus `infra/docker-compose.yml`)
+**Status:** accepted (P26-S1, see `IMPLEMENTATION_PLAN.md`)
+**Context:** Cross-concept (deployment/operations), affects `infra/k8s/dms/` (Phase 26, all containers from `infra/docker-compose.yml`)
 
-## Entscheidung
+## Decision
 
-`infra/k8s/` bekommt genau **ein** Helm-Chart (`infra/k8s/dms/`, Chart-Name `dms`) für alle
-~34 Container aus `infra/docker-compose.yml` — nicht 34+ separate, fast identische
-Charts/Templates (ein Chart pro Service wäre die naheliegende, aber bei diesem hohen
-Grad an struktureller Gleichheit unnötig repetitive Alternative gewesen). Stattdessen:
+`infra/k8s/` gets exactly **one** Helm chart (`infra/k8s/dms/`, chart name `dms`) for all
+~34 containers from `infra/docker-compose.yml` — not 34+ separate, nearly identical
+charts/templates (one chart per service would have been the obvious but, given this high
+degree of structural similarity, needlessly repetitive alternative). Instead:
 
-- **Eine `services:`-Map in `values.yaml`**, ein Eintrag je Container, mit identischem
-  Shape für jeden Service (`enabled`, `image.{repository,tag}`, `port`, `replicas`,
+- **One `services:` map in `values.yaml`**, one entry per container, with an identical
+  shape for every service (`enabled`, `image.{repository,tag}`, `port`, `replicas`,
   `resources.{memory,cpu}.{requests,limits}`, `autoscaling.*`, `podDisruptionBudget.*`,
-  `env`). Ein neuer Service bedeutet einen neuen Map-Eintrag, nie ein neues Template.
-- **Generische Templates** (`templates/deployment.yaml`, `templates/service.yaml`,
-  `templates/hpa.yaml`, `templates/pdb.yaml`), die jeweils per `range` über
-  `.Values.services` iterieren und nur für Einträge mit `enabled: true` (bzw.
-  zusätzlich `autoscaling.enabled`/`podDisruptionBudget.enabled` für HPA/PDB) ein
-  Manifest emittieren.
-- **`resources.baseline`** als Top-Level-Default, den jeder Service per
-  `mergeOverwrite (deepCopy resources.baseline) (service.resources | default dict)`
-  selektiv überschreibt (nur die angegebenen Felder, alles andere bleibt Baseline).
-- **`postgresql`/`keycloak`/`minio`** (nur diese drei, siehe Begründung) bekommen einen
-  `enabled`/`external.*`-Umschalter für "bundled vs. bereits vorhandene externe
-  Instanz nutzen" — `nats`/`redis` bleiben bewusst bundled-only ohne diesen Umschalter.
-- **`storageService.targets`** als native YAML-Liste (Pendant zu
-  `STORAGE_SERVICE_TARGETS`/`DMS_TARGETS`, siehe `BackendTargetConfig` in
-  `services/storage-service/src/storage_service/settings.py`), zur Laufzeit per
-  `toJson` in die vom Service tatsächlich gelesene Env-Var serialisiert.
+  `env`). A new service means a new map entry, never a new template.
+- **Generic templates** (`templates/deployment.yaml`, `templates/service.yaml`,
+  `templates/hpa.yaml`, `templates/pdb.yaml`), each iterating over
+  `.Values.services` via `range` and emitting a manifest only for entries with
+  `enabled: true` (plus, for HPA/PDB, `autoscaling.enabled`/`podDisruptionBudget.enabled`
+  respectively).
+- **`resources.baseline`** as a top-level default, which each service selectively
+  overrides via `mergeOverwrite (deepCopy resources.baseline) (service.resources | default dict)`
+  (only the specified fields, everything else stays at baseline).
+- **`postgresql`/`keycloak`/`minio`** (only these three, see rationale) get an
+  `enabled`/`external.*` toggle for "bundled vs. use an already-existing external
+  instance" — `nats`/`redis` remain deliberately bundled-only without this toggle.
+- **`storageService.targets`** as a native YAML list (the counterpart to
+  `STORAGE_SERVICE_TARGETS`/`DMS_TARGETS`, see `BackendTargetConfig` in
+  `services/storage-service/src/storage_service/settings.py`), serialized at runtime via
+  `toJson` into the env var the service actually reads.
 
-Diese Session (P26-S1) baut das Grundgerüst plus vier reale Beispiel-Einträge
-(`registry-service`, `gateway-service`, `document-service`, `storage-service`) zum
-Beweis, dass Templates+Werte-Struktur end-to-end funktionieren (`helm lint`/
-`helm template`, siehe `docs/services/...`-Pendant für diese Session im Report). Die
-übrigen ~28 Services (P26-S2), die zustandsbehaftete Infrastruktur als echte
-Deployments+PVC (P26-S3), das Storage-Replikations-CronJob (P26-S4) und die
-Frontend-Apps (P26-S5) folgen in den nächsten vier Sessions dieser Phase, jeweils nach
-demselben Muster.
+This session (P26-S1) builds the basic scaffolding plus four real example entries
+(`registry-service`, `gateway-service`, `document-service`, `storage-service`) as proof
+that templates + values structure work end-to-end (`helm lint`/`helm template`, see the
+`docs/services/...` counterpart for this session in the report). The remaining ~28
+services (P26-S2), the stateful infrastructure as real Deployments+PVC (P26-S3), the
+storage replication CronJob (P26-S4), and the frontend apps (P26-S5) follow in the next
+four sessions of this phase, each following the same pattern.
 
-## Begründung
+## Rationale
 
-- **Warum ein Chart statt vieler**: die ~34 Container in `infra/docker-compose.yml`
-  sind strukturell fast identisch (FastAPI-Service, ein Port, DSN/NATS/Registry-URL als
-  Env-Vars, ein Postgres-Schema) — 34 separate Charts hätten denselben
-  Deployment-/Service-/HPA-/PDB-Boilerplate 34-mal dupliziert, mit dem üblichen
-  Folgeproblem, dass ein späterer Fix (z. B. eine neue Standard-Env-Var oder ein
-  Sicherheitscontext-Default) 34 Dateien statt einer anfassen müsste. Eine
-  werte-getriebene Map macht "ein neuer Service" zu einer reinen Daten-Änderung.
-- **Warum trotzdem EIN Chart und nicht z. B. Chart-Dependencies/Subcharts pro Service**:
-  Subcharts hätten den gleichen Boilerplate-Vervielfachungseffekt (ein `Chart.yaml` +
-  Templates-Ordner je Subchart) nur eine Ebene tiefer reproduziert, ohne den
-  eigentlichen Vorteil (generische, über Werte parametrisierte Templates) zu heben.
-- **Warum `postgresql`/`keycloak`/`minio` einen External-Umschalter bekommen, `nats`/
-  `redis` aber nicht**: explizite Nutzervorgabe für diese Session (siehe
-  Session-Briefing P26-S1) — Postgres/Keycloak/MinIO sind die drei Infrastruktur-
-  Komponenten, bei denen eine reale Installation typischerweise bereits eine verwaltete
-  externe Instanz hat (Cloud-DB, zentrales IAM, S3-kompatibler Objektspeicher), NATS und
-  Redis dagegen in diesem Projekt bislang ausschließlich als Chart-interne
-  Queue-/Cache-Instanz betrieben werden und keinen bekannten externen
-  Ersatzbedarf haben.
-- **Warum `resources.baseline` + selektiver Merge statt jeden Service vollständig
-  auszuschreiben**: die meisten der ~34 Services brauchen keine individuellen
-  Requests/Limits — nur eine kleine Minderheit (z. B. `document-service` mit
-  Datei-Handling) braucht mehr. Ein Baseline-Default mit selektivem Override hält
-  `values.yaml` für den Normalfall knapp, ohne die Möglichkeit einzuschränken, einzelne
-  Services abweichend zu konfigurieren.
-- **Warum `storageService.targets` als native YAML-Liste statt weiterhin als
-  JSON-Freitext-String**: `values.yaml` ist der zentrale, versionierte
-  Konfigurationsort dieses Charts — ein YAML-in-JSON-in-YAML-String wäre für
-  Reviews/Diffs schlechter lesbar und fehleranfälliger zu editieren als eine native
-  YAML-Liste, die das Template per `toJson` erst beim Rendern in das vom Service
-  erwartete Format bringt.
+- **Why one chart instead of many**: the ~34 containers in `infra/docker-compose.yml`
+  are structurally almost identical (FastAPI service, one port, DSN/NATS/registry URL as
+  env vars, one Postgres schema) — 34 separate charts would have duplicated the same
+  Deployment/Service/HPA/PDB boilerplate 34 times, with the usual follow-on problem that
+  a later fix (e.g. a new standard env var or a security-context default) would need to
+  touch 34 files instead of one. A values-driven map turns "a new service" into a pure
+  data change.
+- **Why still ONE chart and not, say, chart dependencies/subcharts per service**:
+  subcharts would have reproduced the same boilerplate-multiplication effect (one
+  `Chart.yaml` + templates folder per subchart) just one level deeper, without gaining
+  the actual benefit (generic, values-parameterized templates).
+- **Why `postgresql`/`keycloak`/`minio` get an external toggle, but `nats`/`redis`
+  don't**: explicit user directive for this session (see session briefing P26-S1) —
+  Postgres/Keycloak/MinIO are the three infrastructure components for which a real
+  installation typically already has a managed external instance (cloud DB, central
+  IAM, S3-compatible object storage), whereas NATS and Redis in this project have so far
+  been run exclusively as chart-internal queue/cache instances with no known external
+  replacement need.
+- **Why `resources.baseline` + selective merge instead of writing out every service in
+  full**: most of the ~34 services don't need individual requests/limits — only a small
+  minority (e.g. `document-service` with file handling) need more. A baseline default
+  with selective override keeps `values.yaml` concise for the common case, without
+  limiting the ability to configure individual services differently.
+- **Why `storageService.targets` as a native YAML list instead of continuing as a
+  JSON free-text string**: `values.yaml` is this chart's central, versioned
+  configuration location — a YAML-in-JSON-in-YAML string would be worse to read/review
+  and more error-prone to edit than a native YAML list that the template only converts
+  to the format expected by the service via `toJson` at render time.
 
-## Konsequenzen
+## Consequences
 
-- **`values.yaml` ist der einzige Ort, an dem neue Services in P26-S2..S5 auftauchen** —
-  wer ein neues Template baut statt einen neuen Map-Eintrag zu ergänzen, weicht von
-  dieser Entscheidung ab und sollte das explizit begründen (z. B. ein Service mit
-  einer strukturell wirklich andersartigen Deployment-Form).
-- **Kein echtes Cluster-Deployment in Phase 26** — Verifikation ausschließlich über
-  `helm lint`/`helm template` (siehe Konzept-Referenz Phase 26 Plan-Text). `helm`
-  selbst war in dieser Entwicklungsumgebung nicht vorinstalliert und wurde als
-  statisches Binary (`get.helm.sh`, v3.15.4) ins Session-Scratchpad geladen — kein
-  Root/`apt`-Zugriff nötig, aber auch keine dauerhafte Installation im Image; jede
-  künftige Session, die `helm` braucht, muss das ggf. wiederholen oder eine
-  dauerhaftere Lösung (z. B. `tools/`) einrichten.
-- **`postgresql.auth.password`/vergleichbare Zugangsdaten liegen aktuell als
-  Klartext-Value in `values.yaml`** (Parität zum bestehenden Compose-Dev-Setup, bewusst
-  dokumentierter v1-Kompromiss) — P26-S3, das die echten bundled Postgres/Keycloak/
-  MinIO-Deployments baut, sollte das durch einen echten Kubernetes-`Secret`-Verweis
-  ersetzen, statt es unverändert fortzuschreiben.
-- **`DMS_POSTGRES_DSN` im `external`-Zweig referenziert `${DMS_POSTGRES_PASSWORD}`** als
-  Platzhalter statt eines echten Werts (kein Klartext-Passwort für eine potenziell
-  produktive externe DB in `values.yaml`) — dieser Platzhalter wird nicht von Helm
-  aufgelöst und muss von P26-S3 durch einen echten Secret-basierten Mechanismus (z. B.
-  `envFrom`/`secretKeyRef`) ersetzt werden, bevor der External-Pfad real nutzbar ist.
+- **`values.yaml` is the only place where new services appear in P26-S2..S5** — anyone
+  building a new template instead of adding a new map entry is deviating from this
+  decision and should justify that explicitly (e.g. a service with a structurally truly
+  different deployment shape).
+- **No real cluster deployment in Phase 26** — verification exclusively via
+  `helm lint`/`helm template` (see concept reference, Phase 26 plan text). `helm`
+  itself was not pre-installed in this development environment and was loaded as a
+  static binary (`get.helm.sh`, v3.15.4) into the session scratchpad — no root/`apt`
+  access needed, but also no persistent installation in the image; any future session
+  that needs `helm` may have to repeat this or set up a more durable solution (e.g.
+  `tools/`).
+- **`postgresql.auth.password`/similar credentials currently sit as a plaintext
+  value in `values.yaml`** (parity with the existing Compose dev setup, a deliberately
+  documented v1 compromise) — P26-S3, which builds the real bundled Postgres/Keycloak/
+  MinIO deployments, should replace this with a real Kubernetes `Secret` reference
+  instead of carrying it forward unchanged.
+- **`DMS_POSTGRES_DSN` in the `external` branch references `${DMS_POSTGRES_PASSWORD}`**
+  as a placeholder rather than a real value (no plaintext password for a potentially
+  production external DB in `values.yaml`) — this placeholder is not resolved by Helm
+  and must be replaced by P26-S3 with a real secret-based mechanism (e.g.
+  `envFrom`/`secretKeyRef`) before the external path is actually usable.

@@ -1,94 +1,93 @@
-# 0091 — storage-service/signature-service: Betriebsparameter live-editierbar, Ziel-/Connector-Liste bleibt env-var-only
+# 0091 — storage-service/signature-service: operational parameters live-editable, target/connector list stays env-var-only
 
-**Status:** akzeptiert (Post-Roadmap Phase 22 Session 6)
-**Kontext:** Post-Roadmap Phase 22 Session 6, betrifft `storage-service`, `signature-service`, `admin-ui`
+**Status:** accepted (Post-roadmap Phase 22 Session 6)
+**Context:** Post-roadmap Phase 22 Session 6, affects `storage-service`, `signature-service`, `admin-ui`
 
-## Entscheidung
+## Decision
 
-`storage-service`s Ziel-Set (`Settings.targets`, inkl. S3-Zugangsdaten `access_key`/`secret_key`) und
-`signature-service`s Connector-Set (`Settings.signature_providers`) waren bislang reine Pydantic-Settings
-aus Env-Vars, an vielen Stellen im Code direkt gelesen, nur bei einem Neustart wirksam änderbar. Diese
-Session macht einen bewusst eng geschnittenen Teil davon live-editierbar über neue `GET`/`PUT
-/operational-config` (`storage-service`) bzw. `GET`/`PUT /signature-config` (`signature-service`)
-Endpunkte — nach demselben Get-or-create-Singleton-Muster wie `OcrConfig`/`GuardConfig` (bei jedem
-Zugriff frisch aus der DB gelesen, kein `app.state`-Cache, daher ohne Neustart wirksam):
+`storage-service`'s target set (`Settings.targets`, including S3 credentials `access_key`/`secret_key`)
+and `signature-service`'s connector set (`Settings.signature_providers`) were previously plain Pydantic
+settings from env vars, read directly at many points in the code, changeable only via a restart. This
+session makes a deliberately narrowly scoped part of that live-editable via new `GET`/`PUT
+/operational-config` (`storage-service`) and `GET`/`PUT /signature-config` (`signature-service`)
+endpoints — following the same get-or-create singleton pattern as `OcrConfig`/`GuardConfig` (read fresh
+from the DB on every access, no `app.state` cache, hence effective without a restart):
 
-1. **`storage-service`**: `write_strategy`, `quorum_count`, `max_replication_attempts` — reine
-   Betriebsparameter ohne Geheimnisse.
-2. **`signature-service`**: `levels` je bereits konfiguriertem Connector — ebenfalls ohne Geheimnisse
-   (Zertifikate/Schlüssel selbst liegen in `InternalCa`, unberührt von dieser Session).
-3. **Bewusst NICHT live-editierbar** (bleibt env-var-only, nur bei Neustart änderbar): die Ziel-/
-   Connector-**Liste** selbst (`id`, `type`, `base_path`/`endpoint_url`/`access_key`/`secret_key`/
-   `bucket`/`region` bei Storage-Zielen; `id`, `type` bei Signatur-Connectoren) sowie
-   `object_lock_mode`/`role` je Storage-Ziel.
-4. **Neue Admin-UI-Seiten**: `/storage-operational-config/` (Formular) und `/signature-config/`
-   (Tabelle mit Level-Checkboxen je Connector).
+1. **`storage-service`**: `write_strategy`, `quorum_count`, `max_replication_attempts` — plain operational
+   parameters with no secrets involved.
+2. **`signature-service`**: `levels` per already-configured connector — likewise without secrets
+   (certificates/keys themselves live in `InternalCa`, untouched by this session).
+3. **Deliberately NOT live-editable** (stays env-var-only, changeable only via restart): the target/
+   connector **list** itself (`id`, `type`, `base_path`/`endpoint_url`/`access_key`/`secret_key`/
+   `bucket`/`region` for storage targets; `id`, `type` for signature connectors), as well as
+   `object_lock_mode`/`role` per storage target.
+4. **New admin UI pages**: `/storage-operational-config/` (form) and `/signature-config/`
+   (table with level checkboxes per connector).
 
-## Begründung
+## Rationale
 
-- **Warum Zugangsdaten/Struktur bewusst ausgeklammert bleiben** (Nutzervorgabe für diese Session,
-  per Rückfrage geklärt): `access_key`/`secret_key` live editierbar zu machen hätte eine neue
-  Verschlüsselungs-/Masking-Infrastruktur erfordert (Klartext darf nie in einer `GET`-Antwort
-  auftauchen) — eine deutlich größere, sicherheitskritischere Änderung als der Rest dieser Session.
-  `object_lock_mode`/`role` sind WORM-/Aussonderungs-relevant (5.1/5.2a/5.6) — ein versehentlicher
-  Live-Wechsel hätte compliance-relevante Konsequenzen (z. B. ein Governance-Ziel, das plötzlich kein
-  Objekt-Lock mehr durchsetzt). Beide bleiben bewusst nur per Neustart änderbar, bis eine künftige
-  Session das dediziert und mit eigener Sorgfalt angeht.
-- **Warum "nur bestehende Einträge bearbeiten", keine CRUD-Verwaltung der Liste** (Nutzervorgabe): die
-  Menge konfigurierter Ziele/Connectoren ist strukturell an tatsächlich vorhandene Infrastruktur
-  gebunden (ein `id` ohne zugehörige echte Backend-Instanz wäre bedeutungslos) — Anlegen/Entfernen bleibt
-  ein Deployment-Vorgang (Env-Var + Neustart), nicht ein Admin-UI-Klick. `PUT /operational-config` hat
-  ohnehin keine Liste (nur Skalare); `PUT /signature-config` lehnt unbekannte Connector-`id`s mit `422`
-  ab.
-- **Warum Live-Reload statt "wirkt erst nach Neustart"** (Nutzervorgabe): entspricht der bereits
-  etablierten Erwartungshaltung an eine Admin-UI-Einstellungsseite in diesem Projekt (`OcrConfig`,
-  `GuardConfig`) — ein Admin, der einen Wert ändert, erwartet, dass er wirkt, nicht dass er sich einen
-  Service-Neustart merken muss.
-- **Warum `write_strategy`/`quorum_count`/`max_replication_attempts` bei jedem betroffenen Request neu
-  aus der DB gelesen werden, statt in `app.state` gecacht zu bleiben**: exakt das bereits etablierte
-  Muster von `GuardConfig` in genau diesem Service (`repository.get_guard_config`, jedes Mal neu
-  gelesen) — ein zusätzlicher, indizierter Primärschlüssel-Read pro betroffenem Request ist der
-  akzeptierte Preis für Live-Reload ohne eigene Invalidierungslogik.
-- **Warum die Quorum-Erfüllbarkeits-Prüfung (`_validate_settings`) bei `PUT /operational-config`
-  wiederholt wird**: die Zielanzahl ist strukturell fest (env-var, diese Session ändert daran nichts) -
-  ein Admin könnte sonst live einen `quorum_count` setzen, den kein tatsächlicher Schreibvorgang mehr
-  erfüllen kann, unbemerkt bis zum nächsten Upload-Fehlschlag.
-- **Warum `signature-service`s Validierung (`levels` nicht leer, `type=internal` kein QES) im
-  Repository dupliziert statt aus `SignatureProviderConfig._check_levels` wiederverwendet wird**: der
-  Pydantic-`model_validator` ist an die Instanziierung eines `SignatureProviderConfig`-Objekts gebunden
-  (Settings-Schema-Kontext), die Laufzeitprüfung braucht dieselbe Regel aber unabhängig von einer
-  konkreten Pydantic-Modell-Instanz (nur `id`+`levels`+`type` als lose Werte). Beide Stellen sind kurz
-  genug, dass eine gemeinsame Extraktion mehr Indirektion als Nutzen gebracht hätte.
+- **Why credentials/structure are deliberately left out of scope** (user requirement for this session,
+  clarified via follow-up question): making `access_key`/`secret_key` live-editable would have required
+  new encryption/masking infrastructure (plaintext must never appear in a `GET` response) — a
+  substantially larger, more security-critical change than the rest of this session.
+  `object_lock_mode`/`role` are WORM-/records-disposal-relevant (5.1/5.2a/5.6) — an accidental live change
+  could have compliance-relevant consequences (e.g. a governance target that suddenly no longer enforces
+  object lock). Both deliberately stay restart-only until a future session tackles that dedicated and with
+  its own care.
+- **Why "edit existing entries only", no CRUD management of the list** (user requirement): the set of
+  configured targets/connectors is structurally tied to actually existing infrastructure (an `id` without
+  a corresponding real backend instance would be meaningless) — creating/removing stays a deployment
+  operation (env var + restart), not an admin UI click. `PUT /operational-config` has no list anyway (only
+  scalars); `PUT /signature-config` rejects unknown connector `id`s with `422`.
+- **Why live reload instead of "takes effect only after restart"** (user requirement): matches the
+  already-established expectation for an admin UI settings page in this project (`OcrConfig`,
+  `GuardConfig`) — an admin who changes a value expects it to take effect, not to have to remember a
+  service restart.
+- **Why `write_strategy`/`quorum_count`/`max_replication_attempts` are read fresh from the DB on every
+  affected request instead of being cached in `app.state`**: exactly the already-established pattern of
+  `GuardConfig` in this same service (`repository.get_guard_config`, read fresh every time) — one
+  additional, indexed primary-key read per affected request is the accepted price for live reload without
+  its own invalidation logic.
+- **Why the quorum-satisfiability check (`_validate_settings`) is repeated on `PUT /operational-config`**:
+  the target count is structurally fixed (env var, unchanged by this session) — otherwise an admin could
+  live-set a `quorum_count` that no actual write operation could ever satisfy, unnoticed until the next
+  upload failure.
+- **Why `signature-service`'s validation (`levels` not empty, `type=internal` no QES) is duplicated in the
+  repository instead of reused from `SignatureProviderConfig._check_levels`**: the Pydantic
+  `model_validator` is bound to instantiating a `SignatureProviderConfig` object (settings schema
+  context), whereas the runtime check needs the same rule independent of a concrete Pydantic model
+  instance (just `id`+`levels`+`type` as loose values). Both spots are short enough that a shared
+  extraction would have added more indirection than benefit.
 
-## Konsequenzen
+## Consequences
 
-- **Migration**: keine (zwei brandneue Tabellen `storage.operational_config`/
-  `signature.signature_config`, `Base.metadata.create_all` legt sie automatisch an).
-- **Testinfrastruktur-Fund**: `signature-service`s `tests/conftest.py`-Truncate-Liste fehlte die neue
-  Tabelle (behoben, gleicher Fund wie bereits in P22-S2 bei `permission-service`). `storage-service`
-  hat GAR KEINE Truncate-Fixture (bestehende Tests setzen stattdessen auf pro-Test-eindeutige
-  Objektschlüssel) — die neuen, den DB-Singleton `operational_config` mutierenden Tests bekamen
-  deshalb eine eigene, lokale Restore-Fixture (`operational_config_client`), die die Env-Var-Defaults
-  nach jedem Test wiederherstellt, statt die Testinfrastruktur des gesamten Service umzubauen. Beide
-  Fixes wurden durch zweimaliges Hintereinander-Ausführen der jeweiligen Testsuite verifiziert (das
-  exakte Symptom, das sonst erst bei einem zweiten, unabhängigen Testlauf aufgefallen wäre).
-- **Tests**: `storage-service` 117 (vorher 113, +4: `GET`-Default, `PUT`-Persistenz, Quorum-Ablehnung,
-  Ende-zu-Ende-Beweis über einen echten Upload nach `PUT`); `signature-service` 16 (vorher 11, +5:
-  `GET`-Default, drei Validierungsfälle, Ende-zu-Ende-Beweis über einen fehlschlagenden AES-Sign-Versuch
-  nach Entfernen von AES aus den Niveaus, gefolgt von einem erfolgreichen SES-Versuch). `admin-ui` 201
-  (vorher 191, +10: `storage-operational-config.test.tsx` 4 Tests, `signature-config.test.tsx` 6 Tests).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
+- **Migration**: none (two brand-new tables `storage.operational_config`/
+  `signature.signature_config`, `Base.metadata.create_all` creates them automatically).
+- **Test infrastructure finding**: `signature-service`'s `tests/conftest.py` truncate list was missing the
+  new table (fixed, same finding as already seen in P22-S2 for `permission-service`). `storage-service`
+  has NO truncate fixture at all (existing tests instead rely on per-test-unique object keys) — the new
+  tests that mutate the DB singleton `operational_config` therefore got their own, local restore fixture
+  (`operational_config_client`) that restores the env-var defaults after each test, rather than reworking
+  the entire service's test infrastructure. Both fixes were verified by running the respective test suite
+  twice in a row (the exact symptom that would otherwise only have surfaced on a second, independent test
+  run).
+- **Tests**: `storage-service` 117 (previously 113, +4: `GET` default, `PUT` persistence, quorum
+  rejection, end-to-end proof via a real upload after `PUT`); `signature-service` 16 (previously 11, +5:
+  `GET` default, three validation cases, end-to-end proof via a failing AES sign attempt after removing
+  AES from the levels, followed by a successful SES attempt). `admin-ui` 201
+  (previously 191, +10: `storage-operational-config.test.tsx` 4 tests, `signature-config.test.tsx` 6 tests).
+- **Verified live against the actual running stack** (image rebuild + restart of
   `storage-service`/`signature-service`/`admin-ui`): `GET /operational-config`/`GET /signature-config`
-  zeigten die korrekten Env-Var-Ausgangswerte; ein `PUT` mit `quorum_count=2` (nur 1 reguläres Ziel im
-  Dev-Stack konfiguriert, das zweite trägt `role=archive`) lieferte `422`; ein satisfiables `PUT` auf
-  `strategy=quorum` gefolgt von einem echten Objekt-Upload lief erfolgreich über den Quorum-Codepfad,
-  ganz ohne Neustart zwischen `PUT` und Upload; `signature-config`s `PUT` mit `levels=["qes"]` für den
-  `internal`-Connector sowie mit einer unbekannten Connector-`id` lieferten beide `422`. Alle
-  Testdaten/Konfigurationsänderungen anschließend zurückgesetzt. Kein interaktiver Browser-Test der
-  beiden neuen Admin-UI-Seiten (kein Browser/Playwright in dieser Entwicklungsumgebung verfügbar,
-  projektweit etablierte Praxis) — stattdessen über die Vitest-Komponententests sowie die obige
-  Backend-API-Verifikation über exakt dieselben Gateway-Aufrufe abgesichert.
-- Doku: neues [ADR 0091](0091-connector-operational-config-live-editable.md),
-  `docs/services/storage-service.md`, `docs/services/signature-service.md` (jeweils API-Tabelle, neue
-  Sektion, Tests-Sektion), `docs/services/admin-ui.md` (Seiten-Tabelle, neue Sektion, Backend-
-  Anbindungstabelle, Tests-Sektion) ergänzt.
+  showed the correct env-var starting values; a `PUT` with `quorum_count=2` (only 1 regular target
+  configured in the dev stack, the second carries `role=archive`) returned `422`; a satisfiable `PUT` to
+  `strategy=quorum` followed by a real object upload ran successfully through the quorum code path,
+  entirely without a restart between `PUT` and upload; `signature-config`'s `PUT` with `levels=["qes"]`
+  for the `internal` connector, and with an unknown connector `id`, both returned `422`. All test
+  data/configuration changes were subsequently reset. No interactive browser test of the two new admin UI
+  pages (no browser/Playwright available in this development environment, project-wide established
+  practice) — instead covered via Vitest component tests plus the backend API verification above through
+  the exact same gateway calls.
+- Docs: new [ADR 0091](0091-connector-operational-config-live-editable.md),
+  `docs/services/storage-service.md`, `docs/services/signature-service.md` (each with API table, new
+  section, tests section), `docs/services/admin-ui.md` (page table, new section, backend
+  integration table, tests section) added.

@@ -1,114 +1,115 @@
 # 0070 — case-service RBAC
 
-**Status:** akzeptiert (Session 5 von 11, siehe Phase 19 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 19 Session 5, betrifft `case-service`, `permission-service`,
+**Status:** accepted (session 5 of 11, see phase 19 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap phase 19 session 5, affects `case-service`, `permission-service`,
 `archival-service`, `mail-connector`, `infra/docker-compose.yml`
 
-## Entscheidung
+## Decision
 
-`case-service` hatte bislang **gar keine** Berechtigungsprüfung — nicht einmal einen
-`X-DMS-Principal`-Header-Check wie andere Services vor ihrer jeweiligen Durchsetzung. Diese Session
-schließt diese Lücke:
+`case-service` previously had **no** permission checking at all — not even an
+`X-DMS-Principal` header check like other services have ahead of their respective enforcement. This
+session closes that gap:
 
-1. **Neuer `_require_case_permission(x_dms_principal, *, access_type)`-Helfer** (`main.py`) — `401` ohne
-   `X-DMS-Principal`, sonst `PermissionServiceClient.check(principal_id=..., resource_id=ROOT,
-   permission="case.read"|"case.write", access_type=...)`, `403` bei Ablehnung. **Erster Konsument von
-   `libs/dms-permission-client`** (P19-S1) überhaupt — kein eigener, dupliziertes
-   `permission_client.py` mehr nötig.
-2. **Alle menschlich nutzbaren Endpunkte gegated**: `POST/GET /cases`, `GET /cases/by-vorgangsnummer`,
+1. **New `_require_case_permission(x_dms_principal, *, access_type)` helper** (`main.py`) — `401` without
+   `X-DMS-Principal`, otherwise `PermissionServiceClient.check(principal_id=..., resource_id=ROOT,
+   permission="case.read"|"case.write", access_type=...)`, `403` on denial. **First consumer of
+   `libs/dms-permission-client`** (P19-S1) at all — no more own, duplicated
+   `permission_client.py` needed.
+2. **All human-usable endpoints gated**: `POST/GET /cases`, `GET /cases/by-vorgangsnummer`,
    `GET /cases/{id}`, `POST/DELETE .../documents`, `GET .../documents`, `POST .../archive-request`
-   (menschliche Aktion trotz "instanzverändernd"), `GET .../archive-status`, alle vier Config-Endpunkte
-   (`case-archival-config`, `case-number-config`).
-3. **Zwei rein interne Maschine-zu-Maschine-Rückrufe bewusst UNGEGATET gelassen**: `GET
-   /cases/due-for-archival` und `PUT /cases/{id}/archived` — beide werden ausschließlich von
-   `archival-service` aufgerufen, das dafür aktuell keinerlei Identitäts-Header sendet. Exakt dieselbe,
-   bereits vorbestehende Lücke wie `document-service`s analoges `PUT /documents/{id}/archived` (ebenfalls
-   ungegatet, verifiziert) — eine allgemeine Service-zu-Service-Authentisierung ist eine größere,
-   projektweite Entscheidung außerhalb dieser Session.
-4. **`resource_id` ist immer `"root"`** — case-service registriert (wie document-service für seine
-   Dokumente) keine eigenen Knoten im permission-service-Ressourcenbaum; eine Umlaufmappe hat laut
-   Konzept 2.3 ohnehin keinen Ordner-Elternknoten. Eine feingranulare, Umlaufmappen-eigene
-   Ressourcen-Hierarchie ist ein größeres, noch offenes Architekturthema (siehe "Konsequenzen").
-5. **"everyone"-Gruppe (ADR 0067) um `case.read`/`case.write` erweitert** — erhält das bisherige
-   De-facto-offene Verhalten (case-service prüfte vorher NICHTS), macht es aber admin-editierbar statt
-   für immer unveränderlich offen. Gleiches Prinzip wie `users.lookup`/`users.directory` in P19-S3.
+   (a human action despite being "instance-modifying"), `GET .../archive-status`, all four config
+   endpoints (`case-archival-config`, `case-number-config`).
+3. **Two purely internal machine-to-machine callbacks deliberately left UNGATED**: `GET
+   /cases/due-for-archival` and `PUT /cases/{id}/archived` — both are called exclusively by
+   `archival-service`, which currently sends no identity header for them at all. Exactly the same,
+   already pre-existing gap as `document-service`'s analogous `PUT /documents/{id}/archived` (also
+   ungated, confirmed) — a general service-to-service authentication is a larger,
+   project-wide decision outside this session.
+4. **`resource_id` is always `"root"`** — case-service (like document-service for its
+   documents) registers no own nodes in the permission-service resource tree; a circulation folder
+   has no parent folder node per concept 2.3 anyway. A fine-grained, circulation-folder-owned
+   resource hierarchy is a larger, still-open architecture topic (see "Consequences").
+5. **"everyone" group (ADR 0067) extended with `case.read`/`case.write`** — preserves the previous
+   de-facto-open behavior (case-service previously checked NOTHING), but makes it admin-editable
+   instead of permanently unchangeably open. Same principle as `users.lookup`/`users.directory`
+   in P19-S3.
 
-## Begründung
+## Rationale
 
-- **Warum `case.read`/`case.write` statt einer neuen Domain-Admin-Rolle**: Konzept 2.3 beschreibt die
-  Umlaufmappe explizit als *"eigenständiges, RBAC- und constraint-fähiges Objekt"* — ein normales,
-  RBAC-gesteuertes Geschäftsobjekt wie Dokumente/Ordner, keine Admin-Domäne. `document.read`/`.write`
-  ist das etablierte Namensmuster für genau diesen Fall (`<domain>.read`/`<domain>.write`, passend zu
-  `GET /check`s `access_type`-Parameter).
-- **Warum `POST /cases/{id}/archive-request` gegated wird, `PUT /cases/{id}/archived` aber nicht**:
-  ersteres ist laut eigenem Docstring ein *"Manueller Aussonderungs-Trigger"* — eine menschliche Aktion.
-  Letzteres ist explizit *"Interner Rueckruf von archival-service"* — kein menschlicher Aufrufer
-  existiert, den man prüfen könnte.
-- **Warum die "everyone"-Erweiterung statt einer erzwungenen Rollenzuweisung für alle Nutzer**:
-  case-service hatte vorher überhaupt keine Prüfung — jeder authentifizierte Nutzer konnte jede
-  Umlaufmappe lesen/ändern. Eine erzwungene, engere Default-Rolle hätte das System für jede bestehende
-  Installation beim nächsten Neustart lahmgelegt (niemand hätte `case.read`/`case.write`, bis ein Admin
-  manuell Rollen zuweist) - "everyone" erhält Kontinuität, exakt das bereits in ADR 0067/0068 etablierte
-  Prinzip.
+- **Why `case.read`/`case.write` instead of a new domain admin role**: concept 2.3 explicitly
+  describes the circulation folder as an *"independent, RBAC- and constraint-capable object"* — a
+  normal, RBAC-governed business object like documents/folders, not an admin domain.
+  `document.read`/`.write` is the established naming pattern for exactly this case
+  (`<domain>.read`/`<domain>.write`, matching `GET /check`'s `access_type` parameter).
+- **Why `POST /cases/{id}/archive-request` is gated but `PUT /cases/{id}/archived` is not**:
+  the former is, per its own docstring, a *"manual disposal trigger"* — a human action.
+  The latter is explicitly an *"internal callback from archival-service"* — no human caller
+  exists to check.
+- **Why the "everyone" extension instead of a forced role assignment for all users**:
+  case-service previously had no check at all — every authenticated user could read/modify any
+  circulation folder. A forced, narrower default role would have crippled the system for every
+  existing installation on the next restart (no one would have `case.read`/`case.write` until an
+  admin manually assigns roles) - "everyone" preserves continuity, exactly the principle already
+  established in ADR 0067/0068.
 
-## Ein echtes Deployment-Problem gefunden und behoben
+## A real deployment problem found and fixed
 
-`infra/docker-compose.yml`s `case-service`-Block hatte **kein** `DMS_PERMISSION_SERVICE_BASE_URL` gesetzt
-— `Settings.permission_service_base_url` fiel dadurch auf ihren Lokal-Entwicklungs-Default
-(`http://localhost:8004`) zurück, der innerhalb des Containers ins Leere zeigt (`localhost` ist dort
-`case-service` selbst, nicht die Docker-Compose-Netzwerkadresse von `permission-service`). Jeder gegatete
-Aufruf schlug dadurch mit `httpx.ConnectError` (nicht 401/403!) und `500 Internal Server Error` fehl —
-erst bei der Live-Verifikation gegen den echten Stack entdeckt (Unit-/Integrationstests laufen mit
-explizit gesetzten `TEST_*_URL`-Umgebungsvariablen, die diese Lücke nicht aufdecken). Behoben durch
+`infra/docker-compose.yml`'s `case-service` block had **no** `DMS_PERMISSION_SERVICE_BASE_URL` set
+— `Settings.permission_service_base_url` thereby fell back to its local development default
+(`http://localhost:8004`), which points nowhere within the container (`localhost` there is
+`case-service` itself, not the Docker Compose network address of `permission-service`). Every
+gated call thereby failed with `httpx.ConnectError` (not 401/403!) and a `500 Internal Server Error`
+— only discovered during live verification against the real stack (unit/integration tests run with
+explicitly set `TEST_*_URL` environment variables, which don't reveal this gap). Fixed by
 `DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000` plus `permission-service:
-condition: service_started` in `depends_on` (Konsistenz mit allen anderen permission-service-Konsumenten).
+condition: service_started` in `depends_on` (consistent with every other permission-service consumer).
 
-## Zwei weitere, unabhängige Regressionen bei anderen Services gefunden und behoben
+## Two more, independent regressions found and fixed in other services
 
-Zwei bestehende Services rufen case-service-Endpunkte east-west auf, die durch diese Session gegated
-wurden, **ohne jemals einen `X-DMS-Principal`-Header zu senden** — beide wären in echtem Betrieb mit
-`401` gescheitert:
+Two existing services call case-service endpoints east-west that were gated by this session,
+**without ever sending an `X-DMS-Principal` header** — both would have failed with
+`401` in real operation:
 
-- **`archival-service`s `CaseClient.get_case`/`.list_document_references`/`.get_archival_config`**
-  (`clients.py`) — alle drei riefen zuvor gegatete Endpunkte ohne Header auf.
-- **`mail-connector`s `CaseClient.lookup_by_vorgangsnummer`/`.get`/`.add_document_reference`**
-  (`case_client.py`) — dieselbe Lücke, betrifft die automatische Vorgangsnummer-Zuordnung eingehender
-  Post (2.5/3.3).
+- **`archival-service`'s `CaseClient.get_case`/`.list_document_references`/`.get_archival_config`**
+  (`clients.py`) — all three previously called gated endpoints without a header.
+- **`mail-connector`'s `CaseClient.lookup_by_vorgangsnummer`/`.get`/`.add_document_reference`**
+  (`case_client.py`) — the same gap, affects the automatic file-reference-number matching of
+  incoming mail (2.5/3.3).
 
-Beide sind reine Maschinen-Aufrufer ohne menschlichen Principal (Vorgangsnummer-Matching wird durch
-eingehende E-Mail ausgelöst, nicht durch eine Nutzeraktion) — behoben durch einen synthetischen
-`X-DMS-Principal`-Header nach dem bereits im Projekt etablierten `"system:<Service>"`-Muster
-(vgl. `actor="system:archival-service"` bei publizierten Events): `"system:archival-service"` bzw.
-`"system:mail-connector"`. Da die "everyone"-Gruppe `case.read`/`case.write` standardmäßig gewährt,
-funktioniert das ohne ein eigenes technisches Konto oder eine explizite Rollenzuweisung.
+Both are pure machine callers without a human principal (file-reference-number matching is
+triggered by incoming email, not by a user action) — fixed via a synthetic
+`X-DMS-Principal` header following the project's already established `"system:<Service>"`
+pattern (cf. `actor="system:archival-service"` in published events): `"system:archival-service"` and
+`"system:mail-connector"` respectively. Since the "everyone" group grants `case.read`/`case.write`
+by default, this works without a dedicated technical account or an explicit role assignment.
 
-**Zusätzlich drei direkte, ungeheaderte case-service-Aufrufe in `mail-connector`s eigener Testsuite
-gefunden** (`tests/conftest.py::real_case_id`, `tests/test_api.py::_get_case`/`_get_case_documents`) —
-diese Hilfsfunktionen rufen den echten, laufenden case-service-Container direkt per `httpx` an (gleiche
-"kein Mocking von Sibling-Services"-Testphilosophie wie im gesamten Projekt), fielen aber erst bei einem
-zweiten Testlauf **nach** dem Neubau des case-service-Images auf (der erste Lauf traf noch den alten,
-ungegateten Container-Stand) - ebenfalls mit demselben synthetischen `X-DMS-Principal`-Header behoben.
+**Additionally, three direct, headerless case-service calls found in `mail-connector`'s own test
+suite** (`tests/conftest.py::real_case_id`, `tests/test_api.py::_get_case`/`_get_case_documents`) —
+these helper functions call the real, running case-service container directly via `httpx` (the
+same "no mocking of sibling services" test philosophy used throughout the project), but only surfaced on a
+second test run **after** rebuilding the case-service image (the first run still hit the old,
+ungated container state) - fixed with the same synthetic `X-DMS-Principal` header.
 
-## Konsequenzen
+## Consequences
 
-- **Tests**: `case-service` 50 (vorher 45, +5: Positiv-/Negativ-Tests für `create_case`/`list_cases`
-  `401`/`403`, `archive-request` Auth-Pflicht). Neue Fixtures `case_headers`/`everyone_role_without`
-  in `conftest.py` (letztere dupliziert aus `auth-service`s Muster, Projektkonvention). `archival-service`
-  59, `mail-connector` 30 — beide unverändert grün nach dem Header-Fix (ihre Tests nutzen Fake-Clients
-  für die betroffenen Pfade, decken die reale HTTP-Regression daher nicht ab - nur die Live-Verifikation
-  gegen den echten Stack deckte sie auf). `ruff check`/`ruff format --check` clean für alle vier
-  Services.
-- **Vollständig live gegen den echten laufenden Stack verifiziert** (nach Image-Neubau aller drei
-  Services + Docker-Compose-Fix + Neustart): `GET /api/case-service/cases` über das Gateway → `200`
-  (mit Token) / `401` (ohne); `GET /case-archival-config` direkt mit `X-DMS-Principal:
-  system:archival-service` → `200` mit echten Konfigurationsdaten; `GET /cases/due-for-archival` weiterhin
-  ungegatet erreichbar; `mail-connector`s `GET /cases/by-vorgangsnummer` mit `system:mail-connector` →
+- **Tests**: `case-service` 50 (previously 45, +5: positive/negative tests for `create_case`/`list_cases`
+  `401`/`403`, `archive-request` auth requirement). New fixtures `case_headers`/`everyone_role_without`
+  in `conftest.py` (the latter duplicated from `auth-service`'s pattern, project convention).
+  `archival-service` 59, `mail-connector` 30 — both unchanged and green after the header fix (their
+  tests use fake clients for the affected paths, so they don't cover the real HTTP regression -
+  only live verification against the real stack surfaced it). `ruff check`/`ruff format --check`
+  clean for all four services.
+- **Fully verified live against the real running stack** (after image rebuild of all three
+  services + docker-compose fix + restart): `GET /api/case-service/cases` through the gateway → `200`
+  (with token) / `401` (without); `GET /case-archival-config` directly with `X-DMS-Principal:
+  system:archival-service` → `200` with real configuration data; `GET /cases/due-for-archival` still
+  reachable ungated; `mail-connector`'s `GET /cases/by-vorgangsnummer` with `system:mail-connector` →
   `200`.
-- **Kein Ressourcen-Baumeintrag für Umlaufmappen** (weiterhin offen, siehe
-  `docs/services/case-service.md` "Offene Punkte"): `resource_id="root"` ist ein bewusst grober,
-  vorläufiger Kompromiss - eine feingranulare Berechtigungssteuerung je Umlaufmappe (z. B. nur die
-  zuständige Abteilung darf lesen/schreiben) bräuchte eine eigene Ressourcen-Hierarchie, analog zum
-  bereits offenen Punkt bei Dokumenten. Nicht Teil dieser Session.
-- **`document-service`s eigenes, analoges `PUT /documents/{id}/archived` bleibt weiterhin ungegatet** —
-  dieselbe, bereits vor dieser Session bestehende Lücke, nicht durch diese Session verursacht oder
-  behoben (anderer Service, außerhalb des Sessionsumfangs).
+- **No resource-tree entry for circulation folders** (still open, see
+  `docs/services/case-service.md` "Open Points"): `resource_id="root"` is a deliberately coarse,
+  provisional compromise - a fine-grained permission control per circulation folder (e.g. only the
+  responsible department may read/write) would need its own resource hierarchy, analogous to
+  the already-open point for documents. Not part of this session.
+- **`document-service`'s own, analogous `PUT /documents/{id}/archived` remains ungated** —
+  the same gap that already existed before this session, not caused or fixed by this session
+  (different service, outside this session's scope).

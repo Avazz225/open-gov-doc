@@ -1,67 +1,67 @@
 # document-service
 
-Dokumente als Kernentität (Konzept 2.1): CRUD, dauerhafte Versionierung (2.1a),
-Bearbeitungssperre inkl. Force-Unlock und Konfliktkopie (4.2). Hält selbst nie
-Dateiinhalte - jeder Zugriff läuft über die HTTP-API des Storage Service (3.6).
+Documents as the core entity (concept 2.1): CRUD, durable versioning (2.1a),
+editing lock including force-unlock and conflict copy (4.2). Never holds
+file content itself — every access goes through the Storage Service's HTTP API (3.6).
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/documents` | Anlegen (multipart: `file`, `title`, `created_by`, ...) |
-| `GET` | `/documents/{id}` | Metadaten |
-| `DELETE` | `/documents/{id}?deleted_by=...` | Weiche Löschung |
-| `GET` | `/documents/{id}/content` | Inhalt der aktuellen Version |
-| `GET` | `/documents/{id}/versions` | Alle Versionen (auch Konfliktkopien) |
+| `POST` | `/documents` | Create (multipart: `file`, `title`, `created_by`, ...) |
+| `GET` | `/documents/{id}` | Metadata |
+| `DELETE` | `/documents/{id}?deleted_by=...` | Soft delete |
+| `GET` | `/documents/{id}/content` | Content of the current version |
+| `GET` | `/documents/{id}/versions` | All versions (including conflict copies) |
 | `POST` | `/documents/{id}/versions` | Check-in (multipart: `file`, `expected_base_version_number`, `created_by`) |
-| `GET`/`POST`/`DELETE` | `/documents/{id}/lock` | Sperre lesen/setzen/regulär freigeben |
-| `POST` | `/documents/{id}/lock/force-release` | Administrativer Force-Unlock |
-| `GET`/`PUT` | `/upload-config` | Format-Whitelist lesen/ändern (seit P5d-S1) |
-| `GET` | `/healthz` | Health-Check |
+| `GET`/`POST`/`DELETE` | `/documents/{id}/lock` | Read/set/regularly release lock |
+| `POST` | `/documents/{id}/lock/force-release` | Administrative force-unlock |
+| `GET`/`PUT` | `/upload-config` | Read/change format whitelist (since P5d-S1) |
+| `GET` | `/healthz` | Health check |
 
-Details/Schema/Events: siehe `../../docs/services/document-service.md`.
+Details/schema/events: see `../../docs/services/document-service.md`.
 
-## Content-Type-Erkennung & Format-Whitelist (seit P5d-S1)
+## Content-type detection & format whitelist (since P5d-S1)
 
-Der gespeicherte `content_type` wird per `python-magic`/`libmagic` aus den
-tatsächlichen Datei-Bytes ermittelt, nicht aus dem vom Client gesendeten
-Header übernommen. Eine admin-editierbare Whitelist (`GET`/`PUT
-/upload-config`, leer = keine Einschränkung) lehnt nicht gelistete Formate
-mit `400` ab, bevor Virenscan/Speicherung ausgeführt werden.
+The stored `content_type` is determined from the actual file bytes via
+`python-magic`/`libmagic`, not taken from the header sent by the
+client. An admin-editable whitelist (`GET`/`PUT
+/upload-config`, empty = no restriction) rejects unlisted formats
+with `400` before virus scanning/storage are performed.
 
-## Konfliktschutz statt "überwachter" Sperre
+## Conflict protection instead of a "supervised" lock
 
-Das Konzept beschreibt Force-Unlock über einen dritten Lock-Zustand
-("aufgehoben, aber überwacht"). Dieser Service verzichtet bewusst darauf und
-löst denselben Datenschutz stattdessen über eine immer aktive, optimistische
-Versionsprüfung beim Check-in: Jeder Upload gibt an, auf welcher Version er
-basiert (`expected_base_version_number`); weicht das von der inzwischen
-aktuellen Hauptversion ab, entsteht eine eigenständige Konfliktkopie statt
-eines stillen Überschreibens. Begründung: siehe
+The concept describes force-unlock via a third lock state
+("released, but supervised"). This service deliberately forgoes this and
+instead achieves the same data protection through an always-active, optimistic
+version check at check-in: every upload states which version it
+is based on (`expected_base_version_number`); if that differs from the
+current main version at that time, a standalone conflict copy is created instead
+of a silent overwrite. Rationale: see
 `../../docs/adr/0002-document-locking-optimistic-conflict-detection.md`.
 
-## Speicherung: inhaltsadressierte Objektschlüssel
+## Storage: content-addressed object keys
 
-Objekte werden unter `documents/{document_id}/{sha256}` im Storage Service
-abgelegt - vermeidet die Reihenfolge-Abhängigkeit "Schlüssel braucht
-Versionsnummer, Versionsnummer braucht abgeschlossenen DB-Schreibzugriff" und
-dedupliziert identische Inhalte automatisch.
+Objects are stored under `documents/{document_id}/{sha256}` in the
+Storage Service — this avoids the ordering dependency "key needs
+version number, version number needs completed DB write" and
+automatically deduplicates identical content.
 
-## Ordner- und Objekttyp-Anbindung (seit P3-S3)
+## Folder and object-type integration (since P3-S3)
 
-- `folder_id` (optional): wird beim Anlegen gegen den Folder Service geprüft
-  (`GET /folders/{id}`) - unbekannte Ordner-ID → 400.
-- `object_type_id` + `attributes` (optional, `attributes` als JSON-String im
-  Multipart-Feld): wird gegen `POST /object-types/{id}/validate` des
-  Object-Type Service geprüft - ungültige Attribute → 400 mit Fehlerliste.
-- Beide Prüfungen entfallen vollständig, wenn das jeweilige Feld nicht gesetzt
-  wird (kein erzwungener Ordner/Objekttyp).
+- `folder_id` (optional): checked against the Folder Service on creation
+  (`GET /folders/{id}`) - unknown folder ID → 400.
+- `object_type_id` + `attributes` (optional, `attributes` as a JSON string in the
+  multipart field): checked against `POST /object-types/{id}/validate` of
+  the Object-Type Service - invalid attributes → 400 with error list.
+- Both checks are skipped entirely if the respective field is not set
+  (no enforced folder/object type).
 
-## Registry-Registrierung (seit P4-S1)
+## Registry registration (since P4-S1)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+Registers itself with the registry on startup via `dms-registry-client` (heartbeat, deregister on shutdown) - opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, see `docs/services/gateway-service.md` for the consumer (API gateway, dynamic routing).
 
-## Lokale Ausführung
+## Running locally
 
 ```bash
 cd infra && docker compose up -d postgres nats minio storage-service object-type-service folder-service document-service
@@ -75,5 +75,5 @@ cd infra && docker compose up -d postgres nats minio storage-service object-type
 uv run pytest services/document-service/tests
 ```
 
-Alle Tests laufen gegen echte Infrastruktur (Postgres, NATS, Storage/Folder/
-Object-Type Service über HTTP) - keine Mocks.
+All tests run against real infrastructure (Postgres, NATS, Storage/Folder/
+Object-Type Service via HTTP) — no mocks.

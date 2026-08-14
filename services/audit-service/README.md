@@ -1,30 +1,30 @@
 # audit-service
 
-Unveränderliches, hash-verkettetes Ereignisprotokoll (Konzept 3.4/5.3). Konsumiert
-alle konfigurierten Event-Bus-Subjects (Default `["registry.>", "document.>", "permission.>", "virus_scan.>"]`,
-siehe `Settings.subjects`) und hängt jedes Ereignis manipulationssicher an eine
-Hash-Chain an.
+Immutable, hash-chained event log (concept 3.4/5.3). Consumes
+all configured event bus subjects (default `["registry.>", "document.>", "permission.>", "virus_scan.>"]`,
+see `Settings.subjects`) and appends each event to a
+tamper-evident hash chain.
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/events?limit=100` | Aufgezeichnete Ereignisse, chronologisch |
-| `GET` | `/events/verify` | Prüft die gesamte Kette auf Manipulation |
-| `GET` | `/healthz` | Eigener Health-Check |
+| `GET` | `/events?limit=100` | Recorded events, chronological |
+| `GET` | `/events/verify` | Verifies the entire chain for tampering |
+| `GET` | `/healthz` | Own health check |
 
-## Funktionsweise
+## How it works
 
-- Jeder Eintrag: `hash = sha256(prev_hash + kanonisches_JSON(felder))`. Der erste Eintrag verkettet gegen `GENESIS_HASH` (64 Nullen).
-- **Idempotent** nach `event_id`: JetStream liefert bei At-least-once-Zustellung ggf. Duplikate — bereits bekannte `event_id`s werden übersprungen, nicht erneut verkettet.
-- **Kein `deliver_new`** beim Abonnieren: Der durable Consumer `audit-service` holt nach einem Neustart lückenlos auf, statt Ereignisse zu verpassen (im Gegensatz zu kurzlebigen Test-Abonnements, siehe `dms-eventbus-client`).
-- Konsument ohne eigenen Stream (`ensure_stream=False`, siehe [ADR 0001](../../docs/adr/0001-eventbus-consumer-without-stream-ownership.md)) — kennt nur die Subject-Konvention der Producer, nicht deren Stream-Namen.
+- Each entry: `hash = sha256(prev_hash + canonical_JSON(fields))`. The first entry chains against `GENESIS_HASH` (64 zeros).
+- **Idempotent** by `event_id`: JetStream may deliver duplicates under at-least-once delivery — already known `event_id`s are skipped instead of being chained again.
+- **No `deliver_new`** on subscribe: the durable consumer `audit-service` catches up seamlessly after a restart instead of missing events (unlike short-lived test subscriptions, see `dms-eventbus-client`).
+- Consumer without its own stream (`ensure_stream=False`, see [ADR 0001](../../docs/adr/0001-eventbus-consumer-without-stream-ownership.md)) — only knows the producers' subject convention, not their stream names.
 
-## Registry-Registrierung (seit P4-S1)
+## Registry registration (since P4-S1)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+Registers itself with the registry on startup via `dms-registry-client` (heartbeat, deregister on shutdown) - opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, see `docs/services/gateway-service.md` for the consumer (API gateway, dynamic routing).
 
-## Lokale Ausführung
+## Running locally
 
 ```bash
 cd infra && docker compose up -d postgres nats audit-service

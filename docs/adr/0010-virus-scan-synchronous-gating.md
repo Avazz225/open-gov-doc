@@ -1,27 +1,80 @@
-# 0010 — Virus-Scan: synchrones Gating im Upload-Pfad statt asynchronem Scan-Status
+# 0010 — Virus scan: synchronous gating in the upload path instead of asynchronous scan status
 
-**Status:** akzeptiert
-**Kontext:** Konzept 10.3, Session P5-S1
+**Status:** accepted
+**Context:** Concept 10.3, Session P5-S1
 
-## Entscheidung
+## Decision
 
-Der Document Service ruft den neuen Virus-Scan Service **synchron auf, bevor** er Inhalt oder Metadaten eines Uploads persistiert — sowohl beim initialen Anlegen (`POST /documents`) als auch beim Check-in einer neuen Version (`POST /documents/{id}/versions`). Fällt der Scan negativ aus, wird die gesamte Anfrage mit `422` abgelehnt: kein Dokument/keine Version wird angelegt, nichts wird im Storage Service abgelegt. Es gibt **keinen** neuen Gating-Zustand (z. B. `scan_status: pending/clean/infected`) an `document`/`document_version`.
+The Document Service calls the new Virus Scan Service **synchronously,
+before** persisting either the content or the metadata of an upload — both
+during the initial creation (`POST /documents`) and during check-in of a new
+version (`POST /documents/{id}/versions`). If the scan comes back negative,
+the entire request is rejected with `422`: no document/version is created,
+nothing is stored in the Storage Service. There is **no** new gating state
+(e.g. `scan_status: pending/clean/infected`) on `document`/`document_version`.
 
-Ist der Virus-Scan Service nicht erreichbar, wird der Upload ebenfalls abgelehnt (`503`, fail-closed) statt stillschweigend durchgelassen zu werden.
+If the Virus Scan Service is unreachable, the upload is likewise rejected
+(`503`, fail-closed) rather than being silently let through.
 
-## Begründung
+## Rationale
 
-- **10.3 fordert wörtlich** "Virenscan verpflichtend vor Freigabe eines Uploads". Der bestehende Upload-Pfad des Document Service (`POST /documents`/`POST /documents/{id}/versions`) legt Inhalt sofort im Storage Service ab und macht ihn über `GET .../content` unmittelbar abrufbar — ein rein asynchroner Konsum von `document.version.created` durch einen Virus-Scan-Service würde erst *nach* dieser Freigabe reagieren und das Versprechen verletzen.
-- **Bestehendes Präzedens im selben Service**: Der Document Service validiert bereits heute synchron gegen den Object-Type Service (`object_type_client.validate(...)`, vor dem eigentlichen Schreiben), bevor ein Upload angenommen wird. Der Virus-Scan folgt demselben, bereits etablierten Muster, statt eine zweite, andersartige Integrationsart (asynchrones Event-Gating) einzuführen.
-- **Kein neuer Gating-Zustand nötig**: Eine `scan_status`-Spalte hätte mehrere Stellen betroffen (jeder Lesezugriff auf Inhalt, Rendering/OCR in P5-S2/S3 müssten den Zustand zusätzlich prüfen) und wäre eine invasivere, fehleranfälligere Änderung gewesen als ein einzelner Aufruf vor dem Schreiben. Da der synchrone Scan verhindert, dass ein infiziertes Dokument überhaupt erst entsteht, muss kein nachgelagerter Service je einen Zwischenzustand kennen.
-- **Fail-closed bei Nichterreichbarkeit**: Die Alternative (Upload bei Scan-Fehler durchlassen) widerspräche "verpflichtend" - ein Ausfall des Virus-Scan Service darf keine Sicherheitslücke öffnen.
-- **Quarantäne statt Löschen**: Bei einem Fund wird die Datei nicht verworfen, sondern über den Storage Service unter `quarantine/{scan_id}` abgelegt (Nachvollziehbarkeit/Beweiswert, 10.3 selbst macht dazu keine Vorgabe) - der Virus-Scan Service hält wie der Document Service selbst keine Bytes, sondern delegiert an den Storage Service.
-- **Engine austauschbar, aber nicht ClamAV als Standard**: Nach demselben Plugin-Prinzip wie die Storage-Backends (3.3/3.8) ist die Scan-Engine ein austauschbares Interface (`ScanEngine`). Standard ist eine `EicarSignatureEngine` (erkennt nur die genormte EICAR-Testsignatur), nicht die naheliegende `ClamdEngine` gegen einen `clamd`-Daemon: `clamd` lädt beim ersten Start seine Signaturdatenbank über `freshclam` nach, was in dieser Entwicklungsumgebung Minuten dauert und verlässlichen Internetzugriff auf die ClamAV-Mirrors voraussetzt - für einen reproduzierbaren `docker compose up`/Testlauf nicht geeignet. `ClamdEngine` ist vollständig implementiert (INSTREAM-Protokoll) und über `DMS_SCAN_ENGINE=clamd` aktivierbar, sobald ein `clamd` separat betrieben wird.
+- **10.3 explicitly requires** "virus scan mandatory before an upload is
+  released". The Document Service's existing upload path
+  (`POST /documents`/`POST /documents/{id}/versions`) stores content in the
+  Storage Service immediately and makes it retrievable right away via
+  `GET .../content` — a purely asynchronous consumption of
+  `document.version.created` by a virus scan service would only react
+  *after* this release and would violate that guarantee.
+- **Existing precedent in the same service**: the Document Service already
+  validates synchronously against the Object-Type Service
+  (`object_type_client.validate(...)`, before the actual write) before
+  accepting an upload. The virus scan follows the same, already-established
+  pattern, instead of introducing a second, different kind of integration
+  (asynchronous event gating).
+- **No new gating state needed**: a `scan_status` column would have affected
+  multiple places (every read access to content, rendering/OCR in P5-S2/S3
+  would additionally have to check the state) and would have been a more
+  invasive, more error-prone change than a single call before the write.
+  Since the synchronous scan prevents an infected document from ever coming
+  into existence in the first place, no downstream service ever needs to
+  know about an intermediate state.
+- **Fail-closed on unreachability**: the alternative (letting the upload
+  through on scan failure) would contradict "mandatory" - an outage of the
+  Virus Scan Service must not open a security hole.
+- **Quarantine instead of deletion**: on a hit, the file is not discarded but
+  stored via the Storage Service under `quarantine/{scan_id}`
+  (traceability/evidentiary value, 10.3 itself makes no requirement here) -
+  the Virus Scan Service, like the Document Service itself, holds no bytes
+  of its own, but delegates to the Storage Service.
+- **Engine swappable, but ClamAV not the default**: following the same
+  plugin principle as the storage backends (3.3/3.8), the scan engine is a
+  swappable interface (`ScanEngine`). The default is an
+  `EicarSignatureEngine` (recognizes only the standardized EICAR test
+  signature), not the obvious `ClamdEngine` against a `clamd` daemon:
+  `clamd` downloads its signature database via `freshclam` on first start,
+  which takes minutes in this development environment and requires reliable
+  internet access to the ClamAV mirrors - not suitable for a reproducible
+  `docker compose up`/test run. `ClamdEngine` is fully implemented (INSTREAM
+  protocol) and can be enabled via `DMS_SCAN_ENGINE=clamd` once a `clamd` is
+  operated separately.
 
-## Konsequenzen
+## Consequences
 
-- Upload-Latenz enthält jetzt die Scan-Zeit (bei der `EicarSignatureEngine` vernachlässigbar, bei einer echten Engine wie `clamd` je nach Dateigröße spürbar) - für dieses Grundgerüst akzeptiert, bei Bedarf später durch Chunked-Scanning/Streaming zu optimieren.
-- Der Check-in-Pfad scannt auch dann, wenn `expected_base_version_number` bereits veraltet ist oder ein Lock-Konflikt vorliegt (Scan läuft vor der eigentlichen Konflikterkennung) - unnötige, aber nicht falsche Arbeit; keine Korrektheitslücke.
-- Kein eigener Freigabe-/Lösch-Workflow für Quarantäne-Objekte (Wiederherstellen, endgültiges Löschen) - liegt außerhalb des Scopes dieser Session.
-- Die "Benachrichtigung des Uploaders" bei einem Fund (10.3 erwähnt sie nicht explizit, aber naheliegend) ist noch nicht umgesetzt, da der Notification Service erst in P6-S2 entsteht - `virus_scan.completed` wird bereits publiziert und kann dort ohne Änderung am Virus-Scan Service konsumiert werden.
-- OCR (P5-S3) und Rendering/Preview (P5-S2) docken an `document.version.created` an, das erst *nach* einem sauberen Scan publiziert wird - beide Sessions müssen sich um das Scan-Gating selbst nicht kümmern.
+- Upload latency now includes scan time (negligible with the
+  `EicarSignatureEngine`, noticeably so with a real engine like `clamd`
+  depending on file size) - accepted for this base scaffold, to be optimized
+  later via chunked scanning/streaming if needed.
+- The check-in path also scans when `expected_base_version_number` is
+  already stale or a lock conflict exists (the scan runs before the actual
+  conflict detection) - unnecessary but not incorrect work; no correctness
+  gap.
+- No dedicated release/deletion workflow for quarantined objects (restore,
+  permanent deletion) - out of scope for this session.
+- "Notifying the uploader" on a hit (10.3 does not mention this explicitly,
+  but it is a natural expectation) is not yet implemented, since the
+  Notification Service does not exist until P6-S2 - `virus_scan.completed`
+  is already published and can be consumed there without any change to the
+  Virus Scan Service.
+- OCR (P5-S3) and Rendering/Preview (P5-S2) hook into
+  `document.version.created`, which is only published *after* a clean scan
+  - neither session needs to concern itself with the scan gating itself.

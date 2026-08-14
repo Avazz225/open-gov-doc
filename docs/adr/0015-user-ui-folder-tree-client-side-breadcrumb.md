@@ -1,21 +1,21 @@
-# 0015 — Baumansicht: Breadcrumb-Pfad clientseitig aus dem bereits aufgeklappten Baum rekonstruiert, kein neuer Backend-Endpunkt
+# 0015 — Tree view: breadcrumb path reconstructed client-side from the already-expanded tree, no new backend endpoint
 
-**Status:** akzeptiert
-**Kontext:** Konzept 8 (Explorer-Baumansicht), Session P5b-S4
+**Status:** accepted
+**Context:** Concept 8 (Explorer tree view), Session P5b-S4
 
-## Entscheidung
+## Decision
 
-Die neue Baumansicht des User-UI-Explorers (`FolderTree.tsx`) navigiert per Klick auf einen beliebigen, ggf. tief verschachtelten Ordnerknoten direkt zu diesem Ordner - inklusive korrektem Breadcrumb-Pfad in `DocumentWorkspace`s `trail`-State. Statt dafür einen neuen Folder-Service-Endpunkt für den vollständigen Pfad eines Ordners zu bauen (offener Punkt seit P3-S3, siehe `docs/services/folder-service.md`), rekonstruiert `FolderTree` den Pfad **clientseitig aus bereits geladenen Daten**: da ein Knoten im Baum nur sichtbar/anklickbar ist, nachdem alle seine Vorfahren aufgeklappt wurden, kennt die Komponente zum Zeitpunkt des Klicks bereits die vollständige Kette der übergeordneten `Folder`-Objekte (jedes davon kam als Eintrag aus dem `listChildFolders()`-Aufruf seines jeweiligen Elternknotens). Ein neuer Callback `onNavigateToFolder(path: Folder[])` ersetzt in `DocumentWorkspace` den gesamten `trail` (statt ihn wie das bestehende `onOpenFolder` nur um eine Ebene zu verlängern).
+The User UI Explorer's new tree view (`FolderTree.tsx`) navigates, on a click on any folder node — however deeply nested — directly to that folder, including the correct breadcrumb path in `DocumentWorkspace`'s `trail` state. Rather than building a new Folder Service endpoint for a folder's full path for this purpose (an open point since P3-S3, see `docs/services/folder-service.md`), `FolderTree` reconstructs the path **client-side from data already loaded**: since a node in the tree is only visible/clickable after all its ancestors have been expanded, the component already knows, at the moment of the click, the complete chain of ancestor `Folder` objects (each of these arrived as an entry from the `listChildFolders()` call of its respective parent node). A new callback `onNavigateToFolder(path: Folder[])` replaces the entire `trail` in `DocumentWorkspace` (instead of merely extending it by one level, as the existing `onOpenFolder` does).
 
-## Begründung
+## Rationale
 
-- **Keine zusätzliche Backend-Änderung nötig.** Der Folder Service hat bewusst keinen "vollständiger Pfad"-Endpunkt (siehe `docs/services/folder-service.md` "Offene Punkte") - nur `GET /folders/{id}/children` existiert. Eine Baumansicht, die ohnehin von der Wurzel aus rekursiv aufklappt, hat die Pfadinformation als Nebenprodukt ihrer eigenen Navigation bereits vorliegen; sie erneut vom Backend abzufragen wäre eine unnötige Verdopplung.
-- **Kein zusätzlicher Netzwerk-Roundtrip beim Klick.** Da der Pfad aus bereits im Speicher gehaltenen `Folder`-Objekten zusammengesetzt wird, ist die Navigation sofort verfügbar, ohne auf eine weitere Anfrage zu warten.
-- **Funktioniert nur, weil die Baumansicht von der Wurzel aus aufklappt** - ein hypothetischer "Sprung" zu einem noch nie im Baum sichtbar gemachten Ordner (z. B. über eine Freitext-Ordner-ID) wäre mit diesem Ansatz nicht möglich. Das ist aktuell keine Einschränkung, da es keinen solchen Eingabeweg gibt (keine Ordner-ID-Adressleiste, kein Deep-Link) - würde ein solcher Bedarf später entstehen, bräuchte er doch den in `folder-service.md` offen gelassenen Pfad-Endpunkt.
-- **`onNavigateToFolder` ersetzt den Trail, statt ihn zu verlängern** - anders als `onOpenFolder` (Listenansicht, geht immer genau eine Ebene tiefer als der aktuell gezeigte Ordner) kann ein Baum-Klick auf einen beliebigen Knoten (Geschwister, Vorfahre, tief verschachteltes Kind) erfolgen; ein einfaches Anhängen an den bestehenden Trail wäre in den meisten Fällen falsch.
+- **No additional backend change needed.** The Folder Service deliberately has no "full path" endpoint (see `docs/services/folder-service.md`, "Open Points") — only `GET /folders/{id}/children` exists. A tree view that expands recursively from the root anyway already has the path information available as a byproduct of its own navigation; querying it again from the backend would be unnecessary duplication.
+- **No additional network roundtrip on click.** Since the path is assembled from `Folder` objects already held in memory, navigation is immediately available without waiting for a further request.
+- **Only works because the tree view expands from the root** — a hypothetical "jump" to a folder never yet made visible in the tree (e.g. via a free-text folder ID) would not be possible with this approach. That is currently not a limitation, since no such input path exists (no folder-ID address bar, no deep link) — should such a need arise later, it would require the path endpoint left open in `folder-service.md`.
+- **`onNavigateToFolder` replaces the trail instead of extending it** — unlike `onOpenFolder` (list view, which always goes exactly one level deeper than the currently shown folder), a tree click can land on any node (sibling, ancestor, deeply nested child); simply appending to the existing trail would be wrong in most cases.
 
-## Konsequenzen
+## Consequences
 
-- `ExplorerPane`/`DocumentWorkspace` bekommen eine neue Prop/Funktion `onNavigateToFolder`, unabhängig vom bestehenden `onOpenFolder` (Listenansicht) - beide führen letztlich zum selben `trail`-State, unterscheiden sich nur darin, wie der neue Trail gebildet wird (anhängen vs. ersetzen).
-- Die Baumansicht lädt Kinder eines Knotens **lazy erst beim Aufklappen** (`listChildFolders`/`listDocumentsInFolder` pro Knoten) - ein noch nie aufgeklappter Teilbaum verursacht keine Anfragen, dafür baut sich der Pfad für einen Klick auf einen bereits sichtbaren Knoten garantiert korrekt zusammen.
-- Sollte künftig ein Deep-Link/eine direkte Ordner-ID-Adressierung nötig werden (nicht Teil dieser Session), wäre das der Moment, den bislang aufgeschobenen "vollständiger Pfad"-Endpunkt im Folder Service tatsächlich zu bauen - diese Entscheidung bleibt dafür kein Hindernis, da sie rein clientseitig ist.
+- `ExplorerPane`/`DocumentWorkspace` gain a new prop/function `onNavigateToFolder`, independent of the existing `onOpenFolder` (list view) — both ultimately lead to the same `trail` state, differing only in how the new trail is built (append vs. replace).
+- The tree view loads a node's children **lazily, only on expansion** (`listChildFolders`/`listDocumentsInFolder` per node) — a subtree never expanded causes no requests, while the path for a click on an already-visible node is guaranteed to assemble correctly.
+- Should a deep link/direct folder-ID addressing become necessary in the future (not part of this session), that would be the moment to actually build the previously deferred "full path" endpoint in the Folder Service — this decision does not stand in the way of that, since it is purely client-side.

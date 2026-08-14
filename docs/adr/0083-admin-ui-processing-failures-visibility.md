@@ -1,80 +1,77 @@
-# 0083 — Admin-UI: "Permanent fehlgeschlagen"-Sichtbarkeit + manueller Neustart
+# 0083 — Admin UI: "permanently failed" visibility + manual restart
 
-**Status:** akzeptiert (Session 7 von 7, siehe Phase 20 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 20 Session 7, betrifft `admin-ui`, `rendering-service`, `ocr-service`
+**Status:** accepted (Session 7 of 7, see Phase 20 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 20 Session 7, affects `admin-ui`, `rendering-service`, `ocr-service`
 
-## Entscheidung
+## Decision
 
-Die fünf Resilienz-Sessions dieser Phase (ADR 0078–0082) machten `failed_permanent`/`delivery_failed`
-serverseitig sichtbar und retry-fähig, aber ohne jede Admin-UI-Anbindung. Diese Session schließt die
-Lücke für die vier vom Plan explizit genannten Services (`archival-service` bereits mit vorhandener
-Admin-UI-Seite, `notification-service`/`rendering-service`/`ocr-service` bislang ganz ohne
-UI-Sichtbarkeit) — bewusst **ohne** `federation-hub-service`, das der Plan an dieser Stelle nicht nennt.
+The five resilience sessions of this phase (ADR 0078–0082) made `failed_permanent`/`delivery_failed`
+visible server-side and retry-capable, but without any admin UI integration. This session closes the
+gap for the four services explicitly named by the plan (`archival-service` already having an existing
+admin UI page, `notification-service`/`rendering-service`/`ocr-service` previously without any UI
+visibility) — deliberately **without** `federation-hub-service`, which the plan does not name at this
+point.
 
-1. **`ArchivalTransfersView`** (bereits vorhanden) bekommt `failed_permanent` als neue
-   Filter-Option in beiden Sektionen (Dokument- und Umlaufmappen-Aussonderung) sowie einen "Erneut
-   versuchen"-Button, der nur bei diesem Status erscheint (`POST .../retry`, bereits seit ADR 0078
-   serverseitig vorhanden).
-2. **Neue, gemeinsame Seite `/processing-failures/`** (`ProcessingFailuresView`, drei eigenständige
-   Sektionen: Benachrichtigungen, Ersatzdarstellungen, OCR-Ergebnisse) statt dreier eigener Seiten — jede
-   Sektion lädt ausschließlich `status=failed_permanent`-Datensätze des jeweiligen Service und bietet
-   einen Neustart-Button je Zeile.
-3. **`rendering-service`/`ocr-service`: `GET /renditions`/`GET /ocr-results` bekommen `document_id`
-   optional** (vorher Pflichtparameter) plus einen neuen `status`-Query-Parameter — ohne das wäre eine
-   dokumentübergreifende "alle fehlgeschlagenen Renditions/OCR-Ergebnisse"-Ansicht technisch nicht
-   möglich gewesen. `notification-service`s `GET /notifications` hatte bereits einen optionalen
-   `status`-Filter und brauchte keine Änderung.
+1. **`ArchivalTransfersView`** (already existing) gets `failed_permanent` as a new filter option in
+   both sections (document and circulation-folder disposal) as well as a "retry" button that only
+   appears for this status (`POST .../retry`, already present server-side since ADR 0078).
+2. **New, shared page `/processing-failures/`** (`ProcessingFailuresView`, three independent sections:
+   notifications, renditions, OCR results) instead of three separate pages — each section loads
+   exclusively `status=failed_permanent` records of the respective service and offers a restart button
+   per row.
+3. **`rendering-service`/`ocr-service`: `GET /renditions`/`GET /ocr-results` get `document_id` as
+   optional** (previously a required parameter) plus a new `status` query parameter — without this, a
+   cross-document "all failed renditions/OCR results" view would not have been technically possible.
+   `notification-service`'s `GET /notifications` already had an optional `status` filter and needed no
+   change.
 
-## Begründung
+## Rationale
 
-- **Warum EINE gemeinsame neue Seite statt dreier**: keiner der drei Services hatte bereits eine
-  passende bestehende Admin-UI-Seite, in die eine kleine Sektion natürlich gepasst hätte (anders als bei
-  `archival-service`) — der Plan erlaubt ausdrücklich "neue kleine Sektion statt eigener Seite". Drei
-  komplett neue Einzelseiten für dieselbe Art von Inhalt (Liste + Neustart-Button) wären unnötige
-  Navigationszersplitterung; eine gemeinsame Seite mit drei Sektionen folgt demselben, bereits etablierten
-  Mehr-Sektionen-Muster wie `ArchivalTransfersView` (Dokument-/Case-Sektion in einer Seite).
-- **Warum `document_id` bei `rendering-service`/`ocr-service` optional statt eines separaten
-  Admin-Endpunkts**: beide Endpunkte sind bereits über `rendering.read`/`ocr.read`
-  (`permission-service`, seit ADR 0073) gegated — ein Aufruf ohne `document_id` unterliegt derselben
-  Berechtigungsprüfung wie mit, es entsteht keine neue, ungegatete Angriffsfläche. Ein separater
-  `/admin/...`-Endpunkt hätte dieselbe Berechtigung dupliziert, ohne einen echten Sicherheitsgewinn.
-- **Warum kein neuer, dedizierter "Badge"-Farbton für `failed_permanent`**: `admin-ui`s CSS kennt aktuell
-  nur zwei Badge-Varianten (`ok`/`down`, siehe `globals.css`), konsistent über drei Theme-Varianten
-  (hell/dunkel/Kontrast) gepflegt. Eine dritte Variante allein für diese Session hinzuzufügen wäre
-  Scope-Creep über eine reine Sichtbarkeits-/Neustart-Session hinaus — die Unterscheidung zu `failed`
-  passiert stattdessen über den (bereits übersetzten, klar unterscheidbaren) Status-Text selbst
-  ("Fehlgeschlagen" vs. "Dauerhaft fehlgeschlagen") und den nur bei `failed_permanent` sichtbaren
-  Neustart-Button.
-- **Warum `federation-hub-service` NICHT Teil dieser Session ist**: der Plan nennt in der P20-S7-Zeile
-  explizit nur Archiv-/Notification-/Rendition-/OCR-Fehler, nicht Handover — konsistent mit ADR 0081s
-  eigenem Scope (nur die Erstzustellung, nicht die Ergebnis-Rückleitung). Eine Admin-UI-Sichtbarkeit für
-  fehlgeschlagene Handover wäre eine sinnvolle eigenständige Folgesession, kein Bestandteil dieser.
+- **Why ONE shared new page instead of three**: none of the three services already had a suitable
+  existing admin UI page into which a small section would naturally fit (unlike `archival-service`) —
+  the plan explicitly allows "a new small section instead of its own page." Three entirely new
+  individual pages for the same kind of content (list + restart button) would be unnecessary
+  navigation fragmentation; a shared page with three sections follows the same, already established
+  multi-section pattern as `ArchivalTransfersView` (document/case section on one page).
+- **Why `document_id` is made optional on `rendering-service`/`ocr-service` instead of a separate admin
+  endpoint**: both endpoints are already gated via `rendering.read`/`ocr.read` (`permission-service`,
+  since ADR 0073) — a call without `document_id` is subject to the same permission check as with it,
+  creating no new, ungated attack surface. A separate `/admin/...` endpoint would have duplicated the
+  same permission without a real security benefit.
+- **Why no new, dedicated badge color for `failed_permanent`**: `admin-ui`'s CSS currently only knows
+  two badge variants (`ok`/`down`, see `globals.css`), maintained consistently across three theme
+  variants (light/dark/high-contrast). Adding a third variant just for this session would be scope
+  creep beyond a pure visibility/restart session — the distinction from `failed` instead happens via
+  the (already translated, clearly distinguishable) status text itself ("Failed" vs. "Permanently
+  failed") and the restart button, which is only visible for `failed_permanent`.
+- **Why `federation-hub-service` is NOT part of this session**: the plan's P20-S7 line explicitly names
+  only archival/notification/rendition/OCR failures, not handover — consistent with ADR 0081's own
+  scope (only initial delivery, not the result return path). Admin UI visibility for failed handovers
+  would be a sensible independent follow-up session, not part of this one.
 
-## Konsequenzen
+## Consequences
 
-- **`ArchivalTransfer`/`CaseArchivalTransfer`-Frontend-Typen** bekommen die zuvor fehlenden Felder
-  `attempts`/`next_retry_at` (server-seitig seit ADR 0078 vorhanden, im Frontend bislang nicht
-  abgebildet).
-- **`statusLabel`/`caseStatusLabel`-Hilfsfunktionen** wurden auf PascalCase-je-Wortteil umgestellt
-  (`"failed_permanent"` → `"archivalTransfers.statusFailedPermanent"` statt des vorherigen, nur den
-  ersten Buchstaben großschreibenden Musters, das einen unauffindbaren i18n-Key erzeugt hätte).
-- **Bestehende `rendering-service`/`ocr-service`-Aufrufer bleiben unverändert kompatibel**: alle
-  bisherigen Aufrufe übergeben `document_id` bereits explizit als Keyword-Argument bzw. Query-Parameter —
-  das Optional-Machen ist rein additiv, kein Breaking Change.
-- **Tests**: `rendering-service` 46 (vorher 44, +2), `ocr-service` 53 (vorher 51, +2, plus 8 weiterhin
-  `tesseract`-gegatete Skips) — je ein Repository- und ein API-Test für den `document_id`-optional-Pfad.
-  `admin-ui` 173 (vorher 166, +7): 3 neue Tests in `archival-transfers.test.tsx` (kein Retry-Button bei
-  nur `failed`, Retry bei `failed_permanent` für Dokument- UND Case-Sektion), neue
-  `processing-failures.test.tsx` mit 6 Tests (Laden/Anzeigen aller drei Sektionen mit dem
-  `status`-Filter, Leerzustände, Unreachable-Zustand, je ein Retry-Testfall pro Sektion).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von `rendering-service`,
-  `ocr-service`, `admin-ui`): `GET /renditions?status=failed_permanent` und `GET
-  /ocr-results?status=failed_permanent` liefern ohne `document_id` echte, aus früheren
-  Live-Verifikationen dieser Phase stammende `failed_permanent`-Datensätze über mehrere Dokumente hinweg
-  (bestätigt die dokumentübergreifende Filterung mit echten Daten, nicht nur synthetischen
-  Testfixtures); `GET /notifications?status=failed_permanent` liefert korrekt eine leere Liste (kein
-  entsprechender Datensatz vorhanden); die neue `/processing-failures/`-Route wird vom
-  `admin-ui`-Container ausgeliefert (`200`). Kein interaktiver Browser-Klickdurchlauf durchgeführt
-  (dieses Projekt verifiziert Frontend-Arbeit durchgängig über `tsc`/`eslint`/`vitest`/`next build` plus
-  echte Backend-Live-Checks, siehe `CONTRIBUTING.md` "Definition of Done" — kein Playwright/Browser-
-  Automatisierungswerkzeug ist irgendwo im Monorepo vorhanden).
+- **`ArchivalTransfer`/`CaseArchivalTransfer` frontend types** get the previously missing fields
+  `attempts`/`next_retry_at` (present server-side since ADR 0078, not yet mapped in the frontend).
+- **`statusLabel`/`caseStatusLabel` helper functions** were converted to PascalCase-per-word-part
+  (`"failed_permanent"` → `"archivalTransfers.statusFailedPermanent"` instead of the previous pattern
+  that only capitalized the first letter, which would have produced an unfindable i18n key).
+- **Existing `rendering-service`/`ocr-service` callers remain compatible unchanged**: all previous calls
+  already pass `document_id` explicitly as a keyword argument or query parameter — making it optional
+  is purely additive, not a breaking change.
+- **Tests**: `rendering-service` 46 (previously 44, +2), `ocr-service` 53 (previously 51, +2, plus 8
+  still `tesseract`-gated skips) — one repository and one API test each for the `document_id`-optional
+  path. `admin-ui` 173 (previously 166, +7): 3 new tests in `archival-transfers.test.tsx` (no retry
+  button with only `failed`, retry with `failed_permanent` for both document AND case sections), new
+  `processing-failures.test.tsx` with 6 tests (loading/displaying all three sections with the `status`
+  filter, empty states, unreachable state, one retry test case per section).
+- **Verified live against the real running stack** (image rebuild + restart of `rendering-service`,
+  `ocr-service`, `admin-ui`): `GET /renditions?status=failed_permanent` and
+  `GET /ocr-results?status=failed_permanent` return, without `document_id`, real `failed_permanent`
+  records from earlier live verifications in this phase across multiple documents (confirming the
+  cross-document filtering with real data, not only synthetic test fixtures);
+  `GET /notifications?status=failed_permanent` correctly returns an empty list (no corresponding
+  record present); the new `/processing-failures/` route is served by the `admin-ui` container (`200`).
+  No interactive browser click-through was performed (this project consistently verifies frontend work
+  via `tsc`/`eslint`/`vitest`/`next build` plus real backend live checks, see `CONTRIBUTING.md`
+  "Definition of Done" — no Playwright/browser automation tool exists anywhere in the monorepo).

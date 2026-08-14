@@ -1,20 +1,20 @@
 # dms-constraint-engine
 
-Regel-Engine (Konzept 4.5): validiert Attribute/Namen gegen ein Objekttyp-Schema
-(2.2). Reine, zustandslose Python-Bibliothek - keine eigene Persistenz, kein
-Netzwerkzugriff.
+Rule engine (Concept 4.5): validates attributes/names against an object-type schema
+(2.2). Pure, stateless Python library - no persistence of its own, no
+network access.
 
-## Warum eine Lib statt eines eigenen Service?
+## Why a lib instead of its own service?
 
-Die Roadmap nennt "Constraint Engine" als eigenständiges Konzept neben dem
-Object-Type Service. Die eigentliche Validierungslogik braucht aber keinen
-eigenen Prozess/Schema - sie ist eine reine Funktion `schema -> attributes ->
-errors`. Persistiert wird sie vom **Object-Type Service**, der diese Lib
-nutzt, um seinen `/object-types/{id}/validate`-Endpunkt zu implementieren;
-Document Service und Folder Service rufen ausschließlich diesen HTTP-Endpunkt
-auf (kein Import fremder Service-Interna), nicht die Lib direkt aus einem
-anderen Servicekontext heraus - die Lib selbst ist innerhalb eines einzigen
-Service (Object-Type Service) eingebettet.
+The roadmap names "Constraint Engine" as a standalone concept alongside the
+Object-Type Service. The actual validation logic, however, does not need its
+own process/schema - it is a pure function `schema -> attributes ->
+errors`. It is persisted by the **Object-Type Service**, which uses this lib
+to implement its `/object-types/{id}/validate` endpoint;
+Document Service and Folder Service exclusively call this HTTP endpoint
+(no importing of foreign service internals), not the lib directly from
+another service context - the lib itself is embedded within a single
+service (Object-Type Service).
 
 ## API
 
@@ -24,20 +24,20 @@ from dms_constraint_engine import validate
 errors: list[str] = validate(schema, name="RE-000123_2026-01-01.pdf", attributes={...})
 ```
 
-Leere Liste = gültig. Unterstützt (4.5, Minimum):
+Empty list = valid. Supports (4.5, minimum):
 
-- Pflichtfelder (`required: true`)
-- Bedingte Pflichtfelder (`conditions: [{if: "Betrag > 10000", then: "require:Kostenstelle"}]`,
-  restriktiver Vergleichs-Parser - kein `eval()`, nur `attr <op> literal`)
-- Musterprüfung (Regex) für Werte (`pattern` je String-Attribut) und für Namen
-  (`namingConstraints.pattern`, Platzhalter wie `{Rechnungsnummer}` werden
-  durch den tatsächlichen Attributwert ersetzt und gegen den Namen ohne
-  Dateiendung geprüft)
-- Wertebereiche (`min`/`max` für `decimal`/`integer`)
+- Required fields (`required: true`)
+- Conditional required fields (`conditions: [{if: "Betrag > 10000", then: "require:Kostenstelle"}]`,
+  restrictive comparison parser - no `eval()`, only `attr <op> literal`)
+- Pattern checking (regex) for values (`pattern` per string attribute) and for names
+  (`namingConstraints.pattern`, placeholders like `{Rechnungsnummer}` are
+  replaced with the actual attribute value and checked against the name without
+  file extension)
+- Value ranges (`min`/`max` for `decimal`/`integer`)
 
-**Bewusst vereinfacht**: "Verweise auf andere Objekte" (`type: "reference"`)
-wird nur auf Format geprüft (nicht-leerer String), nicht auf tatsächliche
-Existenz beim referenzierten Service - siehe
+**Deliberately simplified**: "references to other objects" (`type: "reference"`)
+is only checked for format (non-empty string), not for actual
+existence at the referenced service - see
 `docs/services/object-type-service.md`.
 
 ## Tests
@@ -46,4 +46,4 @@ Existenz beim referenzierten Service - siehe
 uv run pytest libs/dms-constraint-engine/tests
 ```
 
-Reine Unit-Tests, keine Infrastruktur nötig.
+Pure unit tests, no infrastructure needed.

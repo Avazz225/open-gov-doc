@@ -1,77 +1,75 @@
-# 0097 — Gateway: Rate Limiting auf Redis umgestellt (Sorted-Set-Sliding-Window)
+# 0097 — Gateway: Rate Limiting switched to Redis (sorted-set sliding window)
 
-**Status:** akzeptiert
-**Kontext:** Konzept 3.5, Session P25-S3 (Post-Roadmap-Feature, revisit von ADR 0005)
+**Status:** accepted
+**Context:** Concept 3.5, Session P25-S3 (post-roadmap feature, revisit of ADR 0005)
 
-## Entscheidung
+## Decision
 
-1. `gateway-service`s `RateLimiter` speichert seinen Sliding-Window-Zähler je Client-Schlüssel
-   nicht mehr in einem in-process `dict[str, deque[float]]` (ADR 0005), sondern in **Redis** — dem
-   ersten Redis-Vorkommen in diesem gesamten Projekt. Neuer `redis`-Service in
-   `infra/docker-compose.yml`, neue `redis_url`-Einstellung (Default zeigt auf diesen Service),
-   neue `redis`-Paketabhängigkeit (`redis.asyncio`, der offizielle async Redis-Client — die
-   frühere separate `aioredis`-Bibliothek ist seit Redis-py 4.2 darin aufgegangen).
-2. Die Sliding-Window-Semantik bleibt exakt erhalten (`max_requests`/`window_seconds`
-   unverändert), umgesetzt über ein Sorted Set pro Client-Schlüssel (`ZADD`/`ZREMRANGEBYSCORE`/
-   `ZCARD` in einer MULTI/EXEC-Transaktion) statt der einfacheren Fixed-Window-Variante
+1. `gateway-service`'s `RateLimiter` no longer stores its sliding-window counter per client key
+   in an in-process `dict[str, deque[float]]` (ADR 0005), but in **Redis** — the
+   first occurrence of Redis in this entire project. New `redis` service in
+   `infra/docker-compose.yml`, new `redis_url` setting (default points to this service),
+   new `redis` package dependency (`redis.asyncio`, the official async Redis client — the
+   former separate `aioredis` library has been merged into it since redis-py 4.2).
+2. The sliding-window semantics remain exactly the same (`max_requests`/`window_seconds`
+   unchanged), implemented via a sorted set per client key (`ZADD`/`ZREMRANGEBYSCORE`/
+   `ZCARD` in a MULTI/EXEC transaction) instead of the simpler fixed-window variant
    (`INCR`+`EXPIRE`).
-3. `RateLimiter.allow()` ist jetzt `async` (Redis-Zugriffe sind inhärent asynchron) — der einzige
-   Aufrufer (`gateway_service.main.proxy()`) ruft ihn entsprechend mit `await` auf.
+3. `RateLimiter.allow()` is now `async` (Redis access is inherently asynchronous) — the only
+   caller (`gateway_service.main.proxy()`) calls it with `await` accordingly.
 
-## Begründung
+## Rationale
 
-- **Redis statt weiterhin in-process**: ADR 0005 hat diese Grenze von Anfang an bewusst
-  dokumentiert und explizit als spätere Umstellung vorgezeichnet ("bei Bedarf später auf einen
-  externen Store (Redis) umstellen, ohne die `RateLimiter`-Schnittstelle selbst zu ändern") — genau
-  dieser Fall tritt jetzt ein: eine horizontal skalierte Gateway-Bereitstellung (mehrere Replikas
-  hinter einem Load Balancer) hätte mit dem alten in-process `dict` pro Replika ein eigenes,
-  unabhängiges Limit geführt. Ein Client hätte das konfigurierte Limit durch Verteilung seiner
-  Anfragen über mehrere Replikas hinweg faktisch vervielfachen können — bei einem Login-Schutz
-  (das Rate Limiting gilt explizit auch für die öffentliche `auth-service:login`-Route, siehe
-  `docs/services/gateway-service.md`) eine reale Brute-Force-Schwäche, nicht nur eine
-  Kapazitätsfrage.
-- **Sorted-Set-Sliding-Window statt Fixed-Window (`INCR`+`EXPIRE`)**: Ein Fixed-Window ist
-  einfacher (ein Zähler + eine TTL statt eines Sorted Sets), hat aber eine bekannte Schwäche an der
-  Fensterkante — das Ende von Fenster N und der Anfang von Fenster N+1 fallen für einen Client
-  zeitlich zusammen, wodurch kurzzeitig bis zu `2 × max_requests` durchgelassen werden können.
-  Für einen Login-Schutz ist das eine reale, nicht nur theoretische Schwäche. Der Sorted-Set-Ansatz
-  bildet die ursprüngliche `deque`-Semantik (jeder einzelne Hit hat einen eigenen Zeitstempel,
-  alte Hits fallen exakt nach `window_seconds` heraus) nahezu 1:1 nach — der Preis dafür ist ein
-  Sorted-Set-Member pro Request statt eines einzelnen atomaren Zählers, bei den hier üblichen
-  Fenstern (Default 600 Requests/60s je Client) vernachlässigbar gegenüber der saubereren Garantie.
-  Ein serverseitiges Lua-Skript (für eine einzige atomare Prüf-und-Add-Operation ohne den
-  nachträglichen `ZREM`-Fallback bei Überschreitung) wäre eine Alternative gewesen, bringt aber
-  einen weiteren beweglichen Teil (Skript-Deployment/-Versionierung) für denselben Effekt — bei den
-  hier moderaten Lastanforderungen nicht gerechtfertigt.
-- **`redis.asyncio` statt separatem `aioredis`-Paket**: `aioredis` ist seit Redis-py 4.2 offiziell
-  in `redis-py` aufgegangen (`from redis import asyncio as redis`) — kein Grund, eine inzwischen
-  archivierte separate Abhängigkeit einzuführen.
-- **Kein Redis-Persistenz-Volume** (`--save ""`, kein AOF, siehe `infra/docker-compose.yml`): die
-  Rate-Limit-Daten sind bewusst rein transient (TTL je Client-Key) — ein Neustart des `redis`-
-  Containers selbst setzt das Limit unschädlich zurück (kurzzeitig großzügiger, kein
-  Sicherheitsproblem), es gibt keinen fachlichen Grund, dafür Festplatten-I/O oder ein Volume zu
-  bezahlen, anders als z. B. NATS JetStream oder Postgres in diesem Stack.
+- **Redis instead of staying in-process**: ADR 0005 deliberately documented this limitation from
+  the start and explicitly foreshadowed a later migration ("switch to an external store (Redis)
+  later if needed, without changing the `RateLimiter` interface itself") — exactly this case now
+  arises: a horizontally scaled gateway deployment (multiple replicas behind a load balancer)
+  would have kept its own, independent limit per replica with the old in-process `dict`. A client
+  could have effectively multiplied the configured limit by distributing its requests across
+  multiple replicas — for a login protection mechanism (rate limiting explicitly also applies to
+  the public `auth-service:login` route, see `docs/services/gateway-service.md`) this is a real
+  brute-force weakness, not merely a capacity concern.
+- **Sorted-set sliding window instead of fixed window (`INCR`+`EXPIRE`)**: a fixed window is
+  simpler (a single counter + a TTL instead of a sorted set), but has a known weakness at the
+  window boundary — the end of window N and the start of window N+1 coincide in time for a
+  client, which can briefly let through up to `2 × max_requests`. For login protection this is a
+  real, not merely theoretical, weakness. The sorted-set approach reproduces the original
+  `deque` semantics (each individual hit has its own timestamp, old hits drop out exactly after
+  `window_seconds`) almost 1:1 — the price is a sorted-set member per request instead of a single
+  atomic counter, negligible at the window sizes typical here (default 600 requests/60s per
+  client) compared to the cleaner guarantee. A server-side Lua script (for a single atomic
+  check-and-add operation without the subsequent `ZREM` fallback on overflow) would have been an
+  alternative, but introduces another moving part (script deployment/versioning) for the same
+  effect — not justified at the moderate load requirements here.
+- **`redis.asyncio` instead of the separate `aioredis` package**: `aioredis` has been officially
+  merged into `redis-py` since redis-py 4.2 (`from redis import asyncio as redis`) — no reason to
+  introduce a now-archived separate dependency.
+- **No Redis persistence volume** (`--save ""`, no AOF, see `infra/docker-compose.yml`): the
+  rate-limit data is deliberately purely transient (TTL per client key) — a restart of the
+  `redis` container itself harmlessly resets the limit (briefly more generous, no security
+  problem), there is no functional reason to pay for disk I/O or a volume for this, unlike e.g.
+  NATS JetStream or Postgres in this stack.
 
-## Konsequenzen
+## Consequences
 
-- Neue Infrastruktur-/Deployment-Abhängigkeit: eine echte Installation muss künftig einen `redis`-
-  Dienst betreiben, den es vorher nicht gab — für den gebündelten Dev-/Test-Stack ist das durch den
-  neuen `infra/docker-compose.yml`-Service bereits abgedeckt, für eine produktive Bereitstellung
-  (z. B. Kubernetes) muss ein Betreiber diesen zusätzlichen Baustein einplanen.
-- `gateway-service`s einzige verbleibende Rolle als "zustandsloser" Dienst (siehe
-  `docs/services/gateway-service.md`, "Eigenes Postgres-Schema: keines") gilt weiterhin für
-  Postgres — die Rate-Limit-Daten liegen jetzt in einem geteilten, aber bewusst nicht dauerhaften
-  Store, kein neues Postgres-Schema nötig.
-- Tests laufen jetzt gegen einen echten, laufenden `redis`-Container (kein Mock, gleiche
-  Teststrategie wie gegen Postgres/NATS/MinIO überall sonst im Projekt) — `scripts/run-tests.sh`
-  benötigt dafür keine Anpassung, da `redis` wie jeder andere Compose-Service bereits vor dem
-  Testlauf hochgefahren wird und `gateway-service` selbst nicht in der `CONSUMER_SERVICES`-Liste
-  steht (kein eigener NATS-Konsument, kein Container-Stop/Start-Sonderfall nötig).
-- Jeder proxied Request verursacht jetzt zusätzlich mehrere Redis-Roundtrips (eine MULTI/EXEC-
-  Transaktion, im Ablehnungsfall ein weiterer `ZREM`) statt eines reinen In-Memory-Zugriffs — bei
-  den hier üblichen Lastanforderungen (Dev-/Lern-Projekt, keine Hochlast-Produktion) nicht
-  spürbar, aber ein bewusst in Kauf genommener Overhead, den eine echte Hochlast-Installation im
-  Auge behalten sollte.
-- Instanzauswahl (`InstanceResolver.pick()`, zufälliges Load Balancing) bleibt unverändert reines
-  In-Process-Verhalten (siehe P25-S4, parallel in Arbeit) — diese Session ändert ausschließlich das
-  Rate Limiting, keine anderen Teile von `main.py`.
+- New infrastructure/deployment dependency: a real installation must now run a `redis` service
+  that did not exist before — for the bundled dev/test stack this is already covered by the new
+  `infra/docker-compose.yml` service; for a production deployment (e.g. Kubernetes) an operator
+  must plan for this additional building block.
+- `gateway-service`'s only remaining role as a "stateless" service (see
+  `docs/services/gateway-service.md`, "Own Postgres schema: none") still holds with regard to
+  Postgres — the rate-limit data now lives in a shared but deliberately non-durable store, no new
+  Postgres schema needed.
+- Tests now run against a real, running `redis` container (no mock, same test strategy as
+  against Postgres/NATS/MinIO everywhere else in the project) — `scripts/run-tests.sh` needs no
+  adjustment for this, since `redis` is already brought up like any other Compose service before
+  the test run, and `gateway-service` itself is not on the `CONSUMER_SERVICES` list (no own NATS
+  consumer, no container stop/start special case needed).
+- Every proxied request now incurs several additional Redis round trips (a MULTI/EXEC
+  transaction, plus an additional `ZREM` in the rejection case) instead of a pure in-memory
+  access — at the load requirements typical here (dev/learning project, not high-load
+  production) not noticeable, but a deliberately accepted overhead that a real high-load
+  installation should keep an eye on.
+- Instance selection (`InstanceResolver.pick()`, random load balancing) remains unchanged
+  in-process-only behavior (see P25-S4, worked on in parallel) — this session changes only the
+  rate limiting, no other parts of `main.py`.

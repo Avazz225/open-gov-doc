@@ -1,36 +1,37 @@
-# 0001 — Event-Bus-Konsumenten besitzen keinen eigenen Stream
+# 0001 — Event bus consumers do not own their own stream
 
-**Status:** akzeptiert
-**Kontext:** Konzept 3.4/5.3, Session P1-S2 (Audit Service)
+**Status:** accepted
+**Context:** Concept 3.4/5.3, Session P1-S2 (Audit Service)
 
-## Entscheidung
+## Decision
 
-`NatsEventBusClient` (libs/dms-eventbus-client) unterscheidet zwei Rollen über
-den neuen Konstruktor-Parameter `ensure_stream`:
+`NatsEventBusClient` (libs/dms-eventbus-client) distinguishes two roles via
+the new constructor parameter `ensure_stream`:
 
-- **Producer** (Default, `ensure_stream=True`, `stream=<name>` erforderlich):
-  `connect()` legt den eigenen JetStream-Stream an, falls er noch nicht existiert.
-- **Reine Konsumenten** (`ensure_stream=False`, kein `stream`-Name nötig):
-  `connect()` verbindet nur, ohne einen Stream zu deklarieren. `subscribe()`
-  funktioniert trotzdem, da JetStream den passenden Stream serverseitig anhand
-  des abonnierten Subjects auflöst.
+- **Producer** (default, `ensure_stream=True`, `stream=<name>` required):
+  `connect()` creates its own JetStream stream if it does not already exist.
+- **Pure consumers** (`ensure_stream=False`, no `stream` name needed):
+  `connect()` only connects, without declaring a stream. `subscribe()`
+  still works, since JetStream resolves the matching stream server-side
+  based on the subscribed subject.
 
-## Begründung
+## Rationale
 
-Der Audit Service (3.4/5.3) soll Ereignisse **beliebig vieler** Producer-Services
-konsumieren, ohne deren Streams zu kennen oder zu besitzen. Mit der ursprünglichen
-Signatur aus P0-S2 (`stream` war Pflichtparameter, `connect()` erzeugte ihn immer)
-hätte der Audit Service für jeden Producer einen eigenen `NatsEventBusClient` mit
-dessen Stream-Namen instanziieren müssen - unnötige Kopplung an Producer-interne
-Namensgebung, die bei jedem neuen Service-Typ hätte nachgezogen werden müssen.
+The Audit Service (3.4/5.3) needs to consume events from an **arbitrary
+number** of producer services, without knowing or owning their streams. With
+the original signature from P0-S2 (`stream` was a required parameter,
+`connect()` always created it), the Audit Service would have had to
+instantiate a separate `NatsEventBusClient` with that producer's stream name
+for every producer - unnecessary coupling to producer-internal naming that
+would have had to be updated for every new service type.
 
-## Konsequenzen
+## Consequences
 
-- Konsumenten kennen nur die Subject-Konvention (`<producer-stream>.>`), nicht die
-  Stream-Namen selbst.
-- Ein Subject kann nur konsumiert werden, wenn mindestens ein Producer den
-  zugehörigen Stream bereits angelegt hat (Producer muss vor dem ersten
-  Konsumieren mindestens einmal gestartet worden sein - unkritisch, da Streams
-  serverseitig persistent sind und nicht bei jedem Producer-Neustart neu entstehen).
-- Bestehender Producer-Code (Registry Service, zukünftige Services) ist von der
-  Änderung nicht betroffen - `ensure_stream=True` bleibt Default.
+- Consumers only know the subject convention (`<producer-stream>.>`), not the
+  stream names themselves.
+- A subject can only be consumed once at least one producer has already
+  created the corresponding stream (the producer must have been started at
+  least once before the first consumption - uncritical, since streams are
+  persisted server-side and are not recreated on every producer restart).
+- Existing producer code (Registry Service, future services) is unaffected
+  by this change - `ensure_stream=True` remains the default.

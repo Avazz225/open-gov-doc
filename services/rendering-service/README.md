@@ -1,44 +1,44 @@
 # rendering-service
 
-Rendering/Preview + Ersatzdarstellungen (Konzept 3.7/2.4): erzeugt automatisch
-Vorschauen/Ersatzdarstellungen für neue Dokumentversionen (nach `document.created`/
-`document.version.created`, die der Document Service erst *nach* erfolgreichem
-Virenscan publiziert, ADR 0010) und stellt On-Demand-Rendering-Funktionen bereit.
+Rendering/preview + renditions (Concept 3.7/2.4): automatically generates
+previews/renditions for new document versions (after `document.created`/
+`document.version.created`, which the Document Service only publishes *after*
+a successful virus scan, ADR 0010) and provides on-demand rendering functions.
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/renditions?document_id=...&version_number=...` | Erzeugte Ersatzdarstellungen/Vorschauen zu einer Version (ohne `version_number`: alle Versionen) |
-| `GET` | `/renditions/{id}` | Einzelne Ersatzdarstellung (Metadaten) |
-| `GET` | `/renditions/{id}/content` | Bytes der Ersatzdarstellung (Proxy auf den Storage Service) |
-| `POST` | `/render/watermark` | Multipart: `file` (PDF), `text` — On-Demand-Wasserzeichen, **nicht** persistiert |
-| `GET` | `/healthz` | Health-Check |
+| `GET` | `/renditions?document_id=...&version_number=...` | Generated renditions/previews for a version (without `version_number`: all versions) |
+| `GET` | `/renditions/{id}` | Single rendition (metadata) |
+| `GET` | `/renditions/{id}/content` | Rendition bytes (proxy to the Storage Service) |
+| `POST` | `/render/watermark` | Multipart: `file` (PDF), `text` — on-demand watermark, **not** persisted |
+| `GET` | `/healthz` | Health check |
 
-Details/Schema: siehe `../../docs/services/rendering-service.md`.
+Details/schema: see `../../docs/services/rendering-service.md`.
 
-## Ersatzdarstellungs-Regeln (2.4/3.7, Plugin-Prinzip wie Storage-Backends)
+## Rendition Rules (2.4/3.7, plugin principle like storage backends)
 
-Automatisch bei jeder neuen Dokumentversion angewendet (`renderers/__init__.py`
-registriert die aktiven Regeln):
+Automatically applied to every new document version (`renderers/__init__.py`
+registers the active rules):
 
-| Quellformat | Ziel | Renderer |
+| Source format | Target | Renderer |
 |---|---|---|
-| Rasterbilder (`image/*`) | PNG-Thumbnail (max. 256×256) | `ThumbnailRenderer` (Pillow) |
-| `.docx` | `.txt`-Textextraktion | `DocxTextExtractionRenderer` (python-docx) |
-| `.pptx` | `.txt`-Textextraktion je Folie | `PptxTextExtractionRenderer` (python-pptx) — weicht bewusst vom Konzept-Beispiel `.pptx -> .pdf` ab, siehe Modul-Docstring |
-| `.pdf` | PDF-Archivkopie (Best-Effort-Tagging) | `PdfArchiveRenderer` (pypdf) — **kein** ISO-19005-validiertes PDF/A |
+| Raster images (`image/*`) | PNG thumbnail (max. 256×256) | `ThumbnailRenderer` (Pillow) |
+| `.docx` | `.txt` text extraction | `DocxTextExtractionRenderer` (python-docx) |
+| `.pptx` | `.txt` text extraction per slide | `PptxTextExtractionRenderer` (python-pptx) — deliberately deviates from the concept example `.pptx -> .pdf`, see module docstring |
+| `.pdf` | PDF archive copy (best-effort tagging) | `PdfArchiveRenderer` (pypdf) — **not** an ISO-19005-validated PDF/A |
 
-Formate ohne passende Regel (inkl. bildbasierter/gescannter Dokumente, die
-OCR brauchen) werden in dieser Session bewusst nicht bedient — Nachzieheffekt
-von P5-S3. Persistenz aller Ergebnisse ausschließlich über den Storage
-Service (2.4: kein Cache).
+Formats without a matching rule (including image-based/scanned documents that
+need OCR) are deliberately not handled in this session — a follow-on effect
+of P5-S3. Persistence of all results exclusively via the Storage Service
+(2.4: no cache).
 
-## Registry-Registrierung (seit P4-S1)
+## Registry Registration (since P4-S1)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an — Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
+Registers itself with the registry on startup via `dms-registry-client` — opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
 
-## Lokale Ausführung
+## Running Locally
 
 ```bash
 cd infra && docker compose up -d postgres nats storage-service document-service rendering-service

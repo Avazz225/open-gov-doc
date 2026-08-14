@@ -1,67 +1,56 @@
-# 0098 — Gateway-Instanzauswahl workload-bewusst, aber bewusst nur pro Replika (nicht über Redis geteilt)
+# 0098 — Gateway instance selection is workload-aware, but deliberately per-replica only (not shared via Redis)
 
-**Status:** akzeptiert
-**Kontext:** Konzept 3.5, Session P25-S4 (`gateway-service`)
+**Status:** accepted
+**Context:** Concept 3.5, Session P25-S4 (`gateway-service`)
 
-## Entscheidung
+## Decision
 
-`InstanceResolver.pick()` wählt seit P25-S4 unter mehreren gesunden
-Kandidaten eines `service_type` die Instanz mit den wenigsten aktuell
-offenen Anfragen, statt wie zuvor (ADR 0005) rein zufällig
-(`random.choice`). Der Zähler offener Anfragen (`dict[str, int]`, Schlüssel
-= Instanz-Adresse) lebt **ausschließlich im Prozessspeicher der jeweiligen
-`InstanceResolver`-Instanz** — bei mehreren horizontal skalierten
-Gateway-Replikas hinter einem Load Balancer führt jede Replika ihren
-eigenen, unabhängigen Zähler. Es gibt bewusst **keinen** clusterweit
-geteilten Zähler (z. B. über Redis), obwohl genau dieses Muster erst eine
-Session zuvor (P25-S3, ADR 0097) für den Rate Limiter eingeführt wurde.
+Since P25-S4, `InstanceResolver.pick()` selects, among several healthy candidates of a
+`service_type`, the instance with the fewest currently open requests, instead of purely at
+random as before (ADR 0005, `random.choice`). The open-request counter (`dict[str, int]`, keyed
+by instance address) lives **exclusively in the process memory of the respective
+`InstanceResolver` instance** — with multiple horizontally scaled gateway replicas behind a load
+balancer, each replica keeps its own, independent counter. There is deliberately **no**
+cluster-wide shared counter (e.g. via Redis), even though exactly this pattern was introduced
+just one session earlier (P25-S3, ADR 0097) for the rate limiter.
 
-Reserve/Release erfolgt über einen Async-Context-Manager
-(`resolver.reserved_instance(instances)`), der `pick()` aufruft, den Zähler
-vor dem Upstream-Aufruf erhöht und in einem `finally` wieder freigibt — auch
-bei einer `httpx.HTTPError` während des Upstream-Aufrufs selbst. Tie-Break
-bei mehreren Instanzen mit demselben Minimum: zufällig unter den
-Minimum-Kandidaten (verhindert, dass im Ruhezustand, wenn alle Zähler bei 0
-stehen, immer dieselbe erste Instanz der Liste bevorzugt würde).
+Reserve/release happens via an async context manager (`resolver.reserved_instance(instances)`)
+that calls `pick()`, increments the counter before the upstream call, and releases it again in a
+`finally` — even in the event of an `httpx.HTTPError` during the upstream call itself. Tie-break
+when multiple instances share the same minimum: random among the minimum candidates (prevents
+the same first instance in the list from always being preferred at rest, when all counters are
+at 0).
 
-## Begründung
+## Rationale
 
-Der Rate Limiter (ADR 0097) musste zwingend clusterweit geteilt werden: ein
-rein lokaler Zähler wäre ein **umgehbares Sicherheitsversprechen** gewesen —
-ein Client hätte das Limit durch Verteilung seiner Anfragen über mehrere
-Gateway-Replikas faktisch vervielfachen können. Bei der Instanzauswahl fehlt
-dieser Umgehungs-Anreiz vollständig: ein "zu gleichmäßig verteilter"
-Load-Balancing-Zähler bringt einem Client keinen Vorteil, den er gezielt
-ausnutzen könnte. Die Instanzauswahl ist eine reine Performance-/Fairness-
-Heuristik, kein Zugriffsschutz.
+The rate limiter (ADR 0097) had to be shared cluster-wide out of necessity: a purely local
+counter would have been a **bypassable security guarantee** — a client could have effectively
+multiplied the limit by distributing its requests across multiple gateway replicas. For instance
+selection this bypass incentive is completely absent: a "too evenly distributed" load-balancing
+counter gives a client no advantage it could specifically exploit. Instance selection is a pure
+performance/fairness heuristic, not an access control mechanism.
 
-Ein clusterweit geteilter Zähler über Redis wäre technisch möglich (analog
-zu ADR 0097, z. B. `INCR`/`DECR` je Instanz-Adresse), hätte aber einen realen
-Preis: **zwei zusätzliche Redis-Roundtrips pro proxiedtem Request** (einer
-vor, einer nach dem eigentlichen Upstream-Aufruf, zusätzlich zum bereits
-vorhandenen Rate-Limit-Roundtrip aus P25-S3) — auf dem heißesten Pfad des
-gesamten Systems (praktisch jeder Request durchläuft `proxy()`). Dieser Preis
-steht in keinem sinnvollen Verhältnis zum Nutzen: selbst eine rein
-pro-Replika-lokale Sicht approximiert "wenig ausgelastete Instanz bevorzugen"
-bereits gut genug, da jede Replika ohnehin nur einen Ausschnitt des
-Gesamtverkehrs sieht und dieser Ausschnitt bei mehreren Replikas hinter einem
-Load Balancer selbst schon einigermaßen gleichmäßig verteilt ist. Im
-schlimmsten Fall führt die fehlende Cluster-Sicht zu einer etwas suboptimalen,
-aber niemals sicherheitsrelevant falschen Verteilung.
+A cluster-wide shared counter via Redis would have been technically possible (analogous to ADR
+0097, e.g. `INCR`/`DECR` per instance address), but would have a real cost: **two additional
+Redis round trips per proxied request** (one before, one after the actual upstream call, in
+addition to the already-existing rate-limit round trip from P25-S3) — on the hottest path of the
+entire system (practically every request goes through `proxy()`). This cost is out of proportion
+to the benefit: even a purely per-replica-local view already approximates "prefer a
+lightly-loaded instance" well enough, since each replica sees only a slice of overall traffic
+anyway, and with multiple replicas behind a load balancer that slice is already reasonably evenly
+distributed on its own. In the worst case, the lack of cluster-wide visibility leads to a
+somewhat suboptimal, but never security-relevant, incorrect distribution.
 
-## Konsequenzen
+## Consequences
 
-- Bei mehreren Gateway-Replikas ist die Lastverteilung pro Replika lokal
-  optimal, global nur approximativ — eine einzelne, von außen "unglücklich"
-  wirkende Instanzwahl über mehrere Replikas hinweg ist möglich, aber
-  folgenlos (kein Sicherheitsproblem, nur eine geringfügig suboptimale
-  Verteilung).
-- Kein neuer Infrastruktur-Bedarf (kein zusätzlicher Redis-Zugriff) — anders
-  als P25-S3 bringt diese Session keine neue Abhängigkeit oder Latenz auf den
-  proxied Request-Pfad.
-- Ein echter Wechsel zu einer clusterweiten Sicht bliebe später möglich
-  (gleicher Redis-Dienst wie beim Rate Limiter wäre bereits vorhanden), ist
-  aber nicht Teil dieser Entscheidung und aktuell nicht für nötig befunden.
-- Weiterhin nicht latenz-bewusst (nur Anzahl offener Anfragen, keine
-  tatsächliche Antwortzeit-Messung) — siehe "Offene Punkte" in
-  `docs/services/gateway-service.md`.
+- With multiple gateway replicas, load distribution is locally optimal per replica but only
+  approximate globally — a single instance choice that looks "unlucky" from the outside across
+  multiple replicas is possible but inconsequential (no security problem, only a slightly
+  suboptimal distribution).
+- No new infrastructure need (no additional Redis access) — unlike P25-S3, this session adds no
+  new dependency or latency to the proxied request path.
+- A real switch to a cluster-wide view remains possible later (the same Redis service as for the
+  rate limiter would already be available), but is not part of this decision and is currently not
+  deemed necessary.
+- Still not latency-aware (only counts open requests, no actual response-time measurement) — see
+  "Open Points" in `docs/services/gateway-service.md`.

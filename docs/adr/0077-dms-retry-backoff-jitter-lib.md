@@ -1,57 +1,57 @@
-# 0077 — `libs/dms-retry`: geteilte Backoff-/Jitter-Mathematik
+# 0077 — `libs/dms-retry`: shared backoff/jitter math
 
-**Status:** akzeptiert (Session 1 von 7, siehe Phase 20 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 20 Session 1, neue Shared Lib `libs/dms-retry`
+**Status:** accepted (Session 1 of 7, see Phase 20 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 20 Session 1, new shared lib `libs/dms-retry`
 
-## Entscheidung
+## Decision
 
-Neue, sehr kleine Shared Lib `libs/dms-retry` mit genau einer Funktion:
+New, very small shared lib `libs/dms-retry` with exactly one function:
 `compute_backoff_seconds(attempt, *, base=1.0, cap=300.0, rng=None) -> float` — "Full Jitter"
-Exponentiell-Backoff nach der AWS-Standardformel (`random(0, min(cap, base * 2**attempt))`).
+exponential backoff following the AWS standard formula (`random(0, min(cap, base * 2**attempt))`).
 
-`storage-service`s `replication.py::process_pending` hat bereits das Grundmuster, das der Nutzer für
-alle fünf betroffenen Stellen (storage-, archival-, notification-, rendering-/ocr-, federation-hub-
-service) will: `ObjectCopy.attempts` + `max_replication_attempts` + Status `"failed_permanent"` nach
-Erschöpfung — nur ohne Backoff/Jitter zwischen Versuchen (jeder `process_pending`-Aufruf verarbeitet
-sofort alle offenen Kopien erneut, unabhängig davon, wie kurz der letzte Fehlschlag zurückliegt). Diese
-Session verallgemeinert ausschließlich die **Zahlenformel**, nicht das Poll-Loop-Muster selbst.
+`storage-service`'s `replication.py::process_pending` already has the base pattern the user wants for
+all five affected spots (storage, archival, notification, rendering/ocr, federation-hub service):
+`ObjectCopy.attempts` + `max_replication_attempts` + status `"failed_permanent"` after exhaustion —
+just without backoff/jitter between attempts (every `process_pending` call immediately reprocesses all
+open copies again, regardless of how recently the last failure occurred). This session generalizes
+only the **number formula**, not the poll-loop pattern itself.
 
-## Begründung
+## Rationale
 
-- **Warum eine neue Lib statt einer Erweiterung von `dms-common`**: `dms-common` ist explizit für
-  Settings/Logging/OpenTelemetry-Basis beschrieben (`libs/README.md`) — eine Backoff-Formel ist fachlich
-  unabhängig davon und wird nur von den fünf Retry-Poll-Loops konsumiert, nicht von jedem Service. Eine
-  eigene, sehr kleine Lib hält die Abhängigkeit explizit und optional, statt `dms-common` (von JEDEM
-  Service importiert) um eine Funktion zu erweitern, die die meisten davon nie aufrufen.
-- **Warum "Full Jitter" statt "Equal Jitter" oder reinem Exponential-Backoff**: verteilt gleichzeitig
-  fehlgeschlagene Versuche (z. B. ein Backend-Ausfall, der viele `ObjectCopy`-Zeilen gleichzeitig
-  fehlschlagen lässt) am breitesten über das Zeitfenster — vermeidet einen erneuten Thundering-Herd-
-  Effekt beim nächsten Poll-Tick, ohne eine zusätzliche Mindestwartezeit (wie bei "Equal Jitter") zu
-  erzwingen. Referenz: AWS Architecture Blog, "Exponential Backoff And Jitter".
-- **Warum `attempt` 0-indiziert statt 1-indiziert**: passt direkt auf `ObjectCopy.attempts` (beginnt bei
-  0, vor dem ersten Versuch) — der Aufrufer muss nicht `attempts - 1` rechnen.
-- **Warum `rng` als optionaler Parameter statt globalem `random`-Modul direkt**: erlaubt deterministische
-  Unit-Tests (`random.Random(seed)`) ohne `unittest.mock.patch` auf das globale `random`-Modul —
-  gleiches Injektions-Prinzip wie `libs/dms-permission-client`s `client`-Parameter für einen
-  vorbereiteten `httpx.AsyncClient`.
-- **Warum KEIN gemeinsamer Poll-Loop-Rahmen** (bewusst NICHT Teil dieser Session, siehe Roadmap-Plan):
-  das Projekt dupliziert Poll-Loops bewusst leichtgewichtig (`_sla_poll_loop`, `_superuser_poll_loop`,
-  `_archival_poll_loop` sind je ~20 Zeilen, identisches Try/Except-Weiter-Idiom) statt sie zu
-  abstrahieren — eine Rahmen-Abstraktion für fünf strukturell leicht unterschiedliche Loops (manche
-  bereits synchron inline, manche schon als Poll-Loop) wäre eine verfrühte Zentralisierung ohne
-  echten Mehrwert gegenüber der Kopie einer ~5-Zeilen-Formel.
-- **Noch KEIN Konsument in dieser Session**: `compute_backoff_seconds` wird erst ab P20-S2
-  (archival-service) tatsächlich verwendet — diese Session legt nur die geteilte Grundlage, damit sie
-  in den folgenden vier Sessions identisch (nicht leicht abweichend kopiert) genutzt wird.
+- **Why a new lib instead of extending `dms-common`**: `dms-common` is explicitly described as the
+  base for settings/logging/OpenTelemetry (`libs/README.md`) — a backoff formula is functionally
+  independent of that and is only consumed by the five retry poll loops, not by every service. A
+  dedicated, very small lib keeps the dependency explicit and optional, instead of extending
+  `dms-common` (imported by EVERY service) with a function most of them never call.
+- **Why "Full Jitter" instead of "Equal Jitter" or plain exponential backoff**: spreads simultaneously
+  failed attempts (e.g. a backend outage that fails many `ObjectCopy` rows at once) most broadly across
+  the time window — avoids a renewed thundering-herd effect at the next poll tick, without enforcing an
+  additional minimum wait (as with "Equal Jitter"). Reference: AWS Architecture Blog, "Exponential
+  Backoff And Jitter".
+- **Why `attempt` is 0-indexed instead of 1-indexed**: fits directly onto `ObjectCopy.attempts` (starts
+  at 0, before the first attempt) — the caller does not need to compute `attempts - 1`.
+- **Why `rng` as an optional parameter instead of using the global `random` module directly**: allows
+  deterministic unit tests (`random.Random(seed)`) without `unittest.mock.patch` on the global `random`
+  module — same injection principle as `libs/dms-permission-client`'s `client` parameter for a
+  prepared `httpx.AsyncClient`.
+- **Why NO shared poll-loop framework** (deliberately NOT part of this session, see roadmap plan):
+  the project deliberately duplicates poll loops lightweight (`_sla_poll_loop`, `_superuser_poll_loop`,
+  `_archival_poll_loop` are each ~20 lines, identical try/except-continue idiom) rather than
+  abstracting them — a framework abstraction for five structurally slightly different loops (some
+  already synchronous inline, some already a poll loop) would be premature centralization without real
+  benefit over copying a ~5-line formula.
+- **No consumer yet in this session**: `compute_backoff_seconds` is only actually used starting with
+  P20-S2 (archival-service) — this session only lays the shared foundation so it can be used
+  identically (not slightly divergently copied) in the following four sessions.
 
-## Konsequenzen
+## Consequences
 
-- **Tests**: `libs/dms-retry` 6 neue Unit-Tests (Grenzfälle: `attempt=0`, exponentielles Wachstum vor
-  dem Cap, Cap-Deckelung bei großem `attempt`, Determinismus mit geseedetem `rng`, negativer `attempt`
-  wirft `ValueError`, Default-Parameter liefern einen plausiblen Bereich).
-- **`uv.lock`**: `uv lock` ausgeführt, aber unverändert — `dms-retry` hat noch keine Abhängigkeiten und
-  keinen Konsumenten, taucht daher erst ab P20-S2 im Auflösungsgraphen auf, wenn `archival-service` es
-  als Abhängigkeit deklariert.
-- Kein Dockerfile musste geändert werden (`COPY libs/ libs/` erfasst neue Verzeichnisse automatisch,
-  gleiches Muster wie bei `dms-permission-client`, P19-S1).
-- Kein Live-Verifikationsschritt nötig — reine, zustandslose Bibliotheksfunktion ohne Service-Anbindung.
+- **Tests**: `libs/dms-retry` 6 new unit tests (edge cases: `attempt=0`, exponential growth before the
+  cap, cap ceiling at large `attempt`, determinism with a seeded `rng`, negative `attempt` raises
+  `ValueError`, default parameters produce a plausible range).
+- **`uv.lock`**: `uv lock` was run, but unchanged — `dms-retry` has no dependencies yet and no
+  consumer, so it only appears in the resolution graph starting with P20-S2, when `archival-service`
+  declares it as a dependency.
+- No Dockerfile needed to change (`COPY libs/ libs/` picks up new directories automatically, same
+  pattern as `dms-permission-client`, P19-S1).
+- No live verification step needed — a pure, stateless library function with no service connection.

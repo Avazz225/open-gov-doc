@@ -1,75 +1,78 @@
-# 0074 — Workflow-Instanzstart & Task-Abschluss RBAC
+# 0074 — Workflow Instance Start & Task Completion RBAC
 
-**Status:** akzeptiert (Session 9 von 11, siehe Phase 19 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 19 Session 9, betrifft `workflow-service`, `permission-service`,
+**Status:** accepted (Session 9 of 11, see Phase 19 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 19 Session 9, affects `workflow-service`, `permission-service`,
 `case-service`
 
-## Entscheidung
+## Decision
 
-`POST /process-definitions/{id}/instances` (Instanzstart) und `POST /instances/{id}/tasks/{id}/complete`
-(Task-Abschluss) waren seit P6-S6 **bewusst** für jeden authentifizierten Principal offen ("normale
-Fachnutzung soll keine Domain-Admin-Rolle brauchen", dokumentierte Nutzerentscheidung). Diese Session
-macht daraus eine echte, admin-editierbare RBAC-Prüfung statt eines hartkodiert offenen Pfads:
+`POST /process-definitions/{id}/instances` (instance start) and
+`POST /instances/{id}/tasks/{id}/complete` (task completion) had been **deliberately** open to any
+authenticated principal since P6-S6 ("normal business use should not require a domain admin role",
+a documented user decision). This session turns this into a real, admin-editable RBAC check instead
+of a hardcoded open path:
 
-1. **Neuer `_require_workflow_permission(x_dms_principal, *, access_type)`-Helfer** (`main.py`) — `401`
-   ohne `X-DMS-Principal`, sonst Prüfung von `workflow.write` über `PermissionServiceClient.check`
-   (`resource_id="root"`, `access_type="write"`), `403` bei Ablehnung. Läuft in beiden Endpunkten NACH
-   `_reject_during_maintenance` (4.8 bleibt die äußerste Sperre) und VOR allen anderen Prüfungen
+1. **New `_require_workflow_permission(x_dms_principal, *, access_type)` helper** (`main.py`) — `401`
+   without `X-DMS-Principal`, otherwise checks `workflow.write` via `PermissionServiceClient.check`
+   (`resource_id="root"`, `access_type="write"`), `403` on rejection. Runs in both endpoints AFTER
+   `_reject_during_maintenance` (4.8 remains the outermost lock) and BEFORE all other checks
    (`_require_valid_signature_if_needed`, `_reject_manual_federated_completion`,
-   `_require_delegation_if_on_behalf_of`) — Basis-RBAC zuerst, spezifischere Checks danach.
-2. **`workflow-service`s lokaler `PermissionServiceClient` (eigene Kopie, nicht `libs/dms-permission-
-   client`) bekommt eine neue `check()`-Methode** — gleiche Signatur wie die Shared Lib, ergänzt die
-   bereits vorhandene `has_permission`/`check_delegation`/`is_maintenance_active`. Kein Umzug auf die
-   Shared Lib (ADR 0066 sieht `check_delegation` explizit als bewusst service-eigen vor, ein Voll-Umzug
-   hätte hier keinen Mehrwert).
-3. **"everyone"-Gruppe (ADR 0067) um `workflow.write` erweitert** — erhält das bisherige,
-   dokumentiert-deliberate offene Verhalten, macht es aber admin-editierbar statt für immer
-   hartkodiert offen.
-4. **`case-service`s `WorkflowClient.start_instance`** (der einzige echte HTTP-Aufrufer von
-   Instanzstart außer migration-service) sendete bislang gar keinen `X-DMS-Principal`-Header — bekommt
-   einen neuen `x_dms_principal`-Parameter, der den bereits von `_require_case_permission` verifizierten
-   Aufrufer durchreicht (NICHT `payload.created_by`, ein ungeprüftes Body-Feld analog zu reporting-
-   services `queried_by`-Antipattern, siehe ADR 0072).
+   `_require_delegation_if_on_behalf_of`) — basic RBAC first, more specific checks afterward.
+2. **`workflow-service`'s local `PermissionServiceClient` (its own copy, not `libs/dms-permission-
+   client`) gets a new `check()` method** — same signature as the shared lib, supplementing the
+   already existing `has_permission`/`check_delegation`/`is_maintenance_active`. No migration to the
+   shared lib (ADR 0066 explicitly designates `check_delegation` as intentionally service-local; a
+   full migration would provide no added value here).
+3. **"everyone" group (ADR 0067) extended with `workflow.write`** — preserves the previous,
+   documented-as-deliberate open behavior, but makes it admin-editable instead of permanently
+   hardcoded open.
+4. **`case-service`'s `WorkflowClient.start_instance`** (the only real HTTP caller of instance start
+   besides migration-service) previously sent no `X-DMS-Principal` header at all — now gets a new
+   `x_dms_principal` parameter that passes through the caller already verified by
+   `_require_case_permission` (NOT `payload.created_by`, an unverified body field analogous to
+   reporting-service's `queried_by` anti-pattern, see ADR 0072).
 
-## Begründung
+## Rationale
 
-- **Warum `workflow.write` statt zweier getrennter Permissions für Start/Abschluss**: beide sind
-  gleichrangige, reguläre Fachnutzungs-Schreibaktionen innerhalb derselben Domäne (Workflow-Ausführung)
-  — keine der beiden ist sensibler als die andere (anders als reporting-services Forensik-Trace vs.
-  Standardberichte), eine Aufspaltung wäre unnötige Granularität ohne erkennbaren Nutzen.
-- **Warum in der "everyone"-Gruppe statt einer neuen Domain-Admin-Rolle**: die ursprüngliche P6-S6-
-  Entscheidung war explizit *"normale Fachnutzung soll keine Domain-Admin-Rolle brauchen"* — eine neue
-  Pflicht-Rolle hätte diese Entscheidung durch die Hintertür kassiert. "everyone" reproduziert exakt das
-  bisherige Verhalten, macht es aber zum ersten Mal admin-editierbar (ein Admin kann `workflow.write`
-  künftig gezielt aus "everyone" entfernen und stattdessen eine engere Rolle vergeben, ohne Codeänderung).
-- **Warum `case-service` den echten `x_dms_principal` statt eines synthetischen `system:case-service`
-  durchreicht (anders als z. B. `archival-service`s `CaseClient`)**: eine Umlaufmappen-Erstellung IST
-  eine echte, auf einen menschlichen Aufrufer zurückführbare Aktion — `create_case` hat den verifizierten
-  Principal bereits aus `_require_case_permission` zur Hand, ein synthetisches Servicekonto würde die
-  Audit-Spur unnötig verwässern (anders als bei rein Consumer-getriebenen Aufrufen ohne jeden
-  menschlichen Auslöser, z. B. `rendering-service`s OCR-Abfrage).
-- **`migration-service` brauchte keine Änderung**: sein `WorkflowServiceClient` sendet bereits
-  standardmäßig `X-DMS-Principal: migration-service` (seit P12-S2) — "everyone" deckt diesen Principal
-  automatisch mit ab, ohne zusätzlichen Rollen-Grant.
+- **Why `workflow.write` instead of two separate permissions for start/completion**: both are
+  equal-ranking, regular business write actions within the same domain (workflow execution) — neither
+  is more sensitive than the other (unlike reporting-service's forensic trace vs. standard reports),
+  splitting them would be unnecessary granularity with no discernible benefit.
+- **Why in the "everyone" group instead of a new domain admin role**: the original P6-S6 decision was
+  explicitly *"normal business use should not require a domain admin role"* — a new mandatory role
+  would have undone this decision through the back door. "everyone" reproduces exactly the previous
+  behavior, but for the first time makes it admin-editable (an admin can in the future remove
+  `workflow.write` from "everyone" specifically and grant a narrower role instead, without a code
+  change).
+- **Why `case-service` passes through the real `x_dms_principal` instead of a synthetic
+  `system:case-service` (unlike, e.g., `archival-service`'s `CaseClient`)**: creating a circulation
+  folder IS a real action attributable to a human caller — `create_case` already has the verified
+  principal on hand from `_require_case_permission`; a synthetic service account would unnecessarily
+  dilute the audit trail (unlike purely consumer-driven calls with no human trigger whatsoever, e.g.
+  `rendering-service`'s OCR query).
+- **`migration-service` needed no change**: its `WorkflowServiceClient` already sends
+  `X-DMS-Principal: migration-service` by default (since P12-S2) — "everyone" automatically covers this
+  principal without an additional role grant.
 
-## Konsequenzen
+## Consequences
 
-- **Tests**: `workflow-service` 171 (Testanzahl unverändert, aber `client`-Fixtures in `test_api.py`/
-  `test_federation.py`/`test_license_gate.py` (inkl. einer eigenständigen `TestClient`-Instanz für den
-  `raise_server_exceptions=False`-Testfall) tragen jetzt standardmäßig einen `X-DMS-Principal`-Header;
-  ein Test, der spezifisch den 401-Pfad bei fehlendem Header innerhalb der Delegations-Prüfung beweisen
-  wollte, überschreibt den Header jetzt explizit auf leer — die Assertion bleibt unverändert `401`, nur
-  der auslösende Mechanismus ist jetzt der neue Basis-RBAC-Check statt der spezifischeren Delegations-
-  Prüfung). `case-service` 50, `migration-service` 8, `permission-service` 128, `config-service` 48,
-  `reporting-service` 57 — alle unverändert an Zahl, weiterhin grün. `ruff check`/`ruff format --check`
+- **Tests**: `workflow-service` 171 (test count unchanged, but `client` fixtures in `test_api.py`/
+  `test_federation.py`/`test_license_gate.py` (incl. a standalone `TestClient` instance for the
+  `raise_server_exceptions=False` test case) now carry an `X-DMS-Principal` header by default; a test
+  that specifically proved the 401 path for a missing header within the delegation check now
+  explicitly overrides the header to empty — the assertion remains `401` unchanged, only the
+  triggering mechanism is now the new basic RBAC check instead of the more specific delegation check).
+  `case-service` 50, `migration-service` 8, `permission-service` 128, `config-service` 48,
+  `reporting-service` 57 — all unchanged in count, still green. `ruff check`/`ruff format --check`
   clean.
-- **Vollständig live gegen den echten laufenden Stack verifiziert** (nach Image-Neubau von
-  `workflow-service`/`case-service` + Neustart, plus manuellem Nachziehen der laufenden "everyone"-
-  Rolle): `POST /process-definitions/{id}/instances` ohne Header → `401`, mit Principal → `201`.
-  `case-service`s eigene Testsuite deckt den realen End-to-End-Pfad (`create_case` → `WorkflowClient.
-  start_instance` mit durchgereichtem Principal) bereits ab — kein Mocking zwischen den Services.
-- **`POST /instances/{id}/retry` bleibt bewusst ungegatet** — der Roadmap-Auftrag nannte explizit nur
-  Instanzstart und Task-Abschluss, nicht den Retry-Pfad; außerhalb dieser Session.
-- **`created_by`/`completed_by` bleiben weiterhin reine, ungeprüfte Body-Strings** (unverändert seit
-  P6-S1) — die Gating-Entscheidung dieser Session betrifft nur, *ob* eine Aktion ausgeführt werden darf,
-  nicht, ob der angegebene Name stimmt.
+- **Fully verified live against the real running stack** (after rebuilding images for
+  `workflow-service`/`case-service` + restart, plus manually re-granting the running "everyone"
+  role): `POST /process-definitions/{id}/instances` without header → `401`, with principal → `201`.
+  `case-service`'s own test suite already covers the real end-to-end path (`create_case` →
+  `WorkflowClient.start_instance` with the passed-through principal) — no mocking between the
+  services.
+- **`POST /instances/{id}/retry` remains deliberately ungated** — the roadmap mandate explicitly named
+  only instance start and task completion, not the retry path; out of scope for this session.
+- **`created_by`/`completed_by` remain plain, unverified body strings** (unchanged since P6-S1) — this
+  session's gating decision only concerns *whether* an action may be performed, not whether the given
+  name is accurate.

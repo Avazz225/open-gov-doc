@@ -1,63 +1,63 @@
 # permission-service
 
-RBAC mit Ordner-Vererbung und materialisiertem, ereignisgetriebenem Rechte-Cache
-(Konzept 4.1) sowie Bereichssperren (4.7, seit P3-S4).
+RBAC with folder inheritance and a materialized, event-driven permission cache
+(Concept 4.1) as well as scope locks (4.7, since P3-S4).
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/roles` | Rolle anlegen (`name`, `description`, `permissions: [str]`) |
-| `GET` | `/roles` | Alle Rollen |
-| `POST` | `/role-assignments` | Rolle einem Principal an einer Ressource zuweisen |
-| `DELETE` | `/role-assignments/{id}` | Zuweisung entfernen |
-| `GET` | `/resources/{id}` | Ressourcenknoten (Debug/Test) |
-| `PATCH` | `/resources/{id}` | Vererbung ein-/ausschalten (`inherit: bool`) |
-| `GET` | `/effective-permissions/{principal_id}/{resource_id}` | Effektive Rollen/Rechte (gecacht) |
-| `GET` | `/check?principal_id=&resource_id=&permission=&access_type=read\|write` | Autorisierungs-Check inkl. Bereichssperren |
-| `POST` | `/scope-locks` | Bereichssperre setzen (`resource_id`, `locked_by`, optional `reason`/`blocks_read`/`expires_at`) |
-| `DELETE` | `/scope-locks/{id}` | Sperre aufheben (`released_by`) |
-| `GET` | `/scope-locks?resource_id=` | Sperren auflisten |
-| `GET` | `/scope-locks/effective/{resource_id}` | Aktive Sperren, die diese Ressource betreffen (inkl. geerbte) |
-| `GET` | `/healthz` | Eigener Health-Check |
+| `POST` | `/roles` | Create a role (`name`, `description`, `permissions: [str]`) |
+| `GET` | `/roles` | All roles |
+| `POST` | `/role-assignments` | Assign a role to a principal on a resource |
+| `DELETE` | `/role-assignments/{id}` | Remove an assignment |
+| `GET` | `/resources/{id}` | Resource node (debug/test) |
+| `PATCH` | `/resources/{id}` | Toggle inheritance on/off (`inherit: bool`) |
+| `GET` | `/effective-permissions/{principal_id}/{resource_id}` | Effective roles/permissions (cached) |
+| `GET` | `/check?principal_id=&resource_id=&permission=&access_type=read\|write` | Authorization check including scope locks |
+| `POST` | `/scope-locks` | Set a scope lock (`resource_id`, `locked_by`, optional `reason`/`blocks_read`/`expires_at`) |
+| `DELETE` | `/scope-locks/{id}` | Release a lock (`released_by`) |
+| `GET` | `/scope-locks?resource_id=` | List locks |
+| `GET` | `/scope-locks/effective/{resource_id}` | Active locks affecting this resource (including inherited) |
+| `GET` | `/healthz` | Own health check |
 
-## Bereichssperren (4.7)
+## Scope locks (4.7)
 
-Sperrt einen ganzen Ressourcen-Teilbaum für reguläre Nutzer, unabhängig von
-RBAC — überlagert die Rechteprüfung statt sie zu verändern. Details, inkl. der
-`scope_lock.bypass`-Capability und der Auditierung über `permission.scope_lock.*`-
-Events: siehe `../../docs/services/permission-service.md`.
+Locks an entire resource subtree for regular users, independent of
+RBAC — overlays the permission check rather than modifying it. Details, including the
+`scope_lock.bypass` capability and auditing via `permission.scope_lock.*`
+events: see `../../docs/services/permission-service.md`.
 
-## Vererbungsmodell
+## Inheritance model
 
-Standard-DMS-Verhalten (SharePoint/Alfresco-artig): Rechte vererben sich von
-der Wurzel (`root`, beim Start automatisch angelegt) nach unten. Ein
-Ressourcenknoten mit `inherit=false` bricht die Vererbung an dieser Stelle ab
-- eigene Zuweisungen an genau diesem Knoten gelten weiterhin, nur der weitere
-Aufstieg zu Vorfahren entfällt.
+Standard DMS behavior (SharePoint/Alfresco-like): permissions inherit from
+the root (`root`, automatically created at startup) downward. A
+resource node with `inherit=false` breaks inheritance at that point
+- its own assignments at that exact node still apply, only the further
+climb to ancestors is skipped.
 
-## Ressourcen-Hierarchie: Folder Service (seit P3-S3)
+## Resource hierarchy: Folder Service (since P3-S3)
 
-Dieser Service hält seine `resource_node`-Tabelle über Struktur-Events synchron,
-die der Folder Service publiziert (`folder.resource.created/.moved/.deleted`,
-siehe `docs/services/permission-service.md` — Vertrag in P3-S3 live gegen die
-echte Folder-Service-API verifiziert, keine Anpassung nötig). Startet dieser
-Service, bevor je ein Producer den `folder`-Stream angelegt hat (z. B. beim
-allerersten Hochfahren des gesamten Stacks), wird das Abonnement übersprungen
-(siehe `structure_consumer.py`) statt den Start zu blockieren — ein Neustart
-nach dem ersten Start des Folder Service holt das nach.
+This service keeps its `resource_node` table in sync via structure events
+published by the Folder Service (`folder.resource.created/.moved/.deleted`,
+see `docs/services/permission-service.md` — contract verified live in P3-S3 against the
+real Folder Service API, no adjustment needed). If this service starts
+before any producer has created the `folder` stream (e.g. on the
+very first startup of the whole stack), the subscription is skipped
+(see `structure_consumer.py`) instead of blocking startup — a restart
+after the Folder Service's first start catches up on it.
 
-## Cache-Invalidierung
+## Cache invalidation
 
-Grobkörnig: jede Rechte- oder Strukturänderung leert den gesamten
-`effective_permission_cache` statt nur den betroffenen Teilbaum. Bewusste
-Vereinfachung für den Start - korrekt, aber nicht maximal granular.
+Coarse-grained: every permission or structure change clears the entire
+`effective_permission_cache` instead of just the affected subtree. Deliberate
+simplification for the initial version - correct, but not maximally granular.
 
-## Registry-Registrierung (seit P4-S1)
+## Registry registration (since P4-S1)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+Registers itself with the registry on startup via `dms-registry-client` (heartbeat, deregister on shutdown) - opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, see `docs/services/gateway-service.md` for the consumer (API gateway, dynamic routing).
 
-## Lokale Ausführung
+## Running locally
 
 ```bash
 cd infra && docker compose up -d postgres nats permission-service

@@ -1,150 +1,146 @@
-# 0036 — CMIS Connector: von Hand implementierte Browser Binding statt Bibliothek
+# 0036 — CMIS Connector: hand-implemented Browser Binding instead of a library
 
-**Status:** akzeptiert
-**Kontext:** P12-S4 (Konzept 3.3, "Connector-Architektur"). Zweiter Referenz-Connector nach
-`webdav-connector` (P12-S1, ADR 0033) — bei P12-S0/P12-S1 bewusst zurückgestellt und als eigene
-Session in die Roadmap aufgenommen. Anders als bei WebDAV (`wsgidav`, aktiv gepflegte
-Protokoll-Engine) stellte sich die Scope-Frage erst nach echter Recherche: **gibt es überhaupt
-eine Python-Bibliothek, auf der ein CMIS-Server aufbauen kann?**
+**Status:** accepted
+**Context:** P12-S4 (Concept 3.3, "Connector Architecture"). Second reference connector after
+`webdav-connector` (P12-S1, ADR 0033) — deliberately deferred at P12-S0/P12-S1 and added to the
+roadmap as its own session. Unlike WebDAV (`wsgidav`, an actively maintained protocol engine),
+the scope question only arose after real research: **does a Python library even exist that a
+CMIS server could be built on?**
 
-## Recherche-Befund (blockierend für jede Implementierungsentscheidung)
+## Research finding (blocking for any implementation decision)
 
-Ein dediziert dafür beauftragter Rechercheauftrag ergab: **keine gepflegte Python-CMIS-*Server*-
-Bibliothek existiert irgendwo.**
+A research task dedicated specifically to this found: **no maintained Python CMIS *server*
+library exists anywhere.**
 
-- **Alle gefundenen Python-CMIS-Pakete sind Client-Bibliotheken**, kein einziges implementiert
-  die Server-Seite: `cmislib` (letztes Release vor Jahren, unverändert), `cmislib3`/`cmislib-maykin`
-  (Forks desselben unveränderten Codes), `CMIS.PythonLib` (unveränderte Alt-Bibliothek). Einzige
-  Ausnahme mit echter, aktueller Pflege: `drc-cmis` (Maykin Media, EUPL-1.2) — aber auch das ist
-  ein reiner Client-Adapter, keine Server-Implementierung.
-- **Apache Chemistys OpenCMIS**, das einzige reale, vollständige CMIS-Server-Framework, ist
-  **Java-only** — nie ein Python-Äquivalent produziert.
-- Die einzigen real existierenden CMIS-**Server**-Implementierungen überhaupt (NemakiWare,
-  Java/AGPL-3.0; ein .NET-Core-`CmisServer`) sind weder Python noch mit diesem Projekt
-  lizenzkompatibel (AGPL-3.0 wäre für eine eingebettete Bibliothek problematisch, .NET ist keine
-  Option in einem Python-Projekt).
+- **Every Python CMIS package found is a client library**; none implements the server
+  side: `cmislib` (last release years ago, unchanged), `cmislib3`/`cmislib-maykin`
+  (forks of the same unchanged code), `CMIS.PythonLib` (an unchanged legacy library). The only
+  exception with real, current maintenance is `drc-cmis` (Maykin Media, EUPL-1.2) — but that too
+  is a pure client adapter, not a server implementation.
+- **Apache Chemistry's OpenCMIS**, the only real, complete CMIS server framework, is
+  **Java-only** — no Python equivalent has ever been produced.
+- The only real CMIS **server** implementations that exist at all (NemakiWare,
+  Java/AGPL-3.0; a .NET Core `CmisServer`) are neither Python nor license-compatible with
+  this project (AGPL-3.0 would be problematic for an embedded library, .NET is not an option in
+  a Python project).
 
-**Konsequenz**: anders als bei WebDAV gibt es kein Äquivalent zu "eine Bibliothek nehmen und nur
-das Backend anschließen" — die gesamte Protokoll-Schicht (URL-Muster, `cmisselector`/`cmisaction`-
-Dispatch, succinct-Property-Serialisierung, Formular-Encoding) musste aus der OASIS-CMIS-1.1-
-Spezifikation selbst (Kapitel 5, "Browser Binding") direkt nachgebaut werden.
+**Consequence**: unlike WebDAV, there is no equivalent to "take a library and just plug in the
+backend" — the entire protocol layer (URL patterns, `cmisselector`/`cmisaction` dispatch,
+succinct-property serialization, form encoding) had to be rebuilt directly from the OASIS
+CMIS 1.1 specification itself (Chapter 5, "Browser Binding").
 
-## Entscheidung
+## Decision
 
-**Browser Binding statt AtomPub/SOAP** (bereits bei P12-S0 als Empfehlung festgehalten, jetzt
-umgesetzt): von den drei CMIS-1.1-Bindings ist Browser Binding das mit Abstand einfachste (JSON +
-HTML-Formular-Semantik über reines GET/POST, keine XML-Namespace-/AtomPub-Feed-Komplexität) — mit
-`FastAPI` bereits nativ passend (JSON-Responses, `Form`/`multipart`-Parsing), ohne dass eine
-XML-Bibliothek für AtomPub-Entries gebraucht würde.
+**Browser Binding instead of AtomPub/SOAP** (already recorded as a recommendation at P12-S0, now
+implemented): of the three CMIS 1.1 bindings, Browser Binding is by far the simplest (JSON +
+HTML form semantics over plain GET/POST, no XML-namespace/AtomPub-feed complexity) — a natural
+fit with `FastAPI` already (JSON responses, `Form`/multipart parsing), with no XML library needed
+for AtomPub entries.
 
-**Nur succinct-Properties** (5.2.11) statt der vollen, typannotierten `properties`-Repräsentation
-— reduziert die zu implementierende JSON-Schemafläche erheblich, ist selbst laut Spezifikation
-der von realen Clients bevorzugte, kompaktere Modus.
+**Succinct properties only** (5.2.11) instead of the full, type-annotated `properties`
+representation — significantly reduces the JSON schema surface to implement, and is itself, per
+the specification, the more compact mode real clients prefer.
 
-**Bewusst begrenzter Funktionsumfang** (~14 Endpunkte statt aller ~38 in Kapitel 5.4 aufgeführten
-Selektoren/Aktionen): Repository-Info, Children/Object/Content lesend; createDocument/
-createFolder/update/move/delete/deleteTree/setContent/checkOut/cancelCheckOut/checkIn schreibend.
-Ausgelassen: Typsystem-Introspektion (`typeChildren`/`typeDescendants`/`typeDefinition` — dieses
-DMS hat kein CMIS-kompatibles Objekttyp-System, siehe unten), Relationships/Policies/Items/ACL
-(keine dieser CMIS-Objektarten hat eine DMS-Entsprechung), CMIS-Query-Sprache (Volltextsuche läuft
-laut ADR 0012 ohnehin über Postgres FTS), volle Versionshistorie (`document-service`s
-Checkin-Historie wird bereits vom Konzept als vollständig genug behandelt, siehe
-`webdav-connector`s Versionierungs-Mapping). Vergleichbar im Umfang mit dem WebDAV-Kernmethodenset
-aus P12-S1.
+**Deliberately limited functional scope** (~14 endpoints instead of all ~38 selectors/actions
+listed in Chapter 5.4): repository info, children/object/content for reads; createDocument/
+createFolder/update/move/delete/deleteTree/setContent/checkOut/cancelCheckOut/checkIn for
+writes. Omitted: type-system introspection (`typeChildren`/`typeDescendants`/`typeDefinition` —
+this DMS has no CMIS-compatible object-type system, see below), Relationships/Policies/Items/ACL
+(none of these CMIS object kinds has a DMS equivalent), the CMIS Query Language (full-text search
+runs via Postgres FTS anyway, per ADR 0012), full version history (`document-service`'s
+check-in history is already treated by the concept as sufficiently complete, see
+`webdav-connector`'s versioning mapping). Comparable in scope to the WebDAV core method set from
+P12-S1.
 
-**Kein separates Private-Working-Copy-Objekt bei checkOut/checkIn/cancelCheckOut**:
-`document-service` kennt keine "Working Copy" als eigene Entität — die reale Dokumentsperre (4.2)
-übernimmt exakt die vom CMIS-PWC-Mechanismus verlangte Rolle (kein Fremdzugriff bis
-Checkin/CancelCheckout). Die zurückgegebene "PWC"-Objekt-Id ist deshalb bewusst identisch zur
-Original-Dokument-Id, statt eine zweite, künstliche Id zu erfinden, die auf kein reales zweites
-Objekt verweisen würde.
+**No separate private-working-copy object on checkOut/checkIn/cancelCheckOut**:
+`document-service` has no "working copy" as its own entity — the real document lock (4.2)
+fulfills exactly the role required by the CMIS PWC mechanism (no third-party access until
+checkin/cancelCheckout). The returned "PWC" object ID is therefore deliberately identical to the
+original document ID, instead of inventing a second, artificial ID that would not point to any
+real second object.
 
-**`objectId` wird sowohl aus dem URL-Query-String als auch aus dem POST-Formular gelesen**
-(5.3.4 vs. 5.4.4.3.3) — beide Adressierungswege sind laut Spezifikation gültig, je nach Aktion
-(Formular-Control für die meisten Schreibaktionen, URL-Adressierung für `createDocument`/
-`createFolder`, die kein `objectId`-Formular-Control kennen).
+**`objectId` is read from both the URL query string and the POST form**
+(5.3.4 vs. 5.4.4.3.3) — both addressing routes are valid per the specification, depending on the
+action (form control for most write actions, URL addressing for `createDocument`/
+`createFolder`, which have no `objectId` form control).
 
-**`asyncio.to_thread()` für den synchronen `DmsTreeClient`-Aufruf in Schreib-Endpunkten**: Lese-
-Endpunkte sind normale (nicht-`async`) FastAPI-Routen (automatisch im Threadpool, wie schon
-`webdav-connector`), Schreib-Endpunkte müssen aber `async def` sein (`await request.form()` ist
-Starlette-`async`-only) — der eigentliche synchrone SDK-Aufruf läuft deshalb über
-`asyncio.to_thread()` statt direkt im Event-Loop-Thread, exakt der bei ADR 0034 als künftiger
-Präzedenzfall für "synchrone `dms-connector-sdk`-Aufrufe aus `async def`-Endpunkten" festgehaltene
-Ansatz.
+**`asyncio.to_thread()` for the synchronous `DmsTreeClient` call in write endpoints**: read
+endpoints are normal (non-`async`) FastAPI routes (automatically run in the thread pool, as
+already with `webdav-connector`), but write endpoints must be `async def` (`await request.form()`
+is Starlette-`async`-only) — the actual synchronous SDK call therefore runs via
+`asyncio.to_thread()` instead of directly on the event-loop thread, exactly the approach recorded
+in ADR 0034 as a future precedent for "synchronous `dms-connector-sdk` calls from `async def`
+endpoints."
 
-**Zwei kleine, rückwärtskompatible Erweiterungen an `libs/dms-connector-sdk`** (gemeinsam mit
-`webdav-connector` genutzt): `TreeFolder`/`TreeDocument` bekamen `created_by`/`created_at` (in den
-zugrundeliegenden `FolderOut`/`DocumentOut`-Antworten längst vorhanden, aber bislang nie in die
-Dataclasses übernommen — Grundlage für `cmis:createdBy`/`cmis:creationDate`, bei `TreeFolder`
-bewusst `str | None`/`datetime | None` statt verpflichtender Felder, siehe "Konsequenzen"); `write_
-document()` bekam ein optionales `comment`-Argument (Grundlage für `cmis:checkinComment`).
+**Two small, backward-compatible extensions to `libs/dms-connector-sdk`** (shared with
+`webdav-connector`): `TreeFolder`/`TreeDocument` got `created_by`/`created_at` (long present in
+the underlying `FolderOut`/`DocumentOut` responses, but never previously carried into the
+dataclasses — basis for `cmis:createdBy`/`cmis:creationDate`; for `TreeFolder` deliberately
+`str | None`/`datetime | None` instead of mandatory fields, see "Consequences"); `write_
+document()` got an optional `comment` argument (basis for `cmis:checkinComment`).
 
-## Begründung
+## Rationale
 
-- **Browser Binding statt der beiden anderen Bindings**: AtomPub/SOAP hätten eine XML-Bibliothek
-  plus deutlich mehr Boilerplate (Namespace-Handling, Feed-/Entry-Strukturen) gebraucht, ohne
-  einen Mehrwert für diese Referenzimplementierung zu bieten — Browser Binding ist die von der
-  Spezifikation selbst als "einfachste, für moderne Web-Stacks optimierte" Variante beschriebene.
-- **Kein CMIS-Typsystem für eigene Objekttypen**: `object-type-service`s Objekttypen (2.2) haben
-  ein eigenes, bereits vollständiges Attribut-/Constraint-Modell — ein zusätzliches, paralleles
-  CMIS-Typsystem (mit eigenen Property-Definitionen je Attributtyp) zu spiegeln wäre ein
-  eigenständiges, großes Feature ohne klaren Konzept-Auftrag (3.3 verlangt "Anbindung", nicht
-  "vollständige bidirektionale Typsystem-Synchronisation").
-- **PWC-Id = Original-Id statt erfundener zweiter Id**: eine erfundene zweite Id müsste auf ein
-  reales zweites Objekt verweisen können (z. B. für einen nachfolgenden `getObject`-Aufruf auf die
-  PWC) — ohne echtes zweites Objekt wäre das nur ein Etikettenschwindel, der bei jedem
-  Folgeaufruf sofort als `objectNotFound` aufgeflogen wäre.
+- **Browser Binding instead of the other two bindings**: AtomPub/SOAP would have needed an XML
+  library plus considerably more boilerplate (namespace handling, feed/entry structures), with no
+  added value for this reference implementation — Browser Binding is the variant the
+  specification itself describes as the "simplest, optimized for modern web stacks."
+- **No CMIS type system for custom object types**: `object-type-service`'s object types (2.2)
+  have their own, already complete attribute/constraint model — mirroring an additional,
+  parallel CMIS type system (with its own property definitions per attribute type) would be a
+  standalone, large feature with no clear mandate in the concept (3.3 requires "integration," not
+  "full bidirectional type-system synchronization").
+- **PWC ID = original ID instead of an invented second ID**: an invented second ID would need to
+  be able to point to a real second object (e.g. for a subsequent `getObject` call on the PWC) —
+  without a real second object, that would just be a fig leaf that would immediately surface as
+  `objectNotFound` on any follow-up call.
 
-## Konsequenzen
+## Consequences
 
-- **Echter, bei der Live-Verifikation gefundener Bug (vor Testabschluss behoben)**: die
-  Schreib-Routen lasen `objectId` anfangs ausschließlich aus dem Formular, nie aus dem
-  Query-String — `createDocument`/`createFolder` landeten dadurch immer im Wurzelordner,
-  unabhängig vom über die URL adressierten Zielordner (real durch zwei fehlschlagende Tests
-  aufgedeckt: ein vermeintlich nicht-leerer Ordner ließ sich trotzdem löschen, ein per `deleteTree`
-  kaskadiert gelöschtes Dokument blieb unverändert). Fix: beide Adressierungswege werden gelesen,
-  das Formular-Control hat Vorrang.
-- **Echter, bei der Live-Verifikation gefundener Bug in `folder-service`s Domäne (im Connector
-  kompensiert, nicht in `folder-service` selbst behoben)**: `DELETE /folders/{id}` prüft nur
-  eigene Unterordner auf Leere, nie Dokumente (die in einem anderen Service/Schema leben) — bislang
-  nie sichtbar, weil der einzige bisherige Aufrufer (`webdav-connector`) immer erst rekursiv alle
-  Kinder löscht. CMIS' nicht-kaskadierende `delete`-Aktion MUSS aber bei einem Dokument-haltigen
-  Ordner mit `constraint` (409) fehlschlagen — `cmis-connector` prüft das selbst
-  (`_tree.list_children()`), bevor es `delete_folder()` überhaupt aufruft.
-- **`TreeFolder.created_by`/`created_at` bewusst optional (`| None`), nicht verpflichtend**:
-  `resolve_path("")` (leerer Pfad, Wurzel-Adressierung) konstruiert die Wurzel weiterhin rein
-  lokal, ohne HTTP-Aufruf — dieser Zweig läuft bei **jeder** WebDAV-Anfrage an die Wurzel durch
-  (`get_resource_inst("/")`), ein zusätzlicher Roundtrip wäre dort ein spürbarer Performance-
-  Rückschritt. Ein erster Versuch, stattdessen `get_folder()` echt aufzurufen, wurde bei der
-  Live-Verifikation wieder verworfen (siehe nächster Punkt) — `created_by`/`created_at` bleiben in
-  diesem einen Fall `None` (CMIS' eigener "value not set"-Zustand, 5.2.7) statt erfundener Werte.
-- **Realer Performance-Befund bei der Live-Verifikation** (kein Code-Bug): `webdav-connector`s
-  Testsuite schlug nach dem `--build`-Vollregressionslauf mit `httpx.ReadTimeout` bei PROPFIND auf
-  die WebDAV-Wurzel fehl. Ursache war **nicht** die testweise eingeführte `get_folder()`-Variante
-  (nach deren Rücknahme trat der Timeout unverändert weiter auf) und **kein** Deadlock, sondern
-  über die gesamte, sehr lange Projektlaufzeit dieser Konversation im geteilten Dev-Root-Ordner
-  angesammelte Testdaten: 68 Unterordner + 74 Dokumente direkt unter `root` (u. a. aus
-  `webdav-connector`s, `cmis-connector`s und `migration-service`s jeweils eigenen Testläufen,
-  keiner davon räumt seine bei `root` erzeugten Objekte selbst wieder auf). `DmsTreeClient.
-  list_children()` holt bewusst je Dokument einen zusätzlichen HTTP-Aufruf nach (siehe deren
-  Docstring) — bei 74 Dokumenten allein an der Wurzel dauerte eine einzelne Root-PROPFIND-Anfrage
-  dadurch über 10 Sekunden (verifiziert: `curl --max-time 60` beantwortete sie in 10,5s), lang
-  genug, um übliche Test-Client-Timeouts reißen zu lassen. Behoben durch einmaliges Aufräumen
-  (`POST /folders/{id}/trash` bzw. `DELETE /documents/{id}` für alle 142 Root-Objekte, ausnahmslos
-  an Test-Actor-Namen wie `webdav-test-*`/`cmis-test-*`/`connector-sdk-tests`/`migration-tests`
-  erkennbar) — reduzierte dieselbe Anfrage auf 76ms. Keine Code-Änderung nötig, aber ein
-  dokumentierter Beleg dafür, dass `list_children()`s "bewusst in Kauf genommener" O(Dokumente)-
-  Overhead (siehe SDK-Docstring) bei einer über viele Sessions hinweg ungeräumten Wurzel real
-  spürbar wird.
-- **Bewusste Grenze: keine GUI-Client-Verifikation** — getestet über direkte HTTP-Aufrufe im
-  rohen Browser-Binding-Wire-Format (kein Mocking), nicht über einen echten CMIS-Desktop-/
-  Office-Client (keiner in dieser Umgebung verfügbar) — gleiche, bereits bei `webdav-connector`
-  dokumentierte Grenze.
-- **Bewusste Grenze: inhaltsloses Checkin nicht möglich** — `document-service`s Versions-Endpunkt
-  verlangt je Version zwingend eine Datei, ein reiner Metadaten-/Kommentar-Checkin ohne
-  Inhaltsänderung wird mit `invalidArgument` (400) abgelehnt statt eines künstlichen "leeren"
-  Uploads.
-- **Präzedenzfall**: ein künftiger dritter Connector, der ebenfalls kein Bibliotheks-Äquivalent
-  vorfindet, sollte denselben Weg gehen — Spezifikation direkt lesen (nicht raten), Umfang bewusst
-  auf die real vorhandenen DMS-Konzepte begrenzen, Lücken ehrlich als "bewusste Grenze"
-  dokumentieren statt sie zu verschweigen oder Fantasie-Verhalten zu bauen.
+- **A real bug found during live verification (fixed before test completion)**: the
+  write routes initially read `objectId` only from the form, never from the query string —
+  `createDocument`/`createFolder` therefore always landed in the root folder, regardless of the
+  target folder addressed via the URL (surfaced for real by two failing tests: a supposedly
+  non-empty folder could still be deleted; a document cascade-deleted via `deleteTree` remained
+  unchanged). Fix: both addressing routes are read, with the form control taking precedence.
+- **A real bug found during live verification in `folder-service`'s domain (compensated in the
+  connector, not fixed in `folder-service` itself)**: `DELETE /folders/{id}` only checks its own
+  subfolders for emptiness, never documents (which live in a different service/schema) —
+  previously never visible, because the only prior caller (`webdav-connector`) always recursively
+  deletes all children first. CMIS' non-cascading `delete` action, however, MUST fail with
+  `constraint` (409) for a folder containing documents — `cmis-connector` checks this itself
+  (`_tree.list_children()`) before ever calling `delete_folder()`.
+- **`TreeFolder.created_by`/`created_at` deliberately optional (`| None`), not mandatory**:
+  `resolve_path("")` (empty path, root addressing) still constructs the root purely locally,
+  without an HTTP call — this branch runs on **every** WebDAV request to the root
+  (`get_resource_inst("/")`), where an additional round trip would be a noticeable performance
+  regression. An initial attempt to actually call `get_folder()` instead was reverted again
+  during live verification (see next point) — `created_by`/`created_at` remain `None` in this one
+  case (CMIS' own "value not set" state, 5.2.7) rather than invented values.
+- **A real performance finding during live verification** (not a code bug): `webdav-connector`'s
+  test suite failed with `httpx.ReadTimeout` on PROPFIND against the WebDAV root after the
+  `--build` full regression run. The cause was **not** the experimentally introduced
+  `get_folder()` variant (the timeout persisted unchanged after reverting it) and **not** a
+  deadlock, but test data accumulated over this conversation's very long project runtime in the
+  shared dev root folder: 68 subfolders + 74 documents directly under `root` (among others from
+  `webdav-connector`'s, `cmis-connector`'s, and `migration-service`'s own respective test runs,
+  none of which clean up the objects they create at `root`). `DmsTreeClient.
+  list_children()` deliberately fetches one additional HTTP call per document (see its
+  docstring) — with 74 documents at the root alone, a single root PROPFIND request thereby took
+  over 10 seconds (verified: `curl --max-time 60` answered it in 10.5s), long enough to exceed
+  typical test-client timeouts. Fixed by a one-time cleanup
+  (`POST /folders/{id}/trash` resp. `DELETE /documents/{id}` for all 142 root objects, all
+  identifiable by test-actor names like `webdav-test-*`/`cmis-test-*`/`connector-sdk-tests`/
+  `migration-tests`) — reduced the same request to 76ms. No code change needed, but documented
+  evidence that `list_children()`'s "deliberately accepted" O(documents) overhead (see the SDK
+  docstring) becomes noticeable in practice with a root left uncleaned across many sessions.
+- **Deliberate limit: no GUI client verification** — tested via direct HTTP calls in the raw
+  Browser Binding wire format (no mocking), not via a real CMIS desktop/office client (none
+  available in this environment) — the same limitation already documented for `webdav-connector`.
+- **Deliberate limit: content-less checkin not possible** — `document-service`'s version
+  endpoint requires a file for every version; a pure metadata/comment checkin with no content
+  change is rejected with `invalidArgument` (400) instead of an artificial "empty" upload.
+- **Precedent**: a future third connector that likewise finds no library equivalent should follow
+  the same path — read the specification directly (do not guess), deliberately limit scope to
+  the DMS concepts that actually exist, honestly document gaps as a "deliberate limit" instead of
+  concealing them or building imaginary behavior.

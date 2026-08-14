@@ -1,172 +1,171 @@
 # cmis-connector
 
-**Verantwortung:** Zweiter Referenz-Connector der Connector-Architektur (Konzept 3.3, P12-S4) —
-macht `folder-service`/`document-service` über eine selbst implementierte **CMIS 1.1 Browser
-Binding** (Kapitel 5 der OASIS-CMIS-1.1-Spezifikation) ansprechbar. Das DMS ist dabei der
-CMIS-**Server** (gleiche Richtungsentscheidung wie `webdav-connector`, ADR 0033/0002, Konzept 4.2).
-Erster Referenz-Connector: [`webdav-connector`](webdav-connector.md) (P12-S1).
+**Purpose:** Second reference connector of the connector architecture (Concept 3.3, P12-S4) —
+makes `folder-service`/`document-service` addressable via a self-implemented **CMIS 1.1 Browser
+Binding** (Chapter 5 of the OASIS CMIS 1.1 specification). The DMS acts as the
+CMIS **server** here (same directional decision as `webdav-connector`, ADR 0033/0002, Concept 4.2).
+First reference connector: [`webdav-connector`](webdav-connector.md) (P12-S1).
 
-**Konzept-Referenz:** 3.3, 4.2
-**Kein eigenes Postgres-Schema** (stateless — jede Anfrage übersetzt sich live in HTTP-Aufrufe
-gegen `folder-service`/`document-service`, über dieselbe `libs/dms-connector-sdk` wie
+**Concept reference:** 3.3, 4.2
+**No own Postgres schema** (stateless — every request translates live into HTTP calls
+against `folder-service`/`document-service`, via the same `libs/dms-connector-sdk` as
 `webdav-connector`)
-**ADR:** [0036 — Von Hand implementierte Browser Binding statt Bibliothek](../adr/0036-cmis-connector-from-scratch-browser-binding.md)
+**ADR:** [0036 — Hand-implemented Browser Binding instead of a library](../adr/0036-cmis-connector-from-scratch-browser-binding.md)
 
-## Warum von Hand (keine Bibliothek)
+## Why hand-implemented (no library)
 
-Anders als bei WebDAV (`wsgidav`, aktiv gepflegt) existiert **keine gepflegte Python-CMIS-*Server*-
-Bibliothek** — reale Recherche (P12-S4-Kickoff) ergab: alle nennenswerten Python-CMIS-Pakete
-(`cmislib`, `cmislib3`, `cmislib-maykin`, `CMIS.PythonLib`, `drc-cmis`) sind reine **Client**-
-Bibliotheken, die meisten davon seit Jahren unverändert. Das einzige reale Server-Framework
-(Apache Chemistys OpenCMIS) ist Java-only, es gibt kein Python-Äquivalent. Details/Begründung
-siehe ADR 0036.
+Unlike WebDAV (`wsgidav`, actively maintained), there is **no maintained Python CMIS *server***
+library — actual research (P12-S4 kickoff) found: all notable Python CMIS packages
+(`cmislib`, `cmislib3`, `cmislib-maykin`, `CMIS.PythonLib`, `drc-cmis`) are pure **client**
+libraries, most of them unchanged for years. The only real server framework (Apache Chemistry's
+OpenCMIS) is Java-only, with no Python equivalent. See ADR 0036 for details/reasoning.
 
-## Umfang (Referenzimplementierung, kein vollständiger CMIS-1.1-Server)
+## Scope (reference implementation, not a complete CMIS 1.1 server)
 
-| Kategorie | Implementiert | Bewusst nicht implementiert |
+| Category | Implemented | Deliberately not implemented |
 |---|---|---|
-| Repository | `repositoryInfo` (Service-URL + Repository-URL) | Multi-Repository (immer genau ein Repository `default`), `typeChildren`/`typeDescendants`/`typeDefinition` (kein CMIS-Typsystem für eigene Objekttypen) |
-| Navigation | `children`, `object` (per Id oder Pfad) | `descendants`, `folderTree`, `parent(s)`, `checkedout`-Liste |
-| Objekt lesen | `content` (Content-Stream) | `renditions`, `allowableActions`, `relationships`, `policies`, `acl` |
-| Objekt schreiben | `createDocument`, `createFolder`, `update` (nur `cmis:name`), `move`, `delete`, `deleteTree`, `setContent` | `createDocumentFromSource`, `createRelationship`/`createPolicy`/`createItem`, `appendContent`, `deleteContent`, `addObjectToFolder`/`removeObjectFromFolder`, `applyPolicy`/`applyACL`, `bulkUpdate` |
-| Versionierung | `checkOut`, `cancelCheckOut`, `checkIn` (immer mit neuem Inhalt) | Volle Versionshistorie/`getAllVersions`, inhaltsloses Checkin |
-| Suche | — | CMIS-Query-Sprache (`query`-Selector/-Action) — Konzept 3.7/ADR 0012 setzt für die eigentliche Volltextsuche ohnehin auf Postgres FTS, nicht CMIS SQL |
+| Repository | `repositoryInfo` (service URL + repository URL) | Multi-repository (always exactly one repository, `default`), `typeChildren`/`typeDescendants`/`typeDefinition` (no CMIS type system for custom object types) |
+| Navigation | `children`, `object` (by id or path) | `descendants`, `folderTree`, `parent(s)`, checked-out list |
+| Reading objects | `content` (content stream) | `renditions`, `allowableActions`, `relationships`, `policies`, `acl` |
+| Writing objects | `createDocument`, `createFolder`, `update` (only `cmis:name`), `move`, `delete`, `deleteTree`, `setContent` | `createDocumentFromSource`, `createRelationship`/`createPolicy`/`createItem`, `appendContent`, `deleteContent`, `addObjectToFolder`/`removeObjectFromFolder`, `applyPolicy`/`applyACL`, `bulkUpdate` |
+| Versioning | `checkOut`, `cancelCheckOut`, `checkIn` (always with new content) | Full version history/`getAllVersions`, contentless checkin |
+| Search | — | CMIS query language (`query` selector/action) — Concept 3.7/ADR 0012 relies on Postgres FTS for actual full-text search anyway, not CMIS SQL |
 
-Insgesamt ~14 Endpunkte (repositoryInfo/children/object/content lesend, die zehn genannten
-Aktionen schreibend) — vergleichbar im Umfang mit dem WebDAV-Kernmethodenset aus P12-S1, aber ohne
-eine `wsgidav`-Entsprechung zum Anlehnen (siehe ADR 0036).
+Roughly 14 endpoints in total (repositoryInfo/children/object/content for reads, the ten named
+actions for writes) — comparable in scope to the WebDAV core method set from P12-S1, but without
+a `wsgidav` equivalent to lean on (see ADR 0036).
 
-## Object-URL-Auflösung (5.3.4)
+## Object URL resolution (5.3.4)
 
-Ein Objekt wird per `objectId`-Query-Parameter ODER per Pfad adressiert, der an die Root-Folder-
-URL angehängt ist (`objectId` hat Vorrang, wörtlich aus der Spezifikation). Bei **Schreibaktionen**
-gibt es zusätzlich das Formular-Control `objectId` (5.4.4.3.3) — das adressiert bei `update`/
-`move`/`delete`/`setContent`/`checkOut`/`cancelCheckOut`/`checkIn` das zu bearbeitende Objekt,
-während bei `createDocument`/`createFolder` (die kein solches Control kennen) weiterhin die
-URL selbst (Query-`objectId` oder Pfad) den Zielordner bestimmt. `cmis_connector.resolve` bildet
-beide Fälle einheitlich ab; ein **echter, bei der Live-Verifikation gefundener Bug**: die
-POST-Routen lasen `objectId` anfangs nur aus dem Formular, nie aus dem Query-String — `createDocument`
-landete dadurch immer im Wurzelordner, unabhängig vom adressierten Zielordner. Fix: beide Quellen
-werden gelesen, das Formular-Control hat Vorrang, falls beide vorkommen.
+An object is addressed either via the `objectId` query parameter OR via a path appended to the
+root folder URL (`objectId` takes precedence, verbatim from the specification). For **write
+actions** there is additionally the form control `objectId` (5.4.4.3.3) — for `update`/
+`move`/`delete`/`setContent`/`checkOut`/`cancelCheckOut`/`checkIn` this addresses the object to be
+edited, while for `createDocument`/`createFolder` (which have no such control) the URL itself
+(query `objectId` or path) still determines the target folder. `cmis_connector.resolve` maps
+both cases uniformly; a **real bug found during live verification**: the
+POST routes initially read `objectId` only from the form, never from the query string —
+`createDocument` therefore always ended up in the root folder, regardless of the addressed target
+folder. Fix: both sources are read, with the form control taking precedence if both are present.
 
-## Kein separates Private-Working-Copy-Objekt
+## No separate private working copy object
 
-`document-service` kennt keine "Working Copy" als eigenständige Entität — die reale
-`document-service`-Sperre (4.2) übernimmt exakt die Rolle, die CMIS dem PWC-Mechanismus zuschreibt
-(kein Schreibzugriff durch andere bis Checkin/CancelCheckout). `checkOut` ruft daher
-`acquire_lock()` auf dem Original-Dokument auf, `checkIn`/`cancelCheckOut` entsprechend
-`write_document()`+`release_lock()`/`release_lock()` — die zurückgegebene "PWC"-Objekt-Id ist
-bewusst **identisch** zur Original-Dokument-Id (echte CMIS-Server geben hier eine eigene Id
-zurück, dieses DMS hat aber kein zweites Objekt, das diese Id tragen könnte). Ein Checkout-Konflikt
-(zweiter Akteur versucht, ein bereits ausgechecktes Dokument erneut auszuchecken) wird über
-`document-service`s bestehende `LockConflictError` erkannt und als CMIS-`updateConflict` (409)
-gemeldet — **wichtig**: die Sperrprüfung vergleicht `locked_by` (den Akteur), nicht `session_id`,
-derselbe Akteur kann seine eigene Sperre daher jederzeit erneut "erwerben" (idempotent), nur ein
-ANDERER Akteur löst einen echten Konflikt aus.
+`document-service` has no concept of a "working copy" as a standalone entity — the actual
+`document-service` lock (4.2) takes on exactly the role CMIS assigns to the PWC mechanism
+(no write access by others until checkin/cancelCheckout). `checkOut` therefore calls
+`acquire_lock()` on the original document, `checkIn`/`cancelCheckOut` correspondingly call
+`write_document()`+`release_lock()`/`release_lock()` — the returned "PWC" object id is
+deliberately **identical** to the original document id (real CMIS servers return a distinct id
+here, but this DMS has no second object that could carry such an id). A checkout conflict
+(a second actor trying to check out an already checked-out document) is detected via
+`document-service`'s existing `LockConflictError` and reported as a CMIS `updateConflict` (409) —
+**important**: the lock check compares `locked_by` (the actor), not `session_id`, so the same
+actor can always re-"acquire" their own lock at any time (idempotent), and only a DIFFERENT actor
+triggers a genuine conflict.
 
-## `delete` auf einem nicht-leeren Ordner (echter Fund)
+## `delete` on a non-empty folder (a real finding)
 
-`folder-service`s Hard-Delete-Endpunkt (`DELETE /folders/{id}`) prüft nur eigene Unterordner auf
-Leere, **nicht** Dokumente — Dokumente leben in einem komplett anderen Service/Schema
-(`document-service`) und werden dort nie gegengeprüft. Das war bislang nie sichtbar, weil der
-einzige bisherige Aufrufer (`webdav-connector`s `DmsDavFolder.handle_delete()`) immer erst alle
-Kinder rekursiv löscht, bevor er den (dann garantiert leeren) Ordner selbst löscht — CMIS' `delete`-
-Aktion ist dagegen laut Spezifikation ein **nicht-kaskadierender** Einzelobjekt-Löschversuch, der
-bei einem nicht-leeren Ordner mit `constraint` (409) fehlschlagen MUSS. `cmis-connector` prüft
-deshalb selbst (`_tree.list_children()`) auf Unterordner UND Dokumente, bevor es
-`delete_folder()` überhaupt aufruft — kein Eingriff in `folder-service` nötig, die Prüfung gehört
-hierher (Konsequenz des CMIS-Vertrags, nicht ein allgemeiner Mangel von `folder-service`s
-Hard-Delete-Fallback).
+`folder-service`'s hard-delete endpoint (`DELETE /folders/{id}`) only checks its own subfolders
+for emptiness, **not** documents — documents live in a completely different service/schema
+(`document-service`) and are never cross-checked there. This was never visible before because the
+only prior caller (`webdav-connector`'s `DmsDavFolder.handle_delete()`) always recursively deletes
+all children first before deleting the (then guaranteed empty) folder itself — CMIS's `delete`
+action, by contrast, is per the specification a **non-cascading** single-object delete attempt
+that MUST fail with `constraint` (409) on a non-empty folder. `cmis-connector` therefore checks
+itself (`_tree.list_children()`) for subfolders AND documents before calling
+`delete_folder()` at all — no change to `folder-service` needed, the check belongs here (a
+consequence of the CMIS contract, not a general shortcoming of `folder-service`'s hard-delete
+fallback).
 
-## Nur `cmis:name` als schreibbares Property
+## Only `cmis:name` as a writable property
 
-Diese Referenzimplementierung bildet ausschließlich `cmis:name` (Umbenennen) auf ein
-DMS-Attribut ab. Eigene Objekttyp-Attribute (2.2, `object-type-service`) werden nicht als
-CMIS-Properties exponiert — das würde ein vollständiges CMIS-Typsystem (`typeDefinition` je
-Objekttyp, Property-Definitionen mit CMIS-Datentypen) erfordern, siehe "Umfang" oben.
+This reference implementation maps only `cmis:name` (renaming) to a DMS attribute. Custom
+object-type attributes (2.2, `object-type-service`) are not exposed as CMIS properties — that
+would require a full CMIS type system (`typeDefinition` per object type, property definitions
+with CMIS data types), see "Scope" above.
 
-## Authentifizierung
+## Authentication
 
-HTTP-Basic-Auth (5.2.9.1 "Basic Authentication for Non-Browser Clients") gegen `auth-service`s
-bestehendes `POST /login` — identisches Muster wie `webdav-connector`s `DmsAuthDomainController`,
-hier als FastAPI-Dependency (`cmis_connector.auth.parse_basic_auth`/`require_actor`) statt
-wsgidav-`BaseDomainController`. Fehlender `Authorization`-Header → `401` mit
-`WWW-Authenticate: Basic` (Challenge, ermöglicht echten CMIS-Clients einen normalen Basic-Auth-
-Dialog); falsche Zugangsdaten → `403` (verhindert Browser-Login-Popups bei versehentlichem
-Browser-Zugriff, wörtlich von 5.2.9.1 als zulässige Alternative genannt).
+HTTP Basic Auth (5.2.9.1 "Basic Authentication for Non-Browser Clients") against `auth-service`'s
+existing `POST /login` — identical pattern to `webdav-connector`'s `DmsAuthDomainController`,
+here as a FastAPI dependency (`cmis_connector.auth.parse_basic_auth`/`require_actor`) instead of
+a wsgidav `BaseDomainController`. Missing `Authorization` header → `401` with
+`WWW-Authenticate: Basic` (challenge, enabling real CMIS clients to show a normal Basic Auth
+dialog); wrong credentials → `403` (prevents browser login popups on accidental
+browser access, explicitly cited by 5.2.9.1 as a permitted alternative).
 
-## `asyncio.to_thread()` für den synchronen `DmsTreeClient`
+## `asyncio.to_thread()` for the synchronous `DmsTreeClient`
 
-Lese-Endpunkte sind normale (nicht-`async`) FastAPI-Routen — `DmsTreeClient` ist synchron (siehe
-`libs/dms-connector-sdk/README.md`), FastAPI führt solche Routen automatisch im eigenen
-Threadpool aus (wie schon bei `webdav-connector`, ADR 0033). Schreib-Endpunkte MÜSSEN dagegen
-`async def` sein (`await request.form()` ist eine Starlette-`async`-only-API, die den
-Multipart-Körper streamt) — der eigentliche `DmsTreeClient`-Aufruf läuft deshalb über
-`asyncio.to_thread()`, statt ihn direkt im Event-Loop-Thread zu blockieren (der bei ADR 0034 als
-künftiger Präzedenzfall für genau diesen Fall festgehaltene Ansatz).
+Read endpoints are ordinary (non-`async`) FastAPI routes — `DmsTreeClient` is synchronous (see
+`libs/dms-connector-sdk/README.md`), and FastAPI automatically runs such routes in its own
+threadpool (as already the case for `webdav-connector`, ADR 0033). Write endpoints, however, MUST
+be `async def` (`await request.form()` is a Starlette `async`-only API that streams the
+multipart body) — the actual `DmsTreeClient` call therefore runs via
+`asyncio.to_thread()` instead of blocking directly in the event loop thread (the approach
+recorded in ADR 0034 as a future precedent for exactly this case).
 
-## Erweiterungen an `libs/dms-connector-sdk` (gemeinsam mit `webdav-connector` genutzt)
+## Extensions to `libs/dms-connector-sdk` (shared with `webdav-connector`)
 
-- `TreeFolder`/`TreeDocument` bekamen `created_by`/`created_at` (beide Felder waren in den
-  zugrundeliegenden `FolderOut`/`DocumentOut`-Antworten bereits vorhanden, wurden aber bislang nie
-  in die Dataclasses übernommen) — Grundlage für CMIS' `cmis:createdBy`/`cmis:creationDate`. Bei
-  `TreeFolder` bewusst `str | None`/`datetime | None`: `resolve_path("")` (Wurzel-Adressierung,
-  durchlaufen bei **jeder** WebDAV-Anfrage an die Wurzel) konstruiert weiterhin rein lokal ohne
-  HTTP-Aufruf — ein zusätzlicher Roundtrip dort wäre ein spürbarer Performance-Rückschritt, `None`
-  ist CMIS' eigener "value not set"-Zustand (5.2.7), kein erfundener Wert.
-- `write_document()` bekam ein optionales `comment`-Argument, weitergereicht an
-  `POST /documents/{id}/versions`s bereits bestehendes `comment`-Formularfeld — Grundlage für
-  CMIS' `checkinComment`.
-- **Realer Performance-Befund bei der Live-Verifikation, kein Code-Bug**: `webdav-connector`s
-  Testsuite schlug im vollen `--build`-Regressionslauf mit `httpx.ReadTimeout` bei PROPFIND auf
-  die Wurzel fehl — verursacht durch über die gesamte, sehr lange Projektlaufzeit angesammelte
-  Testdaten direkt unter `root` (68 Ordner + 74 Dokumente, aus mehreren Connectoren/Services'
-  eigenen, sich nie selbst aufräumenden Testläufen). `DmsTreeClient.list_children()` holt bewusst
-  je Dokument einen zusätzlichen HTTP-Aufruf nach (siehe deren Docstring) — bei 74 Dokumenten
-  direkt an der Wurzel dauerte eine einzelne Anfrage über 10 Sekunden. Behoben durch einmaliges
-  Aufräumen (`POST /folders/{id}/trash`/`DELETE /documents/{id}` für alle 142 Root-Objekte,
-  ausnahmslos an Test-Actor-Namen erkennbar), keine Code-Änderung nötig — reduzierte dieselbe
-  Anfrage auf 76ms. Details siehe ADR 0036.
+- `TreeFolder`/`TreeDocument` gained `created_by`/`created_at` (both fields already existed in the
+  underlying `FolderOut`/`DocumentOut` responses, but had never been carried over into the
+  dataclasses) — basis for CMIS's `cmis:createdBy`/`cmis:creationDate`. For `TreeFolder`
+  deliberately `str | None`/`datetime | None`: `resolve_path("")` (root addressing, traversed on
+  **every** WebDAV request to the root) still constructs purely locally without an
+  HTTP call — an extra round trip there would be a noticeable performance regression, `None`
+  is CMIS's own "value not set" state (5.2.7), not a made-up value.
+- `write_document()` gained an optional `comment` argument, passed through to
+  `POST /documents/{id}/versions`'s already-existing `comment` form field — basis for
+  CMIS's `checkinComment`.
+- **Real performance finding during live verification, not a code bug**: `webdav-connector`'s
+  test suite failed in the full `--build` regression run with `httpx.ReadTimeout` on
+  PROPFIND against the root — caused by test data accumulated over the project's very
+  long runtime directly under `root` (68 folders + 74 documents, from multiple connectors'/
+  services' own test runs that never clean up after themselves). `DmsTreeClient.list_children()`
+  deliberately makes an extra HTTP call per document (see its docstring) — with 74 documents
+  directly at the root, a single request took over 10 seconds. Fixed by a one-time
+  cleanup (`POST /folders/{id}/trash`/`DELETE /documents/{id}` for all 142 root objects,
+  identifiable without exception by test actor names), no code change needed — reduced the same
+  request to 76ms. See ADR 0036 for details.
 
-## Lizenzierung (3.3/9.1, P9-S2-Muster)
+## Licensing (3.3/9.1, P9-S2 pattern)
 
-Konzept 9.1 nennt "CMIS-Connector" wörtlich als Beispiel für eine separat lizenzierbare
-Komponente. `registry-service`s `licensable_components` enthält `"cmis-connector": "demo"`
-(identisches Muster wie `webdav-connector`/`migration-service`) — Demo-Modus blockiert nur
-Schreibaktionen, `unlicensed` blockiert jeden Zugriff.
+Concept 9.1 explicitly names "CMIS Connector" as an example of a separately licensable
+component. `registry-service`'s `licensable_components` contains `"cmis-connector": "demo"`
+(identical pattern to `webdav-connector`/`migration-service`) — demo mode only blocks
+write actions, `unlicensed` blocks all access.
 
-## Konfiguration
+## Configuration
 
-| Variable | Default | Bedeutung |
+| Variable | Default | Meaning |
 |---|---|---|
-| `DMS_DOCUMENT_SERVICE_BASE_URL` | `http://localhost:8006` | `document-service`-Adresse |
-| `DMS_FOLDER_SERVICE_BASE_URL` | `http://localhost:8008` | `folder-service`-Adresse |
-| `DMS_AUTH_SERVICE_BASE_URL` | `http://localhost:8003` | Für die Basic-Auth-Prüfung |
-| `DMS_CMIS_ROOT_FOLDER_ID` | `root` | DMS-Ordner, der als CMIS-Root-Folder erscheint |
-| `DMS_CMIS_REPOSITORY_ID` | `default` | Repository-Id (immer genau ein Repository) |
-| `CMIS_CONNECTOR_PORT` | `8030` | Host-Port im Dev-Compose-Stack |
+| `DMS_DOCUMENT_SERVICE_BASE_URL` | `http://localhost:8006` | `document-service` address |
+| `DMS_FOLDER_SERVICE_BASE_URL` | `http://localhost:8008` | `folder-service` address |
+| `DMS_AUTH_SERVICE_BASE_URL` | `http://localhost:8003` | For the Basic Auth check |
+| `DMS_CMIS_ROOT_FOLDER_ID` | `root` | DMS folder that appears as the CMIS root folder |
+| `DMS_CMIS_REPOSITORY_ID` | `default` | Repository id (always exactly one repository) |
+| `CMIS_CONNECTOR_PORT` | `8030` | Host port in the dev compose stack |
 
-Beispiel-Aufruf (Browser-URL-Muster): `http://localhost:8030/browser/default/root?cmisselector=children`.
+Example call (browser URL pattern): `http://localhost:8030/browser/default/root?cmisselector=children`.
 
 ## Tests
 
-Läuft wie `webdav-connector`/`migration-service` gegen den echten, laufenden Container (kein
-In-Prozess-`TestClient`, kein Mocking der Nachbar-Services) — `real_user`/`second_real_user`-
-Fixtures legen echte `auth-service`-Konten an (letzteres für den Checkout-Konflikt-Test, der zwei
-unterschiedliche Akteure braucht). Deckt ab: Basic-Auth-Challenge/Ablehnung, Repository-Info,
-Children-Listing, Objekt-per-Id, Content-Stream (inkl. Default-Selektor), Umbenennen, Verschieben,
-`setContent`-Versionierung, vollständiger Checkout→Checkin-Zyklus, Checkout-Konflikt,
-CancelCheckout, Löschen (Dokument, nicht-leerer Ordner → `constraint`), kaskadierendes
+Runs like `webdav-connector`/`migration-service` against the real, running container (no
+in-process `TestClient`, no mocking of neighboring services) — `real_user`/`second_real_user`
+fixtures create real `auth-service` accounts (the latter for the checkout conflict test, which
+needs two different actors). Covers: Basic Auth challenge/rejection, repository info,
+children listing, object-by-id, content stream (including default selector), renaming, moving,
+`setContent` versioning, a full checkout→checkin cycle, checkout conflict,
+cancelCheckout, deletion (document, non-empty folder → `constraint`), cascading
 `deleteTree`.
 
-## Bewusste Grenzen
+## Deliberate limitations
 
-- **Keine GUI-Client-Verifikation** — getestet über direkte HTTP-Aufrufe (rohes Browser-Binding-
-  Wire-Format, kein Mocking), nicht über einen echten CMIS-Desktop-/Office-Client (kein solcher
-  in dieser Umgebung verfügbar) — gleiche, bereits bei `webdav-connector` dokumentierte Grenze.
-- **Nur succinct-Properties** (5.2.11) — keine typannotierten `properties`-Objekte mit
-  Property-Definitionen, siehe "Nur `cmis:name`..." oben.
-- **Kein CMIS-Query** — Volltextsuche läuft laut ADR 0012 ohnehin über Postgres FTS
-  (`search-service`), nicht über CMIS SQL.
-- **Inhaltsloses Checkin nicht möglich** — `document-service`s Versions-Endpunkt verlangt je
-  Version zwingend eine Datei.
+- **No GUI client verification** — tested via direct HTTP calls (raw browser-binding
+  wire format, no mocking), not via a real CMIS desktop/office client (none
+  available in this environment) — same limitation already documented for `webdav-connector`.
+- **succinct properties only** (5.2.11) — no type-annotated `properties` objects with
+  property definitions, see "Only `cmis:name`..." above.
+- **No CMIS query** — per ADR 0012, full-text search runs via Postgres FTS
+  (`search-service`) anyway, not via CMIS SQL.
+- **Contentless checkin not possible** — `document-service`'s versions endpoint requires
+  a file for every version.

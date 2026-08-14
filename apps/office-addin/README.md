@@ -1,33 +1,33 @@
 # office-addin
 
-Microsoft-Office-Add-in (Office.js, nur **Word**) für native OG-Doc-Integration
-(Konzept 3.3a), P14-S8. Öffnen/Speichern eines Dokuments direkt aus/in
-OG Doc, inline Metadatenbearbeitung, Workflow-Start/-Fortsetzung, zentrale
-rollenbasierte Vorlagenbibliothek — ohne die DMS-Oberfläche separat aufrufen
-zu müssen. Spricht ausschließlich bereits bestehende `document-service`/
-`workflow-service`/`object-type-service`/`folder-service`/`search-service`-
-Endpunkte an, kein neuer Backend-Code (siehe
+Microsoft Office add-in (Office.js, **Word** only) for native OG Doc integration
+(Concept 3.3a), P14-S8. Open/save a document directly from/to
+OG Doc, inline metadata editing, workflow start/continuation, central
+role-based template library — without having to open the DMS interface
+separately. Talks exclusively to already existing `document-service`/
+`workflow-service`/`object-type-service`/`folder-service`/`search-service`
+endpoints, no new backend code (see
 [ADR 0045](../../docs/adr/0045-office-addin-word-only-reused-endpoints-settings-linking.md)).
 
-Reines Client-Side-Rendering, kein Node-Prozess in Produktion (identisches
-Muster wie `apps/user-ui`, ADR 0006).
+Pure client-side rendering, no Node process in production (identical
+pattern to `apps/user-ui`, ADR 0006).
 
-Ausführliche Doku: [`docs/services/office-addin.md`](../../docs/services/office-addin.md).
+Detailed documentation: [`docs/services/office-addin.md`](../../docs/services/office-addin.md).
 
-## Lokale Entwicklung
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Erwartet ein laufendes Gateway auf `http://localhost:8009`:
+Expects a running gateway at `http://localhost:8009`:
 
 ```bash
 cd ../../infra && docker compose up -d
 ```
 
-## Build (statischer Export)
+## Build (static export)
 
 ```bash
 npm run build
@@ -49,38 +49,37 @@ cd ../../infra && docker compose up -d --build office-addin
 curl localhost:3006/
 ```
 
-## Lokales Sideload-Testen (echter Word-Host)
+## Local Sideload Testing (Real Word Host)
 
-Office lädt Add-in-Webinhalte nur über HTTPS. Dieser Stack läuft in
-Entwicklung durchgehend über HTTP wie jeder andere Dienst — vor einem echten
-Sideload-Test in Word sind zwei zusätzliche Schritte nötig, die **nicht**
-Teil von `docker compose up` sind:
+Office only loads add-in web content over HTTPS. This stack runs
+entirely over HTTP in development like every other service — before a real
+sideload test in Word, two additional steps are needed that are **not**
+part of `docker compose up`:
 
-1. **TLS bereitstellen**, z. B. mit Microsofts eigenem Entwicklungszertifikat-
-   Tool (erzeugt ein lokal vertrauenswürdiges Zertifikat):
+1. **Provide TLS**, e.g. with Microsoft's own development certificate
+   tool (creates a locally trusted certificate):
    ```bash
    npx office-addin-dev-certs install
    ```
-   und einen Reverse-Proxy (z. B. `nginx`/`caddy`) davor, der HTTPS auf
-   Port 3006 terminiert - oder `npm run dev` durch einen HTTPS-fähigen
-   Dev-Server ersetzen.
-2. **`manifest.xml` anpassen**: alle `https://localhost:3006`-Platzhalter
-   (`IconUrl`, `SourceLocation`, `bt:Url`, `AppDomain`) durch die tatsächlich
-   erreichbare HTTPS-Adresse ersetzen.
+   and a reverse proxy (e.g. `nginx`/`caddy`) in front of it that terminates
+   HTTPS on port 3006 - or replace `npm run dev` with an HTTPS-capable
+   dev server.
+2. **Adjust `manifest.xml`**: replace all `https://localhost:3006`
+   placeholders (`IconUrl`, `SourceLocation`, `bt:Url`, `AppDomain`) with the
+   actually reachable HTTPS address.
 
-Danach sideloaden:
+Then sideload:
 
 ```bash
 npx office-addin-debugging start manifest.xml desktop
 ```
 
-öffnet Word und aktiviert das Add-in automatisch. Alternativ manuell über
-Word → Einfügen → Meine Add-ins → Hochladen meines Add-ins → `manifest.xml`
-auswählen.
+opens Word and activates the add-in automatically. Alternatively, do it manually via
+Word → Insert → My Add-ins → Upload My Add-in → select `manifest.xml`.
 
-**Wichtig**: In dieser Entwicklungsumgebung (kein Windows/Office installiert)
-konnte dieser Schritt selbst nicht durchgeführt werden - nur die
-Manifest-Struktur wurde mit dem offiziellen `office-addin-manifest`-Tool
-validiert (`npx office-addin-manifest validate manifest.xml` → "The manifest
-is valid."). Ein Mensch sollte den Sideload-Test vor Produktivnutzung einmal
-tatsächlich durchführen.
+**Important**: In this development environment (no Windows/Office installed),
+this step itself could not be carried out - only the
+manifest structure was validated with the official `office-addin-manifest` tool
+(`npx office-addin-manifest validate manifest.xml` → "The manifest
+is valid."). A human should actually perform the sideload test once
+before production use.

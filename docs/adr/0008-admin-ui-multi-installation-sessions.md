@@ -1,29 +1,88 @@
-# 0008 — Admin-UI Multi-Installation: clientseitige Installationsliste, Sitzung je Installation
+# 0008 — Admin UI multi-installation: client-side installation list, session per installation
 
-**Status:** akzeptiert
-**Kontext:** Konzept 3a/8, Session P4-S5 (Nutzer-Feedback nach dem ersten echten Browser-Test des MVP)
+**Status:** accepted
+**Context:** Concept 3a/8, Session P4-S5 (user feedback after the first real browser test of the MVP)
 
-## Entscheidung
+## Decision
 
-Die Admin-UI verwaltet eine Liste konfigurierter Installationen (`{id, name, gatewayBaseUrl}`), rein clientseitig in `localStorage` (`dms.installations`, `dms.activeInstallationId`) — kein neuer Backend-Service dafür, da diese Liste eine reine UI-Präferenz ist, keine fachliche Daten (siehe Konzept 3a: eine Installation kennt nur sich selbst, es gibt keine zentrale Instanz, die "alle Installationen" kennen dürfte, außer dem optionalen, hier nicht gebauten Fleet-Management-Service).
+The Admin UI manages a list of configured installations (`{id, name,
+gatewayBaseUrl}`), purely client-side in `localStorage`
+(`dms.installations`, `dms.activeInstallationId`) — no new backend service
+for this, since this list is a pure UI preference, not domain data (see
+Concept 3a: an installation only knows itself, there is no central instance
+allowed to know "all installations", except for the optional Fleet
+Management Service, not built here).
 
-Technisch:
+Technically:
 
-- `lib/api.ts`s bisher fest importierte `GATEWAY_BASE_URL`-Konstante wird durch eine **mutable Modulvariable** (`gatewayBaseUrl`) plus Setter (`setGatewayBaseUrl()`) ersetzt. Alle bestehenden Aufrufer (`UserManagement`, `ObjectTypeEditor`, `RegistryOverview`, `auth-context.tsx`) bleiben unverändert — sie kennen nie eine URL, nur `service_type`/Pfad.
-- `InstallationProvider` (`lib/installation-context.tsx`) hält die Liste + aktive Installation und ruft `setGatewayBaseUrl()` synchron im Render (nicht in einem `useEffect`) auf, da `AuthProvider` als Kindkomponente die aktuelle Adresse bereits in seinem eigenen ersten Render-Effekt braucht — Effekte feuern von unten nach oben, ein `useEffect` im `InstallationProvider` käme dafür zu spät.
-- `AuthProvider` bekommt einen **eigenen `localStorage`-Schlüssel je Installation** (`dms.tokens.<installationId>` statt des bisherigen globalen `dms.tokens`) und lädt/speichert Sitzungen ausschließlich für die jeweils aktive Installation, ohne die Sitzungen anderer Installationen zu berühren.
-- Provider-Reihenfolge in `layout.tsx`: `I18nProvider > InstallationProvider > AuthProvider` — `AuthProvider` braucht die aktive Installation, um seinen Storage-Schlüssel zu bilden.
+- `lib/api.ts`'s previously fixed-imported `GATEWAY_BASE_URL` constant is
+  replaced by a **mutable module variable** (`gatewayBaseUrl`) plus a setter
+  (`setGatewayBaseUrl()`). All existing callers (`UserManagement`,
+  `ObjectTypeEditor`, `RegistryOverview`, `auth-context.tsx`) remain
+  unchanged — they never know a URL, only `service_type`/path.
+- `InstallationProvider` (`lib/installation-context.tsx`) holds the list +
+  active installation and calls `setGatewayBaseUrl()` synchronously during
+  render (not in a `useEffect`), since `AuthProvider` as a child component
+  already needs the current address in its own first render effect — effects
+  fire bottom-up, so a `useEffect` in `InstallationProvider` would come too
+  late for that.
+- `AuthProvider` gets its own **`localStorage` key per installation**
+  (`dms.tokens.<installationId>` instead of the previous global
+  `dms.tokens`) and loads/saves sessions exclusively for the currently
+  active installation, without touching other installations' sessions.
+- Provider order in `layout.tsx`: `I18nProvider > InstallationProvider >
+  AuthProvider` — `AuthProvider` needs the active installation to form its
+  storage key.
 
-## Begründung
+## Rationale
 
-- **Warum nicht einfach mehrere Browser-Tabs/-Profile**: Genau das war die vom Nutzer benannte Alternative, die vermieden werden sollte — "man muss sich nicht in n Stück einloggen". Eine Installationsliste mit Umschalter innerhalb einer laufenden Admin-UI-Instanz ist die im Konzept (8) explizit geforderte Lösung.
-- **Kein Single-Sign-on über Installationsgrenzen hinweg**: Widerspräche der bewussten Isolation aus Konzept 3a (jede Installation hat ihre eigene, vollständig unabhängige Identitätsverwaltung/Keycloak-Realm). Jede Installation braucht daher weiterhin eine eigene, einmalige Anmeldung — die Erleichterung ist ausschließlich, dass ein späterer Wechsel *zurück* zu einer bereits angemeldeten Installation keine erneute Anmeldung erfordert, solange deren Sitzung noch gültig ist.
-- **Mutable Singleton statt Context/Prop-Drilling durch `api.ts`**: `api.ts` ist ein reines Funktionsmodul, kein React-Baum — es kann keinen Context konsumieren. Jede Aufruferfunktion um einen `gatewayBaseUrl`-Parameter zu erweitern hätte jede bestehende Komponente und jeden bestehenden Testfall angefasst, für einen Fall (Installationswechsel), der pro Sitzung selten passiert. Ein einzelner Setter, der bei jedem Wechsel aufgerufen wird, ist die kleinere, weniger invasive Änderung.
-- **Seiteneffekt im Render statt in `useEffect`**: bewusste, dokumentierte Abweichung von der React-Konvention "keine Seiteneffekte im Render" — hier reine Zuweisung einer externen Modulvariablen (kein DOM/keine Subscription), bei wiederholter Ausführung mit demselben Wert idempotent, daher auch unter React Strict Mode unkritisch. Die Alternative (`useEffect` im Provider) hätte eine Race Condition eingeführt: `AuthProvider`s eigener Sitzungswiederherstellungs-Effekt (Kind-Effekt, feuert zuerst) hätte in bestimmten Fällen noch gegen die *alte* Gateway-Adresse aufgerufen.
+- **Why not simply use multiple browser tabs/profiles**: that was exactly
+  the alternative named by the user that was meant to be avoided — "you
+  shouldn't have to log in n times". An installation list with a switcher
+  within a single running Admin UI instance is the solution explicitly
+  required by the concept (8).
+- **No single sign-on across installation boundaries**: this would
+  contradict the deliberate isolation from Concept 3a (each installation has
+  its own, fully independent identity management/Keycloak realm). Every
+  installation therefore still needs its own, one-time login — the only
+  convenience gained is that later switching *back* to an already logged-in
+  installation does not require logging in again, as long as its session is
+  still valid.
+- **Mutable singleton instead of context/prop-drilling through `api.ts`**:
+  `api.ts` is a pure function module, not a React tree — it cannot consume a
+  context. Extending every caller function with a `gatewayBaseUrl` parameter
+  would have touched every existing component and every existing test case,
+  for a case (installation switching) that happens rarely per session. A
+  single setter, called on every switch, is the smaller, less invasive
+  change.
+- **Side effect during render instead of in `useEffect`**: a deliberate,
+  documented deviation from the React convention "no side effects during
+  render" — here it is a plain assignment to an external module variable (no
+  DOM/no subscription), idempotent when run repeatedly with the same value,
+  so uncritical even under React Strict Mode. The alternative (`useEffect`
+  in the provider) would have introduced a race condition:
+  `AuthProvider`'s own session-restoration effect (child effect, fires
+  first) would in certain cases have still run against the *old* gateway
+  address.
 
-## Konsequenzen
+## Consequences
 
-- Installationen sind rein lokal im Browser gespeichert — kein Backup, keine Synchronisierung zwischen Geräten/Browsern eines Admin-Nutzers. Das ist eine bewusste Grenze dieses Grundgerüsts, kein vollständiges Provisioning (das wäre Aufgabe des optionalen Fleet-/Lizenz-Management-Service, Konzept 3a, Phase 13).
-- Wird die zuletzt verbleibende Installation entfernt versucht, verhindert `InstallationProvider` das aktiv (`removeInstallation` ist bei genau einer verbleibenden Installation ein No-op) — es muss immer mindestens eine Installation konfiguriert bleiben, sonst hätte die gesamte übrige Admin-UI kein gültiges Gateway-Ziel mehr.
-- Multi-Installation-Verhalten (Sitzungsisolation, Umschalten ohne erneute Anmeldung) ist nur über Vitest-Komponententests verifiziert (`installation-context.test.tsx`, `auth-context.test.tsx`) — kein Browser in dieser Entwicklungsumgebung verfügbar, siehe `docs/services/admin-ui.md`.
-- Die User-UI hat **kein** äquivalentes Multi-Installation-Konzept — laut Konzept 8 ist das ausschließlich eine Admin-UI-Anforderung (Administratoren betreuen ggf. mehrere Installationen, Endnutzer arbeiten typischerweise nur an ihrer eigenen).
+- Installations are stored purely locally in the browser — no backup, no
+  synchronization across an admin user's devices/browsers. This is a
+  deliberate boundary of this base scaffold, not full provisioning (that
+  would be the job of the optional Fleet/License Management Service, Concept
+  3a, Phase 13).
+- If an attempt is made to remove the last remaining installation,
+  `InstallationProvider` actively prevents it (`removeInstallation` is a
+  no-op when exactly one installation remains) — at least one installation
+  must always remain configured, otherwise the entire rest of the Admin UI
+  would have no valid gateway target.
+- Multi-installation behavior (session isolation, switching without
+  re-login) is only verified via Vitest component tests
+  (`installation-context.test.tsx`, `auth-context.test.tsx`) — no browser is
+  available in this development environment, see
+  `docs/services/admin-ui.md`.
+- The User UI has **no** equivalent multi-installation concept — per
+  Concept 8 this is exclusively an Admin UI requirement (administrators may
+  manage multiple installations, end users typically only work within their
+  own).

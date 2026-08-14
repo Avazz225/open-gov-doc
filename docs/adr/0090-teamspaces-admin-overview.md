@@ -1,82 +1,81 @@
-# 0090 — teamspace-service: installationsweite Admin-Übersicht + neue Domäne `admin.teamspace_management`
+# 0090 — teamspace-service: installation-wide admin overview + new domain `admin.teamspace_management`
 
-**Status:** akzeptiert (Post-Roadmap Phase 22 Session 5)
-**Kontext:** Post-Roadmap Phase 22 Session 5, betrifft `teamspace-service`, `permission-service`, `admin-ui`
+**Status:** accepted (Post-roadmap Phase 22 Session 5)
+**Context:** Post-roadmap Phase 22 Session 5, affects `teamspace-service`, `permission-service`, `admin-ui`
 
-## Entscheidung
+## Decision
 
-`GET /teamspaces` liefert seit jeher nur die Teamspaces, denen der anfragende Principal selbst angehört
-(`repository.list_teamspaces_for_principal`, Join über `teamspace_member`) — Teamspaces sind laut Konzept
-2.5 bewusst selbstverwaltet, ohne administrative Vorabeinrichtung. Es gab bislang **keine** Möglichkeit,
-installationsweit alle existierenden Teamspaces zu sehen, unabhängig von der eigenen Mitgliedschaft.
+`GET /teamspaces` has always returned only the teamspaces the requesting principal is themselves a member
+of (`repository.list_teamspaces_for_principal`, join via `teamspace_member`) — teamspaces are, per Concept
+2.5, deliberately self-managed, with no administrative pre-provisioning. There was previously **no** way
+to see all existing teamspaces installation-wide, independent of one's own membership.
 
-1. **Neuer Endpunkt `GET /admin/teamspaces`** (`teamspace-service`) — liefert ALLE Teamspaces
-   (`repository.list_all_teamspaces_with_member_counts`, `outerjoin` + `GROUP BY`), je Zeile zusätzlich
-   `member_count` statt einer vollständigen Mitgliederliste (spart eine zweite, gegatete
-   Mitglieder-Route für einen reinen Übersichts-Endpunkt).
-2. **Neue Capability `admin.teamspace_management`**, neue vorgeseedete Domäne
-   `domain-admin-teamspaces` (`permission_service.repository.DOMAIN_ADMIN_ROLES`) — gleiches Muster wie
-   jede vorherige neue Admin-Domäne (z. B. `domain-admin-license`, P9-S1). `GET /admin/teamspaces` prüft
-   diese Capability über einen neuen `PermissionServiceClient.has_permission()` (identisches Muster wie
+1. **New endpoint `GET /admin/teamspaces`** (`teamspace-service`) — returns ALL teamspaces
+   (`repository.list_all_teamspaces_with_member_counts`, `outerjoin` + `GROUP BY`), each row additionally
+   carrying `member_count` instead of a full member list (saves a second, gated members route for a
+   purely informational overview endpoint).
+2. **New capability `admin.teamspace_management`**, new pre-seeded domain
+   `domain-admin-teamspaces` (`permission_service.repository.DOMAIN_ADMIN_ROLES`) — same pattern as every
+   previous new admin domain (e.g. `domain-admin-license`, P9-S1). `GET /admin/teamspaces` checks this
+   capability via a new `PermissionServiceClient.has_permission()` (identical pattern to
    `document_service.permission_client.PermissionServiceClient.has_permission`).
-3. **Neue Admin-UI-Seite `/teamspaces/`** (`TeamspacesAdmin.tsx`) — reine Statustabelle (Name,
-   Beschreibung, Angelegt von, Mitgliederzahl, Angelegt am), `RequireCapability` UND gegateter
-   Sidebar-Eintrag (anders als P22-S3s `ApprovalSettings` — hier existiert eine echte serverseitige
-   Durchsetzung, ein clientseitiges Gate täuscht also nichts vor).
+3. **New admin UI page `/teamspaces/`** (`TeamspacesAdmin.tsx`) — a plain status table (name,
+   description, created by, member count, created at), gated both via `RequireCapability` AND a gated
+   sidebar entry (unlike P22-S3's `ApprovalSettings` — here real server-side enforcement exists, so a
+   client-side gate doesn't fake anything).
 
-## Begründung
+## Rationale
 
-- **Warum ein neuer Endpunkt statt `GET /teamspaces` um einen Admin-Modus zu erweitern**: `GET
-  /teamspaces` ist bewusst mitgliedschaftsgefiltert — ein optionaler Query-Parameter, der diese Filterung
-  bei ausreichender Capability umgeht, hätte denselben Pfad zwei grundverschiedene Sicherheitsmodelle
-  tragen lassen (implizite Selbstfilterung vs. explizite Rechteprüfung). Ein eigener Pfad
-  (`/admin/teamspaces`, Konvention aus anderen Services übernommen, z. B. `document-service`s
-  `/documents/due-for-archival`) macht die Unterscheidung im Routing selbst sichtbar.
-- **Warum eine neue, dedizierte Capability statt Wiederverwendung von `admin.user_management`**: Konzept
-  4.6 beschreibt explizit domänengetrennte Admin-Rollen — jede neue administrative Fähigkeit bekommt ihre
-  eigene Domäne (ADR 0023), gleiches Prinzip wie `domain-admin-license`/`domain-admin-query-console` u. a.
-  Eine Wiederverwendung von `admin.user_management` hätte "Nutzer-/Rechteverwaltung" und
-  "Teamspace-Aufsicht" fachlich vermischt, obwohl sie unabhängige Zuständigkeiten sind (eine Person kann
-  eine ohne die andere brauchen).
-- **Warum `member_count` statt einer vollständigen, aufklappbaren Mitgliederliste** (anders als P22-S2s
-  Gruppen-UI): der bestehende `GET /teamspaces/{id}/members`-Endpunkt verlangt `_require_member` — ein
-  Admin ohne eigene Mitgliedschaft könnte ihn nicht nutzen. Eine zweite, gegatete Mitglieder-Route wäre
-  für eine reine Übersichtsseite unverhältnismäßig; die Zählung reicht für den Zweck "wie viele
-  Teamspaces gibt es, wie aktiv genutzt werden sie".
-- **Verifikationsdetail, das beim Live-Test auffiel (kein Code-Bug, sondern eine Erinnerung für künftige
-  Live-Verifikationen)**: `X-DMS-Principal`, das das Gateway aus dem Access-Token setzt, ist der
-  Keycloak-`sub`-Claim (bei technischen Kick-Konten wie `users-admin` eine kurze numerische ID, z. B.
-  `"2"`), NICHT der Benutzername. Eine Rollenzuweisung direkt gegen `permission-service` per Username
-  greift deshalb nicht automatisch für Aufrufe über das Gateway — `GET /auth-service/me` liefert den
-  tatsächlichen `sub`-Wert. Frühere Live-Verifikationen dieses Projekts, die Rollen direkt per Username
-  zuwiesen, taten dies überwiegend bei Aufrufen, die den `X-DMS-Principal`-Header manuell per `curl`
-  gesetzt hatten (Service-zu-Service-Testmuster) statt über das Gateway zu laufen.
+- **Why a new endpoint instead of extending `GET /teamspaces` with an admin mode**: `GET /teamspaces` is
+  deliberately membership-filtered — an optional query parameter that bypasses that filtering given
+  sufficient capability would have made the same path carry two fundamentally different security models
+  (implicit self-filtering vs. explicit permission check). A dedicated path (`/admin/teamspaces`,
+  convention borrowed from other services, e.g. `document-service`'s `/documents/due-for-archival`) makes
+  the distinction visible in the routing itself.
+- **Why a new, dedicated capability instead of reusing `admin.user_management`**: Concept 4.6 explicitly
+  describes domain-separated admin roles — every new administrative capability gets its own domain
+  (ADR 0023), same principle as `domain-admin-license`/`domain-admin-query-console` among others. Reusing
+  `admin.user_management` would have conflated "user/rights management" and "teamspace oversight"
+  substantively, even though they are independent responsibilities (one person might need one without the
+  other).
+- **Why `member_count` instead of a full, expandable member list** (unlike P22-S2's groups UI): the
+  existing `GET /teamspaces/{id}/members` endpoint requires `_require_member` — an admin without their own
+  membership could not use it. A second, gated members route would be disproportionate for a purely
+  informational overview page; the count suffices for the purpose "how many teamspaces exist, how actively
+  are they used".
+- **Verification detail noticed during the live test (not a code bug, but a reminder for future live
+  verifications)**: `X-DMS-Principal`, which the gateway sets from the access token, is the Keycloak `sub`
+  claim (for technical kick accounts like `users-admin` a short numeric ID, e.g. `"2"`), NOT the username.
+  A role assignment made directly against `permission-service` by username therefore does not
+  automatically apply to calls made through the gateway — `GET /auth-service/me` returns the actual `sub`
+  value. Earlier live verifications in this project that assigned roles directly by username mostly did
+  so for calls that set the `X-DMS-Principal` header manually via `curl` (service-to-service test
+  pattern) rather than going through the gateway.
 
-## Konsequenzen
+## Consequences
 
-- **Migration**: keine (keine neue Tabelle, keine geänderte Spalte).
-- **`Teamspace`s Selbstverwaltung bleibt unverändert** — Anlegen/Beitreten/Verwalten bleibt für jeden
-  authentifizierten Principal ohne Capability-Gate möglich, nur die neue installationsweite Übersicht ist
-  gegated.
-- **Tests**: `teamspace-service` 45 (vorher 41, +4: zwei `403`-Fälle ohne Principal/ohne Capability,
-  ein Ende-zu-Ende-Test über zwei verschiedene Teamspaces mit unterschiedlichen Erstellern, der bestätigt,
-  dass ein Nicht-Mitglied mit der Capability beide sieht inkl. korrekter Mitgliederzahlen, sowie ein
-  Repository-Unit-Test); `permission-service` unverändert bei 137 (nur eine neue, vorgeseedete Rolle,
-  bereits durch den bestehenden generischen `ensure_domain_admin_roles`-Mechanismus abgedeckt, kein neuer
-  Testfall dafür nötig). `admin-ui` 191 (vorher 185, +6: vier neue Tests in `teamspaces-admin.test.tsx`,
-  zwei neue Sichtbarkeits-Tests in `admin-sidebar.test.tsx`).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
-  `teamspace-service`/`admin-ui`, `permission-service` zusätzlich neu gebaut, damit die neue
-  vorgeseedete Rolle im laufenden Container tatsächlich existiert): `GET /admin/teamspaces` ohne
-  Capability → `403`; nach echter Rollenzuweisung an den korrekten `sub`-Principal → `200`; zwei echte
-  Teamspaces mit unterschiedlichen Erstellern über den Gateway angelegt, der Admin-Principal (kein
-  Mitglied von keinem der beiden) sah in der Übersicht BEIDE inkl. korrekter Mitgliederzahl — bestätigt
-  durch einen parallelen `403` auf `GET /teamspaces/{id}` für denselben Principal (die reguläre,
-  mitgliedschaftsgefilterte Route bleibt unverändert). Testdaten anschließend gelöscht. Kein
-  interaktiver Browser-Test (kein Browser/Playwright in dieser Entwicklungsumgebung verfügbar,
-  projektweit etablierte Praxis).
-- Doku: neues [ADR 0090](0090-teamspaces-admin-overview.md), `docs/services/teamspace-service.md`
-  (API-Tabelle, neue Sektion "Installationsweite Admin-Übersicht", Tests-Sektion),
-  `docs/services/permission-service.md` ("Domänengetrennte Admin-Rollen"-Sektion), `docs/services/
-  admin-ui.md` (Seiten-Tabelle, neue Sektion "Teamspaces-Admin-Übersicht", Backend-Anbindungstabelle,
-  Tests-Sektion) ergänzt.
+- **Migration**: none (no new table, no changed column).
+- **`Teamspace`'s self-management remains unchanged** — creating/joining/managing stays possible for
+  every authenticated principal without a capability gate, only the new installation-wide overview is
+  gated.
+- **Tests**: `teamspace-service` 45 (previously 41, +4: two `403` cases without principal/without
+  capability, an end-to-end test across two different teamspaces with different creators confirming that
+  a non-member with the capability sees both including correct member counts, plus a repository unit
+  test); `permission-service` unchanged at 137 (only one new, pre-seeded role, already covered by the
+  existing generic `ensure_domain_admin_roles` mechanism, no new test case needed for it). `admin-ui` 191
+  (previously 185, +6: four new tests in `teamspaces-admin.test.tsx`, two new visibility tests in
+  `admin-sidebar.test.tsx`).
+- **Verified live against the actual running stack** (image rebuild + restart of
+  `teamspace-service`/`admin-ui`, `permission-service` additionally rebuilt so the new pre-seeded role
+  actually exists in the running container): `GET /admin/teamspaces` without capability → `403`; after a
+  real role assignment to the correct `sub` principal → `200`; two real teamspaces with different
+  creators were created via the gateway, and the admin principal (a member of neither) saw BOTH in the
+  overview including the correct member count — confirmed by a parallel `403` on `GET /teamspaces/{id}`
+  for the same principal (the regular, membership-filtered route stays unchanged). Test data was
+  subsequently deleted. No interactive browser test (no browser/Playwright available in this development
+  environment, project-wide established practice).
+- Docs: new [ADR 0090](0090-teamspaces-admin-overview.md), `docs/services/teamspace-service.md`
+  (API table, new section "Installation-Wide Admin Overview", tests section),
+  `docs/services/permission-service.md` ("Domain-Separated Admin Roles" section), `docs/services/
+  admin-ui.md` (page table, new section "Teamspaces Admin Overview", backend integration table,
+  tests section) added.

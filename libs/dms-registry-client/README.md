@@ -1,11 +1,11 @@
 # dms-registry-client
 
-Selbst-Registrierung eines Service bei der Registry (Konzept 3.2a) — meldet
-sich beim Start an, hält sich per periodischem Heartbeat als `healthy` und
-meldet sich beim Shutdown sauber ab. Grundlage für das registry-basierte
-Routing des API-Gateways (3.5, seit P4-S1).
+Self-registration of a service with the registry (Concept 3.2a) — registers
+itself on startup, keeps itself marked `healthy` via a periodic heartbeat, and
+deregisters cleanly on shutdown. The basis for the API gateway's
+registry-based routing (3.5, since P4-S1).
 
-## Verwendung
+## Usage
 
 ```python
 from dms_registry_client import maybe_start_registration
@@ -21,21 +21,21 @@ if registration:
     await registration.stop()
 ```
 
-`maybe_start_registration` gibt `None` zurück, wenn `registry_service_base_url`
-oder `self_address` nicht gesetzt sind (Default in `BaseServiceSettings`) —
-Discovery ist damit ein Opt-in, kein Hard-Dependency für den Service selbst.
+`maybe_start_registration` returns `None` if `registry_service_base_url`
+or `self_address` are not set (default in `BaseServiceSettings`) —
+discovery is thus opt-in, not a hard dependency for the service itself.
 
-## Verhalten bei Fehlern
+## Behavior on errors
 
-Ist die Registry nicht erreichbar (Start, Heartbeat oder Deregistrierung),
-wird eine Warnung geloggt, aber keine Exception geworfen — ein Service darf
-nicht an einer nicht erreichbaren Registry scheitern, das würde dem
-"Dazustellen"-Prinzip widersprechen (die Registry ist selbst ein Service, der
-zeitweise nicht laufen kann, ohne dass der Rest des Systems stillsteht).
+If the registry is unreachable (on start, heartbeat, or deregistration),
+a warning is logged, but no exception is raised — a service must not
+fail because of an unreachable registry, as that would contradict the
+"plug in additionally" principle (the registry is itself a service that can
+be temporarily down without the rest of the system coming to a halt).
 
 ## Tests
 
-Gegen eine echte laufende `registry-service`-Instanz (kein Mock):
+Against a real running `registry-service` instance (no mock):
 
 ```bash
 cd infra && docker compose up -d postgres nats registry-service && cd ..

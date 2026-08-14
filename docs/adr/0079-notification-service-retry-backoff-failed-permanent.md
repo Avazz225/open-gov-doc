@@ -1,92 +1,88 @@
-# 0079 — notification-service: Retry/Backoff, `failed_permanent`, asynchroner Retry-Poll-Loop
+# 0079 — notification-service: retry/backoff, `failed_permanent`, asynchronous retry poll loop
 
-**Status:** akzeptiert (Session 3 von 7, siehe Phase 20 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 20 Session 3, betrifft `notification-service`
+**Status:** accepted (Session 3 of 7, see Phase 20 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 20 Session 3, affects `notification-service`
 
-## Entscheidung
+## Decision
 
-`Notification` hatte bislang **gar keinen Retry-Mechanismus**: ein fehlgeschlagener `email`/`webhook`-
-Zustellversuch setzte sofort `status="failed"` (terminal) — bereits als offener Punkt in
-`docs/services/notification-service.md` dokumentiert. Diese Session schließt die Lücke mit dem in
-P20-S1 (`libs/dms-retry`) angelegten Backoff-Baustein, adaptiert an die Besonderheit dieses Service:
-**Zustellung passiert synchron inline im NATS-Handler bzw. in `POST /notifications`** (kein
-mehrphasiger Prozess wie bei `archival-service`, ADR 0078) — ein Wiederholungsversuch darf diesen
-Pfad nicht blockieren.
+`Notification` previously had **no retry mechanism whatsoever**: a failed `email`/`webhook` delivery
+attempt immediately set `status="failed"` (terminal) — already documented as an open point in
+`docs/services/notification-service.md`. This session closes the gap using the backoff building block
+introduced in P20-S1 (`libs/dms-retry`), adapted to this service's peculiarity: **delivery happens
+synchronously inline in the NATS handler or in `POST /notifications`** (no multi-phase process like
+`archival-service`, ADR 0078) — a retry attempt must not block this path.
 
-1. **Neue Felder** `attempts: int` (Default 0) und `next_retry_at: datetime | None` auf `Notification`.
-2. **`attempt_delivery`** (vormals `create_and_send`s inline Try/Except, jetzt eine eigene, wiederverwendbare
-   Funktion): bei Erfolg `status="sent"`; bei einem `DeliveryError` unterhalb von
-   `Settings.max_notification_attempts` (Default 5) bleibt `status="failed"` (retry-fähig) mit einem per
-   `compute_backoff_seconds` gesetzten `next_retry_at`. Erst bei Erschöpfung wechselt `status` auf das
-   neue Terminalstatus `failed_permanent`. `in_app` hat keinen echten Zustellschritt und ist daher nie
-   retry-fähig — immer sofort `"sent"`.
-3. **Neuer, eigenständiger `_notification_retry_poll_loop`** (main.py, Intervall
-   `notification_retry_poll_interval_seconds`, Default 60s — deutlich kürzer als z. B.
-   `archival_poll_interval_seconds`, da eine E-Mail-/Webhook-Zustellung typischerweise binnen Sekunden
-   bis Minuten erneut sinnvoll ist, nicht Stunden): greift über `list_due_for_retry` fällige
-   `"failed"`-Notifications auf, ruft erneut `attempt_delivery` auf und publiziert das Ergebnis
-   (`notification.sent`/`.failed`) — der ERSTE Versuch bleibt synchron im Handler, nur die WIEDERHOLUNG
-   läuft asynchron. Die eigentliche Tick-Logik ist in `_run_retry_tick` ausgelagert (isoliert testbar,
-   gleiches Muster wie `archival-service`s `run_active_transfers_tick`).
-4. **Neuer Endpunkt** `POST /notifications/{id}/retry`: `409` wenn `status != "failed_permanent"`, sonst
-   `repository.retry_now` — setzt `attempts=0`/`error=None` zurück und unternimmt **sofort** einen neuen
-   synchronen Zustellversuch (siehe Begründung unten).
-5. **`NotificationOut`** um `attempts`/`next_retry_at` erweitert, `status`-Literal um `"failed_permanent"`.
+1. **New fields** `attempts: int` (default 0) and `next_retry_at: datetime | None` on `Notification`.
+2. **`attempt_delivery`** (formerly `create_and_send`'s inline try/except, now its own, reusable
+   function): on success `status="sent"`; on a `DeliveryError` below `Settings.max_notification_attempts`
+   (default 5), `status` stays `"failed"` (retry-eligible) with `next_retry_at` set via
+   `compute_backoff_seconds`. Only upon exhaustion does `status` transition to the new terminal status
+   `failed_permanent`. `in_app` has no real delivery step and is therefore never retry-eligible —
+   always immediately `"sent"`.
+3. **New, standalone `_notification_retry_poll_loop`** (main.py, interval
+   `notification_retry_poll_interval_seconds`, default 60s — considerably shorter than, e.g.,
+   `archival_poll_interval_seconds`, since an email/webhook delivery typically makes sense to retry
+   within seconds to minutes, not hours): picks up due `"failed"` notifications via `list_due_for_retry`,
+   calls `attempt_delivery` again, and publishes the result (`notification.sent`/`.failed`) — only the
+   FIRST attempt stays synchronous in the handler, only the RETRY runs asynchronously. The actual tick
+   logic is factored into `_run_retry_tick` (independently testable, same pattern as
+   `archival-service`'s `run_active_transfers_tick`).
+4. **New endpoint** `POST /notifications/{id}/retry`: `409` if `status != "failed_permanent"`, otherwise
+   `repository.retry_now` — resets `attempts=0`/`error=None` and **immediately** makes a new synchronous
+   delivery attempt (see rationale below).
+5. **`NotificationOut`** extended with `attempts`/`next_retry_at`, `status` literal extended with
+   `"failed_permanent"`.
 
-## Begründung
+## Rationale
 
-- **Warum ein neuer, eigenständiger Poll-Loop statt eines retry-fähigen `create_and_send`, das selbst
-  wartet/wiederholt**: `create_and_send` läuft synchron im NATS-Konsumenten-Handler bzw. im
-  `POST /notifications`-Request-Response-Zyklus — ein Backoff-Warten dort würde entweder den NATS-
-  Konsumenten blockieren (verzögert JEDE nachfolgende Nachricht auf demselben Durable-Konsumenten) oder
-  den HTTP-Request unzumutbar lange offenhalten. Ein separater, asynchroner Poll-Loop (exakt wie im
-  Roadmap-Plan vorgesehen: "wird ein neuer, eigener Retry-Poll-Loop ergänzt ... statt den NATS-Handler
-  selbst zu blockieren") entkoppelt die Wiederholung vollständig vom ersten, weiterhin schnellen
-  synchronen Versuch.
-- **Warum `attempt_delivery` als eigene, öffentliche Funktion statt weiterhin inline in
-  `create_and_send`**: sie wird jetzt von drei Stellen aufgerufen (erster Versuch, Poll-Loop-
-  Wiederholung, manueller Retry) — dieselbe Erwägung wie bei `archival-service`s `mark_failed`.
-- **Warum `status` bei einem retry-fähigen Fehlschlag `"failed"` bleibt statt eines neuen
-  Zwischenwerts**: anders als bei `archival-service` (mehrere Phasen: `pending`/`locked`/`copied`/...)
-  gibt es hier nur einen einzigen Zustellschritt — `"failed"` beschreibt bereits korrekt "dieser eine
-  Schritt ist gerade nicht erfolgreich", ob retry-fähig oder nicht wird über `attempts`/`next_retry_at`
-  ausgedrückt, nicht über eine weitere Statuskategorie. Bestehende Tests/Konsumenten, die auf
-  `status == "failed"` nach einem EINZELNEN Fehlschlag prüfen, bleiben dadurch unverändert gültig (kein
-  Breaking Change am Status-Vokabular für den bereits bekannten Fall).
-- **Warum der manuelle Retry-Endpunkt SOFORT synchron zustellt statt nur auf `pending` zurückzusetzen
-  und den nächsten Poll-Tick abzuwarten** (bewusster Unterschied zu `archival-service`s
-  `reset_for_retry`): eine Notification ist ein einzelner, leichtgewichtiger Zustellschritt (eine
-  SMTP-/HTTP-Anfrage), kein mehrphasiger Prozess mit mehreren Sekunden/Minuten Laufzeit — ein Admin, der
-  auf "erneut versuchen" klickt, erwartet ein sofortiges Ergebnis in der Antwort, nicht ein Warten auf
-  den nächsten Poll-Tick (bis zu 60s Default-Intervall).
-- **Warum KEINE RBAC-Gate für den neuen Retry-Endpunkt**: `notification-service` hat aktuell überhaupt
-  keine `permission-service`-Integration (kein `dms-permission-client`, keine RBAC-Prüfung an irgendeinem
-  bestehenden Endpunkt außer der Empfänger-Existenzprüfung) — eine komplette RBAC-Neueinführung nur für
-  diesen einen Endpunkt wäre Umfangsausweitung weit über "Retry/Backoff ergänzen" hinaus und war nicht
-  Teil dieser Roadmap-Session (Phase 19 war explizit die RBAC-Phase). Bleibt bewusst wie alle anderen
-  bestehenden `GET`-Endpunkte dieses Service ungegatet.
-- **Warum `in_app` nie retry-fähig ist**: es gibt keinen echten Zustellschritt, der fehlschlagen könnte
-  (reine DB-Persistenz) — `attempt_delivery`s `try`-Block deckt nur `email`/`webhook` mit einem
-  `DeliveryError`-Pfad ab, `in_app` fällt durch zu `status="sent"`, exakt wie vor dieser Session.
+- **Why a new, standalone poll loop instead of a retry-aware `create_and_send` that waits/retries
+  itself**: `create_and_send` runs synchronously in the NATS consumer handler or in the
+  `POST /notifications` request-response cycle — a backoff wait there would either block the NATS
+  consumer (delaying EVERY subsequent message on the same durable consumer) or hold the HTTP request
+  open unreasonably long. A separate, asynchronous poll loop (exactly as intended by the roadmap plan:
+  "a new, dedicated retry poll loop is added ... instead of blocking the NATS handler itself")
+  fully decouples the retry from the still-fast first synchronous attempt.
+- **Why `attempt_delivery` as its own public function instead of staying inline in `create_and_send`**:
+  it is now called from three places (first attempt, poll-loop retry, manual retry) — the same
+  consideration as `archival-service`'s `mark_failed`.
+- **Why `status` stays `"failed"` on a retry-eligible failure instead of a new intermediate value**:
+  unlike `archival-service` (multiple phases: `pending`/`locked`/`copied`/...), there is only a single
+  delivery step here — `"failed"` already correctly describes "this one step is currently not
+  succeeding"; whether it is retry-eligible or not is expressed via `attempts`/`next_retry_at`, not
+  via another status category. Existing tests/consumers checking `status == "failed"` after a SINGLE
+  failure therefore remain valid unchanged (no breaking change to the status vocabulary for the
+  already-known case).
+- **Why the manual retry endpoint delivers IMMEDIATELY and synchronously instead of just resetting to
+  `pending` and waiting for the next poll tick** (a deliberate difference from `archival-service`'s
+  `reset_for_retry`): a notification is a single, lightweight delivery step (one SMTP/HTTP request),
+  not a multi-phase process running several seconds/minutes — an admin clicking "retry" expects an
+  immediate result in the response, not a wait for the next poll tick (up to 60s default interval).
+- **Why NO RBAC gate on the new retry endpoint**: `notification-service` currently has no
+  `permission-service` integration whatsoever (no `dms-permission-client`, no RBAC check on any
+  existing endpoint other than the recipient existence check) — a complete RBAC introduction just for
+  this one endpoint would be scope expansion well beyond "add retry/backoff" and was not part of this
+  roadmap session (Phase 19 was explicitly the RBAC phase). Remains deliberately ungated like every
+  other existing `GET` endpoint of this service.
+- **Why `in_app` is never retry-eligible**: there is no real delivery step that could fail (pure DB
+  persistence) — `attempt_delivery`'s `try` block only covers `email`/`webhook` with a `DeliveryError`
+  path, `in_app` falls through to `status="sent"`, exactly as before this session.
 
-## Konsequenzen
+## Consequences
 
-- **Migration bereits laufender Installationen**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` im
-  Lifespan (gleiches Ad-hoc-Migrationsmuster wie `archival-service`, `document-service`) für beide neuen
-  Spalten.
-- **Tests**: `notification-service` 40 (vorher 30, +10: Repository-Ebene — Backoff-Verhalten unterhalb/
-  bei Erschöpfung von `max_notification_attempts`, `list_due_for_retry`-Filterung nach Status UND
-  Backoff-Fenster, `retry_now`; API-Ebene — neuer `/retry`-Endpunkt inkl. `404`/`409`/erfolgreichem
-  Neustart; neue `test_main.py` — `_run_retry_tick` greift eine fällige Notification auf, überspringt
-  eine noch nicht fällige).
-- **Neue `session_factory`-Fixture in `conftest.py`** (fehlte bislang, anders als bei `archival-service`)
-  — nötig für die neuen Poll-Tick-Tests.
-- Kein neues Event (`notification.sent`/`.failed` reicht weiterhin — ein Wiederholungsversuch, der
-  letztlich erfolgreich ist, publiziert `notification.sent` wie ein Erstversuch; ein `failed_permanent`-
-  Übergang publiziert weiterhin `notification.failed`, keine neue, dritte Event-Variante nötig).
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart, Migration bestätigt):
-  ein Webhook an eine unerreichbare URL erreicht nach `max_notification_attempts` Versuchen
-  `failed_permanent`; `POST /notifications/{id}/retry` liefert `409` für eine noch retry-fähige
-  Notification und stellt bei einer `failed_permanent`-Notification sofort erneut zu (bleibt bei
-  weiterhin unerreichbarem Ziel korrekt `failed_permanent`); der Poll-Loop greift eine künstlich
-  fällig gesetzte Notification auf.
+- **Migration of already-running installations**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in the
+  lifespan (same ad-hoc migration pattern as `archival-service`, `document-service`) for both new
+  columns.
+- **Tests**: `notification-service` 40 (previously 30, +10: repository level — backoff behavior
+  below/at exhaustion of `max_notification_attempts`, `list_due_for_retry` filtering by status AND
+  backoff window, `retry_now`; API level — new `/retry` endpoint incl. `404`/`409`/successful restart;
+  new `test_main.py` — `_run_retry_tick` picks up a due notification, skips one not yet due).
+- **New `session_factory` fixture in `conftest.py`** (previously missing, unlike `archival-service`) —
+  needed for the new poll-tick tests.
+- No new event (`notification.sent`/`.failed` remains sufficient — a retry that ultimately succeeds
+  publishes `notification.sent` like a first attempt; a `failed_permanent` transition still publishes
+  `notification.failed`, no new, third event variant needed).
+- **Verified live against the real running stack** (image rebuild + restart, migration confirmed): a
+  webhook to an unreachable URL reaches `failed_permanent` after `max_notification_attempts` attempts;
+  `POST /notifications/{id}/retry` returns `409` for a still retry-eligible notification and delivers
+  immediately again for a `failed_permanent` notification (correctly stays `failed_permanent` with a
+  still-unreachable target); the poll loop picks up an artificially due notification.

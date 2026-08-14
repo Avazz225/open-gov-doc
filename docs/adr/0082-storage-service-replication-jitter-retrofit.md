@@ -1,79 +1,79 @@
-# 0082 — storage-service: Full-Jitter-Backoff für die Replikations-Retry-Queue
+# 0082 — storage-service: full-jitter backoff for the replication retry queue
 
-**Status:** akzeptiert (Session 6 von 7, siehe Phase 20 in `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 20 Session 6, betrifft `storage-service`
+**Status:** accepted (Session 6 of 7, see Phase 20 in `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 20 Session 6, affects `storage-service`
 
-## Entscheidung
+## Decision
 
-`storage-service` hatte bereits das vollständige Grundmuster, das die vier anderen Sessions dieser Phase
-(ADR 0078–0081) neu einführen mussten: `ObjectCopy.attempts` + `max_replication_attempts` (Default 5) +
-Terminalstatus `failed_permanent` (siehe [ADR 0004](0004-storage-redundancy-scope.md)). Es fehlte nur ein
-einzelnes Element — Full-Jitter-Backoff zwischen Versuchen. `POST /replication/process-pending` griff
-bislang bei JEDEM Aufruf sofort erneut jede `status IN ("pending", "failed")`-Zeile auf, ohne jede
-Wartezeit. Diese Session rüstet `libs/dms-retry`s `compute_backoff_seconds` (gleiche Formel wie an den
-vier anderen Resilienz-Stellen dieser Phase) nach.
+`storage-service` already had the full base pattern that the other four sessions of this phase
+(ADR 0078–0081) had to newly introduce: `ObjectCopy.attempts` + `max_replication_attempts` (default 5)
++ terminal status `failed_permanent` (see [ADR 0004](0004-storage-redundancy-scope.md)). Only a single
+element was missing — full-jitter backoff between attempts. `POST /replication/process-pending`
+previously immediately reprocessed every `status IN ("pending", "failed")` row on EVERY call, with no
+wait time at all. This session retrofits `libs/dms-retry`'s `compute_backoff_seconds` (same formula as
+the four other resilience spots in this phase).
 
-1. **Neues Feld** `next_retry_at: datetime | None` auf `ObjectCopy` (kein neuer Terminalstatus nötig -
-   `failed_permanent` existiert bereits).
-2. **`repository.list_pending_copies`** filtert jetzt zusätzlich auf
-   `next_retry_at IS NULL OR next_retry_at <= now()` — `NULL` (neue Zeile, noch nie fehlgeschlagen) bleibt
-   immer sofort fällig.
-3. **`repository.record_copy`** bekommt einen neuen `next_retry_at`-Parameter, der — anders als
-   `retention_until`s "nur bei explizitem Wert übernehmen"-Muster — wie `last_error` UNBEDINGT gesetzt
-   wird (Default `None`): ein erfolgreicher oder frischer Schreibversuch braucht keine verbleibende
-   Backoff-Zeit, ein evtl. zuvor gesetzter Wert muss verschwinden.
-4. **`replication.process_pending`** berechnet bei einem `"failed"`-Ergebnis (egal ob wegen fehlender
-   Quellkopie oder eines Backend-Schreibfehlers) über eine neue `_next_retry_at(attempts)`-Hilfsfunktion
-   ein per Full-Jitter-Backoff gesetztes `next_retry_at`; bei `"failed_permanent"` explizit `None` (kein
-   weiterer automatischer Versuch).
-5. **Kein CronJob in dieser Session** — der Plan verschiebt die eigentliche periodische Ausführung
-   (`/replication/process-pending`, `/object-verify/{key}/all`) explizit auf **P26-S4** (Helm-Chart-
-   CronJob-Template), da Phase 26 noch nicht existiert. [ADR 0004](0004-storage-redundancy-scope.md)s
-   Entscheidung "expliziter Endpunkt statt In-Prozess-Hintergrundtask" (Testbarkeit/Neustart-Semantik)
-   bleibt unverändert gültig — diese Session ändert nur, WANN eine Zeile innerhalb eines Laufs erneut
-   aufgegriffen wird, nicht WER den Lauf auslöst.
+1. **New field** `next_retry_at: datetime | None` on `ObjectCopy` (no new terminal status needed —
+   `failed_permanent` already exists).
+2. **`repository.list_pending_copies`** now additionally filters on
+   `next_retry_at IS NULL OR next_retry_at <= now()` — `NULL` (new row, never failed yet) is always
+   immediately due.
+3. **`repository.record_copy`** gets a new `next_retry_at` parameter which — unlike `retention_until`'s
+   "only apply on an explicit value" pattern — is UNCONDITIONALLY set (like `last_error`, default
+   `None`): a successful or fresh write attempt needs no remaining backoff time, and any previously set
+   value must disappear.
+4. **`replication.process_pending`** computes, on a `"failed"` result (whether due to a missing source
+   copy or a backend write error), a full-jitter-backed `next_retry_at` via a new
+   `_next_retry_at(attempts)` helper function; on `"failed_permanent"` explicitly `None` (no further
+   automatic attempt).
+5. **No CronJob in this session** — the plan explicitly defers the actual periodic execution
+   (`/replication/process-pending`, `/object-verify/{key}/all`) to **P26-S4** (Helm chart CronJob
+   template), since Phase 26 does not yet exist. [ADR 0004](0004-storage-redundancy-scope.md)'s
+   decision "explicit endpoint instead of in-process background task" (testability/restart semantics)
+   remains unchanged — this session only changes WHEN a row is picked up again within a run, not WHO
+   triggers the run.
 
-## Begründung
+## Rationale
 
-- **Warum kein neuer Poll-Loop wie bei ADR 0079–0081**: `storage-service` hat bewusst KEINEN
-  In-Prozess-Hintergrundtask (siehe ADR 0004) — die Retry-Queue wird ausschließlich durch externe Aufrufe
-  von `POST /replication/process-pending` abgearbeitet. Jitter ändert nur, welche Zeilen ein solcher
-  Aufruf tatsächlich aufgreift (fällige vs. noch wartende), nicht die Aufruf-Architektur selbst.
-- **Warum `next_retry_at` unbedingt statt bedingt gesetzt wird** (Abweichung vom `retention_until`-Muster
-  in derselben Funktion): `retention_until` ist ein einmal gesetzter, seltener geänderter Wert, der bei
-  Zwischenaufrufen (Fixity-Checks, Fehlerfällen) erhalten bleiben MUSS. `next_retry_at` beschreibt dagegen
-  den unmittelbar bevorstehenden nächsten Versuch dieser EINEN Operation — bei jedem Aufruf neu und
-  korrekt zu bestimmen, nie ein Altwert, den ein späterer Aufruf versehentlich stehen lassen dürfte (ein
-  erfolgreicher Schreibversuch, der einen alten Backoff-Wert übrig ließe, wäre ein eigener kleiner Bug).
-- **Warum `verify_all_copies` (Fixity-Check) NICHT ebenfalls Backoff bekommt**: eine per Fixity-Check als
-  `"failed"` markierte Zeile (Prüfsummenabweichung) ist ein anderer Fehlerfall als ein technischer
-  Replikations-Fehlschlag — sie hatte bereits einmal erfolgreich repliziert und wird durch einen erneuten
-  `process_pending`-Lauf ohnehin überschrieben/neu versucht; ein Backoff dafür ist nicht Teil des in
-  dieser Session behobenen, ursprünglich in `libs/dms-retry`s eigenem Docstring benannten Gaps und wäre
-  Scope-Creep über eine reine Jitter-Nachrüstung hinaus.
+- **Why no new poll loop like ADR 0079–0081**: `storage-service` deliberately has NO in-process
+  background task (see ADR 0004) — the retry queue is exclusively processed by external calls to
+  `POST /replication/process-pending`. Jitter only changes which rows such a call actually picks up
+  (due vs. still waiting), not the calling architecture itself.
+- **Why `next_retry_at` is set unconditionally instead of conditionally** (a deviation from the
+  `retention_until` pattern in the same function): `retention_until` is a value set once, rarely
+  changed, that MUST survive intermediate calls (fixity checks, error cases). `next_retry_at`, by
+  contrast, describes the immediately upcoming next attempt of this ONE operation — it must be
+  freshly and correctly determined on every call, never a stale value that a later call could
+  accidentally leave in place (a successful write attempt leaving behind an old backoff value would be
+  its own small bug).
+- **Why `verify_all_copies` (fixity check) does NOT also get backoff**: a row marked `"failed"` by a
+  fixity check (checksum mismatch) is a different failure case than a technical replication failure —
+  it had already replicated successfully once and gets overwritten/retried anyway by a subsequent
+  `process_pending` run; backoff for this is not part of the gap addressed in this session (originally
+  named in `libs/dms-retry`'s own docstring) and would be scope creep beyond a pure jitter retrofit.
 
-## Konsequenzen
+## Consequences
 
-- **Migration bereits laufender Installationen**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS
-  next_retry_at` im Lifespan auf `storage.object_copy`.
-- **Bestehender Test musste angepasst werden**: `test_process_pending_marks_permanently_failed_after_max_attempts`
-  rief `process_pending` bislang zweimal in einer engen Schleife auf und erwartete, dass der zweite Aufruf
-  dieselbe Zeile sofort wieder aufgreift — mit echtem Jitter (auch wenn `attempt=0`s Backoff nur
-  `uniform(0, 1)` Sekunden beträgt) ist das nicht mehr deterministisch garantiert. Der Test setzt
-  `next_retry_at` jetzt zwischen den beiden Aufrufen explizit in die Vergangenheit zurück (gleiches Muster
-  wie die Tick-Tests der vier anderen Services dieser Phase).
-- **Neue Tests**: 113 (vorher 109, +4) — `next_retry_at` wird nach einem Fehlschlag gesetzt und verhindert
-  ein sofortiges erneutes Aufgreifen; nach künstlichem Vorspulen des Zeitstempels wird die Zeile wieder
-  aufgegriffen; `list_pending_copies` filtert eine noch nicht fällige Zeile aus, lässt eine fällige
-  (anderer Key) unverändert durch.
-- **`POST /replication/process-pending`/`GET /object-verify/{key}/all` bleiben bis P26-S4 weiterhin ohne
-  jeden Scheduler** — dieselbe, in `docs/services/storage-service.md` "Offene Punkte" bereits dokumentierte
-  Lücke, jetzt präzisiert um "Jitter bereits vorhanden, nur die externe Triggerung fehlt noch".
-- **Live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart, Migration bestätigt):
-  ein echtes Objekt hochgeladen, per direktem SQL-Insert eine zweite `object_copy`-Zeile mit einem im
-  Container nicht konfigurierten `backend_id` angelegt (erzeugt einen echten `KeyError` beim
-  Backend-Dict-Zugriff in `process_pending`, kein Mocking) — der erste `POST
-  /replication/process-pending`-Aufruf liefert `attempts=1` und ein gesetztes `next_retry_at` in der
-  nahen Zukunft; ein SOFORT folgender zweiter Aufruf liefert `processed=0` (die Zeile ist noch nicht
-  fällig); nach manuellem Zurücksetzen von `next_retry_at` in die Vergangenheit greift ein dritter Aufruf
-  die Zeile wieder auf (`attempts=2`) — bestätigt den vollen Jitter-Zyklus 1:1 gegen den echten Container.
+- **Migration of already-running installations**: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+  next_retry_at` in the lifespan on `storage.object_copy`.
+- **Existing test needed adjustment**: `test_process_pending_marks_permanently_failed_after_max_attempts`
+  previously called `process_pending` twice in a tight loop and expected the second call to
+  immediately pick up the same row again — with real jitter (even though `attempt=0`'s backoff is only
+  `uniform(0, 1)` seconds), that is no longer deterministically guaranteed. The test now explicitly
+  resets `next_retry_at` into the past between the two calls (same pattern as the tick tests of the
+  four other services in this phase).
+- **New tests**: 113 (previously 109, +4) — `next_retry_at` is set after a failure and prevents an
+  immediate re-pickup; after artificially advancing the timestamp, the row is picked up again;
+  `list_pending_copies` filters out a not-yet-due row while letting a due one (different key) through
+  unchanged.
+- **`POST /replication/process-pending`/`GET /object-verify/{key}/all` remain without any scheduler
+  until P26-S4** — the same gap already documented in `docs/services/storage-service.md` "Open Points",
+  now refined to "jitter already in place, only the external triggering is still missing".
+- **Verified live against the real running stack** (image rebuild + restart, migration confirmed): a
+  real object was uploaded, a second `object_copy` row was created via a direct SQL insert with a
+  `backend_id` not configured in the container (produces a real `KeyError` on the backend dict access
+  in `process_pending`, no mocking) — the first `POST /replication/process-pending` call returns
+  `attempts=1` and a `next_retry_at` set in the near future; an IMMEDIATELY following second call
+  returns `processed=0` (the row is not yet due); after manually resetting `next_retry_at` into the
+  past, a third call picks up the row again (`attempts=2`) — confirming the full jitter cycle 1:1
+  against the real container.

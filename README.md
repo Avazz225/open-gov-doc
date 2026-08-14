@@ -1,43 +1,43 @@
-# DMS — Cloud-natives, verteiltes Dokumentenmanagementsystem
+# DMS — Cloud-native, distributed document management system
 
-Dieses Repository enthält die Umsetzung des folgenden Systems: ein revisionssicheres, verteiltes DMS als Microservice-Architektur (Python/FastAPI-first, Postgres mit Schema-pro-Service, Event-Bus, Plugin-/Connector-Erweiterbarkeit).
+This repository contains the implementation of the following system: an audit-proof, distributed DMS built as a microservice architecture (Python/FastAPI-first, Postgres with schema-per-service, event bus, plugin/connector extensibility).
 
-## Einstiegspunkte
+## Entry points
 
-| Dokument | Zweck |
+| Document | Purpose |
 |---|---|
-| Konzept | Fachliches/technisches Konzept — Quelle der Wahrheit für alle Entscheidungen |
-| [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) | Session-Roadmap: welche Phase/Session baut was, in welcher Reihenfolge |
-| [`PROGRESS.md`](PROGRESS.md) | **Lebender Tracker** — jede neue Arbeitssession startet hier: Status, nächster Schritt, offene Entscheidungen |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Konventionen: Definition of Done, Service-Aufbau, Commit-Stil |
-| [`docs/architecture.md`](docs/architecture.md) | Architekturdiagramm des aktuellen Stands (aktualisiert an Phasengrenzen) |
+| Concept | Functional/technical concept — source of truth for all decisions |
+| [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) | Session roadmap: which phase/session builds what, in which order |
+| [`PROGRESS.md`](PROGRESS.md) | **Living tracker** — every new work session starts here: status, next step, open decisions |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Conventions: Definition of Done, service structure, commit style |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture diagram of the current state (updated at phase boundaries) |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records |
-| [`docs/services/`](docs/services/) | Eine Kurzdoku je Service (Verantwortung, API, Schema, Events) |
-| [`docs/service-template.md`](docs/service-template.md) | Verbindliches Muster für einen neuen Service (Layout, pyproject.toml, Dockerfile) |
+| [`docs/services/`](docs/services/) | A short doc per service (responsibility, API, schema, events) |
+| [`docs/service-template.md`](docs/service-template.md) | Binding pattern for a new service (layout, pyproject.toml, Dockerfile) |
 
-## Monorepo-Layout
+## Monorepo layout
 
 ```
-services/   # Ein Ordner je Microservice (src/, tests/, Dockerfile, README.md, pyproject.toml)
-apps/       # Frontend-Anwendungen (Next.js, statischer Export - Konzept 8, siehe ADR 0006)
-libs/       # Geteilte Python-Pakete (siehe libs/README.md für die vollständige Liste)
-infra/      # docker-compose.yml (lokale Dev-Umgebung) + k8s/ (später)
-tools/cli/  # DMS-CLI-Tool
-docs/       # ADRs + Service-Dokumentation
+services/   # One folder per microservice (src/, tests/, Dockerfile, README.md, pyproject.toml)
+apps/       # Frontend applications (Next.js, static export - Concept 8, see ADR 0006)
+libs/       # Shared Python packages (see libs/README.md for the full list)
+infra/      # docker-compose.yml (local dev environment) + k8s/ (later)
+tools/cli/  # DMS CLI tool
+docs/       # ADRs + service documentation
 ```
 
-Jeder Service ist unabhängig containerisiert und deploybar (Prinzip aus Konzept 3.1/10.2) — das Monorepo dient nur der Entwicklungsphase (geteilte Konventionen, ein `docker-compose up` für alles).
+Each service is independently containerized and deployable (principle from Concept 3.1/10.2) — the monorepo only serves the development phase (shared conventions, a single `docker-compose up` for everything).
 
-## Lokale Entwicklungsumgebung
+## Local development environment
 
 ```bash
 cd infra
-cp .env.example .env   # bei Bedarf Werte anpassen
+cp .env.example .env   # adjust values if needed
 docker compose up -d
 ```
 
-Startet Postgres, NATS JetStream, Keycloak und MinIO als Basis-Infrastruktur. Fachliche Services werden ab Phase 1 der Roadmap ergänzt.
+Starts Postgres, NATS JetStream, Keycloak, and MinIO as base infrastructure. Functional services are added starting with Phase 1 of the roadmap.
 
 ## Status
 
-Aktuelle Phase, letzter Stand und nächster Schritt: siehe [`PROGRESS.md`](PROGRESS.md).
+Current phase, latest status, and next step: see [`PROGRESS.md`](PROGRESS.md).

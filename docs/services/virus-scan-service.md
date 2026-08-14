@@ -1,71 +1,71 @@
 # virus-scan-service
 
-**Verantwortung:** Verpflichtender Virenscan vor Freigabe eines Uploads (Konzept 10.3), Quarantäne infizierter Dateien.
-**Konzept-Referenz:** 10.3
-**Eigenes Postgres-Schema:** `virus_scan` (`scan_result`).
+**Responsibility:** Mandatory virus scan prior to releasing an upload (Concept 10.3), quarantine of infected files.
+**Concept reference:** 10.3
+**Own Postgres schema:** `virus_scan` (`scan_result`).
 
 ## API
 
-| Methode | Pfad | Beschreibung |
+| Method | Path | Description |
 |---|---|---|
-| `POST` | `/scan` | Multipart (`file`, optional `document_id`/`created_by`) → führt den Scan durch, legt bei Fund eine Quarantänekopie im Storage Service ab, persistiert und liefert das Ergebnis (`ScanResultOut`) |
-| `GET` | `/scans/{id}` | Einzelnes Scan-Ergebnis — 404 bei unbekannter `id` |
-| `GET` | `/scans?document_id=...` | Alle Scans zu einem Dokument (neueste zuerst) — ungegatet |
-| `GET` | `/scans?status=infected` | Quarantäne-Einsicht (2.5, P15-S2) — erfordert `X-DMS-Principal` (401 ohne) und seit **Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) die echte permission-service-Berechtigung `admin.quarantine` (403 ohne, Rolle `domain-admin-virus-scan`) — ersetzt das vorherige reine `X-DMS-Roles`-Stringgleichheits-Gate. Jeder andere/kein `status`-Wert bleibt ungegatet (additiv, bricht keine bestehenden Aufrufer). |
-| `POST` | `/scans/{id}/release` | Freigabe nach Klärung eines Fehlalarms (2.5, P15-S2) — JSON-Body `{title, folder_id?, object_type_id?, attributes?}`, legt über `document-service`s internen Anlage-Pfad ein echtes Dokument aus den quarantänierten Bytes an (kein erneuter Scan, siehe ADR 0052), löscht danach die Quarantänekopie. 401/403 wie oben, 404 unbekannt, 409 wenn nicht `status="infected"`. |
-| `POST` | `/scans/{id}/purge` | Endgültige Löschung eines Quarantäne-Falls (2.5) — entfernt nur die quarantänierten Bytes, die `ScanResult`-Zeile bleibt mit `status="purged"` als Nachweis erhalten. 401/403/404/409 wie oben. |
-| `GET` | `/healthz` | Health-Check |
+| `POST` | `/scan` | Multipart (`file`, optional `document_id`/`created_by`) → performs the scan, on a hit stores a quarantine copy in the Storage Service, persists and returns the result (`ScanResultOut`) |
+| `GET` | `/scans/{id}` | Single scan result — 404 for unknown `id` |
+| `GET` | `/scans?document_id=...` | All scans for a document (newest first) — ungated |
+| `GET` | `/scans?status=infected` | Quarantine view (2.5, P15-S2) — requires `X-DMS-Principal` (401 without) and, since **Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)), the real permission-service permission `admin.quarantine` (403 without, role `domain-admin-virus-scan`) — replaces the previous plain `X-DMS-Roles` string-equality gate. Any other/no `status` value remains ungated (additive, breaks no existing callers). |
+| `POST` | `/scans/{id}/release` | Release after clarifying a false positive (2.5, P15-S2) — JSON body `{title, folder_id?, object_type_id?, attributes?}`, creates a real document from the quarantined bytes via `document-service`'s internal creation path (no re-scan, see ADR 0052), then deletes the quarantine copy. 401/403 as above, 404 unknown, 409 if not `status="infected"`. |
+| `POST` | `/scans/{id}/purge` | Permanent deletion of a quarantine case (2.5) — removes only the quarantined bytes, the `ScanResult` row remains with `status="purged"` as evidence. 401/403/404/409 as above. |
+| `GET` | `/healthz` | Health check |
 
-`document_id` ist beim initialen Upload noch unbekannt (der Scan läuft *vor* der Dokumenterstellung, siehe unten) — dort wird `null` übergeben; beim Check-in einer Version ist die `document_id` bereits bekannt.
+`document_id` is still unknown at the initial upload (the scan runs *before* document creation, see below) — `null` is passed there; at version check-in, the `document_id` is already known.
 
-## Synchrones Gating statt Scan-Status (ADR 0010)
+## Synchronous gating instead of scan status (ADR 0010)
 
-Der Document Service ruft `/scan` **synchron auf, bevor** er Inhalt/Metadaten eines Uploads persistiert (`POST /documents`, `POST /documents/{id}/versions`) — nicht als asynchroner Konsument von `document.version.created`. Grund: 10.3 verlangt Virenscan "verpflichtend vor Freigabe", der bestehende Upload-Pfad macht Inhalte aber sofort abrufbar, sobald sie geschrieben sind. Ein rein event-getriebener Scan würde erst nach der Freigabe reagieren. Fällt der Scan negativ aus, lehnt der Document Service die gesamte Anfrage mit `422` ab — es entsteht kein Dokument/keine Version, nichts wird im Storage Service abgelegt. Ist der Virus-Scan Service nicht erreichbar, wird der Upload ebenfalls abgelehnt (`503`, fail-closed). Details/Begründung: [ADR 0010](../adr/0010-virus-scan-synchronous-gating.md).
+The Document Service calls `/scan` **synchronously, before** persisting an upload's content/metadata (`POST /documents`, `POST /documents/{id}/versions`) — not as an asynchronous consumer of `document.version.created`. Reason: 10.3 requires the virus scan "mandatory before release", but the existing upload path makes content immediately retrievable as soon as it is written. A purely event-driven scan would only react after release. If the scan comes back negative, the Document Service rejects the entire request with `422` — no document/version is created, nothing is stored in the Storage Service. If the Virus Scan Service is unreachable, the upload is also rejected (`503`, fail-closed). Details/rationale: [ADR 0010](../adr/0010-virus-scan-synchronous-gating.md).
 
-## Engine-Plugins (3.3/3.8)
+## Engine plugins (3.3/3.8)
 
-Austauschbar über `DMS_SCAN_ENGINE` (Interface: `virus_scan_service.engines.ScanEngine`):
+Swappable via `DMS_SCAN_ENGINE` (interface: `virus_scan_service.engines.ScanEngine`):
 
-| Wert | Engine | Hinweis |
+| Value | Engine | Note |
 |---|---|---|
-| `eicar` (Standard) | `EicarSignatureEngine` | Erkennt ausschließlich die genormte EICAR-Testsignatur (branchenüblich für Integrationstests) — kein echter Malware-Schutz. |
-| `clamd` | `ClamdEngine` | Spricht einen separat betriebenen `clamd`-Daemon über dessen INSTREAM-Protokoll an (`DMS_CLAMD_HOST`/`DMS_CLAMD_PORT`). Nicht Standard in dieser Entwicklungsumgebung, da der initiale Signaturdatenbank-Download (`freshclam`) Minuten dauert und Internetzugriff auf die ClamAV-Mirrors voraussetzt. |
+| `eicar` (default) | `EicarSignatureEngine` | Detects only the standardized EICAR test signature (industry standard for integration tests) — no real malware protection. |
+| `clamd` | `ClamdEngine` | Talks to a separately operated `clamd` daemon via its INSTREAM protocol (`DMS_CLAMD_HOST`/`DMS_CLAMD_PORT`). Not the default in this development environment, since the initial signature database download (`freshclam`) takes minutes and requires internet access to the ClamAV mirrors. |
 
-Bei Fund wird die Datei über den Storage Service unter dem Key `quarantine/{scan_id}` abgelegt (Quarantäne statt Löschen, Nachvollziehbarkeit/Beweiswert) — der Virus-Scan Service hält wie der Document Service nie selbst Dateiinhalte.
+On a hit, the file is stored via the Storage Service under the key `quarantine/{scan_id}` (quarantine instead of deletion, for traceability/evidentiary value) — like the Document Service, the Virus Scan Service never holds file content itself.
 
-## Anbindung an das Backend
+## Integration with the backend
 
-- **Storage Service** (3.6): `PUT /objects/quarantine/{scan_id}` bei einem Fund; seit P15-S2 zusätzlich `GET`/`DELETE /objects/quarantine/{scan_id}` bei Freigabe/endgültiger Löschung.
-- **Document Service** (seit P15-S2): `POST /documents/from-quarantine-release` bei einer Freigabe — interner Anlage-Pfad, der bewusst keinen erneuten Scan auslöst (siehe [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md)). Bewusst kein `depends_on` in `docker-compose.yml` (document-service hängt bereits umgekehrt von virus-scan-service ab, ein Zyklus wäre die Folge).
-- Kein Aufruf anderer Services für den Scan selbst — die Engine läuft in-process.
+- **Storage Service** (3.6): `PUT /objects/quarantine/{scan_id}` on a hit; since P15-S2 also `GET`/`DELETE /objects/quarantine/{scan_id}` on release/final deletion.
+- **Document Service** (since P15-S2): `POST /documents/from-quarantine-release` on a release — an internal creation path that deliberately does not trigger a re-scan (see [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md)). Deliberately no `depends_on` in `docker-compose.yml` (document-service already depends on virus-scan-service in the reverse direction; a cycle would result).
+- No call to other services for the scan itself — the engine runs in-process.
 
 ## Events
 
 | Event | Payload |
 |---|---|
 | `virus_scan.completed` | `{document_id, filename, status: "clean"\|"infected", threat_name, created_by}` |
-| `virus_scan.released` (seit P15-S2) | `{document_id, filename, released_by}` |
-| `virus_scan.purged` (seit P15-S2) | `{filename, threat_name, purged_by}` |
+| `virus_scan.released` (since P15-S2) | `{document_id, filename, released_by}` |
+| `virus_scan.purged` (since P15-S2) | `{filename, threat_name, purged_by}` |
 
-Wird für **jeden** Scan publiziert, nicht nur bei einem Fund — der Audit Service konsumiert `virus_scan.>` (seit dieser Session, siehe `docs/services/audit-service.md`) und protokolliert damit lückenlos, was gescannt wurde (5.3 verlangt dies explizit für OCR-artige Verarbeitungsschritte, hier analog angewandt). `virus_scan.released`/`.purged` fallen automatisch unter dasselbe bereits abonnierte Wildcard-Subject — kein Änderungsbedarf in `audit-service`.
+Published for **every** scan, not just on a hit — the Audit Service consumes `virus_scan.>` (since this session, see `docs/services/audit-service.md`) and thereby logs, without gaps, what was scanned (5.3 explicitly requires this for OCR-like processing steps, applied here analogously). `virus_scan.released`/`.purged` automatically fall under the same already-subscribed wildcard subject — no change needed in `audit-service`.
 
-## Selbst-Registrierung (Konzept 3.2a)
+## Self-registration (Concept 3.2a)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an — Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
+Registers itself with the registry via `dms-registry-client` at startup — opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`.
 
-## Sensoren (Konzept 10.1)
+## Sensors (Concept 10.1)
 
-Noch keine — folgt in Phase 11.
+None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/virus-scan-service/tests` (32 Tests): Engine-Verhalten (EICAR-Erkennung inkl. eingebetteter Signatur, Factory-Auswahl, `ClamdEngine` wirft bei nicht erreichbarem Daemon statt fälschlich "clean" zu melden), Repository (CRUD, Filter nach `document_id`/`status`, `mark_resolved` für Freigabe/Löschung), API (`/scan` clean/infiziert inkl. Quarantäne-Key, `/scans`-Endpunkte inkl. rollen-gegateter `status=infected`-Sicht, `/scans/{id}/release`/`/purge` inkl. Rollen-/404/409-Fälle) — läuft gegen echtes Postgres/den echten Storage Service UND (seit P15-S2) den echten Document Service, keine Mocks (gleiche Begründung wie bei den übrigen Backend-Services).
-- Document-Service-Tests decken die Integration ab (`test_create_document_rejects_infected_upload`, `test_checkin_rejects_infected_version_without_creating_it`) — Upload mit EICAR-Inhalt wird mit `422` abgelehnt, es entsteht keine (weitere) Version. Seit P15-S2 zusätzlich `test_quarantine_release_*` — der interne Anlage-Pfad akzeptiert denselben EICAR-Inhalt bewusst (kein erneuter Scan).
+- `uv run pytest services/virus-scan-service/tests` (32 tests): engine behavior (EICAR detection incl. embedded signature, factory selection, `ClamdEngine` throws instead of falsely reporting "clean" when the daemon is unreachable), repository (CRUD, filter by `document_id`/`status`, `mark_resolved` for release/deletion), API (`/scan` clean/infected incl. quarantine key, `/scans` endpoints incl. role-gated `status=infected` view, `/scans/{id}/release`/`/purge` incl. role/404/409 cases) — runs against real Postgres/the real Storage Service AND (since P15-S2) the real Document Service, no mocks (same rationale as the other backend services).
+- Document Service tests cover the integration (`test_create_document_rejects_infected_upload`, `test_checkin_rejects_infected_version_without_creating_it`) — an upload with EICAR content is rejected with `422`, no (further) version is created. Since P15-S2, additionally `test_quarantine_release_*` — the internal creation path deliberately accepts the same EICAR content (no re-scan).
 
-## Offene Punkte
+## Open Points
 
-- **`ClamdEngine` nicht produktiv verdrahtet**: Code existiert und ist über `DMS_SCAN_ENGINE=clamd` aktivierbar, aber kein `clamd`-Container ist Teil von `infra/docker-compose.yml` (Begründung: siehe oben/ADR 0010). Nachzuholen, sobald eine Umgebung mit verlässlichem Zugriff auf die ClamAV-Signaturdatenbank verfügbar ist.
-- **Keine Benachrichtigung des Uploaders bei einem Fund**: Der Notification Service existiert erst ab P6-S2; `virus_scan.completed` wird bereits publiziert und kann dort ohne Änderung an diesem Service konsumiert werden.
-- **Keine Autorisierung auf `/scan`/`GET /scans/{id}`/`GET /scans?document_id=`** (wie bei allen bisherigen Services): Gateway prüft nur Token-Gültigkeit, keine Rollenprüfung. Seit P15-S2 IST der Quarantäne-Bereich selbst (`?status=infected`, `/release`, `/purge`) gegated (siehe oben, seit **Post-Roadmap Phase 19 Session 8** echte permission-service-RBAC statt reinem `X-DMS-Roles`-Vergleich) — bewusst begrenzt auf genau die drei in Konzept §2.5 genannten Handlungen, kein Vollretrofit der übrigen Endpunkte.
-- **Scan-Latenz erhöht Upload-Latenz** (ADR 0010) — bei der `EicarSignatureEngine` vernachlässigbar, bei `clamd`/großen Dateien potenziell spürbar.
-- **Freigabe verlangt manuelle Eingabe von `folder_id`/`object_type_id`/`attributes`** — keiner dieser Werte war beim ursprünglich gescheiterten Upload bekannt. Siehe [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) für die Begründung.
+- **`ClamdEngine` not wired up in production**: code exists and is activatable via `DMS_SCAN_ENGINE=clamd`, but no `clamd` container is part of `infra/docker-compose.yml` (rationale: see above/ADR 0010). To be added once an environment with reliable access to the ClamAV signature database is available.
+- **No notification of the uploader on a hit**: the Notification Service only exists from P6-S2 onward; `virus_scan.completed` is already published and can be consumed there without any change to this service.
+- **No authorization on `/scan`/`GET /scans/{id}`/`GET /scans?document_id=`** (as with all services so far): the gateway only checks token validity, no role check. Since P15-S2 the quarantine area itself (`?status=infected`, `/release`, `/purge`) IS gated (see above, since **Post-Roadmap Phase 19 Session 8** real permission-service RBAC instead of a plain `X-DMS-Roles` comparison) — deliberately limited to exactly the three actions named in Concept §2.5, no full retrofit of the remaining endpoints.
+- **Scan latency increases upload latency** (ADR 0010) — negligible with `EicarSignatureEngine`, potentially noticeable with `clamd`/large files.
+- **Release requires manual entry of `folder_id`/`object_type_id`/`attributes`** — none of these values were known at the originally failed upload. See [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) for the rationale.

@@ -1,124 +1,120 @@
-# 0076 — Root-Ordner-Schutz, formatabgeleitete Mail-Erkennung, Dehydrierungs-409
+# 0076 — Root Folder Protection, Format-Derived Mail Detection, Dehydration 409
 
-**Status:** akzeptiert (Session 11 von 11, letzte Session in Phase 19, siehe `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Post-Roadmap Phase 19 Session 11, betrifft `folder-service`, `mail-connector`,
+**Status:** accepted (Session 11 of 11, final session in Phase 19, see `IMPLEMENTATION_PLAN.md`)
+**Context:** Post-roadmap Phase 19 Session 11, affects `folder-service`, `mail-connector`,
 `document-service`, `apps/user-ui`
 
-## Entscheidung
+## Decision
 
-Drei unabhängige, kleine Lücken aus der "Offene Punkte"-Triage, gebündelt in einer Session:
+Three independent, small gaps from the "Open Points" triage, bundled into one session:
 
-1. **`folder-service`: `root` als geschützter Sonderordner.** `PROTECTED_FOLDER_IDS`
-   (`settings.py`) enthielt bislang nur `inbox`/`outbox`, nicht `root` — `root` konnte umbenannt,
-   verschoben, hart gelöscht oder in den Papierkorb verschoben werden, obwohl er als einziger Ordner
-   `parent_id=null` trägt und von jedem anderen Service als feste, immer existierende Wurzel
-   vorausgesetzt wird. `root` wird jetzt in dieselbe `frozenset` aufgenommen wie `inbox`/`outbox` und
-   durchläuft damit automatisch dieselben drei bestehenden `409`-Prüfungen in `main.py`
-   (`update_folder`, `hard_delete_folder`, `trash_folder`) — keine neue Prüf-Logik, nur eine erweiterte
-   Mitgliedschaft in der bereits bestehenden Menge.
-2. **`mail-connector`: Kandidaten-Erkennung aus den tatsächlich konfigurierten Formaten statt
-   hartkodiert.** `matching.py`s Kandidaten-Regex war ein generisches `[A-Za-z0-9]{2,10}[-/][A-Za-z0-9]{2,10}`
-   — deckte zufällig die beiden Default-Formate ab, aber keine installationsspezifisch abweichenden
-   `kennzeichen_format`/`CaseNumberConfig.format`-Werte. Neue `build_candidate_pattern(formats)` leitet
-   das Muster direkt aus den `{Platzhalter}`-Formatstrings von `object-type-service` und `case-service`
-   ab (erste Rückumwandlung Format→Regex im Projekt, bisher lief `str.format()` nur vorwärts). Ergebnis
-   wird pro eingehender Nachricht frisch geladen (nicht einmalig gecacht), mit Rückfall auf das alte
-   generische Muster, falls einer der beiden Cross-Service-Aufrufe fehlschlägt.
-3. **`document-service`: `409` statt `404` beim Download eines ausgesonderten (dehydrierten)
-   Dokumentinhalts.** `GET /documents/{id}/content` und `GET /documents/{id}/versions/{n}/content`
-   prüfen jetzt `document.dehydrated_at is not None` VOR dem Storage-Aufruf und liefern `409` mit einem
-   Hinweis auf die nötige Rückholung — vorher lieferte der fehlgeschlagene Storage-Download ein
-   generisches `404`, das identisch aussah wie eine echte Dateninkonsistenz (siehe
-   `test_download_content_returns_404_instead_of_crashing_if_object_missing`). `apps/user-ui`s
-   `PreviewPane.tsx` zeigt diese `409`-Meldung jetzt sichtbar an — die bisherige Download-Fehlerbehandlung
-   war komplett stillschweigend (weder bei `409` noch bei irgendeinem anderen Fehler erschien etwas).
+1. **`folder-service`: `root` as a protected special folder.** `PROTECTED_FOLDER_IDS`
+   (`settings.py`) previously only contained `inbox`/`outbox`, not `root` — `root` could be renamed,
+   moved, hard-deleted, or moved to trash, even though it is the only folder with `parent_id=null`
+   and is assumed by every other service to be a fixed, always-existing root. `root` is now added to
+   the same `frozenset` as `inbox`/`outbox` and thereby automatically runs through the same three
+   existing `409` checks in `main.py` (`update_folder`, `hard_delete_folder`, `trash_folder`) — no new
+   check logic, just extended membership in the already existing set.
+2. **`mail-connector`: candidate detection from the actually configured formats instead of hardcoded.**
+   `matching.py`'s candidate regex was a generic `[A-Za-z0-9]{2,10}[-/][A-Za-z0-9]{2,10}` — it happened
+   to cover the two default formats, but not installation-specific `kennzeichen_format`/
+   `CaseNumberConfig.format` values that deviate from them. New `build_candidate_pattern(formats)`
+   derives the pattern directly from the `{Placeholder}` format strings of `object-type-service` and
+   `case-service` (the first format→regex reverse conversion in the project; previously `str.format()`
+   was only ever used forward). The result is freshly loaded per incoming message (not cached once),
+   with a fallback to the old generic pattern if either of the two cross-service calls fails.
+3. **`document-service`: `409` instead of `404` when downloading disposed (dehydrated) document
+   content.** `GET /documents/{id}/content` and `GET /documents/{id}/versions/{n}/content` now check
+   `document.dehydrated_at is not None` BEFORE the storage call and return `409` with a note about the
+   necessary retrieval — previously the failed storage download returned a generic `404`, which looked
+   identical to a real data inconsistency (see
+   `test_download_content_returns_404_instead_of_crashing_if_object_missing`). `apps/user-ui`'s
+   `PreviewPane.tsx` now visibly displays this `409` message — the previous download error handling
+   was completely silent (nothing appeared for `409` or for any other error).
 
-## Begründung
+## Rationale
 
-- **Warum `root` erst jetzt und nicht von Anfang an geschützt**: die ursprüngliche Sonderordner-Logik
-  (P15-S1/S3) entstand für `inbox`/`outbox` als neue, zusätzliche Sonderordner — `root` existierte davor
-  bereits und wurde in der Recherche zu dieser Session als übersehene Lücke identifiziert (kein Nutzer
-  hatte je versucht, `root` umzubenennen; das Verhalten war ein Bug durch Auslassung, kein bewusst
-  offen gelassenes Verhalten).
-- **Warum keine neue Prüf-Logik nötig war**: alle drei Schutzstellen (`main.py:539-545`, `:605-608`,
-  `:635-639` laut Recherche) prüfen bereits gegen `folder_id in PROTECTED_FOLDER_IDS` als Menge, nicht
-  gegen eine feste Liste einzelner IDs — eine reine Konfigurationsänderung genügt.
-- **Warum die Kandidaten-Regex aus echten Formaten abgeleitet wird statt eines zweiten Hardcodes**: eine
-  Installation kann `kennzeichen_format`/`CaseNumberConfig.format` beliebig konfigurieren (2.2/2.5) — ein
-  hartkodiertes Muster, das nur zufällig zu den Defaults passt, würde bei jeder Abweichung (z. B. drei-
-  statt vierstelliges Jahr, ein zusätzliches Trennzeichen) unbemerkt keine Kandidaten mehr finden, ohne
-  dass dies irgendwo sichtbar würde.
-- **Warum pro Nachricht neu geladen statt einmalig gecacht**: ein einmaliger Fetch beim App-Start würde
-  neu angelegte Objekttypen/Formate erst nach einem Neustart erkennen — der Preis (zwei zusätzliche
-  Cross-Service-Aufrufe je eingehender Mail) ist angesichts des Nachrichtenvolumens vernachlässigbar.
-  Wichtiger technischer Grund, der während der Umsetzung entdeckt wurde: ein wiederverwendeter,
-  langlebiger HTTP-Client aus `app.state` (an die Event-Loop des Lifespan-Kontexts gebunden) führt in
-  Tests, die `_ingest_message()` direkt statt über `TestClient`s Request-Dispatch aufrufen, zu
-  `RuntimeError: ... bound to a different event loop` — frische, kurzlebige Client-Instanzen je Aufruf
-  umgehen dieses Problem strukturell.
-- **Warum `409` statt `404` bei Dehydrierung**: `404` ("nicht gefunden") und "bewusst aus dem
-  Primärspeicher entfernt, aber wiederherstellbar" sind semantisch verschieden — ein Nutzer, der `404`
-  sieht, hat keinen Hinweis darauf, dass eine Rückholung überhaupt möglich ist. `409` (Konflikt: der
-  Zustand des Dokuments erlaubt die angeforderte Operation aktuell nicht) mit erklärendem `detail` folgt
-  demselben Muster wie die bereits bestehenden `409`-Antworten dieses Service (z. B. Sonderordner-Schutz
-  in `folder-service`, siehe oben).
-- **Warum keine `archival_transfer_id`-Verlinkung in der Fehlermeldung**: `document.dehydrated_at` trägt
-  keine Referenz auf den zugehörigen `ArchivalTransfer`/`CaseArchivalTransfer` — eine Verlinkung hätte
-  ein neues Datenfeld erfordert, das über den Rahmen dieser kleinen, isolierten Session hinausgegangen
-  wäre. Die Meldung bleibt bewusst generisch ("muss erst zurückgeholt werden").
+- **Why `root` is only protected now and not from the start**: the original special-folder logic
+  (P15-S1/S3) was built for `inbox`/`outbox` as new, additional special folders — `root` already
+  existed before that and was identified during research for this session as an overlooked gap (no
+  user had ever tried to rename `root`; the behavior was a bug of omission, not deliberately
+  left-open behavior).
+- **Why no new check logic was needed**: all three protection points (`main.py:539-545`, `:605-608`,
+  `:635-639` per research) already check against `folder_id in PROTECTED_FOLDER_IDS` as a set, not
+  against a fixed list of individual IDs — a pure configuration change suffices.
+- **Why the candidate regex is derived from real formats instead of a second hardcode**: an
+  installation can configure `kennzeichen_format`/`CaseNumberConfig.format` arbitrarily (2.2/2.5) — a
+  hardcoded pattern that only happens to match the defaults would silently stop finding candidates on
+  any deviation (e.g. a three- instead of four-digit year, an additional separator), without this
+  becoming visible anywhere.
+- **Why reloaded per message instead of cached once**: a one-time fetch at app startup would only
+  recognize newly created object types/formats after a restart — the cost (two additional
+  cross-service calls per incoming mail) is negligible given the message volume. An important
+  technical reason discovered during implementation: a reused, long-lived HTTP client from
+  `app.state` (bound to the event loop of the lifespan context) causes
+  `RuntimeError: ... bound to a different event loop` in tests that call `_ingest_message()` directly
+  rather than via `TestClient`'s request dispatch — fresh, short-lived client instances per call
+  structurally avoid this problem.
+- **Why `409` instead of `404` for dehydration**: `404` ("not found") and "deliberately removed from
+  primary storage but recoverable" are semantically different — a user seeing `404` has no indication
+  that a retrieval is even possible. `409` (conflict: the document's current state does not allow the
+  requested operation) with an explanatory `detail` follows the same pattern as this service's already
+  existing `409` responses (e.g. special-folder protection in `folder-service`, see above).
+- **Why no `archival_transfer_id` link in the error message**: `document.dehydrated_at` carries no
+  reference to the associated `ArchivalTransfer`/`CaseArchivalTransfer` — a link would have required a
+  new data field, which would have gone beyond the scope of this small, isolated session. The message
+  deliberately remains generic ("must first be retrieved").
 
-## Konsequenzen
+## Consequences
 
-- **Tests**: `folder-service` 120 (vorher 116, +4: Umbenennen/Verschieben/Hart-Löschen/Papierkorb für
-  `root`, spiegelbildlich zu den bestehenden Inbox-Tests). `mail-connector` 33 (vorher 30, +3: gezielte
-  Unit-Tests für `build_candidate_pattern`, siehe unten den Regressionsfund; ein Testdatum musste
-  zusätzlich von einem hex- auf ein rein numerisches Suffix umgestellt werden, da die neue, strengere
-  Regex `Laufende_Nummer` als `\d+` statt generisch alphanumerisch erkennt — der reale,
-  systemgenerierte Kennzeichen-Suffix ist ohnehin immer numerisch, siehe `_render_kennzeichen`).
-  `document-service` 234 (vorher 233, +1: neuer `409`-Roundtrip-Test inkl. Rehydrierung).
-  `apps/user-ui`: 171 Tests (vorher 169, +2: `409`-spezifische und generische Download-Fehlermeldung),
+- **Tests**: `folder-service` 120 (previously 116, +4: rename/move/hard-delete/trash for `root`,
+  mirroring the existing inbox tests). `mail-connector` 33 (previously 30, +3: targeted unit tests for
+  `build_candidate_pattern`, see the regression finding below; one test date additionally had to be
+  changed from a hex to a purely numeric suffix, since the new, stricter regex recognizes
+  `Laufende_Nummer` as `\d+` instead of generic alphanumeric — the real, system-generated file
+  reference number suffix is always numeric anyway, see `_render_kennzeichen`).
+  `document-service` 234 (previously 233, +1: new `409` round-trip test incl. rehydration).
+  `apps/user-ui`: 171 tests (previously 169, +2: `409`-specific and generic download error message),
   `tsc`/`eslint`/`next build` clean.
-- **Zwei echte Bugs bei der Live-Verifikation gefunden und behoben** (beide erst sichtbar geworden, weil
-  diese Session zum ersten Mal einen echten SMTP→POP3-Roundtrip mit einem installationsspezifisch
-  konfigurierten, vom Default abweichenden Format durchspielte, statt nur die ohnehin passenden
-  Default-Formate zu testen):
-  1. **`infra/docker-compose.yml`s `mail-connector`-Block hatte kein `DMS_OBJECT_TYPE_SERVICE_BASE_URL`**
-     — fiel im Container auf `Settings`s Lokal-Dev-Default (`http://localhost:8007`) zurück, der dort ins
-     Leere zeigt. `list_kennzeichen_formats()` schlug dadurch bei jedem Nachrichteneingang fehl (mit
-     Log-Warnung), das Kandidaten-Muster nutzte still den generischen Rückfall — funktional unauffällig
-     für die beiden Default-Formate (die deckt der Rückfall zufällig ab), aber genau die neue Fähigkeit
-     dieser Session (installationsspezifische Formate erkennen) blieb dadurch komplett wirkungslos.
-     Behoben durch Ergänzen der Variable (gleiches Muster wie bei jedem anderen Service dieses Projekts)
+- **Two real bugs found and fixed during live verification** (both only surfaced because this session
+  was the first to run a real SMTP→POP3 round trip with an installation-specific format deviating
+  from the default, instead of only testing the already-matching default formats):
+  1. **`infra/docker-compose.yml`'s `mail-connector` block had no `DMS_OBJECT_TYPE_SERVICE_BASE_URL`**
+     — fell back in the container to `Settings`'s local-dev default (`http://localhost:8007`), which
+     points nowhere there. `list_kennzeichen_formats()` therefore failed on every incoming message
+     (with a log warning), and the candidate pattern silently used the generic fallback — functionally
+     unnoticeable for the two default formats (which the fallback happens to cover), but exactly this
+     session's new capability (recognizing installation-specific formats) was thereby completely
+     ineffective. Fixed by adding the variable (same pattern as every other service in this project)
      plus `depends_on: object-type-service`.
-  2. **`build_candidate_pattern` sortierte die Formate alphabetisch statt nach Länge** — Pythons
-     `re`-Alternation ist "erste passende Alternative gewinnt", kein längster-Treffer-Matching wie POSIX.
-     Mit drei live tatsächlich konfigurierten, unterschiedlichen Formaten (`{Federführung}-
-     {Laufende_Nummer}`, `{Federführung}-{YYYY}-{Laufende_Nummer}`, `{YYYY}-{Laufende_Nummer}`) sortierte
-     `sorted(set(formats))` das KÜRZERE, Jahr-lose `{Federführung}-{Laufende_Nummer}`-Muster alphabetisch
-     vor das längere — ein echter Kandidat wie `P19S11Y-2026-004` wurde dadurch fälschlich bereits nach
-     `P19S11Y-2026` abgeschnitten (die erste Alternative `\S+?-\d+` fand dort schon ihren vollständigen,
-     kürzeren Treffer und wurde nie durch die zweite, korrektere Alternative ersetzt). Behoben durch
-     Sortierung nach absteigender Formatlänge (`key=lambda f: (-len(f), f)`) statt alphabetisch — die
-     längste, spezifischste Alternative wird jetzt immer zuerst versucht. Drei neue gezielte Unit-Tests
-     in `test_matching.py` (inkl. eines direkten Regressionstests mit genau dieser Format-Kombination).
-- **Eine vorbestehende, unabhängige Testinfrastruktur-Flakiness** in `mail-connector`s
-  `test_confirm_match_creates_document_in_matched_folder` (sporadisches "different event loop" bei
-  einem langlebigen `app.state.virus_scan`-Client in Kombination mit direktem `_ingest_message()`-Aufruf)
-  wurde während der Fehlersuche identifiziert, aber NICHT behoben — außerhalb des Sessionumfangs, per
-  mehrfachem Isolationslauf als bereits vor dieser Session bestehend bestätigt.
-- **`rendering-service`/`ocr-service`/`signature-service`s Document-Clients** rufen weiterhin
-  `response.raise_for_status()` ohne spezielle `409`-Behandlung auf `GET
-  .../versions/{n}/content` — ein `409` propagiert dort als generischer `httpx.HTTPStatusError`,
-  abgefangen vom jeweils bereits bestehenden breiten `except Exception` der Poll-Loops (gleiches
-  Fehlerbild wie das vorherige `404`, kein Regressionsrisiko). Keine Änderung an diesen drei Clients in
-  dieser Session — außerhalb des in der Roadmap benannten Umfangs.
-- **Live gegen den echten laufenden Stack verifiziert** (nach Image-Neubau von `folder-service`,
-  `mail-connector`, `document-service` — `mail-connector` musste dabei zweimal neu gebaut werden, siehe
-  die beiden oben beschriebenen Bugfixes): `root`-Umbenennung/-Verschiebung/-Hart-Löschung/-Papierkorb
-  liefert jeweils `409`; ein echter SMTP→POP3-Roundtrip gegen `mailpit` mit einem live über
-  `document-service` erzeugten, installationsspezifisch attributbasierten Kennzeichen
-  (`P19S11Z-2026-005`, Objekttyp "Akte", Format `{Federführung}-{YYYY}-{Laufende_Nummer}`) wird nach
-  beiden Bugfixes korrekt und vollständig als `status="proposed_match"` mit passendem `document_id`
-  erkannt (zwei Zwischenversuche mit kollidierenden bzw. abgeschnittenen Kandidaten dokumentierten dabei
-  die beiden Bugs, siehe oben); ein dehydriertes Dokument liefert `409` mit Rückhol-Hinweis statt `404`,
-  nach Rehydrierung wieder `200`.
+  2. **`build_candidate_pattern` sorted the formats alphabetically instead of by length** — Python's
+     `re` alternation is "first matching alternative wins," not longest-match matching like POSIX.
+     With three actually configured, distinct live formats (`{Federführung}-{Laufende_Nummer}`,
+     `{Federführung}-{YYYY}-{Laufende_Nummer}`, `{YYYY}-{Laufende_Nummer}`), `sorted(set(formats))`
+     alphabetically sorted the SHORTER, year-less `{Federführung}-{Laufende_Nummer}` pattern before the
+     longer one — a real candidate like `P19S11Y-2026-004` was thereby incorrectly truncated already
+     after `P19S11Y-2026` (the first alternative `\S+?-\d+` already found its complete, shorter match
+     there and was never replaced by the second, more correct alternative). Fixed by sorting by
+     descending format length (`key=lambda f: (-len(f), f)`) instead of alphabetically — the longest,
+     most specific alternative is now always tried first. Three new targeted unit tests in
+     `test_matching.py` (incl. a direct regression test with exactly this format combination).
+- **A pre-existing, independent test infrastructure flakiness** in `mail-connector`'s
+  `test_confirm_match_creates_document_in_matched_folder` (sporadic "different event loop" with a
+  long-lived `app.state.virus_scan` client combined with a direct `_ingest_message()` call) was
+  identified during debugging, but NOT fixed — out of session scope, confirmed via multiple isolation
+  runs to have pre-existed before this session.
+- **`rendering-service`/`ocr-service`/`signature-service`'s document clients** still call
+  `response.raise_for_status()` without special `409` handling on
+  `GET .../versions/{n}/content` — a `409` propagates there as a generic `httpx.HTTPStatusError`,
+  caught by the already-existing broad `except Exception` of the respective poll loops (same error
+  behavior as the previous `404`, no regression risk). No change to these three clients in this
+  session — out of the scope named in the roadmap.
+- **Verified live against the real running stack** (after rebuilding images for `folder-service`,
+  `mail-connector`, `document-service` — `mail-connector` had to be rebuilt twice, see the two bugfixes
+  described above): `root` rename/move/hard-delete/trash each return `409`; a real SMTP→POP3 round trip
+  against `mailpit` with an installation-specific, attribute-based file reference number
+  (`P19S11Z-2026-005`, object type "Akte", format `{Federführung}-{YYYY}-{Laufende_Nummer}`) generated
+  live via `document-service` is, after both bugfixes, correctly and fully recognized as
+  `status="proposed_match"` with a matching `document_id` (two intermediate attempts with colliding or
+  truncated candidates documented the two bugs above); a dehydrated document returns `409` with a
+  retrieval note instead of `404`, and `200` again after rehydration.

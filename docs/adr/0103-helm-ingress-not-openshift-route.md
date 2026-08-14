@@ -1,107 +1,105 @@
-# 0103 — Helm: vanilla `Ingress` statt OpenShift `Route`, host-basiertes Routing
+# 0103 — Helm: vanilla `Ingress` instead of OpenShift `Route`, host-based routing
 
-**Status:** akzeptiert (P26-S5, siehe `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Konzept 8/3.5, betrifft `infra/k8s/dms/` (Phase 26 — "Helm-Charts für k8s/**OCP**", Fortsetzung von [ADR 0099](0099-helm-single-chart-values-driven-service-map.md)/[ADR 0102](0102-helm-frontend-apps-buildtime-env-limitation.md)), löst den seit P26-S1 in `values.yaml`s `gateway-service`-Kommentar offen gelassenen Punkt ("reale OCP-Route/Ingress folgt in P26-S2/S5") ein
+**Status:** accepted (P26-S5, see `IMPLEMENTATION_PLAN.md`)
+**Context:** Concept 8/3.5, affects `infra/k8s/dms/` (Phase 26 — "Helm charts for k8s/**OCP**," continuation of [ADR 0099](0099-helm-single-chart-values-driven-service-map.md)/[ADR 0102](0102-helm-frontend-apps-buildtime-env-limitation.md)), fulfills the point left open since P26-S1 in `values.yaml`'s `gateway-service` comment ("real OCP route/ingress follows in P26-S2/S5")
 
-## Entscheidung
+## Decision
 
-`templates/ingress.yaml` (neu, P26-S5) rendert ein `networking.k8s.io/v1`
-**`Ingress`** (vanilla Kubernetes) je Eintrag in `.Values.services` mit
-`ingress.enabled: true` — genutzt von `gateway-service` sowie den 6
-Frontend-Apps (7 ausgehende öffentliche Routen insgesamt in dieser Session).
-Es gibt **kein** natives OpenShift-`Route`-Objekt in diesem Chart.
+`templates/ingress.yaml` (new, P26-S5) renders a `networking.k8s.io/v1`
+**`Ingress`** (vanilla Kubernetes) for each entry in `.Values.services` with
+`ingress.enabled: true` — used by `gateway-service` as well as the 6
+frontend apps (7 outbound public routes total in this session). There is
+**no** native OpenShift `Route` object in this chart.
 
-Jeder Eintrag bekommt einen **eigenen Hostnamen** (`ingress.host`, z. B.
-`user-ui.dms.local`), **nicht** einen gemeinsamen Host mit
-Pfad-Präfix-Routing (z. B. `dms.local/user-ui`).
+Each entry gets its **own hostname** (`ingress.host`, e.g.
+`user-ui.dms.local`), **not** a shared host with path-prefix routing (e.g.
+`dms.local/user-ui`).
 
-## Begründung
+## Rationale
 
-- **Ingress statt Route, obwohl die Phase explizit "k8s/OCP" heißt**:
-  OpenShifts Standard-Router (HAProxy-basiert) nimmt reguläre
-  `networking.k8s.io/v1`-`Ingress`-Objekte seit mehreren OCP-Versionen
-  nativ entgegen (intern per Route-Adapter umgesetzt) — ein einziges
-  `Ingress`-Template deckt damit sowohl vanilla-Kubernetes-Cluster als auch
-  OpenShift-Cluster ab, ohne zwei parallele Template-Sätze pflegen zu
-  müssen (derselbe DRY-Grundsatz wie in ADR 0099: keine unnötige
-  Duplikation, wo ein gemeinsamer Nenner ausreicht). Ein natives
-  `Route`-Objekt böte zusätzlich OCP-spezifische Fähigkeiten (z. B.
-  `haproxy.router.openshift.io/*`-Annotationen, native
-  edge/passthrough/reencrypt-TLS-Terminierungsarten, Wildcard-Routen ohne
-  expliziten DNS-Eintrag je Host) — für die Bedürfnisse dieser Phase
-  (öffentlicher HTTP(S)-Zugriff auf 6 statische Frontend-Apps + einen
-  API-Gateway) reicht der `Ingress`-gemeinsame Nenner vollständig aus.
-- **Bewusster v1-Scope-Cut, kein übersehener Teil des Phasennamens**: ein
-  zusätzliches `templates/route.yaml` (OpenShift-`route.openshift.io/v1`)
-  wäre eine reine Additiv-Ergänzung — dieselbe `services:`-Map, dieselben
-  `ingress.*`-Felder, nur ein zweites Template mit anderer `apiVersion`/
-  `kind` und ggf. `annotations`-Handling für Route-spezifische Extras. Für
-  diese Session bewusst zurückgestellt (siehe "Konsequenzen") statt sie
-  ungetestet/unverifiziert mitzuliefern — dieses Chart wurde ausschließlich
-  gegen `helm lint`/`helm template` verifiziert (kein echtes OCP-Cluster in
-  dieser Entwicklungsumgebung verfügbar, siehe ADR 0099 "Kein echtes
-  Cluster-Deployment in Phase 26 gefordert"), ein tatsächlich auf einem
-  realen OCP-Router getesteter Route-Baustein ließe sich mit dieser
-  Einschränkung ohnehin nicht seriös als "verifiziert" behaupten.
-- **Host-basiert statt Pfad-Präfix-basiert**: geprüft (`grep basePath
-  apps/*/next.config.mjs`, kein Treffer) — keiner der 6 Next.js-Static-
-  Exports setzt `basePath`/`assetPrefix`. Ihre `/_next/...`-Asset-Pfade
-  sind deshalb root-relativ; mehrere Apps unter demselben Host mit
-  reinem Pfad-Präfix (z. B. `dms.local/admin-ui/`) würden sich bei diesen
-  Asset-URLs gegenseitig überschreiben (jede App würde versuchen,
-  `/_next/...` an der Host-Wurzel zu laden, nicht unter ihrem eigenen
-  Präfix) — ein `Ingress`-`path`-Rewrite allein löst das nicht, es bräuchte
-  zusätzlich eine `next.config.mjs`-Änderung (`basePath` setzen) UND einen
-  Rebuild aller 6 Images. Host-basiertes Routing braucht keine App-seitige
-  Änderung und funktioniert mit dem bestehenden Next.js-Export unverändert.
-- **`ingress.host`-Werte sind Dev-/Demo-Platzhalter** (`*.dms.local`,
-  analog zu `global.installationId: "local-dev"` an anderer Stelle in
-  `values.yaml`) — bewusst je Service `values.yaml`-konfigurierbar (kein
-  hartkodierter Wert im Template), damit eine echte Installation sie ohne
-  Chart-Änderung durch reale DNS-Namen ersetzen kann (`--set
-  services.user-ui.ingress.host=...` oder eine eigene values-Overlay-Datei).
-- **`office-addin` mit `tls.enabled: true` als einzige Ausnahme unter den
-  6 Apps**: `docs/services/office-addin.md` dokumentiert eine harte
-  HTTPS-Pflicht (Office lädt Add-in-Webinhalte grundsätzlich nur über
-  HTTPS, abgesehen von wenigen lokalen Entwicklungsausnahmen) — die übrigen
-  5 Apps sowie `gateway-service` haben `tls.enabled: false` als Default
-  (funktionsfähig auch ohne TLS, ein produktiver Einsatz würde es
-  typischerweise trotzdem aktivieren, ist hier aber keine harte
-  Voraussetzung wie bei `office-addin`).
-- **Kein cert-manager-Anbindung/automatische Zertifikatsausstellung**:
-  `ingress.tls.secretName` erwartet ein bereits vorhandenes TLS-Secret,
-  dieses Chart legt keins an. `ingress.annotations` steht als freies Feld
-  zur Verfügung, über das ein Betreiber z. B.
-  `cert-manager.io/cluster-issuer` selbst ergänzen kann, ohne dass dieses
-  Chart eine bestimmte Zertifikatslösung voraussetzt oder mitbringt —
-  gleiches Operator-agnostisches Prinzip wie bei `existingSecret`
-  (ADR 0100).
+- **Ingress instead of Route, even though the phase is explicitly called
+  "k8s/OCP"**: OpenShift's standard router (HAProxy-based) has natively
+  accepted regular `networking.k8s.io/v1` `Ingress` objects for several OCP
+  versions (implemented internally via a Route adapter) — a single
+  `Ingress` template thus covers both vanilla Kubernetes clusters and
+  OpenShift clusters, without needing to maintain two parallel sets of
+  templates (the same DRY principle as in ADR 0099: no unnecessary
+  duplication where a common denominator suffices). A native `Route`
+  object would additionally offer OCP-specific capabilities (e.g.
+  `haproxy.router.openshift.io/*` annotations, native
+  edge/passthrough/reencrypt TLS termination modes, wildcard routes
+  without an explicit DNS entry per host) — for the needs of this phase
+  (public HTTP(S) access to 6 static frontend apps + one API gateway) the
+  `Ingress` common denominator is fully sufficient.
+- **A deliberate v1 scope cut, not an overlooked part of the phase name**:
+  an additional `templates/route.yaml` (OpenShift `route.openshift.io/v1`)
+  would be a purely additive extension — the same `services:` map, the
+  same `ingress.*` fields, just a second template with a different
+  `apiVersion`/`kind` and possibly annotation handling for route-specific
+  extras. Deliberately deferred for this session (see "Consequences")
+  rather than shipping it untested/unverified — this chart was verified
+  exclusively against `helm lint`/`helm template` (no real OCP cluster
+  available in this development environment, see ADR 0099 "no real
+  cluster deployment required in Phase 26"), and a route building block
+  actually tested on a real OCP router could not be credibly claimed as
+  "verified" under this constraint anyway.
+- **Host-based instead of path-prefix-based**: checked (`grep basePath
+  apps/*/next.config.mjs`, no hits) — none of the 6 Next.js static
+  exports set `basePath`/`assetPrefix`. Their `/_next/...` asset paths are
+  therefore root-relative; multiple apps under the same host with pure
+  path-prefix routing (e.g. `dms.local/admin-ui/`) would overwrite each
+  other's asset URLs (each app would try to load `/_next/...` at the host
+  root, not under its own prefix) — an `Ingress` `path` rewrite alone
+  doesn't solve this; it would additionally need a `next.config.mjs`
+  change (setting `basePath`) AND a rebuild of all 6 images. Host-based
+  routing needs no app-side change and works unchanged with the existing
+  Next.js export.
+- **`ingress.host` values are dev/demo placeholders** (`*.dms.local`,
+  analogous to `global.installationId: "local-dev"` elsewhere in
+  `values.yaml`) — deliberately configurable per service in `values.yaml`
+  (no hardcoded value in the template), so a real installation can replace
+  them with real DNS names without a chart change (`--set
+  services.user-ui.ingress.host=...` or a dedicated values overlay file).
+- **`office-addin` with `tls.enabled: true` as the sole exception among the
+  6 apps**: `docs/services/office-addin.md` documents a hard HTTPS
+  requirement (Office generally only loads add-in web content over HTTPS,
+  aside from a few local development exceptions) — the remaining 5 apps
+  and `gateway-service` have `tls.enabled: false` as the default
+  (functional even without TLS; a production deployment would typically
+  enable it anyway, but it's not a hard prerequisite here as it is for
+  `office-addin`).
+- **No cert-manager integration/automatic certificate issuance**:
+  `ingress.tls.secretName` expects an already-existing TLS secret; this
+  chart doesn't create one. `ingress.annotations` is available as a free
+  field through which an operator can add, e.g.,
+  `cert-manager.io/cluster-issuer` themselves, without this chart assuming
+  or bundling a particular certificate solution — the same
+  operator-agnostic principle as with `existingSecret` (ADR 0100).
 
-## Konsequenzen
+## Consequences
 
-- Ein Betreiber, der die OCP-**nativen** Route-Fähigkeiten braucht (z. B.
-  Wildcard-Subdomain-Routing ohne expliziten DNS-Eintrag je Host,
-  HAProxy-Annotationen für Sticky-Sessions/Timeouts, native
-  Passthrough-TLS-Terminierung), muss dafür entweder eigene, außerhalb
-  dieses Charts verwaltete `Route`-Objekte anlegen (referenzieren dieselben
-  `<fullname>-<service>`-Kubernetes-Services, die `templates/service.yaml`
-  bereits rendert — kein Chart-Umbau nötig, nur ein zusätzliches, separat
-  gepflegtes Manifest) oder auf eine künftige Chart-Erweiterung
-  (`templates/route.yaml`, gleiche `services.<name>.ingress`-Felder wie
-  hier) warten. Dokumentierter Gap, kein stiller.
-- `services.gateway-service.ingress.host` MUSS mit dem
-  `NEXT_PUBLIC_GATEWAY_BASE_URL`-Build-Arg übereinstimmen, mit dem die 6
-  Frontend-Images gebaut wurden (siehe ADR 0102 "Konsequenzen") — eine
-  Änderung an `ingress.host` allein (ohne Image-Rebuild) macht die
-  Frontend-Apps nicht automatisch wieder funktionsfähig.
-- `gateway-service.env.DMS_CORS_ALLOWED_ORIGINS` muss von Hand mit den 6
-  `ingress.host`-Werten synchron gehalten werden (`values.yaml` listet
-  aktuell alle 6 `https://<app>.dms.local`-Platzhalter plus den
-  bestehenden `http://localhost:3000`-Compose-Dev-Fall) — kein
-  Helm-Templating leitet das eine automatisch aus dem anderen ab (beide
-  Werte stehen in derselben `values.yaml`-Datei, aber
-  `DMS_CORS_ALLOWED_ORIGINS` ist ein roher JSON-String innerhalb von
-  `services.gateway-service.env`, kein strukturiertes Feld, aus dem sich
-  eine Cross-Referenz zu den 6 anderen `services.<name>.ingress.host`-
-  Werten sauber ableiten ließe, ohne den generischen `env:`-Mechanismus für
-  diesen einen Sonderfall aufzubrechen).
+- An operator who needs OCP-**native** route capabilities (e.g.
+  wildcard-subdomain routing without an explicit DNS entry per host,
+  HAProxy annotations for sticky sessions/timeouts, native
+  passthrough TLS termination) must either create their own `Route`
+  objects managed outside this chart (referencing the same
+  `<fullname>-<service>` Kubernetes services that `templates/service.yaml`
+  already renders — no chart rework needed, just an additional,
+  separately maintained manifest), or wait for a future chart extension
+  (`templates/route.yaml`, the same `services.<name>.ingress` fields as
+  here). A documented gap, not a silent one.
+- `services.gateway-service.ingress.host` MUST match the
+  `NEXT_PUBLIC_GATEWAY_BASE_URL` build arg with which the 6 frontend
+  images were built (see ADR 0102 "Consequences") — changing
+  `ingress.host` alone (without an image rebuild) does not automatically
+  make the frontend apps functional again.
+- `gateway-service.env.DMS_CORS_ALLOWED_ORIGINS` must be kept in sync by
+  hand with the 6 `ingress.host` values (`values.yaml` currently lists all
+  6 `https://<app>.dms.local` placeholders plus the existing
+  `http://localhost:3000` Compose dev case) — no Helm templating derives
+  one from the other automatically (both values sit in the same
+  `values.yaml` file, but `DMS_CORS_ALLOWED_ORIGINS` is a raw JSON string
+  within `services.gateway-service.env`, not a structured field from which
+  a cross-reference to the 6 other `services.<name>.ingress.host` values
+  could be cleanly derived, without breaking the generic `env:` mechanism
+  for this one special case).

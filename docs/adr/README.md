@@ -1,21 +1,21 @@
 # Architecture Decision Records
 
-Eine Datei je nicht-trivialer Architekturentscheidung, benannt `NNNN-kurzer-titel.md` (fortlaufend nummeriert). Wird angelegt, sobald die erste Entscheidung ansteht (ab P1-S1).
+One file per non-trivial architecture decision, named `NNNN-short-title.md` (sequentially numbered). Created as soon as the first decision is due (starting at P1-S1).
 
 ## Template
 
 ```markdown
-# NNNN — Titel
+# NNNN — Title
 
-**Status:** vorgeschlagen | akzeptiert | verworfen | ersetzt durch NNNN
-**Kontext:** Konzept-Referenz (z. B. 3.4), betroffene Session
+**Status:** proposed | accepted | rejected | superseded by NNNN
+**Context:** concept reference (e.g. 3.4), affected session
 
-## Entscheidung
+## Decision
 ...
 
-## Begründung
+## Rationale
 ...
 
-## Konsequenzen
+## Consequences
 ...
 ```

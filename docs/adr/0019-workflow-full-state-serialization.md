@@ -1,21 +1,21 @@
-# 0019 — Workflow-Instanzstatus als voller serialisierter Blob statt normalisierter Task-Tabelle
+# 0019 — Workflow instance state as a full serialized blob instead of a normalized task table
 
-**Status:** akzeptiert
-**Kontext:** P6-S1 (Workflow Engine Grundgerüst, Konzept 7.1). `workflow-service` muss den Ausführungszustand jeder Prozessinstanz zwischen einzelnen, zustandslosen HTTP-Requests persistieren (Postgres, `dms-db-base`), da SpiffWorkflow selbst keine eigene Persistenzschicht mitbringt.
+**Status:** accepted
+**Context:** P6-S1 (Workflow Engine foundation, Concept 7.1). `workflow-service` must persist the execution state of every process instance between individual, stateless HTTP requests (Postgres, `dms-db-base`), since SpiffWorkflow itself does not come with its own persistence layer.
 
-## Entscheidung
+## Decision
 
-Jede `process_instance`-Zeile speichert den vollständigen, von `SpiffWorkflow.bpmn.serializer.BpmnWorkflowSerializer.serialize_json()` erzeugten JSON-Blob in einer einzelnen `Text`-Spalte (`workflow_state`). Es gibt **keine** separate, normalisierte Tabelle für einzelne Tasks/Schritte. Bereite Manual/User Tasks werden bei jedem Lesezugriff live durch Deserialisieren des Blobs ermittelt (`spiff_adapter.ready_manual_tasks()`), nicht aus einer eigenen Projektion gelesen.
+Every `process_instance` row stores the full JSON blob produced by `SpiffWorkflow.bpmn.serializer.BpmnWorkflowSerializer.serialize_json()` in a single `Text` column (`workflow_state`). There is **no** separate, normalized table for individual tasks/steps. Ready manual/user tasks are determined live on every read by deserializing the blob (`spiff_adapter.ready_manual_tasks()`), not read from a dedicated projection.
 
-## Begründung
+## Rationale
 
-- **SpiffWorkflow besitzt bereits die korrekte BPMN-Ausführungssemantik** (Parallel-/Exklusiv-/Inklusiv-Gateways, Schleifen, Sub-Prozesse, Boundary Events in späteren Sessions) — eine eigene, normalisierte Task-Tabelle würde einen Teil dieses Zustands duplizieren und könnte bei jeder neuen unterstützten BPMN-Konstruktion (z. B. Multi-Instance-Tasks) erneut nachgezogen werden müssen, mit dem Risiko, dass beide Repräsentationen auseinanderlaufen.
-- **Serialisierung/Deserialisierung ist der von SpiffWorkflow selbst dokumentierte Weg**, eine Workflow-Instanz über mehrere zustandslose Aufrufe hinweg fortzusetzen (siehe `spiff_adapter.py`-Docstring) — dagegen zu arbeiten statt damit hieße, eine parallele Zustandsverwaltung zu bauen, die SpiffWorkflow bereits selbst korrekt löst.
-- **Task-IDs bleiben über Serialisierung/Deserialisierung hinweg stabil** (empirisch verifiziert) — die für die API nötige Adressierbarkeit einzelner Tasks (`GET .../tasks`, `POST .../tasks/{id}/complete`) ist damit ohne eigene ID-Verwaltung gegeben.
-- **Kein aktueller Bedarf für eine eigene Projektion**: In diesem Grundgerüst gibt es keine Cross-Instanz-Abfrage wie "alle bereiten Tasks über alle laufenden Instanzen hinweg" (ein Task-Inbox-UI existiert erst ab P6-S8/später) — eine Deserialisierung je Instanz bei Bedarf ist für die aktuelle Größenordnung ausreichend performant.
+- **SpiffWorkflow already possesses the correct BPMN execution semantics** (parallel/exclusive/inclusive gateways, loops, sub-processes, boundary events in later sessions) — a separate, normalized task table would duplicate part of this state and could need to be updated again with every newly supported BPMN construct (e.g. multi-instance tasks), with the risk of the two representations drifting apart.
+- **Serialization/deserialization is SpiffWorkflow's own documented way** of continuing a workflow instance across multiple stateless calls (see the `spiff_adapter.py` docstring) — working against this instead of with it would mean building a parallel state-management layer that SpiffWorkflow already solves correctly on its own.
+- **Task IDs remain stable across serialization/deserialization** (empirically verified) — this gives the addressability of individual tasks needed by the API (`GET .../tasks`, `POST .../tasks/{id}/complete`) without any custom ID management.
+- **No current need for a dedicated projection**: in this foundational implementation there is no cross-instance query such as "all ready tasks across all running instances" (a task-inbox UI exists only from P6-S8/later) — deserializing per instance on demand is sufficiently performant at the current scale.
 
-## Konsequenzen
+## Consequences
 
-- Eine Abfrage "alle bereiten Tasks über alle laufenden Instanzen" (z. B. für ein künftiges Task-Inbox-UI) erfordert das Deserialisieren jeder laufenden Instanz — kein SQL-seitiger Filter auf Task-Ebene möglich. Bei absehbarem Bedarf einer effizienten Cross-Instanz-Abfrage (vermutlich im Umfeld von P6-S8) wäre eine zusätzliche, aus dem Blob abgeleitete Projektionstabelle nachzuziehen (reine Lesebeschleunigung, keine Ersetzung des Blobs als Quelle der Wahrheit).
-- Der Blob ist für `workflow-service` selbst weitgehend intransparent — jede Interpretation läuft ausschließlich über `spiff_adapter.py`, nie direkt über SQL/JSON-Operatoren auf der Spalte. Ein künftiger SpiffWorkflow-Versions-Bump mit geändertem Serialisierungsformat betrifft nur dieses eine Modul, erfordert aber ggf. eine Migrationsstrategie für bereits gespeicherte, ältere Blobs (in dieser Session nicht relevant, da noch keine Produktivdaten existieren).
-- Kein Audit-Trail auf Feld-Ebene innerhalb eines Tasks (z. B. "welcher Wert wurde für welches Formularfeld eingetragen") jenseits dessen, was im `workflow.task.completed`-Event landet — für eine detaillierte Nachvollziehbarkeit wäre das Event-Payload bei Bedarf zu erweitern, nicht die Persistenzstruktur selbst.
+- A query "all ready tasks across all running instances" (e.g. for a future task-inbox UI) requires deserializing every running instance — no SQL-level filter at the task level is possible. Should an efficient cross-instance query become foreseeably necessary (likely around P6-S8), an additional projection table derived from the blob would need to be added (a pure read-acceleration measure, not a replacement of the blob as the source of truth).
+- The blob is largely opaque to `workflow-service` itself — any interpretation runs exclusively through `spiff_adapter.py`, never directly via SQL/JSON operators on the column. A future SpiffWorkflow version bump with a changed serialization format only affects this one module, but may require a migration strategy for already-stored, older blobs (not relevant in this session, since no production data exists yet).
+- No field-level audit trail within a task (e.g. "which value was entered for which form field") beyond what ends up in the `workflow.task.completed` event — for detailed traceability, the event payload would need to be extended if needed, not the persistence structure itself.

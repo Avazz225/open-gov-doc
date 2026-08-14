@@ -1,25 +1,73 @@
-# 0006 — User-UI: Next.js als statisch exportierte SPA unter `apps/`, kein Node-Laufzeitserver
+# 0006 — User UI: Next.js as a statically exported SPA under `apps/`, no Node runtime server
 
-**Status:** akzeptiert
-**Kontext:** Konzept 8, Session P4-S2 (User-UI Grundgerüst)
+**Status:** accepted
+**Context:** Concept 8, Session P4-S2 (User UI base scaffold)
 
-## Entscheidung
+## Decision
 
-1. Das erste Frontend des Projekts (`apps/user-ui`) liegt unter einem neuen Top-Level-Ordner `apps/`, nicht unter `services/` — `docs/service-template.md` (Layout, `pyproject.toml`, Dockerfile) ist explizit auf Python-Services zugeschnitten und passt nicht auf eine Node/React-Build-Toolchain.
-2. Next.js wird ausschließlich als React-Build-/Routing-Tooling genutzt, mit `output: "export"` (statischer Export). Es gibt **keinen Node-Prozess zur Laufzeit** — das Produktions-Image ist ein zweistufiger Build (Node nur im Build-Stage, `nginx:alpine` liefert die fertigen statischen Dateien aus).
-3. Die Anwendung ist eine reine SPA: Login-Zustand, Ordner-Navigation, Upload/Download laufen komplett clientseitig gegen das API-Gateway (`/api/{service_type}/{path}`, siehe ADR 0005). Es gibt keinen eigenen Backend-Prozess für die UI selbst.
-4. Tokens (Access + Refresh) liegen im `localStorage` des Browsers, nicht in einem httpOnly-Cookie.
+1. The project's first frontend (`apps/user-ui`) lives under a new top-level
+   folder `apps/`, not under `services/` — `docs/service-template.md`
+   (layout, `pyproject.toml`, Dockerfile) is explicitly tailored to Python
+   services and does not fit a Node/React build toolchain.
+2. Next.js is used exclusively as a React build/routing tool, with
+   `output: "export"` (static export). There is **no Node process at
+   runtime** — the production image is a two-stage build (Node only in the
+   build stage, `nginx:alpine` serves the finished static files).
+3. The application is a pure SPA: login state, folder navigation,
+   upload/download all run entirely client-side against the API gateway
+   (`/api/{service_type}/{path}`, see ADR 0005). There is no dedicated
+   backend process for the UI itself.
+4. Tokens (access + refresh) are stored in the browser's `localStorage`, not
+   in an httpOnly cookie.
 
-## Begründung
+## Rationale
 
-- Punkt 2 und 3 setzen die im Konzept bereits **getroffene** Entscheidung (nicht nur Empfehlung) für Client-Side-Rendering direkt um: "SEO spielt keine Rolle" (Anwendung liegt hinter Login) und "vermeidet eine zusätzliche Node-Laufzeitschicht im Backend" (die Python-Services sollen nicht durch einen zusätzlichen Node-SSR-Prozess ergänzt werden müssen, der bei jedem Seitenaufruf gegen sie nachlädt). Ein statischer Export erfüllt exakt diese Vorgabe, ohne auf React/Next.js als Tooling zu verzichten.
-- `apps/` statt `services/`: Vermeidet, das bewährte Python-Service-Template künstlich zu verbiegen (kein `pyproject.toml`, kein `pytest`, kein `uv sync --package`). Die Definition of Done aus `CONTRIBUTING.md` (README, Tests, Dockerfile, Compose-Eintrag, Service-Doku) gilt inhaltlich trotzdem, nur mit Node-typischem Tooling (`npm`, `vitest`, `eslint`) statt der Python-Äquivalente.
-- **localStorage statt httpOnly-Cookie für Tokens**: Ein httpOnly-Cookie bräuchte einen Server, der es setzt (z. B. das Gateway müsste einen Session-Endpoint anbieten, der Login-Response in einen Cookie umwandelt) — das widerspräche der bewusst serverlosen Auslieferung dieser SPA (Punkt 2). `localStorage` ist die pragmatische Standardlösung für reine SPAs gegen eine JSON-API und für ein "Grundgerüst" ausreichend, birgt aber ein bekanntes XSS-Risiko (ein injizierter Skript-Schnipsel könnte Tokens auslesen). Bewusst dokumentierte Vereinfachung, keine übersehene Lücke.
-- **Gateway-Adresse zur Build-Zeit fest eingebrannt** (`NEXT_PUBLIC_GATEWAY_BASE_URL`): Konsequenz aus "kein Server zur Laufzeit" — es gibt keinen Prozess, der zur Laufzeit Konfiguration nachladen könnte. Ein anderer Gateway-Endpunkt (z. B. andere Umgebung) erfordert einen Image-Rebuild mit anderem Build-Arg, analog zu anderen Umgebungsvariablen-Konventionen dieses Projekts, nur zur Build- statt Laufzeit ausgewertet.
+- Points 2 and 3 directly implement the decision **already made** in the
+  concept (not merely recommended) in favor of client-side rendering: "SEO
+  does not matter" (the application sits behind login) and "avoids an
+  additional Node runtime layer in the backend" (the Python services should
+  not have to be supplemented by an additional Node SSR process that
+  re-fetches from them on every page load). A static export fulfills exactly
+  this requirement without giving up React/Next.js as tooling.
+- `apps/` instead of `services/`: avoids artificially bending the
+  well-established Python service template (no `pyproject.toml`, no
+  `pytest`, no `uv sync --package`). The definition of done from
+  `CONTRIBUTING.md` (README, tests, Dockerfile, Compose entry, service docs)
+  still applies in substance, just with Node-typical tooling (`npm`,
+  `vitest`, `eslint`) instead of the Python equivalents.
+- **localStorage instead of an httpOnly cookie for tokens**: An httpOnly
+  cookie would need a server to set it (e.g. the gateway would need to offer
+  a session endpoint that converts a login response into a cookie) — this
+  would contradict the deliberately serverless delivery of this SPA (point
+  2). `localStorage` is the pragmatic default solution for pure SPAs against
+  a JSON API and is sufficient for a "base scaffold", but carries a known
+  XSS risk (an injected script snippet could read out tokens). A deliberately
+  documented simplification, not an overlooked gap.
+- **Gateway address baked in at build time**
+  (`NEXT_PUBLIC_GATEWAY_BASE_URL`): a consequence of "no server at runtime" —
+  there is no process that could reload configuration at runtime. A
+  different gateway endpoint (e.g. a different environment) requires an
+  image rebuild with a different build arg, analogous to this project's other
+  environment variable conventions, just evaluated at build time instead of
+  runtime.
 
-## Konsequenzen
+## Consequences
 
-- Jede künftige Frontend-Anwendung (Admin-UI P4-S3, Reviewer-UI, Migrations-Konsole, Konzept 8) folgt demselben Muster (`apps/<name>`, statischer Export, nginx-Auslieferung) — eine analoge Kurzanleitung könnte künftig als `docs/frontend-template.md` festgehalten werden, sobald eine zweite Frontend-App entsteht (noch nicht Teil dieser Session, da mit nur einer Instanz noch keine stabile Schablone ableitbar ist).
-- Ein härteres Auth-Modell (httpOnly-Session-Cookie über das Gateway, CSRF-Schutz) ist ein späterer Schritt, sobald Sicherheitsanforderungen über das Grundgerüst hinausgehen — erfordert dann einen eigenen, nicht mehr rein statischen Baustein (z. B. einen schlanken Session-Endpoint im Gateway).
-- Kein Server-seitiges Datenvorladen möglich (kein SSR) — jede Seite zeigt beim ersten Laden kurz einen Ladezustand, bis der clientseitige Fetch gegen das Gateway abgeschlossen ist. Für die authentifizierte Kernanwendung wie im Konzept vorgesehen unproblematisch.
-- Rendering/Preview (3.7/2.4) ist bewusst nur als Stub vorhanden (Modal mit Hinweistext) — echte Vorschauen (Thumbnails, PDF-Rendering) folgen mit dem Rendering/Preview Service (P5-S2) und einer entsprechenden Erweiterung dieser Komponente, keine Neuentwicklung der UI-Struktur nötig.
+- Every future frontend application (Admin UI P4-S3, Reviewer UI, migration
+  console, Concept 8) follows the same pattern (`apps/<name>`, static
+  export, nginx delivery) — an analogous short guide could later be captured
+  as `docs/frontend-template.md`, once a second frontend app exists (not yet
+  part of this session, since a stable template cannot yet be derived from a
+  single instance).
+- A stronger auth model (httpOnly session cookie via the gateway, CSRF
+  protection) is a later step, once security requirements go beyond the base
+  scaffold — it would then require its own, no-longer-purely-static building
+  block (e.g. a lightweight session endpoint in the gateway).
+- No server-side data preloading is possible (no SSR) — every page briefly
+  shows a loading state on first load, until the client-side fetch against
+  the gateway completes. Unproblematic for the authenticated core
+  application as envisioned in the concept.
+- Rendering/preview (3.7/2.4) is deliberately present only as a stub (modal
+  with placeholder text) — real previews (thumbnails, PDF rendering) follow
+  with the Rendering/Preview Service (P5-S2) and a corresponding extension of
+  this component, no redevelopment of the UI structure needed.

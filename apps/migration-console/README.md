@@ -1,38 +1,38 @@
 # migration-console
 
-Eigenständige Frontend-Anwendung für Transfer-Vorgänge (Konzept 7.2/8:
-"Migrations-Konsole für Transfer-Vorgänge"), P14-S2. Zwei Bereiche:
+Standalone frontend application for transfer operations (Concept 7.2/8:
+"Migration console for transfer operations"), P14-S2. Two sections:
 
-- **Transfers** — Übersicht/Start neuer Migrations-/Übergabevorgänge gegen
-  `migration-service` (`POST/GET /transfers`), inkl. Dry-Run, optionaler
-  Löschfrist, Vier-Augen-Hinweis (4.3) und Detailansicht (Fortschritt,
-  Phasen-Zeitverlauf, Fehlermeldung bei `failed`). Leichtgewichtiges Polling
-  alle 5s, da ein Transfer selbst als asynchroner `workflow-service`-Prozess
-  im Hintergrund weiterläuft.
-- **Gepaarte Installationen** — Installations-Paarung (7.2, direktes Paar
-  statt Hub-Vermittlung, [ADR 0034](../../docs/adr/0034-migration-service-direct-pairing-and-generic-connector-service-tasks.md)):
-  anlegen/entfernen, einmalige Anzeige eines generierten API-Keys.
+- **Transfers** — overview/start of new migration/handover operations against
+  `migration-service` (`POST/GET /transfers`), including dry run, optional
+  deletion deadline, four-eyes notice (4.3) and detail view (progress,
+  phase timeline, error message on `failed`). Lightweight polling
+  every 5s, since a transfer itself continues running in the background as an
+  asynchronous `workflow-service` process.
+- **Paired installations** — installation pairing (7.2, direct pairing
+  instead of hub mediation, [ADR 0034](../../docs/adr/0034-migration-service-direct-pairing-and-generic-connector-service-tasks.md)):
+  create/remove, one-time display of a generated API key.
 
-Reines Client-Side-Rendering, kein Node-Prozess in Produktion (identisches
-Muster wie `apps/user-ui`/`apps/process-designer`/`apps/reviewer-ui`, siehe
+Pure client-side rendering, no Node process in production (identical
+pattern to `apps/user-ui`/`apps/process-designer`/`apps/reviewer-ui`, see
 [ADR 0006](../../docs/adr/0006-user-ui-static-export-spa.md)).
 
-Ausführliche Doku: [`docs/services/migration-console.md`](../../docs/services/migration-console.md).
+Detailed documentation: [`docs/services/migration-console.md`](../../docs/services/migration-console.md).
 
-## Lokale Entwicklung
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Erwartet ein laufendes Gateway auf `http://localhost:8009`:
+Expects a running gateway at `http://localhost:8009`:
 
 ```bash
 cd ../../infra && docker compose up -d
 ```
 
-## Build (statischer Export)
+## Build (static export)
 
 ```bash
 npm run build

@@ -1,94 +1,89 @@
-# 0093 — AD-Gruppe→Rolle-Mapping: eigene schlanke Tabelle in auth-service, Scope-Cut auf einfache 1:1-Zuordnung
+# 0093 — AD group → role mapping: dedicated lean table in auth-service, scope cut to simple 1:1 mapping
 
-**Status:** akzeptiert (Post-Roadmap Phase 24 Session 2)
-**Kontext:** Konzept 4.4 ("Gruppenmitgliedschaften aus AD werden auf interne Rollen gemappt"), betrifft `auth-service`
+**Status:** accepted (Post-roadmap Phase 24 Session 2)
+**Context:** Concept 4.4 ("AD group memberships are mapped to internal roles"), affects `auth-service`
 
-## Entscheidung
+## Decision
 
-1. **Neue, eigene Tabelle `ad_group_role_mapping`** (`auth`-Schema, `id`, `ad_group_name`, `role_name`,
-   `created_at`, `created_by`) statt Wiederverwendung/Erweiterung von `permission-service`s
-   `Group`/`GroupMembership`/`RoleAssignment` (Post-Roadmap Phase 22 Session 2, ADR 0088). Jene bilden
-   ADMIN-ANGELEGTE Gruppen mit expliziter, synchron zu haltender Mitgliedschaftstabelle ab — eine andere,
-   unabhängige Funktion als das hier umzusetzende Mapping EXTERNER Keycloak-/AD-Gruppenclaims. Die neue
-   Tabelle lebt bewusst lokal in `auth-service` (kleiner Blast-Radius, keine Kopplung an
-   `permission-service`s Gruppenmaschinerie).
-2. **Explizite Scope-Einschränkung gegenüber Konzept 4.4**: nur einfache 1:1-Zuordnung (eine
-   `ad_group_name` → eine `role_name`) — Konzept 4.4 beschreibt als volle Zielausbaustufe zusätzlich
-   zusammengesetzte Regeln ("AD-Gruppe X **und** Attribut Y → Rolle Z", "mehrere AD-Gruppen → eine
-   gemeinsame Rolle"). Diese Session implementiert ausdrücklich NUR die einfache Variante, keine
-   generische Regel-DSL — siehe "Konsequenzen"/`docs/services/auth-service.md` "Offene Punkte".
-3. **Dynamische Auswertung bei jeder `/me`-Anfrage**, kein Caching/keine eigene Mitgliedschaftstabelle:
-   Keycloak liefert die aktuellen Gruppenmitgliedschaften eines Principals ohnehin bei jedem Tokenbezug
-   frisch über den `groups`-JWT-Claim — `ad_group_mapping.resolve_roles_for_groups` liest bei jedem
-   Aufruf direkt gegen die Mapping-Tabelle, eine Änderung/ein Löschen einer Zuordnung wirkt sich also
-   ohne Invalidierungsproblem ab dem nächsten `/me`-Aufruf aus.
-4. **`groups`-Claim fehlte im Access-Token bislang komplett** — Keycloak trägt Gruppenmitgliedschaften
-   nicht automatisch ein (anders als Rollen über `realm_access.roles`). Neuer Protocol-Mapper
-   `oidc-group-membership-mapper` (`bootstrap._ensure_groups_mapper`, `full.path=false` — nur der blanke
-   Gruppenname, kein Keycloak-interner Pfad, passend zur einfachen Namensabbildung), läuft wie
-   `_ensure_client_updated` bei JEDEM Start (nicht nur bei Client-Ersteinrichtung), da `skip_exists=True`
-   bei `create_client` einen bereits bestehenden Client sonst nie um den neuen Mapper ergänzen würde.
-5. **`realm_roles` in `GET /me` bleibt EIN Feld** — aus dem Gruppenclaim abgeleitete Rollen werden in
-   dieselbe Liste gemerged statt in ein separates `group_derived_roles`-Feld, dedupliziert. Siehe
-   "Begründung".
-6. **CRUD-Endpunkte (`GET`/`POST`/`DELETE /ad-group-mappings`) gegated auf `admin.user_management`** —
-   dieselbe Capability/Domäne wie `GET /users`/`POST /realm-roles` ("Nutzer-/Rechteverwaltung"), keine
-   neue, feingranularere Capability für diese Session.
-7. **Audit über den bestehenden Event-Bus-Mechanismus**: `auth.ad_group_role_mapping.created`/`.deleted`
-   (`actor=` aufrufender Principal) — `audit-service` konsumiert bereits das gesamte `auth.>`-Subject
-   (seit P6-S5), kein neuer Audit-Mechanismus nötig. `created_by`/`created_at` zusätzlich direkt an der
-   Zeile für einen schnellen Blick ohne Audit-Trail-Abfrage.
+1. **New, dedicated table `ad_group_role_mapping`** (`auth` schema, `id`, `ad_group_name`, `role_name`,
+   `created_at`, `created_by`) instead of reusing/extending `permission-service`'s
+   `Group`/`GroupMembership`/`RoleAssignment` (post-roadmap Phase 22 Session 2, ADR 0088). Those model
+   ADMIN-DEFINED groups with an explicit membership table that must be kept in sync — a different,
+   independent function from the mapping of EXTERNAL Keycloak/AD group claims being implemented here. The
+   new table deliberately lives locally in `auth-service` (small blast radius, no coupling to
+   `permission-service`'s group machinery).
+2. **Explicit scope restriction relative to Concept 4.4**: only simple 1:1 mapping (one
+   `ad_group_name` → one `role_name`) — Concept 4.4 describes, as the full target build-out, additionally
+   composite rules ("AD group X **and** attribute Y → role Z", "multiple AD groups → one shared role").
+   This session explicitly implements ONLY the simple variant, no generic rule DSL — see
+   "Consequences"/`docs/services/auth-service.md` "Open Points".
+3. **Dynamic evaluation on every `/me` request**, no caching/no dedicated membership table: Keycloak
+   already returns a principal's current group memberships fresh on every token fetch via the `groups`
+   JWT claim — `ad_group_mapping.resolve_roles_for_groups` reads directly against the mapping table on
+   every call, so a change/deletion of a mapping takes effect from the next `/me` call onward with no
+   invalidation problem.
+4. **The `groups` claim was previously entirely missing from the access token** — Keycloak does not
+   automatically include group memberships (unlike roles via `realm_access.roles`). New protocol mapper
+   `oidc-group-membership-mapper` (`bootstrap._ensure_groups_mapper`, `full.path=false` — just the bare
+   group name, no Keycloak-internal path, matching the simple name-based mapping), runs like
+   `_ensure_client_updated` on EVERY startup (not just first client setup), since `skip_exists=True` in
+   `create_client` would otherwise never add the new mapper to an already-existing client.
+5. **`realm_roles` in `GET /me` remains ONE field** — roles derived from the group claim are merged into
+   the same list instead of a separate `group_derived_roles` field, deduplicated. See "Rationale".
+6. **CRUD endpoints (`GET`/`POST`/`DELETE /ad-group-mappings`) gated on `admin.user_management`** — the
+   same capability/domain as `GET /users`/`POST /realm-roles` ("user/rights management"), no new, more
+   fine-grained capability for this session.
+7. **Auditing via the existing event bus mechanism**: `auth.ad_group_role_mapping.created`/`.deleted`
+   (`actor=` calling principal) — `audit-service` already consumes the entire `auth.>` subject
+   (since P6-S5), no new audit mechanism needed. `created_by`/`created_at` additionally kept directly on
+   the row for a quick look without an audit-trail query.
 
-## Begründung
+## Rationale
 
-- **Warum keine generische Regel-DSL in dieser Session**: Konzept 4.4 selbst führt zusammengesetzte
-  Regeln nur als Beispiel einer möglichen Zielausbaustufe an ("ebenso wie komplexere Regeln"), ohne ein
-  konkretes Regelformat vorzugeben — eine tragfähige, admin-editierbare DSL für boolesche
-  Gruppen-/Attribut-Kombinationen ist ein eigenständiger, deutlich größerer Entwurfsaufwand (Editor-UI,
-  Validierung, Auswertungsreihenfolge bei widersprüchlichen Regeln) und explizit als eigene, spätere
-  Session vorgesehen (dieser Task-Auftrag selbst benennt den Scope-Cut). Die einfache 1:1-Zuordnung deckt
-  den mit Abstand häufigsten AD-Anwendungsfall bereits ab (eine AD-Gruppe pro Abteilung/Rolle) und ist in
-  einer Session vollständig reviewbar.
-- **Warum eine neue, eigene Tabelle statt `permission-service`s `Group`/`GroupMembership`**: Eine
-  admin-angelegte `Group` (ADR 0088) braucht explizite `GroupMembership`-Zeilen, die synchron zu einer
-  externen Quelle (AD/Keycloak) gehalten werden müssten, um dieselbe Funktion abzubilden — das wäre ein
-  Synchronisationsproblem (Konzept 4.4 nennt selbst ein "konfigurierbares Synchronisationsintervall" für
-  AD-Nutzer-/Gruppenabgleich, hier bewusst NICHT mitimplementiert, siehe "Konsequenzen"). Die
-  claim-basierte Auswertung bei jedem Tokenbezug braucht dagegen gar keine Mitgliedschaftstabelle —
-  Keycloak/AD bleibt alleinige Quelle der Wahrheit für "wer ist in welcher Gruppe".
-- **Warum `realm_roles` gemerged statt eines separaten Felds**: Jeder bestehende Aufrufer von `GET /me`
-  (Frontend-Rollenprüfungen, `permission-service`s Rollenzuweisungs-Abgleich) liest bereits `realm_roles`
-  als vollständige Rollenliste eines Principals — ein zusätzliches Feld hätte JEDEN dieser Aufrufer zu
-  einer Änderung gezwungen, um die neue Rollenquelle überhaupt zu berücksichtigen. Aus Sicht des übrigen
-  Systems soll eine Rolle unabhängig davon gleich wirken, ob sie direkt als Keycloak-Realm-Rolle
-  zugewiesen oder über eine Gruppenmitgliedschaft abgeleitet wurde.
-- **Warum `admin.user_management` statt einer neuen Capability**: Diese Session fügt bewusst keinen
-  neuen Berechtigungsnamen hinzu, um die Blast-Radius-Vorgabe einzuhalten — eine falsch konfigurierte
-  Zuordnung kann Nutzern stillschweigend zusätzliche Rollen verleihen, gehört also klar in dieselbe
-  sicherheitsrelevante Domäne wie Nutzer-/Rechteverwaltung selbst. Eine feingranularere Capability bleibt
-  eine spätere, nicht-blockierende Erweiterung.
+- **Why no generic rule DSL in this session**: Concept 4.4 itself introduces composite rules only as an
+  example of a possible target build-out ("as well as more complex rules"), without prescribing a concrete
+  rule format — a viable, admin-editable DSL for boolean group/attribute combinations is a standalone,
+  substantially larger design effort (editor UI, validation, evaluation order for conflicting rules) and
+  is explicitly planned as its own, later session (this task assignment itself names the scope cut). The
+  simple 1:1 mapping already covers by far the most common AD use case (one AD group per
+  department/role) and is fully reviewable in one session.
+- **Why a new, dedicated table instead of `permission-service`'s `Group`/`GroupMembership`**: an
+  admin-created `Group` (ADR 0088) needs explicit `GroupMembership` rows that would have to be kept in
+  sync with an external source (AD/Keycloak) to represent the same function — that would be a
+  synchronization problem (Concept 4.4 itself names a "configurable synchronization interval" for AD
+  user/group reconciliation, deliberately NOT implemented here as well, see "Consequences"). The
+  claim-based evaluation on every token fetch, by contrast, needs no membership table at all — Keycloak/AD
+  remains the sole source of truth for "who is in which group".
+- **Why `realm_roles` is merged instead of using a separate field**: every existing caller of `GET /me`
+  (frontend role checks, `permission-service`'s role-assignment reconciliation) already reads
+  `realm_roles` as the complete role list of a principal — an additional field would have forced EVERY
+  such caller to change in order to even consider the new role source. From the rest of the system's
+  perspective, a role should behave the same regardless of whether it was assigned directly as a Keycloak
+  realm role or derived via a group membership.
+- **Why `admin.user_management` instead of a new capability**: this session deliberately adds no new
+  permission name, to keep within the blast-radius requirement — a misconfigured mapping can silently
+  grant users additional roles, so it clearly belongs in the same security-relevant domain as user/rights
+  management itself. A more fine-grained capability remains a later, non-blocking extension.
 
-## Konsequenzen
+## Consequences
 
-- **Zusammengesetzte Regeln (Gruppe UND Attribut, mehrere Gruppen → eine Rolle) bleiben unimplementiert**
-  — Konzept 4.4 explizit nicht vollständig abgedeckt, dokumentierter offener Punkt.
-- **Kein "konfigurierbares Default-Verhalten bei nicht gemappten AD-Gruppen"** (Konzept 4.4 nennt
-  explizit "keine Rolle vergeben vs. definierte Standardrolle" als Konfigurationsoption) — diese Session
-  implementiert nur das erste Verhalten (keine Rolle), fest verdrahtet, keine Einstellung dafür.
-- **Kein "kein Live-Editing mit sofortiger Breitenwirkung ohne Kontrolle"-Freigabe-Schritt** (Konzept 4.4:
-  "Änderungen am Mapping wirken sich erst nach expliziter Freigabe/Speicherung aus") — diese Session
-  macht jede Änderung sofort wirksam (Speichern = Freigabe), kein zusätzlicher Vier-Augen-Schritt wie bei
-  `permission.role_assignment.create` (ADR 0060). Dokumentierter offener Punkt, keine bewusste
-  Sicherheitslücke (die Änderung selbst bleibt bereits durch `admin.user_management` gegated und
-  auditiert).
-- **Kein AD-Synchronisationsintervall/keine Nutzer-/Gruppen-Synchronisation** (Konzept 4.4, letzter
-  Absatz) — diese Session liest Gruppenmitgliedschaften ausschließlich aus dem JWT-`groups`-Claim zum
-  Zeitpunkt des Tokenbezugs, kein periodischer Abgleich, keine eigene Nutzer-/Gruppentabelle.
-- **JSON-Konfigurationsexport (Konzept 4.4: "Teil des JSON-Konfigurationsexports (7.3)")** nicht
-  Teil dieser Session — `ad_group_role_mapping`-Zeilen sind aktuell nicht Teil von `config-service`s
-  Konfigurationspaketen, ein Mapping lässt sich also nicht zwischen Installationen übertragen wie im
-  Konzept vorgesehen.
-- **`skip_exists=True`-Grenze bleibt** (bereits dokumentiert für den Audience-Mapper): Änderungen am
-  neuen `groups`-Mapper selbst (z. B. später `full.path=true`) würden auf einem bereits bestehenden
-  Client nicht automatisch nachgezogen — für Dev/Test unkritisch, `_ensure_groups_mapper` prüft nur auf
-  Existenz eines Mappers namens `groups`, nicht auf dessen Konfigurationsinhalt.
+- **Composite rules (group AND attribute, multiple groups → one role) remain unimplemented** — Concept
+  4.4 explicitly not fully covered, documented open point.
+- **No "configurable default behavior for unmapped AD groups"** (Concept 4.4 explicitly names "no role
+  granted vs. defined default role" as a configuration option) — this session implements only the first
+  behavior (no role), hardcoded, no setting for it.
+- **No "no live editing with immediate blast effect without a control" approval step** (Concept 4.4:
+  "changes to the mapping only take effect after explicit approval/save") — this session makes every
+  change effective immediately (save = approval), no additional four-eyes step as with
+  `permission.role_assignment.create` (ADR 0060). Documented open point, not a deliberate security gap
+  (the change itself is already gated by `admin.user_management` and audited).
+- **No AD synchronization interval/no user/group synchronization** (Concept 4.4, final paragraph) — this
+  session reads group memberships exclusively from the JWT `groups` claim at token-fetch time, no periodic
+  reconciliation, no dedicated user/group table.
+- **JSON configuration export (Concept 4.4: "part of the JSON configuration export (7.3)")** not part of
+  this session — `ad_group_role_mapping` rows are currently not part of `config-service`'s configuration
+  packages, so a mapping cannot be transferred between installations as envisioned in the concept.
+- **`skip_exists=True` limit remains** (already documented for the audience mapper): changes to the new
+  `groups` mapper itself (e.g. later `full.path=true`) would not automatically be picked up on an
+  already-existing client — uncritical for dev/test, `_ensure_groups_mapper` only checks for the
+  existence of a mapper named `groups`, not its configuration content.

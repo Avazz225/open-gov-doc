@@ -1,62 +1,62 @@
 # license-service
 
-**Verantwortung:** Lizenzverwaltung/-prüfung (9.1/9.2/9.3) — verwaltet eine signierte Lizenzdatei (JWT/RS256, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)), prüft laufend (nicht nur beim Start) die aktuelle Nutzung gegen vier Dimensionen und publiziert Statusänderungen als Events. `registry-service` konsumiert diese Events und vermittelt daraus einen Lizenzstatus je Komponente (P9-S2, siehe `docs/services/registry-service.md`), `document-service` fragt `GET /license/status` direkt ab, um Neuanlagen bei überschrittenem Dokumentenlimit zu blockieren.
+**Responsibility:** License management/checking (9.1/9.2/9.3) — manages a signed license file (JWT/RS256, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)), continuously checks (not only at startup) current usage against four dimensions, and publishes status changes as events. `registry-service` consumes these events and derives from them a license status per component (P9-S2, see `docs/services/registry-service.md`); `document-service` queries `GET /license/status` directly to block new creations once the document limit is exceeded.
 
-**Konzept-Referenz:** 9.1, 9.2, 9.3
-**Eigenes Postgres-Schema:** `license` (Tabelle `installed_license`, Singleton-Zeile — genuin eigener Zustand, keine Duplikation fremder Daten).
+**Concept Reference:** 9.1, 9.2, 9.3
+**Own Postgres Schema:** `license` (table `installed_license`, singleton row — genuinely own state, no duplication of foreign data).
 
-## Architekturentscheidungen
+## Architecture Decisions
 
-- **Signaturverfahren: JWT/RS256, statisch eingebetteter öffentlicher Schlüssel** ([ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)) — Wiederverwendung von `python-jose[cryptography]`, das bereits über `libs/dms-auth-client`s `TokenValidator` (Keycloak-JWT-Verifikation) in jedem Service-Container vorhanden ist. Kein JWKS-Fetch in dieser Ausbaustufe. **Seit Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)) unterstützt `license_verifier.decode()` einen optionalen zweiten Kandidatenschlüssel (`settings.license_previous_public_key_pem`) — Grundlage für eine Übergangsfrist bei einem Lizenzgeber-Schlüsselwechsel, siehe unten.
-- **Nur eine ungültige Signatur führt zum Ablehnen des Uploads (`400`)** — eine signaturgültige, aber bereits abgelaufene Lizenz wird trotzdem gespeichert und über `GET /license/status` als ungültig/abgelaufen angezeigt. Bildet die reale Situation ab ("das ist die aktuell installierte Lizenz, sie ist nur abgelaufen") statt eines Sonderfalls beim Hochladen.
-- **Vier Konzept-9.1-Dimensionen als JWT-Claims**: `user_model` (`"concurrent"|"named"`), `max_users`, `storage_limit_gb`, `document_limit`, `licensed_components` — jede `null`-Wertig = "unlimited" (Konzept 9.1 wörtlich).
-- **Installations-Bindung seit P13-S1** (3a, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md) Nachtrag): optionales `installation_id`-Claim, geprüft gegen `settings.installation_id` (`dms_common.BaseServiceSettings`, `DMS_INSTALLATION_ID` - ein Wert für die ganze Installation). Fehlt das Claim, wird nichts geprüft (Rückwärtskompatibilität mit älteren Lizenzdateien); ist es gesetzt und weicht ab, gilt die Lizenz als ungültig (`invalid_reason="Lizenz wurde fuer eine andere Installation ausgestellt"`), selbst bei gültiger Signatur/Gültigkeitsdauer. Verhindert das unveränderte Kopieren einer für eine andere Installation ausgestellten Lizenzdatei.
-- **Nutzungsdaten-Quellen — direkte Service-zu-Service-Aufrufe, kein Umweg über reporting-service**: `storage-service`s `GET /storage/usage` (Summe `total_size_bytes`), `document-service`s neuer `GET /documents/count-active-total` (installationsweit, kein Ordnerfilter — anders als das bestehende, ordnergefilterte `POST /documents/count-active`, P7-S1b), `auth-service`s neue `GET /sessions/count`/`GET /users/count` (je nach `user_model`-Claim nur der jeweils relevante Aufruf). Alle drei Ziel-Services bleiben Quelle der Wahrheit für ihre eigenen Daten (Service-Isolation).
-- **`auth-service`s `GET /users` ist für interne Aufrufe ungeeignet** — gegated über `Depends(get_current_user)` (echtes Keycloak-Bearer-Token), das kein Service besitzt. Die beiden neuen Endpunkte `GET /sessions/count`/`GET /users/count` sind deshalb bewusst ungegatet (interner Aufruf, gleiche Begründung wie z. B. `permission-service`s `/role-assignments`). `GET /sessions/count` nutzt `KeycloakAdmin.get_client_sessions_stats()` (fertige Admin-API-Methode, kein neues Session-Tracking).
-- **Poll-Loop statt Push** (9.2: "prüft laufend, nicht nur beim Start") — gleiches Idiom wie `document-service`s `_retention_poll_loop`/`workflow-service`s SLA-Timer (ADR 0020), Intervall 3600s. Ein Fehler in einem Tick bricht die Schleife nicht ab.
-- **Flankenerkennung statt Event-Spam** — `InstalledLicense.last_status_snapshot` (JSON) hält fest, welche Zustände (ungültig/bald-ablaufend/pro Dimension überschritten) beim letzten Tick bereits gemeldet wurden; Events nur bei tatsächlichem Zustandswechsel, nicht bei jedem Tick. Eine Neuinstallation setzt den Snapshot zurück.
-- **Drei Events, 1:1 die in 9.2 genannten Statusänderungs-Arten**: `license.limit_exceeded` (`dimension`/`current`/`limit`), `license.expiring_soon` (`days_remaining`, Schwelle 30 Tage), `license.invalid` (`reason`). Zusätzlich `license.installed` beim Upload. `audit-service`s Subjects-Liste hat `"license.>"` bekommen.
-- **`notification-service` konsumiert alle drei Flanken-Events** (Konzept 9.2 nennt ihn wörtlich als Konsumenten) — feste `settings.license_admin_email`-Adresse, kein Empfänger-Auflösungsmechanismus, 1:1 Kopie von `_handle_maintenance_mode_activated`. Da alle drei Subjects den neuen `"license"`-Stream teilen, brauchte jedes einen eigenen Durable-Namen (`notification-service-license-*`) — derselbe Durable-Name für mehrere Filter-Subjects auf demselben Stream schlägt mit "consumer is already bound to a subscription" fehl, gleiche Einschränkung wie zuvor schon bei `workflow.federation.inbound_received`.
-- **`admin.license`-Gate aktiviert erstmals die seit Langem vorgeseedete Domain-Admin-Rolle `domain-admin-license`** — `POST /license` verlangt sie (oder den aktivierten Superuser), 1:1 Gate-Muster aus `query-service`. `GET /license/status` bleibt ungegatet (wird von `registry-service` in P9-S2 und später der Admin-UI ohne Principal-Header abgefragt).
-- **Kein Lizenzausstellungswerkzeug in diesem Repo** (ADR 0032) — der private Schlüssel existiert ausschließlich außerhalb des Systems beim Lizenzgeber. Der Test-Fixture-Schlüssel (`tests/fixtures/dev_private_key.pem`) ist ausdrücklich ein Wegwerf-Entwicklungsschlüssel, kein Bestandteil eines Ausstellungswerkzeugs.
+- **Signature scheme: JWT/RS256, statically embedded public key** ([ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)) — reuse of `python-jose[cryptography]`, already present in every service container via `libs/dms-auth-client`'s `TokenValidator` (Keycloak JWT verification). No JWKS fetch at this stage. **Since Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)), `license_verifier.decode()` supports an optional second candidate key (`settings.license_previous_public_key_pem`) — the basis for a transition period during a licensor key change, see below.
+- **Only an invalid signature causes the upload to be rejected (`400`)** — a license with a valid signature but already expired is still stored and shown as invalid/expired via `GET /license/status`. This reflects the real situation ("this is the currently installed license, it is just expired") rather than a special case at upload time.
+- **Four concept-9.1 dimensions as JWT claims**: `user_model` (`"concurrent"|"named"`), `max_users`, `storage_limit_gb`, `document_limit`, `licensed_components` — each `null`-valued = "unlimited" (concept 9.1, literally).
+- **Installation binding since P13-S1** (3a, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md) addendum): optional `installation_id` claim, checked against `settings.installation_id` (`dms_common.BaseServiceSettings`, `DMS_INSTALLATION_ID` — one value for the whole installation). If the claim is absent, nothing is checked (backward compatibility with older license files); if it is set and differs, the license is considered invalid (`invalid_reason="Lizenz wurde fuer eine andere Installation ausgestellt"`), even with a valid signature/validity period. Prevents an unmodified copy of a license file issued for a different installation.
+- **Usage-data sources — direct service-to-service calls, no detour via reporting-service**: `storage-service`'s `GET /storage/usage` (sum of `total_size_bytes`), `document-service`'s new `GET /documents/count-active-total` (installation-wide, no folder filter — unlike the existing, folder-filtered `POST /documents/count-active`, P7-S1b), `auth-service`'s new `GET /sessions/count`/`GET /users/count` (only the relevant call is made, depending on the `user_model` claim). All three target services remain the source of truth for their own data (service isolation).
+- **`auth-service`'s `GET /users` is unsuitable for internal calls** — gated by `Depends(get_current_user)` (a real Keycloak bearer token), which no service holds. The two new endpoints `GET /sessions/count`/`GET /users/count` are therefore deliberately ungated (internal call, same rationale as e.g. `permission-service`'s `/role-assignments`). `GET /sessions/count` uses `KeycloakAdmin.get_client_sessions_stats()` (a ready-made admin API method, no new session tracking).
+- **Poll loop instead of push** (9.2: "checks continuously, not only at startup") — the same idiom as `document-service`'s `_retention_poll_loop`/`workflow-service`'s SLA timer (ADR 0020), interval 3600s. An error in one tick does not abort the loop.
+- **Edge detection instead of event spam** — `InstalledLicense.last_status_snapshot` (JSON) records which states (invalid/expiring soon/exceeded per dimension) were already reported at the last tick; events only fire on an actual state change, not on every tick. A reinstall resets the snapshot.
+- **Three events, 1:1 matching the status-change types named in 9.2**: `license.limit_exceeded` (`dimension`/`current`/`limit`), `license.expiring_soon` (`days_remaining`, threshold 30 days), `license.invalid` (`reason`). Additionally `license.installed` on upload. `audit-service`'s subject list gained `"license.>"`.
+- **`notification-service` consumes all three edge events** (concept 9.2 literally names it as the consumer) — a fixed `settings.license_admin_email` address, no recipient-resolution mechanism, a 1:1 copy of `_handle_maintenance_mode_activated`. Since all three subjects share the new `"license"` stream, each needed its own durable name (`notification-service-license-*`) — the same durable name for multiple filter subjects on the same stream fails with "consumer is already bound to a subscription", the same limitation already encountered earlier with `workflow.federation.inbound_received`.
+- **The `admin.license` gate activates, for the first time, the long-pre-seeded domain-admin role `domain-admin-license`** — `POST /license` requires it (or an activated superuser), a 1:1 gate pattern from `query-service`. `GET /license/status` remains ungated (queried by `registry-service` in P9-S2 and later by the admin UI without a principal header).
+- **No license-issuing tool in this repo** (ADR 0032) — the private key exists exclusively outside the system, with the licensor. The test fixture key (`tests/fixtures/dev_private_key.pem`) is explicitly a throwaway development key, not part of any issuing tool.
 
 ## API
 
-| Methode | Pfad | Beschreibung |
+| Method | Path | Description |
 |---|---|---|
-| `POST` | `/license` `{license_token}` | Signierte Lizenzdatei installieren — `400` bei ungültiger Signatur, sonst `201` auch bei abgelaufener Lizenz. Verlangt `admin.license`, aktivierten Superuser, oder seit P13-S2 einen gültigen `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, kein Principal dieser Installation, siehe [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)). |
-| `GET` | `/license/status` | Aktueller Lizenzstatus + Nutzung je Dimension (`installed`/`valid`/`invalid_reason`/`issued_at`/`expires_at`/`days_remaining`/`user_model`/`users`/`storage_gb`/`documents`/`licensed_components`/`limits_exceeded`). Ungegatet. |
+| `POST` | `/license` `{license_token}` | Install a signed license file — `400` on invalid signature, otherwise `201` even for an expired license. Requires `admin.license`, an activated superuser, or since P13-S2 a valid `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>` (fleet-management-service, not a principal of this installation, see [ADR 0037](../adr/0037-fleet-management-service-agent-key-and-gateway-public-routes.md)). |
+| `GET` | `/license/status` | Current license status + usage per dimension (`installed`/`valid`/`invalid_reason`/`issued_at`/`expires_at`/`days_remaining`/`user_model`/`users`/`storage_gb`/`documents`/`licensed_components`/`limits_exceeded`). Ungated. |
 
-## Datenmodell
+## Data Model
 
-`license.installed_license` — Singleton (`id=1`): `raw_token`, `installed_at`, `installed_by`, `issued_at`, `expires_at`, `last_status_snapshot` (JSON, Flankenerkennung).
+`license.installed_license` — singleton (`id=1`): `raw_token`, `installed_at`, `installed_by`, `issued_at`, `expires_at`, `last_status_snapshot` (JSON, edge detection).
 
 ## Events
 
-Publiziert (Stream `license`): `license.installed`, `license.limit_exceeded`, `license.expiring_soon`, `license.invalid`.
-Konsumiert: keine (kein eigener NATS-Consumer — nur Producer, wie `query-service` vor P8-S2).
+Publishes (stream `license`): `license.installed`, `license.limit_exceeded`, `license.expiring_soon`, `license.invalid`.
+Consumes: none (no own NATS consumer — producer only, like `query-service` before P8-S2).
 
-## Selbst-Registrierung
+## Self-Registration
 
-Wie jeder andere Service über `dms-registry-client` (3.2a) — unabhängig von der in P9-2 geplanten Lizenz-Vermittlungs-Funktion der Registry selbst.
+Like every other service, via `dms-registry-client` (3.2a) — independent of the license-mediation function planned for the registry itself in P9-2.
 
 ## Tests
 
-`services/license-service/tests/` — 37 Tests (vorher 32, +5 seit **Post-Roadmap Phase 21 Session 1**,
-[ADR 0084](../adr/0084-fleet-license-key-rotation.md), alle in `test_license_verifier.py`: Fallback auf
-den vorherigen Schlüssel während einer Übergangsfrist, Bevorzugung des aktuellen Schlüssels ohne
-Fallback-Notwendigkeit, Fehlschlag wenn weder aktueller noch vorheriger Schlüssel passt, unverändertes
-Verhalten ohne konfigurierten vorherigen Schlüssel), davor 31 (seit P13-S1, vorher 25):
-`test_license_verifier.py` (Signaturprüfung, inkl. abgelaufenes-aber-signaturgültiges Token),
-`test_usage.py` (Dimension-Grenzwert-Logik inkl. "unlimited", seit P13-S1 zusätzlich
-Installations-Bindung: fehlendes Claim/übereinstimmend/abweichend), `test_poll_loop.py`
-(Flankenerkennung, seit P13-S1 zusätzlich Installations-Mismatch-Event), `test_api.py` (Upload-Gate,
-Statusendpunkt inkl. "keine Lizenz installiert", seit P13-S1 zusätzlich end-to-end
-Installations-Bindung).
+`services/license-service/tests/` — 37 tests (previously 32, +5 since **Post-Roadmap Phase 21 Session 1**,
+[ADR 0084](../adr/0084-fleet-license-key-rotation.md), all in `test_license_verifier.py`: fallback to
+the previous key during a transition period, preference for the current key with no
+fallback needed, failure when neither the current nor the previous key matches, unchanged
+behavior with no previous key configured), before that 31 (since P13-S1, previously 25):
+`test_license_verifier.py` (signature check, including an expired-but-signature-valid token),
+`test_usage.py` (dimension threshold logic including "unlimited", since P13-S1 additionally
+installation binding: missing claim/matching/mismatching), `test_poll_loop.py`
+(edge detection, since P13-S1 additionally an installation-mismatch event), `test_api.py` (upload gate,
+status endpoint including "no license installed", since P13-S1 additionally end-to-end
+installation binding).
 
-## Offene Punkte
+## Open Points
 
-- ~~Keine Schlüsselrotation~~ — **teilweise behoben in Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)): `license_previous_public_key_pem` erlaubt eine Übergangsfrist, in der sowohl der neue als auch der vorherige öffentliche Verifikationsschlüssel akzeptiert werden. **Kein JWKS** bleibt bewusst so (ADR 0032) — ein kompromittierter PRIVATER Schlüssel liegt beim Lizenzgeber, nicht in diesem Service, und erfordert weiterhin einen neuen, dort ausgestellten öffentlichen Schlüssel (der Betreiber trägt ihn dann über die beiden Settings ein, kein neues `license-service`-Release nötig).
-- ~~Installations-ID nicht durchgesetzt~~ — seit P13-S1 geschlossen, siehe "Installations-Bindung" oben.
-- "Applikationskomponenten"-Dimension (`licensed_components`) wird seit P9-S2 durchgesetzt, aber nur für `workflow-service` — die einzige heute real existierende licensierbare Komponente (CMIS-Connector/Migration-Service kommen erst in Phase 12).
-- Nutzungslimit-Blockade (9.3) bislang nur für die Dokumentenzahl umgesetzt (`document-service`s `POST /documents`) — Speicher-/Nutzerlimits verhindern aktuell keine Neuanlagen, nur die Statusanzeige/Events erfassen sie.
+- ~~No key rotation~~ — **partially resolved in Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)): `license_previous_public_key_pem` allows a transition period in which both the new and the previous public verification key are accepted. **No JWKS** deliberately remains the case (ADR 0032) — a compromised PRIVATE key resides with the licensor, not in this service, and still requires a new public key issued there (the operator then enters it via the two settings, no new `license-service` release needed).
+- ~~Installation ID not enforced~~ — closed since P13-S1, see "Installation Binding" above.
+- The "application components" dimension (`licensed_components`) has been enforced since P9-S2, but only for `workflow-service` — the only licensable component that actually exists today (CMIS connector/migration service arrive only in Phase 12).
+- Usage-limit blocking (9.3) has so far only been implemented for the document count (`document-service`'s `POST /documents`) — storage/user limits currently do not prevent new creations, only the status display/events capture them.

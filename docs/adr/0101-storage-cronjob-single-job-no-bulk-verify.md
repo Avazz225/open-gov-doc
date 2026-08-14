@@ -1,100 +1,90 @@
-# 0101 — Storage-CronJob: nur EIN CronJob (Replikation), kein zweiter für Fixity-Verifikation
+# 0101 — Storage CronJob: only ONE CronJob (replication), no second one for fixity verification
 
-**Status:** akzeptiert (P26-S4, siehe `IMPLEMENTATION_PLAN.md`)
-**Kontext:** Konzept 3.6, betrifft `infra/k8s/dms/` (Phase 26, Fortsetzung von [ADR 0099](0099-helm-single-chart-values-driven-service-map.md)/[ADR 0100](0100-helm-secrets-existing-secret-pattern.md)), löst den in [ADR 0004](0004-storage-redundancy-scope.md) und PROGRESS.md P20-S6 angekündigten externen Träger für `storage-service`s On-Demand-Endpunkte ein.
+**Status:** accepted (P26-S4, see `IMPLEMENTATION_PLAN.md`)
+**Context:** Concept 3.6, affects `infra/k8s/dms/` (Phase 26, continuation of [ADR 0099](0099-helm-single-chart-values-driven-service-map.md)/[ADR 0100](0100-helm-secrets-existing-secret-pattern.md)), fulfills the external carrier for `storage-service`'s on-demand endpoints announced in [ADR 0004](0004-storage-redundancy-scope.md) and PROGRESS.md P20-S6.
 
-## Entscheidung
+## Decision
 
-Der neue `templates/storage-cronjob.yaml` rendert **genau einen** `CronJob`
-(`storageCronJob.enabled`), der periodisch `POST /replication/process-pending`
-gegen `storage-service`s In-Cluster-Service-DNS aufruft
-(`http://<fullname>-storage-service:8000`, via neuem `dms.storageServiceBaseUrl`-
-Helfer, gleiche URL-Formel wie `dms.dependsOnServicesEnv`). Es gibt bewusst
-**keinen** zweiten CronJob für die im Session-Briefing angenommene periodische
-Objekt-Fixity-Verifikation.
+The new `templates/storage-cronjob.yaml` renders **exactly one** `CronJob`
+(`storageCronJob.enabled`), which periodically calls `POST /replication/process-pending`
+against `storage-service`'s in-cluster service DNS
+(`http://<fullname>-storage-service:8000`, via the new `dms.storageServiceBaseUrl`
+helper, the same URL formula as `dms.dependsOnServicesEnv`). There is deliberately
+**no** second CronJob for the periodic object fixity verification assumed in the
+session briefing.
 
-## Begründung
+## Rationale
 
-**Der reale Verifikations-Endpunkt ist kein Bulk-Endpunkt.** Das
-Session-Briefing ging (mit ausdrücklichem Verifikationsauftrag) von einem
-Endpunkt "etwa `/object-verify/.../all`" aus, der periodisch "alle Objekte"
-prüfen könnte. Der tatsächliche Code
-(`services/storage-service/src/storage_service/main.py` Zeile 523-542,
-`@app.get("/object-verify/{key:path}/all")`) verifiziert stattdessen **alle
-konfigurierten Ziele/Kopien EINES per Pfad-Parameter übergebenen einzelnen
-Objekt-`key`** — nicht alle im Store vorhandenen Objekte. Das deckt sich mit
-der eigenen Doku
-(`docs/services/storage-service.md`: "Fixity-Check über **alle** konfigurierten
-Ziele" — "Ziele" bezieht sich auf die Redundanz-Ziele eines Objekts, nicht auf
-die Objektmenge) sowie mit dem "Offene Punkte"-Abschnitt derselben Datei, der
-"Keine automatische periodische Ausführung von `/object-verify/.../all`" als
-bekannte Lücke nennt, ohne einen Enumerationsmechanismus zu versprechen.
+**The real verification endpoint is not a bulk endpoint.** The session briefing
+assumed (with an explicit verification mandate) an endpoint "something like
+`/object-verify/.../all`" that could periodically check "all objects." The actual
+code (`services/storage-service/src/storage_service/main.py` lines 523-542,
+`@app.get("/object-verify/{key:path}/all")`) instead verifies **all configured
+targets/copies of ONE single object `key` passed as a path parameter** — not all
+objects present in the store. This matches its own docs
+(`docs/services/storage-service.md`: "fixity check across **all** configured
+targets" — "targets" refers to an object's redundancy targets, not the set of
+objects) as well as the "Open Points" section of the same file, which lists "no
+automatic periodic execution of `/object-verify/.../all`" as a known gap without
+promising an enumeration mechanism.
 
-`storage-service` hat aktuell **keinen** Endpunkt, der Objektschlüssel
-auflistet oder eine Charge noch nicht (oder am längsten nicht) verifizierter
-Objekte zurückgibt — anders als bei der Replikations-Retry-Queue
-(`repository.list_pending_copies`/`POST /replication/process-pending`, seit
-ADR 0082 mit Full-Jitter-Backoff über `ObjectCopy.next_retry_at`) existiert
-für Fixity kein Pendant zu `next_retry_at`. `ObjectMetadata` (models.py) trägt
-kein `last_verified_at`/`next_verify_at`-Feld, `repository.py` hat keine
-`list_unverified`-artige Abfrage.
+`storage-service` currently has **no** endpoint that lists object keys or returns a
+batch of objects not yet verified (or verified longest ago) — unlike the replication
+retry queue (`repository.list_pending_copies`/`POST /replication/process-pending`,
+since ADR 0082 with full-jitter backoff via `ObjectCopy.next_retry_at`), fixity has
+no counterpart to `next_retry_at`. `ObjectMetadata` (models.py) carries no
+`last_verified_at`/`next_verify_at` field, `repository.py` has no
+`list_unverified`-style query.
 
-Ein CronJob kann von außen nur aufrufen, was die API tatsächlich anbietet.
-Einen periodischen "verifiziere alles"-Job gegen einen Endpunkt zu bauen, der
-zwingend einen konkreten, im Voraus bekannten `key` verlangt, wäre entweder
-funktionslos (fester Platzhalter-Key, verifiziert für immer nur ein einziges
-Objekt) oder würde eine Objekt-Enumeration von außen erfordern (z. B. über
-einen anderen Service mit Kenntnis aller Storage-Keys, mit Paginierung/
-Fehlerbehandlung in einem reinen curl-Shell-Skript) — beides verwässert die
-eigentliche fachliche Anforderung (regelmäßiger Fixity-Check **aller**
-Kopien, Konzept 3.6) auf eine Weise, die suggerieren würde, es funktioniere
-vollständig, obwohl es das nicht täte. Einen neuen Bulk-Endpunkt direkt in
-`storage-service` zu ergänzen wäre die saubere Lösung, sprengt aber den Scope
-dieser Helm-Chart-Session (P26-S4 laut `IMPLEMENTATION_PLAN.md` betrifft
-`infra/k8s/dms/`, nicht Service-Code) und wäre ohne eigene Tests/ADR/
-Doku-Update für `storage-service` selbst unvollständig.
+A CronJob can only call what the API actually offers from the outside. Building a
+periodic "verify everything" job against an endpoint that necessarily requires a
+concrete, known-in-advance `key` would either be non-functional (a fixed placeholder
+key, forever verifying only a single object) or would require object enumeration from
+the outside (e.g. via another service with knowledge of all storage keys, with
+pagination/error handling in a plain curl shell script) — both would dilute the
+actual functional requirement (regular fixity check of **all** copies, Concept 3.6)
+in a way that would suggest it works completely when it does not. Adding a new bulk
+endpoint directly to `storage-service` would be the clean solution, but is outside
+the scope of this Helm chart session (P26-S4 per `IMPLEMENTATION_PLAN.md` covers
+`infra/k8s/dms/`, not service code) and would be incomplete without its own
+tests/ADR/doc update for `storage-service` itself.
 
-**Auth**: Weder `/replication/process-pending` noch
-`/object-verify/{key}/all` verlangen aktuell einen Auth-Header (kein
-`Header(...)`/`Depends(...)`-Gate in `main.py`, anders als z. B.
-`DELETE /objects/{key}`s optionaler `X-DMS-Roles`-Governance-Bypass). Der
-CronJob sendet trotzdem `X-DMS-Principal: system:storage-replication-cronjob`
-mit (gleiches Muster wie `archival-service`s `_SYSTEM_PRINCIPAL_HEADERS`/
-`workflow-service`s `X-DMS-Principal`-Prüfung für andere Service-zu-Service-
-Aufrufe) — kostet nichts, hält den Aufruf im projektweiten Muster konsistent
-und macht ihn in Logs als Maschinenaufruf erkennbar, auch falls
-`storage-service` diesen Endpunkt später gated.
+**Auth**: neither `/replication/process-pending` nor `/object-verify/{key}/all`
+currently require an auth header (no `Header(...)`/`Depends(...)` gate in
+`main.py`, unlike e.g. `DELETE /objects/{key}`'s optional `X-DMS-Roles` governance
+bypass). The CronJob nonetheless sends `X-DMS-Principal: system:storage-replication-cronjob`
+along (the same pattern as `archival-service`'s `_SYSTEM_PRINCIPAL_HEADERS`/
+`workflow-service`'s `X-DMS-Principal` check for other service-to-service calls) —
+costs nothing, keeps the call consistent with the project-wide pattern, and makes
+it identifiable as a machine call in logs, even if `storage-service` later gates
+this endpoint.
 
-**Utility-Image**: `curlimages/curl:8.10.1` statt eines vollen
-`storage-service`-Images — der Container macht nichts weiter als einen
-einzelnen HTTP-POST. Keine bestehende Projekt-Konvention für ein
-Utility-Image gefunden (`infra/docker-compose.yml` nutzt curl/wget nur
-innerhalb der jeweiligen Service-Images für Healthchecks), daher das
-gängige offizielle Minimal-Image gewählt.
+**Utility image**: `curlimages/curl:8.10.1` instead of a full `storage-service`
+image — the container does nothing more than a single HTTP POST. No existing
+project convention for a utility image was found (`infra/docker-compose.yml` uses
+curl/wget only within the respective service images for healthchecks), so the
+common official minimal image was chosen.
 
-## Konsequenzen
+## Consequences
 
-- Sekundärkopien werden ab dieser Session tatsächlich automatisch
-  nachgezogen (`POST /replication/process-pending` alle 15 Minuten, Default
-  `storageCronJob.replication.schedule`) — der in ADR 0004/PROGRESS.md P20-S6
-  offen gelassene "externe Träger" ist damit real vorhanden.
-- Regelmäßige Fixity-Verifikation **aller** Objekte bleibt weiterhin ein
-  manueller/On-Demand-Vorgang (`GET /object-verify/{key}/all` je Objekt) —
-  Konzept 3.6s "regelmäßiger Fixity-Check über alle Kopien" ist damit für
-  Phase 26 NICHT vollständig erfüllt. `values.yaml`s
-  `storageCronJob.verification.enabled: false` ist ein bewusst unverdrahteter
-  Platzhalter (kein Template liest ihn) für eine spätere Session.
-- **Empfohlener Zuschnitt einer künftigen Lösung** (nicht Teil dieser
-  Session): `storage-service` bekommt, analog zur Replikations-Retry-Queue,
-  ein neues Feld `ObjectMetadata.next_verify_at` (oder eine eigene
-  `verification_schedule`-Tabelle) plus einen neuen Endpunkt
-  `POST /object-verify/process-pending?limit=N`, der die `N` am längsten
-  unverifizierten Objekte auswählt, `verify_all_copies` je Objekt aufruft und
-  `next_verify_at` mit einem festen Intervall (kein Retry-Backoff nötig, da
-  kein Fehlerfall im ADR-0082-Sinne) neu setzt — spiegelbildlich zu
-  `list_pending_copies`/`process_pending`. Erst dann lässt sich ein zweiter,
-  echter CronJob analog zu diesem hier bauen.
-- Sollte `storage-service` diese beiden Endpunkte später mit einem echten
-  Auth-Gate versehen (`X-DMS-Principal`/`X-DMS-Roles`-Pflicht), funktioniert
-  dieser CronJob unverändert weiter, da der Principal-Header bereits
-  mitgeschickt wird.
+- Secondary copies are now actually caught up automatically as of this session
+  (`POST /replication/process-pending` every 15 minutes, default
+  `storageCronJob.replication.schedule`) — the "external carrier" left open in
+  ADR 0004/PROGRESS.md P20-S6 is now actually present.
+- Regular fixity verification of **all** objects remains a manual/on-demand
+  operation (`GET /object-verify/{key}/all` per object) — Concept 3.6's "regular
+  fixity check across all copies" is thus NOT fully satisfied for Phase 26.
+  `values.yaml`'s `storageCronJob.verification.enabled: false` is a deliberately
+  unwired placeholder (no template reads it) for a later session.
+- **Recommended shape for a future solution** (not part of this session):
+  `storage-service` gets, analogous to the replication retry queue, a new field
+  `ObjectMetadata.next_verify_at` (or its own `verification_schedule` table) plus
+  a new endpoint `POST /object-verify/process-pending?limit=N`, which selects the
+  `N` objects verified longest ago, calls `verify_all_copies` per object, and
+  resets `next_verify_at` at a fixed interval (no retry backoff needed, since
+  there is no failure case in the ADR-0082 sense) — mirroring
+  `list_pending_copies`/`process_pending`. Only then can a second, real CronJob
+  analogous to this one be built.
+- Should `storage-service` later add real auth gating to these two endpoints
+  (`X-DMS-Principal`/`X-DMS-Roles` requirement), this CronJob continues to work
+  unchanged, since the principal header is already being sent.

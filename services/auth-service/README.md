@@ -1,43 +1,43 @@
 # auth-service
 
-Schlanker OIDC-Broker vor Keycloak (Konzept 4.4) — hält den Client-Secret,
-Aufrufer sehen nur Benutzername/Passwort bzw. fertige Tokens.
+Thin OIDC broker in front of Keycloak (concept 4.4) — holds the client secret,
+callers only see username/password or finished tokens.
 
-## Endpunkte
+## Endpoints
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/login` | Password-Grant gegen Keycloak, liefert Tokens |
-| `POST` | `/refresh` | Refresh-Token gegen neue Tokens tauschen |
-| `GET` | `/me` | Validiert Bearer-Token, liefert normalisierte Identität |
-| `GET` | `/users` | Nutzer auflisten (seit P4-S3, Admin-UI) |
-| `POST` | `/users` | Nutzer anlegen |
-| `DELETE` | `/users/{id}` | Nutzer löschen |
-| `GET` | `/healthz` | Eigener Health-Check |
+| `POST` | `/login` | Password grant against Keycloak, returns tokens |
+| `POST` | `/refresh` | Exchange refresh token for new tokens |
+| `GET` | `/me` | Validates bearer token, returns normalized identity |
+| `GET` | `/users` | List users (since P4-S3, admin UI) |
+| `POST` | `/users` | Create user |
+| `DELETE` | `/users/{id}` | Delete user |
+| `GET` | `/healthz` | Own health check |
 
-## Realm-/Client-Bootstrap
+## Realm/client bootstrap
 
-Beim Start wird Realm `dms` und Client `dms-api` idempotent angelegt (analog
-zum `CREATE SCHEMA IF NOT EXISTS`-Muster der DB-Services), inkl. eines
-Audience-Mappers — ohne den trägt der Access-Token nur `aud: "account"`
-(Keycloak-Default), nicht den eigenen Client-Namen.
+On startup, realm `dms` and client `dms-api` are created idempotently (analogous
+to the `CREATE SCHEMA IF NOT EXISTS` pattern of the DB services), including an
+audience mapper — without it, the access token only carries `aud: "account"`
+(Keycloak default), not the actual client name.
 
-**Falle bei der Testnutzer-Anlage**: Keycloak 25 verlangt per Default-User-Profile
-`firstName`/`lastName`; fehlen sie, schlägt der Login mit "Account is not fully
-set up" fehl, statt einen klaren Fehler zu zeigen.
+**Pitfall when creating test users**: Keycloak 25 requires `firstName`/`lastName`
+per the default user profile; if missing, login fails with "Account is not fully
+set up" instead of showing a clear error.
 
-## Lokale/AD-Konten (Konzept 4.4)
+## Local/AD accounts (concept 4.4)
 
-Beide Kontotypen sind bereits durch Keycloak selbst abgedeckt (ein Realm kann
-lokale und LDAP/AD-föderierte Nutzer gleichzeitig verwalten) — keine eigene
-Nutzertabelle in diesem Service nötig. AD-Gruppe→interne-Rolle-Mapping ist noch
-nicht implementiert (siehe `docs/services/auth-service.md`, "Offene Punkte").
+Both account types are already covered by Keycloak itself (a realm can
+manage local and LDAP/AD-federated users simultaneously) — no separate
+user table is needed in this service. AD group→internal-role mapping is not
+yet implemented (see `docs/services/auth-service.md`, "Open items").
 
-## Registry-Registrierung (seit P4-S1)
+## Registry registration (since P4-S1)
 
-Meldet sich beim Start über `dms-registry-client` selbst bei der Registry an (Heartbeat, Deregister beim Shutdown) - Opt-in über `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, siehe `docs/services/gateway-service.md` für den Konsumenten (API-Gateway, dynamisches Routing).
+Registers itself with the registry on startup via `dms-registry-client` (heartbeat, deregister on shutdown) - opt-in via `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, see `docs/services/gateway-service.md` for the consumer (API gateway, dynamic routing).
 
-## Lokale Ausführung
+## Running locally
 
 ```bash
 cd infra && docker compose up -d postgres keycloak auth-service

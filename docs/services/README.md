@@ -1,23 +1,23 @@
-# Service-Dokumentation
+# Service Documentation
 
-Eine Kurzdoku je Service, angelegt/gepflegt in der Session, die den jeweiligen Service baut (Teil der Definition of Done, siehe `../../CONTRIBUTING.md`).
+A short doc per service, created/maintained in the session that builds the respective service (part of the Definition of Done, see `../../CONTRIBUTING.md`).
 
 ## Template
 
 ```markdown
-# <Service-Name>
+# <Service Name>
 
-**Verantwortung:** ...
-**Konzept-Referenz:** z. B. 3.2
-**Eigenes Postgres-Schema:** <name>
+**Responsibility:** ...
+**Concept Reference:** e.g. 3.2
+**Own Postgres schema:** <name>
 
 ## API
 ...
 
 ## Events
-- Publiziert: ...
-- Konsumiert: ...
+- Published: ...
+- Consumed: ...
 
-## Sensoren (Konzept 10.1)
+## Sensors (Concept 10.1)
 ...
 ```

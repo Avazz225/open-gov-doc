@@ -1,82 +1,82 @@
 # webdav-connector
 
-**Verantwortung:** Erster Referenz-Connector der Connector-Architektur (Konzept 3.3, P12-S1) — macht `folder-service`/`document-service` über das WebDAV-Protokoll (RFC 4918) als Netzlaufwerk ansprechbar (Windows-Explorer/macOS-Finder/Word). Das DMS ist dabei der WebDAV-**Server** (kein Client eines externen Repositories) — siehe "Richtungsentscheidung" unten. Zweiter Referenz-Connector: [`cmis-connector`](cmis-connector.md) (P12-S4).
+**Responsibility:** First reference connector of the connector architecture (Concept 3.3, P12-S1) — makes `folder-service`/`document-service` addressable as a network drive via the WebDAV protocol (RFC 4918) (Windows Explorer/macOS Finder/Word). The DMS is the WebDAV **server** here (not a client of an external repository) — see "Direction decision" below. Second reference connector: [`cmis-connector`](cmis-connector.md) (P12-S4).
 
-**Konzept-Referenz:** 3.3, 4.2
-**Kein eigenes Postgres-Schema** (stateless — jede Anfrage übersetzt sich live in HTTP-Aufrufe gegen `folder-service`/`document-service`, siehe `libs/dms-connector-sdk`)
-**ADR:** [0033 — Server-Richtung, `wsgidav`+`WsgiToAsgi`, synchrones Connector-SDK](../adr/0033-webdav-connector-server-direction-and-wsgidav.md)
+**Concept reference:** 3.3, 4.2
+**Own Postgres schema:** none (stateless — every request translates live into HTTP calls against `folder-service`/`document-service`, see `libs/dms-connector-sdk`)
+**ADR:** [0033 — Server direction, `wsgidav`+`WsgiToAsgi`, synchronous connector SDK](../adr/0033-webdav-connector-server-direction-and-wsgidav.md)
 
-## Richtungsentscheidung (server vs. client)
+## Direction decision (server vs. client)
 
-Konzept 3.3/3.7/3.8/9/12 sprechen an mehreren Stellen generisch von "Anbindung externer Repositories" — für sich genommen uneindeutig, ob ein Connector das DMS *für* externe Programme oder *gegen* ein externes Repository öffnet. Zwei konkrete Textstellen klären das eindeutig zugunsten **Server**:
+Concept 3.3/3.7/3.8/9/12 speak in several places generically of "integration of external repositories" — on its own, ambiguous as to whether a connector opens the DMS *for* external programs or *against* an external repository. Two concrete passages clarify this unambiguously in favor of **server**:
 
-- **Konzept 4.2**: "Öffnet ein Nutzer ein Dokument aus einer Anwendung heraus (z. B. Word über WebDAV/CMIS-Anbindung) zur Bearbeitung, wird automatisch ein Bearbeitungs-Lock gesetzt."
-- **ADR 0002** (Dokument-Sperren): "Entspricht dem etablierten Optimistic-Concurrency-/ETag-Muster aus WebDAV/CMIS, mit dem das Dokument ohnehin über externe Anwendungen angesprochen wird."
+- **Concept 4.2**: "If a user opens a document from within an application (e.g. Word via WebDAV/CMIS integration) for editing, an editing lock is automatically set."
+- **ADR 0002** (document locking): "Corresponds to the established optimistic-concurrency/ETag pattern from WebDAV/CMIS, through which the document is addressed by external applications anyway."
 
-Beide beschreiben ein externes Programm, das das DMS über WebDAV *anspricht* — nicht das DMS, das einen fremden WebDAV-Server abfragt. `webdav-connector` implementiert entsprechend einen WebDAV-Server.
+Both describe an external program that *addresses* the DMS via WebDAV — not the DMS querying a foreign WebDAV server. `webdav-connector` accordingly implements a WebDAV server.
 
-## Architektur
+## Architecture
 
-| Baustein | Wahl | Begründung |
+| Building block | Choice | Rationale |
 |---|---|---|
-| Protokoll-Engine | [`wsgidav`](https://github.com/mar10/wsgidav) (MIT, aktiv gepflegt) statt eigener Implementierung | WebDAV inkl. Windows-Explorer-/Finder-Kompatibilität selbst zu bauen (Depth-Header, If-Header, Lock-Token-Semantik, viele klientenspezifische Macken) ist ein eigenes, fehleranfälliges Projekt. `wsgidav` hat einen dokumentierten Erweiterungspunkt für Nicht-Dateisystem-Backends (`DAVProvider`/`DAVCollection`/`DAVNonCollection`). |
-| WSGI in einem sonst durchgehend ASGI/FastAPI-Projekt | `asgiref.wsgi.WsgiToAsgi` mountet die wsgidav-App unter `/webdav` **innerhalb** eines normalen FastAPI-Service (`app.mount()`) | Der Service bleibt äußerlich konsistent mit allen anderen Services (`/healthz`, `BaseServiceSettings`, Registry-Selbstregistrierung, Lizenzprüfung laufen als normale FastAPI-Routen) — nur `/webdav/*` läuft durch die gebrückte wsgidav-Engine. |
-| DMS-Baum-Übersetzung | Eigene Lib `libs/dms-connector-sdk` (`DmsTreeClient`), nicht Code im Connector selbst | Konzept 3.3 verlangt ein wiederverwendbares SDK — der künftige CMIS-Connector (P12-S4) braucht dieselbe DMS-seitige Logik, nur eine andere Protokoll-Schicht obendrauf. |
-| WebDAV LOCK/UNLOCK | Direkt auf `document-service`s bestehende Sperr-Endpunkte (`POST`/`DELETE`/`GET /documents/{id}/lock`, 4.2) | Kein zweites, konkurrierendes Sperrsystem — eine über WebDAV gesperrte Datei ist serverseitig dieselbe Sperre, die auch die User-UI sieht. |
+| Protocol engine | [`wsgidav`](https://github.com/mar10/wsgidav) (MIT, actively maintained) instead of a custom implementation | Building WebDAV including Windows Explorer/Finder compatibility yourself (Depth header, If header, lock token semantics, many client-specific quirks) is its own error-prone project. `wsgidav` has a documented extension point for non-filesystem backends (`DAVProvider`/`DAVCollection`/`DAVNonCollection`). |
+| WSGI in an otherwise consistently ASGI/FastAPI project | `asgiref.wsgi.WsgiToAsgi` mounts the wsgidav app under `/webdav` **inside** a normal FastAPI service (`app.mount()`) | The service stays externally consistent with all other services (`/healthz`, `BaseServiceSettings`, registry self-registration, license check run as normal FastAPI routes) — only `/webdav/*` runs through the bridged wsgidav engine. |
+| DMS tree translation | Own lib `libs/dms-connector-sdk` (`DmsTreeClient`), not code in the connector itself | Concept 3.3 requires a reusable SDK — the future CMIS connector (P12-S4) needs the same DMS-side logic, just a different protocol layer on top. |
+| WebDAV LOCK/UNLOCK | Directly against `document-service`'s existing lock endpoints (`POST`/`DELETE`/`GET /documents/{id}/lock`, 4.2) | No second, competing lock system — a file locked via WebDAV is the same server-side lock that the user UI also sees. |
 
-**`DmsTreeClient` ist bewusst synchron** (`httpx.Client`, nicht `AsyncClient`): wsgidavs `DAVProvider`-Schnittstelle ist selbst synchron (WSGI). Siehe `libs/dms-connector-sdk/README.md` für die Begründung.
+**`DmsTreeClient` is deliberately synchronous** (`httpx.Client`, not `AsyncClient`): wsgidav's `DAVProvider` interface is itself synchronous (WSGI). See `libs/dms-connector-sdk/README.md` for the rationale.
 
-## `mount_path` (wichtige wsgidav-Falle)
+## `mount_path` (an important wsgidav pitfall)
 
-`WsgiToAsgi` mountet die wsgidav-App unter `settings.webdav_mount_path` (Default `/webdav`) — wsgidav selbst weiß davon nichts und würde ohne den Konfigurationsschlüssel `mount_path` Hrefs relativ zu seiner **eigenen** Wurzel (`/...`) statt zur tatsächlich öffentlichen URL (`/webdav/...`) ausliefern. WebDAV-Clients, die den Ressourcennamen durch Abschneiden des Mount-Präfixes vom Href bestimmen (z. B. `webdav4`), erhalten dann verstümmelte Namen (z. B. `Ordner-abc123` → `bc123`, je nach Präfixlänge) statt eines Fehlers — ein bei der Implementierung real aufgetretener, schwer zu diagnostizierender Bug, da `wsgidav` selbst valide antwortet und die Verstümmelung erst beim Client entsteht. Fix: `"mount_path": settings.webdav_mount_path` im `WsgiDAVApp`-Konfigurationsdict (`main.py`).
+`WsgiToAsgi` mounts the wsgidav app under `settings.webdav_mount_path` (default `/webdav`) — wsgidav itself knows nothing about this and, without the `mount_path` configuration key, would deliver hrefs relative to its **own** root (`/...`) instead of the actually public URL (`/webdav/...`). WebDAV clients that determine the resource name by stripping the mount prefix from the href (e.g. `webdav4`) then receive mangled names (e.g. `Ordner-abc123` → `bc123`, depending on prefix length) instead of an error — a real, hard-to-diagnose bug encountered during implementation, since `wsgidav` itself responds validly and the mangling only occurs on the client side. Fix: `"mount_path": settings.webdav_mount_path` in the `WsgiDAVApp` configuration dict (`main.py`).
 
-## Datei-Metadaten kommen aus der Versionstabelle, nicht aus `DocumentOut`
+## File metadata comes from the version table, not from `DocumentOut`
 
-`document-service`s `DocumentOut` (Antwort von `GET/POST/PATCH /documents...`) trägt keine Datei-Metadaten (Größe/Content-Type/Prüfsumme) — die leben ausschließlich auf `DocumentVersionOut` der jeweils aktuellen Version (`GET /documents/{id}/versions/{version_number}`). `DmsTreeClient` holt diese deshalb bei jeder `TreeDocument`-Konstruktion (Anlegen, Einchecken, Verschieben, Auflisten) mit einem zusätzlichen Aufruf nach (`_fetch_current_version`) — ein zusätzlicher HTTP-Roundtrip je Dokument in einer Verzeichnisauflistung, für eine Referenzimplementierung bewusst in Kauf genommen: WebDAV-Clients (Explorer/Finder) verlassen sich auf korrekte `Content-Length`/`ETag`-Werte, ein falscher Defaultwert (`0`/leerer String) wäre die schlechtere Alternative — ein leerer String als ETag lässt wsgidavs eigene Validierung (`checked_etag`) sogar mit `500` fehlschlagen (nur `None` oder ein nicht-leerer String sind gültig), ebenfalls real aufgetreten und Grund, warum `checksum_sha256` als `str | None` statt mit leerem-String-Default modelliert ist.
+`document-service`'s `DocumentOut` (response of `GET/POST/PATCH /documents...`) carries no file metadata (size/content type/checksum) — that lives exclusively on `DocumentVersionOut` of the respective current version (`GET /documents/{id}/versions/{version_number}`). `DmsTreeClient` therefore fetches this with an additional call on every `TreeDocument` construction (create, check-in, move, list) (`_fetch_current_version`) — an extra HTTP round trip per document in a directory listing, deliberately accepted for a reference implementation: WebDAV clients (Explorer/Finder) rely on correct `Content-Length`/`ETag` values, and an incorrect default value (`0`/empty string) would be the worse alternative — an empty string as an ETag even makes wsgidav's own validation (`checked_etag`) fail with `500` (only `None` or a non-empty string are valid), also encountered in practice and the reason `checksum_sha256` is modeled as `str | None` instead of with an empty-string default.
 
-## Schreiben: Puffer wird beim Schließen abgegriffen, nicht danach gelesen
+## Writing: the buffer is captured on close, not read afterward
 
-wsgidavs echter `do_PUT`-Handler (`request_server.py`) ruft `fileobj.close()` auf den von `begin_write()` zurückgegebenen Puffer, **bevor** er `end_write()` aufruft. Ein `BytesIO.getvalue()` erst in `end_write()` würde auf einem bereits geschlossenen Puffer `ValueError: I/O operation on closed file` werfen — real aufgetreten, weil eine direkte Python-Reproduktion (ohne den echten HTTP/WSGI-Pfad) das `close()` nie aufrief und den Bug deshalb nicht zeigte. `DmsDavDocument` nutzt daher `_CapturingBuffer`, eine `BytesIO`-Unterklasse, die den Inhalt beim `close()` abgreift, statt ihn erst danach aus dem (dann geschlossenen) Puffer zu lesen.
+wsgidav's real `do_PUT` handler (`request_server.py`) calls `fileobj.close()` on the buffer returned by `begin_write()` **before** it calls `end_write()`. A `BytesIO.getvalue()` called only in `end_write()` would throw `ValueError: I/O operation on closed file` on an already-closed buffer — encountered in practice, because a direct Python reproduction (without the real HTTP/WSGI path) never called `close()` and therefore didn't show the bug. `DmsDavDocument` therefore uses `_CapturingBuffer`, a `BytesIO` subclass that captures the content on `close()` instead of reading it afterward from the (by then closed) buffer.
 
-## Authentifizierung
+## Authentication
 
-`DmsAuthDomainController` (`wsgidav.dc.base_dc.BaseDomainController`) bildet WebDAV-Basic-Auth (das, was Explorer/Finder/Word beim Verbinden mit einem Netzlaufwerk senden) auf `auth-service`s bestehendes `POST /login` ab — kein zweiter, connector-eigener Nutzerspeicher. Bewusst nicht anonym erreichbar: anders als die übrigen Backend-Services (deren Ports laut ADR 0005 nur aus Entwickler-Komfort direkt offen sind, echte Nutzung läuft über das authentifizierende Gateway) ist ein WebDAV-Connector sein eigener, direkt von externen Programmen angesprochener Endpunkt — ohne echte Authentifizierung hier wäre jedes Dokument für jeden mit Netzwerkzugriff lesbar/schreibbar. Digest-Auth ist deaktiviert (Basic über TLS-Termination in der Zielumgebung gilt als ausreichend).
+`DmsAuthDomainController` (`wsgidav.dc.base_dc.BaseDomainController`) maps WebDAV Basic Auth (what Explorer/Finder/Word send when connecting to a network drive) onto `auth-service`'s existing `POST /login` — no second, connector-own user store. Deliberately not anonymously reachable: unlike the other backend services (whose ports, per ADR 0005, are directly exposed only for developer convenience, with real usage going through the authenticating gateway), a WebDAV connector is its own endpoint, addressed directly by external programs — without real authentication here, every document would be readable/writable by anyone with network access. Digest auth is disabled (Basic over TLS termination in the target environment is considered sufficient).
 
-## Office-Direktbearbeitung: `by-id`-Pfad + Edit-Token (Ad-hoc Post-Roadmap, siehe ADR 0061)
+## Office direct editing: `by-id` path + edit token (ad hoc post-roadmap, see ADR 0061)
 
-Zwei additive Ergänzungen, ohne den bestehenden pfadbasierten Fluss zu ändern:
+Two additive extensions, without changing the existing path-based flow:
 
-- **`DmsDavProvider.get_resource_inst()`** erkennt Pfade mit Präfix `by-id/` (z. B. `by-id/<document-id>.docx`) VOR dem üblichen `resolve_path()`-Baumdurchlauf und löst sie direkt über `self.tree.get_document(document_id)` auf — O(1) statt O(Baumtiefe). Die `.ext`-Endung ist rein kosmetisch (Office' Dateityperkennung beim Öffnen) und wird serverseitig verworfen.
-- **`DmsAuthDomainController.basic_auth_user()`** behandelt ein leeres Passwort als Zeichen dafür, dass der übergebene Benutzername ein `document-service`-`WebdavEditToken` ist, nicht ein echter Benutzername: löst es gegen `GET /internal/webdav-edit-tokens/{token}` auf (Ost-West, direkt gegen `document_service_base_url`, kein Umweg über `/login`) und überschreibt `environ["wsgidav.auth.user_name"]` mit der aufgelösten `principal_id` — nicht das rohe Token stehen lassen, sonst würde ein späterer Check-in fälschlich das Token statt der echten Identität als Sperrinhaber verwenden. Der bestehende Benutzername+Passwort-Zweig (echter Netzlaufwerk-Mount) bleibt unverändert.
+- **`DmsDavProvider.get_resource_inst()`** recognizes paths with the prefix `by-id/` (e.g. `by-id/<document-id>.docx`) BEFORE the usual `resolve_path()` tree traversal and resolves them directly via `self.tree.get_document(document_id)` — O(1) instead of O(tree depth). The `.ext` suffix is purely cosmetic (Office's file type detection on opening) and is discarded server-side.
+- **`DmsAuthDomainController.basic_auth_user()`** treats an empty password as a sign that the provided username is a `document-service` `WebdavEditToken`, not a real username: resolves it against `GET /internal/webdav-edit-tokens/{token}` (east-west, directly against `document_service_base_url`, no detour via `/login`) and overwrites `environ["wsgidav.auth.user_name"]` with the resolved `principal_id` — not leaving the raw token in place, otherwise a later check-in would incorrectly use the token instead of the real identity as the lock holder. The existing username+password branch (real network drive mount) remains unchanged.
 
-Zusammen ergeben beide die Zieladresse für den Office-URI-Handler (`user-ui`): `https://<token>:@<host>/webdav/by-id/<document-id>.<ext>`.
+Together these two produce the target address for the Office URI handler (`user-ui`): `https://<token>:@<host>/webdav/by-id/<document-id>.<ext>`.
 
-## Lizenzierung (3.3, P9-S2-Muster)
+## Licensing (3.3, P9-S2 pattern)
 
-Konzept 3.3 nennt Connectoren wörtlich als Beispiel für lizenzierbare Komponenten. `registry-service`s `licensable_components` enthält `"webdav-connector": "demo"` (identisches Muster wie `workflow-service`, siehe `docs/services/registry-service.md`). Da der eigentliche WebDAV-Verkehr nicht über FastAPI-Routen läuft (kein `Depends()`-Gate möglich), prüft `DmsDavProvider.check_license(action)` direkt in den wsgidav-Callback-Methoden: `"unlicensed"` blockiert jeden Zugriff (`get_resource_inst`), `"demo"` blockiert nur Schreiboperationen (`create_collection`, `end_write`, `handle_delete`, `handle_move` — jeweils auf Ordner und Dokument).
+Concept 3.3 explicitly names connectors as an example of licensable components. `registry-service`'s `licensable_components` contains `"webdav-connector": "demo"` (identical pattern to `workflow-service`, see `docs/services/registry-service.md`). Since the actual WebDAV traffic does not run through FastAPI routes (no `Depends()` gate possible), `DmsDavProvider.check_license(action)` checks directly in the wsgidav callback methods: `"unlicensed"` blocks every access (`get_resource_inst`), `"demo"` blocks only write operations (`create_collection`, `end_write`, `handle_delete`, `handle_move` — each for folders and documents).
 
-## Ordner-Lock-Mapping
+## Folder lock mapping
 
-Eine per WebDAV gesperrte Sitzung hat kein natives Session-Konzept wie ein Browser-Login (Basic-Auth ist pro Request neu). Die `session_id` für `document-service`s Lock-Endpunkte ist deshalb pro Nutzername stabil (`webdav:<username>`), nicht pro TCP-Verbindung — ausreichend, da `document-service` Sperren ohnehin pro Dokument führt. **Bewusste Grenze**: eine über ein echtes WebDAV-LOCK gehaltene Sperre wird nicht über die gesamte Bearbeitungsdauer gespiegelt, nur während jeder einzelnen Schreiboperation (`end_write()` erwirbt die Sperre, hält sie für die Dauer des Uploads, gibt sie im `finally` wieder frei) — ein per WebDAV geöffnetes Word-Dokument hält document-services Sperre also nicht durchgehend zwischen Öffnen und Speichern, sondern nur während des eigentlichen Speichervorgangs.
+A session locked via WebDAV has no native session concept like a browser login (Basic Auth is renewed per request). The `session_id` for `document-service`'s lock endpoints is therefore stable per username (`webdav:<username>`), not per TCP connection — sufficient, since `document-service` tracks locks per document anyway. **Deliberate limitation**: a lock held via a real WebDAV LOCK is not mirrored for the entire editing duration, only during each individual write operation (`end_write()` acquires the lock, holds it for the duration of the upload, releases it again in `finally`) — a Word document opened via WebDAV therefore does not hold document-service's lock continuously between opening and saving, only during the actual save operation.
 
-## Konfiguration
+## Configuration
 
-| Variable | Default | Bedeutung |
+| Variable | Default | Meaning |
 |---|---|---|
-| `DMS_DOCUMENT_SERVICE_BASE_URL` | `http://localhost:8006` | `document-service`-Adresse |
-| `DMS_FOLDER_SERVICE_BASE_URL` | `http://localhost:8008` | `folder-service`-Adresse |
-| `DMS_AUTH_SERVICE_BASE_URL` | `http://localhost:8003` | Für `DmsAuthDomainController`s `POST /login`-Prüfung |
-| `DMS_WEBDAV_ROOT_FOLDER_ID` | `root` | DMS-Ordner, der als WebDAV-Wurzel erscheint |
-| `DMS_WEBDAV_MOUNT_PATH` | `/webdav` | Mount-Präfix, siehe "wsgidav-Falle" oben |
-| `WEBDAV_CONNECTOR_PORT` | `8027` | Host-Port im Dev-Compose-Stack |
+| `DMS_DOCUMENT_SERVICE_BASE_URL` | `http://localhost:8006` | `document-service` address |
+| `DMS_FOLDER_SERVICE_BASE_URL` | `http://localhost:8008` | `folder-service` address |
+| `DMS_AUTH_SERVICE_BASE_URL` | `http://localhost:8003` | For `DmsAuthDomainController`'s `POST /login` check |
+| `DMS_WEBDAV_ROOT_FOLDER_ID` | `root` | DMS folder that appears as the WebDAV root |
+| `DMS_WEBDAV_MOUNT_PATH` | `/webdav` | Mount prefix, see "wsgidav pitfall" above |
+| `WEBDAV_CONNECTOR_PORT` | `8027` | Host port in the dev compose stack |
 
-Mounten im Dev-Stack z. B. via `net use`/"Netzlaufwerk verbinden" auf `http://localhost:8027/webdav/`.
+Mount in the dev stack e.g. via `net use`/"Map network drive" to `http://localhost:8027/webdav/`.
 
-## Bewusste Grenze: keine GUI-Client-Verifikation
+## Deliberate limitation: no GUI client verification
 
-Getestet wurde diese Session über einen echten WebDAV-**Client** (`webdav4`, MIT, nur Test-Abhängigkeit) gegen die laufende Instanz — PROPFIND/GET/PUT/MKCOL/MOVE/LOCK/DELETE, kein Mocking des Protokolls. Echte Windows-Explorer-/macOS-Finder-Kompatibilität konnte in dieser Umgebung (kein GUI-Client verfügbar) nicht getestet werden — `wsgidav` ist die Engine, die in der Praxis dafür verwendet/getestet wird, ein Mensch sollte das vor Produktivnutzung einmal real mounten.
+This session was tested via a real WebDAV **client** (`webdav4`, MIT, test dependency only) against the running instance — PROPFIND/GET/PUT/MKCOL/MOVE/LOCK/DELETE, no protocol mocking. Real Windows Explorer/macOS Finder compatibility could not be tested in this environment (no GUI client available) — `wsgidav` is the engine used and tested for this in practice; a human should mount it for real once before production use.
 
-## Offene Punkte
+## Open Points
 
-- Kein eigener `GET /metrics` (10.1) — als reiner Protokoll-Übersetzer ohne eigene Geschäftsdaten aktuell kein eigener Sensor definiert.
-- Property-/Attribut-Zugriff (`object_type`-Attribute) ist über WebDAV nicht abbildbar (RFC 4918 kennt nur Dead-Properties, keine strukturierten Custom-Metadaten wie das DMS sie kennt) — Attribute bleiben ausschließlich über die User-UI/API sichtbar, nicht über den WebDAV-Connector.
+- No own `GET /metrics` (10.1) — as a pure protocol translator without its own business data, no own sensor is currently defined.
+- Property/attribute access (`object_type` attributes) cannot be represented over WebDAV (RFC 4918 only knows dead properties, no structured custom metadata as the DMS knows it) — attributes remain visible exclusively via the user UI/API, not via the WebDAV connector.

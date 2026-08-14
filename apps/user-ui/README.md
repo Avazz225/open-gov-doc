@@ -1,35 +1,35 @@
 # user-ui
 
-Authentifizierte Web-Oberfläche für Endnutzer (Konzept 8): Anmelden, Ordner-
-Navigation, Dokument-Upload/-Download, Vorschau-Platzhalter. Reines
-Client-Side-Rendering — Next.js dient nur als React-Build-/Routing-Tooling
-(`output: "export"`), es läuft **kein Node-Prozess in Produktion** (siehe
+Authenticated web interface for end users (Concept 8): sign in, folder
+navigation, document upload/download, preview placeholder. Pure
+client-side rendering — Next.js serves only as React build/routing tooling
+(`output: "export"`), **no Node process runs in production** (see
 [ADR 0006](../../docs/adr/0006-user-ui-static-export-spa.md)).
 
-Ausführliche Doku: [`docs/services/user-ui.md`](../../docs/services/user-ui.md).
+Detailed documentation: [`docs/services/user-ui.md`](../../docs/services/user-ui.md).
 
-## Lokale Entwicklung
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Erwartet ein laufendes Gateway auf `http://localhost:8009` (Default aus
-`src/lib/config.ts`, überschreibbar über `NEXT_PUBLIC_GATEWAY_BASE_URL`):
+Expects a running gateway at `http://localhost:8009` (default from
+`src/lib/config.ts`, overridable via `NEXT_PUBLIC_GATEWAY_BASE_URL`):
 
 ```bash
 cd ../../infra && docker compose up -d
 ```
 
-## Build (statischer Export)
+## Build (static export)
 
 ```bash
 npm run build
 ```
 
-Erzeugt `out/` — ausgeliefert im Produktions-Image über `nginx` (siehe
-`Dockerfile`), keine Laufzeit-Node-Abhängigkeit.
+Produces `out/` — served in the production image via `nginx` (see
+`Dockerfile`), no runtime Node dependency.
 
 ## Tests
 
@@ -39,13 +39,13 @@ npm run lint
 npm test
 ```
 
-Vitest + Testing Library, Netzwerkschicht (`fetch`) gemockt (Grenze zur
-externen Infrastruktur, analog zu `dms-auth-client`s lokalen Test-Schlüsseln
-statt echtem Keycloak). Für eine echte End-to-End-Verifikation gegen den
-laufenden Compose-Stack ist ein Browser nötig (Playwright) — in der
-aktuellen Entwicklungsumgebung nicht verfügbar, siehe
-`docs/services/user-ui.md` für die stattdessen durchgeführte curl-basierte
-Verifikation jedes einzelnen Gateway-Aufrufs.
+Vitest + Testing Library, network layer (`fetch`) mocked (boundary to
+external infrastructure, analogous to `dms-auth-client`'s local test keys
+instead of a real Keycloak). A real end-to-end verification against the
+running Compose stack requires a browser (Playwright) — not available in the
+current development environment, see
+`docs/services/user-ui.md` for the curl-based verification of each
+individual gateway call performed instead.
 
 ## Docker
 

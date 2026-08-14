@@ -1,51 +1,51 @@
-# 0003 — Constraint Engine als geteilte Bibliothek statt eigenständiger Service
+# 0003 — Constraint engine as a shared library instead of a standalone service
 
-**Status:** akzeptiert
-**Kontext:** Konzept 2.2/4.5, Session P3-S3 (Object-Type Service, Folder Service, Constraint Engine)
+**Status:** accepted
+**Context:** Concept 2.2/4.5, Session P3-S3 (Object-Type Service, Folder Service, Constraint Engine)
 
-## Entscheidung
+## Decision
 
-Die Roadmap nennt "Constraint Engine" als eigenständiges Konzept neben dem
-Object-Type Service. Umgesetzt wurde sie **nicht** als eigener Microservice,
-sondern als reine, zustandslose Python-Bibliothek (`libs/dms-constraint-engine`,
-`validate(schema, name, attributes) -> list[str]`), eingebettet ausschließlich
-im **Object-Type Service**, der sie über seinen `POST /object-types/{id}/validate`-
-Endpunkt nach außen anbietet. Folder Service und Document Service rufen diesen
-HTTP-Endpunkt auf, importieren die Lib aber nicht selbst.
+The roadmap names "Constraint Engine" as a standalone concept alongside the
+Object-Type Service. It was **not** implemented as its own microservice, but
+as a pure, stateless Python library (`libs/dms-constraint-engine`,
+`validate(schema, name, attributes) -> list[str]`), embedded exclusively in
+the **Object-Type Service**, which exposes it externally via its
+`POST /object-types/{id}/validate` endpoint. Folder Service and Document
+Service call this HTTP endpoint but do not import the library themselves.
 
-## Begründung
+## Rationale
 
-Die eigentliche Validierungslogik ist eine reine Funktion ohne eigenen
-Zustand, keine eigene Persistenz, keine eigenen Events, keine Notwendigkeit,
-unabhängig vom Object-Type Service skaliert oder deployt zu werden - sie
-braucht die Objekttyp-Definition (die der Object-Type Service ohnehin schon
-persistiert) als einzigen externen Input. Ein eigener Microservice nur für
-eine zustandslose Funktion hätte lediglich zusätzliche Netzwerk-Hops,
-Health-Checks, ein eigenes (leeres) Postgres-Schema und Compose-Einträge
-erzeugt, ohne einen architektonischen Vorteil zu bieten (kein unabhängiger
-Skalierungsbedarf, keine unabhängige Verfügbarkeitsanforderung).
+The actual validation logic is a pure function with no state of its own, no
+own persistence, no own events, and no need to be scaled or deployed
+independently of the Object-Type Service - the only external input it needs
+is the object type definition (which the Object-Type Service already
+persists anyway). A dedicated microservice for just a stateless function
+would only have produced additional network hops, health checks, its own
+(empty) Postgres schema, and Compose entries, without offering an
+architectural advantage (no independent scaling need, no independent
+availability requirement).
 
-Die Trennung "Lib" (Logik) vs. "Object-Type Service" (Persistenz + API) folgt
-demselben Muster wie `dms-eventbus-client`/`dms-db-base`: gemeinsamer Code lebt
-in `libs/`, wird aber in genau einem Servicekontext eingebettet, nicht über
-Service-Grenzen hinweg direkt importiert. Document Service und Folder Service
-sprechen ausschließlich die HTTP-API des Object-Type Service an - kein Import
-fremder Service-Interna, konsistent mit der übrigen Architektur.
+The separation "lib" (logic) vs. "Object-Type Service" (persistence + API)
+follows the same pattern as `dms-eventbus-client`/`dms-db-base`: shared code
+lives in `libs/`, but is embedded in exactly one service context rather than
+being imported directly across service boundaries. Document Service and
+Folder Service exclusively talk to the Object-Type Service's HTTP API - no
+import of another service's internals, consistent with the rest of the
+architecture.
 
-## Konsequenzen
+## Consequences
 
-- Ein zusätzlicher Netzwerk-Hop pro Validierung (Document/Folder Service →
-  Object-Type Service) statt eines In-Process-Aufrufs - für den aktuellen
-  Anwendungsfall (Validierung bei Erstellung, kein Hot Path mit hoher
-  Frequenz) unkritisch.
-- Sollte die Constraint Engine später auch von der Workflow Engine (7.1) für
-  BPMN-Gateway-Bedingungen wiederverwendet werden, kann sie entweder erneut
-  als Lib eingebunden werden (z. B. in einem eigenen Auswertungsdienst) oder
-  über denselben `/validate`-artigen HTTP-Vertrag angesprochen werden - beide
-  Wege bleiben offen, ohne dass diese Entscheidung revidiert werden muss.
-- "Verweise auf andere Objekte" (`type: "reference"`) werden von der Lib nur
-  auf Format geprüft (nicht-leerer String), nicht auf tatsächliche Existenz
-  beim referenzierten Service - eine generische "Referenztyp → zuständiger
-  Service"-Auflösung existiert nicht und wäre eine deutlich größere
-  Erweiterung als der aktuelle Bedarf rechtfertigt (siehe
-  `docs/services/object-type-service.md`).
+- An additional network hop per validation (Document/Folder Service →
+  Object-Type Service) instead of an in-process call - uncritical for the
+  current use case (validation at creation time, not a high-frequency hot
+  path).
+- Should the constraint engine later also be reused by the Workflow Engine
+  (7.1) for BPMN gateway conditions, it can either be embedded again as a
+  library (e.g. in a dedicated evaluation service) or addressed via the same
+  `/validate`-style HTTP contract - both paths remain open, without this
+  decision needing to be revisited.
+- "References to other objects" (`type: "reference"`) are only checked by
+  the library for format (non-empty string), not for actual existence at the
+  referenced service - a generic "reference type → responsible service"
+  resolution does not exist and would be a significantly larger extension
+  than currently warranted (see `docs/services/object-type-service.md`).

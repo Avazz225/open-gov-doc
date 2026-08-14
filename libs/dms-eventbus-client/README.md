@@ -1,21 +1,21 @@
 # dms-eventbus-client
 
-Publish/Consume-Interface für den Event-Bus (Konzept 3.4) — Services kennen nur
-`EventBusClient`, nicht das konkrete Backend.
+Publish/consume interface for the event bus (Concept 3.4) — services know only
+`EventBusClient`, not the concrete backend.
 
-- `EventBusClient` — abstraktes Interface (`connect`, `publish`, `subscribe`, `close`).
-- `NatsEventBusClient` — Werkseinstellungs-Implementierung über NATS JetStream (`nats-py`).
-- `Event` — gemeinsame Ereignis-Hülle (Konzept 3.4/5.3): `event_id`, `event_type`, `occurred_at`, `service_name`, `subject`, `payload`, `actor` (seit P7-S2 — handelnde Person, `None` bei Alt-Events/wo keine Aktions-Identität existiert), `on_behalf_of` (seit P14-S11, 4.4a — vertretene Person bei einer Aktion "im Auftrag von", siehe `docs/services/audit-service.md`). `to_bytes()`/`from_bytes()` für den Transport.
+- `EventBusClient` — abstract interface (`connect`, `publish`, `subscribe`, `close`).
+- `NatsEventBusClient` — default implementation over NATS JetStream (`nats-py`).
+- `Event` — shared event envelope (Concept 3.4/5.3): `event_id`, `event_type`, `occurred_at`, `service_name`, `subject`, `payload`, `actor` (since P7-S2 — the acting person, `None` for legacy events/where no action identity exists), `on_behalf_of` (since P14-S11, 4.4a — the represented person for an action performed "on behalf of", see `docs/services/audit-service.md`). `to_bytes()`/`from_bytes()` for transport.
 
-Eine Kafka-Implementierung (für große Einzelinstallationen, siehe 3.4) kann später als
-weitere Klasse hinter demselben Interface ergänzt werden, ohne Aufrufer anzufassen.
+A Kafka implementation (for large single installations, see 3.4) can be added
+later as an additional class behind the same interface, without touching callers.
 
-## Producer vs. Konsument (siehe ADR 0001)
+## Producer vs. consumer (see ADR 0001)
 
-- **Producer** (z. B. Registry Service) geben `stream=` an (Default `ensure_stream=True`) - `connect()` legt den Stream an, falls er fehlt.
-- **Reine Konsumenten** (z. B. Audit Service, der Ereignisse mehrerer fremder Services liest) verwenden `NatsEventBusClient(url, ensure_stream=False)` ohne `stream`-Namen - JetStream löst den passenden Stream beim `subscribe()` automatisch über das Subject auf, kein Stream-Ownership nötig.
+- **Producers** (e.g. Registry Service) provide `stream=` (default `ensure_stream=True`) - `connect()` creates the stream if it is missing.
+- **Pure consumers** (e.g. Audit Service, which reads events from multiple foreign services) use `NatsEventBusClient(url, ensure_stream=False)` without a `stream` name - JetStream automatically resolves the matching stream on `subscribe()` via the subject, no stream ownership needed.
 
-## Nutzung
+## Usage
 
 ```python
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -27,19 +27,19 @@ event = Event(
 )
 await bus.publish("registry.instance.registered", event.to_bytes())
 
-# Reiner Konsument, z. B. Audit Service:
+# Pure consumer, e.g. Audit Service:
 consumer = NatsEventBusClient(settings.nats_url, ensure_stream=False)
 await consumer.connect()
 await consumer.subscribe("registry.>", handler, durable="audit-service")
 ```
 
-## Sauberes Beenden (`close()`, seit P15-S1)
+## Clean shutdown (`close()`, since P15-S1)
 
-`close()` ruft intern `drain()` statt `nc.close()` auf — Letzteres trennt die Verbindung sofort, ohne aktive Subscriptions serverseitig sauber abzumelden. Bei einem durable JetStream-Consumer (`subscribe(..., durable=...)`) blieb die Bindung dadurch kurzzeitig bestehen, selbst nachdem der Prozess bereits beendet war (z. B. per `docker compose stop`) — ein sofortiger Neustart mit demselben `durable`-Namen (z. B. der nächste Testlauf desselben Service, siehe `scripts/run-tests.sh`s `CONSUMER_SERVICES`) konnte dann intermittierend mit `nats: JetStream.Error consumer is already bound to a subscription` fehlschlagen (live bei P15-S1 in `scripts/run-tests.sh --build` beobachtet und reproduziert). `drain()` meldet jede Subscription explizit ab, bevor die Verbindung geschlossen wird, und behebt das Rennen an der Wurzel statt es nur unwahrscheinlicher zu machen — mit eingebautem Timeout (nats-py-Default 30s), kein Risiko eines hängenden Shutdowns.
+`close()` internally calls `drain()` instead of `nc.close()` — the latter disconnects immediately, without cleanly unregistering active subscriptions server-side. With a durable JetStream consumer (`subscribe(..., durable=...)`), the binding therefore remained briefly in place even after the process had already terminated (e.g. via `docker compose stop`) — an immediate restart with the same `durable` name (e.g. the next test run of the same service, see `scripts/run-tests.sh`'s `CONSUMER_SERVICES`) could then intermittently fail with `nats: JetStream.Error consumer is already bound to a subscription` (observed and reproduced live during P15-S1 in `scripts/run-tests.sh --build`). `drain()` explicitly unregisters each subscription before closing the connection, fixing the race at its root rather than merely making it less likely — with a built-in timeout (nats-py default 30s), no risk of a hanging shutdown.
 
 ## Tests
 
-Integrationstest gegen echtes NATS JetStream (nutzt `infra/docker-compose.yml`):
+Integration test against real NATS JetStream (uses `infra/docker-compose.yml`):
 
 ```bash
 cd infra && docker compose up -d nats && cd ..
