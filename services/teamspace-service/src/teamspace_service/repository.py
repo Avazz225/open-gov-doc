@@ -1,7 +1,7 @@
-"""Reine Datenbank-Operationen (2.5, P14-S6) - Cross-Service-Aufrufe
-(`folder-service`/`permission-service`) orchestriert `main.py`, analog zum
-durchgängigen Muster dieses Projekts (z. B. `workflow-service`,
-`migration-service`): `repository.py` kennt keine HTTP-Clients."""
+"""Pure database operations (2.5, P14-S6) - cross-service calls
+(`folder-service`/`permission-service`) are orchestrated by `main.py`,
+analogous to this project's consistent pattern (e.g. `workflow-service`,
+`migration-service`): `repository.py` knows nothing about HTTP clients."""
 
 from datetime import UTC, datetime
 
@@ -27,10 +27,10 @@ class DuplicateMemberError(Exception):
 async def create_teamspace(
     session: AsyncSession, *, name: str, description: str, root_folder_id: str, created_by: str
 ) -> Teamspace:
-    """Legt den Teamspace UND die erste Mitgliedschaftszeile (die anlegende
-    Person, `can_manage_members=True`) in einem Zug an - ein Teamspace ohne
-    mindestens ein verwaltungsberechtigtes Mitglied wäre für niemanden mehr
-    änderbar."""
+    """Creates the teamspace AND the first membership row (the creating
+    person, `can_manage_members=True`) in one go - a teamspace without at
+    least one member with management rights would no longer be
+    changeable by anyone."""
     now = datetime.now(UTC)
     teamspace = Teamspace(
         name=name,
@@ -77,14 +77,14 @@ async def list_teamspaces_for_principal(
 async def list_all_teamspaces_with_member_counts(
     session: AsyncSession,
 ) -> list[tuple[Teamspace, int]]:
-    """Installationsweite Übersicht (Post-Roadmap Phase 22 Session 5) -
-    anders als `list_teamspaces_for_principal` NICHT nach Mitgliedschaft
-    gefiltert, daher auf `main.py`-Ebene über `admin.teamspace_management`
-    gegated statt (wie die übrigen Endpunkte dieses Service) über die
-    eigene `teamspace_member`-Tabelle. `outerjoin`, damit ein Teamspace
-    grundsätzlich nie ohne Mitglied auftauchen könnte (siehe
-    `create_teamspace`), die Zählung aber auch bei einer künftig doch
-    leeren Mitgliederliste nicht stillschweigend die ganze Zeile ausließe."""
+    """Installation-wide overview (Post-Roadmap Phase 22 Session 5) -
+    unlike `list_teamspaces_for_principal`, NOT filtered by membership,
+    hence gated at the `main.py` level via `admin.teamspace_management`
+    instead of via the service's own `teamspace_member` table (as the
+    rest of this service's endpoints are). `outerjoin` so that, while a
+    teamspace could in principle never appear without a member (see
+    `create_teamspace`), the count would still not silently omit the
+    entire row if the member list were ever empty in the future."""
     result = await session.execute(
         select(Teamspace, func.count(TeamspaceMember.principal_id))
         .outerjoin(TeamspaceMember, TeamspaceMember.teamspace_id == Teamspace.id)
@@ -95,13 +95,13 @@ async def list_all_teamspaces_with_member_counts(
 
 
 async def delete_teamspace(session: AsyncSession, teamspace_id: str) -> None:
-    """Löscht nur die Teamspace-eigenen Metadaten (Zeile selbst, Mitglieder,
-    Termine, Kontakte) - der `folder-service`-Wurzelordner samt Inhalt bleibt
-    bewusst bestehen (verwaist, aber nicht automatisch gelöscht). Eine echte
-    Löschung wäre ein eigenständiges, riskantes Feature (Aufbewahrungsfristen,
-    Vier-Augen-Löschfreigabe, siehe 5.2) - für eine Referenzimplementierung
-    bewusst nicht mitgebaut, siehe `docs/services/teamspace-service.md`
-    "Bewusste Grenzen"."""
+    """Deletes only the teamspace's own metadata (the row itself, members,
+    appointments, contacts) - the `folder-service` root folder along with
+    its content deliberately remains (orphaned, but not automatically
+    deleted). A real deletion would be a separate, risky feature
+    (retention periods, four-eyes deletion approval, see 5.2) -
+    deliberately not built for a reference implementation, see
+    `docs/services/teamspace-service.md` "Deliberate boundaries"."""
     teamspace = await get_teamspace(session, teamspace_id)
     await session.execute(
         TeamspaceMember.__table__.delete().where(TeamspaceMember.teamspace_id == teamspace_id)

@@ -9,12 +9,12 @@ Base = make_declarative_base("favorite")
 
 
 class Favorite(Base):
-    """Persönliches Lesezeichen (schnelles Wiederfinden, seit P7-S1d) auf ein
-    Dokument oder einen Ordner. Bewusst ohne referenzielle Prüfung gegen
-    document-/folder-service - ein verwaistes Lesezeichen (z. B. nach
-    Löschung des Originals) richtet keinen Schaden an, wird von der
-    Filteransicht in der User-UI beim Auflösen einfach übersprungen/markiert
-    statt hier eine Kopplung an andere Services zu erzwingen."""
+    """Personal bookmark (quick retrieval, since P7-S1d) on a document or a
+    folder. Deliberately without referential checking against the
+    document-/folder-service - an orphaned bookmark (e.g. after the original
+    is deleted) does no harm; the filter view in the user UI simply
+    skips/marks it when resolving, instead of forcing a coupling to other
+    services here."""
 
     __tablename__ = "favorite"
     __table_args__ = (UniqueConstraint("user_id", "object_type", "object_id"),)

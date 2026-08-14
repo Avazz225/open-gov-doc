@@ -31,16 +31,16 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_retry_tick(session_factory) -> None:
-    """Ein einzelner Durchlauf der fälligen Rendition-Wiederholungsversuche
-    (Post-Roadmap Phase 20 Session 4, ADR 0080) - ausgelagert aus
-    `_rendition_retry_poll_loop`, damit ein Tick isoliert testbar ist."""
+    """A single pass over the due rendition retry attempts
+    (post-roadmap phase 20 session 4, ADR 0080) - factored out of
+    `_rendition_retry_poll_loop` so that a tick is independently testable."""
     async with session_factory() as session:
         due = await repository.list_due_for_retry(session)
     for stale in due:
         async with session_factory() as session:
             fresh = await session.get(Rendition, stale.id)
             if fresh is None or fresh.status != "failed":
-                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+                continue  # handled differently in the meantime (e.g. manual retry)
             document_id = fresh.document_id
             version_number = fresh.version_number
             rendition_type = fresh.rendition_type
@@ -57,10 +57,10 @@ async def _run_retry_tick(session_factory) -> None:
 
 
 async def _rendition_retry_poll_loop(session_factory) -> None:
-    """Wiederholt fehlgeschlagene Ersatzdarstellungs-Erzeugung (Post-Roadmap
-    Phase 20 Session 4, ADR 0080) - der erste Versuch bleibt synchron im
-    NATS-Handler, nur die WIEDERHOLUNG läuft asynchron in diesem eigenen
-    Poll-Loop. Gleiches Idiom wie notification-/ocr-service."""
+    """Retries failed rendition creation (post-roadmap phase 20 session 4,
+    ADR 0080) - the first attempt remains synchronous in the NATS handler,
+    only the RETRY runs asynchronously in this dedicated poll loop. Same
+    idiom as notification-/ocr-service."""
     while True:
         try:
             await _run_retry_tick(session_factory)
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS rendering"))
         await conn.run_sync(Base.metadata.create_all)
-        # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080).
+        # Retry/backoff (post-roadmap phase 20 session 4, ADR 0080).
         await conn.execute(
             text(
                 "ALTER TABLE rendering.rendition "
@@ -99,10 +99,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ocr_client = OcrServiceClient(settings.ocr_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
-    # Reiner Konsument fremder Streams (`document.>`, ensure_stream=False) und
-    # eigener Producer-Client (eigener Stream "rendering") getrennt, wie bei
-    # permission-service - ein Producer muss seinen Stream selbst anlegen,
-    # siehe ADR 0001.
+    # Pure consumer of foreign streams (`document.>`, ensure_stream=False) and
+    # own producer client (own stream "rendering") kept separate, as with
+    # permission-service - a producer must create its own stream, see
+    # ADR 0001.
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
     app.state.event_bus = event_bus
@@ -120,8 +120,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         publish_event=publish_event,
         max_attempts=settings.max_rendering_attempts,
     )
-    # Nachzieheffekt aus P5-S3 (2.4/3.9): zweites Abo auf demselben event_bus-
-    # Client, aber auf dem "ocr"-Stream statt "document" - siehe consumer.py.
+    # Follow-up effect from P5-S3 (2.4/3.9): second subscription on the same
+    # event_bus client, but on the "ocr" stream instead of "document" - see
+    # consumer.py.
     await start_consuming_ocr(
         event_bus,
         settings.ocr_subjects,
@@ -187,12 +188,12 @@ def healthz() -> dict:
 
 
 async def _require_rendering_permission(x_dms_principal: str, *, access_type: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - rendering-service
-    hatte zuvor GAR KEINE Berechtigungsprüfung. Prüft `rendering.read`/
-    `rendering.write` an der Wurzelressource (`root`) - rendering-service
-    registriert keine eigenen Ressourcen-Baumknoten. Die "everyone"-Gruppe
-    (ADR 0067) gewährt beide standardmäßig - erhält das bisherige De-facto-
-    offene Verhalten, macht es aber admin-editierbar."""
+    """RBAC (post-roadmap phase 19 session 8, ADR 0073) - rendering-service
+    previously had NO permission check at all. Checks `rendering.read`/
+    `rendering.write` on the root resource (`root`) - rendering-service does
+    not register any resource tree nodes of its own. The "everyone" group
+    (ADR 0067) grants both by default - preserves the previous de facto open
+    behavior but makes it admin-editable."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     permission = "rendering.read" if access_type == "read" else "rendering.write"
@@ -214,10 +215,10 @@ async def list_renditions(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[RenditionOut]:
-    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
-    ohne ihn (typischerweise kombiniert mit ``status``) liefert dies eine
-    dokumentübergreifende Liste, Grundlage für die neue Admin-UI-Sicht auf
-    dauerhaft fehlgeschlagene Renditions."""
+    """``document_id`` has been optional since post-roadmap phase 20 session
+    7 - without it (typically combined with ``status``) this returns a
+    cross-document list, the basis for the new admin UI view of
+    permanently failed renditions."""
     await _require_rendering_permission(x_dms_principal, access_type="read")
     return await repository.list_renditions(
         session, document_id=document_id, version_number=version_number, status=status
@@ -243,11 +244,11 @@ async def retry_rendition_endpoint(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> RenditionOut:
-    """Manueller Neustart einer dauerhaft fehlgeschlagenen Ersatzdarstellung
-    (Post-Roadmap Phase 20 Session 4, ADR 0080) - nur fuer `failed_permanent`
-    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen Versuch
-    NUR fuer den betroffenen Renderer statt auf den naechsten Poll-Tick zu
-    warten."""
+    """Manual restart of a permanently failed rendition
+    (post-roadmap phase 20 session 4, ADR 0080) - only meaningful for
+    `failed_permanent` (409 otherwise); immediately makes a new synchronous
+    attempt ONLY for the affected renderer instead of waiting for the next
+    poll tick."""
     await _require_rendering_permission(x_dms_principal, access_type="write")
     try:
         rendition = await repository.get_rendition(session, rendition_id)
@@ -278,9 +279,9 @@ async def retry_rendition_endpoint(
         publish_event=publish_event,
         max_attempts=settings.max_rendering_attempts,
     )
-    # Frische Session statt der obigen `session` (deren Identity Map sonst die
-    # VOR `retry_rendition` geladene, jetzt veraltete Instanz zurückgäbe -
-    # `retry_rendition` committet über eigene, separate Sessions).
+    # Fresh session instead of the `session` above (whose identity map would
+    # otherwise return the now-stale instance loaded BEFORE `retry_rendition` -
+    # `retry_rendition` commits via its own, separate sessions).
     async with app.state.session_factory() as fresh_session:
         return await repository.get_rendition(fresh_session, rendition_id)
 
@@ -310,8 +311,8 @@ async def render_watermark(
     text_: str = Form(..., alias="text"),
     x_dms_principal: str = Header(default=""),
 ) -> Response:
-    """On-Demand-Wasserzeichen (3.7) - kein automatischer Pipelineschritt,
-    keine Persistenz (siehe watermark.py)."""
+    """On-demand watermark (3.7) - not an automatic pipeline step,
+    no persistence (see watermark.py)."""
     await _require_rendering_permission(x_dms_principal, access_type="write")
     data = await file.read()
     try:

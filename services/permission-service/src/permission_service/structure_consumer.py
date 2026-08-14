@@ -9,14 +9,14 @@ from permission_service.models import ResourceNode
 
 logger = logging.getLogger(__name__)
 
-"""Provisorischer Struktur-Event-Vertrag (siehe docs/services/permission-service.md):
+"""Provisional structure event contract (see docs/services/permission-service.md):
 
 - "*.resource.created"  payload: {resource_id, parent_id, resource_type}
 - "*.resource.moved"    payload: {resource_id, new_parent_id}
 - "*.resource.deleted"  payload: {resource_id}
 
-Erwarteter Producer: Folder Service (P3-S3), noch nicht gebaut - Subject-Präfix
-und Payload-Form können sich beim tatsächlichen Bau noch ändern.
+Expected producer: Folder Service (P3-S3), not yet built - the subject
+prefix and payload shape may still change once it is actually built.
 """
 
 
@@ -58,11 +58,11 @@ async def start_consuming(
     subjects: list[str],
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Abonniert jedes konfigurierte Subject. Existiert (noch) kein Stream dafür
-    - z. B. weil der Folder Service noch nie gelaufen ist -, wird das Subject
-    übersprungen statt den ganzen Service am Start zu hindern. **Bekannte
-    Grenze**: Taucht der Stream später auf, holt dieser Service ihn ohne
-    Neustart nicht automatisch nach (kein Retry-Loop implementiert).
+    """Subscribes to every configured subject. If no stream exists (yet) for
+    one - e.g. because the Folder Service has never run - the subject is
+    skipped instead of preventing the entire service from starting. **Known
+    limitation**: if the stream appears later, this service does not pick
+    it up automatically without a restart (no retry loop implemented).
     """
     handler = make_handler(session_factory)
     for subject in subjects:

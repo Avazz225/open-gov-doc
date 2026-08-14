@@ -39,10 +39,10 @@ settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
 
-# Für Tests austauschbar (`app.state.agent_transport = httpx.MockTransport(...)`),
-# damit ein Statusabruf/eine Provisionierung ohne echtes Netzwerk gegen einen
-# In-Prozess-Stub der Ziel-Installation läuft (gleiches Muster wie
-# `federation-hub-service`s `app.state.http_client`-Austausch in Tests).
+# Swappable in tests (`app.state.agent_transport = httpx.MockTransport(...)`),
+# so that a status query/provisioning run against an in-process stub of the
+# target installation without a real network (same pattern as
+# `federation-hub-service`'s `app.state.http_client` swap in tests).
 _AGENT_TRANSPORT_STATE_KEY = "agent_transport"
 
 
@@ -112,8 +112,8 @@ async def create_installation(
 async def list_installations(
     session: AsyncSession = Depends(get_session),
 ) -> list[ManagedInstallation]:
-    """Bewusst ohne `fleet_agent_api_key` im Response-Model - der Klartext-
-    Schlüssel wird nur einmal bei der Anlage zurückgegeben (siehe oben)."""
+    """Deliberately without `fleet_agent_api_key` in the response model - the
+    plaintext key is only returned once, at creation (see above)."""
     return await repository.list_managed_installations(session)
 
 
@@ -137,17 +137,16 @@ async def rotate_installation_key(
     payload: ManagedInstallationRotateKeyRequest,
     session: AsyncSession = Depends(get_session),
 ) -> ManagedInstallationCreateOut:
-    """Schlüsselrotation (Post-Roadmap Phase 21 Session 1, ADR 0084) - ersetzt
-    den gespeicherten `fleet_agent_api_key` sofort, ohne Übergangsfenster
-    (dieser Service PRÄSENTIERT den Schlüssel nur, verifiziert ihn nie selbst
-    - ein "beide Schlüssel kurz gültig"-Fenster wie bei `federation-hub-
-    service`s Installations-Rotation ergibt hier keinen Sinn). **Aktualisiert
-    nur die Seite dieses Service** - die Zielinstallation verifiziert weiterhin
-    gegen ihren eigenen, statisch konfigurierten `DMS_FLEET_AGENT_API_KEY`;
-    bis ein Betreiber sie manuell auf den hier zurückgegebenen neuen Wert
-    umstellt (und neu startet), schlagen ausgehende Aufrufe dieses Service an
-    die Installation mit `401`/`403` fehl. Der Klartext-Schlüssel wird - wie
-    bei der Anlage - nur in dieser einen Antwort zurückgegeben."""
+    """Key rotation (Post-Roadmap Phase 21 Session 1, ADR 0084) - replaces
+    the stored `fleet_agent_api_key` immediately, without a transition window
+    (this service only PRESENTS the key, never verifies it itself - a "both
+    keys briefly valid" window like `federation-hub-service`'s installation
+    rotation doesn't make sense here). **Only updates this service's side** -
+    the target installation continues to verify against its own, statically
+    configured `DMS_FLEET_AGENT_API_KEY`; until an operator manually switches
+    it to the new value returned here (and restarts), outgoing calls from
+    this service to the installation fail with `401`/`403`. As with
+    creation, the plaintext key is only returned in this single response."""
     try:
         installation, api_key = await repository.rotate_managed_installation_key(
             session, installation_id, new_api_key=payload.fleet_agent_api_key
@@ -178,8 +177,8 @@ async def _fetch_status(installation: ManagedInstallation) -> InstallationStatus
             installation_display_name=identity.get("display_name"),
             license_status=license_status,
         )
-    except Exception as exc:  # noqa: BLE001 - eine nicht erreichbare Installation
-        # darf die Übersicht der übrigen nicht verhindern (siehe schemas.py).
+    except Exception as exc:  # noqa: BLE001 - an unreachable installation
+        # must not prevent the overview of the others (see schemas.py).
         logger.warning(
             "fleet_agent_status_unreachable",
             extra={"installation_id": installation.id, "error": str(exc)},
@@ -209,10 +208,9 @@ async def get_installation_status(
 async def list_installation_statuses(
     session: AsyncSession = Depends(get_session),
 ) -> list[InstallationStatusOut]:
-    """3a: "grundlegende Health-Übersicht" über die gesamte Flotte - parallel
-    abgefragt (`asyncio.gather`), damit eine einzelne langsame/nicht
-    erreichbare Installation die Antwortzeit für die übrigen nicht
-    dominiert."""
+    """3a: "basic health overview" of the entire fleet - queried in parallel
+    (`asyncio.gather`), so that a single slow/unreachable installation
+    doesn't dominate the response time for the others."""
     installations = await repository.list_managed_installations(session)
     return list(await asyncio.gather(*(_fetch_status(i) for i in installations)))
 
@@ -223,8 +221,8 @@ async def push_license(
     payload: LicenseUploadRequest,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """3a: "Lizenzvergabe/-verlängerung" - reicht das Lizenztoken über den
-    Gateway der Zielinstallation an deren `license-service` weiter, siehe
+    """3a: "license assignment/renewal" - passes the license token through
+    the target installation's gateway to its `license-service`, see
     `agent_client.FleetAgentClient.upload_license`."""
     try:
         installation = await repository.get_managed_installation(session, installation_id)
@@ -245,11 +243,11 @@ async def provision_installation(
     payload: ProvisionRequest,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """3a: "zentrales Provisioning neuer Installationen aus einer
-    Konfigurationsvorlage heraus" - `payload.config_document` ist ein
-    reguläres 7.3-Konfigurationsdokument (z. B. der Export einer
-    Referenzinstallation, oder künftig ein kuratiertes Paket aus Phase 17),
-    dieser Service kuratiert selbst keine Vorlagen-Bibliothek."""
+    """3a: "central provisioning of new installations from a configuration
+    template" - `payload.config_document` is a regular 7.3 configuration
+    document (e.g. the export of a reference installation, or in the future
+    a curated package from Phase 17); this service itself does not curate a
+    template library."""
     try:
         installation = await repository.get_managed_installation(session, installation_id)
     except repository.NotFoundError as exc:
@@ -263,7 +261,7 @@ async def provision_installation(
         await client.close()
 
 
-# --- Flotten-Update-Orchestrierung (3a-Erweiterung, P13-S2b) ----------------
+# --- Fleet update orchestration (3a extension, P13-S2b) --------------------
 
 
 async def _group_out(session: AsyncSession, group) -> GroupOut:
@@ -415,11 +413,11 @@ async def get_rollout(rollout_id: str, session: AsyncSession = Depends(get_sessi
 async def start_rollout(
     rollout_id: str, payload: RolloutStart, session: AsyncSession = Depends(get_session)
 ):
-    """3a: "eine Welle muss explizit gestartet werden" - setzt jeden noch
-    nicht gestarteten `InstallationRun` auf den Wartezustand seines ersten
-    Schritts (``wait_external``); ein `verify`-Erstschritt muss trotzdem
-    explizit über `POST .../advance` versucht werden, kein impliziter
-    Auto-Start (ein Schritttyp-Verhalten, keine Sonderregel für Schritt 0)."""
+    """3a: "a wave must be started explicitly" - sets every not-yet-started
+    `InstallationRun` to the waiting state of its first step
+    (``wait_external``); a `verify` first step must still be explicitly
+    attempted via `POST .../advance`, no implicit auto-start (a step-type
+    behavior, not a special rule for step 0)."""
     try:
         rollout = await repository.get_rollout(session, rollout_id)
     except repository.NotFoundError as exc:
@@ -453,10 +451,10 @@ async def _load_run_context(session: AsyncSession, rollout_id: str, installation
 async def advance_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
 ):
-    """Nur für ``step_type="verify"``-Schritte - ruft `_fetch_status()` der
-    Zielinstallation ab und wertet das Ergebnis in eine der fünf
-    Fehlerentscheidungen (oder Erfolg) um. ``"gate"``-Schritte werden nicht
-    hierüber, sondern über `mark-done` bestätigt (siehe dort)."""
+    """Only for ``step_type="verify"`` steps - fetches `_fetch_status()` of
+    the target installation and converts the result into one of the five
+    error decisions (or success). ``"gate"`` steps are not confirmed here,
+    but via `mark-done` (see there)."""
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
     step = repository.current_step(plan, run)
     if step is None:
@@ -507,11 +505,11 @@ async def mark_installation_run_done(
     payload: MarkDoneRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """Bestätigt einen ``"gate"``-Schritt (Bereichssperre/Wartungsmodus
-    gesetzt, Rolling Update durchgeführt, Backup gezogen, final freigegeben -
-    3a) - die tatsächliche Ausführung liegt außerhalb dieses Service (siehe
-    ADR 0038), `payload.outcome` lässt den Bediener, der die Aktion
-    durchgeführt hat, jede der vier meldbaren Fehlerentscheidungen wählen."""
+    """Confirms a ``"gate"`` step (scope lock/maintenance mode set, rolling
+    update performed, backup taken, finally approved - 3a) - the actual
+    execution lies outside this service (see ADR 0038); `payload.outcome`
+    lets the operator who performed the action choose any of the four
+    reportable error decisions."""
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
     step = repository.current_step(plan, run)
     if step is None or step["step_type"] != "gate":
@@ -552,14 +550,13 @@ async def approve_installation_run(
     payload: ApprovalDecision,
     session: AsyncSession = Depends(get_session),
 ):
-    """Wiederverwendung des generischen Vier-Augen-Grundprinzips (4.3) auf
-    Fleet-Ebene: getrennter Vorschlags-/Freigabeschritt, erzwungen über zwei
-    getrennte API-Aufrufe (`mark-done` schlägt vor, `approve` bestätigt) -
-    ``actor`` muss vom ursprünglichen `proposed_by` abweichen. Anders als
-    `permission-service`s echtes 4.3 führt fleet-management-service keine
-    eigene Nutzerverwaltung (siehe ADR 0038) - die Trennung ist strukturell
-    (zwei Aufrufe), nicht kryptografisch zwischen zwei echten Identitäten
-    erzwungen."""
+    """Reuse of the generic four-eyes principle (4.3) at the fleet level:
+    separate proposal/approval step, enforced via two separate API calls
+    (`mark-done` proposes, `approve` confirms) - ``actor`` must differ from
+    the original `proposed_by`. Unlike `permission-service`'s genuine 4.3,
+    fleet-management-service does not manage its own users (see ADR 0038) -
+    the separation is structural (two calls), not cryptographically enforced
+    between two real identities."""
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
     if run.status != "manual_required":
         raise HTTPException(
@@ -608,9 +605,9 @@ async def reject_installation_run(
 async def retry_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
 ):
-    """Für ``retry_later``/``recoverable_failed`` (3a: "die Bedienperson kann
-    gezielt erneut versuchen") - setzt den aktuellen Schritt zurück in den
-    Wartezustand, ohne den Schrittindex zu verändern."""
+    """For ``retry_later``/``recoverable_failed`` (3a: "the operator can
+    deliberately retry") - resets the current step back to the waiting
+    state, without changing the step index."""
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
     if run.status not in {"retry_later", "recoverable_failed"}:
         raise HTTPException(
@@ -629,10 +626,10 @@ async def retry_installation_run(
 async def acknowledge_fatal_installation_run(
     rollout_id: str, installation_id: str, session: AsyncSession = Depends(get_session)
 ):
-    """Für ``fatal_contract`` (3a: "muss vor jedem weiteren Versuch korrigiert
-    werden") - bewusst ein eigener, expliziter Endpunkt statt `retry`: eine
-    Bedienperson muss aktiv bestätigen, dass Plan/Konfiguration korrigiert
-    wurden, bevor ein neuer Versuch überhaupt erst möglich wird."""
+    """For ``fatal_contract`` (3a: "must be corrected before any further
+    attempt") - deliberately its own, explicit endpoint instead of `retry`:
+    an operator must actively confirm that the plan/configuration was
+    corrected before a new attempt becomes possible at all."""
     rollout, run, plan = await _load_run_context(session, rollout_id, installation_id)
     if run.status != "fatal_contract":
         raise HTTPException(

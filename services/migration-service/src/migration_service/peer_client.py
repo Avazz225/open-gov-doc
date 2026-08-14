@@ -1,5 +1,5 @@
-"""HTTP-Client gegen eine gepaarte Ziel-Installation's `/inbound/*`-API (7.2) -
-bewusst synchron, siehe `dms_client.py`s Moduldocstring für die Begründung."""
+"""HTTP client against a paired target installation's `/inbound/*` API (7.2) -
+deliberately synchronous, see `dms_client.py`'s module docstring for the rationale."""
 
 import httpx
 

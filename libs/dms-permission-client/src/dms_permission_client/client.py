@@ -12,16 +12,16 @@ class RoleAssignmentPendingApprovalError(Exception):
 
 
 class PermissionServiceClient:
-    """HTTP-Client gegen den Permission Service - konsolidiert die zuvor je
-    Service duplizierte `PermissionServiceClient`-Klasse (Post-Roadmap Phase
-    19 Session 1) in ein gemeinsames Paket. Deckt die vier über die
-    Serviceduplikate hinweg gemeinsamen Operationen ab (`check`, `check_batch`,
-    `has_permission`, `ensure_role_assignment`) - service-spezifische
-    Zusatzmethoden (z. B. `workflow-service`s `check_delegation`,
-    `query-service`s Vier-Augen-Endpunkte, `teamspace-service`s
-    Rollen-Bootstrap) bleiben bewusst in den jeweiligen Services, kein
-    Selbstzweck-Refactor der bestehenden Duplikate. Neue Konsumenten ab
-    dieser Session nutzen direkt dieses Paket."""
+    """HTTP client against the Permission Service - consolidates the
+    `PermissionServiceClient` class previously duplicated per service
+    (Post-Roadmap Phase 19 Session 1) into a shared package. Covers the four
+    operations shared across the service duplicates (`check`, `check_batch`,
+    `has_permission`, `ensure_role_assignment`) - service-specific extra
+    methods (e.g. `workflow-service`'s `check_delegation`, `query-service`'s
+    four-eyes principle endpoints, `teamspace-service`'s role bootstrap)
+    deliberately remain in their respective services; this is not a
+    refactor-for-its-own-sake of the existing duplicates. New consumers from
+    this session onward use this package directly."""
 
     ROOT_RESOURCE_ID = "root"
 
@@ -42,9 +42,9 @@ class PermissionServiceClient:
         permission: str,
         access_type: Literal["read", "write"] = "read",
     ) -> bool:
-        """Einzelprüfung gegen `GET /check` - verallgemeinert das zuvor in
-        `document-service` duplizierte `check_read`/`check_write`-Paar über
-        den `access_type`-Parameter."""
+        """Single check against `GET /check` - generalizes the
+        `check_read`/`check_write` pair previously duplicated in
+        `document-service` via the `access_type` parameter."""
         response = await self._client.get(
             "/check",
             params={
@@ -97,9 +97,9 @@ class PermissionServiceClient:
     async def ensure_role_assignment(
         self, *, principal_id: str, role_name: str, resource_id: str = ROOT_RESOURCE_ID
     ) -> None:
-        """Idempotent: weist `principal_id` die per Name benannte Rolle am
-        angegebenen Resource (Default: Wurzelressource) zu, sofern das noch
-        nicht der Fall ist."""
+        """Idempotent: assigns `principal_id` the role identified by name on
+        the given resource (default: root resource), unless that assignment
+        already exists."""
         role_id = await self.get_role_id(role_name)
         if role_id is None:
             raise RoleNotFoundError(f"Rolle {role_name!r} ist im Permission Service unbekannt")
@@ -124,11 +124,12 @@ class PermissionServiceClient:
             },
         )
         response.raise_for_status()
-        # `POST /role-assignments` liefert immer 2xx, auch wenn
-        # `permission.role_assignment.create` auf dieser Installation
-        # Vier-Augen-pflichtig ist (ADR 0060) - die Zuweisung selbst existiert
-        # dann noch NICHT, nur ein offener Genehmigungsantrag. Ohne diese
-        # Prüfung würde die Methode fälschlich Erfolg melden.
+        # `POST /role-assignments` always returns 2xx, even when
+        # `permission.role_assignment.create` requires the four-eyes
+        # principle on this installation (ADR 0060) - in that case the
+        # assignment itself does NOT yet exist, only an open approval
+        # request. Without this check the method would falsely report
+        # success.
         if response.json()["status"] != "created":
             raise RoleAssignmentPendingApprovalError(
                 f"Rollenzuweisung für {principal_id!r}/{role_name!r} wartet auf Genehmigung "

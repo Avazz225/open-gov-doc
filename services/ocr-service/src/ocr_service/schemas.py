@@ -39,10 +39,10 @@ class OcrResultOut(BaseModel):
 
 
 class OcrConfigIn(BaseModel):
-    # None = keine Obergrenze.
+    # None = no upper limit.
     max_word_count: int | None = Field(default=None, ge=1)
     batch_size: int = Field(default=4, ge=1, le=64)
-    # Leer = keine Einschränkung (Default, siehe models.OcrConfig).
+    # Empty = no restriction (default, see models.OcrConfig).
     allowed_content_types: list[str] = Field(default_factory=list)
 
 

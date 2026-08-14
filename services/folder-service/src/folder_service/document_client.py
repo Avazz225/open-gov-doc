@@ -2,11 +2,12 @@ import httpx
 
 
 class DocumentClient:
-    """HTTP-Client gegen den Document Service (5.2, seit P7-S1b) - Gegenstück
-    zu `document_service.FolderClient` (P3-S3), nur in umgekehrter Richtung.
-    Kaskadiert Papierkorb/Wiederherstellung eines Ordner-Teilbaums synchron
-    auf die darin enthaltenen Dokumente und prüft vor einer Ordner-
-    Zwangslöschung, ob dessen Teilbaum noch aktive Dokumente enthält."""
+    """HTTP client against the Document Service (5.2, since P7-S1b) -
+    counterpart to `document_service.FolderClient` (P3-S3), just in the
+    reverse direction. Cascades trash/restore of a folder subtree
+    synchronously onto the documents contained within it, and checks before
+    a forced folder deletion whether its subtree still contains active
+    documents."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)

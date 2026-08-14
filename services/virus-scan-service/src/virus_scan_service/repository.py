@@ -71,9 +71,9 @@ async def mark_resolved(
     resolved_by: str,
     document_id: str | None = None,
 ) -> ScanResult:
-    """Löst einen Quarantäne-Fall auf (2.5, P15-S2) - `new_status` ist
-    "released" (Fehlalarm geklärt, `document_id` auf das neu angelegte
-    Dokument gesetzt) oder "purged" (endgültig gelöscht)."""
+    """Resolves a quarantine case (2.5, P15-S2) - `new_status` is either
+    "released" (false positive cleared, `document_id` set to the newly
+    created document) or "purged" (permanently deleted)."""
     result = await get_scan_result(session, scan_id)
     result.status = new_status
     result.resolved_by = resolved_by

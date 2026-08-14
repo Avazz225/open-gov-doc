@@ -7,10 +7,10 @@ from storage_service.settings import BackendTargetConfig, Settings
 
 
 def has_governance_bypass_role(x_dms_roles: str, settings: Settings) -> bool:
-    """Serverseitige Rollen-Header-Prüfung (5.1/5.2a, seit P7-S1) - gleiches
-    Muster wie `document_service.kennzeichen_admin_role`/
-    `_has_kennzeichen_admin_role` (main.py): der Gateway reicht `X-DMS-Roles`
-    bereits seit P4-S1 als kommagetrennte Liste durch."""
+    """Server-side role-header check (5.1/5.2a, since P7-S1) - same
+    pattern as `document_service.kennzeichen_admin_role`/
+    `_has_kennzeichen_admin_role` (main.py): the gateway has been passing
+    through `X-DMS-Roles` as a comma-separated list since P4-S1."""
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     return settings.governance_bypass_role in roles
 
@@ -18,12 +18,13 @@ def has_governance_bypass_role(x_dms_roles: str, settings: Settings) -> bool:
 async def find_locked_targets(
     session: AsyncSession, key: str, *, targets: list[BackendTargetConfig]
 ) -> list[str]:
-    """Liefert die Ziel-`id`s, deren Kopie dieses Objekts noch unter einer in
-    der Zukunft liegenden Aufbewahrungsfrist steht UND deren Ziel-Konfiguration
-    `object_lock_mode="governance"` gesetzt hat (5.1/5.2a). Ein Ziel mit
-    gesetztem `retention_until`, aber OHNE `object_lock_mode`, blockiert die
-    Löschung bewusst NICHT - Governance-Mode ist eine gezielt aktivierte
-    Ausnahme, kein globaler Zwang für jedes konfigurierte Ziel."""
+    """Returns the target `id`s whose copy of this object is still under a
+    retention period that lies in the future AND whose target
+    configuration has `object_lock_mode="governance"` set (5.1/5.2a). A
+    target with `retention_until` set but WITHOUT `object_lock_mode`
+    deliberately does NOT block deletion - Governance mode is a
+    deliberately activated exception, not a global requirement for every
+    configured target."""
     lock_mode_by_id = {t.id: t.object_lock_mode for t in targets}
     now = datetime.now(UTC)
     blocked: list[str] = []

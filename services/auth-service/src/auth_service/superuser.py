@@ -13,19 +13,19 @@ class SuperuserNotConfiguredError(Exception):
 
 
 async def ensure_superuser_account(session_factory) -> None:
-    """Break-Glass-Konto (4.6): idempotent angelegt, **immer** `enabled=False`
-    nach Ersteinrichtung - Reaktivierung geschieht ausschließlich über
-    `activate()` unten (Konsument des genehmigten Vier-Augen-Requests, siehe
-    `consumer.py`), nie durch direktes Update von Hand vorgesehen.
-    Default-Passwort = Username, wie zuvor beim Keycloak-Konto - sollte vom
-    Betreiber geändert werden (noch kein Passwort-Änderungs-Endpunkt, siehe
-    "Offene Punkte").
+    """Break-glass account (4.6): created idempotently, **always**
+    `enabled=False` after initial setup - reactivation happens exclusively
+    via `activate()` below (consumer of the approved four-eyes request, see
+    `consumer.py`), never intended via a direct manual update.
+    Default password = username, as before with the Keycloak account -
+    should be changed by the operator (no password change endpoint yet,
+    see "Open Points").
 
-    Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063):
-    lebt seit dieser Session als `TechnicalAccount`-Zeile statt eines
-    Keycloak-Nutzerkontos - Break-Glass funktioniert dadurch unabhängig von
-    Keycloaks Erreichbarkeit, der eigentliche Zweck eines
-    Notfallmechanismus."""
+    Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR
+    0063): has lived as a `TechnicalAccount` row instead of a Keycloak user
+    account since this session - break-glass thereby works independently
+    of Keycloak's reachability, the actual purpose of an emergency
+    mechanism."""
     async with session_factory() as session:
         existing = await session.scalar(
             select(TechnicalAccount).where(TechnicalAccount.username == SUPERUSER_USERNAME)
@@ -56,10 +56,11 @@ async def _get_superuser_account(session) -> TechnicalAccount:
 
 
 async def activate(session_factory, *, activation_minutes: int) -> datetime:
-    """Aktiviert das Konto zeitlich befristet (4.6) - ein einziger absoluter
-    Ablauf-Zeitstempel statt getrennter Gesamtdauer-/Inaktivitäts-Timer
-    (bewusste Vereinfachung, siehe ADR 0023), seit Phase 18 als Spalten der
-    eigenen `technical_account`-Zeile statt eines Keycloak-Attributs."""
+    """Activates the account for a limited time (4.6) - a single absolute
+    expiry timestamp instead of separate total-duration/inactivity timers
+    (deliberate simplification, see ADR 0023), as columns of this
+    service's own `technical_account` row instead of a Keycloak attribute
+    since Phase 18."""
     async with session_factory() as session:
         account = await _get_superuser_account(session)
         expires_at = datetime.now(UTC) + timedelta(minutes=activation_minutes)
@@ -78,22 +79,22 @@ async def deactivate(session_factory) -> None:
 
 
 async def get_status(session_factory) -> tuple[bool, datetime | None]:
-    """`(active, expires_at)` - `active` liest den tatsächlichen `enabled`-
-    Wert, nicht nur den Zeitstempel, da `deactivate()`/der Poll-Loop
-    `enabled=False` setzen, sobald abgelaufen."""
+    """`(active, expires_at)` - `active` reads the actual `enabled` value,
+    not just the timestamp, since `deactivate()`/the poll loop set
+    `enabled=False` as soon as it expires."""
     async with session_factory() as session:
         account = await _get_superuser_account(session)
         return account.enabled, account.expires_at
 
 
 async def get_principal_id(session_factory) -> str | None:
-    """Stabile ID des Superuser-Kontos (`TechnicalAccount.id` als String) -
-    nötig, damit `permission-service` (4.8, P6-S6) prüfen kann, ob ein
-    `POST /maintenance-mode/lift`-Aufrufer tatsächlich der aktive Superuser
-    ist (Vergleich gegen denselben Wert, der auch als `sub`-Claim in dessen
-    Tokens landet, siehe `main.py._login_technical_account`). `None`, falls
-    das Konto noch nicht angelegt wurde, statt zu werfen - der Aufrufer
-    behandelt das wie "kein aktiver Superuser"."""
+    """Stable ID of the superuser account (`TechnicalAccount.id` as a
+    string) - needed so `permission-service` (4.8, P6-S6) can check whether
+    a `POST /maintenance-mode/lift` caller is actually the active superuser
+    (compared against the same value that also ends up as the `sub` claim
+    in its tokens, see `main.py._login_technical_account`). `None` if the
+    account hasn't been created yet, instead of raising - the caller treats
+    this as "no active superuser"."""
     async with session_factory() as session:
         account = await session.scalar(
             select(TechnicalAccount).where(TechnicalAccount.username == SUPERUSER_USERNAME)
@@ -102,9 +103,9 @@ async def get_principal_id(session_factory) -> str | None:
 
 
 async def deactivate_if_expired(session_factory) -> bool:
-    """Wird vom Poll-Loop (`main.py`) periodisch aufgerufen (ADR 0020-Muster) -
-    gibt True zurück, wenn tatsächlich deaktiviert wurde (für den Event-Publish
-    im Aufrufer)."""
+    """Called periodically by the poll loop (`main.py`) (ADR 0020 pattern) -
+    returns True if it was actually deactivated (for the event publish in
+    the caller)."""
     active, expires_at = await get_status(session_factory)
     if not active or expires_at is None:
         return False

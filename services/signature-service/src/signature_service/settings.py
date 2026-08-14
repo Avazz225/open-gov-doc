@@ -7,17 +7,17 @@ SignatureLevel = Literal["ses", "aes", "qes"]
 
 
 class SignatureProviderConfig(BaseModel):
-    """Eine einzelne Signature-Provider-Connector-Instanz (3.10, Plugin-Prinzip
-    wie die Storage-Backends, 3.3). `id` - nicht `type` - ist der eindeutige
-    Schlüssel (gleiche Begründung wie `BackendTargetConfig`, ADR 0017): mehrere
-    Connectoren desselben Typs sollen unabhängig konfigurierbar bleiben, sobald
-    ein zweiter echter Anbieter (z. B. zwei QTSPs) hinzukommt.
+    """A single signature provider connector instance (3.10, plugin
+    principle like the storage backends, 3.3). `id` - not `type` - is the
+    unique key (same rationale as `BackendTargetConfig`, ADR 0017): multiple
+    connectors of the same type should remain independently configurable
+    once a second real provider (e.g. two QTSPs) is added.
 
-    `type="qtsp"` ist im Schema bewusst vorgesehen, aber in dieser Session
-    NICHT implementiert (kein akkreditierter externer Vertrauensdiensteanbieter
-    verfügbar/testbar) - ein Konfigurationsversuch schlägt in der Factory
-    (`connectors/__init__.py`) mit einer klaren Fehlermeldung fehl, siehe
-    docs/services/signature-service.md "Offene Punkte"."""
+    `type="qtsp"` is deliberately provided for in the schema but NOT
+    implemented in this session (no accredited external trust service
+    provider available/testable) - a configuration attempt fails in the
+    factory (`connectors/__init__.py`) with a clear error message, see
+    docs/services/signature-service.md "Open Points"."""
 
     id: str
     type: Literal["internal", "qtsp"]
@@ -40,11 +40,11 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Connector-Set (3.10) - Default-Seed: ein interner, selbstsignierter
-    # Connector für SES/AES (siehe connectors/internal.py). Weitere Einträge
-    # (insb. ein echter QTSP für QES) werden je Installation über diese
-    # Env-Var ergänzt, ohne Code-Änderung - gleiches Muster wie `DMS_TARGETS`
-    # bei storage-service.
+    # Connector set (3.10) - default seed: an internal, self-signed
+    # connector for SES/AES (see connectors/internal.py). Further entries
+    # (especially a real QTSP for QES) are added per installation via this
+    # env var, without a code change - same pattern as `DMS_TARGETS` on
+    # storage-service.
     signature_providers: list[SignatureProviderConfig] = [
         SignatureProviderConfig(id="internal", type="internal", levels=["ses", "aes"])
     ]
@@ -52,10 +52,10 @@ class Settings(BaseServiceSettings):
     document_service_base_url: str = "http://localhost:8006"
     object_type_service_base_url: str = "http://localhost:8007"
 
-    # Für die Existenzprüfung von `signer_principal_id` und das Auslesen von
-    # Anzeigename/E-Mail fürs AES-Zertifikat (`GET /users`, seit P6-S5 gegated) -
-    # gleiches Retrofit-Muster wie bei notification-service (P6-S6): Anmeldung
-    # über das technische `users-admin`-Konto, kein Token-Caching.
+    # For checking the existence of `signer_principal_id` and reading the
+    # display name/email for the AES certificate (`GET /users`, gated since
+    # P6-S5) - same retrofit pattern as with notification-service (P6-S6):
+    # logs in via the technical `users-admin` account, no token caching.
     auth_service_base_url: str = "http://localhost:8003"
     auth_service_admin_username: str = "users-admin"
     auth_service_admin_password: str = "users-admin"

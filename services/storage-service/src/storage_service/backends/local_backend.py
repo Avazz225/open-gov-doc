@@ -9,21 +9,21 @@ from storage_service.backends.interface import ObjectNotFoundError, StorageBacke
 
 
 class LocalFilesystemBackend(StorageBackend):
-    """Lokales Dateisystem als Backend (3.6).
+    """Local filesystem as a backend (3.6).
 
-    Deckt zugleich den NFS-Fall ab: In einer Kubernetes-Umgebung ist
-    ``base_path`` der Mountpunkt eines PVC - ob darunter ein Block-Volume
-    oder ein NFS-Export liegt, ist für diesen Code unsichtbar, da beide sich
-    für Anwendungen als normaler Ordner verhalten. Ein separates NFS-Backend
-    ist daher nicht nötig.
+    This also covers the NFS case: in a Kubernetes environment,
+    ``base_path`` is the mount point of a PVC - whether a block volume or
+    an NFS export sits underneath is invisible to this code, since both
+    behave as an ordinary folder from the application's perspective. A
+    separate NFS backend is therefore not needed.
 
-    **Schreibsicherheit statt Locking**: Statt plattformspezifischem
-    File-Locking (fcntl), dessen Semantik über NFS-Implementierungen hinweg
-    inkonsistent ist, wird atomar geschrieben (temporäre Datei + ``os.replace``)
-    - das verhindert Teilschreib-Korruption bei gleichzeitigen Schreibern auf
-    denselben Key, auch über NFSv4+. Nebenläufige *Bearbeitung* desselben
-    Dokuments ist ohnehin Aufgabe des dokumentenweiten Lockings im Document
-    Service (4.2), nicht dieser Abstraktionsschicht.
+    **Write safety instead of locking**: instead of platform-specific file
+    locking (fcntl), whose semantics are inconsistent across NFS
+    implementations, writes are atomic (temporary file + ``os.replace``) -
+    this prevents partial-write corruption from concurrent writers on the
+    same key, even over NFSv4+. Concurrent *editing* of the same document
+    is handled by the document-wide locking in the Document Service (4.2)
+    regardless, not by this abstraction layer.
     """
 
     def __init__(self, base_path: str) -> None:
@@ -44,10 +44,10 @@ class LocalFilesystemBackend(StorageBackend):
         os.replace(tmp_path, path)
 
     async def write(self, key: str, data: bytes, *, lock_until: datetime | None = None) -> None:
-        # `lock_until` hat auf dem lokalen Dateisystem keine technische
-        # Entsprechung (kein Object-Lock-Äquivalent) - wird bewusst ignoriert,
-        # nicht simuliert. Die portable Durchsetzung übernimmt
-        # `retention_guard.py` unabhängig vom Backend-Typ.
+        # `lock_until` has no technical equivalent on the local filesystem
+        # (no Object Lock equivalent) - deliberately ignored, not
+        # simulated. Portable enforcement is handled by
+        # `retention_guard.py` independent of the backend type.
         await asyncio.to_thread(self._write_sync, self._path_for(key), data)
 
     async def read(self, key: str) -> bytes:

@@ -1,9 +1,9 @@
-"""Object-URL-Auflösung (5.3.4 "Object URLs"): ein Objekt wird entweder per
-`objectId`-Query-Parameter (hat Vorrang) oder per Pfad adressiert, der an die
-Root-Folder-URL angehängt ist. `DmsTreeClient` kann bereits vorwärts (Pfad
--> Objekt) auflösen (`resolve_path`) - für den umgekehrten Weg (Id -> voller
-CMIS-Pfad, gebraucht für `cmis:path`, 2.1.5.3) läuft dieses Modul die
-`parent_id`-Kette bis zur Wurzel hoch."""
+"""Object URL resolution (5.3.4 "Object URLs"): an object is addressed either
+via the `objectId` query parameter (takes precedence) or via a path appended
+to the root folder URL. `DmsTreeClient` can already resolve forward (path
+-> object) (`resolve_path`) - for the reverse direction (id -> full
+CMIS path, needed for `cmis:path`, 2.1.5.3) this module walks the
+`parent_id` chain up to the root."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -71,7 +71,7 @@ def resolve_by_path(tree: DmsTreeClient, path: str) -> ResolvedObject:
 
 
 def resolve_object(tree: DmsTreeClient, *, path: str, object_id: str | None) -> ResolvedObject:
-    """`objectId` hat Vorrang vor dem Pfad (5.3.4, wörtlich: "If the
+    """`objectId` takes precedence over the path (5.3.4, verbatim: "If the
     parameter objectId is set, it takes precedence over the path")."""
     if object_id:
         return resolve_by_id(tree, object_id)

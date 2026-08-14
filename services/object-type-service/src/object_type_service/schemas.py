@@ -6,8 +6,8 @@ from pydantic import BaseModel
 
 
 class LayoutPurpose(StrEnum):
-    """Verwendungszweck eines Formular-Layouts (2.2b) - dasselbe Layout-Format
-    steuert alle drei, aber als getrennt speicherbare/überschreibbare Zeilen."""
+    """Usage purpose of a form layout (2.2b) - the same layout format
+    governs all three, but as separately storable/overridable rows."""
 
     display = "display"
     search = "search"
@@ -16,8 +16,9 @@ class LayoutPurpose(StrEnum):
 
 SignatureLevel = Literal["ses", "aes", "qes"]
 
-# Verschlusssachen-Einstufung (2.5, seit P17-S2 mehrstufig - 14.2): die vier
-# gängigen deutschen VS-Einstufungen, wörtlich aus dem Konzepttext.
+# Classified-documents classification (2.5, multi-level since P17-S2 - 14.2):
+# the four common German classification levels, taken verbatim from the
+# concept text.
 ClassificationLevel = Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
 
 
@@ -83,12 +84,12 @@ class KennzeichenOut(BaseModel):
 
 
 class NextKennzeichenRequest(BaseModel):
-    """Attributwerte des anzulegenden Dokuments (seit P17-S2, 14.2) - Grundlage
-    für attributbasierte Kennzeichen-Platzhalter wie `{Federfuehrung}` (jeder
-    Platzhalter, der kein Datums-/Zähler-Platzhalter ist, wird als Attributname
-    interpretiert, siehe repository._render_kennzeichen). Leer/weggelassen
-    bleibt für einen rein datums-/zählerbasierten Format-String wie zuvor
-    (P5e-S1) folgenlos."""
+    """Attribute values of the document being created (since P17-S2, 14.2) -
+    basis for attribute-based reference number placeholders like
+    `{Federfuehrung}` (every placeholder that is not a date/counter
+    placeholder is interpreted as an attribute name, see
+    repository._render_kennzeichen). Empty/omitted has no effect for a
+    purely date-/counter-based format string as before (P5e-S1)."""
 
     attributes: dict = {}
 
@@ -106,10 +107,11 @@ class KennzeichenConfigOut(KennzeichenConfigIn):
 class ValidateRequest(BaseModel):
     name: str
     attributes: dict = {}
-    # Vom Aufrufer (Folder/Document Service) aufgelöste Platzierungs-Information
-    # (2.2a) - bewusst als object_type_id/Root-Flag statt bereits aufgelöstem
-    # Namen übertragen, damit Object-Type Service als einzige Quelle der
-    # Namensauflösung dient (kein zusätzlicher Roundtrip beim Aufrufer nötig).
+    # Placement information resolved by the caller (Folder/Document Service)
+    # (2.2a) - deliberately transmitted as object_type_id/root flag instead
+    # of an already-resolved name, so that Object-Type Service serves as the
+    # single source of name resolution (no extra roundtrip needed by the
+    # caller).
     parent_object_type_id: int | None = None
     parent_is_root: bool = False
 
@@ -135,6 +137,6 @@ class LayoutIn(BaseModel):
 
 
 class LayoutOut(LayoutIn):
-    # False = generiertes Smart Layout (nicht persistiert), True = explizit
-    # über PUT gespeicherte Abweichung (siehe ADR 0014).
+    # False = generated smart layout (not persisted), True = deviation
+    # explicitly saved via PUT (see ADR 0014).
     is_custom: bool

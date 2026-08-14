@@ -1,23 +1,23 @@
-"""Erweiterte Volltextsuche-Query-Sprache (Konzept 3.7a, P14-S7).
+"""Advanced full-text search query language (concept 3.7a, P14-S7).
 
-Ersetzt das bisherige direkte `websearch_to_tsquery(query)` (ADR 0012) durch
-einen eigenen, kleinen Parser, der zusätzlich Wildcards, Fuzzy- und
-Näherungssuche unterstützt - alles ergänzend zur bereits vorhandenen
-Booleschen-/Phrasensuche, keine externe Suchmaschine.
+Replaces the previous direct `websearch_to_tsquery(query)` (ADR 0012) with a
+custom, small parser that additionally supports wildcards, fuzzy, and
+proximity search - all on top of the already existing boolean/phrase
+search, not an external search engine.
 
-Syntax (an marktübliche Referenzprodukte angelehnt, Konzept 3.7a wörtlich
-"mit marktüblichen Referenzprodukten gleichziehen"):
+Syntax (modeled after common market reference products, concept 3.7a
+literally "match up with common market reference products"):
 
-    wort1 wort2       impliziertes AND
-    wort1 OR wort2     Disjunktion (Großschreibung beliebig)
-    -wort / NOT wort   Negation
-    (...)              explizite Klammerung/Vorrang
-    "genaue phrase"    Phrasensuche (Wortfolge exakt)
-    "wort1 wort2"~N    Näherungssuche - genau zwei Wörter, Treffer wenn sie
-                       innerhalb von N Wörtern zueinander vorkommen (beide
-                       Reihenfolgen)
-    wort*              Wildcard/Präfixsuche
-    wort~ / wort~N     Fuzzy-Suche, Toleranzstufe N in {1,2,3} (Default 2)
+    word1 word2        implied AND
+    word1 OR word2      disjunction (case-insensitive)
+    -word / NOT word    negation
+    (...)               explicit parenthesization/precedence
+    "exact phrase"      phrase search (exact word sequence)
+    "word1 word2"~N     proximity search - exactly two words, matches if
+                        they occur within N words of each other (either
+                        order)
+    word*               wildcard/prefix search
+    word~ / word~N       fuzzy search, tolerance level N in {1,2,3} (default 2)
 """
 
 from __future__ import annotations
@@ -26,19 +26,19 @@ from dataclasses import dataclass
 
 FUZZY_LEVELS = (1, 2, 3)
 DEFAULT_FUZZY_LEVEL = 2
-# Trigram-Ähnlichkeitsschwellen je Toleranzstufe (1 = streng/hohe
-# Ähnlichkeit nötig, 3 = tolerant) - eigene, dokumentierte Zuordnung auf
-# pg_trgms 0..1-Fließkommaskala, keine Postgres-Konvention.
+# Trigram similarity thresholds per tolerance level (1 = strict/high
+# similarity required, 3 = tolerant) - our own, documented mapping onto
+# pg_trgm's 0..1 floating-point scale, not a Postgres convention.
 FUZZY_THRESHOLDS = {1: 0.5, 2: 0.35, 3: 0.2}
-# Obergrenze für die Wortdistanz einer Näherungssuche - verhindert, dass ein
-# beliebig großes ~N eine unangemessen lange ODER-Kette aus Einzeldistanzen
-# erzeugt (siehe compile_query/_proximity_variants). Dieselbe Art von
-# bewusster, dokumentierter Grenze wie `search_result_hard_limit`.
+# Upper bound on the word distance of a proximity search - prevents an
+# arbitrarily large ~N from producing an unreasonably long OR chain of
+# individual distances (see compile_query/_proximity_variants). The same
+# kind of deliberate, documented limit as `search_result_hard_limit`.
 MAX_PROXIMITY_DISTANCE = 20
 
 
 class QuerySyntaxError(Exception):
-    """Für 400-Antworten in main.py - Nutzertext, kein interner Fehler."""
+    """For 400 responses in main.py - user-facing text, not an internal error."""
 
 
 # --- AST ---------------------------------------------------------------
@@ -121,9 +121,9 @@ def _is_word_char(ch: str) -> bool:
 def tokenize(raw: str) -> list[_Token]:
     tokens: list[_Token] = []
     i, n = 0, len(raw)
-    # True direkt nach Zeilenanfang/Whitespace/'('/einem Schlüsselwort - nur
-    # dort darf ein '-' als Negations-Präfix statt als Teil eines
-    # Bindestrich-Worts ("E-Mail") gelesen werden.
+    # True right after line start/whitespace/'('/a keyword - only there may
+    # a '-' be read as a negation prefix instead of as part of a
+    # hyphenated word ("e-mail").
     at_term_start = True
     while i < n:
         ch = raw[i]
@@ -203,15 +203,15 @@ def tokenize(raw: str) -> list[_Token]:
             i = k
             at_term_start = False
             continue
-        # Unbekanntes Zeichen (Satzzeichen etc.) - permissiv überspringen,
-        # gleiche Grundhaltung wie das bisherige websearch_to_tsquery, das nie
-        # mit einem SQL-Fehler auf "unerwartete" Eingabe reagiert.
+        # Unknown character (punctuation etc.) - permissively skip it, same
+        # underlying stance as the previous websearch_to_tsquery, which
+        # never reacts to "unexpected" input with an SQL error.
         i += 1
         at_term_start = False
     return tokens
 
 
-# --- Parser (rekursiver Abstieg, Vorrang: Klammer > NOT > AND > OR) -------
+# --- Parser (recursive descent, precedence: parens > NOT > AND > OR) -------
 
 
 class _Cursor:
@@ -293,9 +293,9 @@ def _parse_primary(cur: _Cursor) -> Node:
 
 
 def parse_query(raw: str | None) -> Node | None:
-    """Liefert `None` für eine leere/nur-Whitespace-Anfrage (= keine
-    Volltextfilterung, reine Facetten-/Attributnavigation, bestehendes
-    Verhalten unverändert)."""
+    """Returns `None` for an empty/whitespace-only query (= no full-text
+    filtering, pure facet/attribute navigation, existing behavior
+    unchanged)."""
     if raw is None or not raw.strip():
         return None
     tokens = tokenize(raw)

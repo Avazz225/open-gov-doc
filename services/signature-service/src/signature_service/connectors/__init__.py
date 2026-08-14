@@ -11,9 +11,9 @@ from signature_service.settings import Settings, SignatureProviderConfig
 def build_connector(
     config: SignatureProviderConfig, *, ca_certificate_pem: bytes, ca_private_key_pem: bytes
 ) -> SignatureProviderConnector:
-    """Baut einen Connector (3.10) für eine einzelne konfigurierte Instanz -
-    neue Connector-Typen (insbesondere ein echter QTSP für QES) werden hier
-    ergänzt, ohne den Rest des Service anzufassen (gleiches Muster wie
+    """Builds a connector (3.10) for a single configured instance - new
+    connector types (especially a real QTSP for QES) are added here without
+    touching the rest of the service (same pattern as
     `storage_service.backends.build_backend`)."""
     if config.type == "internal":
         return InternalSelfSignedConnector(ca_certificate_pem, ca_private_key_pem)
@@ -42,14 +42,14 @@ def resolve_connector_for_level(
     connectors: dict[str, SignatureProviderConnector],
     level: str,
 ) -> tuple[str, SignatureProviderConnector] | None:
-    """Erstes konfiguriertes Connector, das das angeforderte Niveau
-    unterstützt (Reihenfolge der übergebenen `providers`-Liste) - `None`,
-    wenn kein Connector dieses Niveau anbietet (z. B. `level="qes"` ohne
-    konfigurierten QTSP). Seit Post-Roadmap Phase 22 Session 6 (ADR 0091)
-    nimmt dieser Parameter bewusst die bereits mit `SignatureConfig`s
-    live-editierbaren `levels` gemergte Liste entgegen (`main.py`), nicht
-    mehr `Settings` direkt - `id`/`type` bleiben strukturell aus `Settings`,
-    nur `levels` kann inzwischen vom Env-Var-Ausgangswert abweichen."""
+    """First configured connector that supports the requested level (order
+    of the passed-in `providers` list) - `None` if no connector offers this
+    level (e.g. `level="qes"` without a configured QTSP). Since post-roadmap
+    phase 22 session 6 (ADR 0091), this parameter deliberately receives the
+    list already merged with `SignatureConfig`'s live-editable `levels`
+    (`main.py`), no longer `Settings` directly - `id`/`type` still come
+    structurally from `Settings`, only `levels` can now differ from the
+    env-var starting value."""
     for config in providers:
         if level in config.levels:
             return config.id, connectors[config.id]

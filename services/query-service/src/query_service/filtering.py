@@ -2,23 +2,23 @@ import asyncio
 
 from query_service.clients import DocumentClient, PermissionServiceClient
 
-# Gleiche Konvention wie search-service (P5-S4): "document.read" ist die
-# generische "darf Inhalt dieses Ordners lesen"-Berechtigung, geprueft gegen
-# den Ordner-`resource_id` - sowohl fuer Dokumentinhalte als auch fuer
-# Aktionen auf dem Ordner selbst, da nur Ordner `ResourceNode`s sind.
+# Same convention as search-service (P5-S4): "document.read" is the generic
+# "may read this folder's content" permission, checked against the folder's
+# `resource_id` - for both document content and actions on the folder
+# itself, since only folders are `ResourceNode`s.
 RESULT_READ_PERMISSION = "document.read"
 
 
 async def _resolve_resource_ids(
     events: list[dict], document_client: DocumentClient
 ) -> list[str | None]:
-    """Loest je Ereignis eine Ordner-`resource_id` auf, sofern moeglich.
-    `document-service`-Ereignisse tragen die `document_id` als `subject` und
-    muessen erst auf ihre `folder_id` aufgeloest werden; `folder-service`-
-    Ereignisse tragen die `resource_id` bereits direkt als `subject`. Alle
-    anderen Kategorien (workflow/case/auth/signature/notification/registry/
-    permission-auf-Nicht-Ordner/...) sind nicht auflösbar - siehe
-    docs/services/query-service.md fuer die bewusste Umfangsgrenze."""
+    """Resolves a folder `resource_id` per event, where possible.
+    `document-service` events carry `document_id` as `subject` and must
+    first be resolved to their `folder_id`; `folder-service` events already
+    carry the `resource_id` directly as `subject`. All other categories
+    (workflow/case/auth/signature/notification/registry/permission-on-
+    non-folder/...) are not resolvable - see docs/services/query-service.md
+    for the deliberate scope boundary."""
     unique_document_ids = list(
         {
             event["subject"]
@@ -57,12 +57,12 @@ async def filter_events_by_permission(
     document_client: DocumentClient,
     is_superuser: bool,
 ) -> list[dict]:
-    """Setzt Konzept 6.1 woertlich um: "eine Query kann nie mehr sehen ...
-    als die ausfuehrende Person ohnehin duerfte". Der aktivierte Superuser
-    (4.6) ist die einzige im Konzept vorgesehene Ausnahme. Ereignisse ohne
-    aufloesbare Ordner-Ressource werden fail-closed ausgeblendet, statt eine
-    nicht existierende generische Objekt-Berechtigung fuer jede denkbare
-    Domaene zu erfinden."""
+    """Implements concept 6.1 verbatim: "a query can never see ... more than
+    the executing person would be allowed to see anyway". The activated
+    superuser (4.6) is the only exception provided for in the concept.
+    Events without a resolvable folder resource are hidden fail-closed,
+    instead of inventing a non-existent generic object permission for every
+    conceivable domain."""
     if is_superuser:
         return events
     resource_ids = await _resolve_resource_ids(events, document_client)

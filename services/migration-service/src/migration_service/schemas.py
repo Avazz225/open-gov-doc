@@ -6,10 +6,10 @@ from pydantic import BaseModel
 class PairedInstallationCreate(BaseModel):
     display_name: str
     base_url: str
-    # Leer lassen, wenn diese Installation die PAARUNG initiiert (ein neuer
-    # Key wird generiert und einmalig zurückgegeben) - gesetzt, wenn hier der
-    # von der Gegenseite bereits ausgegebene Key eingetragen wird (siehe
-    # docs/services/migration-service.md "Paarung").
+    # Leave empty if this installation is initiating the PAIRING (a new
+    # key is generated and returned once) - set if the key already issued
+    # by the other side is entered here (see
+    # docs/services/migration-service.md "Pairing").
     api_key: str | None = None
 
 
@@ -23,9 +23,9 @@ class PairedInstallationOut(BaseModel):
 
 
 class PairedInstallationCreateOut(PairedInstallationOut):
-    # Nur in der Anlage-Antwort enthalten (nie in GET/List) - identisches
-    # "einmalig zurückgeben, nie wieder aussenden"-Prinzip wie
-    # federation-hub-service, auch wenn hier zusätzlich intern gespeichert.
+    # Only included in the creation response (never in GET/List) - identical
+    # "return once, never send again" principle as federation-hub-service,
+    # even though it is additionally stored internally here.
     api_key: str
 
 
@@ -63,10 +63,10 @@ class TransferOut(BaseModel):
 
 
 class TransferStartResult(BaseModel):
-    """Antwort auf `POST /transfers` - `pending_approval` (Vier-Augen aktiv)
-    liefert keinen `transfer`, da noch keine Zeile angelegt wurde (der
-    eigentliche Start passiert erst beim Konsumieren von
-    `permission.approval.approved`, siehe `consumer.py`)."""
+    """Response to `POST /transfers` - `pending_approval` (four-eyes principle active)
+    returns no `transfer`, since no row has been created yet (the
+    actual start only happens when consuming
+    `permission.approval.approved`, see `consumer.py`)."""
 
     status: str
     transfer: TransferOut | None = None

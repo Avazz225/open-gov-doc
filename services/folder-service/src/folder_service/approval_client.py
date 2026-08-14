@@ -2,10 +2,10 @@ import httpx
 
 
 class ApprovalClient:
-    """HTTP-Client gegen den generischen Vier-Augen-Approval-Mechanismus im
-    Permission Service (4.3, P6-S4) - identisches Muster wie
-    `document_service.approval_client.ApprovalClient` (P7-S1), hier für den
-    Aktionstyp `folder.force_delete` (5.2a, seit P7-S1b)."""
+    """HTTP client against the generic four-eyes principle approval mechanism
+    in the Permission Service (4.3, P6-S4) - identical pattern to
+    `document_service.approval_client.ApprovalClient` (P7-S1), here for the
+    action type `folder.force_delete` (5.2a, since P7-S1b)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)

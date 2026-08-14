@@ -32,10 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _archival_poll_loop(session_factory) -> None:
-    """Faelligkeits-Poll fuer Aussonderung/Dehydrierung (5.6) - gleiches
-    Idiom wie document-service's `_retention_poll_loop`/reporting-service's
-    `_report_schedule_poll_loop`: zwei unabhaengige Phasen je Durchlauf, ein
-    Fehler in einer Phase bricht die Schleife nicht ab."""
+    """Due-date poll for records disposal/dehydration (5.6) - the same
+    idiom as document-service's `_retention_poll_loop`/reporting-service's
+    `_report_schedule_poll_loop`: two independent phases per run, an error
+    in one phase does not abort the loop."""
     while True:
         try:
             await pipeline.run_active_transfers_tick(
@@ -91,11 +91,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS archival"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Migration fuer bereits laufende Installationen (Post-Roadmap
-        # Phase 20 Session 2, ADR 0078) - `create_all` legt neue Tabellen an,
-        # aendert aber keine bestehenden. `IF NOT EXISTS` macht dies idempotent,
-        # betrifft nur additive, defaultbehaftete Spalten (gleiches Muster wie
-        # document-service's `main.py`-Lifespan).
+        # Ad-hoc migration for already-running installations (Post-Roadmap
+        # Phase 20 Session 2, ADR 0078) - `create_all` creates new tables but
+        # does not alter existing ones. `IF NOT EXISTS` makes this idempotent;
+        # affects only additive columns with defaults (same pattern as
+        # document-service's `main.py` lifespan).
         await conn.execute(
             text(
                 "ALTER TABLE archival.archival_transfer "
@@ -175,16 +175,16 @@ def healthz() -> dict:
 
 async def _require_archival_permission(x_dms_principal: str, *, access_type: str) -> None:
     """RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - archival-service
-    hatte zuvor GAR KEINE allgemeine Berechtigungsprüfung, nur das separate,
-    engere `archive_retrieval_role`-Gate (X-DMS-Roles) für Rückholung/
-    Aussonderungs-Zugriffsbereich/Paket-Download (5.6 "Entschlüsselung nur
-    für berechtigte Rollen") - dieses Gate bleibt UNVERÄNDERT bestehen, die
-    RBAC-Prüfung hier kommt zusätzlich, nicht ersetzend, exakt wie bei
-    case-service (ADR 0070). Prüft `archival.read`/`archival.write` an der
-    Wurzelressource (`root`) - archival-service registriert keine eigenen
-    Ressourcen-Baumknoten. Die "everyone"-Gruppe (ADR 0067) gewährt beide
-    Permissions standardmäßig - erhält das bisherige De-facto-offene
-    Verhalten, macht es aber admin-editierbar."""
+    previously had NO general permission check at all, only the separate,
+    narrower `archive_retrieval_role` gate (X-DMS-Roles) for retrieval/
+    records-disposal access area/package download (5.6, "decryption only
+    for authorized roles") - this gate remains UNCHANGED; the RBAC check
+    here is additive, not a replacement, exactly as with case-service
+    (ADR 0070). Checks `archival.read`/`archival.write` on the root
+    resource (`root`) - archival-service does not register its own
+    resource tree nodes. The "everyone" group (ADR 0067) grants both
+    permissions by default - preserves the previous de-facto-open behavior
+    while making it admin-editable."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     permission = "archival.read" if access_type == "read" else "archival.write"
@@ -227,10 +227,10 @@ async def retry_archival_transfer(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ArchivalTransferOut:
-    """Manueller Neustart eines dauerhaft fehlgeschlagenen Transfers
-    (Post-Roadmap Phase 20 Session 2, ADR 0078) - nur fuer `failed_permanent`
-    sinnvoll (409 sonst, ein noch aktiver oder bereits abgeschlossener
-    Transfer braucht keinen manuellen Neustart)."""
+    """Manual restart of a permanently failed transfer (Post-Roadmap Phase
+    20 Session 2, ADR 0078) - only meaningful for `failed_permanent` (409
+    otherwise; a still-active or already-completed transfer doesn't need a
+    manual restart)."""
     await _require_archival_permission(x_dms_principal, access_type="write")
     try:
         transfer = await repository.get_transfer(session, transfer_id)
@@ -256,12 +256,12 @@ async def retrieve_archival_transfer(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ArchivalTransferOut:
-    """Rueckholung (5.6, wörtliche Konzeptvorgabe: "ein eigener, ebenfalls
-    auditierter Vorgang mit Entschlüsselung nur für berechtigte Rollen") -
-    schreibt den entschluesselten Archiv-Inhalt zurueck auf die Live-Ziele
-    unter genau demselben Storage-Schluessel wie die aktuelle Version, damit
-    der reguläre `document-service`-Download-Pfad danach unveraendert
-    funktioniert."""
+    """Retrieval (5.6, literal concept requirement: "a separate, likewise
+    audited process with decryption only for authorized roles") - writes
+    the decrypted archive content back to the live targets under exactly
+    the same storage key as the current version, so that the regular
+    `document-service` download path continues to work unchanged
+    afterward."""
     await _require_archival_permission(x_dms_principal, access_type="write")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     if settings.archive_retrieval_role not in roles:
@@ -319,16 +319,16 @@ async def list_released_items(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
-    """Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - durchsuchbare Sicht
-    auf bereits ausgesonderte, aber noch innerhalb der Übergangsfrist
-    befindliche Dokumente/Umlaufmappen, statt sie nur indirekt über Audit-
-    Trail-Verweise auffindbar zu machen (Konzept 5.6, wörtlich). Reine
-    gefilterte Sicht auf die bereits bestehende `released`-Zustandsmaschine -
-    kein neuer Datenspeicher. Gleiches Rollen-Gate wie die Rückholung
-    (`archive_retrieval_role`) - Konzept 2.5 nennt für diesen Sonderbereich
-    "dieselben Rollen ... zusätzlich ggf. eine dedizierte Archiv-/
-    Registratur-Rolle", die bereits bestehende Rückhol-Rolle deckt genau
-    diesen Fall ab, ohne ein zweites, redundantes Setting einzuführen."""
+    """Records disposal access area (2.5/5.6, P15-S5) - a searchable view
+    of documents/circulation folders that have already been disposed of but
+    are still within the transition period, instead of making them
+    findable only indirectly via audit-trail references (concept 5.6,
+    literally). A pure filtered view onto the already-existing `released`
+    state machine - no new data store. Same role gate as retrieval
+    (`archive_retrieval_role`) - concept 2.5 names "the same roles ...
+    additionally possibly a dedicated archive/registry role" for this
+    special area; the already-existing retrieval role covers exactly this
+    case, without introducing a second, redundant setting."""
     await _require_archival_permission(x_dms_principal, access_type="read")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     if settings.archive_retrieval_role not in roles:
@@ -380,8 +380,8 @@ async def retry_case_archival_transfer(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseArchivalTransferOut:
-    """Case-Pendant zu `retry_archival_transfer` oben (Post-Roadmap Phase 20
-    Session 2, ADR 0078)."""
+    """Case counterpart to `retry_archival_transfer` above (Post-Roadmap
+    Phase 20 Session 2, ADR 0078)."""
     await _require_archival_permission(x_dms_principal, access_type="write")
     try:
         transfer = await repository.get_case_transfer(session, transfer_id)
@@ -407,10 +407,11 @@ async def download_case_archival_package(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Liefert das XDOMEA-Aussonderungspaket (ZIP: `aussonderung.xml` +
-    referenzierte Dokumentinhalte, 5.6, seit P7-S3b) direkt als Download -
-    anders als bei Dokumenten (`.../retrieve`) kein Zurueckschreiben auf ein
-    Live-Ziel, da eine Umlaufmappe keinen eigenen Live-Speicherplatz besitzt."""
+    """Delivers the XDOMEA records-disposal package (ZIP: `aussonderung.xml`
+    + referenced document contents, 5.6, since P7-S3b) directly as a
+    download - unlike for documents (`.../retrieve`), no writing back to a
+    live target, since a circulation folder has no live storage space of
+    its own."""
     await _require_archival_permission(x_dms_principal, access_type="read")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
     if settings.archive_retrieval_role not in roles:

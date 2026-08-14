@@ -39,11 +39,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS search"))
         await conn.run_sync(Base.metadata.create_all)
-        # Fuzzy-Suche (Konzept 3.7a, P14-S7, siehe ADR 0044) - pg_trgm ist ein
-        # Standard-Contrib-Modul, im postgres:16-alpine-Image ohne weiteren
-        # Build-Schritt vorhanden (bereits bei ADR 0012 verifiziert). Eigene
-        # Trigram-Indizes zusätzlich zum bestehenden GIN-Index auf
-        # `search_vector` - `word_similarity()` nutzt sie sonst nicht.
+        # Fuzzy search (concept 3.7a, P14-S7, see ADR 0044) - pg_trgm is a
+        # standard contrib module, available in the postgres:16-alpine image
+        # without any further build step (already verified in ADR 0012).
+        # Dedicated trigram indexes in addition to the existing GIN index on
+        # `search_vector` - `word_similarity()` would not use them otherwise.
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.execute(
             text(
@@ -67,8 +67,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ocr_client = OcrServiceClient(settings.ocr_service_base_url)
     app.state.rendering_client = RenderingServiceClient(settings.rendering_service_base_url)
 
-    # Reiner Konsument (kein eigener Stream, kein Publisher) - Search Service
-    # veröffentlicht keine Events, dieselbe Rolle wie audit-service.
+    # Pure consumer (no own stream, no publisher) - Search Service does not
+    # publish any events, same role as audit-service.
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
     app.state.event_bus = event_bus

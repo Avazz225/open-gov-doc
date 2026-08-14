@@ -28,19 +28,18 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_retry_tick(session_factory) -> None:
-    """Ein einzelner Durchlauf der fälligen OCR-Wiederholungsversuche
-    (Post-Roadmap Phase 20 Session 4, ADR 0080) - ausgelagert aus
-    `_ocr_retry_poll_loop`, damit ein Tick isoliert testbar ist. Ruft
-    `pipeline.process_version` erneut auf (nicht nur einen Teilschritt) - es
-    gibt nur EIN autoritatives Ergebnis je Version, ein Neudurchlauf ist
-    idempotent (`upsert_ocr_result` überschreibt dieselbe Zeile)."""
+    """A single pass over the due OCR retry attempts (Post-Roadmap Phase 20
+    Session 4, ADR 0080) - factored out of `_ocr_retry_poll_loop` so a tick
+    is testable in isolation. Calls `pipeline.process_version` again (not
+    just a sub-step) - there is only ONE authoritative result per version, a
+    re-run is idempotent (`upsert_ocr_result` overwrites the same row)."""
     async with session_factory() as session:
         due = await repository.list_due_for_retry(session)
     for stale in due:
         async with session_factory() as session:
             fresh = await session.get(OcrResult, stale.id)
             if fresh is None or fresh.status != "failed":
-                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+                continue  # handled differently in the meantime (e.g. manual retry)
         await process_version(
             fresh.document_id,
             fresh.version_number,
@@ -53,10 +52,10 @@ async def _run_retry_tick(session_factory) -> None:
 
 
 async def _ocr_retry_poll_loop(session_factory) -> None:
-    """Wiederholt fehlgeschlagene OCR-Verarbeitung (Post-Roadmap Phase 20
-    Session 4, ADR 0080) - der erste Versuch bleibt synchron im NATS-Handler,
-    nur die WIEDERHOLUNG läuft asynchron in diesem eigenen Poll-Loop.
-    Gleiches Idiom wie notification-service's `_notification_retry_poll_loop`."""
+    """Retries failed OCR processing (Post-Roadmap Phase 20 Session 4, ADR
+    0080) - the first attempt stays synchronous in the NATS handler, only
+    the RETRY runs asynchronously in this dedicated poll loop. Same idiom
+    as notification-service's `_notification_retry_poll_loop`."""
     while True:
         try:
             await _run_retry_tick(session_factory)
@@ -74,12 +73,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS ocr"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
-        # CONTRIBUTING.md): `create_all` legt fehlende TABELLEN an, ändert aber
-        # keine bestehenden - `allowed_content_types` kam erst in P5d-S1 dazu
-        # (zunächst als Negativliste `excluded_content_types` gebaut, noch in
-        # derselben Session auf eine Positivliste korrigiert - `DROP` betrifft
-        # daher keine echten Admin-Einstellungen).
+        # Ad-hoc schema extension (no Alembic at this early phase, see
+        # CONTRIBUTING.md): `create_all` creates missing TABLES, but doesn't
+        # alter existing ones - `allowed_content_types` was only added in
+        # P5d-S1 (initially built as a denylist `excluded_content_types`,
+        # corrected to an allowlist in the same session - the `DROP`
+        # therefore does not affect any real admin settings).
         await conn.execute(
             text("ALTER TABLE ocr.ocr_config DROP COLUMN IF EXISTS excluded_content_types")
         )
@@ -89,7 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS allowed_content_types JSON DEFAULT '[]'::json NOT NULL"
             )
         )
-        # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080).
+        # Retry/backoff (Post-Roadmap Phase 20 Session 4, ADR 0080).
         await conn.execute(
             text(
                 "ALTER TABLE ocr.ocr_result "
@@ -106,10 +105,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage = StorageClient(settings.storage_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
-    # Reiner Konsument fremder Streams (`document.>`, ensure_stream=False) und
-    # eigener Producer-Client (eigener Stream "ocr") getrennt, wie bei
-    # rendering-service - ein Producer muss seinen Stream selbst anlegen,
-    # siehe ADR 0001.
+    # Pure consumer of other streams (`document.>`, ensure_stream=False) and
+    # its own producer client (own stream "ocr") kept separate, as with
+    # rendering-service - a producer must create its own stream, see ADR
+    # 0001.
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
     app.state.event_bus = event_bus
@@ -183,12 +182,12 @@ def healthz() -> dict:
 
 
 async def _require_ocr_permission(x_dms_principal: str, *, access_type: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ocr-service hatte
-    zuvor GAR KEINE Berechtigungsprüfung. Prüft `ocr.read`/`ocr.write` an
-    der Wurzelressource (`root`) - ocr-service registriert keine eigenen
-    Ressourcen-Baumknoten. Die "everyone"-Gruppe (ADR 0067) gewährt beide
-    standardmäßig - erhält das bisherige De-facto-offene Verhalten, macht
-    es aber admin-editierbar."""
+    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ocr-service
+    previously had NO permission check at all. Checks `ocr.read`/`ocr.write`
+    on the root resource (`root`) - ocr-service registers no resource tree
+    nodes of its own. The "everyone" group (ADR 0067) grants both by
+    default - preserves the previous de-facto-open behavior, but makes it
+    admin-editable."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     permission = "ocr.read" if access_type == "read" else "ocr.write"
@@ -237,10 +236,10 @@ async def list_ocr_results(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[OcrResultOut]:
-    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
-    ohne ihn (typischerweise kombiniert mit ``status``) liefert dies eine
-    dokumentübergreifende Liste, Grundlage für die neue Admin-UI-Sicht auf
-    dauerhaft fehlgeschlagene OCR-Ergebnisse."""
+    """``document_id`` has been optional since Post-Roadmap Phase 20
+    Session 7 - without it (typically combined with ``status``), this
+    returns a cross-document list, the basis for the new admin UI view of
+    permanently failed OCR results."""
     await _require_ocr_permission(x_dms_principal, access_type="read")
     return await repository.list_ocr_results(
         session, document_id=document_id, version_number=version_number, status=status
@@ -266,10 +265,10 @@ async def retry_ocr_result(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> OcrResultOut:
-    """Manueller Neustart eines dauerhaft fehlgeschlagenen OCR-Laufs
-    (Post-Roadmap Phase 20 Session 4, ADR 0080) - nur fuer `failed_permanent`
-    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen Versuch
-    statt auf den naechsten Poll-Tick zu warten."""
+    """Manual restart of a permanently failed OCR run (Post-Roadmap Phase 20
+    Session 4, ADR 0080) - only makes sense for `failed_permanent` (409
+    otherwise); immediately makes a new synchronous attempt instead of
+    waiting for the next poll tick."""
     await _require_ocr_permission(x_dms_principal, access_type="write")
     try:
         result = await repository.get_ocr_result(session, ocr_result_id)
@@ -295,9 +294,9 @@ async def retry_ocr_result(
         publish_event=publish_event,
         max_attempts=settings.max_ocr_attempts,
     )
-    # Frische Session statt der obigen `session` (deren Identity Map sonst die
-    # VOR `process_version` geladene, jetzt veraltete Instanz zurückgäbe -
-    # `process_version` committet über eigene, separate Sessions).
+    # Fresh session instead of the `session` above (whose identity map would
+    # otherwise return the now-stale instance loaded BEFORE `process_version`
+    # - `process_version` commits via its own, separate sessions).
     async with app.state.session_factory() as fresh_session:
         return await repository.get_ocr_result(fresh_session, ocr_result_id)
 
@@ -322,7 +321,7 @@ async def download_page_image(
         )
     if page_number < 1 or page_number > len(result.pages):
         raise HTTPException(status_code=404, detail=f"Seite {page_number} existiert nicht")
-    # `page_image_storage_key` ist seit dem Mehrseiten-Bugfix ein Präfix ohne
-    # Seitensuffix, siehe `pipeline.process_version`.
+    # `page_image_storage_key` has been a prefix without a page suffix since
+    # the multi-page bugfix, see `pipeline.process_version`.
     data = await app.state.storage.download(f"{result.page_image_storage_key}-{page_number}.png")
     return Response(content=data, media_type="image/png")

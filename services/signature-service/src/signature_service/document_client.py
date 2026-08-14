@@ -10,11 +10,11 @@ class LockConflictError(Exception):
 
 
 class DocumentServiceClient:
-    """HTTP-Client gegen den Document Service (kein Mocking von
-    Sibling-Services, siehe PROGRESS.md "Tooling & Testing"): lädt die zu
-    signierende Version, checkt die signierten Bytes anschließend als neue
-    Dokumentversion ein (2.1a) - siehe docs/services/signature-service.md
-    "Signaturebene ↔ Dokumentversion"."""
+    """HTTP client against the Document Service (no mocking of sibling
+    services, see PROGRESS.md "Tooling & Testing"): loads the version to be
+    signed, then checks the signed bytes in as a new document version
+    (2.1a) - see docs/services/signature-service.md "Signature level ↔
+    document version"."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

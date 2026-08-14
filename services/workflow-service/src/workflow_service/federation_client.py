@@ -6,11 +6,10 @@ from workflow_service import federation_crypto
 
 
 def _signed_headers(installation_id: str, private_key_pem: bytes, body: bytes) -> dict[str, str]:
-    """P13-S4 (ADR 0039): ersetzt den zuvor als Bearer-Token mitgeschickten,
-    vom Hub ausgegebenen `api_key` - der Hub verifiziert stattdessen, dass
-    diese Signatur zum bereits registrierten `public_key_pem` dieser
-    Installation passt (`X-Installation-Id` sagt ihm, welchen Schlüssel er
-    dafür nachschlagen soll)."""
+    """P13-S4 (ADR 0039): replaces the `api_key` previously sent as a bearer
+    token, issued by the hub - the hub instead verifies that this signature
+    matches this installation's already registered `public_key_pem`
+    (`X-Installation-Id` tells it which key to look up for that)."""
     return {
         "X-Installation-Id": installation_id,
         "X-Installation-Signature": federation_crypto.sign_body(private_key_pem, body),
@@ -18,11 +17,12 @@ def _signed_headers(installation_id: str, private_key_pem: bytes, body: bytes) -
 
 
 class FederationHubClient:
-    """HTTP-Client gegen den Federation Hub (7.4, P6-S9) - gleiches
-    Dünn-Wrapper-Muster wie `permission_client.py`/`signature_client.py`. Der
-    Hub ist bewusst kein interner Service dieser Installation (keine
-    Registry-/Gateway-Anbindung), daher eine feste, separat konfigurierte
-    Basis-URL statt Registry-Discovery, siehe `settings.federation_hub_base_url`."""
+    """HTTP client against the Federation Hub (7.4, P6-S9) - same thin
+    wrapper pattern as `permission_client.py`/`signature_client.py`. The
+    hub is deliberately not an internal service of this installation (no
+    registry/gateway integration), hence a fixed, separately configured
+    base URL instead of registry discovery, see
+    `settings.federation_hub_base_url`."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=15.0)
@@ -43,11 +43,11 @@ class FederationHubClient:
         version: str,
         min_compatible_peer_version: str,
     ) -> dict:
-        """Signiert mit dem **eigenen** `private_key_pem` - auch bei der
-        allerersten Registrierung (das Schlüsselpaar wird lokal generiert,
-        bevor `register()` überhaupt aufgerufen wird, siehe `main.py.
-        _ensure_federation_identity`), der Hub prüft dabei Selbstkonsistenz
-        gegen das im selben Request eingereichte `public_key_pem` (ADR 0039)."""
+        """Signs with the **own** `private_key_pem` - even for the very
+        first registration (the key pair is generated locally before
+        `register()` is even called, see `main.py._ensure_federation_
+        identity`); the hub checks self-consistency against the
+        `public_key_pem` submitted in the same request (ADR 0039)."""
         body = json.dumps(
             {
                 "id": installation_id,
@@ -72,9 +72,9 @@ class FederationHubClient:
     async def rotate_key(
         self, *, installation_id: str, old_private_key_pem: bytes, new_public_key_pem: str
     ) -> dict:
-        """Signiert mit dem **alten** privaten Schlüssel (Kontinuitätsnachweis,
-        ADR 0039 "Schlüsselrotation") - erst nach erfolgreicher Antwort darf
-        der Aufrufer lokal auf das neue Schlüsselpaar umstellen."""
+        """Signs with the **old** private key (proof of continuity, ADR 0039
+        "key rotation") - only after a successful response may the caller
+        switch locally to the new key pair."""
         body = json.dumps({"new_public_key_pem": new_public_key_pem}).encode("utf-8")
         response = await self._client.post(
             f"/installations/{installation_id}/rotate-key",

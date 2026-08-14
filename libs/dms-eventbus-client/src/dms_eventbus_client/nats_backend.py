@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class NatsEventBusClient(EventBusClient):
-    """Werkseinstellung aus Konzept 3.4: NATS JetStream als Event-Bus-Backend.
+    """Default from concept 3.4: NATS JetStream as the event bus backend.
 
-    ``ensure_stream=True`` (Default) ist für **Producer** gedacht: ``connect()``
-    legt den eigenen Stream an, falls er noch nicht existiert. Reine
-    **Konsumenten** wie der Audit Service, die Ereignisse mehrerer fremder
-    Streams abonnieren, verwenden ``ensure_stream=False`` und geben keinen
-    ``stream``-Namen an - JetStream löst den passenden Stream beim Abonnieren
-    automatisch anhand des Subjects auf (siehe ADR 0001).
+    ``ensure_stream=True`` (default) is meant for **producers**: ``connect()``
+    creates its own stream if it doesn't already exist. Pure **consumers**
+    like the audit service, which subscribe to events from multiple foreign
+    streams, use ``ensure_stream=False`` and don't provide a ``stream`` name -
+    JetStream automatically resolves the matching stream on subscription
+    based on the subject (see ADR 0001).
     """
 
     def __init__(self, url: str, stream: str | None = None, *, ensure_stream: bool = True) -> None:
@@ -70,10 +70,11 @@ class NatsEventBusClient(EventBusClient):
             try:
                 await handler(msg.data)
             except Exception:
-                # Wie im sequentiellen Pfad: bei einem Fehler wird nicht
-                # bestätigt (Neuzustellung durch JetStream) - hier zusätzlich
-                # geloggt, da die Exception sonst nur als "Task exception was
-                # never retrieved" verlorenginge (Task statt direktem await).
+                # As in the sequential path: on failure, the message is not
+                # acknowledged (redelivery by JetStream) - additionally
+                # logged here, since the exception would otherwise be lost
+                # as just a "Task exception was never retrieved" (task
+                # instead of a direct await).
                 logger.exception(
                     "Handler-Fehler bei nebenläufiger Verarbeitung (Subject %r) - "
                     "keine Bestätigung, Neuzustellung erwartet",
@@ -90,8 +91,8 @@ class NatsEventBusClient(EventBusClient):
             nonlocal in_flight
             limit = await _resolve_limit()
             if limit <= 1:
-                # Exakt das bisherige Verhalten (keine Nebenläufigkeit) -
-                # unverändert für jeden Aufrufer, der max_concurrency nicht setzt.
+                # Exactly the previous behavior (no concurrency) - unchanged
+                # for any caller that doesn't set max_concurrency.
                 await handler(msg.data)
                 await msg.ack()
                 return
@@ -112,17 +113,17 @@ class NatsEventBusClient(EventBusClient):
             ) from exc
 
     async def close(self) -> None:
-        """`drain()` statt `close()` - Letzteres trennt die Verbindung sofort,
-        ohne aktive Subscriptions serverseitig sauber abzumelden. Bei einem
-        durable JetStream-Consumer (siehe `subscribe()`) bleibt die Bindung
-        serverseitig dadurch kurzzeitig bestehen, selbst nachdem der Prozess
-        (z. B. per `docker compose stop`) bereits beendet ist - ein sofortiger
-        Neustart mit demselben `durable`-Namen (z. B. der nächste Testlauf
-        gegen denselben Service) kann dann mit "consumer is already bound to
-        a subscription" fehlschlagen (live bei P15-S1 in `scripts/run-tests.sh
-        --build` beobachtet). `drain()` meldet jede Subscription explizit ab,
-        bevor die Verbindung geschlossen wird, und behebt das Rennen an der
-        Wurzel - mit eingebautem Timeout (nats-py-Default 30s), kein Risiko
-        eines hängenden Shutdowns."""
+        """`drain()` instead of `close()` - the latter disconnects immediately,
+        without cleanly unsubscribing active subscriptions server-side. For a
+        durable JetStream consumer (see `subscribe()`), the binding therefore
+        briefly persists server-side even after the process (e.g. via
+        `docker compose stop`) has already terminated - an immediate restart
+        with the same `durable` name (e.g. the next test run against the same
+        service) can then fail with "consumer is already bound to a
+        subscription" (observed live in P15-S1 in
+        `scripts/run-tests.sh --build`). `drain()` explicitly unsubscribes
+        every subscription before the connection is closed, and fixes the
+        race at its root - with a built-in timeout (nats-py default 30s), no
+        risk of a hanging shutdown."""
         if self._nc is not None and not self._nc.is_closed:
             await self._nc.drain()

@@ -8,12 +8,12 @@ Base = make_declarative_base("rendering")
 
 
 class Rendition(Base):
-    """Eine erzeugte Vorschau/Ersatzdarstellung zu genau einer Dokumentversion
-    (2.4/3.7). Der Primärschlüssel ist bewusst ein natürlicher Schlüssel aus
-    `document_id`/`version_number`/`rendition_type` statt einer zufälligen
-    UUID: dieselbe Version desselben Quellformats erzeugt bei erneutem
-    Verarbeiten (z. B. NATS-Redelivery) immer dieselbe Zeile - `repository.
-    upsert_rendition` überschreibt statt zu duplizieren.
+    """A generated preview/rendition for exactly one document version
+    (2.4/3.7). The primary key is deliberately a natural key made of
+    `document_id`/`version_number`/`rendition_type` instead of a random
+    UUID: the same version of the same source format always produces the
+    same row when reprocessed (e.g. NATS redelivery) - `repository.
+    upsert_rendition` overwrites instead of duplicating.
     """
 
     __tablename__ = "rendition"
@@ -28,8 +28,8 @@ class Rendition(Base):
     target_content_type: Mapped[str] = mapped_column(String(255))
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_object_key: Mapped[str] = mapped_column(String(1024))
-    # "ready" | "failed" | "failed_permanent" (seit Post-Roadmap Phase 20
-    # Session 4, ADR 0080).
+    # "ready" | "failed" | "failed_permanent" (since post-roadmap phase 20
+    # session 4, ADR 0080).
     status: Mapped[str] = mapped_column(String(16))
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)

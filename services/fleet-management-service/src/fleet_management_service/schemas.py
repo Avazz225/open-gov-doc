@@ -6,11 +6,11 @@ from pydantic import BaseModel
 class ManagedInstallationCreate(BaseModel):
     display_name: str
     gateway_base_url: str
-    # Optional: der Betreiber kann den auf der Installationsseite bereits per
-    # DMS_FLEET_AGENT_API_KEY gesetzten Wert hier eintragen, oder leer lassen
-    # und diesen Service einen erzeugen lassen (dann muss der Betreiber den
-    # zurückgegebenen Wert umgekehrt auf die Installation übertragen) - exakt
-    # dasselbe Muster wie migration-service's `PairedInstallationCreate`.
+    # Optional: the operator can enter here the value already set on the
+    # installation side via DMS_FLEET_AGENT_API_KEY, or leave it blank and
+    # let this service generate one (in which case the operator must instead
+    # transfer the returned value onto the installation) - exactly the same
+    # pattern as migration-service's `PairedInstallationCreate`.
     fleet_agent_api_key: str | None = None
 
 
@@ -23,29 +23,30 @@ class ManagedInstallationOut(BaseModel):
 
 
 class ManagedInstallationCreateOut(ManagedInstallationOut):
-    """Nur die Erstantwort enthält den Klartext-Schlüssel - danach nie wieder
-    (gleiche Konvention wie `federation-hub-service`s `InstallationRegisterOut`
-    bzw. `migration-service`s `PairedInstallationCreateOut`)."""
+    """Only the initial response contains the plaintext key - never again
+    afterward (same convention as `federation-hub-service`'s
+    `InstallationRegisterOut` and `migration-service`'s
+    `PairedInstallationCreateOut`)."""
 
     fleet_agent_api_key: str
 
 
 class ManagedInstallationRotateKeyRequest(BaseModel):
-    # Optional, gleiche Flexibilität wie `ManagedInstallationCreate` oben:
-    # leer lassen und diesen Service einen neuen Wert erzeugen lassen (dann
-    # muss der Betreiber ihn umgekehrt auf die Installation übertragen), oder
-    # einen bereits auf der Installation gesetzten Wert hier eintragen (dann
-    # zieht dieser Service nur nach).
+    # Optional, same flexibility as `ManagedInstallationCreate` above: leave
+    # it blank and let this service generate a new value (in which case the
+    # operator must instead transfer it onto the installation), or enter a
+    # value already set on the installation here (in which case this service
+    # merely catches up).
     fleet_agent_api_key: str | None = None
 
 
 class InstallationStatusOut(BaseModel):
-    """Aggregierter Überblick (3a: "grundlegende Health-Übersicht") - live
-    abgefragt, nichts davon wird hier persistiert. ``reachable=False`` bei
-    jedem Netzwerk-/Protokollfehler statt einer geworfenen Exception, damit
-    eine nicht erreichbare Installation nicht die Übersicht der übrigen
-    verhindert (gleiches Prinzip wie andere Poll-Schleifen in diesem Projekt,
-    z. B. `license-service`s `poll_loop.py`)."""
+    """Aggregated overview (3a: "basic health overview") - queried live,
+    none of it is persisted here. ``reachable=False`` for every
+    network/protocol error instead of a raised exception, so that an
+    unreachable installation doesn't prevent the overview of the others
+    (same principle as other poll loops in this project, e.g.
+    `license-service`'s `poll_loop.py`)."""
 
     id: str
     display_name: str
@@ -61,17 +62,17 @@ class LicenseUploadRequest(BaseModel):
 
 
 class ProvisionRequest(BaseModel):
-    """`config_document` ist bewusst ein rohes `dict` (identisches Format wie
-    `config-service`s eigener Export/Import, 7.3) statt eines eigenen,
-    zweiten Konfigurationsschemas - dieser Service kuratiert keine
-    Vorlagen-Bibliothek (das ist Phase 17, Konzept §14), er reicht nur
-    zentral weiter, was der Betreiber mitgibt."""
+    """`config_document` is deliberately a raw `dict` (identical format to
+    `config-service`'s own export/import, 7.3) instead of its own, second
+    configuration schema - this service does not curate a template library
+    (that's Phase 17, concept §14), it just centrally passes along whatever
+    the operator provides."""
 
     config_document: dict
     categories: list[str] | None = None
 
 
-# --- Flotten-Update-Orchestrierung (3a-Erweiterung, P13-S2b) ----------------
+# --- Fleet update orchestration (3a extension, P13-S2b) --------------------
 
 
 class GroupCreate(BaseModel):

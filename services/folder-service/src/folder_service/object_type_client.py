@@ -2,9 +2,10 @@ import httpx
 
 
 class ObjectTypeClient:
-    """HTTP-Client gegen den Object-Type Service (2.2/4.5) - Folder Service
-    ruft dessen `/validate`-Endpunkt auf, statt die Constraint-Engine-Lib
-    selbst einzubinden (kein Import fremder Service-Interna)."""
+    """HTTP client against the Object-Type Service (2.2/4.5) - Folder
+    Service calls its `/validate` endpoint instead of embedding the
+    constraint-engine library itself (no import of another service's
+    internals)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -31,11 +32,11 @@ class ObjectTypeClient:
         return response.json()["errors"]
 
     async def get(self, object_type_id: int) -> dict | None:
-        """Aufbewahrung (5.2, seit P7-S1b): liest `default_retention_days`/
-        `deletion_reason_required_override` für den Objekttyp - `None` bei
-        unbekannter `object_type_id` statt eines Fehlers, da der Aufrufer die
-        Existenz an dieser Stelle bereits über `validate()` geprüft hat.
-        Identisches Muster wie `document_service.object_type_client` (P7-S1)."""
+        """Retention (5.2, since P7-S1b): reads `default_retention_days`/
+        `deletion_reason_required_override` for the object type - `None` for
+        an unknown `object_type_id` instead of an error, since the caller
+        has already checked existence at this point via `validate()`.
+        Identical pattern to `document_service.object_type_client` (P7-S1)."""
         response = await self._client.get(f"/object-types/{object_type_id}")
         if response.status_code == 404:
             return None

@@ -16,12 +16,12 @@ def make_handler(
     governance_bypass_role: str,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Führt zuvor per Vier-Augen-Prinzip (4.3, P6-S4) zurückgestellte
-    Aktionen erst nach Genehmigung aus: Force-Unlock (P6-S4), seit P7-S1
-    Zwangslöschung (5.2a, `document.force_delete`) und seit P7-S1c
-    Löschantrag für reguläre Nutzer (5.2, `document.delete`). Andere
-    Aktionstypen (z. B. Bereichssperren) gehören nicht zu diesem Service und
-    werden ignoriert."""
+    """Executes actions previously deferred under the four-eyes principle
+    (4.3, P6-S4) only after approval: force-unlock (P6-S4), forced deletion
+    since P7-S1 (5.2a, `document.force_delete`), and since P7-S1c the
+    deletion request for regular users (5.2, `document.delete`). Other
+    action types (e.g. scope locks) do not belong to this service and are
+    ignored."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -39,11 +39,11 @@ def make_handler(
         action_payload = event.payload.get("payload") or {}
         document_id = action_payload.get("document_id")
         if not document_id:
-            # Fremd-/Fehlform-Payload (z. B. ein zu Testzwecken über
-            # /approval-requests angelegter Request mit demselben
-            # action_type, aber ohne document_id) - loggen statt crashen,
-            # sonst bleibt die NATS-Nachricht unbestätigt und wird endlos
-            # erneut zugestellt (siehe dms-eventbus-client._callback).
+            # Foreign/malformed payload (e.g. a request created for testing
+            # purposes via /approval-requests with the same action_type but
+            # without document_id) - log instead of crashing, otherwise the
+            # NATS message remains unacknowledged and gets redelivered
+            # endlessly (see dms-eventbus-client._callback).
             logger.warning(
                 "permission.approval.approved für document.force_unlock ohne document_id "
                 "im payload erhalten - ignoriert: %r",
@@ -128,11 +128,11 @@ async def _handle_delete_approved(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - führt
-    eine zuvor per Vier-Augen-Prinzip zurückgestellte reguläre
-    Papierkorb-Verschiebung aus, sobald sie genehmigt wurde. Identisches
-    Muster wie der `document.force_unlock`-Zweig oben, nur mit
-    `repository.delete_document` statt `force_release_lock`."""
+    """Deletion request workflow for regular users (5.2, since P7-S1c) -
+    executes a regular trash move previously deferred under the four-eyes
+    principle, once it has been approved. Identical pattern to the
+    `document.force_unlock` branch above, just using
+    `repository.delete_document` instead of `force_release_lock`."""
     action_payload = event.payload.get("payload") or {}
     document_id = action_payload.get("document_id")
     if not document_id:

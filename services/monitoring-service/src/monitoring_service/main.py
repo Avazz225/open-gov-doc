@@ -44,12 +44,12 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
 
 
 async def _require_monitoring_permission(x_dms_principal: str) -> None:
-    """Aktiviert die neue domaenengetrennte Admin-Rolle
-    `domain-admin-monitoring` (`admin.monitoring`, P11-S1) - der aktivierte
-    Superuser (4.6) ist die einzige Ausnahme, gleiches Gate-Muster wie
-    license-service/plugin-orchestration-service. Konzept 10.1: Deaktivieren
-    sicherheitsrelevanter Sensoren ist selbst ein sicherheitsrelevanter,
-    auditierter Vorgang."""
+    """Enforces the new domain-separated admin role
+    `domain-admin-monitoring` (`admin.monitoring`, P11-S1) - the activated
+    superuser (4.6) is the only exception, same gate pattern as
+    license-service/plugin-orchestration-service. Concept 10.1: disabling
+    security-relevant sensors is itself a security-relevant,
+    audited operation."""
     if await _is_active_superuser(x_dms_principal):
         return
     allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
@@ -82,11 +82,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.registry_client = RegistryClient(settings.registry_service_base_url)
     app.state.scrape_client = httpx.AsyncClient()
 
-    # Immer-aktiver, nicht konfigurierbarer operativer Zähler (P11-S1-
-    # Entscheidung: ein Selbstbezug - monitoring-service fragt sich selbst
-    # per HTTP, ob dieser eigene Sensor aktiv ist - waere unnoetige
-    # Komplexitaet ohne echten Nutzen). Eigene CollectorRegistry, getrennt
-    # von den gescrapten Fach-Service-Metriken.
+    # Always-active, non-configurable operational counter (P11-S1
+    # decision: a self-reference - monitoring-service asking itself
+    # via HTTP whether this very sensor is active - would be unnecessary
+    # complexity without real benefit). Own CollectorRegistry, separate
+    # from the scraped domain service metrics.
     app.state.own_registry = CollectorRegistry()
     app.state.scrape_failures_counter = Counter(
         "monitoring_scrape_failures_total",
@@ -125,10 +125,10 @@ app = FastAPI(title=settings.service_name, lifespan=lifespan)
 
 
 class _StaticMetricsCollector:
-    """Gibt eine bereits fertig zusammengeführte Liste von `Metric`-Objekten
-    unverändert an `generate_latest()` weiter - `scraper.merge_metric_families`
-    liefert diese Liste pro Request frisch (10.1: live Scrape statt
-    zwischengespeichertem Snapshot)."""
+    """Passes an already fully merged list of `Metric` objects
+    unchanged to `generate_latest()` - `scraper.merge_metric_families`
+    delivers this list freshly per request (10.1: live scrape instead
+    of a cached snapshot)."""
 
     def __init__(self, metrics: list) -> None:
         self._metrics = metrics
@@ -149,10 +149,10 @@ def healthz() -> dict:
 
 @app.get("/metrics")
 async def get_metrics() -> Response:
-    """Scrape-Proxy (10.1, P11-S1): das einzige Ziel, das Prometheus
-    tatsaechlich abfragt. Ruft live und parallel die /metrics-Endpunkte
-    aller aktuell aktiven, gesunden Instanzen ab (Adressliste kommt von
-    `registry-service`) und fuehrt sie zu einer Antwort zusammen."""
+    """Scrape proxy (10.1, P11-S1): the only target that Prometheus
+    actually queries. Fetches the /metrics endpoints of all currently
+    active, healthy instances live and in parallel (address list comes
+    from `registry-service`) and merges them into a single response."""
     instances = await app.state.registry_client.list_active_instances()
     bodies = await scraper.scrape_targets(
         app.state.scrape_client,
@@ -176,9 +176,9 @@ async def list_sensors(session: AsyncSession = Depends(get_session)) -> list[Sen
 
 @app.get("/sensor-config", response_model=SensorConfigOut)
 async def get_sensor_config(session: AsyncSession = Depends(get_session)) -> SensorConfigOut:
-    """Ungegatet, wird von `dms_metrics_client.SensorConfigClient` gepollt -
-    reiner Lesezugriff auf bereits oeffentlich über `GET /sensors` sichtbare
-    Information, keine Rollenpruefung noetig."""
+    """Ungated, polled by `dms_metrics_client.SensorConfigClient` -
+    pure read access to information already publicly visible via
+    `GET /sensors`, no role check needed."""
     return await repository.get_sensor_config(session)
 
 

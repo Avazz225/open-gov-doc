@@ -6,9 +6,10 @@ from auth_service import federation_crypto
 
 
 def _signed_headers(installation_id: str, private_key_pem: bytes, body: bytes) -> dict[str, str]:
-    """Identisches Schema wie `workflow_service.federation_client`s
-    gleichnamige Funktion (ADR 0039) - der Hub prüft die Signatur gegen den
-    bereits registrierten `public_key_pem` dieser (Kontaktsuche-)Installation."""
+    """Identical scheme to `workflow_service.federation_client`'s
+    function of the same name (ADR 0039) - the Hub checks the signature
+    against this (contact-directory) installation's already-registered
+    `public_key_pem`."""
     return {
         "X-Installation-Id": installation_id,
         "X-Installation-Signature": federation_crypto.sign_body(private_key_pem, body),
@@ -16,10 +17,10 @@ def _signed_headers(installation_id: str, private_key_pem: bytes, body: bytes) -
 
 
 class FederationHubClient:
-    """Dünner HTTP-Client gegen den Federation Hub (7.4) - nur die für die
-    Kontaktsuche benötigte Teilmenge von `workflow_service.
-    FederationHubClient` (Registrierung + Adressbuch-Lesen), keine
-    Handover-Methoden."""
+    """Thin HTTP client against the Federation Hub (7.4) - only the subset
+    of `workflow_service.FederationHubClient` needed for the contact
+    directory search (registration + address book reading), no handover
+    methods."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=15.0)

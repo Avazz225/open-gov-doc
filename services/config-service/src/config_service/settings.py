@@ -10,13 +10,13 @@ class Settings(BaseServiceSettings):
     monitoring_service_base_url: str = "http://localhost:8026"
     auth_service_base_url: str = "http://localhost:8003"
 
-    # Gate für POST /config/import (7.3) - dieselbe Domain-Admin-Capability wie
-    # workflow-service's Prozessdefinition-Upload (P6-S6-Retrofit): ein voller
-    # Konfigurationsimport ist eine Erweiterung derselben "Objekttyp-/Workflow-
-    # Konfiguration"-Verantwortung, keine eigene neue Domäne.
+    # Gate for POST /config/import (7.3) - the same domain admin capability as
+    # workflow-service's process definition upload (P6-S6 retrofit): a full
+    # configuration import is an extension of the same "object type/workflow
+    # configuration" responsibility, not a new domain of its own.
     import_required_capability: str = "admin.object_config"
 
-    # Seit P17-S3 (4.3/14.2): reiner NATS-Konsument für
-    # `permission.approval.approved`, damit ein per Vier-Augen-Prinzip
-    # zurückgestellter `config.import` nach Genehmigung angewendet wird.
+    # Since P17-S3 (4.3/14.2): pure NATS consumer for
+    # `permission.approval.approved`, so that a `config.import` deferred via
+    # the four-eyes principle is applied after approval.
     approval_subjects: list[str] = ["permission.approval.approved"]

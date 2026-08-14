@@ -14,11 +14,11 @@ async def run_gauge_sampler_loop(
     *,
     interval_seconds: float,
 ) -> None:
-    """Generischer Poll-Loop für "aktueller Zustand"-Sensoren (gleiches Idiom
-    wie `plugin_orchestration_service.sampler`/`license_service`-Poll-Loops).
-    Ruft je Tick nur die Sampler-Funktion eines Sensors auf, wenn dieser
-    aktuell aktiv ist - bei Deaktivierung unterbleibt die (ggf. teure)
-    Datenbankabfrage vollständig, nicht nur das Setzen des Gauges."""
+    """Generic poll loop for "current state" sensors (same idiom as
+    `plugin_orchestration_service.sampler`/`license_service` poll loops).
+    Calls a sensor's sampler function per tick only if it is currently
+    active - when deactivated, the (possibly expensive) database query is
+    skipped entirely, not just the setting of the gauge."""
     while True:
         for name, (gauge, compute) in samplers.items():
             if not gauge.is_active():

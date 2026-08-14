@@ -21,20 +21,21 @@ from signature_service.connectors.interface import (
 )
 
 _ROOT_CA_VALIDITY = timedelta(days=20 * 365)
-# Bewusst mehrjährig statt kurzlebig: diese Session setzt PAdES-B-B um (siehe
-# docs/services/signature-service.md "Offene Punkte") - ohne Timestamp-Authority
-# und Langzeitarchiv-Profil (PAdES-B-LTA, 3.10) müsste eine kurzlebige
-# Leaf-Zertifikatslaufzeit sonst jede spätere Verifikation künstlich als
-# "abgelaufen" ausweisen, obwohl der eigentliche Signaturvorgang selbst zum
-# Signierzeitpunkt vollkommen gültig war.
+# Deliberately multi-year instead of short-lived: this session implements
+# PAdES-B-B (see docs/services/signature-service.md "Open Points") -
+# without a timestamp authority and long-term archival profile
+# (PAdES-B-LTA, 3.10), a short-lived leaf certificate validity would
+# otherwise falsely flag every later verification as "expired", even
+# though the actual signing operation itself was completely valid at the
+# time of signing.
 _LEAF_VALIDITY = timedelta(days=5 * 365)
 
 
 def generate_root_ca() -> tuple[bytes, bytes]:
-    """Erzeugt eine neue, selbstsignierte interne Root-CA (RSA 2048, 3.10:
-    "systeminterne/selbstsignierte Schlüssel") - wird genau einmal beim ersten
-    Start aufgerufen, siehe `repository.get_or_create_ca` (Singleton-Muster wie
-    `OcrConfig`). Gibt `(certificate_pem, private_key_pem)` zurück."""
+    """Generates a new, self-signed internal root CA (RSA 2048, 3.10:
+    "system-internal/self-signed keys") - called exactly once on first
+    startup, see `repository.get_or_create_ca` (singleton pattern like
+    `OcrConfig`). Returns `(certificate_pem, private_key_pem)`."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name(
         [
@@ -84,12 +85,12 @@ def _issue_leaf_certificate(
     common_name: str,
     email: str | None,
 ) -> tuple[bytes, bytes, x509.Certificate]:
-    """Stellt je Signaturvorgang ein neues Leaf-Zertifikat aus, signiert von der
-    internen Root-CA - `common_name`/`email` machen AES "eindeutig einer
-    Person zuordenbar" (3.10), ohne einen externen Anbieter zu benötigen (SES
-    nutzt stattdessen einen generischen, nicht-personenbezogenen `common_name`,
-    siehe `InternalSelfSignedConnector.sign`). Gibt `(cert_pem, key_pem,
-    cert_object)` zurück."""
+    """Issues a new leaf certificate per signing operation, signed by the
+    internal root CA - `common_name`/`email` make AES "uniquely
+    attributable to a person" (3.10), without requiring an external
+    provider (SES instead uses a generic, non-personal `common_name`, see
+    `InternalSelfSignedConnector.sign`). Returns `(cert_pem, key_pem,
+    cert_object)`."""
     ca_cert = x509.load_pem_x509_certificate(ca_certificate_pem)
     ca_key = serialization.load_pem_private_key(ca_private_key_pem, password=None)
 
@@ -134,12 +135,12 @@ def _issue_leaf_certificate(
 
 
 class InternalSelfSignedConnector(SignatureProviderConnector):
-    """Einziger real implementierter Connector dieser Session (3.10: "für
-    dieses Grundgerüst nur SES/AES mit systeminternen/selbstsignierten
-    Schlüsseln") - stellt je Signaturvorgang ein von der internen Root-CA
-    ausgestelltes Leaf-Zertifikat aus und bettet es per **pyHanko** (PAdES-B-B)
-    in die PDF-Bytes ein. `level="qes"` wird bereits in
-    `SignatureProviderConfig` verboten (kein akkreditierter QTSP verfügbar)."""
+    """The only actually implemented connector for this session (3.10:
+    "for this basic scaffold only SES/AES with system-internal/self-signed
+    keys") - issues a leaf certificate from the internal root CA per
+    signing operation and embeds it into the PDF bytes via **pyHanko**
+    (PAdES-B-B). `level="qes"` is already forbidden in
+    `SignatureProviderConfig` (no accredited QTSP available)."""
 
     def __init__(self, ca_certificate_pem: bytes, ca_private_key_pem: bytes) -> None:
         self._ca_certificate_pem = ca_certificate_pem
@@ -150,8 +151,8 @@ class InternalSelfSignedConnector(SignatureProviderConnector):
             common_name = signer.display_name
             email = signer.email
         else:
-            # SES (Simple Electronic Signature): bewusst kein personenbezogenes
-            # Zertifikat - "einfache elektronische Bestätigung", siehe 3.10.
+            # SES (Simple Electronic Signature): deliberately no personal
+            # certificate - "simple electronic confirmation", see 3.10.
             common_name = "DMS System (SES)"
             email = None
 
@@ -177,24 +178,24 @@ class InternalSelfSignedConnector(SignatureProviderConnector):
             cms_signer = signers.SimpleSigner.load(
                 key_file.name, cert_file.name, ca_chain_files=(ca_file.name,)
             )
-            # `strict=False`: viele reale PDF-Erzeuger (u. a. LibreOffice)
-            # schreiben eine hybride Querverweistabelle (klassische Xref-Tabelle
-            # + zusätzlicher `/XRefStm` für Reader vor PDF 1.5) - pyHanko lehnt
-            # das im strikten Modus mit einem `SigningError` ab, da eine
-            # hybride Historie theoretisch für "Shadow Attacks" beim
-            # nachträglichen Validieren missbraucht werden könnte. Das betrifft
-            # hier aber die bereits vor dieser Signatur bestehende Dokument-
-            # historie, nicht die inkrementelle Änderung, die wir selbst
-            # anhängen - für eine erste Signatur eines hochgeladenen Dokuments
-            # ist das ein zu häufiger, legitimer Fall, um ihn pauschal
-            # abzulehnen.
+            # `strict=False`: many real-world PDF producers (including
+            # LibreOffice) write a hybrid cross-reference table (classic
+            # xref table + an additional `/XRefStm` for readers prior to
+            # PDF 1.5) - pyHanko rejects this in strict mode with a
+            # `SigningError`, since a hybrid history could theoretically be
+            # abused for "shadow attacks" during later validation. This
+            # concerns the document history that already existed before
+            # this signature, though, not the incremental change we append
+            # ourselves - for a first signature on an uploaded document
+            # this is too common a legitimate case to reject outright.
             writer = IncrementalPdfFileWriter(io.BytesIO(pdf_bytes), strict=False)
             meta = signers.PdfSignatureMetadata(
                 field_name="DMSSignature", reason="Elektronische Signatur (DMS, 3.10)"
             )
-            # `signers.sign_pdf` ruft intern `asyncio.run(...)` auf und kollidiert
-            # deshalb mit der bereits laufenden Event-Loop des FastAPI-Handlers -
-            # `async_sign_pdf` ist das direkte, koroutinen-native Äquivalent.
+            # `signers.sign_pdf` internally calls `asyncio.run(...)` and
+            # therefore collides with the already-running event loop of the
+            # FastAPI handler - `async_sign_pdf` is the direct,
+            # coroutine-native equivalent.
             signed_buffer = await signers.async_sign_pdf(writer, meta, signer=cms_signer)
 
         return SignedResult(
@@ -206,9 +207,10 @@ class InternalSelfSignedConnector(SignatureProviderConnector):
         )
 
     async def verify(self, pdf_bytes: bytes) -> VerificationResult:
-        # `strict=False` aus demselben Grund wie in `sign()` - ein Dokument mit
-        # hybrider Querverweistabelle in seiner Vorhistorie lässt sich sonst
-        # auch nach erfolgreicher Signatur nicht mehr verifizieren.
+        # `strict=False` for the same reason as in `sign()` - a document
+        # with a hybrid cross-reference table in its prior history would
+        # otherwise no longer be verifiable even after a successful
+        # signature.
         reader = PdfFileReader(io.BytesIO(pdf_bytes), strict=False)
         if not reader.embedded_signatures:
             return VerificationResult(

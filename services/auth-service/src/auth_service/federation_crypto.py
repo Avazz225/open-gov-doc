@@ -1,17 +1,17 @@
-"""Signatur-Primitive für die optionale föderierte Kontaktsuche (2.5/7.4,
-P15-S4) - identische Bibliothek/Serialisierung wie `workflow_service.
-federation_crypto` (RSA-2048, PEM/PKCS8, RSA-PSS/SHA-256), hier bewusst
-erneut dupliziert statt in eine gemeinsame Lib extrahiert (kein
-`libs/`-Paket kannte diese Primitive bisher, sie waren bereits zuvor zweimal
-unabhängig in `workflow-service`/`federation-hub-service` dupliziert - dritte
-Duplikation folgt demselben, bereits etablierten Präzedenzfall dieses
-Projekts statt eine neue Abstraktion für einen einzelnen zusätzlichen
-Aufrufer einzuführen). Anders als `workflow_service.federation_crypto` OHNE
-Ende-zu-Ende-Verschlüsselung (`encrypt_for`/`decrypt_with`): die föderierte
-Kontaktsuche läuft direkt Installation-zu-Installation (nicht über den Hub
-relayt, siehe ADR 0054), der Hub sieht die Anfrage/Antwort ohnehin nie - der
-Bedrohungsfall, den die Verschlüsselung im Handover-Schema adressiert
-("Hub soll nie Klartext sehen"), besteht hier gar nicht."""
+"""Signature primitives for the optional federated contact directory search
+(2.5/7.4, P15-S4) - identical library/serialization as `workflow_service.
+federation_crypto` (RSA-2048, PEM/PKCS8, RSA-PSS/SHA-256), deliberately
+duplicated here again instead of extracted into a shared lib (no `libs/`
+package knew these primitives before now, they had already been
+independently duplicated twice in `workflow-service`/`federation-hub-service`
+- a third duplication follows this project's already-established precedent
+instead of introducing a new abstraction for a single additional caller).
+Unlike `workflow_service.federation_crypto`, WITHOUT end-to-end encryption
+(`encrypt_for`/`decrypt_with`): the federated contact directory search runs
+directly installation-to-installation (not relayed through the Hub, see ADR
+0054), the Hub never sees the request/response anyway - the threat that the
+encryption in the handover scheme addresses ("Hub should never see
+plaintext") simply does not exist here."""
 
 import base64
 

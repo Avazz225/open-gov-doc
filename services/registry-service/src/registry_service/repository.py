@@ -33,17 +33,17 @@ def _to_out(instance: ServiceInstance, timeout_seconds: float, now: datetime) ->
 
 
 async def register(session: AsyncSession, payload: RegisterRequest) -> InstanceOut:
-    """Registrierung ist ein Upsert (3.2a): meldet sich eine bereits bekannte
-    ``instance_id`` erneut (z. B. nach einem Reconnect), werden ihre Daten
-    aktualisiert statt einen Konflikt zu erzeugen.
+    """Registration is an upsert (3.2a): if an already known ``instance_id``
+    registers again (e.g. after a reconnect), its data is updated instead of
+    raising a conflict.
     """
     now = datetime.now(UTC)
     instance = await session.get(ServiceInstance, payload.instance_id)
     if instance is None:
-        # Nur eine echte Neuregistrierung startet "active" - eine erneute
-        # Registrierung derselben instance_id (Selbstheilung nach 404, siehe
-        # dms-registry-client) ist kein Neustart und darf einen zuvor
-        # gesetzten "draining"-Status nicht stillschweigend zuruecksetzen.
+        # Only a genuine new registration starts as "active" - re-registering
+        # the same instance_id (self-healing after a 404, see
+        # dms-registry-client) is not a restart and must not silently reset
+        # a previously set "draining" status.
         instance = ServiceInstance(
             instance_id=payload.instance_id, registered_at=now, status="active"
         )
@@ -72,10 +72,10 @@ async def heartbeat(session: AsyncSession, instance_id: str) -> InstanceOut:
 
 
 async def mark_draining(session: AsyncSession, instance_id: str) -> InstanceOut:
-    """Drain-Mechanismus (10.5/3.8, P10-S2): setzt ausschliesslich den
-    Status, keine Kuendigung/kein Abbruch der Instanz - siehe
-    `gateway_service.upstream.InstanceResolver`, der draining-Instanzen aus
-    dem Pool fuer NEUE Anfragen ausschliesst."""
+    """Drain mechanism (10.5/3.8, P10-S2): only sets the status, does not
+    terminate/abort the instance - see
+    `gateway_service.upstream.InstanceResolver`, which excludes draining
+    instances from the pool for NEW requests."""
     instance = await session.get(ServiceInstance, instance_id)
     if instance is None:
         raise InstanceNotFoundError(instance_id)
@@ -85,12 +85,11 @@ async def mark_draining(session: AsyncSession, instance_id: str) -> InstanceOut:
 
 
 async def activate(session: AsyncSession, instance_id: str) -> InstanceOut:
-    """Umkehrung von `mark_draining` (10.5, P10-S3): ohne diesen Endpunkt
-    gaebe es keinen echten Rollback-Pfad - Konzept 10.5 verlangt
-    ausdruecklich, dass ein Rollback moeglich bleibt, "solange der Drain...
-    noch nicht vollstaendig abgeschlossen ist". Wird z. B. von
-    `scripts/rolling-update.sh` genutzt, wenn ein Rollout manuell
-    zurueckgerollt wird."""
+    """Reversal of `mark_draining` (10.5, P10-S3): without this endpoint
+    there would be no real rollback path - concept 10.5 explicitly requires
+    that a rollback remains possible "as long as the drain... has not yet
+    fully completed". Used e.g. by `scripts/rolling-update.sh` when a
+    rollout is manually rolled back."""
     instance = await session.get(ServiceInstance, instance_id)
     if instance is None:
         raise InstanceNotFoundError(instance_id)
@@ -112,10 +111,10 @@ async def deregister(session: AsyncSession, instance_id: str) -> InstanceOut:
 async def list_active_by_type(
     session: AsyncSession, service_type: str, *, heartbeat_timeout_seconds: float
 ) -> list[InstanceOut]:
-    """Die aktive Routingtabelle (3.2a): nur Instanzen, deren letzter Heartbeat
-    innerhalb des konfigurierten Zeitfensters liegt. Kein separater
-    Hintergrund-Sweep nötig - Ausfall wird beim Lesen bewertet, nicht durch
-    einen mutierenden Hintergrundjob, was Race Conditions vermeidet.
+    """The active routing table (3.2a): only instances whose last heartbeat
+    falls within the configured time window. No separate background sweep
+    needed - failure is evaluated on read rather than via a mutating
+    background job, which avoids race conditions.
     """
     now = datetime.now(UTC)
     result = await session.execute(

@@ -7,15 +7,15 @@ class Settings(BaseServiceSettings):
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
     keycloak_base_url: str = "http://localhost:8080"
-    # SSO/automatischer Login (Post-Roadmap-Feature): die vom BROWSER
-    # erreichbare Keycloak-URL für den Redirect-Flow (`GET /oidc/authorize`
-    # liefert eine `authorization_url`, zu der der Browser selbst navigiert).
-    # Kann von `keycloak_base_url` abweichen - im Docker-Compose-Stack
-    # spricht `auth-service` Keycloak intern über `http://keycloak:8080` an,
-    # der Browser des Nutzers kennt diesen Hostnamen aber nicht und braucht
-    # stattdessen den extern gemappten `http://localhost:8080`. Fällt auf
-    # `keycloak_base_url` zurück, wenn nicht gesetzt (z. B. Tests/lokale
-    # Entwicklung ohne Docker, wo beide identisch sind).
+    # SSO/automatic login (post-roadmap feature): the Keycloak URL reachable
+    # from the BROWSER for the redirect flow (`GET /oidc/authorize` returns
+    # an `authorization_url` the browser navigates to itself). May differ
+    # from `keycloak_base_url` - in the Docker Compose stack, `auth-service`
+    # talks to Keycloak internally via `http://keycloak:8080`, but the
+    # user's browser doesn't know this hostname and needs the externally
+    # mapped `http://localhost:8080` instead. Falls back to
+    # `keycloak_base_url` if not set (e.g. tests/local development without
+    # Docker, where both are identical).
     keycloak_public_base_url: str | None = None
     keycloak_realm: str = "dms"
     keycloak_client_id: str = "dms-api"
@@ -24,50 +24,52 @@ class Settings(BaseServiceSettings):
     keycloak_admin_password: str = "admin_dev_only"
 
     permission_service_base_url: str = "http://localhost:8004"
-    # Erster Konsument dieses Service (P6-S5, Superuser Break-Glass, 4.6).
+    # First consumer of this service (P6-S5, superuser break-glass, 4.6).
     subjects: list[str] = ["permission.approval.approved"]
 
-    # Break-Glass-Aktivierung (4.6): bewusste Vereinfachung eines einzigen
-    # absoluten Ablauf-Zeitstempels statt getrennter Gesamtdauer-/Inaktivitäts-
-    # Timer (siehe ADR 0023) - durchgesetzt über denselben Poll-Loop-Ansatz wie
-    # die SLA-Zeitüberwachung in workflow-service (ADR 0020).
+    # Break-glass activation (4.6): deliberate simplification of a single
+    # absolute expiry timestamp instead of separate total-duration/
+    # inactivity timers (see ADR 0023) - enforced via the same poll-loop
+    # approach as workflow-service's SLA time monitoring (ADR 0020).
     superuser_activation_minutes: int = 30
     superuser_poll_interval_seconds: float = 30.0
 
-    # Föderierte Kontaktsuche (2.5/7.4, P15-S4) - eigene, von workflow-services
-    # Federation-Hub-Teilnahme unabhängige Registrierung (siehe models.py).
-    # Bewusst opt-in: bleibt `None`/`False`, bis eine Installation dies
-    # ausdrücklich konfiguriert - "keine automatische Nebenwirkung der
-    # bestehenden Föderationsfunktion" (Konzept 2.5, wörtlich).
+    # Federated contact directory search (2.5/7.4, P15-S4) - own
+    # registration independent of workflow-service's Federation Hub
+    # participation (see models.py). Deliberately opt-in: stays
+    # `None`/`False` until an installation explicitly configures this -
+    # "no automatic side effect of the existing federation feature"
+    # (concept 2.5, verbatim).
     federation_hub_base_url: str | None = None
     federated_directory_enabled: bool = False
     installation_gateway_base_url: str = "http://gateway-service:8000"
 
-    # SSO/automatischer Login (Post-Roadmap-Feature, Kerberos/SPNEGO über
-    # Keycloak): der Browser-Redirect-Fluss (`standardFlowEnabled` +
-    # Redirect-URIs) wird IMMER eingerichtet, unabhängig von Kerberos - das
-    # ist der Teil, der auch ohne Kerberos-Konfiguration funktioniert
-    # (Fallback auf Keycloaks eigenes gehostetes Login-Formular). Nur der
-    # Kerberos-Teil selbst ist an diese drei Werte gebunden; fehlt einer,
-    # wird `_ensure_kerberos` in bootstrap.py sauber übersprungen (kein
-    # Domain-Controller/Keytab in einer frischen/sandbox-artigen Installation
-    # nötig, um SSO grundsätzlich nutzbar zu machen).
+    # SSO/automatic login (post-roadmap feature, Kerberos/SPNEGO via
+    # Keycloak): the browser redirect flow (`standardFlowEnabled` +
+    # redirect URIs) is ALWAYS set up, independent of Kerberos - this is
+    # the part that works even without Kerberos configuration (fallback to
+    # Keycloak's own hosted login form). Only the Kerberos part itself is
+    # tied to these three values; if one is missing, `_ensure_kerberos` in
+    # bootstrap.py is cleanly skipped (no domain controller/keytab needed
+    # in a fresh/sandbox-like installation to make SSO usable at all).
     kerberos_enabled: bool = False
     kerberos_realm: str | None = None
     kerberos_server_principal: str | None = None
     kerberos_keytab_path: str | None = None
 
-    # Erlaubte Origins für `redirect_uri` bei `GET /oidc/authorize` (Open-
-    # Redirect-Absicherung) - gleiches Listen-Setting-Muster wie gateway-
-    # services `cors_allowed_origins`. Bewusst nur user-ui in dieser Session
-    # (siehe ADR) - weitere Frontends folgen bei Bedarf demselben Muster.
+    # Allowed origins for `redirect_uri` in `GET /oidc/authorize`
+    # (open-redirect protection) - same list-setting pattern as
+    # gateway-service's `cors_allowed_origins`. Deliberately only user-ui in
+    # this session (see ADR) - further frontends follow the same pattern as
+    # needed.
     sso_redirect_uri_allowed_origins: list[str] = ["http://localhost:3000"]
 
-    # Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063):
-    # Gültigkeitsdauer von Tokens lokaler technischer Konten (Superuser,
-    # künftig Domain-Admins) - unabhängig von `superuser_activation_minutes`
-    # oben, das die Break-Glass-AKTIVIERUNG befristet (wie lange `enabled=
-    # True` bleibt), nicht die Lebensdauer eines einzelnen Tokens. Werte
-    # orientieren sich an Keycloaks eigenen Standard-Token-Laufzeiten.
+    # Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR
+    # 0063): validity duration of tokens for local technical accounts
+    # (superuser, future domain admins) - independent of
+    # `superuser_activation_minutes` above, which limits the break-glass
+    # ACTIVATION (how long `enabled=True` stays), not the lifetime of a
+    # single token. Values are oriented on Keycloak's own default token
+    # lifetimes.
     local_access_token_ttl_seconds: int = 300
     local_refresh_token_ttl_seconds: int = 1800

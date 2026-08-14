@@ -53,10 +53,10 @@ def _has_poststelle_role(x_dms_roles: str) -> bool:
 def _parse_message(
     raw_bytes: bytes,
 ) -> tuple[str, str, datetime, str, list[tuple[str, str | None, bytes]]]:
-    """Zerlegt eine rohe RFC-822-Nachricht (2.5/3.3) in Kopfdaten, Textkörper
-    und Anhänge. Der Textkörper wird selbst wie ein (synthetischer) Anhang
-    behandelt - siehe `_ingest_message` - damit er denselben verpflichtenden
-    Virenscan (10.3) durchläuft wie jeder echte Dateianhang."""
+    """Parses a raw RFC-822 message (2.5/3.3) into headers, body text, and
+    attachments. The body text itself is treated like a (synthetic)
+    attachment - see `_ingest_message` - so it goes through the same
+    mandatory virus scan (10.3) as any real file attachment."""
     msg = email.message_from_bytes(raw_bytes)
     from_address = msg.get("From", "unbekannt")
     subject = msg.get("Subject", "(kein Betreff)")
@@ -100,12 +100,12 @@ def _safe_filename(name: str) -> str:
 async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> None:
     from_address, subject, received_at, body_text, attachment_parts = _parse_message(raw.raw_bytes)
 
-    # Kandidaten-Muster frisch je Nachricht statt einmalig beim Start
-    # zwischengespeichert (Post-Roadmap Phase 19 Session 11) - Posteingang
-    # ist realistisch niedrigfrequent (Poststelle-Betrieb), ein zusätzlicher
-    # Cross-Service-Aufruf je NEU eingehender Nachricht (nicht je Kandidat)
-    # ist vertretbar und hält neu angelegte Objekttypen/geänderte Formate
-    # sofort wirksam, ohne einen Neustart abzuwarten.
+    # Candidate pattern loaded fresh per message instead of cached once at
+    # startup (Post-Roadmap Phase 19 Session 11) - inbound mail is
+    # realistically low-frequency (mail room operation), an additional
+    # cross-service call per NEWLY incoming message (not per candidate) is
+    # acceptable and keeps newly created object types/changed formats
+    # immediately effective, without waiting for a restart.
     candidate_pattern = await _load_candidate_pattern()
     match = await matching.resolve_match(
         f"{subject}\n{body_text}",
@@ -127,9 +127,9 @@ async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> Non
         match_candidates=match.candidates,
     )
 
-    # Der Textkörper selbst zählt als erster (synthetischer) Anhang - die
-    # Korrespondenz an sich ist genauso archivierungswürdig wie ihre
-    # Beilagen (siehe Docstring an `_parse_message`).
+    # The body text itself counts as the first (synthetic) attachment - the
+    # correspondence itself is just as worth archiving as its enclosures
+    # (see docstring on `_parse_message`).
     parts = list(attachment_parts)
     if body_text.strip():
         parts.insert(0, (f"{_safe_filename(subject)}.txt", "text/plain", body_text.encode("utf-8")))
@@ -166,23 +166,22 @@ async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> Non
 
 
 async def _load_candidate_pattern() -> "re.Pattern[str]":
-    """Post-Roadmap Phase 19 Session 11 - liest die tatsächlich
-    konfigurierten `kennzeichen_format`-Werte (object-type-service, je
-    Objekttyp) und das globale `case_number_config.format` (case-service)
-    und baut daraus das Kandidaten-Muster (matching.build_candidate_
-    pattern). Best-Effort, aufgerufen je neu eingehender Nachricht (siehe
-    `_ingest_message`), nicht einmalig beim Start - Posteingang ist
-    niedrigfrequent genug, dass ein neu angelegter Objekttyp/geändertes
-    Format ohne Neustart sofort wirksam wird. Schlägt ein Service fehl,
-    bleibt es für diese eine Nachricht beim generischen Rückfall-Muster.
-    Bewusst EIGENE, kurzlebige Clients statt der langlebigen `app.state.*`-
-    Instanzen: Letztere sind an den Event-Loop gebunden, in dem sie beim
-    Lifespan-Start erzeugt wurden - ein direkter Testaufruf von
-    `_ingest_message()` (an `TestClient`s eigenem Request-Dispatch vorbei,
-    siehe `tests/test_api.py::_ingest`) läuft in einem ANDEREN Loop
-    (pytest-asyncio) und würde beim ersten Zugriff mit "bound to a
-    different event loop" fehlschlagen - dasselbe bereits andernorts im
-    Projekt dokumentierte asyncpg/pytest-asyncio-Muster, hier für httpx."""
+    """Post-Roadmap Phase 19 Session 11 - reads the actually configured
+    `kennzeichen_format` values (object-type-service, per object type) and
+    the global `case_number_config.format` (case-service) and builds the
+    candidate pattern from them (matching.build_candidate_pattern).
+    Best-effort, called per newly incoming message (see `_ingest_message`),
+    not once at startup - inbound mail is low-frequency enough that a newly
+    created object type/changed format takes effect immediately without a
+    restart. If a service fails, this one message falls back to the generic
+    fallback pattern. Deliberately uses its OWN, short-lived clients instead
+    of the long-lived `app.state.*` instances: the latter are bound to the
+    event loop in which they were created at lifespan startup - a direct
+    test call to `_ingest_message()` (bypassing `TestClient`'s own request
+    dispatch, see `tests/test_api.py::_ingest`) runs in a DIFFERENT loop
+    (pytest-asyncio) and would fail on first access with "bound to a
+    different event loop" - the same asyncpg/pytest-asyncio pattern already
+    documented elsewhere in the project, here for httpx."""
     formats: list[str] = []
     object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     try:
@@ -212,9 +211,9 @@ async def _load_candidate_pattern() -> "re.Pattern[str]":
 
 
 async def _poll_loop(session_factory) -> None:
-    """Holt zyklisch neue Nachrichten ab (2.5/3.3) - gleiches Poll-Loop-Idiom
-    wie document-service's `_retention_poll_loop` (ADR 0020), hier deutlich
-    kürzer getaktet (Poststelle-Betrieb, siehe settings.py)."""
+    """Cyclically retrieves new messages (2.5/3.3) - same poll-loop idiom as
+    document-service's `_retention_poll_loop` (ADR 0020), here at a
+    considerably shorter cadence (mail room operation, see settings.py)."""
     while True:
         try:
             messages = await app.state.backend.fetch_new_messages()
@@ -347,11 +346,11 @@ async def get_inbound(
 async def _create_documents_for_message(
     session: AsyncSession, message, *, folder_id: str | None, created_by: str, title: str
 ) -> None:
-    """`title` gilt für das ERSTE angelegte Dokument (deterministisch der
-    Textkörper, siehe `_ingest_message`s `parts.insert(0, ...)`) - bei
-    mehreren Anhängen behalten die übrigen ihren eigenen Dateinamen als
-    Titel, da ein einzelner vom Formular vorgegebener Titel nicht sinnvoll
-    auf mehrere unterschiedliche Anlagen zugleich passt."""
+    """`title` applies to the FIRST document created (deterministically the
+    body text, see `_ingest_message`'s `parts.insert(0, ...)`) - with
+    multiple attachments, the remaining ones keep their own filename as the
+    title, since a single form-provided title does not sensibly fit
+    multiple different enclosures at once."""
     for index, attachment in enumerate(await repository.list_attachments(session, message.id)):
         if attachment.scan_status != "clean" or attachment.storage_object_key is None:
             continue
@@ -386,10 +385,9 @@ async def confirm_match(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> InboundMessageOut:
-    """Bestätigt einen vorgeschlagenen Treffer (2.5, P15-S3) - keine stille
-    Zuordnung: der Treffer wurde beim Abholen nur VORGESCHLAGEN
-    (`status="proposed_match"`), erst dieser Aufruf legt tatsächlich
-    Dokumente an."""
+    """Confirms a proposed match (2.5, P15-S3) - not a silent assignment:
+    the match was only PROPOSED during retrieval (`status="proposed_match"`),
+    only this call actually creates documents."""
     _require_poststelle(x_dms_principal, x_dms_roles)
     try:
         message = await repository.get_message(session, message_id)
@@ -410,10 +408,10 @@ async def confirm_match(
                 raise HTTPException(
                     status_code=409, detail="Zugeordnetes Dokument nicht mehr auffindbar"
                 )
-            # Fällt zusammen mit dem Ordner des gefundenen Dokuments (naheliegender
-            # Default: eine Rückmeldung zu einem bekannten Dokument wird neben
-            # diesem abgelegt) - `None`, wenn jenes Dokument selbst auf oberster
-            # Ebene liegt, dann landet die neue Post ebenfalls dort.
+            # Coincides with the folder of the found document (obvious
+            # default: a reply concerning a known document is filed next to
+            # it) - `None` if that document itself resides at the top
+            # level, in which case the new mail ends up there too.
             folder_id = document["folder_id"]
         else:
             raise HTTPException(
@@ -442,9 +440,9 @@ async def assign_manually(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> InboundMessageOut:
-    """Manuelle Zuordnung (2.5) - für Nachrichten ohne (oder mit mehrdeutigem)
-    automatischem Treffer, aber auch als bewusste Übersteuerung eines
-    vorgeschlagenen Treffers nutzbar (z. B. falsches Kennzeichen erkannt)."""
+    """Manual assignment (2.5) - for messages without (or with ambiguous)
+    automatic match, but also usable as a deliberate override of a proposed
+    match (e.g. wrong reference number detected)."""
     _require_poststelle(x_dms_principal, x_dms_roles)
     try:
         message = await repository.get_message(session, message_id)
@@ -506,13 +504,13 @@ async def reject_message(
 
 
 async def _attach_related_document(message: EmailMessage, document_id: str) -> None:
-    """Hängt den aktuellen Inhalt eines bereits im DMS liegenden Dokuments an
-    eine Postausgang-Nachricht an (2.5) - das anhang-seitige Gegenstück zu
-    `_create_documents_for_message`s Posteingang-Pfad (dort: Anhang -> neues
-    Dokument; hier: bestehendes Dokument -> Anhang). Unbekannte
-    `related_document_id` ist ein Eingabefehler des Aufrufers (400, siehe
-    Aufrufstelle in `send_outbound`), ein im Storage Service fehlender
-    Inhalt (z. B. bereits ausgesondert) ein 404 - gleiche Unterscheidung wie
+    """Attaches the current content of a document already residing in the
+    DMS to an outbound message (2.5) - the attachment-side counterpart to
+    `_create_documents_for_message`'s inbound path (there: attachment ->
+    new document; here: existing document -> attachment). An unknown
+    `related_document_id` is a caller input error (400, see call site in
+    `send_outbound`), content missing in the storage service (e.g. already
+    disposed of) is a 404 - same distinction as
     `_create_documents_for_message`."""
     version = await app.state.documents.get_current_version(document_id)
     if version is None:
@@ -548,12 +546,12 @@ async def send_outbound(
     message["Subject"] = payload.subject
     message.set_content(payload.body)
 
-    # Anhang aus einem bereits im DMS liegenden Dokument (2.5) - VOR dem
-    # eigentlichen Versandversuch aufgelöst, nicht in dessen try/except
-    # eingeschlossen: eine unbekannte `related_document_id` ist ein
-    # Eingabefehler des Aufrufers (400), keine Versand-Fehlschlagsituation
-    # wie ein nicht erreichbarer SMTP-Server - gleiches Prinzip wie
-    # `assign_manually`s Vorab-Prüfung einer unbekannten `case_id`.
+    # Attachment from a document already residing in the DMS (2.5) -
+    # resolved BEFORE the actual send attempt, not wrapped in its
+    # try/except: an unknown `related_document_id` is a caller input error
+    # (400), not a send-failure situation like an unreachable SMTP server -
+    # same principle as `assign_manually`'s upfront check of an unknown
+    # `case_id`.
     if payload.related_document_id is not None:
         await _attach_related_document(message, payload.related_document_id)
 

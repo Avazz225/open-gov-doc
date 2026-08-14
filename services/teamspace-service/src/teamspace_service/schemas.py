@@ -21,10 +21,10 @@ class TeamspaceOut(BaseModel):
 
 
 class TeamspaceAdminOut(BaseModel):
-    """Installationsweite Übersicht (Post-Roadmap Phase 22 Session 5) -
-    identisch zu `TeamspaceOut`, zusätzlich `member_count` statt einer
-    vollständigen Mitgliederliste (für einen reinen Übersichts-Endpunkt
-    ausreichend, spart eine zweite, gegatete Mitglieder-Route)."""
+    """Installation-wide overview (Post-Roadmap Phase 22 Session 5) -
+    identical to `TeamspaceOut`, plus `member_count` instead of a full
+    member list (sufficient for a pure overview endpoint, avoids a
+    second, gated members route)."""
 
     id: str
     name: str

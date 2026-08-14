@@ -4,14 +4,14 @@ _CONFIG_ADMIN_PRINCIPAL_ID = "migration-service"
 
 
 class WorkflowServiceClient:
-    """Treibt den eigentlichen Transfer über eine echte BPMN-Instanz in
-    `workflow-service` an (7.2: "läuft selbst als auditierbarer, resumable
-    Workflow über die Workflow Engine"). Lädt die mitgelieferten
-    Prozessdefinitionen (`resources/*.bpmn`) beim Start idempotent hoch
-    (Upload unter demselben Namen legt eine neue Version an, siehe
-    docs/services/workflow-service.md "Versionierung" - daher erst per
-    `GET /process-definitions?name=` prüfen, ob bereits eine Version
-    existiert, statt bei jedem Neustart eine weitere anzulegen)."""
+    """Drives the actual transfer via a real BPMN instance in
+    `workflow-service` (7.2: "itself runs as an auditable, resumable
+    workflow via the workflow engine"). Idempotently uploads the bundled
+    process definitions (`resources/*.bpmn`) on startup
+    (uploading under the same name creates a new version, see
+    docs/services/workflow-service.md "Versioning" - hence first check via
+    `GET /process-definitions?name=` whether a version already
+    exists, instead of creating another one on every restart)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(
@@ -40,13 +40,13 @@ class WorkflowServiceClient:
     async def start_instance(
         self, definition_id: int, *, created_by: str, initial_data: dict, instance_id: str
     ) -> str:
-        """`instance_id` wird vom Aufrufer bestimmt (P12-S2, siehe
-        `ProcessInstanceCreate.instance_id`-Docstring in workflow-service) -
-        wichtig, weil bereits der allererste automatische Schritt (z. B.
-        "Sperren") fehlschlagen kann: ohne eine im Voraus bekannte ID gäbe es
-        bei einem Fehlschlag dieses Aufrufs keine Möglichkeit, die dennoch in
-        workflow-service angelegte Instanz für `POST /instances/{id}/retry`
-        wiederzufinden."""
+        """`instance_id` is determined by the caller (P12-S2, see
+        `ProcessInstanceCreate.instance_id` docstring in workflow-service) -
+        important because even the very first automatic step (e.g.
+        "lock") can fail: without an ID known in advance, if this call
+        fails there would be no way to find the instance that was
+        nevertheless created in workflow-service again for
+        `POST /instances/{id}/retry`."""
         response = await self._client.post(
             f"/process-definitions/{definition_id}/instances",
             json={

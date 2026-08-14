@@ -9,23 +9,23 @@ from jose import jwt
 from auth_service import federation_crypto
 from auth_service.models import LocalSigningKey
 
-# Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063) -
-# kein URL-Issuer (anders als Keycloaks `{base_url}/realms/{realm}`), da
-# dieser Issuer keinen eigenen HTTP-Endpunkt außer dem lokalen JWKS braucht
-# und absichtlich nicht mit einer erreichbaren Adresse verwechselt werden
-# soll - `MultiIssuerTokenValidator` wählt allein über den `iss`-String,
-# keine Netzwerkoperation involviert.
+# Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR 0063) -
+# not a URL issuer (unlike Keycloak's `{base_url}/realms/{realm}`), since
+# this issuer needs no HTTP endpoint of its own besides the local JWKS and
+# is deliberately meant not to be mistaken for a reachable address -
+# `MultiIssuerTokenValidator` selects purely via the `iss` string, no
+# network operation involved.
 LOCAL_ISSUER = "dms-auth-service-local"
 _SIGNING_KEY_ID = 1
 _DEFAULT_KID = "local-1"
 
 
 async def ensure_signing_key(session_factory) -> LocalSigningKey:
-    """Idempotent (gleiches Muster wie `main._ensure_federation_identity`) -
-    erzeugt beim allerersten Aufruf ein neues RSA-Schlüsselpaar und
-    persistiert es, jeder weitere Aufruf liest nur die bereits vorhandene
-    Zeile. Nutzt `federation_crypto.generate_keypair()` wieder (RSA-2048,
-    PEM/PKCS8) - selber Service, keine neue Duplikation."""
+    """Idempotent (same pattern as `main._ensure_federation_identity`) -
+    generates a new RSA key pair and persists it on the very first call,
+    every subsequent call just reads the already-existing row. Reuses
+    `federation_crypto.generate_keypair()` (RSA-2048, PEM/PKCS8) - same
+    service, no new duplication."""
     async with session_factory() as session:
         key = await session.get(LocalSigningKey, _SIGNING_KEY_ID)
         if key is None:
@@ -44,9 +44,9 @@ async def ensure_signing_key(session_factory) -> LocalSigningKey:
 
 
 def build_jwks(public_key_pem: bytes, kid: str) -> dict:
-    """Liefert dasselbe JWKS-Format wie Keycloaks `/protocol/openid-connect/
-    certs` - `dms_auth_client.TokenValidator` unterscheidet nicht, woher ein
-    JWKS stammt."""
+    """Returns the same JWKS format as Keycloak's `/protocol/openid-connect/
+    certs` - `dms_auth_client.TokenValidator` doesn't distinguish where a
+    JWKS came from."""
     public_jwk = jose_jwk.construct(public_key_pem.decode("ascii"), algorithm="RS256").to_dict()
     public_jwk["kid"] = kid
     public_jwk["alg"] = "RS256"
@@ -64,21 +64,20 @@ def mint_token(
     roles: list[str],
     expires_in_seconds: int,
 ) -> str:
-    """Stellt ein einzelnes Token mit demselben Claim-Shape wie Keycloak aus
-    (`sub`, `preferred_username`, `realm_access.roles`, `aud`) - Downstream-
-    Konsumenten (`GET /me`, `permission-service`-Aufrufe, die `sub`/Rollen
-    auslesen) müssen dadurch nichts über die Herkunft des Tokens wissen.
-    Liefert nur den rohen Token-String zurück; das Zusammensetzen der vollen
-    `TokenResponse` (Access- + Refresh-Token, je ein Aufruf mit
-    unterschiedlicher Gültigkeitsdauer) ist Sache des Aufrufers (`POST
-    /login`, Phase 18 Session 2) - kein echtes Keycloak-Refresh-Grant, da
-    rein lokale Konten keine Keycloak-Session besitzen, gegen die refresht
-    werden könnte. Trägt einen `jti` (registrierter JWT-Claim für genau
-    diesen Zweck) - ohne ihn wären zwei innerhalb derselben Sekunde
-    ausgestellte Tokens für dasselbe Konto (z. B. Login direkt gefolgt von
-    Refresh) byte-identisch, da `iat`/`exp` nur Sekundenauflösung haben und
-    alle übrigen Claims sich nicht unterscheiden - real bei der
-    Testentwicklung dieser Session aufgetreten."""
+    """Issues a single token with the same claim shape as Keycloak
+    (`sub`, `preferred_username`, `realm_access.roles`, `aud`) - downstream
+    consumers (`GET /me`, `permission-service` calls that read `sub`/roles)
+    therefore don't need to know anything about the token's origin.
+    Returns only the raw token string; assembling the full `TokenResponse`
+    (access + refresh token, one call each with a different validity
+    duration) is the caller's job (`POST /login`, Phase 18 Session 2) - no
+    real Keycloak refresh grant, since purely local accounts have no
+    Keycloak session to refresh against. Carries a `jti` (registered JWT
+    claim for exactly this purpose) - without it, two tokens issued within
+    the same second for the same account (e.g. login immediately followed
+    by refresh) would be byte-identical, since `iat`/`exp` only have
+    second-level resolution and all other claims don't differ - this
+    actually occurred during test development in this session."""
     now = int(time.time())
     claims = {
         "iss": LOCAL_ISSUER,
@@ -96,14 +95,14 @@ def mint_token(
 
 
 def is_local_token(token: str) -> bool:
-    """Peekt den `iss`-Claim OHNE Signaturprüfung, um `POST /refresh` zu
-    entscheiden, ob ein Token lokal (`local_token_issuer`) oder von Keycloak
-    ausgestellt wurde - reine Weichenstellung, welcher der beiden Refresh-
-    Pfade zuständig ist; die eigentliche Signaturprüfung passiert erst
-    danach (`MultiIssuerTokenValidator`/Keycloaks Token-Endpunkt). Liefert
-    `False` bei jedem unparsbaren Token (fällt dann auf den bisherigen
-    Keycloak-Pfad zurück, dessen Fehlerverhalten für kaputte Tokens bereits
-    etabliert ist)."""
+    """Peeks at the `iss` claim WITHOUT signature verification, to let
+    `POST /refresh` decide whether a token was issued locally
+    (`local_token_issuer`) or by Keycloak - purely a routing decision for
+    which of the two refresh paths is responsible; the actual signature
+    verification only happens afterward (`MultiIssuerTokenValidator`/
+    Keycloak's token endpoint). Returns `False` for any unparsable token
+    (then falls back to the existing Keycloak path, whose error behavior
+    for broken tokens is already established)."""
     try:
         claims = jwt.get_unverified_claims(token)
     except Exception:

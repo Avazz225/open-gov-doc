@@ -1,15 +1,15 @@
-"""Schema-Versionierung des Konfigurationsdokuments (7.3: "Versionierung des
-Konfigurationsschemas selbst, damit Export aus einer älteren Version in eine
-neuere importiert werden kann - mit Migrationslogik bei Schemaänderungen").
+"""Schema versioning of the configuration document (7.3: "Versioning the
+configuration schema itself, so an export from an older version can be
+imported into a newer one - with migration logic for schema changes").
 
-Es gibt bislang nur `SCHEMA_VERSION = "1.0"` (siehe `schemas.py`), also noch
-keine reale Migration zu schreiben - `MIGRATIONS` ist der vorgesehene
-Erweiterungspunkt für den Tag, an dem sich das Dokumentformat ändert: ein
-Eintrag `"1.0"` würde eine Funktion `dict -> dict` registrieren, die ein
-Dokument dieser Version auf die NÄCHSTHÖHERE Version anhebt (`upgrade_to_current`
-wendet alle nötigen Schritte nacheinander an). Ein unbekannter, nicht in
-`MIGRATIONS` erreichbarer `schema_version`-Wert wird abgelehnt (`422`), statt
-stillschweigend falsch interpretiert zu werden."""
+So far there is only `SCHEMA_VERSION = "1.0"` (see `schemas.py`), so there is
+no real migration to write yet - `MIGRATIONS` is the intended
+extension point for the day the document format changes: an
+entry `"1.0"` would register a `dict -> dict` function that raises a
+document of that version to the NEXT-HIGHER version (`upgrade_to_current`
+applies all necessary steps in sequence). An unknown `schema_version` value
+not reachable in `MIGRATIONS` is rejected (`422`) instead of
+being silently misinterpreted."""
 
 from collections.abc import Callable
 

@@ -4,10 +4,11 @@ import httpx
 
 
 class FolderServiceClient:
-    """HTTP-Client gegen den Folder Service (3.1) - nur für die denormalisierte
-    `folder_name` im Suchindex (siehe consumer.py). Ein Ordner-Umbenennen
-    aktualisiert bereits indexierte Dokumente nicht rückwirkend, erst beim
-    nächsten Re-Index (akzeptierte Inkonsistenz, siehe Offene Punkte)."""
+    """HTTP client against the Folder Service (3.1) - only for the
+    denormalized `folder_name` in the search index (see consumer.py).
+    Renaming a folder does not retroactively update already indexed
+    documents, only on the next re-index (accepted inconsistency, see Open
+    Points)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

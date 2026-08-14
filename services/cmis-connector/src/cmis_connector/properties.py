@@ -1,10 +1,9 @@
-"""Übersetzung von `TreeFolder`/`TreeDocument` (dms-connector-sdk) auf die
-CMIS-1.1-Objekt-Repräsentation (5.2.11 Succinct Representation of Properties)
-- diese Referenzimplementierung liefert AUSSCHLIESSLICH das succinct-Format
-  (flache `succinctProperties`, keine typannotierten `properties`-Objekte),
-  siehe docs/services/cmis-connector.md "Bewusste Grenzen". Reale CMIS-Clients
-  nutzen `succinct=true` ohnehin verbreitet, um Nachrichtengrößen zu
-  reduzieren (5.2.11)."""
+"""Translation of `TreeFolder`/`TreeDocument` (dms-connector-sdk) to the
+CMIS 1.1 object representation (5.2.11 Succinct Representation of Properties)
+- this reference implementation delivers EXCLUSIVELY the succinct format
+  (flat `succinctProperties`, no type-annotated `properties` objects),
+  see docs/services/cmis-connector.md "Deliberate Limitations". Real CMIS clients
+  commonly use `succinct=true` anyway to reduce message sizes (5.2.11)."""
 
 from datetime import UTC, datetime
 
@@ -13,11 +12,11 @@ from dms_connector_sdk import TreeDocument, TreeFolder
 CMIS_VERSION_SUPPORTED = "1.1"
 
 
-# CMIS datetime -> JSON-Zahl (Millisekunden seit 1970-01-01 UTC), wörtlich aus
-# 5.2.4 "Mapping Schema Elements to JSON". `None` bleibt `None` (5.2.7
-# "Properties in a value not set state") - z. B. für die Wurzel, deren
-# `TreeFolder` bewusst ohne `created_by`/`created_at` konstruiert wird
-# (siehe dms_tree_client.resolve_path).
+# CMIS datetime -> JSON number (milliseconds since 1970-01-01 UTC), verbatim from
+# 5.2.4 "Mapping Schema Elements to JSON". `None` stays `None` (5.2.7
+# "Properties in a value not set state") - e.g. for the root, whose
+# `TreeFolder` is deliberately constructed without `created_by`/`created_at`
+# (see dms_tree_client.resolve_path).
 def _to_cmis_datetime(value: datetime | None) -> int | None:
     if value is None:
         return None
@@ -36,10 +35,10 @@ def folder_properties(folder: TreeFolder, *, path: str) -> dict:
         "cmis:parentId": folder.parent_id,
         "cmis:createdBy": folder.created_by,
         "cmis:creationDate": _to_cmis_datetime(folder.created_at),
-        # `TreeFolder` führt keinen eigenen `updated_at`-Zeitstempel
-        # (folder-service kennt nur `created_at`, siehe FolderOut) - die
-        # Erstellungszeit wird bewusst auch als letzte Änderungszeit
-        # ausgegeben statt eines erfundenen Werts.
+        # `TreeFolder` does not carry its own `updated_at` timestamp
+        # (folder-service only knows `created_at`, see FolderOut) - the
+        # creation time is deliberately also output as the last modification
+        # time instead of a made-up value.
         "cmis:lastModifiedBy": folder.created_by,
         "cmis:lastModificationDate": _to_cmis_datetime(folder.created_at),
         "cmis:changeToken": None,
@@ -64,10 +63,10 @@ def document_properties(
         "cmis:contentStreamMimeType": document.content_type,
         "cmis:contentStreamFileName": document.title,
         "cmis:versionLabel": str(document.current_version_number),
-        # `document-service`s Checkin-Historie liefert immer die jeweils
-        # aktuellste Version zurück (kein Konzept nicht-aktueller,
-        # gleichzeitig sichtbarer Versionen) - daher immer `true`, siehe
-        # docs/services/cmis-connector.md "Bewusste Grenzen".
+        # `document-service`'s checkin history always returns the respective
+        # latest version (no concept of non-current, simultaneously
+        # visible versions) - hence always `true`, see
+        # docs/services/cmis-connector.md "Deliberate Limitations".
         "cmis:isLatestVersion": True,
         "cmis:isMajorVersion": True,
         "cmis:isLatestMajorVersion": True,
@@ -75,7 +74,7 @@ def document_properties(
         "cmis:isPrivateWorkingCopy": False,
         "cmis:isVersionSeriesCheckedOut": is_checked_out,
         "cmis:versionSeriesCheckedOutBy": checked_out_by,
-        # Kein separates PWC-Objekt (siehe `main.py` checkOut) - die
-        # Working-Copy-ID ist bewusst identisch zur Original-Dokument-ID.
+        # No separate PWC object (see `main.py` checkOut) - the
+        # working copy ID is deliberately identical to the original document ID.
         "cmis:versionSeriesCheckedOutId": document.id if is_checked_out else None,
     }

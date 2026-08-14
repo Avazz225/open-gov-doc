@@ -15,14 +15,14 @@ def make_handler(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     document_client: DocumentClient | None = None,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Führt zuvor per Vier-Augen-Prinzip (4.3) zurückgestellte Aktionen erst
-    nach Genehmigung aus: Ordner-Zwangslöschung (5.2a, seit P7-S1b,
-    `folder.force_delete` - exaktes Copy-Paste-Muster von `document_service.
-    consumer` für `document.force_delete`, P7-S1) und seit P7-S1c
-    Löschantrag für reguläre Nutzer (5.2, `folder.delete`). `document_client`
-    ist nur für Letzteres nötig (Kaskade auf enthaltene Dokumente, siehe
-    `repository.soft_delete_folder`) - optional, damit bestehende Aufrufer
-    ohne den neuen Parameter weiterhin funktionieren."""
+    """Executes actions previously deferred via the four-eyes principle (4.3)
+    only after approval: forced folder deletion (5.2a, since P7-S1b,
+    `folder.force_delete` - exact copy-paste pattern from `document_service.
+    consumer` for `document.force_delete`, P7-S1) and, since P7-S1c, the
+    deletion request for regular users (5.2, `folder.delete`). `document_client`
+    is only needed for the latter (cascade onto contained documents, see
+    `repository.soft_delete_folder`) - optional, so existing callers without
+    the new parameter keep working."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -79,10 +79,10 @@ async def _handle_delete_approved(
     document_client: DocumentClient | None,
     event: Event,
 ) -> None:
-    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - führt
-    eine zuvor per Vier-Augen-Prinzip zurückgestellte reguläre
-    Papierkorb-Verschiebung (inkl. Kaskade auf Unterordner/Dokumente) aus,
-    sobald sie genehmigt wurde."""
+    """Deletion request workflow for regular users (5.2, since P7-S1c) -
+    executes a regular trash move (including cascade onto subfolders/
+    documents) that was previously deferred via the four-eyes principle,
+    once it has been approved."""
     action_payload = event.payload.get("payload") or {}
     folder_id = action_payload.get("folder_id")
     if not folder_id:

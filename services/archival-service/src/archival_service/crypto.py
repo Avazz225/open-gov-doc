@@ -10,11 +10,11 @@ class DecryptionError(Exception):
 
 
 def encrypt(data: bytes, key: bytes) -> bytes:
-    """AES-256-GCM (5.6, ADR 0029) - der Nonce wird den Ciphertext-Bytes
-    vorangestellt (kein separates Envelope-Format noetig, anders als die
-    RSA-hybride Installationsuebergreifende Verschluesselung in
-    `workflow_service.federation_crypto`: hier gibt es nur einen einzigen,
-    symmetrischen Schluessel aus dem `KeyStore`)."""
+    """AES-256-GCM (5.6, ADR 0029) - the nonce is prepended to the
+    ciphertext bytes (no separate envelope format needed, unlike the
+    RSA-hybrid cross-installation encryption in
+    `workflow_service.federation_crypto`: here there is only a single
+    symmetric key from the `KeyStore`)."""
     nonce = os.urandom(_NONCE_LENGTH)
     ciphertext = AESGCM(key).encrypt(nonce, data, None)
     return nonce + ciphertext

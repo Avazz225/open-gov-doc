@@ -11,9 +11,9 @@ class NotFoundError(Exception):
 
 
 class NotInStatusError(Exception):
-    """Confirm/Assign/Reject setzt einen bestimmten Ausgangsstatus voraus
-    (2.5) - z. B. `confirm_match` nur auf einer noch unbestätigten
-    `proposed_match`-Nachricht."""
+    """Confirm/Assign/Reject requires a specific starting status (2.5) -
+    e.g. `confirm_match` only on a not-yet-confirmed `proposed_match`
+    message."""
 
 
 async def get_by_source_uid(session: AsyncSession, source_uid: str) -> InboundMessage | None:

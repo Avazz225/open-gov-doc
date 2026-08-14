@@ -2,15 +2,15 @@ import httpx
 
 
 class RenderingServiceClient:
-    """HTTP-Client gegen den Rendering Service (3.7, P5-S2) - Fallback-
-    Volltextquelle, falls kein OCR-Ergebnis vorliegt (siehe consumer.py).
-    `GET /renditions` filtert nicht nach `rendition_type` - Filterung passiert
-    hier client-seitig."""
+    """HTTP client against the Rendering Service (3.7, P5-S2) - fallback
+    full-text source when no OCR result is available (see consumer.py).
+    `GET /renditions` does not filter by `rendition_type` - filtering
+    happens client-side here."""
 
-    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - `GET /renditions`/
-    # `.../content` verlangen seither `rendering.read`; dieser Aufruf läuft
-    # aus einem NATS-Consumer heraus, kein menschlicher Principal verfügbar -
-    # gleiches `system:<Service>`-Muster wie `archival-service`s `CaseClient`.
+    # RBAC (post-roadmap phase 19 session 8, ADR 0073) - `GET /renditions`/
+    # `.../content` have since required `rendering.read`; this call runs
+    # from within a NATS consumer, no human principal is available - same
+    # `system:<Service>` pattern as `archival-service`'s `CaseClient`.
     _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:search-service"}
 
     def __init__(self, base_url: str) -> None:

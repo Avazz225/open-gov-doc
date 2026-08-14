@@ -8,22 +8,22 @@ from storage_service.backends.interface import ObjectNotFoundError, StorageBacke
 
 
 class AzureBlobBackend(StorageBackend):
-    """Azure Blob Storage Backend (3.6, Konzept 1a) - Verbindungsstring-Auth
-    (kein `azure-identity`/AAD, siehe `docs/services/storage-service.md`),
-    funktioniert identisch gegen echtes Azure Blob Storage und den lokalen
-    Azurite-Emulator (Werkseinstellung für Tests/Dev, analog zu MinIO bei
+    """Azure Blob Storage backend (3.6, concept 1a) - connection-string auth
+    (no `azure-identity`/AAD, see `docs/services/storage-service.md`),
+    works identically against real Azure Blob Storage and the local
+    Azurite emulator (default setting for tests/dev, analogous to MinIO for
     `S3Backend`).
 
-    **`lock_until` ist hier bewusst ein dokumentierter No-Op**, kein echtes
-    Azure Immutable Blob Storage (versionierungs-/richtlinienbasiertes
-    Time-Based Retention): Azurite - die Referenz-Testumgebung dieses
-    Projekts - unterstützt Immutability-Policies bislang nicht, ein gegen
-    Azurite ungetestetes "technisches WORM" wäre ein vorgetäuschter statt
-    ein echter Schutz. Gleiche Haltung wie beim `LocalFilesystemBackend`
-    (siehe ADR 0030): die portable, tatsächliche Durchsetzung übernimmt
-    unabhängig vom Backend-Typ ohnehin `retention_guard.py` auf
-    Anwendungsebene - `S3Backend`s echtes Object Lock ist eine zusätzliche
-    Härtung, keine Voraussetzung.
+    **`lock_until` is deliberately a documented no-op here**, not real
+    Azure Immutable Blob Storage (versioning-/policy-based time-based
+    retention): Azurite - this project's reference test environment - does
+    not yet support immutability policies, and a "technical WORM" untested
+    against Azurite would be a pretended rather than a real protection.
+    Same stance as with `LocalFilesystemBackend` (see ADR 0030): the
+    portable, actual enforcement is handled independently of the backend
+    type by `retention_guard.py` at the application level anyway -
+    `S3Backend`'s real Object Lock is additional hardening, not a
+    prerequisite.
     """
 
     def __init__(self, *, connection_string: str, container: str) -> None:
@@ -39,11 +39,11 @@ class AzureBlobBackend(StorageBackend):
             try:
                 await container_client.create_container()
             except ResourceExistsError:
-                pass  # bereits vorhanden - idempotent, analog zu S3Backend.ensure_bucket
+                pass  # already exists - idempotent, analogous to S3Backend.ensure_bucket
 
     async def write(self, key: str, data: bytes, *, lock_until: datetime | None = None) -> None:
-        # `lock_until` wird bewusst ignoriert, nicht simuliert - siehe
-        # Klassen-Docstring.
+        # `lock_until` is deliberately ignored, not simulated - see the
+        # class docstring.
         async with self._service_client() as service:
             blob_client = service.get_blob_client(self._container, key)
             await blob_client.upload_blob(data, overwrite=True)
@@ -58,15 +58,15 @@ class AzureBlobBackend(StorageBackend):
                 raise ObjectNotFoundError(key) from exc
 
     async def delete(self, key: str, *, bypass_governance: bool = False) -> None:
-        # `bypass_governance` ist hier ohne Wirkung (kein echtes Object-Lock-
-        # Äquivalent, siehe Klassen-Docstring) - wird trotzdem entgegen-
-        # genommen, um dasselbe `StorageBackend`-Interface zu erfüllen.
+        # `bypass_governance` has no effect here (no real Object Lock
+        # equivalent, see the class docstring) - still accepted to satisfy
+        # the same `StorageBackend` interface.
         async with self._service_client() as service:
             blob_client = service.get_blob_client(self._container, key)
             try:
                 await blob_client.delete_blob()
             except ResourceNotFoundError:
-                pass  # bereits nicht (mehr) vorhanden - idempotent wie sonst auch
+                pass  # already gone - idempotent as elsewhere
 
     async def exists(self, key: str) -> bool:
         async with self._service_client() as service:

@@ -1,22 +1,22 @@
 from virus_scan_service.engines.interface import ScanEngine, ScanVerdict
 
-# Die standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
-# praktisch jedem echten Antivirus-Produkt zu Integrationstestzwecken erkannt.
-# Aufgeteilt über eine String-Konkatenation, damit dieselbe Datei nicht selbst
-# von einem auf dem Build-Host laufenden Virenscanner fälschlich als Fund
-# markiert wird.
+# The standardized EICAR test file signature (https://www.eicar.org/) -
+# recognized by virtually every real antivirus product for integration
+# testing purposes. Split via string concatenation so that this very file
+# does not itself get falsely flagged as a hit by a virus scanner running on
+# the build host.
 EICAR_SIGNATURE = (
     r"X5O!P%@AP[4\PZX54(P^)7CC)7}$" "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 ).encode("ascii")
 
 
 class EicarSignatureEngine(ScanEngine):
-    """Standard-Engine dieses Grundgerüsts (ADR 0010): erkennt ausschließlich
-    die genormte EICAR-Testsignatur - eine echte, branchenübliche
-    Signaturprüfung (kein reiner "immer sauber"-Stub), aber ohne die
-    Notwendigkeit einer laufend zu aktualisierenden vollständigen
-    Virendefinitionsdatenbank. Erkennt keine echte Schadsoftware - für den
-    produktiven Einsatz ist die austauschbare `ClamdEngine` vorgesehen."""
+    """Default engine of this scaffold (ADR 0010): recognizes exclusively the
+    standardized EICAR test signature - a real, industry-standard signature
+    check (not a mere "always clean" stub), but without the need for a
+    continuously updated, full virus definition database. Does not detect
+    actual malware - the swappable `ClamdEngine` is intended for production
+    use."""
 
     async def scan(self, data: bytes) -> ScanVerdict:
         if EICAR_SIGNATURE in data:

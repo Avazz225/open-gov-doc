@@ -1,7 +1,7 @@
-"""Dünne HTTP-Clients gegen die Services, deren Konfiguration exportiert/
-importiert wird (7.3) - config-service hat kein eigenes Postgres-Schema,
-jede Kategorie liest/schreibt direkt bei ihrem jeweiligen Owner-Service
-(Domain-Owner-Prinzip, kein Duplizieren fremder Datenhaltung)."""
+"""Thin HTTP clients against the services whose configuration is exported/
+imported (7.3) - config-service has no Postgres schema of its own,
+each category reads/writes directly at its respective owner service
+(domain owner principle, no duplicating another service's data)."""
 
 import httpx
 
@@ -123,8 +123,8 @@ class WorkflowServiceClient:
         return response.json()
 
     async def get_federation_config(self) -> dict:
-        """7.4/P13-S3: Versionskompatibilitätsspanne - ungegatet auf der
-        Zielseite, siehe `docs/services/workflow-service.md` "Federation"."""
+        """7.4/P13-S3: version compatibility range - ungated on the
+        target side, see `docs/services/workflow-service.md` "Federation"."""
         response = await self._client.get("/federation/config")
         response.raise_for_status()
         return response.json()
@@ -142,13 +142,13 @@ class WorkflowServiceClient:
 
 class PermissionServiceClient:
     ROOT_RESOURCE_ID = "root"
-    # Self-Gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
-    # `PUT /roles` verlangen seither `admin.user_management`. config-service
-    # weist sich diese Capability bereits an seinem eigenen Bootstrap zu
-    # (`main.py._REQUIRED_ROLE_NAMES`, u. a. "domain-admin-users") - dieser
-    # Client sandte bislang aber (anders als seine Geschwister-Clients in
-    # dieser Datei) keinen `X-DMS-Principal`-Header, wäre also trotz
-    # gehaltener Berechtigung an der neuen Prüfung gescheitert.
+    # Self-gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
+    # `PUT /roles` have required `admin.user_management` since then. config-service
+    # already assigns itself this capability during its own bootstrap
+    # (`main.py._REQUIRED_ROLE_NAMES`, among others "domain-admin-users") - this
+    # client, however, did not previously send an `X-DMS-Principal` header
+    # (unlike its sibling clients in this file), and would therefore have
+    # failed the new check despite holding the permission.
     _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
 
     def __init__(self, base_url: str) -> None:
@@ -201,9 +201,9 @@ class PermissionServiceClient:
 
 
 class AuthServiceClient:
-    """Für die `realm_roles`-Kategorie (14.1, P17-S1) - Keycloak-Realm-Rollen
-    leben in `auth-service`, nicht in `permission-service` (siehe `roles`
-    oben)."""
+    """For the `realm_roles` category (14.1, P17-S1) - Keycloak realm roles
+    live in `auth-service`, not in `permission-service` (see `roles`
+    above)."""
 
     _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
 
@@ -246,10 +246,10 @@ class MonitoringServiceClient:
         return response.json()
 
     async def put_global(self, enabled: bool) -> dict:
-        # `PUT /sensor-config/global`/`.../{sensor_name}` verlangen
-        # `admin.monitoring` (P11-S1) - `X-DMS-Principal` wird bereits im
-        # Konstruktor gesetzt, siehe `main.py`s Bootstrap der
-        # `domain-admin-monitoring`-Rolle für dasselbe Principal.
+        # `PUT /sensor-config/global`/`.../{sensor_name}` require
+        # `admin.monitoring` (P11-S1) - `X-DMS-Principal` is already set in the
+        # constructor, see `main.py`'s bootstrap of the
+        # `domain-admin-monitoring` role for the same principal.
         response = await self._client.put("/sensor-config/global", json={"enabled": enabled})
         response.raise_for_status()
         return response.json()

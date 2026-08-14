@@ -6,9 +6,9 @@ class ObjectNotFoundError(Exception):
 
 
 class StorageClient:
-    """Dünner HTTP-Client gegen die Storage-Service-API (3.6), identischer
-    Zuschnitt wie in jedem anderen Service dieses Projekts - `mail-connector`
-    hält nie selbst Dateiinhalte."""
+    """Thin HTTP client against the storage-service API (3.6), identical
+    shape as in every other service in this project - `mail-connector`
+    never holds file content itself."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

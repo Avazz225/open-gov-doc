@@ -35,16 +35,15 @@ def _resolve_binary() -> str:
 
 
 async def convert_via_libreoffice(data: bytes, *, filename: str, pdf_a: bool = True) -> bytes:
-    """Konvertiert beliebige LibreOffice-lesbare Dokumente (Office-Formate,
-    Text, RTF, ...) zu PDF über einen `soffice --headless`-Subprozess (5.6,
-    seit P7-S3). Jeder Aufruf bekommt ein isoliertes `UserInstallation`-Profil
-    (`-env:UserInstallation=file://...`) - ohne das verweigert ein zweiter,
-    parallel laufender `soffice`-Prozess mit einer Profil-Sperre den Start
-    ("Another instance is running"), da LibreOffice sonst ein einziges,
-    geteiltes Nutzerprofil verwendet. `pdf_a=True` nutzt LibreOffices eigenen
-    PDF/A-1b-Export-Filter (eingebettete Fonts/XMP-Metadaten) - technisch
-    konformer als reines PDF, aber weiterhin nicht unabhängig
-    veraPDF-validiert."""
+    """Converts any LibreOffice-readable document (Office formats, text,
+    RTF, ...) to PDF via a `soffice --headless` subprocess (5.6, since
+    P7-S3). Each call gets an isolated `UserInstallation` profile
+    (`-env:UserInstallation=file://...`) - without this, a second, parallel
+    running `soffice` process refuses to start due to a profile lock
+    ("Another instance is running"), since LibreOffice otherwise uses a
+    single, shared user profile. `pdf_a=True` uses LibreOffice's own
+    PDF/A-1b export filter (embedded fonts/XMP metadata) - technically more
+    compliant than plain PDF, but still not independently veraPDF-validated."""
     binary = _resolve_binary()
     suffix = Path(filename).suffix or ".bin"
 

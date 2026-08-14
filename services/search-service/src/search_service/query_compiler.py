@@ -1,23 +1,23 @@
-"""Übersetzt einen `query_language`-AST in SQLAlchemy-Ausdrücke (P14-S7).
+"""Translates a `query_language` AST into SQLAlchemy expressions (P14-S7).
 
-Zwei Pfade, siehe ADR 0044 für die vollständige Begründung:
+Two paths, see ADR 0044 for the full rationale:
 
-- **Reiner Boolescher/Phrasen/Wildcard/Näherungs-Baum (kein Fuzzy-Blatt)**:
-  wird zu EINEM einzigen `to_tsquery('german', ...)`-String zusammengesetzt
-  (Postgres' eigene Operator-Algebra `&`/`|`/`!`/`<->`/`<N>`/`:*` übernimmt
-  Vorrang/Klammerung) - Ranking bleibt exakt wie vor dieser Session ein
-  einziges `ts_rank()` über die kombinierte tsquery.
-- **Sobald irgendwo ein Fuzzy-Blatt vorkommt**: Fuzzy ist kein Bestandteil
-  der tsquery-Algebra (pg_trgm-Ähnlichkeit statt Lexem-Matching) - der ganze
-  Baum wird stattdessen blattweise zu SQL-Booleschen Ausdrücken kompiliert
-  (`and_`/`or_`/`not_`), jedes Nicht-Fuzzy-Blatt liefert dabei sein eigenes
-  `search_vector @@ to_tsquery(...)`. Das ist mathematisch exakt äquivalent
-  zur kombinierten-tsquery-Variante (Postgres' `@@`-Operator verteilt sich
-  korrekt über `&`/`|`/`!`), nur strukturell in mehrere SQL-Bedingungen
-  aufgeteilt statt einer. Das Ranking ist in diesem Pfad bewusst einfacher:
-  Summe unabhängiger Pro-Blatt-Bewertungen statt eines boolesche-Struktur-
-  bewussten `ts_rank` - konsistent mit ADR 0012s bereits akzeptierter
-  "nicht BM25-Niveau"-Einschränkung.
+- **Pure boolean/phrase/wildcard/proximity tree (no fuzzy leaf)**: is
+  composed into a SINGLE `to_tsquery('german', ...)` string (Postgres' own
+  operator algebra `&`/`|`/`!`/`<->`/`<N>`/`:*` handles precedence/
+  parenthesization) - ranking stays exactly as it was before this session:
+  a single `ts_rank()` over the combined tsquery.
+- **As soon as a fuzzy leaf occurs anywhere**: fuzzy is not part of the
+  tsquery algebra (pg_trgm similarity instead of lexeme matching) - the
+  whole tree is instead compiled leaf-by-leaf into SQL boolean expressions
+  (`and_`/`or_`/`not_`), with each non-fuzzy leaf contributing its own
+  `search_vector @@ to_tsquery(...)`. This is mathematically exactly
+  equivalent to the combined-tsquery variant (Postgres' `@@` operator
+  distributes correctly over `&`/`|`/`!`), just structurally split into
+  several SQL conditions instead of one. Ranking is deliberately simpler on
+  this path: a sum of independent per-leaf scores instead of a boolean-
+  structure-aware `ts_rank` - consistent with ADR 0012's already-accepted
+  "not BM25-level" limitation.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def compile_query(node: Node) -> CompiledQuery:
     return CompiledQuery(where=_compile_bool(node), rank=_compile_rank_sum(node))
 
 
-# --- Pfad 1: eine einzige to_tsquery-Zeichenkette -------------------------
+# --- Path 1: a single to_tsquery string -------------------------
 
 
 def _render_tsquery_string(node: Node) -> str:
@@ -79,16 +79,16 @@ def _render_tsquery_string(node: Node) -> str:
 
 
 def _proximity_string(word_a: str, word_b: str, distance: int) -> str:
-    """ "a"/"b" gelten als Treffer, wenn sie in EINER der beiden Reihenfolgen
-    innerhalb von `distance` Wörtern zueinander vorkommen - Postgres' `<N>`-
-    Operator selbst verlangt genau N Wörter Abstand UND eine feste
-    Reihenfolge, daher die ODER-Kette über 1..distance je Richtung."""
+    """ "a"/"b" count as a match if they occur in EITHER of the two orders
+    within `distance` words of each other - Postgres' `<N>` operator itself
+    requires exactly N words apart AND a fixed order, hence the OR chain
+    over 1..distance per direction."""
     variants = [f"{word_a}<{d}>{word_b}" for d in range(1, distance + 1)]
     variants += [f"{word_b}<{d}>{word_a}" for d in range(1, distance + 1)]
     return "(" + " | ".join(variants) + ")"
 
 
-# --- Pfad 2: blattweise SQL-Boolesche Ausdrücke (enthält Fuzzy) -----------
+# --- Path 2: leaf-by-leaf SQL boolean expressions (contains fuzzy) -----------
 
 
 def _leaf_where(node: Term | Phrase | Prefix | Proximity) -> ColumnElement:
@@ -138,6 +138,6 @@ def _compile_rank_sum(node: Node) -> ColumnElement:
     if isinstance(node, (And, Or)):
         return _compile_rank_sum(node.left) + _compile_rank_sum(node.right)
     if isinstance(node, Not):
-        # Ein negiertes Blatt soll die Relevanz nicht beeinflussen.
+        # A negated leaf should not affect relevance.
         return literal(0.0)
     raise AssertionError(f"Unbekannter Knotentyp: {node!r}")

@@ -57,9 +57,9 @@ async def delete_metadata(session: AsyncSession, object_key: str) -> None:
     if metadata is None:
         raise NotFoundError(object_key)
     await session.delete(metadata)
-    # Ohne Flush bleibt das Objekt im Identity-Map-Fast-Path von `session.get()`
-    # auffindbar, obwohl es zur Löschung vorgemerkt ist (die DELETE-Anweisung
-    # selbst wird erst hier tatsächlich abgesetzt).
+    # Without a flush, the object remains findable via the identity-map
+    # fast path of `session.get()`, even though it's marked for deletion
+    # (the DELETE statement itself is only actually issued here).
     await session.flush()
 
 
@@ -75,16 +75,15 @@ async def record_copy(
     retention_until: datetime | None = None,
     next_retry_at: datetime | None = None,
 ) -> ObjectCopy:
-    """Legt eine Zeile in ``object_copy`` an oder aktualisiert sie (3.6) -
-    ein Aufruf pro (object_key, backend_id) je Schreib-/Replikations-/
-    Fixity-Versuch. ``retention_until`` (5.1/5.2a, seit P7-S1) wird nur bei
-    explizit gesetztem Wert übernommen - ein bereits gesetzter Wert bleibt
-    bei Aufrufen ohne dieses Argument (Fixity-Checks, Fehlerfälle) erhalten.
-    ``next_retry_at`` (seit Post-Roadmap Phase 20 Session 6, ADR 0082) wird
-    dagegen wie ``last_error`` UNBEDINGT gesetzt (Default `None`) - ein
-    erfolgreicher oder frischer Schreibversuch braucht keine verbleibende
-    Backoff-Wartezeit, ein evtl. zuvor gesetzter Wert muss also verschwinden,
-    nicht erhalten bleiben."""
+    """Creates or updates a row in ``object_copy`` (3.6) - one call per
+    (object_key, backend_id) for each write/replication/fixity attempt.
+    ``retention_until`` (5.1/5.2a, since P7-S1) is only applied when a
+    value is explicitly set - an already-set value is preserved on calls
+    without this argument (fixity checks, error cases). ``next_retry_at``
+    (since Post-Roadmap Phase 20 Session 6, ADR 0082), by contrast, is
+    UNCONDITIONALLY set like ``last_error`` (default `None`) - a
+    successful or fresh write attempt needs no remaining backoff wait
+    time, so any previously set value must disappear, not be preserved."""
     now = datetime.now(UTC)
     existing = await session.get(ObjectCopy, (object_key, backend_id))
     if existing is None:
@@ -127,11 +126,11 @@ async def list_copies(session: AsyncSession, object_key: str) -> list[ObjectCopy
 
 
 async def list_pending_copies(session: AsyncSession, *, limit: int) -> list[ObjectCopy]:
-    """Retry-Queue (3.6): alle Kopien, die noch nicht erfolgreich repliziert
-    sind, noch nicht als dauerhaft fehlgeschlagen gelten, und (seit
-    Post-Roadmap Phase 20 Session 6, ADR 0082) deren Full-Jitter-Backoff
-    bereits abgelaufen ist - ``next_retry_at IS NULL`` (neue Zeile, noch nie
-    fehlgeschlagen) zählt dabei immer als sofort fällig."""
+    """Retry queue (3.6): all copies that have not yet been replicated
+    successfully, are not yet considered permanently failed, and (since
+    Post-Roadmap Phase 20 Session 6, ADR 0082) whose full-jitter backoff
+    has already expired - ``next_retry_at IS NULL`` (new row, never
+    failed) always counts as due immediately."""
     now = datetime.now(UTC)
     result = await session.execute(
         select(ObjectCopy)
@@ -158,13 +157,13 @@ async def delete_copies_for_key(session: AsyncSession, object_key: str) -> None:
 
 
 async def reset_copies_for_backend(session: AsyncSession, backend_id: str) -> int:
-    """Setzt jede vorhandene Kopie-Zeile eines Ziels auf `pending` zurück
-    (3.6 "Hintergrund-Replikation zwingend", P5b-S6) - nach einem
-    Datenträger-Wechsel gilt jede zuvor dort abgelegte Kopie als verloren,
-    unabhängig vom zuletzt bekannten Status. `POST /replication/
-    process-pending` zieht sie danach über die bereits bestehende Retry-Queue
-    nach (kein neuer Hintergrundtask, siehe ADR 0004/0017). Gibt die Anzahl
-    zurückgesetzter Zeilen zurück (fürs Logging/Audit)."""
+    """Resets every existing copy row of a target back to `pending`
+    (3.6 "background replication mandatory", P5b-S6) - after a storage
+    device swap, every copy previously stored there is considered lost,
+    regardless of its last known status. `POST /replication/
+    process-pending` then picks them up via the already-existing retry
+    queue (no new background task, see ADR 0004/0017). Returns the
+    number of reset rows (for logging/audit)."""
     result = await session.execute(
         update(ObjectCopy)
         .where(ObjectCopy.backend_id == backend_id)
@@ -175,14 +174,14 @@ async def reset_copies_for_backend(session: AsyncSession, backend_id: str) -> in
 
 
 async def seed_pending_copies_for_new_target(session: AsyncSession, backend_id: str) -> int:
-    """Rebalancing bei neu hinzugefügtem Ziel (3.6/7.2, P5c-S2): legt für
-    jedes bereits existierende Objekt, das noch keine Kopie-Zeile für
-    `backend_id` hat, eine neue `pending`-Zeile an - `POST /replication/
-    process-pending` zieht sie über die bereits bestehende Retry-Queue nach,
-    kein neuer Mechanismus. Wird ausschließlich beim Erststart-Bootstrap
-    eines Ziels aufgerufen (siehe `identity_guard.check_target_identity`),
-    daher hier keine eigene Gate-Logik. Gibt die Anzahl neu angelegter
-    Zeilen zurück (fürs Logging)."""
+    """Rebalancing for a newly added target (3.6/7.2, P5c-S2): creates a
+    new `pending` row for every already-existing object that does not yet
+    have a copy row for `backend_id` - `POST /replication/
+    process-pending` picks them up via the already-existing retry queue,
+    no new mechanism. Called exclusively during a target's first-start
+    bootstrap (see `identity_guard.check_target_identity`), hence no
+    separate gate logic here. Returns the number of newly created rows
+    (for logging)."""
     already_covered = select(ObjectCopy.object_key).where(ObjectCopy.backend_id == backend_id)
     result = await session.execute(
         select(ObjectMetadata.object_key).where(ObjectMetadata.object_key.notin_(already_covered))
@@ -206,10 +205,10 @@ async def seed_pending_copies_for_new_target(session: AsyncSession, backend_id: 
 
 
 async def count_pending_copies_by_backend(session: AsyncSession) -> dict[str, int]:
-    """Anzahl noch nicht erfolgreich replizierter Kopien je Ziel (`pending`/
-    `failed`) - Grundlage für den Admin-UI-Statusblock (3.6 "im Admin-UI als
-    Status sichtbar"), z. B. um einen laufenden Wiederherstellungs-Fortschritt
-    nach einem degradierten Start sichtbar zu machen."""
+    """Count of not-yet-successfully-replicated copies per target
+    (`pending`/`failed`) - basis for the admin-UI status block (3.6
+    "visible as status in the admin UI"), e.g. to show ongoing recovery
+    progress after a degraded start."""
     result = await session.execute(
         select(ObjectCopy.backend_id, func.count())
         .where(ObjectCopy.status.in_(["pending", "failed"]))
@@ -219,9 +218,10 @@ async def count_pending_copies_by_backend(session: AsyncSession) -> dict[str, in
 
 
 async def get_storage_usage(session: AsyncSession) -> list[tuple[str, int, int]]:
-    """Speicherverbrauch je Backend (5.4a, seit P7-S2b) - `object_metadata.
-    backend` ist die Primärziel-`id` zum Zeitpunkt der letzten Schreibung
-    (siehe models.py), keine Aussage über Redundanz-Kopien (`ObjectCopy`)."""
+    """Storage usage per backend (5.4a, since P7-S2b) - `object_metadata.
+    backend` is the primary target `id` at the time of the last write
+    (see models.py), it says nothing about redundancy copies
+    (`ObjectCopy`)."""
     result = await session.execute(
         select(
             ObjectMetadata.backend,
@@ -244,10 +244,10 @@ async def list_backend_identities(session: AsyncSession) -> list[BackendIdentity
 async def record_backend_identity(
     session: AsyncSession, target_id: str, device_id: str
 ) -> BackendIdentity:
-    """Legt die bekannte Geräte-ID für ein Ziel an oder bestätigt sie erneut
-    (`verified_at` wird immer aktualisiert) - ein Aufruf deckt sowohl den
-    Erststart (Anlage) als auch jede spätere erfolgreiche Übereinstimmungs-
-    prüfung ab (3.6, P5b-S6)."""
+    """Creates the known device ID for a target or re-confirms it
+    (`verified_at` is always updated) - a single call covers both the
+    first start (creation) and every later successful match check (3.6,
+    P5b-S6)."""
     now = datetime.now(UTC)
     identity = await session.get(BackendIdentity, target_id)
     if identity is None:
@@ -261,9 +261,9 @@ async def record_backend_identity(
 
 
 async def get_guard_config(session: AsyncSession) -> GuardConfig:
-    """Get-or-create mit Default `allow_degraded_start=False` (gleiches
-    Muster wie `ocr_service.repository.get_config`, P5b-S5/ADR 0016) - kein
-    separates Migrations-/Seed-Skript nötig."""
+    """Get-or-create with default `allow_degraded_start=False` (same
+    pattern as `ocr_service.repository.get_config`, P5b-S5/ADR 0016) - no
+    separate migration/seed script needed."""
     config = await session.get(GuardConfig, _GUARD_CONFIG_ID)
     if config is None:
         config = GuardConfig(
@@ -289,13 +289,14 @@ async def get_operational_config(
     default_quorum_count: int,
     default_max_replication_attempts: int,
 ) -> OperationalConfig:
-    """Get-or-create (Post-Roadmap Phase 22 Session 6, ADR 0091), gleiches
-    Muster wie `get_guard_config`. Die Defaults kommen bewusst als Parameter
-    vom Aufrufer (`main.py`, aus `Settings`) statt hier direkt aus `Settings`
-    gelesen zu werden - `repository.py` bleibt dadurch frei von jeder
-    Env-Var-Kenntnis (Konvention dieses Moduls), nur beim allerersten Anlegen
-    der Zeile wird der bisherige Env-Var-Wert übernommen, damit ein Upgrade
-    auf diese Session das Ist-Verhalten nicht stillschweigend ändert."""
+    """Get-or-create (Post-Roadmap Phase 22 Session 6, ADR 0091), same
+    pattern as `get_guard_config`. The defaults deliberately come as
+    parameters from the caller (`main.py`, from `Settings`) instead of
+    being read directly from `Settings` here - this keeps `repository.py`
+    free of any env-var knowledge (this module's convention); only when
+    the row is created for the very first time is the previous env-var
+    value adopted, so an upgrade to this session does not silently change
+    current behavior."""
     config = await session.get(OperationalConfig, _OPERATIONAL_CONFIG_ID)
     if config is None:
         config = OperationalConfig(
@@ -330,10 +331,10 @@ async def update_operational_config(
 
 
 async def list_target_overrides(session: AsyncSession) -> list[TargetOverride]:
-    """Sparse (Post-Roadmap Phase 22 Session 7, ADR 0092) - nur Ziele mit
-    tatsächlich gesetztem Override haben eine Zeile, siehe `TargetOverride`-
-    Docstring. `main.py._compute_target_state()` ruft dies bei jedem
-    relevanten Schreibzugriff neu auf."""
+    """Sparse (Post-Roadmap Phase 22 Session 7, ADR 0092) - only targets
+    with an actually set override have a row, see the `TargetOverride`
+    docstring. `main.py._compute_target_state()` calls this fresh on
+    every relevant write access."""
     result = await session.execute(select(TargetOverride))
     return list(result.scalars().all())
 

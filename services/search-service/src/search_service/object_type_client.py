@@ -4,11 +4,11 @@ import httpx
 
 
 class ObjectTypeServiceClient:
-    """HTTP-Client gegen den Object-Type Service (3.1) - reiner
-    Referenzdaten-Dienst ohne eigene Events (bestätigt in dessen Doku), daher
-    wird das Attributschema hier synchron abgefragt statt reaktiv aktualisiert.
-    Nötig für die Facetten-Definition (`GET /search/facets`) und die
-    Typ-Verzweigung der Attributfilter (exakt vs. Bereich)."""
+    """HTTP client against the Object-Type Service (3.1) - a pure reference
+    data service without its own events (confirmed in its docs), so the
+    attribute schema is queried synchronously here instead of updated
+    reactively. Needed for the facet definition (`GET /search/facets`) and
+    the type branching of attribute filters (exact vs. range)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

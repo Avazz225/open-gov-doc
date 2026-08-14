@@ -10,18 +10,18 @@ logger = logging.getLogger(__name__)
 
 
 class SensorConfigClient:
-    """Pollt die Sensor-Aktivierungskonfiguration beim `monitoring-service`
-    (`GET /sensor-config`) - TTL-Poll statt NATS-Invalidierung (bewusste
-    P11-S0/S1-Scope-Entscheidung: Pilot statt Vollausbau). Fail-open: bleibt
-    bei einem unerreichbaren `monitoring-service` auf dem zuletzt bekannten
-    Stand, vor der allerersten erfolgreichen Abfrage auf "alles aktiv" -
-    ein Monitoring-Ausfall soll die Sensor-Erfassung selbst niemals
-    blockieren (Konzept 10.1: Monitoring ist ein Zusatznutzen, kein
-    Hard-Dependency für den fachlichen Betrieb).
+    """Polls the sensor activation configuration from `monitoring-service`
+    (`GET /sensor-config`) - TTL poll instead of NATS invalidation (deliberate
+    P11-S0/S1 scope decision: pilot instead of full rollout). Fail-open:
+    stays at the last known state when `monitoring-service` is unreachable,
+    defaulting to "everything active" before the very first successful
+    query - a monitoring outage should never block sensor collection itself
+    (concept 10.1: monitoring is an added benefit, not a hard dependency for
+    business operation).
 
-    `is_active()` ist bewusst synchron (liest nur den zuletzt gepollten
-    Cache) - die `Guarded*`-Sensor-Wrapper in `sensors.py` rufen sie direkt
-    aus synchronem Code auf, ohne selbst async werden zu müssen.
+    `is_active()` is deliberately synchronous (only reads the last polled
+    cache) - the `Guarded*` sensor wrappers in `sensors.py` call it directly
+    from synchronous code, without needing to become async themselves.
     """
 
     def __init__(

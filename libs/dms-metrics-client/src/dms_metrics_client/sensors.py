@@ -11,10 +11,10 @@ SensorCost = Literal["cheap", "expensive"]
 
 @dataclass(frozen=True)
 class SensorSpec:
-    """Ein einzelner, klar benannter Messpunkt (10.1) - kennt seine eigene
-    Gruppe (fachliche Einordnung, z. B. für eine künftige Admin-UI-Übersicht)
-    und seine Kosten (CPU/IO-Overhead), damit ein "alles an" nicht
-    versehentlich das System spürbar belastet."""
+    """A single, clearly named measurement point (10.1) - knows its own
+    group (business categorization, e.g. for a future admin UI overview)
+    and its cost (CPU/IO overhead), so an "everything on" setting doesn't
+    accidentally place a noticeable load on the system."""
 
     name: str
     group: str
@@ -34,10 +34,10 @@ IsActiveFn = Callable[[str], bool]
 
 
 class GuardedCounter:
-    """Wrapper um einen `prometheus_client.Counter` - `inc()` fasst das
-    zugrunde liegende Metrik-Objekt NICHT an, wenn der Sensor deaktiviert
-    ist (10.1: "kein Erzeugen, kein Zwischenspeichern" bei Deaktivierung,
-    nicht nur ein Verstecken im Export)."""
+    """Wrapper around a `prometheus_client.Counter` - `inc()` does NOT touch
+    the underlying metric object when the sensor is deactivated (10.1: "no
+    generation, no buffering" when deactivated, not just hiding it from the
+    export)."""
 
     def __init__(self, name: str, metric: Counter, is_active: IsActiveFn) -> None:
         self._name = name
@@ -59,9 +59,9 @@ class GuardedGauge:
         self._is_active = is_active
 
     def is_active(self) -> bool:
-        """Erlaubt Aufrufern (z. B. `loop.run_gauge_sampler_loop`), eine ggf.
-        teure Datenbankabfrage für den aktuellen Wert gar nicht erst
-        auszuführen, wenn der Sensor deaktiviert ist."""
+        """Allows callers (e.g. `loop.run_gauge_sampler_loop`) to avoid even
+        running a possibly expensive database query for the current value
+        when the sensor is deactivated."""
         return self._is_active(self._name)
 
     def set(self, value: float) -> None:
@@ -76,9 +76,9 @@ class GuardedHistogram:
         self._is_active = is_active
 
     def is_active(self) -> bool:
-        """Erlaubt Aufrufern, eine Zeitmessung selbst gar nicht erst zu
-        starten, wenn der Sensor deaktiviert ist (z. B. `time.monotonic()`
-        vor einem Upload) - auch dieser minimale Overhead unterbleibt dann."""
+        """Allows callers to avoid even starting a time measurement when the
+        sensor is deactivated (e.g. `time.monotonic()` before an upload) -
+        this minimal overhead is then also avoided."""
         return self._is_active(self._name)
 
     def observe(self, value: float) -> None:
@@ -87,12 +87,12 @@ class GuardedHistogram:
 
 
 class SensorRegistry:
-    """Laufzeit-Registrierung der von einem Service angebotenen Sensoren
-    (10.1) - hält die deklarierten `SensorSpec`s (für die Selbstregistrierung
-    bei `registry-service`, siehe `dms_registry_client`) und baut daraus
-    `Guarded*`-Prometheus-Objekte in einer eigenen `CollectorRegistry`
-    (nicht der globale Default - vermeidet Testkontamination über mehrere
-    Service-Instanzen im selben Prozess hinweg)."""
+    """Runtime registration of the sensors offered by a service (10.1) -
+    holds the declared `SensorSpec`s (for self-registration with
+    `registry-service`, see `dms_registry_client`) and builds `Guarded*`
+    Prometheus objects from them in its own `CollectorRegistry` (not the
+    global default - avoids test contamination across multiple service
+    instances in the same process)."""
 
     def __init__(self, service_name: str, *, is_active: IsActiveFn) -> None:
         self.service_name = service_name

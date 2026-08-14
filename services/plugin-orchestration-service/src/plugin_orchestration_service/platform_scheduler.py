@@ -1,15 +1,16 @@
-"""Plattform-Scheduler bevorzugt, FFD als Fallback (3.8). P10-S0-Entscheidung
-(Rueckfrage bei Sessionstart): dieses Repo hat ausschliesslich Docker Compose
-als reales Deploy-Ziel (kein Swarm/Kubernetes) - der Plattform-Scheduler-Zweig
-wurde deshalb zunaechst als sauberes, konkretes Interface gebaut, aber nur
-gegen einen Fake-Adapter getestet, nicht gegen ein echtes Cluster.
+"""Platform scheduler preferred, FFD as fallback (3.8). P10-S0 decision
+(clarifying question at session start): this repo has exclusively Docker
+Compose as its real deploy target (no Swarm/Kubernetes) - the platform
+scheduler branch was therefore initially built as a clean, concrete
+interface, but only tested against a fake adapter, not against a real
+cluster.
 
-P24-S4 rüstet mit `KubernetesSchedulerAdapter` einen echten Adapter fuer genau
-dieses Interface nach (siehe ADR 0094). `NullSchedulerAdapter` bleibt der
-tatsaechlich gelebte Zustand in DIESER Docker-Compose-Entwicklungsumgebung
-(`KUBERNETES_SERVICE_HOST` ist hier nie gesetzt) - `main.py` waehlt den
-Kubernetes-Adapter nur, wenn `detect_platform_scheduler()` tatsaechlich einen
-Treffer liefert, sonst weiterhin `NullSchedulerAdapter` -> FFD-Fallback."""
+P24-S4 retrofits `KubernetesSchedulerAdapter` as a real adapter for exactly
+this interface (see ADR 0094). `NullSchedulerAdapter` remains the actually
+lived state in THIS Docker Compose development environment
+(`KUBERNETES_SERVICE_HOST` is never set here) - `main.py` only chooses the
+Kubernetes adapter when `detect_platform_scheduler()` actually returns a
+hit, otherwise it still uses `NullSchedulerAdapter` -> FFD fallback."""
 
 from __future__ import annotations
 
@@ -26,50 +27,50 @@ logger = logging.getLogger(__name__)
 
 class SchedulerAdapter(Protocol):
     async def try_place(self, *, cpu_cores: float, ram_mb: float) -> str | None:
-        """Liefert eine `node_id`, wenn die Plattform selbst die Platzierung
-        uebernommen hat, sonst `None` (FFD-Fallback greift)."""
+        """Returns a `node_id` if the platform itself has taken over
+        placement, otherwise `None` (FFD fallback applies)."""
         ...
 
 
 class NullSchedulerAdapter:
-    """Kein angeschlossener Plattform-Scheduler - immer FFD-Fallback."""
+    """No connected platform scheduler - always FFD fallback."""
 
     async def try_place(self, *, cpu_cores: float, ram_mb: float) -> str | None:
         return None
 
 
 class KubernetesSchedulerAdapter:
-    """Echter Plattform-Scheduler-Adapter fuer Kubernetes (P24-S4, siehe ADR
-    0094 fuer die vollstaendige Begruendung der hier getroffenen
-    Vereinfachungen).
+    """Real platform scheduler adapter for Kubernetes (P24-S4, see ADR 0094
+    for the complete rationale behind the simplifications made here).
 
-    `try_place` beantwortet ausschliesslich die Platzierungs-Frage des
-    `SchedulerAdapter`-Interface ("welcher Knoten HAT Platz") - der Service
-    startet dadurch KEINE Container (siehe "Grenzen dieser Ausbaustufe" in
-    `docs/services/plugin-orchestration-service.md`), das bleibt unveraendert
-    ausserhalb seines Scopes.
+    `try_place` exclusively answers the placement question of the
+    `SchedulerAdapter` interface ("which node HAS room") - the service
+    therefore does NOT start any containers (see "Limitations of this
+    stage" in `docs/services/plugin-orchestration-service.md`), that
+    remains unchanged and outside its scope.
 
-    Zwei bewusste Vereinfachungen fuer diese erste Version:
+    Two deliberate simplifications for this first version:
 
-    1. **Nur In-Cluster-Konfiguration** (`kubernetes.config.load_incluster_config`).
-       Kein Kubeconfig-Pfad fuer eine Out-of-Cluster-Nutzung, weil
-       `detect_platform_scheduler()` diesen Adapter ohnehin nur dann waehlt,
-       wenn `KUBERNETES_SERVICE_HOST` gesetzt ist - also der Code bereits IN
-       einem Pod laeuft. Ein zusaetzlicher Kubeconfig-Pfad waere fuer diesen
-       Aufrufkontext totes Codepfad-Gewicht.
-    2. **Kapazitaetspruefung nur gegen `status.allocatable` je Knoten**, NICHT
-       gegen die Summe der `resources.requests` bereits laufender Pods auf
-       diesem Knoten. Ein Knoten kann also faelschlich als passend gemeldet
-       werden, obwohl er durch andere Pods bereits ausgelastet ist. Da
-       `decide_placement()` einer Rueckgabe von `try_place` OHNE eigene
-       Nachpruefung vertraut (siehe Docstring dort), ist das ein echtes,
-       bewusst eingegangenes Risiko fuer diese erste Version - nicht
-       stillschweigend uebergangen, siehe ADR 0094.
+    1. **In-cluster configuration only**
+       (`kubernetes.config.load_incluster_config`). No kubeconfig path for
+       out-of-cluster usage, because `detect_platform_scheduler()` only
+       selects this adapter in the first place when
+       `KUBERNETES_SERVICE_HOST` is set - i.e. the code is already running
+       IN a pod. An additional kubeconfig path would be dead code weight
+       for this call context.
+    2. **Capacity check only against `status.allocatable` per node**, NOT
+       against the sum of `resources.requests` of pods already running on
+       that node. A node can therefore be falsely reported as suitable even
+       though it is already fully utilized by other pods. Since
+       `decide_placement()` trusts a return value from `try_place` WITHOUT
+       its own re-check (see the docstring there), this is a real,
+       deliberately accepted risk for this first version - not silently
+       glossed over, see ADR 0094.
 
-    Zusaetzlich werden Knoten uebersprungen, die laut `spec.unschedulable`
-    cordoned sind oder deren `Ready`-Condition nicht `"True"` ist - beides
-    ohne Pod-Buchhaltung direkt aus der Knoten-API ablesbar und ein
-    Mindeststandard, den auch ein echter Kubernetes-Scheduler beachtet.
+    Additionally, nodes are skipped that are cordoned per
+    `spec.unschedulable` or whose `Ready` condition is not `"True"` - both
+    readable directly from the node API without pod accounting, and a
+    minimum standard that a real Kubernetes scheduler also observes.
     """
 
     def __init__(
@@ -78,13 +79,12 @@ class KubernetesSchedulerAdapter:
         core_v1_api: CoreV1Api | None = None,
         node_label_selector: str = "",
     ) -> None:
-        # `core_v1_api` injizierbar (Tests: gemockter Client, siehe
-        # test_platform_scheduler_kubernetes.py). Produktionscode
-        # (`main.py`) uebergibt nichts - der echte Client wird lazy beim
-        # ersten `try_place`-Aufruf ueber In-Cluster-Config aufgebaut, nicht
-        # schon bei Objekterzeugung, damit ein Import/Konstruktion dieser
-        # Klasse ausserhalb eines Pods (z. B. beim Modul-Import in Tests)
-        # nicht sofort fehlschlaegt.
+        # `core_v1_api` is injectable (tests: mocked client, see
+        # test_platform_scheduler_kubernetes.py). Production code
+        # (`main.py`) passes nothing - the real client is built lazily on
+        # the first `try_place` call via in-cluster config, not already at
+        # object creation, so importing/constructing this class outside a
+        # pod (e.g. during module import in tests) doesn't fail immediately.
         self._core_v1_api = core_v1_api
         self._node_label_selector = node_label_selector or None
 
@@ -98,10 +98,10 @@ class KubernetesSchedulerAdapter:
 
     async def try_place(self, *, cpu_cores: float, ram_mb: float) -> str | None:
         api = self._client()
-        # Blockierender Netzwerkaufruf des synchronen kubernetes-Clients -
-        # in einen Thread ausgelagert, damit er die FastAPI-Event-Loop nicht
-        # blockiert (gleiches Prinzip wie an jeder anderen synchronen
-        # I/O-Stelle in async-Code).
+        # Blocking network call of the synchronous kubernetes client -
+        # offloaded to a thread so it doesn't block the FastAPI event loop
+        # (same principle as at every other synchronous I/O point in async
+        # code).
         node_list = await asyncio.to_thread(api.list_node, label_selector=self._node_label_selector)
 
         candidates: list[tuple[str, float, float]] = []
@@ -116,24 +116,23 @@ class KubernetesSchedulerAdapter:
         if not candidates:
             return None
 
-        # Tie-Break bei mehreren passenden Knoten: der mit der meisten frei
-        # allokierbaren RAM-Kapazitaet gewinnt ("most-available" statt reines
-        # First-Fit) - verteilt Last eher, statt einen knapp passenden Knoten
-        # sofort vollzupacken, was angesichts der oben dokumentierten
-        # Vereinfachung (keine Pod-Buchhaltung) das vorsichtigere Verhalten
-        # ist. Bei RAM-Gleichstand `node_id` als deterministischer
-        # Zweit-Tie-Break.
+        # Tie-break when multiple nodes match: the one with the most freely
+        # allocatable RAM capacity wins ("most-available" instead of pure
+        # first-fit) - spreads load rather than immediately filling up a
+        # tightly matching node, which, given the simplification documented
+        # above (no pod accounting), is the more cautious behavior. On a
+        # RAM tie, `node_id` serves as a deterministic secondary tie-break.
         candidates.sort(key=lambda c: (-c[2], c[0]))
         best_node_id, _, _ = candidates[0]
         return best_node_id
 
 
 def _schedulable_node_capacity(node: object) -> tuple[str, float, float] | None:
-    """Liefert `(node_id, verfuegbare_cpu_cores, verfuegbarer_ram_mb)` fuer
-    einen Knoten aus `CoreV1Api.list_node()`, oder `None`, wenn der Knoten
-    cordoned/nicht bereit ist oder keine `node_id`/`allocatable`-Angaben hat.
-    "Verfuegbar" meint hier `status.allocatable` (siehe Klassendocstring
-    fuer die bewusste Vereinfachung ggue. tatsaechlich laufenden Pods)."""
+    """Returns `(node_id, available_cpu_cores, available_ram_mb)` for a node
+    from `CoreV1Api.list_node()`, or `None` if the node is cordoned/not
+    ready or lacks `node_id`/`allocatable` data. "Available" here means
+    `status.allocatable` (see the class docstring for the deliberate
+    simplification versus actually running pods)."""
     from kubernetes.utils import parse_quantity
 
     metadata = getattr(node, "metadata", None)
@@ -166,11 +165,11 @@ def _schedulable_node_capacity(node: object) -> tuple[str, float, float] | None:
 
 
 def detect_platform_scheduler() -> str | None:
-    """Rein informative Erkennung (3.8) - liefert den Namen einer erkannten
-    Plattform oder `None`. `KUBERNETES_SERVICE_HOST` ist das uebliche Signal,
-    in einem Kubernetes-Pod zu laufen. Seit P24-S4 existiert fuer einen
-    positiven Treffer ein echter Adapter (`KubernetesSchedulerAdapter`,
-    s.o.) - `main.py` waehlt ihn basierend auf diesem Rueckgabewert."""
+    """Purely informational detection (3.8) - returns the name of a
+    detected platform or `None`. `KUBERNETES_SERVICE_HOST` is the usual
+    signal for running in a Kubernetes pod. Since P24-S4, a real adapter
+    exists for a positive hit (`KubernetesSchedulerAdapter`, see above) -
+    `main.py` selects it based on this return value."""
     if os.environ.get("KUBERNETES_SERVICE_HOST"):
         return "kubernetes"
     return None

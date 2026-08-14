@@ -1,10 +1,10 @@
-"""AD-/Keycloak-Gruppe -> interne Rolle-Mapping (4.4, P24-S2).
+"""AD/Keycloak group -> internal role mapping (4.4, P24-S2).
 
-Reine Datenzugriffs-/Auflösungsfunktionen für `models.AdGroupRoleMapping` -
-`main.py` verdrahtet daraus die Admin-CRUD-Endpunkte (`/ad-group-mappings`)
-und den Aufruf in `GET /me`. Bewusster Scope-Cut dieser Session: nur
-einfache 1:1-Zuordnung (eine `ad_group_name` -> eine `role_name`), siehe
-`models.AdGroupRoleMapping`-Docstring und ADR 0093.
+Pure data-access/resolution functions for `models.AdGroupRoleMapping` -
+`main.py` wires these up into the admin CRUD endpoints
+(`/ad-group-mappings`) and the call in `GET /me`. Deliberate scope cut for
+this session: only simple 1:1 mapping (one `ad_group_name` -> one
+`role_name`), see the `models.AdGroupRoleMapping` docstring and ADR 0093.
 """
 
 from datetime import UTC, datetime
@@ -53,20 +53,20 @@ async def delete_mapping(session: AsyncSession, mapping_id: int) -> AdGroupRoleM
 
 
 async def resolve_roles_for_groups(session: AsyncSession, groups: list[str]) -> list[str]:
-    """Löst die Werte des Keycloak-`groups`-JWT-Claims (siehe
-    `bootstrap._ensure_groups_mapper`) in interne Rollennamen auf - reine
-    Lesefunktion, bei JEDER Auflösung (aktuell `GET /me`) frisch gegen die
-    Tabelle ausgewertet statt zwischengespeichert, damit eine Änderung/ein
-    Löschen einer Zuordnung sich sofort beim nächsten Aufruf auswirkt (kein
-    Caching-Invalidierungsproblem). Ein Principal ohne gemappte Gruppen
-    (leere `groups`-Liste oder keine Übereinstimmung) bekommt eine leere
-    Liste zurück, bleibt also unverändert."""
+    """Resolves the values of the Keycloak `groups` JWT claim (see
+    `bootstrap._ensure_groups_mapper`) into internal role names - a pure
+    read function, evaluated fresh against the table on EVERY resolution
+    (currently `GET /me`) rather than cached, so that a change to or
+    deletion of a mapping takes effect immediately on the next call (no
+    cache-invalidation problem). A principal with no mapped groups (empty
+    `groups` list or no match) gets an empty list back, and thus remains
+    unchanged."""
     if not groups:
         return []
     result = await session.execute(
         select(AdGroupRoleMapping.role_name).where(AdGroupRoleMapping.ad_group_name.in_(groups))
     )
-    # `dict.fromkeys` dedupliziert bei stabiler Einfügereihenfolge (z. B. ist
-    # ein Principal in zwei Gruppen, die beide auf dieselbe Rolle mappen, nur
-    # einmal in `realm_roles` vertreten) - deterministischer als `set()`.
+    # `dict.fromkeys` deduplicates while preserving insertion order (e.g. a
+    # principal that belongs to two groups both mapping to the same role
+    # appears only once in `realm_roles`) - more deterministic than `set()`.
     return list(dict.fromkeys(result.scalars().all()))

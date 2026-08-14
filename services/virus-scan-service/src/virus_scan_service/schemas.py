@@ -24,9 +24,9 @@ class ScanResultOut(BaseModel):
 
 
 class QuarantineReleaseRequest(BaseModel):
-    """Angaben, die beim Anlegen des ursprünglich nie erzeugten Dokuments
-    fehlen und jetzt bei der Freigabe (2.5, P15-S2) nachgereicht werden
-    müssen."""
+    """Information that is missing for creating the document that was
+    originally never generated, and that must now be supplied at release
+    time (2.5, P15-S2)."""
 
     title: str
     folder_id: str | None = None

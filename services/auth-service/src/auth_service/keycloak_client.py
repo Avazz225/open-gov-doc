@@ -14,12 +14,12 @@ def _realm_base(settings: Settings) -> str:
 
 
 def _public_realm_base(settings: Settings) -> str:
-    """Wie `_realm_base`, aber für URLs, zu denen der BROWSER navigiert (nicht
-    für Server-zu-Server-Aufrufe) - siehe `Settings.keycloak_public_base_url`-
-    Docstring. Nur `_authorization_endpoint` braucht das, da nur `GET
-    /oidc/authorize`s Antwort tatsächlich vom Client aufgerufen wird; Token-/
-    Logout-Endpunkt werden immer serverseitig aus `auth-service` heraus
-    angesprochen."""
+    """Like `_realm_base`, but for URLs the BROWSER navigates to (not for
+    server-to-server calls) - see `Settings.keycloak_public_base_url`
+    docstring. Only `_authorization_endpoint` needs this, since only `GET
+    /oidc/authorize`'s response is actually invoked by the client; the
+    token/logout endpoints are always addressed server-side from within
+    `auth-service`."""
     base = settings.keycloak_public_base_url or settings.keycloak_base_url
     return f"{base}/realms/{settings.keycloak_realm}"
 
@@ -37,9 +37,9 @@ def _end_session_endpoint(settings: Settings) -> str:
 
 
 async def login(settings: Settings, username: str, password: str) -> dict:
-    """Password-Grant gegen Keycloak (4.4) - der Auth Service hält den
-    Client-Secret, der Aufrufer sieht nur Benutzername/Passwort und bekommt
-    fertige Tokens zurück.
+    """Password grant against Keycloak (4.4) - the Auth Service holds the
+    client secret, the caller only sees username/password and gets back
+    finished tokens.
     """
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -74,13 +74,12 @@ async def refresh(settings: Settings, refresh_token: str) -> dict:
 
 
 def authorization_url(settings: Settings, *, redirect_uri: str, state: str) -> str:
-    """SSO/automatischer Login (Post-Roadmap-Feature) - reine URL-Konstruktion,
-    kein HTTP-Aufruf: der Browser navigiert selbst dorthin. Besitzt der
-    Rechner ein gültiges Kerberos-Ticket UND ist die Kerberos-Erweiterung des
-    Browser-Flows konfiguriert (siehe bootstrap.py), meldet Keycloaks
-    SPNEGO-Mechanismus automatisch an, ohne dass diese Seite je sichtbar
-    wird - andernfalls zeigt Keycloak selbst sein gehostetes Formular
-    (Fallback)."""
+    """SSO/automatic login (post-roadmap feature) - pure URL construction,
+    no HTTP call: the browser navigates there itself. If the machine has a
+    valid Kerberos ticket AND the Kerberos extension of the browser flow is
+    configured (see bootstrap.py), Keycloak's SPNEGO mechanism logs in
+    automatically without this page ever becoming visible - otherwise
+    Keycloak itself shows its hosted form (fallback)."""
     params = {
         "client_id": settings.keycloak_client_id,
         "redirect_uri": redirect_uri,
@@ -92,10 +91,10 @@ def authorization_url(settings: Settings, *, redirect_uri: str, state: str) -> s
 
 
 async def exchange_code(settings: Settings, *, code: str, redirect_uri: str) -> dict:
-    """Tauscht den von Keycloaks Redirect gelieferten `code` serverseitig
-    gegen Tokens - da `dms-api` ein confidential Client ist (hält den
-    `client_secret`), läuft dieser Austausch hier in `auth-service`, nie im
-    Browser (kein PKCE nötig, siehe ADR)."""
+    """Exchanges the `code` delivered by Keycloak's redirect for tokens
+    server-side - since `dms-api` is a confidential client (holds the
+    `client_secret`), this exchange happens here in `auth-service`, never in
+    the browser (no PKCE needed, see ADR)."""
     async with httpx.AsyncClient() as client:
         response = await client.post(
             _token_endpoint(settings),
@@ -115,12 +114,12 @@ async def exchange_code(settings: Settings, *, code: str, redirect_uri: str) -> 
 
 
 async def end_session(settings: Settings, refresh_token: str) -> None:
-    """Beendet die Sitzung wirklich auf Keycloak-Seite (Refresh-Token-
-    Variante des OIDC-Logout-Endpunkts, kein `id_token_hint` nötig, da
-    `TokenResponse` kein ID-Token führt) - ohne das würde ein SPNEGO-fähiger
-    Browser sich nach einem lokalen "Abmelden" beim nächsten Besuch sofort
-    wieder automatisch anmelden, da Keycloaks eigene SSO-Sitzung
-    unangetastet bliebe."""
+    """Actually ends the session on Keycloak's side (refresh-token variant
+    of the OIDC logout endpoint, no `id_token_hint` needed since
+    `TokenResponse` carries no ID token) - without this, a SPNEGO-capable
+    browser would immediately log back in automatically on its next visit
+    after a local "logout", since Keycloak's own SSO session would remain
+    untouched."""
     async with httpx.AsyncClient() as client:
         await client.post(
             _end_session_endpoint(settings),

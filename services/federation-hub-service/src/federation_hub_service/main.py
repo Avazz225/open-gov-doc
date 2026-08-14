@@ -35,13 +35,12 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_body(model: type[BaseModel], body: bytes):
-    """`request.body()` + manuelles `model_validate_json()` (statt eines
-    typisierten FastAPI-Body-Parameters) ist nötig, damit die Endpunkte unten
-    exakt die rohen, signierten Bytes verifizieren können (P13-S4, ADR 0039) -
-    FastAPI wandelt einen so **manuell** ausgelösten `pydantic.ValidationError`
-    aber anders als bei einem automatischen Body-Parameter NICHT von selbst in
-    einen `422` um (nur seine eigene `RequestValidationError`), daher hier
-    explizit gefangen."""
+    """`request.body()` + manual `model_validate_json()` (instead of a typed
+    FastAPI body parameter) is necessary so that the endpoints below can
+    verify exactly the raw, signed bytes (P13-S4, ADR 0039) - however, unlike
+    with an automatic body parameter, FastAPI does NOT automatically convert
+    a `pydantic.ValidationError` raised this **manually** into a `422` (only
+    its own `RequestValidationError`), so it is caught explicitly here."""
     try:
         return model.model_validate_json(body)
     except ValidationError as exc:
@@ -55,17 +54,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS federation"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
-        # CONTRIBUTING.md): `create_all` legt fehlende Tabellen an, ändert aber
-        # keine bestehenden - `revoked_at`/`revoked_reason` kamen erst in
-        # P13-S4 dazu (ADR 0039). `api_key_hash` wird im selben Schritt
-        # entfernt statt bewusst zurückgestellt (anders als sonst üblich) -
-        # das alte API-Key-Modell wird hier vollständig durch die
-        # signaturbasierte Authentisierung ersetzt, nicht schrittweise über
-        # mehrere Versionen hinweg abgelöst (kein Rolling-Update-Szenario
-        # zwischen alt/neu zu berücksichtigen), und eine verbliebene
-        # NOT-NULL-Spalte ohne Server-Default würde jeden neuen Insert
-        # brechen, der sie (zu Recht) nicht mehr befüllt.
+        # Ad-hoc schema extension (no Alembic in this early phase, see
+        # CONTRIBUTING.md): `create_all` creates missing tables but does not
+        # alter existing ones - `revoked_at`/`revoked_reason` were only added
+        # in P13-S4 (ADR 0039). `api_key_hash` is removed in the same step
+        # instead of being deliberately deferred (unlike the usual approach)
+        # - the old API-key model is fully replaced here by
+        # signature-based authentication, not phased out gradually across
+        # multiple versions (no rolling-update scenario between old/new to
+        # account for), and a remaining NOT-NULL column without a server
+        # default would break every new insert that (rightly) no longer
+        # populates it.
         await conn.execute(
             text(
                 "ALTER TABLE federation.installation "
@@ -78,9 +77,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE federation.installation DROP COLUMN IF EXISTS api_key_hash")
         )
-        # Post-Roadmap Phase 20 Session 5 (ADR 0081): Retry/Backoff für die
-        # Handover-Erstzustellung, analog zu den vier anderen Resilienz-Stellen
-        # dieser Phase.
+        # Post-Roadmap Phase 20 Session 5 (ADR 0081): retry/backoff for the
+        # initial handover delivery, analogous to the four other resilience
+        # spots of this phase.
         await conn.execute(
             text(
                 "ALTER TABLE federation.handover "
@@ -93,8 +92,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
             )
         )
-        # Post-Roadmap Phase 21 Session 2 (ADR 0085): Zertifikatsebene über der
-        # bestehenden Signaturprüfung, siehe models.py-Docstrings.
+        # Post-Roadmap Phase 21 Session 2 (ADR 0085): certificate layer on top
+        # of the existing signature check, see models.py docstrings.
         await conn.execute(
             text(
                 "ALTER TABLE federation.hub_identity "
@@ -118,10 +117,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with app.state.session_factory() as session:
         identity = await repository.get_or_create_hub_identity(session)
-        # Nachhol-Migration (ADR 0085): Installationen, die vor dieser Session
-        # registriert wurden, haben noch kein Zertifikat - wird hier einmalig
-        # nachgeholt, damit `authenticate_signed_request`s Bestandsschutz-
-        # Ausnahme in der Praxis nicht dauerhaft in Anspruch genommen wird.
+        # Backfill migration (ADR 0085): installations registered before this
+        # session don't yet have a certificate - caught up here once so that
+        # `authenticate_signed_request`'s grandfathering exception isn't
+        # relied upon permanently in practice.
         installations_without_certificate = await repository.list_installations_without_certificate(
             session
         )
@@ -137,21 +136,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.hub_public_key_pem = identity.public_key_pem
         app.state.hub_ca_certificate_pem = identity.ca_certificate_pem
 
-    # Ein einzelner geteilter Client für alle ausgehenden Zustellungen an
-    # Installations-Callback-URLs - austauschbar in Tests (`app.state.http_client
-    # = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))`), damit ein
-    # Handover-Rundlauf ohne echtes Netzwerk getestet werden kann.
+    # A single shared client for all outgoing deliveries to installation
+    # callback URLs - swappable in tests (`app.state.http_client =
+    # httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))`), so that a
+    # handover round trip can be tested without a real network.
     app.state.http_client = httpx.AsyncClient(timeout=15.0)
 
-    # Post-Roadmap Phase 20 Session 5 (ADR 0081): der Ende-zu-Ende
-    # verschlüsselte Payload wird bewusst NIE in der `handover`-Tabelle
-    # persistiert (siehe `models.Handover`-Docstring, ADR 0028) - ein
-    # zwischenzeitlich per Retry erneut zuzustellender Payload lebt daher nur
-    # FLÜCHTIG in diesem Prozessspeicher-Dict (keyed by handover_id). Ein
-    # Neustart des Hub während eines offenen Retry-Fensters verliert damit
-    # bewusst die Möglichkeit zur automatischen Nachzustellung - dokumentiert,
-    # nicht stillschweigend umgangen (siehe `docs/services/
-    # federation-hub-service.md` "Offene Punkte").
+    # Post-Roadmap Phase 20 Session 5 (ADR 0081): the end-to-end encrypted
+    # payload is deliberately NEVER persisted in the `handover` table (see
+    # `models.Handover` docstring, ADR 0028) - a payload that still needs to
+    # be redelivered via retry therefore only lives EPHEMERALLY in this
+    # in-process memory dict (keyed by handover_id). A restart of the hub
+    # during an open retry window therefore deliberately loses the ability
+    # to automatically redeliver - documented, not silently worked around
+    # (see `docs/services/federation-hub-service.md` "Open Points").
     app.state.pending_handover_payloads = {}
     retry_poll_task = asyncio.create_task(
         _handover_retry_poll_loop(app.state.session_factory, app.state.pending_handover_payloads)
@@ -185,22 +183,22 @@ def healthz() -> dict:
 
 @app.get("/public-key", response_model=PublicKeyOut)
 def get_public_key() -> PublicKeyOut:
-    """Installationen rufen dies **einmalig** beim ersten Registrieren ab und
-    cachen den Schlüssel lokal (Trust-on-First-Use, siehe ADR 0028) - damit
-    verifizieren sie jede spätere, vom Hub signierte Zustellung
+    """Installations fetch this **once** during initial registration and
+    cache the key locally (trust-on-first-use, see ADR 0028) - they use it to
+    verify every subsequent delivery signed by the hub
     (``X-Federation-Hub-Signature``)."""
     return PublicKeyOut(public_key_pem=app.state.hub_public_key_pem.decode("utf-8"))
 
 
 @app.get("/ca-certificate", response_model=CaCertificateOut)
 def get_ca_certificate() -> CaCertificateOut:
-    """Selbstsigniertes Root-CA-Zertifikat des Hub (Post-Roadmap Phase 21
-    Session 2, ADR 0085) - Installationen können es analog zu `GET
-    /public-key` beim ersten Kontakt abrufen und pinnen (Trust-on-First-Use,
-    Certificate-Pinning-Äquivalent), um damit spätere, vom Hub ausgestellte
-    Installations-Zertifikate lokal nachzuvollziehen. Rein informativ für den
-    Hub selbst - die eigentliche Zertifikatsprüfung passiert serverseitig in
-    `authenticate_signed_request`, nicht hier."""
+    """Self-signed root CA certificate of the hub (Post-Roadmap Phase 21
+    Session 2, ADR 0085) - installations can fetch and pin it on first
+    contact, analogous to `GET /public-key` (trust-on-first-use,
+    certificate-pinning equivalent), to locally validate installation
+    certificates issued later by the hub. Purely informational for the hub
+    itself - the actual certificate check happens server-side in
+    `authenticate_signed_request`, not here."""
     return CaCertificateOut(ca_certificate_pem=app.state.hub_ca_certificate_pem.decode("utf-8"))
 
 
@@ -210,13 +208,14 @@ async def register_installation(
     x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> Installation:
-    """Seit P13-S4 (ADR 0039) kryptografisch statt über ein geteiltes
-    API-Key-Geheimnis abgesichert - `payload.public_key_pem` dient zugleich
-    als Identität, `X-Installation-Signature` beweist den Besitz des
-    zugehörigen privaten Schlüssels. Liest den rohen Body statt eines
-    typisierten Parameters, damit exakt diese Bytes (nicht ein separat neu
-    serialisiertes Objekt) verifiziert werden - gleiches Prinzip wie
-    `workflow_service.main.federation_inbound`, nur in umgekehrter Richtung."""
+    """Since P13-S4 (ADR 0039) secured cryptographically instead of via a
+    shared API-key secret - `payload.public_key_pem` simultaneously serves as
+    identity, `X-Installation-Signature` proves possession of the
+    corresponding private key. Reads the raw body instead of a typed
+    parameter so that exactly these bytes (not a separately re-serialized
+    object) are verified - same principle as
+    `workflow_service.main.federation_inbound`, just in the reverse
+    direction."""
     body = await request.body()
     payload = _parse_body(InstallationRegister, body)
     try:
@@ -225,11 +224,11 @@ async def register_installation(
         )
     except repository.UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    # Post-Roadmap Phase 21 Session 2 (ADR 0085): sowohl bei Neuanlage als auch
-    # bei einer regulären Re-Registrierung neu ausgestellt (`public_key_pem`
-    # selbst ändert sich bei einer Re-Registrierung zwar nicht, siehe
-    # `register_or_update_installation`, ein frisches Zertifikat schadet aber
-    # nicht und hält die Gültigkeitsfrist konsistent aktuell).
+    # Post-Roadmap Phase 21 Session 2 (ADR 0085): reissued both on initial
+    # creation and on a regular re-registration (`public_key_pem` itself
+    # doesn't change on a re-registration, see
+    # `register_or_update_installation`, but a fresh certificate doesn't
+    # hurt and keeps the validity period consistently up to date).
     await repository.issue_or_renew_installation_certificate(
         session,
         installation,
@@ -242,9 +241,10 @@ async def register_installation(
 
 @app.get("/installations", response_model=list[InstallationOut])
 async def list_installations(session: AsyncSession = Depends(get_session)) -> list[InstallationOut]:
-    """Das Adressbuch ist bewusst ungegated lesbar (7.4 zufolge braucht ein
-    Prozess-Designer nur die öffentlichen Kennungen/Anzeigenamen, um ein
-    Ziel auszuwählen) - analog zu `registry-service`s offenem `GET /instances`."""
+    """The address book is deliberately readable without gating (per 7.4, a
+    process designer only needs the public identifiers/display names to
+    select a target) - analogous to `registry-service`'s open
+    `GET /instances`."""
     return await repository.list_installations(session)
 
 
@@ -272,9 +272,9 @@ async def rotate_installation_key(
     x_installation_signature: str = Header(default="", alias="X-Installation-Signature"),
     session: AsyncSession = Depends(get_session),
 ) -> Installation:
-    """Kontrollierte Schlüsselrotation (P13-S4, ADR 0039) - der Request-Body
-    (``{"new_public_key_pem": ...}``) muss mit dem noch **aktuellen**
-    privaten Schlüssel signiert sein, siehe `repository.rotate_installation_key`."""
+    """Controlled key rotation (P13-S4, ADR 0039) - the request body
+    (``{"new_public_key_pem": ...}``) must be signed with the still
+    **current** private key, see `repository.rotate_installation_key`."""
     body = await request.body()
     payload = _parse_body(RotateKeyRequest, body)
     try:
@@ -289,8 +289,8 @@ async def rotate_installation_key(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except repository.UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    # Post-Roadmap Phase 21 Session 2 (ADR 0085): MUSS neu ausgestellt werden -
-    # das vorherige Zertifikat band den jetzt abgelösten alten Schlüssel.
+    # Post-Roadmap Phase 21 Session 2 (ADR 0085): MUST be reissued - the
+    # previous certificate bound the now-replaced old key.
     await repository.issue_or_renew_installation_certificate(
         session,
         installation,
@@ -308,11 +308,12 @@ async def revoke_installation(
     authorization: str = Header(default="", alias="Authorization"),
     session: AsyncSession = Depends(get_session),
 ) -> Installation:
-    """Betreiber-Aktion (P13-S4, ADR 0039 "Revocation") - gegated über
-    `settings.hub_operator_key`, nicht über die Signatur der betroffenen
-    Installation (die könnte kompromittiert sein, siehe `repository.
-    revoke_installation`). Ohne konfigurierten `hub_operator_key` vollständig
-    gesperrt (`403`) - ein Hub-Betreiber muss Revocation bewusst aktivieren."""
+    """Operator action (P13-S4, ADR 0039 "Revocation") - gated via
+    `settings.hub_operator_key`, not via the signature of the affected
+    installation (which could be compromised, see `repository.
+    revoke_installation`). Fully locked (`403`) without a configured
+    `hub_operator_key` - a hub operator must deliberately enable
+    revocation."""
     if not settings.hub_operator_key or authorization != f"Bearer {settings.hub_operator_key}":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -329,12 +330,12 @@ async def revoke_installation(
 
 
 async def _deliver(url: str, body: dict) -> bool:
-    """Sendet ``body`` als vom Hub signierten JSON-Request an ``url`` - die
-    exakten, gesendeten Bytes werden signiert (nicht ein separat neu
-    serialisiertes Objekt), damit die empfangende Seite über genau diese Bytes
-    verifizieren kann. Netzwerkfehler/Nicht-2xx-Antworten gelten als
-    fehlgeschlagene Zustellung, werfen aber keine Exception - der Aufrufer
-    entscheidet anhand des Rückgabewerts, wie der Handover-Status lautet."""
+    """Sends ``body`` as a JSON request signed by the hub to ``url`` - the
+    exact, sent bytes are signed (not a separately re-serialized object), so
+    the receiving side can verify over exactly these bytes. Network
+    errors/non-2xx responses count as a failed delivery but do not raise an
+    exception - the caller decides the handover status based on the return
+    value."""
     raw = json.dumps(body).encode("utf-8")
     signature = sign_body(app.state.hub_private_key_pem, raw)
     try:
@@ -353,17 +354,16 @@ async def _deliver(url: str, body: dict) -> bool:
 
 
 async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) -> None:
-    """Ein einzelner Durchlauf der fälligen Handover-Wiederholungsversuche -
-    ausgelagert aus `_handover_retry_poll_loop`, damit ein Tick isoliert
-    testbar ist (gleiches Muster wie notification-service's `_run_retry_tick`,
-    ADR 0079)."""
+    """A single pass over the due handover retry attempts - factored out of
+    `_handover_retry_poll_loop` so that a tick is independently testable
+    (same pattern as notification-service's `_run_retry_tick`, ADR 0079)."""
     async with session_factory() as session:
         due = await repository.list_due_for_retry(session)
     for stale in due:
         async with session_factory() as session:
             handover = await session.get(Handover, stale.id)
             if handover is None or handover.status != "pending_retry":
-                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+                continue  # handled differently in the meantime (e.g. manual retry)
             cached = pending_payloads.get(handover.id)
             if cached is None:
                 logger.warning(
@@ -385,21 +385,21 @@ async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) ->
                 success=delivered,
                 max_attempts=settings.max_handover_delivery_attempts,
             )
-            # NUR bei Erfolg entfernen - bleibt auch nach Erschöpfung
-            # (`delivery_failed`) im Cache, sonst wäre der Cache-Eintrag exakt
-            # in dem Moment weg, in dem `POST .../retry` ihn erstmals nutzen
-            # könnte (beide Übergänge passieren im selben Tick).
+            # ONLY remove on success - stays in the cache even after
+            # exhaustion (`delivery_failed`), otherwise the cache entry would
+            # be gone exactly at the moment `POST .../retry` could first use
+            # it (both transitions happen in the same tick).
             if delivered:
                 pending_payloads.pop(handover.id, None)
             await session.commit()
 
 
 async def _handover_retry_poll_loop(session_factory, pending_payloads: dict[str, dict]) -> None:
-    """Wiederholt fehlgeschlagene Handover-Erstzustellungen (Post-Roadmap
-    Phase 20 Session 5, ADR 0081) - der erste Zustellversuch bleibt bewusst
-    synchron in `POST /handovers` (schnelle Antwort im Regelfall), nur die
-    WIEDERHOLUNG läuft asynchron in diesem eigenen Poll-Loop. Gleiches Idiom
-    wie notification-service's `_notification_retry_poll_loop` (ADR 0079)."""
+    """Retries failed initial handover deliveries (Post-Roadmap Phase 20
+    Session 5, ADR 0081) - the first delivery attempt deliberately stays
+    synchronous in `POST /handovers` (fast response in the normal case), only
+    the RETRY runs asynchronously in this dedicated poll loop. Same idiom as
+    notification-service's `_notification_retry_poll_loop` (ADR 0079)."""
     while True:
         try:
             await _run_retry_tick(session_factory, pending_payloads)
@@ -467,14 +467,14 @@ async def create_handover(
         to_installation_id=to_installation.id,
         process_type=payload.process_type,
     )
-    # Muss vor der Zustellung committet sein: die Zielinstallation kann beim
-    # Verarbeiten von `/federation/inbound` synchron in denselben Hub
-    # zurückrufen (z. B. ein `federated_return`-Task, der sofort
-    # `POST /handovers/{id}/result` aufruft, siehe ADR 0028 "Selbst-Loopback").
-    # Dieser verschachtelte Aufruf läuft in einer eigenen DB-Transaktion und
-    # sähe die Handover-Zeile sonst noch nicht (Postgres-Transaktionsisolation) -
-    # ein `GET`/`POST .../result` auf einen erst noch uncommitteten Handover
-    # schlägt sonst reproduzierbar mit 404 fehl.
+    # Must be committed before delivery: the target installation can call
+    # back synchronously into the same hub while processing
+    # `/federation/inbound` (e.g. a `federated_return` task that immediately
+    # calls `POST /handovers/{id}/result`, see ADR 0028 "self-loopback").
+    # This nested call runs in its own DB transaction and would otherwise not
+    # yet see the handover row (Postgres transaction isolation) - a
+    # `GET`/`POST .../result` on a handover that hasn't been committed yet
+    # would otherwise reproducibly fail with 404.
     await session.commit()
 
     delivery_body = {
@@ -490,11 +490,11 @@ async def create_handover(
         session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
     )
     if not delivered:
-        # Bleibt auch nach Erschöpfung (`delivery_failed`) im Cache - ein
-        # manueller `POST .../retry` braucht ihn gerade dann. Nur ein
-        # ERFOLGREICHER Versuch (hier oder später im Poll-Loop/Retry-Endpunkt)
-        # entfernt den Eintrag wieder. Siehe `lifespan`s Kommentar zur bewusst
-        # flüchtigen Natur dieses Cache (ADR 0028, ADR 0081).
+        # Stays in the cache even after exhaustion (`delivery_failed`) - a
+        # manual `POST .../retry` needs it precisely then. Only a
+        # SUCCESSFUL attempt (here or later in the poll loop/retry endpoint)
+        # removes the entry again. See `lifespan`'s comment on the
+        # deliberately ephemeral nature of this cache (ADR 0028, ADR 0081).
         app.state.pending_handover_payloads[handover.id] = delivery_body
     await session.commit()
     return handover
@@ -551,17 +551,16 @@ async def get_handover(
 async def retry_handover(
     handover_id: str, session: AsyncSession = Depends(get_session)
 ) -> HandoverOut:
-    """Manueller Neustart eines endgültig fehlgeschlagenen Handover
-    (Post-Roadmap Phase 20 Session 5, ADR 0081) - nur für `delivery_failed`
-    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen
-    Zustellversuch statt auf den nächsten Poll-Tick zu warten, gleiches Muster
-    wie ocr-/rendering-service (ADR 0080). Setzt `attempts`/`next_retry_at`
-    zwingend VOR dem erneuten Versuch zurück (`repository.reset_for_retry`).
-    Funktioniert nur, solange der verschlüsselte Payload noch im
-    Prozessspeicher des Hub liegt - nach einem Neustart während eines offenen
-    Retry-Fensters ist er unwiederbringlich verloren (bewusste Konsequenz aus
-    "kein Payload wird je persistiert", ADR 0028); die Absenderinstallation
-    muss in diesem Fall einen neuen Handover mit neuer handover_id einreichen."""
+    """Manual restart of a permanently failed handover (Post-Roadmap Phase 20
+    Session 5, ADR 0081) - only meaningful for `delivery_failed` (409
+    otherwise); makes a new synchronous delivery attempt immediately instead
+    of waiting for the next poll tick, same pattern as ocr-/rendering-service
+    (ADR 0080). MUST reset `attempts`/`next_retry_at` BEFORE the new attempt
+    (`repository.reset_for_retry`). Only works as long as the encrypted
+    payload is still in the hub's process memory - after a restart during an
+    open retry window it is irrecoverably lost (deliberate consequence of "no
+    payload is ever persisted", ADR 0028); in that case the sending
+    installation must submit a new handover with a new handover_id."""
     try:
         handover = await repository.get_handover(session, handover_id)
     except repository.NotFoundError as exc:
@@ -596,10 +595,9 @@ async def retry_handover(
     await repository.mark_handover_delivered(
         session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
     )
-    # Nur bei Erfolg entfernen - bleibt bei erneutem Fehlschlag im Cache, damit
-    # ein weiterer manueller Retry (oder ein zwischenzeitlich wieder
-    # aufgenommener Poll-Loop, falls attempts noch nicht erschöpft war) ihn
-    # weiterhin nutzen kann.
+    # Only remove on success - stays in the cache on renewed failure, so a
+    # further manual retry (or a poll loop resumed in the meantime, if
+    # attempts hadn't been exhausted yet) can still use it.
     if delivered:
         app.state.pending_handover_payloads.pop(handover_id, None)
     await session.commit()

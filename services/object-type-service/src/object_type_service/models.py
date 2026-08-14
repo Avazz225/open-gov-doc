@@ -8,9 +8,9 @@ Base = make_declarative_base("object_type")
 
 
 class ObjectType(Base):
-    """Objekttyp-Definition (2.2): Attribute, Namenskonventionen, bedingte
-    Regeln. Angewandt wird das Schema nicht hier, sondern über
-    ``dms-constraint-engine`` im ``/validate``-Endpunkt (siehe main.py)."""
+    """Object type definition (2.2): attributes, naming conventions,
+    conditional rules. The schema is not applied here, but via
+    ``dms-constraint-engine`` in the ``/validate`` endpoint (see main.py)."""
 
     __tablename__ = "object_type"
 
@@ -20,71 +20,72 @@ class ObjectType(Base):
     attributes: Mapped[list] = mapped_column(JSON, default=list)
     naming_constraints: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     conditions: Mapped[list] = mapped_column(JSON, default=list)
-    # Erzwungene Objekt-Hierarchie (2.2a): Namen zulässiger Eltern-Ordnerklassen,
-    # oder der Sentinel "$ROOT" für Platzierung direkt unter der Wurzel. None/leer
-    # = überall platzierbar (Rückwärtskompatibilität zu Typen ohne diese Angabe).
+    # Enforced object hierarchy (2.2a): names of allowed parent folder classes,
+    # or the sentinel "$ROOT" for placement directly under the root. None/empty
+    # = can be placed anywhere (backward compatibility for types without this).
     allowed_parent_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    # Nur für Ordnerklassen (applies_to == "folder") gesetzt (2.2a) - Anzeige im
-    # User-UI-Explorer vor dem Namen folgt erst mit P5b-S4.
+    # Only set for folder classes (applies_to == "folder") (2.2a) - display in
+    # the user UI explorer before the name only follows with P5b-S4.
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Kennzeichengenerator (2.2, seit P5e-S1) - nur für applies_to == "document"
-    # gesetzt. None = kein Generator konfiguriert. Format-String mit
-    # Platzhaltern {YYYY}/{YY}/{MM}/{DD}/{Laufende_Nummer}, siehe
+    # Reference number generator (2.2, since P5e-S1) - only set for
+    # applies_to == "document". None = no generator configured. Format string
+    # with placeholders {YYYY}/{YY}/{MM}/{DD}/{Laufende_Nummer}, see
     # repository._render_kennzeichen.
     kennzeichen_format: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    # Tri-State-Override (None = kein Override, es gilt der globale Standard
-    # aus P5e-S2) des globalen "Kennzeichen vor Dateinamen anzeigen"-Schalters.
+    # Tri-state override (None = no override, the global default from P5e-S2
+    # applies) of the global "show reference number before filename" toggle.
     kennzeichen_display_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Mindest-Signaturniveau (3.10, seit P6-S7) - nur für applies_to == "document"
-    # gesetzt (Ordner werden nicht signiert). None = keine Anforderung. Wird vom
-    # Signature Service bei jedem Signiervorgang gegen das angeforderte Niveau
-    # geprüft (`ses` < `aes` < `qes`), siehe signature-service/main.py.
+    # Minimum signature level (3.10, since P6-S7) - only set for
+    # applies_to == "document" (folders are not signed). None = no
+    # requirement. Checked by the Signature Service against the requested
+    # level on every signing operation (`ses` < `aes` < `qes`), see
+    # signature-service/main.py.
     required_signature_level: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    # Aufbewahrung (5.2, seit P7-S1): Standard-Aufbewahrungsfrist in Tagen ab
-    # Anlage, für applies_to == "document" UND "folder" gleichermaßen gültig
-    # (gilt für beide Session P7-S1/P7-S1b). None = kein Typ-Standard, Frist
-    # bleibt manuell zu setzen.
+    # Retention (5.2, since P7-S1): default retention period in days from
+    # creation, valid equally for applies_to == "document" AND "folder"
+    # (applies to both Session P7-S1/P7-S1b). None = no type default, period
+    # remains to be set manually.
     default_retention_days: Mapped[int | None] = mapped_column(nullable=True)
-    # Tri-State-Override (None = kein Override, es gilt der globale Standard
-    # aus RetentionConfig) - ob ein Löschgrund bei Zwangslöschung Pflicht ist
-    # (5.2a), gleiches Muster wie kennzeichen_display_override.
+    # Tri-state override (None = no override, the global default from
+    # RetentionConfig applies) - whether a deletion reason is mandatory on
+    # forced deletion (5.2a), same pattern as kennzeichen_display_override.
     deletion_reason_required_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Aussonderung (5.6, seit P7-S3): Standard-Frist in Tagen ab Anlage, nach
-    # deren Ablauf ein Dokument aussonderungsfaehig wird (archival-service
-    # loest daraus einmalig Document.archive_after auf) - exakt gleiches
-    # Muster wie default_retention_days, aber unabhaengig davon (Aussonderung
-    # ist laut Konzept ergaenzend zur regulaeren Aufbewahrungsfrist, kein
-    # dritter Zweig derselben Entscheidung). None = kein Typ-Standard, nur
-    # manueller Trigger moeglich.
+    # Records disposal (5.6, since P7-S3): default period in days from
+    # creation, after which a document becomes eligible for disposal
+    # (archival-service resolves Document.archive_after from this once) -
+    # exactly the same pattern as default_retention_days, but independent of
+    # it (per the concept, records disposal is complementary to the regular
+    # retention period, not a third branch of the same decision). None = no
+    # type default, only a manual trigger is possible.
     default_archive_after_days: Mapped[int | None] = mapped_column(nullable=True)
-    # Ob die Archivkopie vor der Ablage im Archiv-Ziel verschluesselt wird
-    # (5.6) - ueber archival-service's KeyStore-Plugin-Schnittstelle (ADR
-    # 0029), Default aus false (unverschluesselt).
+    # Whether the archive copy is encrypted before being stored at the
+    # archive target (5.6) - via archival-service's KeyStore plugin
+    # interface (ADR 0029), defaults to false (unencrypted).
     archive_encryption_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Verschlusssachen-Einstufung (2.5, P15-S1, seit P17-S2 mehrstufig statt
-    # binär - 14.2) - nur für applies_to == "document" gesetzt (der
-    # Konzepttext nennt ausdrücklich nur Dokumente, keine Ordner). None =
-    # nicht eingestuft, sonst eine der vier gängigen deutschen
-    # VS-Einstufungen (siehe schemas.ClassificationLevel). Jeder gesetzte
-    # Wert (unabhängig von der konkreten Stufe) löst weiterhin denselben
-    # binären Gate wie zuvor aus: ein klassifiziertes, gelöschtes Dokument
-    # landet im strukturell getrennten Verschlusssachen-Papierkorb statt im
-    # regulären, siehe document-service `settings.classified_trash_hard_
-    # delete_admin_role` - die konkrete Stufe ist reine Zusatzinformation
-    # (Anzeige/Audit), keine zusätzliche Rollen-Differenzierung in dieser
-    # Referenzimplementierung. Ersetzt das bis P17-S1 rein binäre `is_
-    # classified: bool` (identisches schema-gebundenes Architekturmuster,
-    # siehe ADR 0051 "Begründung" - nur der Werteraum wurde erweitert).
+    # Classified-documents classification (2.5, P15-S1, multi-level instead of
+    # binary since P17-S2 - 14.2) - only set for applies_to == "document" (the
+    # concept text explicitly names only documents, not folders). None =
+    # not classified, otherwise one of the four common German classification
+    # levels (see schemas.ClassificationLevel). Every set value (regardless
+    # of the specific level) still triggers the same binary gate as before:
+    # a classified, deleted document ends up in the structurally separate
+    # classified-documents trash instead of the regular one, see
+    # document-service `settings.classified_trash_hard_delete_admin_role` -
+    # the specific level is purely additional information (display/audit),
+    # not additional role differentiation in this reference implementation.
+    # Replaces the purely binary `is_classified: bool` from before P17-S1
+    # (identical schema-bound architecture pattern, see ADR 0051
+    # "Rationale" - only the value space was extended).
     classification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ObjectTypeSequence(Base):
-    """Atomarer, gegen Nebenläufigkeit abgesicherter Jahres-Zähler für den
-    Kennzeichengenerator (P5e-S1): eine Zeile je Objekttyp und Jahr, damit der
-    Zähler zum Jahreswechsel automatisch wieder bei 1 beginnt (Nutzerentscheidung
-    "Reset pro Jahr", siehe PROGRESS.md)."""
+    """Atomic, concurrency-safe yearly counter for the reference number
+    generator (P5e-S1): one row per object type and year, so the counter
+    automatically restarts at 1 at the turn of the year (user decision
+    "reset per year", see PROGRESS.md)."""
 
     __tablename__ = "object_type_sequence"
 
@@ -96,11 +97,11 @@ class ObjectTypeSequence(Base):
 
 
 class KennzeichenConfig(Base):
-    """Globaler Anzeige-Standard für den Kennzeichengenerator (2.2, seit
-    P5e-S3) - bewusst eine einzelne Zeile mit fester ``id=1``, gleiches Muster
-    wie ``OcrConfig``/``UploadConfig`` der anderen Services (eine Installation,
-    keine Mandantentrennung, 3a). Einzelne Dokumentenarten können diesen
-    Standard über ``ObjectType.kennzeichen_display_override`` überschreiben."""
+    """Global display default for the reference number generator (2.2, since
+    P5e-S3) - deliberately a single row with fixed ``id=1``, same pattern as
+    ``OcrConfig``/``UploadConfig`` of the other services (one installation,
+    no tenant separation, 3a). Individual document types can override this
+    default via ``ObjectType.kennzeichen_display_override``."""
 
     __tablename__ = "kennzeichen_config"
 
@@ -110,12 +111,12 @@ class KennzeichenConfig(Base):
 
 
 class ObjectTypeLayout(Base):
-    """Formular-Layout je Objekttyp und Verwendungszweck (2.2b, seit P5b-S2):
-    ``purpose`` ist ``"display"``|``"search"``|``"upload"``. Nur explizit vom
-    generierten "Smart Layout" abweichende Layouts werden hier persistiert
-    (siehe ``object_type_service.layout.generate_smart_layout``) - ohne eigene
-    Zeile wird bei jedem Lesezugriff aus der aktuellen Attributliste neu
-    generiert, damit ein unveränderter Default nie veraltet."""
+    """Form layout per object type and usage purpose (2.2b, since P5b-S2):
+    ``purpose`` is ``"display"``|``"search"``|``"upload"``. Only layouts
+    that explicitly deviate from the generated "smart layout" are persisted
+    here (see ``object_type_service.layout.generate_smart_layout``) -
+    without its own row, it is regenerated from the current attribute list
+    on every read, so an unmodified default never goes stale."""
 
     __tablename__ = "object_type_layout"
 

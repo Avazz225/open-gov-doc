@@ -6,9 +6,9 @@ from dms_metrics_client.sensors import SensorRegistry
 
 
 def metrics_payload(registry: SensorRegistry) -> tuple[bytes, str]:
-    """Serialisiert die aktiven Sensoren einer `SensorRegistry` im
-    Prometheus-Exposition-Format. Liefert bewusst rohe Bytes + Content-Type
-    statt einer fertigen `fastapi.Response`, damit diese Lib kein
-    FastAPI-Abhängigkeit braucht - jeder Service baut die Response selbst
+    """Serializes the active sensors of a `SensorRegistry` in Prometheus
+    exposition format. Deliberately returns raw bytes + content type instead
+    of a ready-made `fastapi.Response`, so this lib doesn't need a FastAPI
+    dependency - each service builds the response itself
     (`Response(content=body, media_type=content_type)`)."""
     return generate_latest(registry.collector_registry), CONTENT_TYPE_LATEST

@@ -6,44 +6,45 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Kein Zugriff auf das Document-Service-Schema/-Storage-Key direkt (3.1) -
-    # Metadaten und Originalinhalt werden ausschließlich über dessen HTTP-API
-    # bezogen (GET .../versions/{n} bzw. .../versions/{n}/content).
+    # No direct access to the document service's schema/storage key (3.1) -
+    # metadata and original content are obtained exclusively via its HTTP
+    # API (GET .../versions/{n} or .../versions/{n}/content).
     document_service_base_url: str = "http://localhost:8006"
 
-    # OCR speichert eigene Seitenbilder (PDFs) über den Storage Service - nur
-    # dort, nie im OCR Service selbst (3.6, gleiches Prinzip wie rendering-service).
+    # OCR stores its own page images (PDFs) via the storage service - only
+    # there, never in the OCR service itself (3.6, same principle as
+    # rendering-service).
     storage_service_base_url: str = "http://localhost:8005"
 
-    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ocr-service hatte
-    # bislang gar keine Berechtigungsprüfung.
+    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ocr-service had no
+    # permission check at all until now.
     permission_service_base_url: str = "http://localhost:8004"
 
-    # Gleiches Muster wie rendering-service: ein breites document.>-Abo statt
-    # zweier Einzel-Subscriptions, Dispatch nach event_type im Consumer.
+    # Same pattern as rendering-service: one broad document.> subscription
+    # instead of two separate ones, dispatch by event_type in the consumer.
     document_subjects: list[str] = ["document.>"]
 
-    # DPI der Seitenrasterung - sowohl Eingabe für Tesseract als auch
-    # eigenständiges Seitenbild (rendering-service rastert keine PDFs).
+    # DPI for page rasterization - both the input for Tesseract and the
+    # standalone page image (rendering-service does not rasterize PDFs).
     raster_dpi: int = 150
 
-    # "Nutzbarer Textlayer" (3.9: automatische Erkennung, ob OCR überhaupt
-    # nötig ist) ab dieser Zeichenzahl auf Seite 1 - einfache, bewusst grobe
-    # Schwelle, filtert leere/dekorative Deckblätter ohne kurze echte Seiten
-    # (z. B. ein einzeiliges Deckblatt) falsch einzuordnen.
+    # "Usable text layer" (3.9: automatic detection of whether OCR is even
+    # needed) from this character count on page 1 - a simple, deliberately
+    # coarse threshold that filters out empty/decorative cover pages without
+    # misclassifying short genuine pages (e.g. a single-line cover page).
     min_native_text_chars: int = 20
 
-    # Unterhalb dieser mittleren Tesseract-Konfidenz gilt ein Ergebnis als
-    # `needs_review` (3.9: optionale manuelle Nachprüfung bei niedriger
-    # Konfidenz) - rein informativ, blockiert nichts (siehe ADR 0010: nur der
-    # Virenscan gated den Zugriff).
+    # Below this average Tesseract confidence, a result counts as
+    # `needs_review` (3.9: optional manual review at low confidence) - purely
+    # informational, blocks nothing (see ADR 0010: only the virus scan gates
+    # access).
     needs_review_confidence_threshold: float = 70.0
 
-    # Retry/Backoff (Post-Roadmap Phase 20 Session 4, ADR 0080) - gleicher
-    # Zahlenwert wie archival-/notification-service's `max_*_attempts`. Nach
-    # Erschoepfung wechselt ein OCR-Ergebnis auf `failed_permanent`.
+    # Retry/backoff (Post-Roadmap Phase 20 Session 4, ADR 0080) - same
+    # numeric value as archival-/notification-service's `max_*_attempts`.
+    # After exhaustion, an OCR result switches to `failed_permanent`.
     max_ocr_attempts: int = 5
 
-    # Poll-Intervall des neuen `_ocr_retry_poll_loop` (main.py) - gleicher Wert
-    # wie notification-service's `notification_retry_poll_interval_seconds`.
+    # Poll interval of the new `_ocr_retry_poll_loop` (main.py) - same value
+    # as notification-service's `notification_retry_poll_interval_seconds`.
     ocr_retry_poll_interval_seconds: float = 60.0

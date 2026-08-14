@@ -5,17 +5,17 @@ import httpx
 
 
 class PathNotFoundError(Exception):
-    """Ein Pfadsegment (Ordner oder Dokument) existiert nicht - sowohl beim
-    Auflösen eines Pfads als auch bei Move/Create gegen ein unbekanntes Ziel."""
+    """A path segment (folder or document) does not exist - both when
+    resolving a path and on move/create against an unknown target."""
 
 
 class LockConflictError(Exception):
-    """Das Dokument ist bereits von einer anderen Sitzung gesperrt (409, siehe
+    """The document is already locked by another session (409, see
     document-service `POST /documents/{id}/lock`)."""
 
 
 class LockNotHeldError(Exception):
-    """Freigabeversuch einer Sperre, die eine andere Sitzung hält (403)."""
+    """Attempt to release a lock held by another session (403)."""
 
 
 @dataclass(frozen=True)
@@ -23,12 +23,11 @@ class TreeFolder:
     id: str
     name: str
     parent_id: str | None
-    # `str | None`/`datetime | None` statt verpflichtender Felder: die
-    # kostenlose lokale Root-Kurzschluss-Konstruktion in `resolve_path()`
-    # (unten) kennt beide Werte nicht, ohne dafür einen zusätzlichen
-    # HTTP-Aufruf im (bei jeder WebDAV-Anfrage durchlaufenen) Hot Path zu
-    # riskieren - `None` ist CMIS' eigener "value not set"-Zustand (5.2.7),
-    # kein erfundener Wert.
+    # `str | None`/`datetime | None` instead of mandatory fields: the free
+    # local root short-circuit construction in `resolve_path()` (below)
+    # doesn't know either value, without risking an extra HTTP call in the
+    # hot path (traversed on every WebDAV request) - `None` is CMIS' own
+    # "value not set" state (5.2.7), not a made-up value.
     created_by: str | None
     created_at: datetime | None
 
@@ -56,15 +55,15 @@ class TreeLock:
 
 
 def _to_tree_document(body: dict, version: dict | None = None) -> TreeDocument:
-    """`DocumentOut` (das `body`-Argument) traegt selbst keine Datei-Metadaten
-    (Groesse/Content-Type/Pruefsumme) - die leben ausschliesslich auf
-    `DocumentVersionOut` der jeweils aktuellen Version. `version` ist daher
-    ein separat abgerufener `DocumentVersionOut`-Body (siehe
-    `DmsTreeClient._fetch_current_version`); ohne ihn (z. B. wenn der
-    Aufrufer die Werte bewusst nicht braucht) bleiben die Felder auf
-    neutralen Defaults - WICHTIG: nicht `checksum_sha256=""`, das wsgidav
-    als ETag ablehnt (`checked_etag` erlaubt `None`, aber keinen leeren
-    String), siehe `DmsDavDocument.get_etag()`."""
+    """`DocumentOut` (the `body` argument) itself carries no file metadata
+    (size/content type/checksum) - those live exclusively on
+    `DocumentVersionOut` of the respective current version. `version` is
+    therefore a separately fetched `DocumentVersionOut` body (see
+    `DmsTreeClient._fetch_current_version`); without it (e.g. when the
+    caller deliberately doesn't need the values) the fields stay at
+    neutral defaults - IMPORTANT: not `checksum_sha256=""`, which wsgidav
+    rejects as an ETag (`checked_etag` allows `None` but not an empty
+    string), see `DmsDavDocument.get_etag()`."""
     version = version or {}
     return TreeDocument(
         id=body["id"],
@@ -91,19 +90,19 @@ def _to_tree_folder(body: dict) -> TreeFolder:
 
 
 class DmsTreeClient:
-    """Wiederverwendbare DMS-Baum-Anbindung für Connector-Services (3.3) -
-    kennt weder WebDAV noch CMIS, nur die Übersetzung "Pfad/Ordner/Dokument"
-    auf die bestehenden `folder-service`/`document-service`-HTTP-APIs.
+    """Reusable DMS tree integration for connector services (3.3) - knows
+    neither WebDAV nor CMIS, only the translation of "path/folder/document"
+    onto the existing `folder-service`/`document-service` HTTP APIs.
 
-    Bewusst **synchron** (`httpx.Client`, nicht `AsyncClient`): der erste
-    Connector (`webdav-connector`, P12-S1) baut auf `wsgidav` auf, dessen
-    `DAVProvider`-Schnittstelle selbst synchron ist (WSGI) - eine
-    async-Variante hier hätte im Provider eine async/sync-Brücke
-    (`asgiref.async_to_sync`) gebraucht, ein bekannt fragiles Muster über
-    mehrere verschachtelte Thread-/Loop-Grenzen hinweg. Ein künftiger
-    FastAPI-basierter Connector (z. B. CMIS, P12-S4) kann diese Lib weiterhin
-    gefahrlos nutzen: FastAPI führt normale `def`-Endpunkte (kein `async def`)
-    bereits automatisch in seinem eigenen Threadpool aus."""
+    Deliberately **synchronous** (`httpx.Client`, not `AsyncClient`): the
+    first connector (`webdav-connector`, P12-S1) is built on `wsgidav`,
+    whose `DAVProvider` interface is itself synchronous (WSGI) - an async
+    variant here would have needed an async/sync bridge
+    (`asgiref.async_to_sync`) in the provider, a known-fragile pattern across
+    multiple nested thread/loop boundaries. A future FastAPI-based connector
+    (e.g. CMIS, P12-S4) can still safely use this lib: FastAPI already runs
+    regular `def` endpoints (not `async def`) automatically in its own
+    thread pool."""
 
     def __init__(
         self,
@@ -137,12 +136,12 @@ class DmsTreeClient:
         documents_response = self._documents.get("/documents", params={"folder_id": folder_id})
         documents_response.raise_for_status()
         folders = [_to_tree_folder(f) for f in folders_response.json() if f["deleted_at"] is None]
-        # Ein zusaetzlicher HTTP-Aufruf je Dokument (Versions-Metadaten leben
-        # nicht auf `DocumentOut`, siehe `_to_tree_document`) - fuer eine
-        # Referenzimplementierung bewusst in Kauf genommen: WebDAV-Clients
-        # (Windows-Explorer/Finder) verlassen sich auf korrekte
-        # Content-Length/ETag-Werte in der Verzeichnisauflistung, ein falscher
-        # Defaultwert waere die schlechtere Alternative.
+        # An extra HTTP call per document (version metadata doesn't live on
+        # `DocumentOut`, see `_to_tree_document`) - deliberately accepted for
+        # a reference implementation: WebDAV clients (Windows Explorer/
+        # Finder) rely on correct Content-Length/ETag values in the
+        # directory listing; a wrong default value would be the worse
+        # alternative.
         documents = [
             self._to_tree_document_enriched(d)
             for d in documents_response.json()
@@ -151,21 +150,21 @@ class DmsTreeClient:
         return folders, documents
 
     def resolve_path(self, path: str) -> TreeFolder | TreeDocument:
-        """Löst einen Slash-Pfad segmentweise ab `root_folder_id` auf - ein
-        Connector kennt keine eigene Kopie der Ordnerstruktur (3.1), jede
-        Auflösung fragt live nach. O(Tiefe) HTTP-Aufrufe je Pfad, für eine
-        Referenzimplementierung bewusst einfach gehalten statt eines eigenen
-        Caches mit Invalidierungsproblemen."""
+        """Resolves a slash path segment by segment starting from
+        `root_folder_id` - a connector keeps no local copy of the folder
+        structure (3.1), every resolution queries live. O(depth) HTTP calls
+        per path, deliberately kept simple for a reference implementation
+        instead of a custom cache with invalidation problems."""
         segments = [s for s in path.strip("/").split("/") if s]
         if not segments:
-            # Bewusst lokal konstruiert, kein `get_folder()`-Aufruf: dieser
-            # Zweig wird bei JEDER WebDAV-Anfrage an die Wurzel durchlaufen
-            # (`get_resource_inst("/")`) - ein zusätzlicher Roundtrip hier
-            # erwies sich real als Hänger unter wsgidavs WSGI-zu-ASGI-Brücke
-            # (reproduzierbarer `ReadTimeout` bei PROPFIND auf `/webdav/`,
-            # siehe docs/services/cmis-connector.md). `created_by`/
-            # `created_at` bleiben `None` (CMIS' "value not set", 5.2.7)
-            # statt erfundener Werte oder eines teuren Aufrufs im Hot Path.
+            # Deliberately constructed locally, no `get_folder()` call: this
+            # branch is traversed on EVERY WebDAV request to the root
+            # (`get_resource_inst("/")`) - an extra roundtrip here turned out
+            # in practice to cause a hang under wsgidav's WSGI-to-ASGI bridge
+            # (reproducible `ReadTimeout` on PROPFIND against `/webdav/`,
+            # see docs/services/cmis-connector.md). `created_by`/
+            # `created_at` stay `None` (CMIS' "value not set", 5.2.7)
+            # instead of made-up values or an expensive call in the hot path.
             return TreeFolder(
                 id=self.root_folder_id, name="", parent_id=None, created_by=None, created_at=None
             )
@@ -185,7 +184,7 @@ class DmsTreeClient:
                 if document_match is not None:
                     return document_match
             raise PathNotFoundError(path)
-        raise PathNotFoundError(path)  # unerreichbar, beruhigt den Type-Checker
+        raise PathNotFoundError(path)  # unreachable, satisfies the type checker
 
     def create_folder(self, *, parent_id: str, name: str, created_by: str) -> TreeFolder:
         response = self._folders.post(
@@ -229,11 +228,11 @@ class DmsTreeClient:
         expected_base_version_number: int | None = None,
         comment: str | None = None,
     ) -> TreeDocument:
-        """PUT-Semantik (WebDAV/CMIS gleichermaßen): existiert am Zielpfad
-        bereits ein Dokument, wird eine neue Version eingecheckt statt ein
-        zweites Dokument mit demselben Namen anzulegen. `comment` (nur beim
-        Einchecken einer neuen Version relevant, `POST /documents` selbst
-        kennt kein Kommentarfeld) - seit P12-S4, Grundlage für CMIS'
+        """PUT semantics (WebDAV/CMIS alike): if a document already exists at
+        the target path, a new version is checked in instead of creating a
+        second document with the same name. `comment` (only relevant when
+        checking in a new version, `POST /documents` itself has no comment
+        field) - since P12-S4, groundwork for CMIS'
         `checkinComment` (5.4.4.3.28)."""
         media_type = content_type or "application/octet-stream"
         if existing_document_id is not None:
@@ -339,13 +338,13 @@ class DmsTreeClient:
         if response.status_code == 403:
             raise LockNotHeldError(document_id)
         if response.status_code == 404:
-            return  # bereits entsperrt/unbekannt - UNLOCK ist idempotent
+            return  # already unlocked/unknown - UNLOCK is idempotent
         response.raise_for_status()
 
     def get_lock(self, document_id: str) -> TreeLock | None:
-        # Liefert immer 200 mit `null`-Body, wenn keine Sperre existiert -
-        # prüft nicht einmal, ob `document_id` überhaupt existiert (siehe
-        # document-service main.py `get_lock()`), daher kein 404-Zweig hier.
+        # Always returns 200 with a `null` body when no lock exists - doesn't
+        # even check whether `document_id` exists at all (see document-service
+        # main.py `get_lock()`), hence no 404 branch here.
         response = self._documents.get(f"/documents/{document_id}/lock")
         response.raise_for_status()
         body = response.json()

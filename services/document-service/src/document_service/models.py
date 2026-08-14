@@ -9,11 +9,12 @@ Base = make_declarative_base("document")
 
 
 class Document(Base):
-    """Kernentität (2.1). ``folder_id`` ist eine opake Referenz auf den
-    Folder Service (P3-S3), ``object_type_id`` referenziert den Object-Type
-    Service (2.2) - beide ohne FK-Erzwingung über Service-Grenzen hinweg,
-    aber seit P3-S3 aktiv gegen die jeweilige Service-API geprüft (siehe
-    main.py: Existenz des Ordners, Constraint-Validierung der Attribute)."""
+    """Core entity (2.1). ``folder_id`` is an opaque reference to the
+    Folder Service (P3-S3), ``object_type_id`` references the Object-Type
+    Service (2.2) - both without FK enforcement across service boundaries,
+    but actively checked against the respective service API since P3-S3
+    (see main.py: existence of the folder, constraint validation of the
+    attributes)."""
 
     __tablename__ = "document"
 
@@ -21,76 +22,79 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String(512))
     folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     object_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Custom-Attribute gemäß Objekttyp-Schema (2.2) - nur bei Erstellung
-    # gesetzt/validiert, noch kein Update-Endpunkt für spätere Änderungen.
+    # Custom attributes according to the object-type schema (2.2) -
+    # only set/validated at creation time, no update endpoint yet for later
+    # changes.
     attributes: Mapped[dict] = mapped_column(JSON, default=dict)
-    # Zeigt auf die aktuelle Hauptversion (nicht die zuletzt angelegte Zeile -
-    # Konfliktkopien erhöhen diesen Zeiger nicht, siehe repository.checkin_version).
+    # Points to the current main version (not the most recently
+    # created row - conflict copies do not advance this pointer, see
+    # repository.checkin_version).
     current_version_number: Mapped[int] = mapped_column(Integer, default=0)
-    # Prozessspezifische Bearbeitungskopie (2.3, P6-S3, z. B. eine Schwärzung
-    # für die Akteneinsicht): eine solche Kopie ist ein ganz normales, eigenes
-    # Dokument mit eigener Versionierung/Auditierung, trägt nur zusätzlich
-    # diese drei opaken Herkunftsfelder - kein FK über Service-Grenzen hinweg,
-    # `derived_from_document_id` verweist auf `Document.id` innerhalb
-    # desselben Schemas und wird daher als echter FK modelliert.
+    # Process-specific working copy (2.3, P6-S3, e.g. a redaction
+    # for file inspection): such a copy is a completely normal, independent
+    # document with its own versioning/auditing, it only additionally
+    # carries these three opaque provenance fields - no FK across service
+    # boundaries, `derived_from_document_id` refers to `Document.id` within
+    # the same schema and is therefore modeled as a genuine FK.
     derived_from_document_id: Mapped[str | None] = mapped_column(
         String(128), ForeignKey("document.document.id"), nullable=True
     )
     derived_from_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     originating_case_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Wer die Löschmarkierung gesetzt hat (2.5, P15-S1) - Voraussetzung für den
-    # persönlichen Papierkorb ("nur die von mir selbst markierten Elemente").
-    # Bislang wurde `deleted_by` zwar an mehreren Stellen entgegengenommen,
-    # aber nie tatsächlich persistiert (echte, bei P15-S1 gefundene Lücke).
+    # Who set the deletion marker (2.5, P15-S1) - prerequisite for
+    # the personal trash ("only the items I marked myself"). Until now
+    # `deleted_by` was accepted in several places, but never actually
+    # persisted (a genuine gap found during P15-S1).
     deleted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # Kaskaden-Herkunft (5.2, seit P7-S1b): gesetzt, wenn dieses Dokument nicht
-    # einzeln, sondern weil sein übergeordneter Ordner in den Papierkorb
-    # verschoben wurde (`POST /documents/cascade-trash`) gelöscht wurde -
-    # `POST /documents/cascade-restore` stellt beim Wiederherstellen des
-    # Ordners NUR dadurch kaskadierte Dokumente wieder her, kein unabhängig
-    # einzeln gelöschtes Dokument im selben Ordner.
+    # Cascade provenance (5.2, since P7-S1b): set when this document
+    # was deleted not individually, but because its parent folder was moved
+    # to the trash (`POST /documents/cascade-trash`) - when restoring the
+    # folder, `POST /documents/cascade-restore` only restores documents
+    # cascaded this way, not an independently, individually deleted document
+    # in the same folder.
     deleted_via_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # Aufbewahrung/Zwangslöschung (5.2/5.2a, seit P7-S1): ein gemeinsames
-    # Feldpaar für beide Konzeptabschnitte - `retention_until` erreicht,
-    # `full_deletion=False` löst den bestehenden Soft-Delete aus (`deleted_at`
-    # oben), `full_deletion=True` löst stattdessen die sofortige physische
-    # Löschung aus (siehe `_retention_poll_loop` in main.py). Manuell gesetzt
-    # oder einmalig aus `ObjectType.default_retention_days` übernommen.
+    # Retention/forced deletion (5.2/5.2a, since P7-S1): a shared
+    # field pair for both concept sections - once `retention_until` is
+    # reached, `full_deletion=False` triggers the existing soft delete
+    # (`deleted_at` above), `full_deletion=True` instead triggers immediate
+    # physical deletion (see `_retention_poll_loop` in main.py). Set
+    # manually or copied once from `ObjectType.default_retention_days`.
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Löschgrund (5.2a) - nur während der Planungsphase auf dem Dokument
-    # gehalten (notwendig, da die Ausführung Tage/Wochen später erfolgt).
-    # Bei tatsächlicher physischer Löschung wandert der Grund in
-    # `DeletionRegisterEntry`/das Audit-Event, die `Document`-Zeile selbst
-    # wird dabei komplett entfernt - der Grund überlebt das Objekt also nur
-    # dort, nie als Property eines noch existierenden Objekts.
+    # Deletion reason (5.2a) - held on the document only during the
+    # planning phase (necessary because execution happens days/weeks later).
+    # On actual physical deletion, the reason migrates into
+    # `DeletionRegisterEntry`/the audit event, the `Document` row itself is
+    # completely removed in the process - so the reason only survives the
+    # object there, never as a property of a still-existing object.
     pending_deletion_reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    # Löscherinnerung (5.2a, optional) - `deletion_reminder_sent_at`
-    # verhindert Mehrfachversand über aufeinanderfolgende Poll-Durchläufe
-    # hinweg. `reminder_notify_email` ist ein opakes, beim Terminieren
-    # mitgegebenes Datum - gleiches Muster wie `escalation_email`/
-    # `notify_email` bei workflow-service (keine Rollen-/Konto-Auflösung).
+    # Deletion reminder (5.2a, optional) - `deletion_reminder_sent_at`
+    # prevents duplicate sending across successive poll runs.
+    # `reminder_notify_email` is an opaque value supplied when scheduling -
+    # same pattern as `escalation_email`/`notify_email` in workflow-service
+    # (no role/account resolution).
     deletion_reminder_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     reminder_notify_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Verhindert, dass der Poll-Loop bei aktiviertem Vier-Augen-Prinzip
-    # (4.3) bei jedem Durchlauf erneut einen Freigabe-Request für dieselbe
-    # fällige Zwangslöschung anlegt, solange die Genehmigung noch aussteht.
+    # Prevents the poll loop, when the four-eyes principle (4.3) is
+    # enabled, from creating a new approval request on every run for the
+    # same due forced deletion while approval is still pending.
     force_delete_approval_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Aussonderung (5.6, seit P7-S3): einmalig aus `ObjectType.
-    # default_archive_after_days` übernommen (analog `retention_until`),
-    # unabhängig von der regulären Aufbewahrungsfrist - Aussonderung ist laut
-    # Konzept ergänzend, kein dritter Zweig derselben Entscheidung. `None` =
-    # kein Typ-Standard, nur manueller Trigger (`POST .../archive-request`)
-    # möglich. `archived_at`/`archive_format` werden von `archival-service`
-    # per Rückruf gesetzt, sobald die Archivkopie verifiziert ist;
-    # `dehydrated_at`, sobald die Live-Kopie nach der Übergangsfrist entfernt
-    # wurde - die `Document`-Zeile selbst bleibt dabei erhalten (Metadaten
-    # weiterhin auffindbar, wörtliche Konzeptvorgabe).
+    # Records disposal (5.6, since P7-S3): copied once from
+    # `ObjectType.default_archive_after_days` (analogous to
+    # `retention_until`), independent of the regular retention period -
+    # according to the concept, records disposal is supplementary, not a
+    # third branch of the same decision. `None` = no type default, only a
+    # manual trigger (`POST .../archive-request`) is possible.
+    # `archived_at`/`archive_format` are set by `archival-service` via
+    # callback once the archive copy has been verified; `dehydrated_at` once
+    # the live copy has been removed after the transition period - the
+    # `Document` row itself remains in place (metadata remains findable, a
+    # literal requirement of the concept).
     archive_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archive_format: Mapped[str | None] = mapped_column(String(16), nullable=True)
@@ -101,9 +105,9 @@ class Document(Base):
 
 
 class DocumentVersion(Base):
-    """Alle Versionen bleiben dauerhaft erhalten (2.1a) - auch Konfliktkopien
-    (``is_conflict=True``) sind eigenständige, für immer abrufbare Zeilen,
-    keine flüchtigen Zwischenstände."""
+    """All versions remain permanently preserved (2.1a) - even
+    conflict copies (``is_conflict=True``) are independent, forever
+    retrievable rows, not transient intermediate states."""
 
     __tablename__ = "document_version"
 
@@ -125,12 +129,12 @@ class DocumentVersion(Base):
 
 
 class UploadConfig(Base):
-    """Admin-UI-editierbare Format-Whitelist (3.1/3.6, P5d-S1) - gleiches
-    Einzelzeilen-Muster wie `ocr_service.OcrConfig`/`storage_service.GuardConfig`:
-    bewusst eine feste Zeile `id=1` statt echter Mehrzeiligkeit (genau eine
-    Installation je Deployment, 3a). Leere Liste (Default) = keine
-    Einschränkung - jeder per Sniffing erkannte Content-Type wird akzeptiert,
-    identisch zum Verhalten vor P5d-S1."""
+    """Admin-UI-editable format whitelist (3.1/3.6, P5d-S1) - same
+    single-row pattern as `ocr_service.OcrConfig`/`storage_service.GuardConfig`:
+    deliberately one fixed row `id=1` instead of genuine multi-row support
+    (exactly one installation per deployment, 3a). Empty list (default) = no
+    restriction - every content type detected via sniffing is accepted,
+    identical to the behavior before P5d-S1."""
 
     __tablename__ = "upload_config"
 
@@ -140,9 +144,9 @@ class UploadConfig(Base):
 
 
 class DocumentLock(Base):
-    """Bearbeitungssperre (4.2), an Nutzer + Session gebunden. Genau eine
-    aktive Sperre je Dokument - deshalb ``document_id`` als Primärschlüssel
-    statt einer eigenen ID/Historie."""
+    """Editing lock (4.2), bound to user + session. Exactly one
+    active lock per document - hence ``document_id`` as the primary key
+    instead of a dedicated ID/history."""
 
     __tablename__ = "document_lock"
 
@@ -151,21 +155,21 @@ class DocumentLock(Base):
     )
     locked_by: Mapped[str] = mapped_column(String(128))
     session_id: Mapped[str] = mapped_column(String(128))
-    # Version, auf der die Bearbeitung basiert - Grundlage der optimistischen
-    # Konflikterkennung beim Check-in (siehe repository.checkin_version).
+    # Version on which editing is based - basis for optimistic
+    # conflict detection at check-in (see repository.checkin_version).
     based_on_version_number: Mapped[int] = mapped_column(Integer)
     locked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class LegalHold(Base):
-    """Legal Hold (5.2, seit P7-S1): sperrt ein Dokument unabhängig von
-    dessen regulärer Aufbewahrungsfrist, bis der Hold explizit aufgehoben
-    wird - überschreibt sowohl regulären Soft-Delete als auch Zwangslöschung
-    im Poll-Loop (siehe main.py). Aktiv = ``released_at IS NULL``. Eigene
-    Zeile statt eines einzelnen Felds auf ``Document``, da die Historie
-    (wer/wann gesetzt/aufgehoben) selbst auditrelevant ist - mehrere
-    vergangene Holds je Dokument bleiben so nachvollziehbar."""
+    """Legal hold (5.2, since P7-S1): locks a document independently
+    of its regular retention period, until the hold is explicitly released
+    - overrides both the regular soft delete and forced deletion in the
+    poll loop (see main.py). Active = ``released_at IS NULL``. A dedicated
+    row instead of a single field on ``Document``, since the history
+    (who/when set/released) is itself audit-relevant - multiple past holds
+    per document remain traceable this way."""
 
     __tablename__ = "legal_hold"
 
@@ -181,25 +185,24 @@ class LegalHold(Base):
 
 
 class DeletionRegisterEntry(Base):
-    """Löschregister (5.2a, seit P7-S1): ein Eintrag je tatsächlich
-    durchgeführter physischer Löschung - sowohl die geplante Zwangslöschung
-    (``trigger="forced_deletion"``) als auch die routinemäßige
-    Papierkorb-Fristablauf-Bereinigung (``trigger="trash_expiry"``) legen
-    hier eine Zeile an. Bewusst KEIN FK auf ``Document.id`` - das gelöschte
-    Dokument existiert zu diesem Zeitpunkt bereits nicht mehr, das Register
-    ist der einzige verbleibende Nachweis (siehe Konzept: Abgleich nach
-    Backup-Wiederherstellung, ob zwischenzeitlich gelöschte Objekte
-    unbeabsichtigt zurückkamen). Nicht selbst hash-verkettet wie
-    audit-service - jede Zeile wird zusätzlich als reguläres Event
-    publiziert, das dort mitgeschrieben wird (siehe docs/services/
-    document-service.md "Offene Punkte" zur noch fehlenden separaten
-    Backup-Politik, Phase 11)."""
+    """Deletion register (5.2a, since P7-S1): one entry per physical
+    deletion actually carried out - both the planned forced deletion
+    (``trigger="forced_deletion"``) and the routine trash retention-period
+    expiry cleanup (``trigger="trash_expiry"``) create a row here.
+    Deliberately NO FK on ``Document.id`` - the deleted document no longer
+    exists at this point, the register is the only remaining evidence (see
+    concept: reconciliation after backup restoration, checking whether
+    objects deleted in the meantime came back unintentionally). Not
+    hash-chained itself like audit-service - each row is additionally
+    published as a regular event, which is recorded there as well (see
+    docs/services/document-service.md "Open Points" on the still-missing
+    separate backup policy, phase 11)."""
 
     __tablename__ = "deletion_register_entry"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id: Mapped[str] = mapped_column(String(128), index=True)
-    # "forced_deletion" | "trash_expiry" | "manual_purge" (letzteres seit P15-S1)
+    # "forced_deletion" | "trash_expiry" | "manual_purge" (the latter since P15-S1)
     trigger: Mapped[str] = mapped_column(String(32))
     reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -207,24 +210,24 @@ class DeletionRegisterEntry(Base):
 
 
 class RetentionConfig(Base):
-    """Admin-UI-editierbare Aufbewahrungs-Grundeinstellungen (5.2/5.2a, seit
-    P7-S1) - gleiches Einzelzeilen-Muster wie ``UploadConfig``."""
+    """Admin-UI-editable base retention settings (5.2/5.2a, since
+    P7-S1) - same single-row pattern as ``UploadConfig``."""
 
     __tablename__ = "retention_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # Installationsweiter Default, je ObjectType per
-    # ``deletion_reason_required_override`` überschreibbar (Tri-State).
+    # Installation-wide default, overridable per ObjectType via
+    # ``deletion_reason_required_override`` (tri-state).
     deletion_reason_required: Mapped[bool] = mapped_column(Boolean, default=False)
-    # None = keine Löscherinnerung (Werkseinstellung, "eher seltener genutzt"
-    # laut Konzept).
+    # None = no deletion reminder (factory setting, "used rather
+    # rarely" according to the concept).
     reminder_lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class TrashConfig(Base):
-    """Papierkorb-Wiederherstellungsfrist (5.2, seit P7-S1) - gleiches
-    Einzelzeilen-Muster wie ``UploadConfig``/``RetentionConfig``."""
+    """Trash restoration period (5.2, since P7-S1) - same single-row
+    pattern as ``UploadConfig``/``RetentionConfig``."""
 
     __tablename__ = "trash_config"
 
@@ -234,12 +237,12 @@ class TrashConfig(Base):
 
 
 class AuditTraceConfig(Base):
-    """Basis-Protokollierungstiefe für den Forensik-Trace (5.4b, seit
-    P7-S2c) - gleiches Einzelzeilen-Muster wie ``UploadConfig``. Steuert, ob
-    `GET /documents/{id}` (`document.viewed`) bzw. die Content-Download-
-    Endpunkte (`document.downloaded`) überhaupt ein Event publizieren.
-    Per-Rolle über ``AuditTraceRoleOverride`` überschreibbar. Default laut
-    Nutzervorgabe: beide an (maximale Nachvollziehbarkeit als Werkseinstellung)."""
+    """Base logging depth for the forensic trace (5.4b, since
+    P7-S2c) - same single-row pattern as ``UploadConfig``. Controls whether
+    `GET /documents/{id}` (`document.viewed`) or the content download
+    endpoints (`document.downloaded`) publish an event at all. Overridable
+    per role via ``AuditTraceRoleOverride``. Default per user requirement:
+    both on (maximum traceability as the factory setting)."""
 
     __tablename__ = "audit_trace_config"
 
@@ -250,15 +253,15 @@ class AuditTraceConfig(Base):
 
 
 class AuditTraceRoleOverride(Base):
-    """Rollenspezifischer Override der Basis-Protokollierungstiefe (5.4b,
-    seit P7-S2c) - ``role`` ist freier Text (keine Existenzprüfung gegen
-    permission-service/Keycloak, gleiche bestehende Lücke wie überall sonst
-    im System). ``None`` je Feld bedeutet "Basis gilt", ein gesetzter Wert
-    überschreibt die Basis für Aufrufer mit dieser Rolle. Bei mehreren
-    zugewiesenen Rollen mit widersprüchlichen Overrides gewinnt "protokollieren"
-    (siehe main._resolve_should_log) - Sicherheits-first, eine Rolle, die mehr
-    Protokollierung verlangt, kann nicht durch eine andere Rolle desselben
-    Nutzers stillschweigend unterlaufen werden."""
+    """Role-specific override of the base logging depth (5.4b,
+    since P7-S2c) - ``role`` is free text (no existence check against
+    permission-service/Keycloak, same existing gap as everywhere else in
+    the system). ``None`` per field means "base applies", a set value
+    overrides the base for callers with this role. When multiple assigned
+    roles have conflicting overrides, "log" wins (see
+    main._resolve_should_log) - security-first, a role that demands more
+    logging cannot be silently undermined by another role of the same
+    user."""
 
     __tablename__ = "audit_trace_role_override"
 
@@ -269,15 +272,15 @@ class AuditTraceRoleOverride(Base):
 
 
 class ShareLinkConfig(Base):
-    """Öffentlicher Freigabelink (4.2a, P14-S10) - installationsweiter
-    Schalter, gleiches Einzelzeilen-Muster wie ``UploadConfig``/
-    ``RetentionConfig``. ``enabled=False`` heißt laut Konzept-Wortlaut nicht
-    nur "serverseitig blockieren", sondern "API-Route nicht erreichbar" -
-    umgesetzt als `404` statt `403` auf den betroffenen Endpunkten (main.py),
-    da ein echtes Nicht-Registrieren der Route zur Laufzeit ohne Neustart
-    nicht möglich wäre. Default bewusst als Implementierungsentscheidung
-    dieser Session gewählt (Konzept selbst legt sich nicht auf eine
-    Werkseinstellung fest, siehe ADR 0047)."""
+    """Public share link (4.2a, P14-S10) - installation-wide switch,
+    same single-row pattern as ``UploadConfig``/``RetentionConfig``.
+    ``enabled=False`` according to the concept's literal wording means not
+    just "block server-side" but "API route unreachable" - implemented as
+    `404` instead of `403` on the affected endpoints (main.py), since
+    genuinely not registering the route at runtime without a restart would
+    not be possible. Default deliberately chosen as an implementation
+    decision of this session (the concept itself does not commit to a
+    factory setting, see ADR 0047)."""
 
     __tablename__ = "share_link_config"
 
@@ -288,13 +291,13 @@ class ShareLinkConfig(Base):
 
 
 class ShareLink(Base):
-    """Ein einzelner Freigabelink (4.2a) - ``token`` ist der Primärschlüssel
-    UND der in der öffentlichen URL verwendete Wert (``secrets.token_urlsafe``,
-    siehe repository.py) - bewusst kein separates, erratbares ID-Feld daneben,
-    das dieselbe Zugriffskraft hätte. Ausschließlich Lesezugriff auf GENAU
-    dieses eine Dokument (kein Ordner-/Metadaten-Zugriff darüber hinaus,
-    Konzept-Wortlaut) - ``document_id`` ist die einzige fachliche Referenz,
-    keine Ordner-ID wird hier je gespeichert."""
+    """A single share link (4.2a) - ``token`` is the primary key AND
+    the value used in the public URL (``secrets.token_urlsafe``, see
+    repository.py) - deliberately no separate, guessable ID field alongside
+    it that would have the same access power. Read-only access to EXACTLY
+    this one document (no folder/metadata access beyond that, per the
+    concept's literal wording) - ``document_id`` is the only business
+    reference, no folder ID is ever stored here."""
 
     __tablename__ = "share_link"
 
@@ -302,30 +305,30 @@ class ShareLink(Base):
     document_id: Mapped[str] = mapped_column(String(128), index=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # Zwingend (Konzept-Wortlaut: "kein dauerhaft gültiger Link") - kein
-    # `nullable=True` wie bei Aufbewahrungsfristen, die bewusst unbefristet
-    # sein dürfen.
+    # Mandatory (concept wording: "no permanently valid link") - no
+    # `nullable=True` like for retention periods, which may deliberately be
+    # unlimited.
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class WebdavEditToken(Base):
-    """Kurzlebiges, auf genau ein Dokument gescoptes Token für die
-    Office-Direktbearbeitung aus dem Browser (Post-Roadmap-Feature, Office-
-    URI-Schema `ms-word:ofe|u|<url>` gegen `webdav-connector`) - strukturell
-    fast identisch zu `ShareLink` (`token` ist wieder PK UND der in der
-    Start-URL verwendete Wert, `secrets.token_urlsafe`), aber anders als
-    `ShareLink` NICHT rein lesend: `principal_id` ist die Identität, die
-    `webdav-connector`s `DmsAuthDomainController` bei erfolgreicher Auflösung
-    als `environ["wsgidav.auth.user_name"]` einsetzt und die dadurch beim
-    späteren Check-in (`POST /documents/{id}/versions`) als `created_by`/
-    Sperrinhaber verwendet wird - ein Freigabelink braucht das nie, da er nie
-    schreibt. `expires_at` ist bewusst großzügiger bemessen als bei
-    `ShareLink` (Stunden statt Minuten, siehe `settings.
-    webdav_edit_token_ttl_hours`), da eine Office-Bearbeitungssitzung über
-    die gesamte Dauer hinweg WebDAV-Anfragen stellt (Sperren/Lesen/
-    Zwischenspeichern/Entsperren), nicht nur beim Öffnen."""
+    """Short-lived token scoped to exactly one document, for direct
+    Office editing from the browser (post-roadmap feature, Office URI
+    scheme `ms-word:ofe|u|<url>` against `webdav-connector`) - structurally
+    almost identical to `ShareLink` (`token` is again the PK AND the value
+    used in the start URL, `secrets.token_urlsafe`), but unlike `ShareLink`
+    NOT purely read-only: `principal_id` is the identity that
+    `webdav-connector`'s `DmsAuthDomainController` inserts as
+    `environ["wsgidav.auth.user_name"]` upon successful resolution, and
+    which is therefore used as `created_by`/lock owner during the later
+    check-in (`POST /documents/{id}/versions`) - a share link never needs
+    this, since it never writes. `expires_at` is deliberately sized more
+    generously than for `ShareLink` (hours instead of minutes, see
+    `settings.webdav_edit_token_ttl_hours`), since an Office editing session
+    makes WebDAV requests (lock/read/cache/unlock) throughout the entire
+    duration, not just when opening."""
 
     __tablename__ = "webdav_edit_token"
 

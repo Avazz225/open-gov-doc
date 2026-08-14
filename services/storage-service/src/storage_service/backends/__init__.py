@@ -6,14 +6,14 @@ from storage_service.settings import BackendTargetConfig, Settings
 
 
 def build_backend(target: BackendTargetConfig) -> StorageBackend:
-    """Baut ein Backend-Plugin (3.6) für eine einzelne, konfigurierte
-    Ziel-Instanz - neue Backend-Typen (z. B. Azure Blob) werden hier ergänzt,
-    ohne den Rest des Service anzufassen. Seit P5b-S6 nach `target.id`
-    (nicht `target.type`) instanziiert, damit beliebig viele gleichartige
-    Instanzen (z. B. zwei S3-Provider) unabhängig konfiguriert werden können
+    """Builds a backend plugin (3.6) for a single, configured target
+    instance - new backend types (e.g. Azure Blob) are added here without
+    touching the rest of the service. Since P5b-S6, instantiated by
+    `target.id` (not `target.type`) so that any number of instances of the
+    same type (e.g. two S3 providers) can be configured independently
     (ADR 0017)."""
     if target.type == "local":
-        assert target.base_path is not None  # von BackendTargetConfig bereits erzwungen
+        assert target.base_path is not None  # already enforced by BackendTargetConfig
         return LocalFilesystemBackend(target.base_path)
     if target.type == "s3":
         assert target.endpoint_url and target.access_key and target.secret_key
@@ -36,32 +36,33 @@ def build_backend(target: BackendTargetConfig) -> StorageBackend:
 
 
 def resolve_targets(targets: list[BackendTargetConfig]) -> list[str]:
-    """Liste der konfigurierten Ziel-`id`s, Primärziel zuerst (bestimmt auch
-    die Lesepriorität, siehe ``replication.read_with_fallback``). Schließt
-    seit P7-S3 (5.6) Ziele mit ``role="archive"`` aus - diese sind nicht
-    Teil der regulären Upload-Replikation, siehe ``resolve_archive_targets``.
-    Seit Post-Roadmap Phase 22 Session 7 (ADR 0092) nimmt diese Funktion
-    bewusst eine bereits aufgelöste `BackendTargetConfig`-Liste entgegen statt
-    `Settings` direkt zu lesen - Aufrufer übergeben je nach Kontext entweder
-    die strukturelle Env-Var-Liste (`settings.targets`, z. B. beim Bau der
-    Backend-Instanzen) oder die live mit `TargetOverride`-Zeilen gemergte
-    Liste (`main.py._compute_target_state`, für `role`-abhängiges Routing)."""
+    """List of configured target `id`s, primary target first (this also
+    determines read priority, see ``replication.read_with_fallback``).
+    Since P7-S3 (5.6), excludes targets with ``role="archive"`` - these are
+    not part of the regular upload replication, see
+    ``resolve_archive_targets``. Since Post-Roadmap Phase 22 Session 7
+    (ADR 0092) this function deliberately takes an already-resolved
+    `BackendTargetConfig` list instead of reading `Settings` directly -
+    depending on context, callers pass either the structural env-var list
+    (`settings.targets`, e.g. when building the backend instances) or the
+    list merged live with `TargetOverride` rows (`main.py._compute_target_state`,
+    for `role`-dependent routing)."""
     return [target.id for target in targets if target.role != "archive"]
 
 
 def resolve_archive_targets(targets: list[BackendTargetConfig]) -> list[str]:
-    """Liste der konfigurierten Archiv-Ziel-`id`s (5.6, seit P7-S3) - erhalten
-    Inhalte ausschließlich über die `.../archive-copy`-Endpunkte, nicht über
-    die reguläre Upload-Replikation. Seit Post-Roadmap Phase 22 Session 7
-    ebenfalls auf eine übergebene Liste umgestellt, siehe `resolve_targets`."""
+    """List of configured archive target `id`s (5.6, since P7-S3) - these
+    receive content exclusively via the `.../archive-copy` endpoints, not
+    via the regular upload replication. Since Post-Roadmap Phase 22
+    Session 7, also switched to a passed-in list, see `resolve_targets`."""
     return [target.id for target in targets if target.role == "archive"]
 
 
 def build_backends(settings: Settings) -> dict[str, StorageBackend]:
-    """Baut genau die Backend-Instanzen, die im Ziel-Set konfiguriert sind -
-    beliebig viele, auch mehrere desselben Typs (3.6 "Mehrfach-Devices",
-    P5b-S6). Ohne Redundanz bleibt es bei einem einzigen Ziel, wie vor
-    P3-S4."""
+    """Builds exactly the backend instances configured in the target set -
+    any number, including several of the same type (3.6 "multiple
+    devices", P5b-S6). Without redundancy, it stays at a single target, as
+    before P3-S4."""
     return {target.id: build_backend(target) for target in settings.targets}
 
 

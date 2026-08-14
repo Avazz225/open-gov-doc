@@ -1,27 +1,27 @@
-"""Die eigentliche fachliche Arbeit je Phase (7.2) - aufgerufen von den
-`POST /transfers/{id}/steps/*`-Endpunkten in `main.py`, die ihrerseits die
-`serviceUrl`-Ziele der `connector_call`-Service-Tasks in
-`resources/migration_transfer.bpmn`/`migration_dry_run.bpmn` sind (P12-S2,
-siehe `docs/services/workflow-service.md` "Connector-Service-Tasks").
+"""The actual domain work per phase (7.2) - called from the
+`POST /transfers/{id}/steps/*` endpoints in `main.py`, which in turn are the
+`serviceUrl` targets of the `connector_call` service tasks in
+`resources/migration_transfer.bpmn`/`migration_dry_run.bpmn` (P12-S2,
+see `docs/services/workflow-service.md` "Connector Service Tasks").
 
-Jede Funktion bekommt die aktuellen Prozessdaten (`data`, aus dem BPMN-Task)
-und gibt ein Dict zurück, das die Workflow-Engine in die Prozessdaten
-zurückmerged - Fortschritt/Statuswechsel selbst werden zusätzlich direkt in
-der `transfer`-Zeile persistiert (die eigentliche, dauerhafte Quelle für
-`GET /transfers/{id}`; die Workflow-Prozessdaten sind nur Plumbing zwischen
-den Schritten).
+Each function receives the current process data (`data`, from the BPMN task)
+and returns a dict that the workflow engine merges back into the process
+data - progress/status changes themselves are additionally persisted directly
+in the `transfer` row (the actual, durable source for
+`GET /transfers/{id}`; the workflow process data is just plumbing between
+the steps).
 
-Jeder Aufruf von `local`/`peer` (beide synchron, siehe `dms_client.py`s
-Moduldocstring) läuft über `asyncio.to_thread()` statt direkt - ein synchroner
-HTTP-Aufruf **direkt** in einem `async def`-Endpoint blockiert den gesamten
-Event-Loop-Thread dieses Prozesses. Beim Selbst-Loopback-Test (dieselbe
-Instanz ruft sich selbst als Ziel auf) führt das zu einem echten Deadlock: der
-blockierende Aufruf wartet auf eine Antwort von genau dem Thread, den er
-selbst blockiert, und der die eingehende Anfrage sonst verarbeiten würde -
-real aufgetreten (`httpx.ReadTimeout`) und hier behoben. `asyncio.to_thread()`
-(sync-Arbeit AUS einem async-Kontext heraus in einen Thread auslagern) ist
-die unproblematische Richtung, anders als das in P12-S1 bewusst vermiedene
-`asgiref.async_to_sync` (async-Aufruf AUS synchronem Code heraus)."""
+Every call to `local`/`peer` (both synchronous, see `dms_client.py`'s
+module docstring) goes through `asyncio.to_thread()` instead of directly -
+a synchronous HTTP call **directly** in an `async def` endpoint blocks the
+entire event loop thread of this process. In the self-loopback test (the
+same instance calls itself as the target) this leads to a real deadlock: the
+blocking call waits for a response from exactly the thread it is itself
+blocking, which would otherwise process the incoming request -
+this actually occurred (`httpx.ReadTimeout`) and is fixed here. `asyncio.to_thread()`
+(offloading sync work FROM an async context into a thread) is
+the unproblematic direction, unlike the `asgiref.async_to_sync`
+(async call FROM synchronous code) deliberately avoided in P12-S1."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -34,10 +34,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class StepError(Exception):
-    """Ein Schritt konnte nicht ausgeführt werden - wird von `main.py` als
-    `error_message` auf der Transfer-Zeile hinterlegt und als Exception nach
-    oben durchgereicht (löst den `ERROR`-Zustand des Service-Tasks aus, siehe
-    `spiff_adapter.retry_errored_tasks` - Resumability, 7.2)."""
+    """A step could not be executed - stored by `main.py` as
+    `error_message` on the transfer row and re-raised as an exception
+    (triggers the `ERROR` state of the service task, see
+    `spiff_adapter.retry_errored_tasks` - resumability, 7.2)."""
 
 
 async def _mark(
@@ -73,14 +73,14 @@ def _copy_folder_recursive(
     checksums: dict[str, str],
     progress: dict[str, int],
 ) -> None:
-    """Läuft den Quellbaum ab `source_folder_id` rekursiv ab - kopiert
-    Dokumente + legt Unterordner an der jeweils entsprechenden Stelle im
-    Zielbaum an, überträgt anschließend die Rollenzuweisungen JEDES
-    besuchten Ordners (7.2 "Berechtigungen"). Bewusst eine einzige,
-    synchrone Funktion statt Batch-/Parallelisierung - für eine
-    Referenzimplementierung ausreichend, siehe
-    docs/services/migration-service.md "Bewusste Grenzen" zur Laufzeit bei
-    sehr großen Bäumen."""
+    """Recursively walks the source tree starting at `source_folder_id` -
+    copies documents + creates subfolders at the corresponding location in
+    the target tree, then transfers the role assignments of EVERY
+    visited folder (7.2 "Permissions"). Deliberately a single,
+    synchronous function instead of batching/parallelization - sufficient
+    for a reference implementation, see
+    docs/services/migration-service.md "Deliberate Limits" regarding runtime
+    for very large trees."""
     for assignment in local.list_role_assignments(source_folder_id):
         peer.push_permission(
             transfer_id,
@@ -208,11 +208,11 @@ async def delete_source(
     body = await asyncio.to_thread(_trash)
 
     if body.get("status") != "trashed":
-        # Vier-Augen (4.3) ist für `folder.delete` konfigurierbar (P7-S1c) -
-        # löst genau dann einen eigenen Freigabe-Antrag bei folder-service aus,
-        # außerhalb der Kontrolle dieses Service. Die Migration selbst ist zu
-        # diesem Zeitpunkt bereits vollständig abgeschlossen (released) - eine
-        # verzögerte Löschung im Quellsystem ist kein Fehlschlag des Transfers.
+        # Four-eyes principle (4.3) is configurable for `folder.delete` (P7-S1c) -
+        # if so, triggers its own approval request at folder-service,
+        # outside the control of this service. The migration itself is
+        # already fully completed (released) at this point - a
+        # delayed deletion in the source system is not a failure of the transfer.
         transfer.error_message = (
             f"Löschung im Quellsystem nicht sofort ausgeführt (Status: {body.get('status')})"
         )

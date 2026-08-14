@@ -2,13 +2,14 @@ import httpx
 
 
 class ObjectNotFoundError(Exception):
-    """Der Storage Service kennt den angefragten Object-Key nicht (mehr)."""
+    """The Storage Service does not (or no longer) know the requested object
+    key."""
 
 
 class StorageClient:
-    """Dünner HTTP-Client gegen die Storage-Service-API (3.6), identisch im
-    Zuschnitt zum gleichnamigen Client des Document Service - auch der Virus-
-    Scan Service hält nie selbst Dateiinhalte."""
+    """Thin HTTP client against the Storage Service API (3.6), identical in
+    scope to the equally named client of the Document Service - the virus
+    scan service also never holds file contents itself."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -19,8 +20,8 @@ class StorageClient:
         response.raise_for_status()
 
     async def download(self, key: str) -> bytes:
-        """Liest einen quarantänierten Objekt-Inhalt zurück (2.5, P15-S2) -
-        z. B. um ihn bei einer Freigabe an den Document Service weiterzugeben."""
+        """Reads back a quarantined object's content (2.5, P15-S2) - e.g. to
+        pass it on to the Document Service upon release."""
         response = await self._client.get(f"/objects/{key}")
         if response.status_code == 404:
             raise ObjectNotFoundError(key)
@@ -28,9 +29,9 @@ class StorageClient:
         return response.content
 
     async def delete(self, key: str) -> None:
-        """Entfernt den quarantänierten Objekt-Inhalt endgültig (2.5, P15-S2).
-        Idempotent - ein bereits fehlendes Objekt ist kein Fehler, da eine
-        Freigabe/Löschung nie zweimal dieselben Bytes benötigt."""
+        """Permanently removes the quarantined object content (2.5, P15-S2).
+        Idempotent - an already missing object is not an error, since a
+        release/deletion never needs the same bytes twice."""
         response = await self._client.delete(f"/objects/{key}")
         if response.status_code == 404:
             return

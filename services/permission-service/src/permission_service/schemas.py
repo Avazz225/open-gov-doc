@@ -11,11 +11,11 @@ class RoleCreate(BaseModel):
 
 
 class RoleUpdate(BaseModel):
-    """Seit P12-S3 (7.3, Konfigurationsimport) - bislang gab es keinen Weg,
-    eine bestehende Rolle zu aktualisieren (nur Anlegen/Auflisten), obwohl
-    `folder-service`/`document-service` u. ä. ihre Update-Pendants längst
-    haben. `name` bleibt unveränderlich (natürlicher Schlüssel für den
-    Konfigurationsimport-Abgleich per Name)."""
+    """Since P12-S3 (7.3, configuration import) - previously there was no
+    way to update an existing role (only creation/listing), even though
+    `folder-service`/`document-service` and similar have long had their
+    update counterparts. `name` remains immutable (natural key for the
+    configuration import's matching by name)."""
 
     description: str
     permissions: list[str]
@@ -48,9 +48,9 @@ class RoleAssignmentOut(BaseModel):
 
 
 class RoleAssignmentActionResult(BaseModel):
-    """Wie `ScopeLockActionResult` (4.3/4.7) - `POST /role-assignments` kann
-    seit P17-S3 optional per generischem Vier-Augen-Mechanismus gegated sein
-    (`permission.role_assignment.create`, 14.2 "Berechtigungsänderung")."""
+    """Like `ScopeLockActionResult` (4.3/4.7) - `POST /role-assignments` can
+    optionally be gated via the generic four-eyes mechanism since P17-S3
+    (`permission.role_assignment.create`, 14.2 "permission change")."""
 
     status: Literal["created", "pending_approval"]
     role_assignment: RoleAssignmentOut | None = None
@@ -223,7 +223,7 @@ class MaintenanceModeActionResult(BaseModel):
     approval_request_id: str | None = None
 
 
-# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+# --- Delegation during absence (4.4a, P14-S11) -------------------------
 
 
 class DelegationCreate(BaseModel):

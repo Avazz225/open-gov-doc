@@ -4,11 +4,11 @@ import httpx
 
 
 class WorkflowClient:
-    """Duenner HTTP-Client gegen workflow-service (5.4a "offene Workflow-
-    Aufgaben") - live abgefragt statt als eigenes Read-Modell, da kein
-    Event einen Task als "bereit" markiert (nur Start/Abschluss werden
-    publiziert), ein Read-Modell koennte also nicht aktuell gehalten
-    werden ohne selbst wieder synchron nachzufragen."""
+    """Thin HTTP client against workflow-service (5.4a "open workflow
+    tasks") - queried live instead of as its own read model, since no event
+    marks a task as "ready" (only start/completion are published), so a
+    read model could not be kept current without itself querying
+    synchronously again."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -28,10 +28,10 @@ class WorkflowClient:
 
 
 class AuditClient:
-    """Duenner HTTP-Client gegen audit-service - Nutzeraktivitaet (5.4a)
-    nutzt direkt die in P7-S2 gebaute Filter-API (`actor`/`since`/`until`),
-    kein eigenes Read-Modell noetig, audit-service ist bereits die
-    autoritative Quelle."""
+    """Thin HTTP client against audit-service - user activity (5.4a) directly
+    uses the filter API built in P7-S2 (`actor`/`since`/`until`), no own
+    read model needed, audit-service is already the authoritative
+    source."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -66,10 +66,10 @@ class AuditClient:
 
 
 class StorageClient:
-    """Duenner HTTP-Client gegen storage-service - sowohl fuer den
-    Speicherverbrauch-Bericht (`GET /storage/usage`, seit P7-S2b) als auch
-    fuer das Ablegen/Abrufen erzeugter Berichtsdateien (3.6-Prinzip: der
-    eigentliche Inhalt liegt nie im Reporting Service selbst)."""
+    """Thin HTTP client against storage-service - both for the storage usage
+    report (`GET /storage/usage`, since P7-S2b) and for storing/retrieving
+    generated report files (3.6 principle: the actual content never lives
+    in the Reporting Service itself)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -95,9 +95,10 @@ class StorageClient:
 
 
 class NotificationClient:
-    """Duenner HTTP-Client gegen notification-service - reine Text-E-Mail
-    mit Downloadlink statt Anhang (5.4a "planbar (regelmässiger Versand)"),
-    siehe docs/services/reporting-service.md fuer die Begruendung."""
+    """Thin HTTP client against notification-service - plain text email
+    with a download link instead of an attachment (5.4a "schedulable
+    (regular sending)"), see docs/services/reporting-service.md for the
+    rationale."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)

@@ -19,11 +19,11 @@ class InvalidProviderLevelsError(Exception):
 
 
 async def get_or_create_ca(session: AsyncSession) -> InternalCa:
-    """Singleton-Muster wie `OcrConfig`/`SystemMaintenanceMode`: die interne
-    Root-CA wird beim allerersten Start generiert und danach idempotent
-    wiederverwendet - ein Neustart darf keine neue CA erzeugen, sonst würden
-    zuvor ausgestellte Signaturen nicht mehr gegen die (dann andere) Root
-    verifizierbar sein."""
+    """Singleton pattern like `OcrConfig`/`SystemMaintenanceMode`: the
+    internal root CA is generated on the very first startup and then reused
+    idempotently - a restart must not generate a new CA, otherwise
+    previously issued signatures would no longer be verifiable against the
+    (then different) root."""
     ca = await session.get(InternalCa, _CA_ID)
     if ca is not None:
         return ca
@@ -95,11 +95,11 @@ async def list_signatures(
 async def get_signature_config(
     session: AsyncSession, *, default_provider_levels: dict[str, list[str]]
 ) -> SignatureConfig:
-    """Get-or-create (Post-Roadmap Phase 22 Session 6, ADR 0091), gleiches
-    Muster wie `storage_service.repository.get_operational_config`. Der
-    Default kommt als Parameter vom Aufrufer (`main.py`, aus `Settings.
-    signature_providers`), damit dieses Modul frei von Env-Var-Kenntnis
-    bleibt."""
+    """Get-or-create (post-roadmap phase 22 session 6, ADR 0091), same
+    pattern as `storage_service.repository.get_operational_config`. The
+    default is passed in as a parameter by the caller (`main.py`, from
+    `Settings.signature_providers`), so that this module stays free of any
+    env-var knowledge."""
     config = await session.get(SignatureConfig, _SIGNATURE_CONFIG_ID)
     if config is None:
         config = SignatureConfig(
@@ -119,14 +119,14 @@ async def update_signature_config(
     known_provider_types: dict[str, str],
     default_provider_levels: dict[str, list[str]],
 ) -> SignatureConfig:
-    """Aktualisiert NUR die im Aufruf genannten Connector-`id`s (partielles
-    Merge, nicht-genannte Connectoren behalten ihren aktuellen Wert) -
-    passend zu `SignatureProviderLevelsIn`s Listenform, ein Admin muss nicht
-    jedes Mal alle Connectoren mitschicken. `known_provider_types` (id->type
-    aus `Settings.signature_providers`) begrenzt auf bereits per Env-Var
-    konfigurierte Connectoren ("nur bestehende Einträge bearbeiten") und
-    reicht `type` für dieselbe Validierung wie `SignatureProviderConfig.
-    _check_levels` (Settings-Schema-Validator) durch."""
+    """Updates ONLY the connector `id`s named in the call (partial merge,
+    connectors not named keep their current value) - matching
+    `SignatureProviderLevelsIn`'s list shape, an admin doesn't have to send
+    all connectors every time. `known_provider_types` (id->type from
+    `Settings.signature_providers`) restricts to connectors already
+    configured via env var ("only edit existing entries") and passes
+    `type` through for the same validation as
+    `SignatureProviderConfig._check_levels` (settings schema validator)."""
     for provider_id, levels in provider_levels.items():
         if provider_id not in known_provider_types:
             raise InvalidProviderLevelsError(f"Unbekannter Connector: {provider_id!r}")

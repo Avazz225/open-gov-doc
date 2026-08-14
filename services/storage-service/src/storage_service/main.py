@@ -46,14 +46,14 @@ logger = logging.getLogger(__name__)
 def _compute_target_state(
     targets: list[BackendTargetConfig], overrides: dict[str, TargetOverride]
 ) -> tuple[list[BackendTargetConfig], list[str], list[str], set[str]]:
-    """Merged die Env-Var-Ziele mit den in der DB gespeicherten
-    `TargetOverride`-Zeilen (Post-Roadmap Phase 22 Session 7, ADR 0092) -
-    Zugangsdaten/Struktur kommen unverändert aus `targets`, nur
-    `object_lock_mode`/`role` können überschrieben sein. Aufrufer (Startup
-    UND jeder `PUT /guard-status/{id}/config`) schreiben das Ergebnis direkt
-    in `app.state` zurück, damit der übrige Code weiterhin einfache
-    `app.state`-Lookups nutzt, ohne bei jedem einzelnen Request selbst neu
-    aus der DB zu lesen."""
+    """Merges the env-var targets with the `TargetOverride` rows stored in
+    the DB (Post-Roadmap Phase 22 Session 7, ADR 0092) - credentials/
+    structure come unchanged from `targets`, only `object_lock_mode`/
+    `role` can be overridden. Callers (startup AND every
+    `PUT /guard-status/{id}/config`) write the result directly back to
+    `app.state`, so the rest of the code continues to use simple
+    `app.state` lookups without reading fresh from the DB on every single
+    request."""
     effective = [
         target.model_copy(
             update={
@@ -88,15 +88,15 @@ def _validate_settings(settings: Settings) -> None:
 
 
 async def _run_startup_guard(session_factory, backends: dict, targets: list[str]) -> None:
-    """Datenträger-Wechsel-Wächter (3.6, P5b-S6, ADR 0017): prüft für jedes
-    konfigurierte Ziel die Geräte-Identität, bevor der Service Anfragen
-    entgegennimmt. Werkseinstellung ist Startverweigerung bei jeder
-    Abweichung; ein Admin-Override (`GuardConfig.allow_degraded_start`)
-    erlaubt einen degradierten Start, sofern mindestens ein Ziel nachweislich
-    unverändert ist - in diesem Fall werden alle Kopien der betroffenen Ziele
-    automatisch zur Nachreplikation vorgemerkt (`POST
-    /replication/process-pending` zieht sie nach, kein In-Prozess-
-    Hintergrundtask, siehe ADR 0004)."""
+    """Storage device swap guard (3.6, P5b-S6, ADR 0017): checks the
+    device identity for every configured target before the service
+    accepts requests. The default is to refuse startup on any mismatch;
+    an admin override (`GuardConfig.allow_degraded_start`) allows a
+    degraded start as long as at least one target is verifiably
+    unchanged - in that case, all copies on the affected targets are
+    automatically queued for re-replication (`POST
+    /replication/process-pending` picks them up, no in-process background
+    task, see ADR 0004)."""
     verified: dict[str, bool] = {}
     async with session_factory() as session:
         for target_id in targets:
@@ -147,16 +147,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS storage"))
         await conn.run_sync(Base.metadata.create_all)
-        # Aufbewahrung/WORM (5.1/5.2a, P7-S1) - Ad-hoc-Migrationsmuster wie
-        # in jedem anderen Service dieser Phase (kein Alembic).
+        # Retention/WORM (5.1/5.2a, P7-S1) - ad-hoc migration pattern as
+        # in every other service in this phase (no Alembic).
         await conn.execute(
             text(
                 "ALTER TABLE storage.object_copy "
                 "ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ"
             )
         )
-        # Full-Jitter-Backoff für die Retry-Queue (Post-Roadmap Phase 20
-        # Session 6, ADR 0082) - gleiches Ad-hoc-Migrationsmuster.
+        # Full-jitter backoff for the retry queue (Post-Roadmap Phase 20
+        # Session 6, ADR 0082) - same ad-hoc migration pattern.
         await conn.execute(
             text(
                 "ALTER TABLE storage.object_copy ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ"
@@ -165,12 +165,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
-    # Aussonderung (5.6, seit P7-S3) - Archiv-Ziele sind NICHT Teil von
-    # `app.state.targets` (reguläre Upload-Replikation), sondern nur über die
-    # neuen `.../archive-copy`-Endpunkte erreichbar. Seit Post-Roadmap Phase
-    # 22 Session 7 (ADR 0092) werden `object_lock_mode`/`role` zusätzlich mit
-    # etwaigen `TargetOverride`-Zeilen gemergt, bevor diese vier Listen
-    # berechnet werden - siehe `_compute_target_state`.
+    # Records disposal (5.6, since P7-S3) - archive targets are NOT part
+    # of `app.state.targets` (regular upload replication), but reachable
+    # only via the new `.../archive-copy` endpoints. Since Post-Roadmap
+    # Phase 22 Session 7 (ADR 0092), `object_lock_mode`/`role` are
+    # additionally merged with any `TargetOverride` rows before these four
+    # lists are computed - see `_compute_target_state`.
     async with app.state.session_factory() as session:
         target_overrides = {o.target_id: o for o in await repository.list_target_overrides(session)}
     (
@@ -215,10 +215,11 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def _get_operational_config(session: AsyncSession):
-    """Frisch aus der DB gelesen bei jedem Aufruf (kein `app.state`-Cache) -
-    Post-Roadmap Phase 22 Session 6, ADR 0091: macht `write_strategy`/
-    `quorum_count`/`max_replication_attempts` ohne Neustart wirksam, gleiches
-    Live-Reload-Prinzip wie `GuardConfig`/`ocr_service.OcrConfig`."""
+    """Read fresh from the DB on every call (no `app.state` cache) - Post-
+    Roadmap Phase 22 Session 6, ADR 0091: makes `write_strategy`/
+    `quorum_count`/`max_replication_attempts` take effect without a
+    restart, same live-reload principle as `GuardConfig`/
+    `ocr_service.OcrConfig`."""
     return await repository.get_operational_config(
         session,
         default_write_strategy=settings.write_strategy,
@@ -250,12 +251,12 @@ async def list_object_copies(
 async def upload_archive_copy(
     key: str, request: Request, session: AsyncSession = Depends(get_session)
 ) -> ObjectMetadataOut:
-    """Aussonderung (5.6, seit P7-S3): schreibt NUR auf die konfigurierten
-    Archiv-Ziele (`role="archive"`), nicht auf die reguläre Live-Ziel-Menge -
-    aufgerufen von `archival-service`, nicht Teil des normalen Upload-Pfads.
-    `key` ist bewusst unabhängig vom Live-Objektschlüssel des Dokuments (die
-    Archivkopie ist inhaltlich ein anderes Objekt, i. d. R. die PDF/A-
-    Rendition statt des Originals)."""
+    """Records disposal (5.6, since P7-S3): writes ONLY to the configured
+    archive targets (`role="archive"`), not to the regular live target
+    set - called by `archival-service`, not part of the normal upload
+    path. `key` is deliberately independent of the document's live object
+    key (the archive copy is a different object in content, typically the
+    PDF/A rendition instead of the original)."""
     if not app.state.archive_targets:
         raise HTTPException(
             status_code=503,
@@ -295,8 +296,8 @@ async def upload_archive_copy(
 
 @app.get("/objects/{key:path}/archive-copy")
 async def download_archive_copy(key: str, session: AsyncSession = Depends(get_session)) -> Response:
-    """Rückholung (5.6, seit P7-S3) - liest ausschließlich von Archiv-
-    Zielen, unabhängig vom Live-Zustand desselben Objektschlüssels."""
+    """Retrieval (5.6, since P7-S3) - reads exclusively from archive
+    targets, independent of the live state of the same object key."""
     try:
         metadata = await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
@@ -318,9 +319,9 @@ async def download_archive_copy(key: str, session: AsyncSession = Depends(get_se
 async def verify_archive_copy(
     key: str, session: AsyncSession = Depends(get_session)
 ) -> list[FixityEntry]:
-    """Fixity-Check der Archiv-Kopie (5.6, seit P7-S3) - wiederverwendet
-    dieselbe Verifikationslogik wie `GET /object-verify/{key}/all`, gefiltert
-    auf Archiv-Ziele."""
+    """Fixity check of the archive copy (5.6, since P7-S3) - reuses the
+    same verification logic as `GET /object-verify/{key}/all`, filtered to
+    archive targets."""
     try:
         metadata = await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
@@ -340,10 +341,10 @@ async def delete_live_copies(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """ "Dehydrieren" (5.6, seit P7-S3): entfernt die Kopie(n) auf den
-    regulären Live-Zielen, NICHT auf Archiv-Zielen - das unterscheidet dies
-    bewusst von `DELETE /objects/{key}`, das wirklich alle Kopien entfernt.
-    Gleiches Governance-Lock-Gate wie die reguläre Löschung."""
+    """"Dehydrating" (5.6, since P7-S3): removes the copy/copies on the
+    regular live targets, NOT on archive targets - this deliberately
+    distinguishes it from `DELETE /objects/{key}`, which removes really
+    all copies. Same governance-lock gate as the regular deletion."""
     try:
         await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
@@ -459,11 +460,11 @@ async def delete_object(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="Objekt nicht gefunden") from exc
 
-    # WORM/Object-Lock-Guard (5.1/5.2a, seit P7-S1): blockiert die Löschung,
-    # solange mindestens ein Ziel mit aktivem `object_lock_mode` noch eine in
-    # der Zukunft liegende Aufbewahrungsfrist für dieses Objekt hat - außer,
-    # der Aufrufer fordert `bypass_governance=true` UND hat die konfigurierte
-    # Rolle (Default `dms-admin`, siehe `settings.governance_bypass_role`).
+    # WORM/Object Lock guard (5.1/5.2a, since P7-S1): blocks deletion as
+    # long as at least one target with active `object_lock_mode` still has
+    # a retention period lying in the future for this object - unless the
+    # caller requests `bypass_governance=true` AND has the configured role
+    # (default `dms-admin`, see `settings.governance_bypass_role`).
     locked_targets = await retention_guard.find_locked_targets(
         session, key, targets=app.state.target_configs
     )
@@ -511,8 +512,8 @@ async def get_object_metadata(
 async def get_storage_usage(
     session: AsyncSession = Depends(get_session),
 ) -> list[StorageUsageEntry]:
-    """Speicherverbrauch je Backend (5.4a, seit P7-S2b) - Grundlage für den
-    gleichnamigen Standardbericht im Reporting Service."""
+    """Storage usage per backend (5.4a, since P7-S2b) - basis for the
+    identically named standard report in the Reporting Service."""
     rows = await repository.get_storage_usage(session)
     return [
         StorageUsageEntry(backend=backend, object_count=count, total_size_bytes=total_size)
@@ -524,9 +525,9 @@ async def get_storage_usage(
 async def verify_object_all_copies(
     key: str, session: AsyncSession = Depends(get_session)
 ) -> list[FixityEntry]:
-    """Fixity-Check über alle konfigurierten Ziele hinweg (3.6: "regelmäßiger
-    Fixity-Check über alle Kopien") - wird noch nicht automatisch periodisch
-    ausgeführt, siehe Offene Punkte in docs/services/storage-service.md."""
+    """Fixity check across all configured targets (3.6: "regular fixity
+    check across all copies") - not yet run automatically on a periodic
+    basis, see Open Points in docs/services/storage-service.md."""
     try:
         metadata = await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
@@ -544,9 +545,9 @@ async def verify_object_all_copies(
 
 @app.get("/object-verify/{key:path}", response_model=VerifyResult)
 async def verify_object(key: str, session: AsyncSession = Depends(get_session)) -> VerifyResult:
-    """Fixity-Check-Grundlage (3.6): Prüfsumme des Primärziels neu aus dem
-    Backend lesen und gegen den in der Shared DB hinterlegten Referenzwert
-    abgleichen. Für alle konfigurierten Ziele siehe .../all."""
+    """Fixity check basis (3.6): read the primary target's checksum fresh
+    from the backend and compare it against the reference value stored in
+    the shared DB. For all configured targets, see .../all."""
     try:
         metadata = await repository.get_metadata(session, key)
     except repository.NotFoundError as exc:
@@ -562,10 +563,10 @@ async def verify_object(key: str, session: AsyncSession = Depends(get_session)) 
 async def replication_process_pending(
     limit: int = 100, session: AsyncSession = Depends(get_session)
 ) -> ReplicationRunResult:
-    """Retry-Queue für asynchron nachzuziehende Sekundärkopien (3.6) -
-    bewusst ein expliziter Endpunkt statt eines In-Prozess-Hintergrundtasks
-    (siehe ADR 0004), gedacht zum periodischen Aufruf durch einen externen
-    Scheduler (noch nicht Teil dieser Session)."""
+    """Retry queue for secondary copies to be asynchronously caught up
+    (3.6) - deliberately an explicit endpoint instead of an in-process
+    background task (see ADR 0004), intended for periodic invocation by
+    an external scheduler (not yet part of this session)."""
     operational_config = await _get_operational_config(session)
     result = await replication.process_pending(
         session,
@@ -588,13 +589,13 @@ async def get_operational_config(
 async def put_operational_config(
     body: OperationalConfigIn, session: AsyncSession = Depends(get_session)
 ) -> OperationalConfigOut:
-    """Betriebsparameter (Post-Roadmap Phase 22 Session 6, ADR 0091) - anders
-    als das Ziel-Set selbst (Zugangsdaten, `Settings.targets`, bewusst
-    weiterhin env-var-only) ohne Geheimnisse, daher live editierbar. Die
-    Anzahl konfigurierter Ziele ist strukturell fest (env-var, diese Session
-    ändert daran nichts) - dieselbe Quorum-Erfüllbarkeits-Prüfung wie beim
-    Start (`_validate_settings`), hier gegen einen admin-gewählten Wert statt
-    des Env-Var-Defaults."""
+    """Operational parameters (Post-Roadmap Phase 22 Session 6, ADR 0091) -
+    unlike the target set itself (credentials, `Settings.targets`,
+    deliberately still env-var-only), these hold no secrets and are
+    therefore live-editable. The number of configured targets is
+    structurally fixed (env-var, this session does not change that) -
+    same quorum-satisfiability check as at startup (`_validate_settings`),
+    here against an admin-chosen value instead of the env-var default."""
     if body.write_strategy == "quorum" and not (1 <= body.quorum_count <= len(app.state.targets)):
         raise HTTPException(
             status_code=422,
@@ -633,12 +634,12 @@ async def put_guard_config(
 async def reidentify_target(
     target_id: str, session: AsyncSession = Depends(get_session)
 ) -> GuardStatusEntry:
-    """Korrekturmechanismus für einen beabsichtigten Datenträger-Wechsel
-    (3.6, P5c-S2, ADR 0017-Folgepunkt) - ersetzt die bisher nötige direkte
-    Korrektur in `backend_identity` durch einen API-Aufruf, ohne Neustart.
-    Markiert alle bisherigen Kopien des Ziels zur Nachreplikation, wie beim
-    automatischen degradierten Start (`POST /replication/process-pending`
-    zieht sie nach)."""
+    """Correction mechanism for an intended storage device swap (3.6,
+    P5c-S2, ADR 0017 follow-up item) - replaces the previously necessary
+    direct correction in `backend_identity` with an API call, without a
+    restart. Marks all previous copies of the target for re-replication,
+    just as with an automatic degraded start (`POST
+    /replication/process-pending` picks them up)."""
     if target_id not in app.state.targets:
         raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
 
@@ -667,10 +668,10 @@ async def reidentify_target(
 
 @app.get("/guard-status", response_model=list[GuardStatusEntry])
 async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list[GuardStatusEntry]:
-    """Admin-UI-Statusblock (3.6 "im Admin-UI als Status sichtbar", P5b-S6):
-    zuletzt bestätigte Geräte-ID je konfiguriertem Ziel plus Anzahl noch
-    nicht replizierter Kopien - ein Ziel mit `pending_copies > 0` nach einem
-    degradierten Start befindet sich noch in der Wiederherstellung."""
+    """Admin-UI status block (3.6 "visible as status in the admin UI",
+    P5b-S6): last confirmed device ID per configured target plus the
+    count of not-yet-replicated copies - a target with
+    `pending_copies > 0` after a degraded start is still in recovery."""
     identities = {i.target_id: i for i in await repository.list_backend_identities(session)}
     pending_counts = await repository.count_pending_copies_by_backend(session)
     configs = {t.id: t for t in app.state.target_configs}
@@ -691,13 +692,13 @@ async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list
 async def put_target_config(
     target_id: str, body: TargetConfigIn, session: AsyncSession = Depends(get_session)
 ) -> GuardStatusEntry:
-    """Ziel-Metadaten live editieren (Post-Roadmap Phase 22 Session 7,
-    ADR 0092) - NUR `object_lock_mode`/`role` je bereits konfiguriertem Ziel
-    ("nur bestehende Einträge bearbeiten", gleiche Vorgabe wie P22-S6).
-    `404` bei unbekannter `target_id` (die Ziel-*Liste* selbst bleibt
-    env-var-only, keine neuen IDs über diesen Endpunkt). Schreibt das
-    Ergebnis sofort in `app.state` zurück (`_compute_target_state`), wirkt
-    also ohne Neustart auf jeden nachfolgenden Request."""
+    """Edit target metadata live (Post-Roadmap Phase 22 Session 7,
+    ADR 0092) - ONLY `object_lock_mode`/`role` per already-configured
+    target ("only edit existing entries", same rule as P22-S6). `404` for
+    an unknown `target_id` (the target *list* itself remains env-var-only,
+    no new IDs via this endpoint). Writes the result immediately back to
+    `app.state` (`_compute_target_state`), so it takes effect on every
+    subsequent request without a restart."""
     if target_id not in {t.id for t in settings.targets}:
         raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
 

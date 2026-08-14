@@ -2,12 +2,13 @@ import httpx
 
 
 class ApprovalClient:
-    """HTTP-Client gegen den generischen Vier-Augen-Approval-Mechanismus im
-    Permission Service (4.3, P6-S4) - Kopie von `document_service.approval_client`
-    (identisches ~25-Zeilen-Muster, kein Grund für eine geteilte Lib bei diesem
-    Umfang). migration-service fragt vor dem Start eines Transfers ab, ob
-    `action_type="migration.transfer.start"` gerade Genehmigung erfordert (7.2:
-    "kann selbst dem Vier-Augen-Prinzip unterliegen")."""
+    """HTTP client against the generic four-eyes approval mechanism in the
+    permission service (4.3, P6-S4) - copy of
+    `document_service.approval_client` (identical ~25-line pattern, no
+    reason for a shared lib at this size). migration-service checks before
+    starting a transfer whether `action_type="migration.transfer.start"`
+    currently requires approval (7.2: "may itself be subject to the
+    four-eyes principle")."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)

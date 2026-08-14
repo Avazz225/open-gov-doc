@@ -4,15 +4,15 @@ import httpx
 
 
 class PermissionServiceClient:
-    """HTTP-Client gegen den Permission Service - Retrofit P6-S6:
-    (a) Prozessdefinitionen (BPMN-/Script-Task-Upload) verlangen die Domain-
-    Admin-Capability `admin.object_config` (gleiches Muster wie `auth-service`s
-    `_require_user_management`, P6-S5); (b) der SLA-Poll-Loop respektiert die
-    systemweite Notfallsperre (4.8). Bewusst weiterhin eine eigene, lokale
-    Kopie statt `libs/dms-permission-client` (P19-S1) - `check_delegation`
-    unten ist eine service-spezifische Zusatzmethode, die laut ADR 0066
-    bewusst nicht im geteilten Paket landet, ein Voll-Umzug hätte hier keinen
-    Mehrwert."""
+    """HTTP client against the Permission Service - Retrofit P6-S6:
+    (a) process definitions (BPMN/script task upload) require the domain
+    admin capability `admin.object_config` (same pattern as `auth-service`'s
+    `_require_user_management`, P6-S5); (b) the SLA poll loop respects the
+    system-wide emergency lock (4.8). Deliberately still its own local
+    copy instead of `libs/dms-permission-client` (P19-S1) - `check_delegation`
+    below is a service-specific extra method that, per ADR 0066, is
+    deliberately not moved into the shared package; a full migration
+    would add no value here."""
 
     ROOT_RESOURCE_ID = "root"
 
@@ -34,10 +34,10 @@ class PermissionServiceClient:
         permission: str,
         access_type: Literal["read", "write"] = "read",
     ) -> bool:
-        """Post-Roadmap Phase 19 Session 9 (ADR 0074) - Einzelprüfung gegen
-        `GET /check` (inkl. Bereichssperren-Überlagerung), anders als
-        `has_permission` oben (reine Rechteliste ohne Sperren-Auswertung).
-        Gleiche Signatur wie `libs/dms-permission-client`s `check`."""
+        """Post-Roadmap Phase 19 Session 9 (ADR 0074) - single check against
+        `GET /check` (including scope-lock overlay), unlike `has_permission`
+        above (a plain permission list without lock evaluation).
+        Same signature as `libs/dms-permission-client`'s `check`."""
         response = await self._client.get(
             "/check",
             params={
@@ -58,10 +58,10 @@ class PermissionServiceClient:
     async def check_delegation(
         self, *, deputy_principal_id: str, delegator_principal_id: str, process_definition_id: int
     ) -> bool:
-        """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - wahr, wenn
-        ``deputy_principal_id`` gerade aktiv als Stellvertretung fuer
-        ``delegator_principal_id`` eingetragen ist (Zeitfenster + optionaler
-        Prozess-Scope), siehe main.py's ``complete_task``."""
+        """Deputizing during absence (4.4a, P14-S11) - true if
+        ``deputy_principal_id`` is currently registered as an active
+        deputy for ``delegator_principal_id`` (time window + optional
+        process scope), see main.py's ``complete_task``."""
         response = await self._client.get(
             "/delegations/check",
             params={

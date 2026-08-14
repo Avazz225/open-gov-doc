@@ -11,19 +11,19 @@ class Settings(BaseServiceSettings):
     permission_service_base_url: str = "http://localhost:8004"
     workflow_service_base_url: str = "http://localhost:8014"
 
-    # Vier-Augen-Prinzip (4.3, P6-S4-Muster): fragt vor dem Start eines Transfers
-    # ab, ob "migration.transfer.start" gerade Genehmigung erfordert.
+    # Four-eyes principle (4.3, P6-S4 pattern): checks before starting a transfer
+    # whether "migration.transfer.start" currently requires approval.
     approval_action_type: str = "migration.transfer.start"
 
-    # Lizenzvermittlung (9.1/9.3, P9-S2-Muster) - Konzept 9.1 nennt
-    # "Migration-Service" wörtlich als Beispiel für eine separat lizenzierbare
-    # Komponente.
+    # License brokering (9.1/9.3, P9-S2 pattern) - concept 9.1 names
+    # "Migration-Service" literally as an example of a separately licensable
+    # component.
     license_status_cache_ttl_seconds: float = 30.0
 
-    # Konfigurierbare Übergangs-/Aufbewahrungsfrist (7.2) - Default für neue
-    # Transfers, falls beim Anlegen kein expliziter Wert mitgegeben wird.
+    # Configurable transition/retention period (7.2) - default for new
+    # transfers if no explicit value is given when creating one.
     default_retention_days: int = 30
 
-    # Timeout für Aufrufe gegen eine gepaarte Ziel-Installation (Kopieren
-    # potenziell vieler Dokumente, siehe docs/services/migration-service.md).
+    # Timeout for calls against a paired target installation (copying
+    # potentially many documents, see docs/services/migration-service.md).
     peer_call_timeout_seconds: float = 300.0

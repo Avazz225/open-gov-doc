@@ -64,9 +64,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS permission"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Schema-Erweiterung (kein Alembic, siehe CONTRIBUTING.md):
-        # `required_permission` kam erst in P6-S5 dazu, `create_all` legt nur
-        # fehlende Tabellen an, keine fehlenden Spalten auf bestehenden.
+        # Ad-hoc schema extension (no Alembic, see CONTRIBUTING.md):
+        # `required_permission` was only added in P6-S5, `create_all` only
+        # creates missing tables, not missing columns on existing ones.
         await conn.execute(
             text(
                 "ALTER TABLE permission.approval_action_config "
@@ -80,14 +80,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await repository.ensure_root_resource(session)
         await repository.ensure_domain_admin_roles(session)
         await repository.ensure_everyone_role(session)
-        # Break-Glass-Aktivierung (4.6) verlangt zwingend Vier-Augen mit
-        # Gruppenbindung - anders als Force-Unlock/Bereichssperren (P6-S4)
-        # bewusst schon beim Seeding als `requires_approval=True` mit
-        # `required_permission` vorbelegt, nicht erst per Admin-Opt-in. Nur
-        # beim allerersten Start gesetzt (idempotent wie die Rollen oben) -
-        # ein Betreiber könnte diese Zeile später bewusst über
-        # `PUT /approval-config/auth.superuser.activate` ändern, ohne dass
-        # ein Neustart das wieder überschreibt.
+        # Break-glass activation (4.6) mandatorily requires the four-eyes
+        # principle with group binding - unlike force-unlock/scope locks
+        # (P6-S4), deliberately pre-seeded already with `requires_approval=
+        # True` and `required_permission`, not left to a later admin opt-in.
+        # Only set on the very first startup (idempotent like the roles
+        # above) - an operator could later deliberately change this row via
+        # `PUT /approval-config/auth.superuser.activate` without a restart
+        # overwriting it again.
         if await session.get(ApprovalActionConfig, "auth.superuser.activate") is None:
             await repository.set_approval_config(
                 session,
@@ -95,11 +95,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 requires_approval=True,
                 required_permission="breakglass.approve",
             )
-        # Not-Shutdown (4.8, P6-S6): anders als Break-Glass NICHT hart auf
-        # requires_approval=True vorbelegt ("optional konfigurierbar je
-        # Installation") - required_permission ist trotzdem schon gesetzt,
-        # damit eine spätere Aktivierung von requires_approval sofort korrekt
-        # rollengebunden ist, ohne dass ein Betreiber daran denken muss.
+        # Emergency shutdown (4.8, P6-S6): unlike break-glass, NOT hard-coded
+        # to requires_approval=True ("optionally configurable per
+        # installation") - required_permission is nonetheless already set so
+        # a later activation of requires_approval is immediately correctly
+        # role-bound, without an operator having to remember it.
         if await session.get(ApprovalActionConfig, "system.not_shutdown.trigger") is None:
             await repository.set_approval_config(
                 session,
@@ -119,17 +119,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         event_bus, settings.structure_subjects, app.state.session_factory
     )
 
-    # Eigener Producer-Client für publizierte Ereignisse (Bereichssperren, 4.7/5.3) -
-    # getrennt vom obigen reinen Konsumenten-Client (ensure_stream=False), da ein
-    # Producer den eigenen Stream anlegen muss (siehe ADR 0001).
+    # Dedicated producer client for published events (scope locks, 4.7/5.3) -
+    # separate from the pure consumer client above (ensure_stream=False),
+    # since a producer must create its own stream (see ADR 0001).
     publisher = NatsEventBusClient(settings.nats_url, stream="permission", ensure_stream=True)
     await publisher.connect()
     app.state.publisher = publisher
 
-    # Selbst-Konsum des eigenen Approval-Events (4.3, P6-S4): erst jetzt
-    # möglich, weil der Stream "permission" gerade eben durch den obigen
-    # publisher-Connect angelegt wurde - der reine Konsumenten-Client
-    # (event_bus) kann das Subject also erst ab hier abonnieren.
+    # Self-consumption of its own approval event (4.3, P6-S4): only possible
+    # now, because the "permission" stream was just created by the publisher
+    # connect above - the pure consumer client (event_bus) can therefore
+    # only subscribe to the subject from this point on.
     await approval_consumer.start_consuming(
         event_bus, settings.approval_subjects, app.state.session_factory, publish_event
     )
@@ -176,14 +176,15 @@ def healthz() -> dict:
 
 
 async def _require_role_management(session: AsyncSession, x_dms_principal: str) -> None:
-    """Self-Gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
-    `PUT /roles` waren seit jeher ungegatet (ADR 0023 nannte explizit nur
-    `POST /role-assignments` als Henne-Ei-Fall, Rollen-*Anlage* selbst hängt
-    an keinem Bootstrap-Pfad, siehe ADR 0071 "Begründung"). `RoleCreate`/
-    `RoleUpdate` haben kein Akteur-Feld (anders als `ScopeLockCreate.locked_
-    by`/`.released_by` unten) - `X-DMS-Principal` ist hier die einzige
-    Identitätsquelle, gleiches Muster wie `auth-service`s `_require_service_
-    user_management`/`case-service`s `_require_case_permission`."""
+    """Self-gating (Post-Roadmap Phase 19 Session 6, ADR 0071) - `POST`/
+    `PUT /roles` had been ungated since the beginning (ADR 0023 explicitly
+    named only `POST /role-assignments` as a chicken-and-egg case; role
+    *creation* itself does not sit on any bootstrap path, see ADR 0071
+    "Rationale"). `RoleCreate`/`RoleUpdate` have no actor field (unlike
+    `ScopeLockCreate.locked_by`/`.released_by` below) - `X-DMS-Principal` is
+    the only identity source here, same pattern as `auth-service`'s
+    `_require_service_user_management`/`case-service`'s
+    `_require_case_permission`."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     try:
@@ -218,10 +219,10 @@ async def update_role(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> RoleOut:
-    """Seit P12-S3 (7.3) - Grundlage für den Konfigurationsimport (`config-
-    service`), der eine bereits vorhandene Rolle (Abgleich per `name`)
-    aktualisieren statt sie zu duplizieren erwarten muss. Seit P19-S6
-    gegated, siehe `_require_role_management`."""
+    """Since P12-S3 (7.3) - basis for the configuration import (`config-
+    service`), which needs to update an already existing role (matched by
+    `name`) instead of duplicating it. Gated since P19-S6, see
+    `_require_role_management`."""
     await _require_role_management(session, x_dms_principal)
     try:
         role = await repository.update_role(
@@ -239,9 +240,9 @@ async def create_group(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> GroupOut:
-    """Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen
-    die seit Phase 19 Session 2 bestehende "everyone"-Gruppe. Gleiches
-    Self-Gating wie `POST /roles` (`admin.user_management`), siehe
+    """Admin-creatable groups (Post-Roadmap Phase 22 Session 2) - complement
+    the "everyone" group that has existed since Phase 19 Session 2. Same
+    self-gating as `POST /roles` (`admin.user_management`), see
     `_require_role_management`."""
     await _require_role_management(session, x_dms_principal)
     group = await repository.create_group(session, payload.name, payload.description)
@@ -310,20 +311,21 @@ async def remove_group_member(
 async def create_role_assignment(
     payload: RoleAssignmentCreate, session: AsyncSession = Depends(get_session)
 ) -> RoleAssignmentActionResult:
-    """Seit P17-S3 optional per generischem Vier-Augen-Mechanismus gegated
-    (4.3, `permission.role_assignment.create`) - 14.2 nennt
-    "Berechtigungsänderung" wörtlich als sensiblen Aktionstyp für die
-    Vier-Augen-Vorbelegung des eGov-Pakets. Per Default (keine Konfiguration)
-    bleibt das Verhalten unverändert: sofortige Anlage, gleiches Muster wie
+    """Optionally gated since P17-S3 via the generic four-eyes mechanism
+    (4.3, `permission.role_assignment.create`) - 14.2 literally names
+    "permission change" as a sensitive action type for the four-eyes
+    pre-configuration of the eGov package. By default (no configuration),
+    behavior stays unchanged: immediate creation, same pattern as
     `document.force_unlock`/`permission.scope_lock.create`."""
     config = await repository.get_approval_config(session, "permission.role_assignment.create")
     if config.requires_approval:
-        # `RoleAssignmentCreate` hat kein eigenes "wer beantragt das"-Feld
-        # (dieser Endpunkt liest wie `create_scope_lock` bewusst keinen
-        # `X-DMS-Principal`-Header, älteres, einfacheres Muster als die
-        # neueren Delegation-Endpunkte) - `principal_id` (die Person, die die
-        # Rolle erhalten soll) ist der einzige verfügbare Platzhalter für
-        # `initiated_by`, identisches Kompromiss-Muster wie dort.
+        # `RoleAssignmentCreate` has no field of its own for "who is
+        # requesting this" (like `create_scope_lock`, this endpoint
+        # deliberately does not read an `X-DMS-Principal` header, an older,
+        # simpler pattern than the newer delegation endpoints) -
+        # `principal_id` (the person who is to receive the role) is the only
+        # available placeholder for `initiated_by`, the identical trade-off
+        # pattern used there.
         request = await _request_approval(
             session,
             action_type="permission.role_assignment.create",
@@ -441,11 +443,11 @@ async def check(
 async def check_batch(
     payload: BatchCheckRequest, session: AsyncSession = Depends(get_session)
 ) -> BatchCheckResult:
-    """Batch-Form von `/check` (P5-S4, Search Service): prüft mehrere
-    Resource-IDs in einem Aufruf statt vieler Einzel-Roundtrips. Wiederholt
-    dieselbe Logik wie `/check` je Resource-ID - jeder Aufruf trifft den
-    bereits vorhandenen `EffectivePermissionCache`, daher keine teure
-    Mehrfachberechnung trotz der Schleife."""
+    """Batch form of `/check` (P5-S4, search service): checks multiple
+    resource IDs in a single call instead of many individual round trips.
+    Repeats the same logic as `/check` for each resource ID - each call hits
+    the already existing `EffectivePermissionCache`, so no expensive
+    recomputation despite the loop."""
     results: dict[str, bool] = {}
     for resource_id in set(payload.resource_ids):
         entry = await repository.get_effective_permissions(
@@ -466,9 +468,9 @@ async def check_batch(
 async def _request_approval(
     session: AsyncSession, *, action_type: str, initiated_by: str, payload: dict
 ) -> ApprovalRequest:
-    """Gemeinsamer Erstellungs-/Publish-Pfad für `POST /approval-requests`
-    und jeden gegateten Endpunkt (Scope-Locks hier, `document-service`s
-    Force-Unlock via HTTP) - vermeidet doppelte Publish-Logik."""
+    """Shared creation/publish path for `POST /approval-requests` and every
+    gated endpoint (scope locks here, `document-service`'s force-unlock via
+    HTTP) - avoids duplicated publish logic."""
     try:
         request = await repository.create_approval_request(
             session, action_type=action_type, initiated_by=initiated_by, payload=payload
@@ -508,14 +510,15 @@ async def put_approval_config(
     payload: ApprovalActionConfigUpdate,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalActionConfigOut:
-    """Bewusst weiterhin ungegatet (Post-Roadmap Phase 22 Session 3 hat das
-    geprüft, nicht umgesetzt, siehe ADR 0089): über ein Dutzend Testsuiten quer
-    durchs Repo (auth-/config-/folder-/document-/migration-/workflow-service,
-    webdav-connector) rufen diesen Endpunkt direkt als Test-Infrastruktur auf,
-    ohne `X-DMS-Principal`/Capability - ein Self-Gating analog zu `POST`/
-    `PUT /roles` (ADR 0071) hätte all diese Aufrufstellen angefasst. Siehe
-    `docs/services/permission-service.md` "Offene Punkte" für die
-    Dokumentation dieser bewusst zurückgestellten Härtung."""
+    """Deliberately still ungated (Post-Roadmap Phase 22 Session 3 examined
+    this but did not implement it, see ADR 0089): over a dozen test suites
+    across the repo (auth-/config-/folder-/document-/migration-/workflow-
+    service, webdav-connector) call this endpoint directly as test
+    infrastructure, without `X-DMS-Principal`/capability - a self-gating
+    scheme analogous to `POST`/`PUT /roles` (ADR 0071) would have touched
+    all of these call sites. See `docs/services/permission-service.md`
+    "Open Points" for the documentation of this deliberately deferred
+    hardening."""
     config = await repository.set_approval_config(
         session,
         action_type,
@@ -619,13 +622,13 @@ async def reject_approval_request(
 async def create_scope_lock(
     payload: ScopeLockCreate, session: AsyncSession = Depends(get_session)
 ) -> ScopeLockActionResult:
-    """Self-Gating seit P19-S6 (ADR 0071): Baseline-Capability-Prüfung LÄUFT
-    VOR dem optionalen Vier-Augen-Zweig unten - ohne diese Reihenfolge könnte
-    ein Principal ohne jede Berechtigung trotzdem einen offenen
-    Genehmigungsantrag auslösen. `payload.locked_by` ist bereits die
-    etablierte Akteur-Quelle für den Vier-Augen-Zweig hier (`initiated_by`),
-    dieselbe Quelle wird für die neue Prüfung wiederverwendet statt eines
-    zusätzlichen `X-DMS-Principal`-Headers."""
+    """Self-gating since P19-S6 (ADR 0071): the baseline capability check
+    RUNS BEFORE the optional four-eyes branch below - without this ordering,
+    a principal with no permission at all could still trigger an open
+    approval request. `payload.locked_by` is already the established actor
+    source for the four-eyes branch here (`initiated_by`); the same source
+    is reused for the new check instead of an additional `X-DMS-Principal`
+    header."""
     try:
         await repository.require_capability(session, payload.locked_by, "admin.user_management")
     except repository.MissingRequiredPermissionError as exc:
@@ -677,8 +680,8 @@ async def create_scope_lock(
 async def release_scope_lock(
     lock_id: int, payload: ScopeLockRelease, session: AsyncSession = Depends(get_session)
 ) -> ScopeLockActionResult:
-    """Self-Gating seit P19-S6 (ADR 0071) - siehe `create_scope_lock` oben
-    für die Begründung von Reihenfolge und Akteur-Quelle."""
+    """Self-gating since P19-S6 (ADR 0071) - see `create_scope_lock` above
+    for the rationale behind the ordering and actor source."""
     try:
         await repository.require_capability(session, payload.released_by, "admin.user_management")
     except repository.MissingRequiredPermissionError as exc:
@@ -736,11 +739,11 @@ async def get_maintenance_mode(session: AsyncSession = Depends(get_session)) -> 
 async def trigger_maintenance_mode(
     payload: MaintenanceModeTrigger, session: AsyncSession = Depends(get_session)
 ) -> MaintenanceModeActionResult:
-    """Not-Shutdown-Auslösung (4.8, P6-S6): anders als Bereichssperren/Force-
-    Unlock (P6-S4) verlangt bereits der *direkte* Pfad (ohne Vier-Augen) eine
-    Baseline-Rechteprüfung - "frei konfigurierbar, wer auslösen darf, keine
-    fest verdrahtete Rolle" (4.8) ist keine optionale Ergänzung wie bei 4.3,
-    sondern von Anfang an verbindlich."""
+    """Emergency shutdown trigger (4.8, P6-S6): unlike scope locks/force-
+    unlock (P6-S4), even the *direct* path (without four-eyes) already
+    requires a baseline permission check - "freely configurable who may
+    trigger it, no hard-wired role" (4.8) is not an optional addition like
+    for 4.3, but mandatory from the outset."""
     try:
         await repository.require_capability(
             session, payload.triggered_by, "system.not_shutdown.trigger"
@@ -776,9 +779,9 @@ async def trigger_maintenance_mode(
 async def lift_maintenance_mode(
     payload: MaintenanceModeLift, session: AsyncSession = Depends(get_session)
 ) -> MaintenanceModeOut:
-    """Nur der aktuell aktive Superuser darf aufheben (4.8) - dessen Identität
-    lebt in auth-service (P6-S5), daher der Cross-Service-Check statt einer
-    eigenen zweiten Quelle der Wahrheit hier."""
+    """Only the currently active superuser may lift it (4.8) - their
+    identity lives in auth-service (P6-S5), hence the cross-service check
+    instead of a second, independent source of truth here."""
     active, superuser_id = await app.state.auth_client.get_active_superuser()
     if not active or superuser_id != payload.lifted_by:
         raise HTTPException(
@@ -796,7 +799,7 @@ async def lift_maintenance_mode(
     return mode
 
 
-# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+# --- Delegation during absence (4.4a, P14-S11) -------------------------
 
 
 def _has_delegation_admin_role(x_dms_roles: str) -> bool:
@@ -810,10 +813,10 @@ async def create_delegation(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DelegationOut:
-    """Eine Person hinterlegt selbst eine Stellvertretung (4.4a) - bewusst
-    kein Feld für ``delegator_principal_id`` im Request-Body: die vertretene
-    Person ist immer die anfragende (``X-DMS-Principal``), niemand kann eine
-    Delegation im Namen einer dritten Person anlegen."""
+    """A person registers a deputy for themself (4.4a) - deliberately no
+    field for ``delegator_principal_id`` in the request body: the delegating
+    person is always the requester (``X-DMS-Principal``); nobody can create
+    a delegation on behalf of a third person."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     if payload.ends_at <= payload.starts_at:
@@ -857,9 +860,9 @@ async def list_delegations(
 async def list_active_delegations_for_deputy(
     principal_id: str, session: AsyncSession = Depends(get_session)
 ) -> list[DelegationOut]:
-    """Für wen ``principal_id`` gerade als Stellvertretung aktiv ist (4.4a) -
-    von user-ui/reviewer-ui genutzt, um "im Auftrag von"-Auswahllisten zu
-    füllen, ohne dass das Frontend selbst über alle Delegationen filtern muss."""
+    """Who ``principal_id`` is currently active as a deputy for (4.4a) - used
+    by user-ui/reviewer-ui to populate "on behalf of" selection lists,
+    without the frontend having to filter over all delegations itself."""
     return await repository.list_delegations(
         session, deputy_principal_id=principal_id, active_only=True
     )
@@ -874,9 +877,9 @@ async def check_delegation(
     folder_resource_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> DelegationCheckResult:
-    """Eigentlicher Durchsetzungs-Endpunkt (4.4a) - von workflow-service beim
-    Aufgabenabschluss "im Auftrag von" aufgerufen (gleiches Muster wie
-    document-services `GET /check` für Leserechte, P14-S10)."""
+    """The actual enforcement endpoint (4.4a) - called by workflow-service
+    "on behalf of" when completing a task (same pattern as document-service's
+    `GET /check` for read permissions, P14-S10)."""
     allowed = await repository.is_active_deputy_for(
         session,
         deputy_principal_id=deputy_principal_id,
@@ -895,12 +898,11 @@ async def revoke_delegation(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Vorzeitige Beendigung (4.4a) - durch die vertretene Person selbst oder
-    eine berechtigte Admin-Rolle (Konzept-Wortlaut), NICHT durch die
-    Stellvertretung selbst (die könnte sich sonst eine fremde Delegation
-    einseitig verlängert vorstellen, indem sie die eigene Widerrufsmöglichkeit
-    ignoriert - der Widerruf muss von der Seite kommen können, die die
-    Verantwortung trägt)."""
+    """Early termination (4.4a) - by the delegating person themself or an
+    authorized admin role (concept wording), NOT by the deputy themself
+    (who could otherwise effectively extend someone else's delegation
+    unilaterally by ignoring their own revocation option - revocation must
+    be able to come from the side that carries the responsibility)."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
 

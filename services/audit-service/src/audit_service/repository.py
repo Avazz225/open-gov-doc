@@ -35,14 +35,14 @@ def _hashable_fields(
         "payload": payload,
         "recorded_at": recorded_at.isoformat(),
     }
-    # Cutover-Versionierung (seit P7-S2, siehe AuditMeta): das actor-Feld
-    # darf nur fuer Zeilen NACH dem Cutover ins kanonische JSON einfliessen,
-    # sonst aendert sich der Hash-Input fuer bereits verkettete Alt-Zeilen
-    # und jede vorherige Pruefung schlaegt rueckwirkend fehl.
+    # Cutover versioning (since P7-S2, see AuditMeta): the actor field may
+    # only flow into the canonical JSON for rows AFTER the cutover,
+    # otherwise the hash input for already-chained old rows changes and
+    # every previous verification retroactively fails.
     if include_actor:
         fields["actor"] = actor
-    # Gleiche Cutover-Versionierung fuer das seit P14-S11 neue on_behalf_of-
-    # Feld (4.4a) - eigener, unabhaengiger Cutover-Wert (siehe
+    # Same cutover versioning for the on_behalf_of field introduced in
+    # P14-S11 (4.4a) - its own, independent cutover value (see
     # get_on_behalf_of_field_cutover_id).
     if include_on_behalf_of:
         fields["on_behalf_of"] = on_behalf_of
@@ -50,11 +50,11 @@ def _hashable_fields(
 
 
 async def get_actor_field_cutover_id(session: AsyncSession) -> int:
-    """Legt die AuditMeta-Zeile beim allerersten Aufruf nach der Migration
-    einmalig an - Cutover = MAX(id) der zu diesem Zeitpunkt bestehenden
-    Zeilen (0, falls die Kette leer ist). ``ON CONFLICT DO NOTHING`` macht
-    das nebenlaeufigkeitssicher (mehrere gleichzeitige erste Aufrufe legen
-    denselben Wert nur einmal an, kein Race zwischen zwei Berechnungen)."""
+    """Creates the AuditMeta row once, on the very first call after the
+    migration - cutover = MAX(id) of the rows existing at that point (0 if
+    the chain is empty). ``ON CONFLICT DO NOTHING`` makes this
+    concurrency-safe (multiple simultaneous first calls create the same
+    value only once, no race between two computations)."""
     existing = await session.get(AuditMeta, _AUDIT_META_ID)
     if existing is not None:
         return existing.actor_field_cutover_id
@@ -76,14 +76,14 @@ async def get_actor_field_cutover_id(session: AsyncSession) -> int:
 
 
 async def get_on_behalf_of_field_cutover_id(session: AsyncSession) -> int:
-    """Wie ``get_actor_field_cutover_id`` oben, aber fuer das neue
-    ``on_behalf_of``-Feld (4.4a, seit P14-S11) - eigener, unabhaengiger
-    Cutover-Wert. Anders als beim actor-Cutover (der die AuditMeta-Zeile
-    beim allerersten Aufruf per INSERT ANLEGT) existiert die Zeile hier
-    bereits (seit P7-S2) - der Cutover wird deshalb per ORM-Attribut-Update
-    NACHGETRAGEN statt neu eingefuegt, und dank der Bedingung
-    ``is None`` genau einmal gesetzt."""
-    await get_actor_field_cutover_id(session)  # stellt sicher, dass die Zeile existiert
+    """Like ``get_actor_field_cutover_id`` above, but for the new
+    ``on_behalf_of`` field (4.4a, since P14-S11) - its own, independent
+    cutover value. Unlike the actor cutover (which CREATES the AuditMeta
+    row via INSERT on the very first call), the row already exists here
+    (since P7-S2) - the cutover is therefore RETROFITTED via an ORM
+    attribute update instead of newly inserted, and set exactly once thanks
+    to the ``is None`` condition."""
+    await get_actor_field_cutover_id(session)  # ensures the row exists
     existing = await session.get(AuditMeta, _AUDIT_META_ID)
     assert existing is not None
     if existing.on_behalf_of_field_cutover_id is not None:
@@ -102,9 +102,9 @@ async def _latest(session: AsyncSession) -> AuditEvent | None:
 
 
 async def append_event(session: AsyncSession, event: Event) -> AuditEvent:
-    """Hängt ``event`` ans Ende der Kette an. Idempotent nach ``event_id`` -
-    JetStream liefert bei At-least-once-Zustellung ggf. Duplikate, die hier
-    ohne erneute Verkettung übersprungen werden.
+    """Appends ``event`` to the end of the chain. Idempotent by
+    ``event_id`` - JetStream may deliver duplicates under at-least-once
+    delivery, which are skipped here without re-chaining.
     """
     existing = await session.execute(
         select(AuditEvent).where(AuditEvent.event_id == event.event_id)
@@ -113,12 +113,12 @@ async def append_event(session: AsyncSession, event: Event) -> AuditEvent:
     if found is not None:
         return found
 
-    # Stellt sicher, dass der Cutover-Punkt (P7-S2) VOR dieser neuen Zeile
-    # feststeht, bevor deren id vergeben wird - sonst koennte eine spaetere
-    # verify_chain()-Erstberechnung des Cutovers faelschlich auch bereits
-    # mit actor gehashte Zeilen als "vor dem Cutover" einstufen (die
-    # main.py-Lifespan ruft dies zwar bereits vorab explizit auf, dieser
-    # Aufruf hier ist die eigentliche Garantie - idempotent bei Wiederholung).
+    # Ensures the cutover point (P7-S2) is fixed BEFORE this new row is
+    # assigned an id - otherwise a later first-time computation of the
+    # cutover by verify_chain() could wrongly classify rows already hashed
+    # with actor as "before the cutover" (main.py's lifespan already calls
+    # this explicitly beforehand, but this call here is the actual
+    # guarantee - idempotent on repetition).
     await get_actor_field_cutover_id(session)
     await get_on_behalf_of_field_cutover_id(session)
 
@@ -126,10 +126,10 @@ async def append_event(session: AsyncSession, event: Event) -> AuditEvent:
     prev_hash = latest.hash if latest is not None else GENESIS_HASH
     recorded_at = datetime.now(UTC)
 
-    # Jede neu angehaengte Zeile liegt per Definition nach beiden Cutover-
-    # Punkten (ihre id ist noch nicht vergeben, also zwangslaeufig > jeder
-    # bestehenden id) - include_actor/include_on_behalf_of sind fuer
-    # append_event daher immer True.
+    # Every newly appended row is by definition after both cutover points
+    # (its id has not yet been assigned, so it is necessarily > every
+    # existing id) - include_actor/include_on_behalf_of are therefore
+    # always True for append_event.
     fields = _hashable_fields(
         event.event_id,
         event.event_type,
@@ -172,12 +172,12 @@ async def list_events(
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> list[AuditEvent]:
-    """Filter-API (5.4b, seit P7-S2): ``event_type`` unterstuetzt dieselbe
-    NATS-Wildcard-Schreibweise wie die Subject-Konfiguration selbst
-    (``"document.>"`` -> alle ``document.*``-Ereignisse), sonst exakter
-    Treffer. ``on_behalf_of`` (seit P14-S11, 4.4a) filtert auf Aktionen, die
-    im Auftrag einer bestimmten Person ausgefuehrt wurden - unabhaengig von
-    ``actor``, der die tatsaechlich handelnde Stellvertretung bleibt."""
+    """Filter API (5.4b, since P7-S2): ``event_type`` supports the same
+    NATS wildcard notation as the subject configuration itself
+    (``"document.>"`` -> all ``document.*`` events), otherwise an exact
+    match. ``on_behalf_of`` (since P14-S11, 4.4a) filters on actions
+    performed on behalf of a specific person - independent of ``actor``,
+    which remains the delegate who actually performed the action."""
     query = select(AuditEvent)
     if actor is not None:
         query = query.where(AuditEvent.actor == actor)

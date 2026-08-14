@@ -10,11 +10,11 @@ class ScanOutcome:
 
 
 class VirusScanClient:
-    """Ruft den verpflichtenden Virenscan (10.3, ADR 0010) für jeden
-    Posteingang-Anhang auf - identischer Aufruf wie document-service's
-    `POST /documents`, hier für Anhänge, die (anders als ein regulärer
-    Upload) zum Zeitpunkt des Scans noch keinem Dokument zugeordnet sind
-    (`document_id=None`, exakt der vom Service selbst vorgesehene Fall)."""
+    """Invokes the mandatory virus scan (10.3, ADR 0010) for every inbound
+    mail attachment - identical call to document-service's `POST /documents`,
+    here for attachments that (unlike a regular upload) are not yet assigned
+    to a document at the time of the scan (`document_id=None`, exactly the
+    case the service itself provides for)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class PrimaryWriteError(Exception):
-    """Das Primärziel selbst hat den Schreibversuch abgelehnt - unabhängig
-    von der Schreibstrategie ein harter Fehlschlag (kein Fallback)."""
+    """The primary target itself rejected the write attempt - a hard
+    failure regardless of the write strategy (no fallback)."""
 
 
 class QuorumNotReachedError(Exception):
-    """Bei Schreibstrategie 'quorum' hat nicht die konfigurierte
-    Mindestanzahl an Zielen erfolgreich bestätigt (3.6)."""
+    """With write strategy 'quorum', the configured minimum number of
+    targets did not confirm successfully (3.6)."""
 
     def __init__(self, successes: int, required: int) -> None:
         self.successes = successes
@@ -41,14 +41,16 @@ async def write_with_redundancy(
     retention_until: datetime | None = None,
     lock_target_ids: set[str] | None = None,
 ) -> dict[str, str]:
-    """Schreibt ``data`` gemäß Schreibstrategie auf die konfigurierten Ziele
-    und pflegt je Ziel eine ``object_copy``-Zeile. Gibt ``{backend_id: status}``
-    zurück oder wirft ``PrimaryWriteError``/``QuorumNotReachedError``.
+    """Writes ``data`` to the configured targets according to the write
+    strategy and maintains an ``object_copy`` row per target. Returns
+    ``{backend_id: status}`` or raises ``PrimaryWriteError``/
+    ``QuorumNotReachedError``.
 
-    ``retention_until`` (5.1/5.2a, seit P7-S1) wird auf JEDER ``object_copy``-
-    Zeile vermerkt (Grundlage für `retention_guard.py`, backend-unabhängig) -
-    echtes S3 Object Lock beim Schreiben selbst bekommt aber nur ein Ziel aus
-    ``lock_target_ids`` (die konfigurierten `object_lock_mode`-Ziele)."""
+    ``retention_until`` (5.1/5.2a, since P7-S1) is recorded on EVERY
+    ``object_copy`` row (basis for `retention_guard.py`, backend-
+    independent) - however, real S3 Object Lock on the write itself is
+    only applied to a target from ``lock_target_ids`` (the configured
+    `object_lock_mode` targets)."""
     lock_target_ids = lock_target_ids or set()
     if strategy == "quorum":
         results = await asyncio.gather(
@@ -88,9 +90,9 @@ async def write_with_redundancy(
             raise QuorumNotReachedError(successes, quorum_count)
         return statuses
 
-    # "primary_async": Primärziel synchron, Sekundärziele bleiben "pending"
-    # und werden erst über process_pending() nachgezogen (kein In-Prozess-
-    # Hintergrundtask - siehe ADR 0004).
+    # "primary_async": primary target synchronous, secondary targets stay
+    # "pending" and are only caught up via process_pending() (no in-
+    # process background task - see ADR 0004).
     primary = targets[0]
     try:
         await backends[primary].write(
@@ -114,8 +116,8 @@ async def write_with_redundancy(
 async def read_with_fallback(
     session: AsyncSession, *, backends: dict[str, StorageBackend], targets: list[str], key: str
 ) -> bytes:
-    """Liest von der ersten Kopie mit Status 'ok' in Zielpriorität
-    (Primärziel zuerst) - automatischer Fallback bei Nichterreichbarkeit (3.6)."""
+    """Reads from the first copy with status 'ok' in target priority order
+    (primary target first) - automatic fallback on unavailability (3.6)."""
     last_error: Exception | None = None
     for target in targets:
         copy = await repository.get_copy(session, key, target)
@@ -138,12 +140,12 @@ async def write_to_targets(
     data: bytes,
     checksum: str,
 ) -> dict[str, str]:
-    """Schreibt synchron auf ALLE angegebenen Ziele (5.6, seit P7-S3) - anders
-    als `write_with_redundancy` kein Primär-/Sekundär-Unterschied und keine
-    Schreibstrategie/Quorum-Semantik, da Archiv-Schreibvorgänge bewusst
-    synchrone Einzelvorgänge sind (kein Teil des Upload-Hot-Path). Ein
-    fehlschlagendes Ziel wirft die Exception des Backends unverändert weiter -
-    alle angegebenen Ziele müssen erfolgreich sein."""
+    """Writes synchronously to ALL specified targets (5.6, since P7-S3) -
+    unlike `write_with_redundancy`, there is no primary/secondary
+    distinction and no write-strategy/quorum semantics, since archive
+    writes are deliberately synchronous, individual operations (not part
+    of the upload hot path). A failing target propagates the backend's
+    exception unchanged - all specified targets must succeed."""
     statuses: dict[str, str] = {}
     for target in targets:
         await backends[target].write(key, data)
@@ -160,10 +162,10 @@ async def delete_from_targets(
     key: str,
     bypass_governance: bool = False,
 ) -> None:
-    """Entfernt Kopien NUR von den angegebenen Zielen (5.6, seit P7-S3,
-    "Dehydrieren") - anders als `delete_from_all` werden nur die
-    `object_copy`-Zeilen der genannten Ziele entfernt, Kopien auf anderen
-    Zielen (z. B. Archiv-Zielen) bleiben unberührt."""
+    """Removes copies ONLY from the specified targets (5.6, since P7-S3,
+    "dehydrating") - unlike `delete_from_all`, only the `object_copy`
+    rows of the named targets are removed, copies on other targets (e.g.
+    archive targets) remain untouched."""
     for target in targets:
         with contextlib.suppress(ObjectNotFoundError):
             await backends[target].delete(key, bypass_governance=bypass_governance)
@@ -178,9 +180,9 @@ async def delete_from_all(
     key: str,
     bypass_governance: bool = False,
 ) -> None:
-    """``bypass_governance`` (5.1/5.2a) wird an jedes Backend durchgereicht -
-    die eigentliche Autorisierungsprüfung (Rolle, aktive Sperre) liegt bereits
-    vor diesem Aufruf in `retention_guard.py`/`main.py`."""
+    """``bypass_governance`` (5.1/5.2a) is passed through to every backend -
+    the actual authorization check (role, active lock) already happens
+    before this call, in `retention_guard.py`/`main.py`."""
     for target in targets:
         with contextlib.suppress(ObjectNotFoundError):
             await backends[target].delete(key, bypass_governance=bypass_governance)
@@ -194,9 +196,9 @@ async def verify_all_copies(
     key: str,
     expected_checksum: str,
 ) -> list[dict]:
-    """Fixity-Check über alle bekannten Kopien eines Objekts (3.6): Prüfsumme
-    je Backend neu lesen, mit dem Referenzwert aus der Shared DB abgleichen,
-    Ergebnis in ``object_copy`` zurückschreiben."""
+    """Fixity check across all known copies of an object (3.6): read the
+    checksum fresh per backend, compare it against the reference value
+    from the shared DB, write the result back to ``object_copy``."""
     results = []
     for copy in await repository.list_copies(session, key):
         if copy.status == "pending":
@@ -233,11 +235,11 @@ async def verify_all_copies(
 
 
 def _next_retry_at(attempts: int) -> datetime:
-    """Full-Jitter-Backoff (`libs/dms-retry`, seit Post-Roadmap Phase 20
-    Session 6, ADR 0082) - gleiche Formel wie an den vier anderen
-    Resilienz-Stellen dieser Phase. ``attempts`` ist bereits die NEUE,
-    inkrementierte Zählung (1-indiziert), `compute_backoff_seconds` erwartet
-    einen 0-indizierten Versuchszähler."""
+    """Full-jitter backoff (`libs/dms-retry`, since Post-Roadmap Phase 20
+    Session 6, ADR 0082) - same formula as in the other four resilience
+    spots in this phase. ``attempts`` is already the NEW, incremented
+    count (1-indexed), `compute_backoff_seconds` expects a 0-indexed
+    attempt counter."""
     delay = compute_backoff_seconds(attempts - 1)
     return datetime.now(UTC) + timedelta(seconds=delay)
 
@@ -249,11 +251,11 @@ async def process_pending(
     max_attempts: int,
     limit: int = 100,
 ) -> dict:
-    """Retry-Queue für asynchron nachzuziehende Kopien (3.6). Liest die Bytes
-    von einer bereits bestätigten Kopie desselben Objekts und schreibt sie
-    aufs ausstehende Ziel. Nach ``max_attempts`` erfolglosen Versuchen gilt
-    eine Kopie als dauerhaft fehlgeschlagen (Log statt Alarmierung, siehe
-    Settings.max_replication_attempts)."""
+    """Retry queue for asynchronously caught-up copies (3.6). Reads the
+    bytes from an already-confirmed copy of the same object and writes
+    them to the pending target. After ``max_attempts`` unsuccessful
+    attempts, a copy is considered permanently failed (logged instead of
+    alerted, see Settings.max_replication_attempts)."""
     processed = succeeded = failed = permanently_failed = 0
     for copy in await repository.list_pending_copies(session, limit=limit):
         processed += 1
@@ -274,12 +276,12 @@ async def process_pending(
 
         try:
             data = await backends[source.backend_id].read(copy.object_key)
-            # `lock_until` wird hier bewusst NICHT an das Backend
-            # durchgereicht (offener Punkt, siehe docs/services/
-            # storage-service.md): ein Ziel, das erst nach dem ursprünglichen
-            # Schreibvorgang per Nachreplikation befüllt wird, bekäme sonst
-            # kein echtes S3 Object Lock - der Anwendungsschicht-Guard
-            # (`retention_until` unten) greift trotzdem unabhängig davon.
+            # `lock_until` is deliberately NOT passed through to the
+            # backend here (open point, see docs/services/
+            # storage-service.md): a target that is only populated via
+            # re-replication after the original write would otherwise get
+            # no real S3 Object Lock - the application-layer guard
+            # (`retention_until` below) still applies regardless.
             await backends[copy.backend_id].write(copy.object_key, data)
         except Exception as exc:
             new_attempts = copy.attempts + 1

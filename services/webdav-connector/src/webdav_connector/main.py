@@ -17,22 +17,23 @@ settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
 
-# Konzept 3.3 wörtlich: "Capability-Beschreibung: lesen, schreiben, Metadaten,
-# Locking, Versionierung" - alle fünf treffen auf diesen Referenz-Connector zu
-# (Versionierung über document-service's bestehende Check-in-Historie, jedes
-# `write_document()` auf ein existierendes Ziel checkt eine neue Version ein
-# statt zu überschreiben).
+# Concept 3.3 verbatim: "Capability description: read, write, metadata,
+# locking, versioning" - all five apply to this reference connector
+# (versioning via document-service's existing check-in history, every
+# `write_document()` against an existing target checks in a new version
+# instead of overwriting).
 _DESCRIPTOR = ConnectorDescriptor(
     protocol="webdav",
     capabilities=frozenset({"read", "write", "metadata", "locking", "versioning"}),
 )
 
-# Bewusst auf Modulebene statt in `lifespan` konstruiert: `DmsTreeClient`/
-# `LicenseStatusClient` sind synchron (kein async-Connect-Schritt nötig, siehe
-# deren Docstrings), und `app.mount()` nach Modul-Import statt erst beim
-# ASGI-Lifespan-Start ist der etabliertere, unzweideutig sichere Zeitpunkt für
-# WSGI-Unterapplikationen (kein Risiko einer Zustandsänderung an der Routing-
-# Tabelle, während der Server ggf. schon dabei ist, sie zu lesen).
+# Deliberately constructed at module level instead of in `lifespan`:
+# `DmsTreeClient`/`LicenseStatusClient` are synchronous (no async connect
+# step needed, see their docstrings), and calling `app.mount()` after module
+# import rather than only at ASGI lifespan startup is the more established,
+# unambiguously safe point in time for WSGI sub-applications (no risk of a
+# state change to the routing table while the server may already be reading
+# it).
 _tree = DmsTreeClient(
     document_service_base_url=settings.document_service_base_url,
     folder_service_base_url=settings.folder_service_base_url,
@@ -52,29 +53,29 @@ _wsgidav_config = {
         "accept_digest": False,
         "default_to_digest": False,
     },
-    # Eigener Konfigurationsschlüssel, von `DmsAuthDomainController.__init__`
-    # gelesen (`BaseDomainController` bekommt das volle Config-Dict
-    # durchgereicht) - kein offizieller wsgidav-Schlüssel, aber der
-    # dokumentierte Weg, eigene Provider-/DC-Parameter durchzureichen.
+    # Dedicated configuration key, read by `DmsAuthDomainController.__init__`
+    # (`BaseDomainController` receives the full config dict passed through) -
+    # not an official wsgidav key, but the documented way to pass through
+    # custom provider/DC parameters.
     "dms_auth_service_base_url": settings.auth_service_base_url,
-    # Office-Direktbearbeitung (Post-Roadmap-Feature): `DmsAuthDomainController`
-    # löst WebDAV-Edit-Tokens direkt (Ost-West, kein Gateway) gegen
-    # document-service auf, dasselbe Prinzip wie der `dms_auth_service_base_url`-
-    # Schlüssel oben, nur für einen anderen Aufrufer.
+    # Office direct editing (post-roadmap feature): `DmsAuthDomainController`
+    # resolves WebDAV edit tokens directly (east-west, no gateway) against
+    # document-service, the same principle as the `dms_auth_service_base_url`
+    # key above, just for a different caller.
     "dms_document_service_base_url": settings.document_service_base_url,
-    # In-Prozess-Lock-Manager (RFC 4918 LOCK/UNLOCK, Opaque-Tokens, Timeouts,
-    # If-Header-Prüfung) - ausreichend für eine einzelne Instanz, gleiches
-    # Prinzip wie gateway-services `RateLimiter` (ADR 0005). Siehe
-    # docs/services/webdav-connector.md für die bewusste Grenze ggü. einer
-    # über die gesamte Bearbeitungsdauer gespiegelten document-service-Sperre.
+    # In-process lock manager (RFC 4918 LOCK/UNLOCK, opaque tokens, timeouts,
+    # If-header checking) - sufficient for a single instance, same principle
+    # as gateway-service's `RateLimiter` (ADR 0005). See
+    # docs/services/webdav-connector.md for the deliberate boundary versus a
+    # document-service lock mirrored over the entire editing duration.
     "lock_storage": True,
-    # `WsgiToAsgi` mountet die App unter `settings.webdav_mount_path` (z. B.
-    # "/webdav") innerhalb von FastAPI - wsgidav selbst weiss davon nichts und
-    # wuerde sonst Hrefs relativ zu SEINER eigenen Wurzel ("/...") statt zur
-    # tatsaechlich oeffentlichen URL ("/webdav/...") ausliefern. Ohne diesen
-    # Schluessel interpretieren WebDAV-Clients (z. B. `webdav4`, das den
-    # Ressourcennamen durch Abschneiden des Mount-Pfad-Praefixes vom Href
-    # bestimmt) die Antwort falsch und liefern verstuemmelte Namen.
+    # `WsgiToAsgi` mounts the app under `settings.webdav_mount_path` (e.g.
+    # "/webdav") within FastAPI - wsgidav itself has no knowledge of this and
+    # would otherwise serve hrefs relative to ITS OWN root ("/...") instead
+    # of the actually public URL ("/webdav/..."). Without this key, WebDAV
+    # clients (e.g. `webdav4`, which determines the resource name by
+    # stripping the mount path prefix from the href) misinterpret the
+    # response and produce mangled names.
     "mount_path": settings.webdav_mount_path,
     "verbose": 1,
     "logging": {"enable": False},

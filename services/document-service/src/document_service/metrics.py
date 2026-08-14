@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from document_service import repository
 
-# document-service ist einer der zwei Sensor-Piloten (10.1, P11-S1, siehe
-# P11-S0-Befund: kein Vollretrofit aller Services). Beide Sensor-Namen sind
-# bewusst wörtlich aus Konzept 10.1s eigener Beispielliste übernommen.
+# document-service is one of the two sensor pilots (10.1, P11-S1, see
+# P11-S0 finding: no full retrofit of all services). Both sensor names are
+# deliberately taken verbatim from concept 10.1's own example list.
 UPLOAD_DURATION = SensorSpec(
     name="document.upload.duration",
     group="performance",

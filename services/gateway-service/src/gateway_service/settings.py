@@ -11,62 +11,63 @@ class Settings(BaseServiceSettings):
     keycloak_realm: str = "dms"
     keycloak_client_id: str = "dms-api"
 
-    # Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
-    # 0063): `auth-service` kann seit Phase 18 zusätzlich zu Keycloak selbst
-    # Tokens für lokale technische Konten (Superuser, künftig Domain-Admins)
-    # ausstellen - das Gateway muss deren JWKS zusätzlich kennen, um solche
-    # Tokens zu validieren, siehe `_build_token_validator`. Direkte Adresse
-    # (wie bei jedem anderen Ost-West-Aufruf dieses Projekts), keine
-    # Registry-Auflösung nötig, da `TokenValidator` das JWKS nur lazy beim
-    # ersten tatsächlich zu validierenden lokalen Token abruft.
+    # Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR
+    # 0063): since Phase 18, `auth-service` can issue tokens for local
+    # technical accounts (superuser, domain admins in the future) in
+    # addition to Keycloak itself - the gateway must additionally know
+    # their JWKS to validate such tokens, see `_build_token_validator`.
+    # Direct address (as with every other east-west call in this project),
+    # no registry resolution needed, since `TokenValidator` only fetches
+    # the JWKS lazily when the first local token actually needs validation.
     auth_service_base_url: str = "http://localhost:8003"
 
-    # Browser-Frontends (user-ui/admin-ui, Konzept 8) laufen auf einer anderen
-    # Origin als das Gateway - ohne CORS-Freigabe scheitert bereits der
-    # Preflight-OPTIONS-Request mit 405, bevor der eigentliche Request
-    # überhaupt gesendet wird (curl-basierte Tests decken das nicht ab, da
-    # curl keinen Origin-Header setzt und damit keinen Preflight auslöst).
+    # Browser frontends (user-ui/admin-ui, concept 8) run on a different
+    # origin than the gateway - without CORS approval, the preflight
+    # OPTIONS request already fails with 405, before the actual request is
+    # even sent (curl-based tests don't cover this, since curl doesn't set
+    # an Origin header and therefore doesn't trigger a preflight).
     cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
-    # "{service_type}:{path}" (Pfad ohne führenden Slash, exakter Match) - Routen,
-    # die ohne Bearer-Token erreichbar sein müssen, allen voran Login/Refresh
-    # selbst (man braucht ja erst einen Token, um einen Token zu bekommen).
-    # Seit P6-S9 zusätzlich die beiden Federation-Hub-Inbound-Endpunkte (7.4) -
-    # der Hub ist kein eingeloggter Principal, authentisiert sich stattdessen
-    # über eine eigene Signatur (`X-Federation-Hub-Signature`, siehe
+    # "{service_type}:{path}" (path without leading slash, exact match) -
+    # routes that must be reachable without a bearer token, first and
+    # foremost login/refresh itself (you need a token to get a token, after
+    # all). Since P6-S9, additionally the two federation-hub inbound
+    # endpoints (7.4) - the hub is not a logged-in principal, it
+    # authenticates instead via its own signature
+    # (`X-Federation-Hub-Signature`, see
     # `workflow_service.main._verify_hub_signature`).
-    # Seit P13-S2 zusätzlich vier Routen für den unabhängig betriebenen
-    # `fleet-management-service` (3a) - der hat ebenfalls keinen eingeloggten
-    # Principal dieser Installation. Die beiden Lese-Routen waren schon vor
-    # dem Gateway-Zugriff ungegatet (`registry-service`/`license-service`
-    # verlangen dort nie einen Principal); die beiden Schreib-Routen prüfen
-    # stattdessen serverseitig den installationsweiten
-    # `DMS_FLEET_AGENT_API_KEY` (siehe dortiges `_is_fleet_agent()`) - der
-    # Gateway selbst kennt diesen Schlüssel nicht, lässt den `Authorization`-
-    # Header nur unangetastet durch (kein Keycloak-Token-Zwang mehr auf
-    # diesen vier Pfaden).
-    # Seit P14-S10 zusätzlich die beiden öffentlichen Freigabelink-Endpunkte
-    # (4.2a) - anonyme Betrachter besitzen keinen Bearer-Token, das Token des
-    # Freigabelinks selbst reist stattdessen als Query-Parameter mit (`?token=`,
-    # siehe document-service.main._resolve_active_share_link), damit diese
-    # beiden Einträge simple, statische Exact-Match-Strings bleiben können,
-    # ohne Wildcard-/Matching-Logik am Gateway selbst zu ändern.
-    # Seit P15-S4 zusätzlich die föderierte Kontaktsuche (2.5/7.4) - eine
-    # Peer-Installation besitzt keinen Bearer-Token dieser Installation,
-    # authentisiert sich stattdessen über `X-Installation-Signature` (siehe
-    # auth_service.main.federated_search_inbound, gleiches Prinzip wie
-    # workflow-service's federation/inbound oben).
-    # Seit P17-S1 `config-service:config/import` durch `config-service:config/
-    # fleet-import` ersetzt (nicht nur ergänzt): der alte, gemeinsame Pfad für
-    # sowohl den Fleet-Agent-Schlüssel als auch echte, eingeloggte Admins
-    # bedeutete, dass der Gateway für JEDEN Aufruf dieses Pfads keinen
-    # Bearer-Token validierte - `X-DMS-Principal` blieb dadurch auch für
-    # echte Admins immer leer, der RBAC-Zweig von `config-service`s
-    # `_require_import_permission` war faktisch unerreichbar (bei P17-S1
-    # gefunden, als die erste Admin-UI-Anbindung für Konfigurationspakete,
-    # 14.1, entstand). `POST /config/import` ist jetzt ein regulärer,
-    # Keycloak-Token-pflichtiger Pfad; nur der neue, dedizierte
-    # `config/fleet-import`-Pfad bleibt öffentlich, siehe
+    # Since P13-S2, additionally four routes for the independently operated
+    # `fleet-management-service` (3a) - it likewise has no logged-in
+    # principal of this installation. The two read routes were already
+    # ungated before gateway access (`registry-service`/`license-service`
+    # never require a principal there); the two write routes instead check
+    # the installation-wide `DMS_FLEET_AGENT_API_KEY` server-side (see
+    # `_is_fleet_agent()` there) - the gateway itself does not know this
+    # key, it only passes the `Authorization` header through untouched (no
+    # more Keycloak token requirement on these four paths).
+    # Since P14-S10, additionally the two public share-link endpoints
+    # (4.2a) - anonymous viewers do not have a bearer token, the share
+    # link's own token instead travels along as a query parameter
+    # (`?token=`, see document-service.main._resolve_active_share_link),
+    # so that these two entries can remain simple, static exact-match
+    # strings, without changing wildcard/matching logic on the gateway
+    # itself.
+    # Since P15-S4, additionally the federated contact search (2.5/7.4) - a
+    # peer installation has no bearer token of this installation, it
+    # authenticates instead via `X-Installation-Signature` (see
+    # auth_service.main.federated_search_inbound, same principle as
+    # workflow-service's federation/inbound above).
+    # Since P17-S1, `config-service:config/import` replaced (not just
+    # supplemented) by `config-service:config/fleet-import`: the old,
+    # shared path for both the fleet-agent key and real, logged-in admins
+    # meant the gateway never validated a bearer token for ANY call to this
+    # path - `X-DMS-Principal` therefore always stayed empty even for real
+    # admins, the RBAC branch of `config-service`'s
+    # `_require_import_permission` was effectively unreachable (found at
+    # P17-S1, when the first admin-UI integration for configuration
+    # packages, 14.1, was built). `POST /config/import` is now a regular
+    # path requiring a Keycloak token; only the new, dedicated
+    # `config/fleet-import` path remains public, see
     # `config_service.main.fleet_import_config`.
     public_routes: list[str] = [
         "auth-service:login",
@@ -80,29 +81,28 @@ class Settings(BaseServiceSettings):
         "config-service:config/fleet-import",
         "document-service:public/share-links",
         "document-service:public/share-links/content",
-        # SSO/automatischer Login (Post-Roadmap-Feature): der Login-
-        # Einstiegspunkt selbst und der Code-Austausch-Rückweg - an dieser
-        # Stelle existiert noch kein DMS-Token, das der Bearer-Check prüfen
-        # könnte.
+        # SSO/automatic login (post-roadmap feature): the login entry point
+        # itself and the code-exchange callback - at this point no DMS
+        # token exists yet for the bearer check to verify.
         "auth-service:oidc/authorize",
         "auth-service:oidc/callback",
     ]
 
-    # Not-Shutdown (4.8, P6-S6): während aktivem Wartungsmodus werden alle
-    # proxied Requests mit 503 abgelehnt, außer diese Routen (Login/Refresh/Me/
-    # Superuser-Status bleiben erreichbar, damit sich zumindest der Superuser
-    # anmelden kann - `auth-service` selbst lehnt jeden anderen Benutzernamen
-    # ab, siehe dortiges `POST /login`; die beiden Wartungsmodus-Endpunkte
-    # selbst müssen naturgemäß während der Sperre erreichbar bleiben).
+    # Emergency shutdown (4.8, P6-S6): while maintenance mode is active,
+    # all proxied requests are rejected with 503, except these routes
+    # (login/refresh/me/superuser status remain reachable, so at least the
+    # superuser can log in - `auth-service` itself rejects any other
+    # username, see `POST /login` there; the two maintenance-mode endpoints
+    # themselves must naturally remain reachable during the lock).
     maintenance_mode_allowed_routes: list[str] = [
         "auth-service:login",
         "auth-service:refresh",
         "auth-service:me",
         "auth-service:superuser/status",
-        # SSO/automatischer Login (Post-Roadmap-Feature): gleiche Begründung
-        # wie bei "auth-service:login" oben - auch während aktivem
-        # Wartungsmodus muss sich zumindest der Superuser anmelden können,
-        # unabhängig davon, über welchen der beiden Login-Wege.
+        # SSO/automatic login (post-roadmap feature): same reasoning as for
+        # "auth-service:login" above - even during active maintenance mode,
+        # at least the superuser must be able to log in, regardless of
+        # which of the two login paths is used.
         "auth-service:oidc/authorize",
         "auth-service:oidc/callback",
         "permission-service:maintenance-mode",
@@ -110,23 +110,23 @@ class Settings(BaseServiceSettings):
     ]
     maintenance_cache_ttl_seconds: float = 5.0
 
-    # Nutzer-Feedback: 120/60s löste bei ganz normaler interaktiver Nutzung
-    # sehr schnell 429 aus - ein einzelner Seitenaufruf des Drei-Spalten-
-    # Arbeitsbereichs feuert bereits ein Dutzend paralleler Aufrufe (Ordner,
-    # Dokumente, Favoriten, Genehmigungskonfiguration, Kennzeichen-Config,
-    # Objekttypen, Wartungsmodus-Poll alle 30s, ...), reales Klicken kam
-    # dadurch innerhalb einer Minute leicht über 120 - kein Bug in Client
-    # oder Auth, nur ein für dieses SPA zu knapp bemessener Default (siehe
-    # PROGRESS.md). Deutlich großzügiger bemessen, bleibt aber ein reales
-    # Sicherheitsnetz gegen tatsächlich außer Kontrolle geratene Clients.
+    # User feedback: 120/60s triggered 429 very quickly during completely
+    # normal interactive use - a single page load of the three-column
+    # workspace already fires a dozen parallel calls (folders, documents,
+    # favorites, approval configuration, reference-number config, object
+    # types, maintenance-mode poll every 30s, ...), real clicking easily
+    # exceeded 120 within a minute as a result - not a bug in the client or
+    # auth, just a default sized too tightly for this SPA (see
+    # PROGRESS.md). Sized significantly more generously, but remains a
+    # real safety net against clients that genuinely run out of control.
     rate_limit_max_requests: int = 600
     rate_limit_window_seconds: float = 60.0
 
-    # Geteilter Store fürs Rate Limiting (seit P25-S3, ADR 0097) - ersetzt den
-    # ursprünglichen in-process `dict` (ADR 0005), damit mehrere horizontal
-    # skalierte Gateway-Instanzen denselben Zähler je Client sehen. Zeigt
-    # standardmäßig auf den neuen `redis`-Service in
-    # `infra/docker-compose.yml` (interne Compose-DNS).
+    # Shared store for rate limiting (since P25-S3, ADR 0097) - replaces
+    # the original in-process `dict` (ADR 0005), so multiple horizontally
+    # scaled gateway instances see the same counter per client. Points by
+    # default to the new `redis` service in `infra/docker-compose.yml`
+    # (internal Compose DNS).
     redis_url: str = "redis://localhost:6379/0"
 
     upstream_timeout_seconds: float = 30.0

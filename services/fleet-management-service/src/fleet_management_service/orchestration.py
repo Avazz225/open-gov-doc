@@ -1,25 +1,25 @@
-"""Reine Validierungs-/Vokabular-Logik für Update-Pläne und Rollouts (3a-
-Erweiterung, P13-S2b) - kein I/O hier, das lebt in `main.py`/`repository.py`.
+"""Pure validation/vocabulary logic for update plans and rollouts (3a
+extension, P13-S2b) - no I/O here, that lives in `main.py`/`repository.py`.
 
-Fünfwertige Fehlerentscheidung (3a wörtlich, "statt binärem Erfolg/
-Fehlschlag"): ``retry_later``/``wait_external``/``manual_required``/
-``recoverable_failed``/``fatal_contract``. Ein einfacher Erfolg braucht
-keinen eigenen Namen - er bedeutet schlicht "nächster Schritt" bzw.
-``status="completed"`` beim letzten Schritt."""
+Five-valued error decision (3a verbatim, "instead of binary success/
+failure"): ``retry_later``/``wait_external``/``manual_required``/
+``recoverable_failed``/``fatal_contract``. A simple success doesn't need its
+own name - it simply means "next step", or ``status="completed"`` at the
+last step."""
 
 STEP_TYPES = frozenset({"verify", "gate"})
 
-# Die fünf Konzept-Werte - zusätzlich zu "pending"/"completed" als die beiden
-# strukturellen Bookend-Zustände eines `InstallationRun`.
+# The five concept values - in addition to "pending"/"completed" as the two
+# structural bookend states of an `InstallationRun`.
 OUTCOMES = frozenset(
     {"retry_later", "wait_external", "manual_required", "recoverable_failed", "fatal_contract"}
 )
 
-# Outcomes, die ein Bediener einem "gate"-Schritt explizit über
-# `POST .../mark-done` mitgeben darf (die Person, die die externe/manuelle
-# Aktion durchgeführt hat, weiß am besten, ob ein Fehlschlag wiederholbar
-# oder grundsätzlich falsch ist) - "wait_external"/"manual_required" sind
-# dagegen strukturelle Zustände, kein von außen meldbares Ergebnis.
+# Outcomes that an operator may explicitly provide for a "gate" step via
+# `POST .../mark-done` (the person who performed the external/manual action
+# knows best whether a failure is repeatable or fundamentally wrong) -
+# "wait_external"/"manual_required", by contrast, are structural states, not
+# an outcome reportable from outside.
 REPORTABLE_GATE_OUTCOMES = frozenset(
     {"success", "retry_later", "recoverable_failed", "fatal_contract"}
 )

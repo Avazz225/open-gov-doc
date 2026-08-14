@@ -8,11 +8,11 @@ Base = make_declarative_base("virus_scan")
 
 
 class ScanResult(Base):
-    """Ein durchgeführter Scan (10.3). `document_id` ist beim initialen Upload
-    noch unbekannt (der Scan läuft *vor* der Dokumenterstellung, ADR 0010) und
-    daher nullable; beim Check-in einer neuen Version ist er bereits bekannt.
-    Seit P15-S2 (2.5) wird `document_id` bei einer Freigabe (status="released")
-    nachträglich auf das neu angelegte Dokument gesetzt.
+    """A performed scan (10.3). `document_id` is not yet known at the
+    initial upload (the scan runs *before* document creation, ADR 0010) and
+    is therefore nullable; it is already known when checking in a new
+    version. Since P15-S2 (2.5), `document_id` is retroactively set to the
+    newly created document on a release (status="released").
     """
 
     __tablename__ = "scan_result"
@@ -23,23 +23,23 @@ class ScanResult(Base):
     content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer)
     checksum_sha256: Mapped[str] = mapped_column(String(64))
-    # "clean" | "infected" | "released" (Fehlalarm geklärt, 2.5, P15-S2) |
-    # "purged" (endgültig gelöscht, 2.5, P15-S2)
+    # "clean" | "infected" | "released" (false positive cleared, 2.5, P15-S2)
+    # | "purged" (permanently deleted, 2.5, P15-S2)
     status: Mapped[str] = mapped_column(String(16))
     threat_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     engine: Mapped[str] = mapped_column(String(32))
-    # Nur bei status="infected" gesetzt gewesen: Objekt-Key im Storage
-    # Service, unter dem die infizierte Datei zu Beweiszwecken abgelegt wurde
-    # (Quarantäne statt automatischem Löschen, 10.3). Bleibt nach Freigabe/
-    # endgültiger Löschung als historische Referenz stehen, auch wenn die
-    # Bytes selbst dann nicht mehr existieren - kein Nullen des Felds, damit
-    # `GET /scans/{id}` weiterhin nachvollziehbar bleibt (5.3).
+    # Only ever set for status="infected": object key in the Storage Service
+    # under which the infected file was stored for evidentiary purposes
+    # (quarantine instead of automatic deletion, 10.3). Remains as a
+    # historical reference after release/permanent deletion, even though the
+    # bytes themselves no longer exist by then - the field is not nulled out,
+    # so `GET /scans/{id}` stays traceable (5.3).
     quarantine_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # Wer/wann den Quarantäne-Fall aufgelöst hat (freigegeben oder endgültig
-    # gelöscht, 2.5, P15-S2) - deckt beide Aktionen mit denselben zwei Spalten
-    # ab, analog zum knappen `deleted_by`-Muster der Papierkorb-Familie
-    # (P15-S1) statt vier separater release_*/purge_*-Spalten.
+    # Who/when resolved the quarantine case (released or permanently
+    # deleted, 2.5, P15-S2) - covers both actions with the same two columns,
+    # analogous to the compact `deleted_by` pattern of the trash family
+    # (P15-S1) instead of four separate release_*/purge_* columns.
     resolved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,22 +1,23 @@
 import httpx
 
-# RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service prüft seit
-# dieser Session `case.read`/`case.write` gegen permission-service und
-# verlangt dafür einen `X-DMS-Principal`-Header. `mail-connector` handelt hier
-# als reiner Maschinen-Aufrufer (ausgelöst durch eingehende Post, kein
-# menschlicher Principal vorhanden) - synthetischer Identifikator nach
-# demselben "system:<Service>"-Muster wie an anderer Stelle im Projekt
-# (z. B. `actor="system:archival-service"` bei publizierten Events). Die
-# "everyone"-Gruppe (ADR 0067) gewährt `case.read`/`case.write` standardmäßig
-# jedem authentifizierten Principal, kein eigenes technisches Konto nötig.
+# RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - since this session
+# case-service checks `case.read`/`case.write` against permission-service and
+# requires an `X-DMS-Principal` header for that. `mail-connector` acts here as
+# a pure machine caller (triggered by incoming mail, no human principal
+# present) - synthetic identifier following the same "system:<Service>"
+# pattern used elsewhere in the project (e.g. `actor="system:archival-service"`
+# on published events). The "everyone" group (ADR 0067) grants
+# `case.read`/`case.write` by default to every authenticated principal, no
+# dedicated technical account needed.
 _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:mail-connector"}
 
 
 class CaseClient:
-    """Dünner HTTP-Client gegen die case-service-API - Vorgangsnummer-
-    Zuordnungssuche (P15-S3) und Ergänzen der bei einer Fall-Zuordnung neu
-    angelegten Dokumente als Referenz auf die getroffene Umlaufmappe (2.3,
-    bereits bestehender Endpunkt, keine Erweiterung nötig)."""
+    """Thin HTTP client against the case-service API - Vorgangsnummer
+    (case number) assignment lookup (P15-S3) and adding the documents newly
+    created during a case assignment as a reference to the matched
+    circulation folder (2.3, already-existing endpoint, no extension
+    needed)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -38,10 +39,10 @@ class CaseClient:
         return response.json()
 
     async def get_number_config(self) -> dict:
-        """Post-Roadmap Phase 19 Session 11 - liefert `CaseNumberConfig.
-        format` (2.5, ein globaler `{Platzhalter}`-Formatstring), aus dem
-        `matching.py` das tatsächlich konfigurierte Kandidaten-Muster
-        ableitet, statt eines fest kodierten generischen Musters."""
+        """Post-Roadmap Phase 19 Session 11 - returns `CaseNumberConfig.
+        format` (2.5, a global `{placeholder}` format string), from which
+        `matching.py` derives the actually configured candidate pattern,
+        instead of a hard-coded generic pattern."""
         response = await self._client.get("/case-number-config", headers=_SYSTEM_PRINCIPAL_HEADERS)
         response.raise_for_status()
         return response.json()

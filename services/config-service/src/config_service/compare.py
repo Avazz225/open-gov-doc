@@ -1,19 +1,19 @@
-"""Delta-/Vergleichsfunktion zwischen zwei Konfigurationsexporten (7.5,
-P14-S1) - rein lesend/diagnostisch, verändert nichts an einer der beiden
-Seiten (siehe `docs/adr/0040-config-compare-field-level-diff-no-cross-
-installation-fetch.md` für die Architekturentscheidungen: Feld-Ebene statt
-Tiefendiff je verschachtelter Liste, kein automatischer Cross-Installation-
-Abruf in dieser Session)."""
+"""Delta/comparison function between two configuration exports (7.5,
+P14-S1) - purely read-only/diagnostic, does not change anything on either
+side (see `docs/adr/0040-config-compare-field-level-diff-no-cross-
+installation-fetch.md` for the architectural decisions: field-level instead
+of deep diff per nested list, no automatic cross-installation
+fetch in this session)."""
 
 import re
 from typing import Any
 
 from config_service.schemas import CategoryDelta, ConfigDocument
 
-# Kategorie -> Identitätsfeld für Listen-Kategorien (der Name-artige
-# Schlüssel, über den zwei Einträge als "dasselbe Objekt" erkannt werden,
-# 7.5) - `sensor_config`/`federation_config` sind Singletons, kein
-# Namensabgleich nötig.
+# Category -> identity field for list categories (the name-like
+# key by which two entries are recognized as "the same object",
+# 7.5) - `sensor_config`/`federation_config` are singletons, no
+# name matching needed.
 _LIST_IDENTITY_FIELD = {
     "object_types": "name",
     "workflows": "name",
@@ -23,17 +23,17 @@ _LIST_IDENTITY_FIELD = {
     "approval_config": "action_type",
 }
 SINGLETON_CATEGORIES = ("sensor_config", "federation_config")
-# `realm_roles` ist eine reine Namensliste (`list[str]`, keine
-# `list[dict]`-Kategorie wie die übrigen) - eigener, einfacherer Diff-Modus
-# statt `_LIST_IDENTITY_FIELD` (das `item[identity_field]` auf jedem Eintrag
-# erwartet).
+# `realm_roles` is a plain name list (`list[str]`, not a
+# `list[dict]` category like the others) - its own, simpler diff mode
+# instead of `_LIST_IDENTITY_FIELD` (which expects `item[identity_field]` on
+# every entry).
 STRING_LIST_CATEGORIES = ("realm_roles",)
 
 
 def normalize(value: str, pattern: str | None) -> str:
-    """7.5: die Ignore-Regex wird vor dem Namensabgleich auf beide Namen
-    angewendet (z. B. um numerische Präfixe zu entfernen) - passende
-    Teilstrings werden entfernt, nicht ersetzt."""
+    """7.5: the ignore regex is applied to both names before the name
+    matching (e.g. to strip numeric prefixes) - matching
+    substrings are removed, not replaced."""
     if not pattern:
         return value
     return re.sub(pattern, "", value)
@@ -79,8 +79,8 @@ def diff_list_category(
     for norm_name in sorted(set(base_by_norm) & set(compare_by_norm)):
         base_item = base_by_norm[norm_name]
         compare_item = compare_by_norm[norm_name]
-        # Anzeigename bewusst der Basisinstanz-Rohwert - die Ignore-Regex
-        # betrifft nur die Zuordnung, nicht die Darstellung (7.5).
+        # Display name is deliberately the base instance's raw value - the
+        # ignore regex only affects matching, not display (7.5).
         display_name = base_item[identity_field]
         fields = _diff_fields(base_item, compare_item, exclude={identity_field})
         if fields:
@@ -107,9 +107,9 @@ def diff_string_list_category(
     for norm_name in sorted(set(compare_by_norm) - set(base_by_norm)):
         delta.only_in_compare.append(compare_by_norm[norm_name])
     for norm_name in sorted(set(base_by_norm) & set(compare_by_norm)):
-        # Ein Name ist entweder identisch oder gar nicht vorhanden - anders als
-        # `diff_list_category` gibt es keine weiteren Felder, die abweichen
-        # könnten.
+        # A name is either identical or not present at all - unlike
+        # `diff_list_category`, there are no further fields that could
+        # differ.
         delta.identical.append(base_by_norm[norm_name])
     return delta
 

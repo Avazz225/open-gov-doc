@@ -2,14 +2,14 @@ from dms_common import BaseServiceSettings
 
 ROOT_FOLDER_ID = "root"
 
-# Posteingang/Postausgang (2.5/3.3, P15-S3): weitere feste Sonderordner nach
-# demselben Muster wie ROOT_FOLDER_ID (schlichte, fest bekannte ID statt
-# UUID, kein eigenes `kind`-Unterscheidungsmerkmal - siehe
-# `repository.ensure_special_folders`). Alle drei Sonderordner sind vor
-# Umbenennen/Verschieben/Löschen geschützt (siehe main.py), da Konzept §2.5
-# einen Sonderbereich als "existiert genau einmal je Installation"
-# beschreibt - `root` war hier bis Post-Roadmap Phase 19 Session 11 bewusst
-# ausgenommen (siehe ADR 0076), diese Lücke ist seither geschlossen.
+# Inbox/Outbox (2.5/3.3, P15-S3): further fixed special folders following
+# the same pattern as ROOT_FOLDER_ID (a plain, well-known ID instead of a
+# UUID, no separate `kind` discriminator - see
+# `repository.ensure_special_folders`). All three special folders are
+# protected against renaming/moving/deletion (see main.py), since concept
+# §2.5 describes a special area as "existing exactly once per
+# installation" - `root` was deliberately excluded here until Post-Roadmap
+# Phase 19 Session 11 (see ADR 0076), this gap has since been closed.
 INBOX_FOLDER_ID = "inbox"
 OUTBOX_FOLDER_ID = "outbox"
 SPECIAL_FOLDER_IDS = frozenset({ROOT_FOLDER_ID, INBOX_FOLDER_ID, OUTBOX_FOLDER_ID})
@@ -21,37 +21,38 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Objekttyp-Validierung ist optional - nur aufgerufen, wenn ein Folder
-    # tatsächlich einen object_type_id trägt (2.2).
+    # Object-type validation is optional - only invoked when a folder
+    # actually carries an object_type_id (2.2).
     object_type_service_base_url: str = "http://localhost:8007"
 
-    # Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
-    # P7-S1b) - Papierkorb/Wiederherstellung kaskadieren synchron auf
-    # enthaltene Dokumente (siehe document_client.py), Zwangslöschung fragt
-    # darüber ab, ob der Teilbaum noch aktive Dokumente enthält.
+    # Retention/legal hold/forced deletion for folders (5.2/5.2a, since
+    # P7-S1b) - trash/restore cascade synchronously onto contained
+    # documents (see document_client.py), forced deletion queries via this
+    # whether the subtree still contains active documents.
     document_service_base_url: str = "http://localhost:8006"
 
-    # Generischer Vier-Augen-Approval-Mechanismus (4.3) - gleiches Muster wie
-    # document-service seit P7-S1, hier für den Aktionstyp `folder.force_delete`.
+    # Generic four-eyes approval mechanism (4.3) - same pattern as
+    # document-service since P7-S1, here for the action type
+    # `folder.force_delete`.
     permission_service_base_url: str = "http://localhost:8004"
 
-    # Welche Subjects folder-service konsumiert (seit P7-S1b) - erster
-    # Konsument dieses Service überhaupt, bisher reiner Producer.
+    # Which subjects folder-service consumes (since P7-S1b) - first
+    # consumer of this service at all, previously a pure producer.
     subjects: list[str] = ["permission.approval.approved"]
 
-    # Poll-Intervall des `_retention_poll_loop` (main.py) - gleiches Idiom
-    # wie document-service's `retention_poll_interval_seconds` (P7-S1).
+    # Poll interval of `_retention_poll_loop` (main.py) - same idiom as
+    # document-service's `retention_poll_interval_seconds` (P7-S1).
     retention_poll_interval_seconds: float = 3600.0
 
-    # Löschabgleich nach Restore (10.4, P11-S4) - gleiche Rolle wie
-    # document-service's `kennzeichen_admin_role`, hier für den neuen
-    # `POST /folders/{id}/reconcile-restore-deletion`-Endpunkt.
+    # Deletion reconciliation after restore (10.4, P11-S4) - same role as
+    # document-service's `kennzeichen_admin_role`, here for the new
+    # `POST /folders/{id}/reconcile-restore-deletion` endpoint.
     admin_role: str = "dms-admin"
 
-    # Papierkorb-Familie (2.5, P15-S1): endgültiges Löschen aus dem Papierkorb
-    # ist einer eigenen, domänengetrennten Admin-Rolle vorbehalten (4.6) -
-    # bewusst eigenständig konfigurierbar statt `admin_role` wiederzuverwenden,
-    # gleiches Prinzip wie document-service's separate Rollen-Settings. Keine
-    # Verschlusssachen-Variante hier - Konzept 2.5 nennt die Klassifizierung
-    # ausdrücklich nur für Dokumente, nicht für Ordner.
+    # Trash family (2.5, P15-S1): permanent deletion from trash is reserved
+    # for a separate, domain-specific admin role (4.6) - deliberately
+    # independently configurable instead of reusing `admin_role`, same
+    # principle as document-service's separate role settings. No classified
+    # documents variant here - concept 2.5 mentions the classification
+    # explicitly only for documents, not for folders.
     trash_hard_delete_admin_role: str = "dms-admin"

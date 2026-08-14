@@ -13,8 +13,8 @@ _HUB_IDENTITY_ID = 1
 
 
 class UnauthorizedError(Exception):
-    """Fehlende/ungültige Installations-Signatur, ein Update-/Rotationsversuch
-    mit dem falschen Schlüssel, oder eine widerrufene Installation."""
+    """Missing/invalid installation signature, an update/rotation attempt
+    with the wrong key, or a revoked installation."""
 
 
 class NotFoundError(Exception):
@@ -26,18 +26,18 @@ class VersionIncompatibleError(Exception):
 
 
 async def get_or_create_hub_identity(session: AsyncSession) -> HubIdentity:
-    """Singleton-Muster wie `signature-service`s `get_or_create_ca`: das
-    Signaturschlüsselpaar des Hub wird beim allerersten Start generiert und
-    danach idempotent wiederverwendet - ein Neustart darf keinen neuen
-    Schlüssel erzeugen, sonst könnten bereits registrierte Installationen den
-    (dann anderen) öffentlichen Schlüssel nicht mehr verifizieren.
+    """Singleton pattern like `signature-service`'s `get_or_create_ca`: the
+    hub's signing key pair is generated on the very first startup and then
+    reused idempotently - a restart must not generate a new key, otherwise
+    already-registered installations could no longer verify the (then
+    different) public key.
 
-    Seit Post-Roadmap Phase 21 Session 2 (ADR 0085) wird zusätzlich
-    ``ca_certificate_pem`` sichergestellt - bei einem frisch erzeugten
-    Schlüsselpaar sofort, bei einer bereits VOR dieser Session bestehenden
-    Zeile (Migration, ``ca_certificate_pem IS NULL``) lazily nachgeholt, ohne
-    das Schlüsselpaar selbst zu verändern (reine Zertifikatshülle um den
-    bereits vorhandenen Schlüssel, siehe `crypto_utils.generate_ca_certificate`)."""
+    Since Post-Roadmap Phase 21 Session 2 (ADR 0085), ``ca_certificate_pem``
+    is additionally ensured - immediately for a freshly generated key pair,
+    lazily backfilled for a row that already existed BEFORE this session
+    (migration, ``ca_certificate_pem IS NULL``), without changing the key
+    pair itself (a pure certificate wrapper around the already-existing key,
+    see `crypto_utils.generate_ca_certificate`)."""
     identity = await session.get(HubIdentity, _HUB_IDENTITY_ID)
     if identity is None:
         private_pem, public_pem = crypto_utils.generate_hub_keypair()
@@ -67,13 +67,12 @@ async def issue_or_renew_installation_certificate(
     ca_certificate_pem: bytes,
     ca_private_key_pem: bytes,
 ) -> None:
-    """Stellt ein neues, von der Hub-CA signiertes Zertifikat für
-    ``installation.public_key_pem`` aus (Post-Roadmap Phase 21 Session 2,
-    ADR 0085) - aufgerufen bei Registrierung, Schlüsselrotation, und beim
-    Nachholen für Alt-Installationen ohne Zertifikat (siehe `main.lifespan`).
-    MUSS nach jeder Änderung von ``public_key_pem`` erneut aufgerufen werden -
-    ein Zertifikat für den ALTEN Schlüssel wäre nach einer Rotation nicht mehr
-    zutreffend."""
+    """Issues a new certificate, signed by the hub CA, for
+    ``installation.public_key_pem`` (Post-Roadmap Phase 21 Session 2,
+    ADR 0085) - called on registration, key rotation, and when backfilling
+    legacy installations without a certificate (see `main.lifespan`). MUST be
+    called again after every change to ``public_key_pem`` - a certificate for
+    the OLD key would no longer be valid after a rotation."""
     certificate_pem, not_valid_after = crypto_utils.issue_installation_certificate(
         ca_certificate_pem,
         ca_private_key_pem,
@@ -92,24 +91,23 @@ async def register_or_update_installation(
     raw_body: bytes,
     presented_signature: str | None,
 ) -> Installation:
-    """Registrierung ist ein Upsert (analog `registry-service.register`),
-    aber seit P13-S4 (ADR 0039) kryptografisch statt über ein geteiltes
-    Geheimnis abgesichert:
+    """Registration is an upsert (analogous to `registry-service.register`),
+    but since P13-S4 (ADR 0039) secured cryptographically instead of via a
+    shared secret:
 
-    - **Neuanlage**: die Signatur muss zum im selben Request eingereichten
-      ``public_key_pem`` passen (Selbstkonsistenz-Nachweis - die Installation
-      muss den privaten Schlüssel zu dem Schlüssel besitzen, den sie gerade
-      registriert, sonst könnte jeder einen beliebigen fremden öffentlichen
-      Schlüssel im Namen einer neuen ``id`` hinterlegen).
-    - **Update**: die Signatur muss zum **bereits gespeicherten**
-      ``public_key_pem`` passen - verhindert, dass ein beliebiger Aufrufer den
-      Adressbucheintrag einer fremden Installation überschreibt.
-      ``public_key_pem`` selbst wird bei einem Update **nicht** übernommen
-      (ein abweichender Wert im Payload wird schlicht ignoriert) - ein
-      Schlüsselwechsel läuft ausschließlich über
-      ``POST /installations/{id}/rotate-key``, damit eine routinemäßige
-      Re-Registrierung (z. B. nach einer Versionsänderung) nicht versehentlich
-      auch die kryptografische Identität mitändert.
+    - **Creation**: the signature must match the ``public_key_pem`` submitted
+      in the same request (self-consistency proof - the installation must own
+      the private key for the key it is currently registering, otherwise
+      anyone could deposit an arbitrary foreign public key under the name of
+      a new ``id``).
+    - **Update**: the signature must match the **already-stored**
+      ``public_key_pem`` - prevents any arbitrary caller from overwriting the
+      address-book entry of a foreign installation. ``public_key_pem`` itself
+      is **not** adopted on an update (a differing value in the payload is
+      simply ignored) - a key change goes exclusively through
+      ``POST /installations/{id}/rotate-key``, so that a routine
+      re-registration (e.g. after a version change) doesn't accidentally
+      also change the cryptographic identity.
     """
     now = datetime.now(UTC)
     existing = await session.get(Installation, payload.id)
@@ -155,9 +153,9 @@ async def register_or_update_installation(
 async def deregister_installation(
     session: AsyncSession, installation_id: str, *, presented_signature: str | None
 ) -> None:
-    """Signatur über die UTF-8-Bytes von ``installation_id`` selbst (keine
-    andere natürliche "Body" für einen `DELETE` ohne Payload, gleiche
-    Konvention wie unten bei `rotate_installation_key`s Aufrufer)."""
+    """Signature over the UTF-8 bytes of ``installation_id`` itself (no other
+    natural "body" for a `DELETE` without a payload, same convention as
+    `rotate_installation_key`'s caller below)."""
     installation = await session.get(Installation, installation_id)
     if installation is None:
         raise NotFoundError(f"installation_id {installation_id!r} unbekannt")
@@ -177,12 +175,11 @@ async def rotate_installation_key(
     new_public_key_pem: str,
     presented_signature: str | None,
 ) -> Installation:
-    """Kontrollierter Schlüsselwechsel (P13-S4, ADR 0039 "Schlüsselrotation"):
-    ``raw_body`` (der `RotateKeyRequest`-Body, enthält ``new_public_key_pem``)
-    muss mit dem **aktuellen** (alten) privaten Schlüssel signiert sein - ein
-    Kontinuitätsnachweis, der beweist, dass der Rotationswunsch tatsächlich
-    von der Installation selbst kommt, nicht von einem Dritten, der zufällig
-    die ``id`` kennt."""
+    """Controlled key change (P13-S4, ADR 0039 "key rotation"): ``raw_body``
+    (the `RotateKeyRequest` body, contains ``new_public_key_pem``) must be
+    signed with the **current** (old) private key - a continuity proof that
+    demonstrates the rotation request actually comes from the installation
+    itself, not from a third party who happens to know the ``id``."""
     installation = await session.get(Installation, installation_id)
     if installation is None:
         raise NotFoundError(f"installation_id {installation_id!r} unbekannt")
@@ -201,11 +198,11 @@ async def rotate_installation_key(
 async def revoke_installation(
     session: AsyncSession, installation_id: str, *, reason: str | None
 ) -> Installation:
-    """Betreiber-Aktion (P13-S4, ADR 0039 "Revocation") - bewusst **ohne**
-    Signaturprüfung der betroffenen Installation: der ganze Sinn des
-    Widerrufs ist der Fall, in dem die Installation selbst nicht mehr
-    vertrauenswürdig signieren kann (kompromittierter privater Schlüssel).
-    Gegated stattdessen über `settings.hub_operator_key`, siehe `main.py`."""
+    """Operator action (P13-S4, ADR 0039 "Revocation") - deliberately
+    **without** a signature check of the affected installation: the whole
+    point of revocation is the case where the installation itself can no
+    longer sign in a trustworthy way (compromised private key). Gated
+    instead via `settings.hub_operator_key`, see `main.py`."""
     installation = await session.get(Installation, installation_id)
     if installation is None:
         raise NotFoundError(f"installation_id {installation_id!r} unbekannt")
@@ -221,8 +218,8 @@ async def list_installations(session: AsyncSession) -> list[Installation]:
 
 
 async def list_installations_without_certificate(session: AsyncSession) -> list[Installation]:
-    """Nachhol-Migration (ADR 0085) - Installationen, die vor Post-Roadmap
-    Phase 21 Session 2 registriert wurden, siehe `main.lifespan`."""
+    """Backfill migration (ADR 0085) - installations registered before
+    Post-Roadmap Phase 21 Session 2, see `main.lifespan`."""
     result = await session.execute(
         select(Installation).where(Installation.certificate_pem.is_(None))
     )
@@ -237,20 +234,21 @@ async def authenticate_signed_request(
     signature: str,
     hub_ca_certificate_pem: bytes | None = None,
 ) -> Installation:
-    """Zentrale Verifikation für jede signierte Installations-Anfrage
-    (`POST /handovers`, `.../result`) - Gegenstück zu `_verify_hub_signature`
-    auf der Installationsseite (`workflow_service.main`), nur in umgekehrter
-    Richtung. Seit Post-Roadmap Phase 21 Session 2 (ADR 0085) zusätzlich zur
-    Signaturprüfung eine echte Zertifikatsprüfung (Kette bis zur Hub-CA UND
-    Gültigkeitsfenster, siehe `crypto_utils.verify_installation_certificate`)
-    - bewusst ZUSÄTZLICH, nicht als Ersatz: die Signaturprüfung bleibt die
-    eigentliche Besitz-Beweisführung, das Zertifikat gibt ihr eine geprüfte
-    Herkunft und eine Gültigkeitsgrenze. Installationen ohne Zertifikat
-    (``certificate_pem IS NULL``, Alt-Zeilen vor dieser Session, siehe
-    `main.lifespan`) oder ein Aufrufer ohne ``hub_ca_certificate_pem``
-    (z. B. ein Test, der diesen Parameter bewusst weglässt) überspringen
-    diese zusätzliche Prüfung (Bestandsschutz) - in der Praxis sollte das
-    nach dem Nachhol-Migrationsschritt nicht mehr vorkommen."""
+    """Central verification for every signed installation request
+    (`POST /handovers`, `.../result`) - counterpart to
+    `_verify_hub_signature` on the installation side (`workflow_service.
+    main`), just in the reverse direction. Since Post-Roadmap Phase 21
+    Session 2 (ADR 0085), in addition to the signature check, a real
+    certificate check (chain up to the hub CA AND validity window, see
+    `crypto_utils.verify_installation_certificate`) - deliberately IN
+    ADDITION, not as a replacement: the signature check remains the actual
+    proof of possession, the certificate gives it a verified origin and a
+    validity boundary. Installations without a certificate
+    (``certificate_pem IS NULL``, legacy rows from before this session, see
+    `main.lifespan`) or a caller without ``hub_ca_certificate_pem`` (e.g. a
+    test that deliberately omits this parameter) skip this additional check
+    (grandfathering) - in practice this should no longer occur after the
+    backfill migration step."""
     if not installation_id or not signature:
         raise UnauthorizedError("Fehlende Installations-Signatur")
     installation = await session.get(Installation, installation_id)
@@ -275,11 +273,11 @@ async def authenticate_signed_request(
 
 
 def is_version_compatible(a: Installation, b: Installation) -> bool:
-    """Beidseitige Prüfung (7.4 "Versionskompatibilität"): ``b`` muss mindestens
-    ``a``s erklärte Mindestanforderung erfüllen und umgekehrt. Bewusst ein
-    einfaches ``(major, minor)``-Zahlenschema statt einer SemVer-Bibliothek.
-    ``parse_version`` kann hier nicht mehr fehlschlagen (P13-S3: Format wird
-    bereits bei der Registrierung validiert, siehe `schemas.py`)."""
+    """Bidirectional check (7.4 "version compatibility"): ``b`` must meet at
+    least ``a``'s stated minimum requirement and vice versa. Deliberately a
+    simple ``(major, minor)`` numeric scheme instead of a SemVer library.
+    `parse_version` can no longer fail here (P13-S3: the format is already
+    validated at registration, see `schemas.py`)."""
     return parse_version(b.version) >= parse_version(a.min_compatible_peer_version) and (
         parse_version(a.version) >= parse_version(b.min_compatible_peer_version)
     )
@@ -293,9 +291,9 @@ async def create_handover(
     to_installation_id: str,
     process_type: str,
 ) -> Handover:
-    """``handover_id`` kommt von der Absenderinstallation selbst (siehe
-    `schemas.HandoverCreate`), nicht vom Hub generiert - siehe ADR 0028
-    "Selbst-Loopback"."""
+    """``handover_id`` comes from the sending installation itself (see
+    `schemas.HandoverCreate`), not generated by the hub - see ADR 0028
+    "self-loopback"."""
     handover = Handover(
         id=handover_id,
         from_installation_id=from_installation_id,
@@ -319,10 +317,10 @@ async def get_handover(session: AsyncSession, handover_id: str) -> Handover:
 async def mark_handover_delivered(
     session: AsyncSession, handover: Handover, *, success: bool, max_attempts: int
 ) -> None:
-    """Retry-aware Fassung (P20-S5, ADR 0081): ein Fehlschlag führt nicht mehr
-    sofort zu ``delivery_failed``, sondern zu ``pending_retry`` mit
-    Full-Jitter-Backoff, solange ``max_attempts`` noch nicht erreicht ist -
-    gleiches Muster wie `ocr_service.repository.record_failure` /
+    """Retry-aware version (P20-S5, ADR 0081): a failure no longer leads
+    immediately to ``delivery_failed``, but to ``pending_retry`` with
+    full-jitter backoff, as long as ``max_attempts`` hasn't been reached yet
+    - same pattern as `ocr_service.repository.record_failure` /
     `rendering_service.repository.record_failure` (ADR 0080)."""
     if success:
         handover.status = "delivered"
@@ -353,10 +351,10 @@ async def list_due_for_retry(session: AsyncSession) -> list[Handover]:
 
 
 async def reset_for_retry(session: AsyncSession, handover: Handover) -> None:
-    """MUSS vor einem erneuten Zustellversuch laufen - sonst zählt
-    `mark_handover_delivered` von der bereits erschöpften attempts-Zahl
-    weiter (siehe ADR 0080 "Konsequenzen" für den gefundenen Bug in
-    ocr-service/rendering-service, der dieses Muster begründet hat)."""
+    """MUST run before a new delivery attempt - otherwise
+    `mark_handover_delivered` keeps counting from the already-exhausted
+    attempts count (see ADR 0080 "Consequences" for the bug found in
+    ocr-service/rendering-service that established this pattern)."""
     handover.attempts = 0
     handover.next_retry_at = None
     await session.flush()

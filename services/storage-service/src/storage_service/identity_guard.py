@@ -10,13 +10,12 @@ from storage_service.models import BackendIdentity
 
 logger = logging.getLogger(__name__)
 
-# Reservierter Objekt-Key für die Identitätsdatei (3.6 "Datenträger-Wechsel-
-# Sensibilität", P5b-S6) - bewusst über das bestehende StorageBackend-
-# Interface (write/read) statt eines eigenen Backend-Methodenpaars, siehe
-# ADR 0017. Kein Schrägstrich, damit der Key nicht mit einem echten,
-# segmentierten Dokument-/OCR-/Rendition-Key kollidieren kann (die alle
-# `typ/id/...`-Form haben) - dennoch ein dokumentierter Namensraum-Vorbehalt,
-# kein technisch erzwungener.
+# Reserved object key for the identity file (3.6 "storage device swap
+# sensitivity", P5b-S6) - deliberately via the existing StorageBackend
+# interface (write/read) instead of a dedicated backend method pair, see
+# ADR 0017. No slash, so the key cannot collide with a real, segmented
+# document/OCR/rendition key (all of which have `type/id/...` form) - still
+# a documented namespace reservation, not a technically enforced one.
 IDENTITY_KEY = "__dms_storage_identity__"
 
 
@@ -28,20 +27,19 @@ async def _read_device_id(backend: StorageBackend) -> str | None:
     try:
         return json.loads(raw)["device_id"]
     except (ValueError, KeyError, TypeError):
-        # Kaputte/fremde Marker-Datei - wie "fehlt" behandeln, nicht wie ein
-        # Treffer interpretieren (sicherer als eine kaputte Datei zu vertrauen).
+        # Corrupt/foreign marker file - treat as "missing", not as a
+        # match (safer than trusting a corrupt file).
         return None
 
 
 async def check_target_identity(
     session: AsyncSession, target_id: str, backend: StorageBackend
 ) -> bool:
-    """Prüft die Geräte-ID eines Ziels gegen den zuletzt bekannten Wert in
-    der Shared DB (3.6). Gibt `True` zurück, wenn das Ziel als verifiziert
-    gilt - das schließt den Erststart eines Ziels ein (kein bekannter
-    Referenzwert vorhanden, siehe Konsequenzen in ADR 0017: ein neu
-    hinzugefügtes Ziel wird beim ersten Start automatisch "geprägt", nicht
-    abgelehnt)."""
+    """Checks a target's device ID against the last known value in the
+    shared DB (3.6). Returns `True` if the target counts as verified -
+    this includes a target's first start (no known reference value
+    present, see consequences in ADR 0017: a newly added target is
+    automatically "stamped" on first start, not rejected)."""
     known = await repository.get_backend_identity(session, target_id)
 
     try:
@@ -63,12 +61,12 @@ async def check_target_identity(
         else:
             return False
         await repository.record_backend_identity(session, target_id, device_id)
-        # Rebalancing (3.6/7.2, P5c-S2): ein neu zum Ziel-Set hinzugefügtes
-        # Ziel hat noch keine Kopien bereits existierender Objekte - hier
-        # (Erststart-Bootstrap) ist der einzige Ort, an dem "neu" zuverlässig
-        # erkennbar ist, ohne eine zweite Änderungserkennung einzuführen.
-        # Bei einer komplett frischen Installation ist `object_metadata` leer,
-        # der Aufruf also ein günstiges No-Op.
+        # Rebalancing (3.6/7.2, P5c-S2): a target newly added to the target
+        # set has no copies of already-existing objects yet - this (first-
+        # start bootstrap) is the only place where "new" can be reliably
+        # detected without introducing a second change-detection
+        # mechanism. On a completely fresh install, `object_metadata` is
+        # empty, so the call is a cheap no-op.
         seeded = await repository.seed_pending_copies_for_new_target(session, target_id)
         if seeded:
             logger.info(
@@ -96,21 +94,20 @@ async def check_target_identity(
 async def reidentify_target(
     session: AsyncSession, target_id: str, backend: StorageBackend
 ) -> BackendIdentity:
-    """Korrekturmechanismus für einen beabsichtigten, legitimen Datenträger-
-    Wechsel (3.6, ADR 0017 "Konsequenzen", P5c-S2) - ersetzt die bisher
-    nötige direkte Korrektur in `backend_identity` durch einen API-Aufruf
-    zur Laufzeit, ohne Neustart. Übernimmt eine bereits vorhandene
-    Marker-Datei des neuen Geräts (z. B. ein andernorts im selben System schon
-    einmal geprägtes Ziel), sonst wird - wie beim Erststart-Bootstrap in
-    `check_target_identity` - eine neue geschrieben. Da sich das physische
-    Gerät geändert hat, gelten alle bisherigen Kopien auf diesem Ziel als
-    verloren und werden wie bei einem degradierten Start auf `pending`
-    zurückgesetzt (`repository.reset_copies_for_backend`) - dieselbe
-    Retry-Queue (`POST /replication/process-pending`) zieht sie nach.
-    Lässt Fehler beim Backend-Zugriff bewusst durchreichen (kein
-    stillschweigendes "als fehlend behandeln" wie in `_read_device_id`, da
-    ein nicht erreichbares Backend hier ein harter Fehlschlag der Aktion
-    sein muss, nicht eine gültige Ausgangslage)."""
+    """Correction mechanism for an intended, legitimate storage device
+    swap (3.6, ADR 0017 "consequences", P5c-S2) - replaces the previously
+    necessary direct correction in `backend_identity` with an API call at
+    runtime, without a restart. Adopts an already-present marker file of
+    the new device (e.g. a target that was already stamped elsewhere in
+    the same system), otherwise a new one is written - as in the first-
+    start bootstrap in `check_target_identity`. Since the physical device
+    has changed, all previous copies on this target are considered lost
+    and are reset to `pending`, just as with a degraded start
+    (`repository.reset_copies_for_backend`) - the same retry queue
+    (`POST /replication/process-pending`) picks them up. Deliberately
+    lets errors during backend access propagate (no silent "treat as
+    missing" as in `_read_device_id`, since an unreachable backend here
+    must be a hard failure of the action, not a valid starting state)."""
     found_device_id = await _read_device_id(backend)
     device_id = found_device_id
     if device_id is None:

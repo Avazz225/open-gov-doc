@@ -1,7 +1,7 @@
-"""HTTP-Client gegen das API-Gateway (3.5) - exakt dasselbe Muster wie
+"""HTTP client against the API gateway (3.5) - exactly the same pattern as
 `apps/*-ui/src/lib/api.ts`: `{gateway_url}/api/{service_type}/{path}`,
-Bearer-Token, keine direkten Backend-Adressen. Damit gelten fuer das CLI
-dieselben Rechte-/Sicherungsstufen wie fuer die Web-UIs (Konzept 6.2)."""
+bearer token, no direct backend addresses. This means the same permission/
+security levels apply to the CLI as to the web UIs (Concept 6.2)."""
 
 from __future__ import annotations
 
@@ -47,11 +47,11 @@ def login(gateway_url: str, username: str, password: str) -> dict:
 
 
 class GatewayClient:
-    """Ein Aufruf je CLI-Invocation. Versucht bei `401` genau einmal einen
-    transparenten Refresh + Retry (siehe Architekturentscheidung in
-    PROGRESS.md: die Web-UIs rufen `refreshToken()` bislang nirgends auf -
-    fuer ein CLI, dessen Access-Token ueber viele kurze Prozessaufrufe
-    hinweg abläuft, ist das aber notwendig)."""
+    """One call per CLI invocation. On `401`, attempts exactly one
+    transparent refresh + retry (see architecture decision in
+    PROGRESS.md: the web UIs don't call `refreshToken()` anywhere so
+    far - but for a CLI whose access token expires over the course of
+    many short process invocations, this is necessary)."""
 
     def __init__(
         self,
@@ -68,9 +68,9 @@ class GatewayClient:
         return f"{self._creds.gateway_url.rstrip('/')}/api/{service_type}/{path.lstrip('/')}"
 
     def _refresh_once(self) -> None:
-        # Ueber self._client (nicht die freie `refresh()`-Funktion), damit der
-        # Refresh denselben Transport wie alle anderen Aufrufe verwendet - in
-        # Tests den injizierten MockTransport, im Betrieb den echten.
+        # Via self._client (not the free `refresh()` function), so the
+        # refresh uses the same transport as all other calls - the injected
+        # MockTransport in tests, the real one in production.
         if not self._creds.refresh_token:
             raise AuthRequiredError("Sitzung abgelaufen - bitte 'dms login' erneut ausfuehren.")
         response = self._client.post(

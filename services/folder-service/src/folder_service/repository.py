@@ -28,17 +28,18 @@ class FolderNotEmptyError(Exception):
 
 
 class NotDeletedError(Exception):
-    """Wiederherstellungsversuch für einen Ordner, der gar nicht im
-    Papierkorb liegt (5.2, seit P7-S1b)."""
+    """Restore attempt for a folder that is not actually in the trash
+    (5.2, since P7-S1b)."""
 
 
 class RestorePeriodExpiredError(Exception):
-    """Die konfigurierte Papierkorb-Wiederherstellungsfrist ist bereits
-    abgelaufen (5.2, seit P7-S1b)."""
+    """The configured trash restore period has already expired (5.2, since
+    P7-S1b)."""
 
 
 class AlreadyReleasedError(Exception):
-    """Ein Legal Hold wurde bereits zuvor aufgehoben (5.2, seit P7-S1b)."""
+    """A legal hold has already been released previously (5.2, since
+    P7-S1b)."""
 
 
 async def ensure_root_folder(session: AsyncSession) -> None:
@@ -61,11 +62,11 @@ async def ensure_root_folder(session: AsyncSession) -> None:
 
 
 async def ensure_special_folders(session: AsyncSession) -> None:
-    """Posteingang/Postausgang (2.5/3.3, P15-S3) - identisches Idempotenz-
-    Muster wie `ensure_root_folder` (get-by-fester-PK, insert-if-missing),
-    direkt unter `root` gehängt statt selbst wurzelständig, damit die
-    normale Ordner-Navigation der User-UI sie ohne Sonderfall anzeigen
-    kann."""
+    """Inbox/Outbox (2.5/3.3, P15-S3) - identical idempotency pattern as
+    `ensure_root_folder` (get-by-fixed-PK, insert-if-missing), attached
+    directly under `root` instead of being root-level themselves, so the
+    User UI's normal folder navigation can display them without a special
+    case."""
     now = datetime.now(UTC)
     for folder_id, name in ((INBOX_FOLDER_ID, "Posteingang"), (OUTBOX_FOLDER_ID, "Postausgang")):
         existing = await session.get(Folder, folder_id)
@@ -86,9 +87,9 @@ async def ensure_special_folders(session: AsyncSession) -> None:
 
 
 async def _get_folder_row(session: AsyncSession, folder_id: str) -> Folder:
-    """Roher Zugriff ohne Papierkorb-Filter - für Aufbewahrungs-/Legal-Hold-
-    Operationen (5.2, seit P7-S1b), die auch auf einem bereits im Papierkorb
-    liegenden Ordner funktionieren müssen (`restore_folder` u. a.)."""
+    """Raw access without a trash filter - for retention/legal-hold
+    operations (5.2, since P7-S1b) that must also work on a folder already
+    in the trash (`restore_folder`, among others)."""
     folder = await session.get(Folder, folder_id)
     if folder is None:
         raise NotFoundError(f"folder_id {folder_id!r} unbekannt")
@@ -96,9 +97,9 @@ async def _get_folder_row(session: AsyncSession, folder_id: str) -> Folder:
 
 
 async def get_folder(session: AsyncSession, folder_id: str) -> Folder:
-    """Behandelt einen soft-gelöschten Ordner wie nicht existent (5.2, seit
-    P7-S1b) - verhindert, dass neue Kinder unter einem im Papierkorb
-    liegenden Ordner angelegt oder Ordner dorthin verschoben werden."""
+    """Treats a soft-deleted folder as non-existent (5.2, since P7-S1b) -
+    prevents new children from being created under a folder in the trash,
+    or folders being moved there."""
     folder = await _get_folder_row(session, folder_id)
     if folder.deleted_at is not None:
         raise NotFoundError(f"folder_id {folder_id!r} unbekannt")
@@ -106,11 +107,11 @@ async def get_folder(session: AsyncSession, folder_id: str) -> Folder:
 
 
 async def get_folder_any_state(session: AsyncSession, folder_id: str) -> Folder:
-    """Öffentliches Gegenstück zu `get_folder` OHNE Papierkorb-Filter (2.5,
-    P15-S1) - für die manuelle Löschadministrations-Löschung, die gerade
-    einen bereits im Papierkorb liegenden Ordner ansprechen muss. Reiner
-    Namens-Wrapper um `_get_folder_row`, damit `main.py` nicht auf eine als
-    privat markierte Funktion zugreift."""
+    """Public counterpart to `get_folder` WITHOUT a trash filter (2.5,
+    P15-S1) - for manual deletion-administration deletion, which needs to
+    address exactly a folder already in the trash. Pure naming wrapper
+    around `_get_folder_row`, so `main.py` does not access a function
+    marked as private."""
     return await _get_folder_row(session, folder_id)
 
 
@@ -133,7 +134,7 @@ async def create_folder(
     attributes: dict,
     created_by: str,
 ) -> Folder:
-    await get_folder(session, parent_id)  # 404, falls Elternordner unbekannt/gelöscht
+    await get_folder(session, parent_id)  # 404 if parent folder is unknown/deleted
 
     now = datetime.now(UTC)
     folder = Folder(
@@ -159,9 +160,9 @@ async def update_folder(
     new_parent_id: str | None,
     attributes: dict | None,
 ) -> tuple[Folder, bool]:
-    """Aktualisiert Name/Attribute und optional den Elternordner (Verschieben).
-    Gibt zurück, ob sich der Elternordner tatsächlich geändert hat, damit der
-    Aufrufer nur dann ein ``.resource.moved``-Event publiziert."""
+    """Updates name/attributes and optionally the parent folder (move).
+    Returns whether the parent folder actually changed, so the caller only
+    publishes a ``.resource.moved`` event in that case."""
     folder = await get_folder(session, folder_id)
     moved = False
 
@@ -183,9 +184,9 @@ async def update_folder(
 
 
 async def delete_folder(session: AsyncSession, folder_id: str) -> None:
-    """Sofortiger Hard-Delete - bleibt als Fallback für bereits-leere,
-    nie-retention-behaftete Fälle bestehen (siehe `soft_delete_folder` für
-    den regulären Papierkorb-Weg, seit P7-S1b)."""
+    """Immediate hard delete - remains as a fallback for already-empty
+    cases that never had retention applied (see `soft_delete_folder` for
+    the regular trash path, since P7-S1b)."""
     folder = await get_folder(session, folder_id)
     children = await list_children(session, folder_id)
     if children:
@@ -194,14 +195,14 @@ async def delete_folder(session: AsyncSession, folder_id: str) -> None:
     await session.flush()
 
 
-# --- Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b) ---
+# --- Retention/legal hold/forced deletion for folders (5.2/5.2a, since P7-S1b) ---
 
 
 async def list_active_subtree_ids(session: AsyncSession, folder_id: str) -> list[str]:
-    """Ordner-ID + alle aktiven (nicht bereits gelöschten) Nachfahren über
-    beliebig viele Ebenen - Grundlage für die Papierkorb-Kaskade sowie dafür,
-    welche Ordner-IDs bei der Nicht-leer-Prüfung vor einer Zwangslöschung auf
-    aktive Dokumente hin abgefragt werden (siehe `document_client.count_active`)."""
+    """Folder ID + all active (not already deleted) descendants across any
+    number of levels - basis for the trash cascade, as well as for which
+    folder IDs are queried for active documents during the not-empty check
+    before a forced deletion (see `document_client.count_active`)."""
     ids = [folder_id]
     frontier = [folder_id]
     while frontier:
@@ -215,16 +216,15 @@ async def list_active_subtree_ids(session: AsyncSession, folder_id: str) -> list
 
 
 async def has_any_child_folder_row(session: AsyncSession, folder_id: str) -> bool:
-    """Nicht-leer-Prüfung vor Zwangslöschung, Teil 2 (5.2a, seit P7-S1b) -
-    anders als `list_active_subtree_ids` bewusst OHNE `deleted_at`-Filter:
-    ein bereits soft-gelöschter (aber noch nicht per Papierkorb-Ablauf
-    physisch bereinigter) Unterordner ist als DB-Zeile weiterhin vorhanden
-    und referenziert diesen Ordner per FK (`parent_id`) - ein physisches
-    Entfernen des Elternordners würde sonst mit einer `ForeignKeyViolation`
-    fehlschlagen (live beim P7-S1b-Smoke-Test gefunden, siehe PROGRESS.md).
-    Bewusst kein automatisches Mit-Bereinigen des bereits im Papierkorb
-    liegenden Unterordners - der hat noch seine eigene, unabhängige
-    Wiederherstellungsfrist."""
+    """Not-empty check before forced deletion, part 2 (5.2a, since P7-S1b) -
+    unlike `list_active_subtree_ids`, deliberately WITHOUT a `deleted_at`
+    filter: a subfolder that is already soft-deleted (but not yet
+    physically cleaned up via trash expiry) is still present as a DB row
+    and references this folder via FK (`parent_id`) - physically removing
+    the parent folder would otherwise fail with a `ForeignKeyViolation`
+    (found live during the P7-S1b smoke test, see PROGRESS.md).
+    Deliberately no automatic cascading cleanup of a subfolder already in
+    the trash - it still has its own, independent restore period."""
     result = await session.execute(select(Folder.id).where(Folder.parent_id == folder_id).limit(1))
     return result.scalar_one_or_none() is not None
 
@@ -232,13 +232,13 @@ async def has_any_child_folder_row(session: AsyncSession, folder_id: str) -> boo
 async def soft_delete_folder(
     session: AsyncSession, folder_id: str, *, deleted_by: str, document_client: DocumentClient
 ) -> Folder:
-    """Papierkorb-Weg (5.2, seit P7-S1b) - kaskadiert über den gesamten
-    aktiven Teilbaum: Unterordner werden hier direkt mitsoft-gelöscht,
-    enthaltene Dokumente über einen synchronen Aufruf an `document-service`
-    (siehe `document_client.py`). Bereits unabhängig gelöschte Unterordner
-    bleiben unangetastet - ihr `deleted_via_folder_id` würde sonst
-    fälschlich überschrieben und bei einer künftigen Wiederherstellung
-    dieses Ordners mit zurückgeholt, obwohl sie eigenständig gelöscht wurden."""
+    """Trash path (5.2, since P7-S1b) - cascades over the entire active
+    subtree: subfolders are soft-deleted directly here, contained documents
+    via a synchronous call to `document-service` (see `document_client.py`).
+    Subfolders already independently deleted remain untouched - otherwise
+    their `deleted_via_folder_id` would be incorrectly overwritten and they
+    would be retrieved again on a future restore of this folder, even
+    though they were deleted independently."""
     folder = await get_folder(session, folder_id)
     subtree_ids = await list_active_subtree_ids(session, folder_id)
     now = datetime.now(UTC)
@@ -257,9 +257,9 @@ async def soft_delete_folder(
 async def restore_folder(
     session: AsyncSession, folder_id: str, *, document_client: DocumentClient
 ) -> Folder:
-    """Papierkorb-Wiederherstellung (5.2, seit P7-S1b) - stellt den Ordner
-    selbst sowie alle über ihn kaskadiert gelöschten Unterordner/Dokumente
-    wieder her, nur innerhalb der konfigurierten Frist."""
+    """Trash restore (5.2, since P7-S1b) - restores the folder itself as
+    well as all subfolders/documents that were deleted via cascade through
+    it, only within the configured retention period."""
     folder = await _get_folder_row(session, folder_id)
     if folder.deleted_at is None:
         raise NotDeletedError(f"Ordner {folder_id!r} ist nicht gelöscht")
@@ -290,10 +290,10 @@ async def restore_folder(
 async def list_deleted_folders(
     session: AsyncSession, *, parent_id: str | None = None, deleted_by: str | None = None
 ) -> list[Folder]:
-    """Papierkorb-Inhalt (5.2, seit P7-S1b; um `deleted_by`-Filter erweitert
-    seit P15-S1). Ohne `parent_id` liefert dies den installationsweiten
-    Papierkorb (persönlicher Papierkorb/Löschadministrations-Ansicht, 2.5)
-    statt nur den eines einzelnen Ordners."""
+    """Trash contents (5.2, since P7-S1b; extended with a `deleted_by`
+    filter since P15-S1). Without `parent_id`, this returns the
+    installation-wide trash (personal trash/deletion-administration view,
+    2.5) instead of only that of a single folder."""
     query = select(Folder).where(Folder.deleted_at.isnot(None))
     if parent_id is not None:
         query = query.where(Folder.parent_id == parent_id)
@@ -304,9 +304,9 @@ async def list_deleted_folders(
 
 
 async def hard_delete_folder(session: AsyncSession, folder_id: str) -> None:
-    """Vollständige, unwiederbringliche Entfernung (5.2a, seit P7-S1b) -
-    entfernt zuerst die Legal-Hold-Historie, damit die FK-Constraint nicht
-    verletzt wird (gleiches Zwischen-Flush-Muster wie
+    """Complete, irrecoverable removal (5.2a, since P7-S1b) - first removes
+    the legal-hold history so that the FK constraint is not violated (same
+    interim-flush pattern as
     `document_service.repository.hard_delete_document`)."""
     folder = await _get_folder_row(session, folder_id)
     for hold in await list_holds(session, folder_id):
@@ -495,7 +495,7 @@ async def list_expired_trash(session: AsyncSession, *, restore_period_days: int)
     return [f for f in candidates if not await has_active_hold(session, f.id)]
 
 
-# --- Struktur-Vorlagen (2.5/7.3, seit P15-S6) ---
+# --- Structure templates (2.5/7.3, since P15-S6) ---
 
 
 async def _build_structure_node(session: AsyncSession, folder_id: str) -> dict:
@@ -509,10 +509,10 @@ async def _build_structure_node(session: AsyncSession, folder_id: str) -> dict:
 
 
 async def build_template_structure(session: AsyncSession, folder_id: str) -> dict:
-    """Erfasst den aktiven Teilbaum ab `folder_id` als verschachtelten
-    Struktur-Baum (2.5/7.3, P15-S6) - nur Name/`object_type_id` je Knoten,
-    bewusst keine Attributwerte (Rohbau, siehe ADR 0056). `list_children`
-    schließt bereits soft-gelöschte Unterordner aus."""
+    """Captures the active subtree starting at `folder_id` as a nested
+    structure tree (2.5/7.3, P15-S6) - only name/`object_type_id` per node,
+    deliberately no attribute values (skeleton, see ADR 0056).
+    `list_children` already excludes soft-deleted subfolders."""
     return await _build_structure_node(session, folder_id)
 
 
@@ -572,14 +572,15 @@ async def _apply_structure_node(
 async def apply_template(
     session: AsyncSession, template: FolderTemplate, *, target_parent_id: str, created_by: str
 ) -> list[Folder]:
-    """Wendet eine Struktur-Vorlage unterhalb `target_parent_id` an (2.5/7.3,
-    P15-S6) - erzeugt für jeden Knoten einen echten Ordner über die reguläre
-    `create_folder`-Grundfunktion, bewusst OHNE die object-type-Validierung
-    aus `main.py`s `_validate_against_object_type` (Rohbau: Pflichtattribute
-    sind zum Anwendungszeitpunkt naturgemäß noch nicht befüllt, werden erst
-    beim späteren Ausfüllen via PATCH geprüft - siehe ADR 0056). Gibt alle
-    neu erzeugten Ordner zurück, Wurzel des angewendeten Teilbaums zuerst."""
-    await get_folder(session, target_parent_id)  # 404, falls Ziel unbekannt/gelöscht
+    """Applies a structure template below `target_parent_id` (2.5/7.3,
+    P15-S6) - creates a real folder for each node via the regular
+    `create_folder` base function, deliberately WITHOUT the object-type
+    validation from `main.py`'s `_validate_against_object_type` (skeleton:
+    required attributes are naturally not yet populated at application
+    time, they are only checked later when filled in via PATCH - see
+    ADR 0056). Returns all newly created folders, root of the applied
+    subtree first."""
+    await get_folder(session, target_parent_id)  # 404 if target is unknown/deleted
     return await _apply_structure_node(
         session, template.structure, parent_id=target_parent_id, created_by=created_by
     )

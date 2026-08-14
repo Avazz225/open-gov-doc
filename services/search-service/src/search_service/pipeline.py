@@ -20,15 +20,15 @@ async def reindex_document(
     ocr_client: OcrServiceClient,
     rendering_client: RenderingServiceClient,
 ) -> None:
-    """Baut den Suchindex-Eintrag eines Dokuments von Grund auf neu auf -
-    aufgerufen sowohl von `document.>`-Events (Metadatenänderungen) als auch
-    von `ocr.completed`/`rendering.completed` (Volltext-Nachlieferung). Ein
-    einziger Codepfad statt zweier getrennter "erstellen"/"Text aktualisieren"-
-    Varianten: `document.>` und `ocr.>`/`rendering.>` sind getrennte NATS-
-    Streams ohne Reihenfolgegarantie beim Erstlauf-Backfill - ein
-    `ocr.completed` kann vor dem zugehörigen `document.created` ankommen.
-    Da hier immer der volle Dokumentzustand per HTTP nachgeladen wird, ist es
-    unerheblich, welches Event zuerst eintrifft."""
+    """Rebuilds a document's search index entry from scratch - called both by
+    `document.>` events (metadata changes) and by `ocr.completed`/
+    `rendering.completed` (full-text follow-up delivery). A single code path
+    instead of two separate "create"/"update text" variants: `document.>`
+    and `ocr.>`/`rendering.>` are separate NATS streams with no ordering
+    guarantee during the initial backfill run - an `ocr.completed` can
+    arrive before the corresponding `document.created`. Since the full
+    document state is always reloaded here via HTTP, it doesn't matter which
+    event arrives first."""
     doc = await document_client.get(document_id)
     if doc is None or doc.get("deleted_at") is not None:
         async with session_factory() as session:
@@ -45,9 +45,9 @@ async def reindex_document(
 
     async with session_factory() as session:
         existing = await repository.get_document(session, document_id)
-        # Text einer bereits indizierten, noch aktuellen Version behalten,
-        # sonst verwerfen (neue Version hat noch keinen eigenen OCR-/Rendering-
-        # Text, bis die jeweiligen Events eintreffen).
+        # Keep the text of an already-indexed, still-current version,
+        # otherwise discard it (a new version has no OCR/rendering text of
+        # its own yet until the respective events arrive).
         full_text = (
             existing.full_text
             if existing is not None and existing.current_version_number == version_number
@@ -57,7 +57,7 @@ async def reindex_document(
         if version_number > 0:
             try:
                 text_from_ocr = await ocr_client.get_full_text(document_id, version_number)
-            except Exception:  # OCR Service nicht erreichbar/kein Ergebnis - nicht fatal
+            except Exception:  # OCR service unreachable/no result - not fatal
                 logger.exception(
                     "OCR-Abfrage fehlgeschlagen für %r Version %s", document_id, version_number
                 )

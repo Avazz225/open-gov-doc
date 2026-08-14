@@ -2,32 +2,33 @@ from dms_common import BaseServiceSettings
 
 
 class Settings(BaseServiceSettings):
-    """Der Federation Hub (7.4) ist bewusst **kein** interner Service einer
-    Installation - er registriert sich deshalb nicht bei einer `registry-service`
-    (`BaseServiceSettings.registry_service_base_url`/`self_address` bleiben
-    ungenutzt) und hat auch keinen Event-Bus-Producer/-Consumer (er protokolliert
-    Vermittlungs-Metadaten nur in seiner eigenen `handover`-Tabelle, siehe
-    `docs/services/federation-hub-service.md`). Für lokale Entwicklung/Tests wird
-    er trotzdem in `infra/docker-compose.yml` mitgeliefert (dev-only Convenience,
-    siehe ADR 0028) - ein Betreiber würde ihn in Produktion separat betreiben."""
+    """The Federation Hub (7.4) is deliberately **not** an internal service of
+    an installation - it therefore does not register with a
+    `registry-service` (`BaseServiceSettings.registry_service_base_url`/
+    `self_address` remain unused) and has no event-bus producer/consumer
+    either (it only logs mediation metadata in its own `handover` table, see
+    `docs/services/federation-hub-service.md`). For local
+    development/testing it is nonetheless included in
+    `infra/docker-compose.yml` (dev-only convenience, see ADR 0028) - an
+    operator would run it separately in production."""
 
     service_name: str = "federation-hub-service"
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Betreiber-Geheimnis für `POST /installations/{id}/revoke` (P13-S4,
-    # ADR 0039) - bewusst unabhängig von jeder Installation: Revocation ist
-    # explizit für den Fall gedacht, dass eine Installation selbst nicht mehr
-    # vertrauenswürdig signieren kann (kompromittierter Schlüssel), kann also
-    # nicht an deren eigene Signatur gebunden sein. `None` (Default) sperrt
-    # den Endpunkt vollständig - ein Hub-Betreiber muss diesen Wert bewusst
-    # setzen, um Revocation überhaupt zu aktivieren.
+    # Operator secret for `POST /installations/{id}/revoke` (P13-S4,
+    # ADR 0039) - deliberately independent of any installation: revocation is
+    # explicitly meant for the case where an installation itself can no
+    # longer sign in a trustworthy way (compromised key), so it cannot be
+    # bound to its own signature. `None` (default) fully locks the endpoint -
+    # a hub operator must deliberately set this value to enable revocation
+    # at all.
     hub_operator_key: str | None = None
 
-    # Retry/Backoff für die Handover-Erstzustellung (P20-S5, ADR 0081) -
-    # gleiche Full-Jitter-Formel wie an den anderen vier Resilienz-Stellen
-    # dieser Phase (`libs/dms-retry`). Betrifft ausschließlich die
-    # `POST /handovers`-Zustellung an `to_installation_id`, NICHT die
-    # separate `submit_handover_result`-Rückleitung.
+    # Retry/backoff for the initial handover delivery (P20-S5, ADR 0081) -
+    # same full-jitter formula as the four other resilience spots of this
+    # phase (`libs/dms-retry`). Applies exclusively to the `POST /handovers`
+    # delivery to `to_installation_id`, NOT the separate
+    # `submit_handover_result` return path.
     max_handover_delivery_attempts: int = 5
     handover_retry_poll_interval_seconds: float = 60.0

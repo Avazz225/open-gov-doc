@@ -14,12 +14,12 @@ def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
     publish_event: Callable[[str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Führt die eigenen gegateten Aktionen (Bereichssperren, 4.7, seit P17-S3
-    zusätzlich Rollenzuweisungen, 4.3/14.2) erst nach Genehmigung aus (4.3) -
-    Selbst-Konsum des eigenen `permission.approval.approved`-Events, exakt
-    derselbe Mechanismus wie für fremde Services (z. B. `document-service`).
-    Aktionstypen, die nicht zu diesem Service gehören (z. B.
-    `document.force_unlock`), werden ignoriert."""
+    """Executes this service's own gated actions (scope locks, 4.7, plus
+    role assignments since P17-S3, 4.3/14.2) only after approval (4.3) -
+    self-consumption of its own `permission.approval.approved` event, the
+    exact same mechanism used for other services (e.g. `document-service`).
+    Action types that do not belong to this service (e.g.
+    `document.force_unlock`) are ignored."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -88,10 +88,10 @@ def make_handler(
                     )
                 else:
                     # permission.role_assignment.create (P17-S3, 14.2
-                    # "Berechtigungsänderung") - `create_role_assignment` ist
-                    # bereits idempotent-freundlich über
-                    # `repository.NotFoundError` abgesichert (unbekannte
-                    # role_id/Ressource), siehe except-Zweig unten.
+                    # "permission change") - `create_role_assignment` is
+                    # already idempotency-friendly, guarded via
+                    # `repository.NotFoundError` (unknown role_id/resource),
+                    # see the except branch below.
                     assignment = await repository.create_role_assignment(
                         session,
                         principal_type=action_payload["principal_type"],
@@ -112,11 +112,11 @@ def make_handler(
                         actor=assignment.principal_id,
                     )
             except (repository.NotFoundError, KeyError):
-                # KeyError deckt Fremd-/Fehlform-Payloads ab (z. B. ein zu
-                # Testzwecken angelegter Request mit demselben action_type,
-                # aber ohne die hier erwarteten Felder) - loggen statt
-                # crashen, sonst bleibt die NATS-Nachricht unbestätigt und
-                # wird endlos erneut zugestellt (siehe dms-eventbus-client).
+                # KeyError covers foreign/malformed payloads (e.g. a request
+                # created for test purposes with the same action_type but
+                # without the fields expected here) - log instead of
+                # crashing, otherwise the NATS message stays unacknowledged
+                # and gets redelivered endlessly (see dms-eventbus-client).
                 logger.warning(
                     "Genehmigte Aktion %r konnte nicht ausgeführt werden (Ressource/Sperre "
                     "inzwischen nicht mehr vorhanden oder Payload unvollständig) - "

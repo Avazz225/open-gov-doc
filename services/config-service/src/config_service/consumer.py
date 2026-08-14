@@ -9,16 +9,16 @@ logger = logging.getLogger(__name__)
 def make_handler(
     apply_import: Callable[[dict, list[str] | None], Awaitable[object]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Führt einen zuvor per Vier-Augen-Prinzip (4.3, seit P17-S3, 14.2
-    "Konfigurationsimport") zurückgestellten Import erst nach Genehmigung aus
-    - reiner Konsument (`ensure_stream=False` in `main.py`s Lifespan):
-    config-service besitzt keinen eigenen Stream und hat nichts Eigenes zu
-    publizieren, es reagiert nur auf permission-services bereits bestehendes
-    `permission.approval.approved`-Event, identisches Selbst-/Fremd-Konsum-
-    Muster wie `document_service.consumer`. Andere Aktionstypen (z. B.
-    Bereichssperren, Rollenzuweisungen) gehören nicht zu diesem Service und
-    werden ignoriert. `apply_import` ist `main._apply_config_document` -
-    dieselbe Anwendungslogik wie der sofortige, ungegatete Pfad."""
+    """Executes an import previously deferred via the four-eyes principle (4.3,
+    since P17-S3, 14.2 "Configuration Import") only after approval
+    - pure consumer (`ensure_stream=False` in `main.py`'s lifespan):
+    config-service owns no stream of its own and has nothing of its own to
+    publish, it only reacts to permission-service's already existing
+    `permission.approval.approved` event, an identical self-/foreign-consumption
+    pattern to `document_service.consumer`. Other action types (e.g.
+    scope locks, role assignments) do not belong to this service and
+    are ignored. `apply_import` is `main._apply_config_document` -
+    the same application logic as the immediate, ungated path."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -27,11 +27,11 @@ def make_handler(
         action_payload = event.payload.get("payload") or {}
         document = action_payload.get("document")
         if document is None:
-            # Fremd-/Fehlform-Payload (z. B. ein zu Testzwecken über
-            # /approval-requests angelegter Request mit demselben
-            # action_type, aber ohne document) - loggen statt crashen, sonst
-            # bleibt die NATS-Nachricht unbestätigt und wird endlos erneut
-            # zugestellt (siehe dms-eventbus-client._callback).
+            # Foreign/malformed payload (e.g. a request created for test purposes
+            # via /approval-requests with the same
+            # action_type but without document) - log instead of crashing, otherwise
+            # the NATS message stays unacknowledged and gets redelivered
+            # endlessly (see dms-eventbus-client._callback).
             logger.warning(
                 "permission.approval.approved für config.import ohne document im "
                 "payload erhalten - ignoriert: %r",
@@ -42,13 +42,13 @@ def make_handler(
         try:
             await apply_import(document, action_payload.get("categories"))
         except Exception:
-            # Breiter als das übliche `(repository.NotFoundError, KeyError)`
-            # anderer Konsumenten: `_apply_config_document` kann u. a.
-            # `HTTPException` (unbekannte Schema-Version) werfen sowie
-            # beliebige Downstream-Client-Fehler propagieren, die hier keinen
-            # HTTP-Aufrufer mehr haben, dem sie gemeldet werden könnten -
-            # einzelne Kategorie-Einträge scheitern ohnehin bereits
-            # best-effort innerhalb von `imports.apply_import` (siehe dort).
+            # Broader than the usual `(repository.NotFoundError, KeyError)`
+            # of other consumers: `_apply_config_document` can, among other things,
+            # raise `HTTPException` (unknown schema version) as well as
+            # propagate arbitrary downstream client errors, which no longer have
+            # an HTTP caller here to report them to -
+            # individual category entries already fail best-effort within
+            # `imports.apply_import` anyway (see there).
             logger.exception(
                 "Genehmigter Konfigurationsimport (request_id=%s) konnte nicht angewendet werden",
                 event.payload.get("request_id"),

@@ -21,16 +21,16 @@ def make_handler(
     publish_event: PublishEvent,
     max_attempts: int,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Reagiert auf `document.created` (erste Version, Payload enthält keine
-    `version_number`) und `document.version.created` (Check-in, `version_
-    number` im Payload) - beide docken *nach* dem Scan-Gating aus P5-S1 an, da
-    Document Service diese Events erst nach erfolgreichem Virenscan und
-    erfolgreichem Schreiben publiziert (siehe ADR 0010). Andere `document.>`-
-    Events (Metadaten-Update, Löschung, Force-Unlock) lösen kein Rendering
-    aus. Ein einziges breites Subject-Abo (`document.>`) statt zweier
-    Einzel-Subscriptions, weil ein JetStream-Durable-Consumer-Name pro Subject
-    reserviert wäre - Dispatch stattdessen im Handler (Muster aus
-    permission-service/structure_consumer.py)."""
+    """Reacts to `document.created` (first version, payload does not contain
+    `version_number`) and `document.version.created` (check-in, `version_
+    number` in the payload) - both hook in *after* the scan gating from P5-S1,
+    since Document Service only publishes these events after a successful
+    virus scan and successful write (see ADR 0010). Other `document.>`
+    events (metadata update, deletion, force unlock) do not trigger
+    rendering. A single broad subject subscription (`document.>`) instead of
+    two individual subscriptions, because a JetStream durable consumer name
+    would be reserved per subject - dispatch happens in the handler instead
+    (pattern from permission-service/structure_consumer.py)."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -93,10 +93,10 @@ def make_ocr_handler(
     storage: StorageClient,
     publish_event: PublishEvent,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Nachzieheffekt aus P5-S3 (2.4/3.9): reagiert auf `ocr.completed` und
-    erzeugt eine `substitute_text`-Rendition aus dem OCR-Volltext, sofern noch
-    keine existiert (z. B. bereits durch `DocxTextExtractionRenderer` erzeugt).
-    `ocr.failed`-Events liefern keinen Text und werden ignoriert."""
+    """Follow-up effect from P5-S3 (2.4/3.9): reacts to `ocr.completed` and
+    creates a `substitute_text` rendition from the OCR full text, provided
+    none exists yet (e.g. already created by `DocxTextExtractionRenderer`).
+    `ocr.failed` events do not carry text and are ignored."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -119,10 +119,11 @@ def make_ocr_handler(
         try:
             full_text = await ocr_client.get_full_text(document_id, version_number)
         except Exception:
-            # OCR Service nicht erreichbar (P5b-S5: ocrEnabled=false-Installationen
-            # haben ihn gar nicht deployt) oder anderer HTTP-Fehler - nicht fatal,
-            # sonst würde dieses `ocr.completed`-Event (aus der Zeit, als OCR noch
-            # aktiv war) endlos redeliver-t, ohne je verarbeitbar zu sein.
+            # OCR Service unreachable (P5b-S5: ocrEnabled=false installations
+            # don't deploy it at all) or another HTTP error - not fatal,
+            # otherwise this `ocr.completed` event (from a time when OCR was
+            # still active) would be redelivered endlessly without ever being
+            # processable.
             logger.exception(
                 "OCR-Abfrage fehlgeschlagen für %r Version %s", document_id, version_number
             )
@@ -159,9 +160,9 @@ async def start_consuming_ocr(
     )
     for subject in subjects:
         try:
-            # Eigener Durable-Name, getrennt vom document.>-Abo oben - beide
-            # laufen über denselben event_bus-Client, aber auf verschiedenen
-            # Streams ("document" vs. "ocr").
+            # Own durable name, separate from the document.> subscription
+            # above - both run over the same event_bus client, but on
+            # different streams ("document" vs. "ocr").
             await bus.subscribe(subject, handler, durable="rendering-service-ocr")
         except SubjectNotFoundError:
             logger.warning(

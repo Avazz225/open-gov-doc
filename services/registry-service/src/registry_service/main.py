@@ -30,22 +30,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
     engine = build_engine(settings.postgres_dsn)
     async with engine.begin() as conn:
-        # Kein Alembic in dieser frühen Phase - Schema/Tabellen werden beim
-        # Start idempotent sichergestellt. Migrationen folgen, sobald sich
-        # das Modell in Produktion stabilisiert hat.
+        # No Alembic in this early phase - schema/tables are ensured
+        # idempotently at startup. Migrations will follow once the model
+        # has stabilized in production.
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS registry"))
         await conn.run_sync(Base.metadata.create_all)
-        # `create_all` legt fehlende TABELLEN an, aendert aber keine
-        # bestehenden - `status` (Drain-Mechanismus, 10.5/3.8, P10-S2) kam
-        # erst nachtraeglich dazu, gleiches additive Ad-hoc-Migrationsmuster
-        # wie z. B. document-service. Idempotent dank IF NOT EXISTS.
+        # `create_all` creates missing TABLES but does not alter existing
+        # ones - `status` (drain mechanism, 10.5/3.8, P10-S2) was only added
+        # afterward, same additive ad-hoc migration pattern as e.g.
+        # document-service. Idempotent thanks to IF NOT EXISTS.
         await conn.execute(
             text(
                 "ALTER TABLE registry.service_instance "
                 "ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active' NOT NULL"
             )
         )
-        # Sensor-Katalog (10.1, P11-S1) - gleiches additive Muster.
+        # Sensor catalog (10.1, P11-S1) - same additive pattern.
         await conn.execute(
             text(
                 "ALTER TABLE registry.service_instance "
@@ -59,10 +59,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    # Lizenzvermittlung (Konzept 3.2b/9.3, P9-S2): erster eigener NATS-
-    # Konsument der Registry - reagiert auf Statusaenderungen des
-    # license-service (P9-S1) durch Invalidierung des TTL-Caches, statt
-    # ausschliesslich zeitbasiert neu abzufragen.
+    # License mediation (concept 3.2b/9.3, P9-S2): the registry's first own
+    # NATS consumer - reacts to status changes of license-service (P9-S1) by
+    # invalidating the TTL cache, instead of re-querying purely on a
+    # time basis.
     app.state.license_cache = ComponentLicenseCache(
         LicenseServiceClient(settings.license_service_base_url),
         licensable_components=settings.licensable_components,
@@ -73,15 +73,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.consumer_bus = consumer_bus
     await consumer.start_consuming(consumer_bus, ["license.>"], app.state.license_cache)
 
-    # Die Registry meldet sich seit P4-S3 bei sich selbst an (registry_service_base_url
-    # zeigt auf die eigene Adresse) - Grundlage dafür, dass das Gateway auch
-    # "registry-service" als service_type auflösen kann (z. B. für die
-    # Admin-UI-Registry-Übersicht, die konsequent nur über das Gateway spricht,
-    # nie direkt). Die allererste Registrierung schlägt unvermeidlich fehl (der
-    # eigene Uvicorn-Server nimmt erst nach Abschluss des Lifespan-Startups
-    # Verbindungen an) - der Selbstheilungs-Fix aus `dms-registry-client`
-    # (Re-Registrierung bei 404 im nächsten Heartbeat) greift hier also für
-    # den denkbar häufigsten Fall: Selbstregistrierung beim eigenen Start.
+    # The registry has been registering with itself since P4-S3
+    # (registry_service_base_url points to its own address) - the basis for
+    # the gateway also being able to resolve "registry-service" as a
+    # service_type (e.g. for the admin UI's registry overview, which
+    # consistently only talks through the gateway, never directly). The
+    # very first registration inevitably fails (the own Uvicorn server only
+    # starts accepting connections after the lifespan startup completes) -
+    # the self-healing fix from `dms-registry-client` (re-registration on
+    # 404 on the next heartbeat) therefore kicks in here for arguably the
+    # most common case: self-registration at its own startup.
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
@@ -90,11 +91,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sensors=metrics.sensor_declarations(),
     )
 
-    # Sensor-Konzept (10.1, P11-S1): registry-service ist einer der zwei
-    # Piloten (siehe P11-S0-Befund). Aktivierungsstatus kommt vom
-    # `monitoring-service`, nicht aus der eigenen DB - symmetrisches Muster
-    # zu jedem anderen Sensor-emittierenden Service (kein Sonderfall, obwohl
-    # dieser Service zufaellig auch die Registry selbst ist).
+    # Sensor concept (10.1, P11-S1): registry-service is one of the two
+    # pilots (see the P11-S0 finding). Activation status comes from
+    # `monitoring-service`, not from its own DB - a symmetric pattern to
+    # every other sensor-emitting service (no special case, even though this
+    # service happens to also be the registry itself).
     app.state.sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await app.state.sensor_config_client.start()
     sensor_registry, active_gauge, heartbeat_miss_gauge = metrics.build_sensor_registry(
@@ -157,19 +158,19 @@ def healthz() -> dict:
 
 @app.get("/installation")
 def get_installation() -> dict:
-    """Installations-Identität (3a, P13-S1): ein Service, ein Werkzeug (CLI,
-    Admin-UI) oder die künftige Fleet-/Lizenz-Management-Ebene (P13-S2) kann
-    hier abfragen, welche Installation gerade antwortet - unauthentifiziert
-    und ohne DB-Zugriff wie `/healthz`, da `installation_id`/
-    `installation_display_name` reine Konfigurationswerte sind (siehe
-    `dms_common.BaseServiceSettings`), keine geheimen Daten."""
+    """Installation identity (3a, P13-S1): a service, a tool (CLI, admin
+    UI), or the future fleet/license management layer (P13-S2) can query
+    here which installation is currently responding - unauthenticated and
+    without DB access like `/healthz`, since `installation_id`/
+    `installation_display_name` are plain configuration values (see
+    `dms_common.BaseServiceSettings`), not secret data."""
     return {"id": settings.installation_id, "display_name": settings.installation_display_name}
 
 
 @app.get("/metrics")
 def get_metrics() -> Response:
-    """Prometheus-Exposition der zwei eigenen Sensoren (10.1, P11-S1) - wird
-    vom `monitoring-service` gescraped, nicht direkt von Prometheus."""
+    """Prometheus exposition of the two own sensors (10.1, P11-S1) - scraped
+    by `monitoring-service`, not directly by Prometheus."""
     body, content_type = metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
@@ -207,9 +208,9 @@ async def send_heartbeat(
 async def drain_instance(
     instance_id: str, session: AsyncSession = Depends(get_session)
 ) -> InstanceOut:
-    """Drain-Mechanismus (10.5/3.8, P10-S2) - ungegatet wie jeder andere
-    Registry-Endpunkt: WANN gedraint wird, entscheidet ein externes
-    Deploy-Werkzeug/P10-S3, nicht die Registry selbst."""
+    """Drain mechanism (10.5/3.8, P10-S2) - ungated like every other registry
+    endpoint: WHEN draining happens is decided by an external deploy
+    tool/P10-S3, not by the registry itself."""
     try:
         result = await repository.mark_draining(session, instance_id)
     except repository.InstanceNotFoundError as exc:
@@ -223,8 +224,8 @@ async def drain_instance(
 async def activate_instance(
     instance_id: str, session: AsyncSession = Depends(get_session)
 ) -> InstanceOut:
-    """Umkehrung von `/drain` (10.5, P10-S3) - ermoeglicht einen echten
-    Rollback-Pfad, solange die alte Instanz noch nicht gestoppt wurde."""
+    """Reversal of `/drain` (10.5, P10-S3) - enables a genuine rollback path
+    as long as the old instance has not yet been stopped."""
     try:
         result = await repository.activate(session, instance_id)
     except repository.InstanceNotFoundError as exc:

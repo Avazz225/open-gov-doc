@@ -9,7 +9,7 @@ class OcrWordResult:
     top: float
     width: float
     height: float
-    confidence: float  # 0-100; 100.0 für Wörter aus dem nativen Textlayer (exakt, nicht OCR'd)
+    confidence: float  # 0-100; 100.0 for words from the native text layer (exact, not OCR'd)
 
 
 @dataclass
@@ -26,22 +26,22 @@ class OcrExtractionResult:
     average_confidence: float
     full_text: str
     pages: list[OcrPageResult]
-    # Ein Seitenbild je Eintrag in `pages` (gleicher Index, 1:1), nur für PDFs
-    # gesetzt (siehe engines/__init__.py) - leer für Rasterbilder, die keine
-    # eigene OCR-Seitenbild-Rendition brauchen (siehe rendering-service-
-    # Thumbnail). War früher ein einzelnes `bytes | None`-Feld ausschließlich
-    # für die erste Seite (Bugfix: mehrseitige PDF-Vorschau zeigte immer nur
-    # Seite 1, egal welche Version/welcher Ausschnitt ausgewählt war).
+    # One page image per entry in `pages` (same index, 1:1), only set for
+    # PDFs (see engines/__init__.py) - empty for raster images, which don't
+    # need their own OCR page-image rendition (see rendering-service
+    # thumbnail). Used to be a single `bytes | None` field exclusively for
+    # the first page (bugfix: multi-page PDF preview always showed only
+    # page 1, regardless of which version/excerpt was selected).
     page_images: list[bytes]
     page_image_content_type: str | None
 
 
 class TextLayerExtractor(ABC):
-    """Eine OCR-Engine (3.3/3.8, gleiches Plugin-Prinzip wie die
-    Storage-Backends und `rendering_service.renderers.Renderer`) - anders als
-    dort läuft aber pro Version genau eine Engine statt mehrerer unabhängiger
-    Regeln, ausgewählt von `select_engine()` anhand der zweistufigen
-    Entscheidung "gibt es einen nutzbaren Textlayer?"."""
+    """An OCR engine (3.3/3.8, same plugin principle as the storage backends
+    and `rendering_service.renderers.Renderer`) - unlike there, however,
+    exactly one engine runs per version instead of several independent
+    rules, selected by `select_engine()` based on the two-stage decision
+    "is there a usable text layer?"."""
 
     engine_name: str
 
@@ -57,6 +57,6 @@ class TextLayerExtractor(ABC):
 
 
 class UnreadableDocumentError(Exception):
-    """Datei gibt sich als PDF aus (Content-Type/Endung), ist aber korrupt/
-    nicht öffnenbar - anders als ein schlicht nicht unterstütztes Format
-    (z. B. .docx) ein expliziter Fehlerfall, kein stiller Skip."""
+    """File claims to be a PDF (content type/extension), but is corrupt/
+    cannot be opened - unlike a simply unsupported format (e.g. .docx), an
+    explicit error case, not a silent skip."""

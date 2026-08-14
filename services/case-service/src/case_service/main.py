@@ -43,20 +43,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
     engine = build_engine(settings.postgres_dsn)
     async with engine.begin() as conn:
-        # "case" ist ein reserviertes SQL-Schluesselwort (CASE WHEN) - anders
-        # als Base.metadata.create_all (quotet automatisch ueber SQLAlchemys
-        # IdentifierPreparer) muss dieser rohe SQL-String selbst quoten.
+        # "case" is a reserved SQL keyword (CASE WHEN) - unlike
+        # Base.metadata.create_all (which quotes automatically via
+        # SQLAlchemy's IdentifierPreparer), this raw SQL string must quote
+        # it itself.
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS "case"'))
         await conn.run_sync(Base.metadata.create_all)
-        # Aussonderung (5.6, seit P7-S3b) - Ad-hoc-Migration wie ueberall in
-        # diesem System (kein Alembic), "case" muss weiterhin gequotet werden.
+        # Records disposal (5.6, since P7-S3b) - ad-hoc migration like
+        # everywhere in this system (no Alembic), "case" must continue to
+        # be quoted.
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS archive_after TIMESTAMPTZ')
         )
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
         )
-        # Vorgangsnummer (2.3/2.5, P15-S3) - gleiches Ad-hoc-Migrationsmuster.
+        # Case number (2.3/2.5, P15-S3) - same ad-hoc migration pattern.
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS vorgangsnummer VARCHAR(64)')
         )
@@ -68,10 +70,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.object_type_client = ObjectTypeClient(settings.object_type_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
-    # Producer (eigener Stream "case", `case.created`/`.document.added`/
-    # `.document.removed`/`.closed`) UND Konsument (`workflow.instance.completed`)
-    # - zwei getrennte Client-Instanzen, gleiche Konvention wie notification-service
-    # (siehe dessen main.py-Kommentar zur Begruendung).
+    # Producer (own stream "case", `case.created`/`.document.added`/
+    # `.document.removed`/`.closed`) AND consumer
+    # (`workflow.instance.completed`) - two separate client instances, same
+    # convention as notification-service (see its main.py comment for the
+    # rationale).
     producer = NatsEventBusClient(settings.nats_url, stream="case")
     await producer.connect()
     app.state.producer = producer
@@ -133,15 +136,15 @@ async def publish_event(
 
 
 async def _require_case_permission(x_dms_principal: str, *, access_type: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service hatte
-    zuvor GAR KEINE Berechtigungsprüfung. Prüft `case.read`/`case.write` an
-    der Wurzelressource (`root`), nicht an einer Umlaufmappen-eigenen
-    Ressource - case-service registriert (anders als folder-service) keine
-    eigenen Knoten im permission-service-Ressourcenbaum, siehe ADR 0070
-    "Begründung". Erster Konsument von `libs/dms-permission-client` (P19-S1)
-    überhaupt. Die "everyone"-Gruppe (ADR 0067) gewährt `case.read`/
-    `case.write` standardmäßig jedem authentifizierten Principal - erhält
-    das bisherige De-facto-offene Verhalten, macht es aber admin-editierbar."""
+    """RBAC (post-roadmap Phase 19 Session 5, ADR 0070) - case-service
+    previously had NO permission check at all. Checks `case.read`/
+    `case.write` at the root resource (`root`), not at a circulation-
+    folder-owned resource - unlike folder-service, case-service registers
+    no own nodes in the permission-service resource tree, see ADR 0070
+    "Rationale". The first ever consumer of `libs/dms-permission-client`
+    (P19-S1). The "everyone" group (ADR 0067) grants `case.read`/
+    `case.write` to every authenticated principal by default - preserves
+    the previous de-facto-open behavior, but makes it admin-editable."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     permission = "case.read" if access_type == "read" else "case.write"
@@ -156,10 +159,10 @@ async def _require_case_permission(x_dms_principal: str, *, access_type: str) ->
 
 
 async def _resolve_reference(session: AsyncSession, case, reference) -> CaseDocumentReferenceOut:
-    """Zweistufiges Referenzmodell (2.3): waehrend die Umlaufmappe offen ist,
-    wird die aktuelle Hauptversion live aus dem Document Service gelesen -
-    ab Abschluss zaehlt ausschliesslich der fixierte Abschluss-Snapshot,
-    ohne weiteren document-service-Aufruf."""
+    """Two-stage reference model (2.3): while the circulation folder is
+    open, the current main version is read live from the Document Service -
+    from closure onward, only the fixed closure snapshot counts, without
+    any further document-service call."""
     current_version_number = None
     document_deleted_at = None
     if case.status == "open" and reference.removed_at is None:
@@ -210,10 +213,10 @@ async def create_case(
     except ProcessDefinitionUnknownError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Vorgangsnummer (2.3/2.5, P15-S3): jede neue Umlaufmappe bekommt ab
-    # dieser Session einen server-generierten, installationsweit eindeutigen
-    # Bezug (Grundlage für das automatische Zuordnen eingehender Post über
-    # den neuen mail-connector).
+    # Case number (2.3/2.5, P15-S3): starting with this session, every new
+    # circulation folder gets a server-generated, installation-wide unique
+    # reference (basis for automatically matching incoming mail via the new
+    # mail-connector).
     vorgangsnummer = await repository.next_vorgangsnummer(session)
 
     case = await repository.create_case(
@@ -254,10 +257,10 @@ async def list_cases_by_vorgangsnummer(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
-    """Für den neuen `mail-connector` (2.5/3.3, P15-S3) - vor
-    `/cases/{case_id}` registriert, damit `"by-vorgangsnummer"` nicht als
-    `{case_id}` interpretiert wird (gleiche Route-Reihenfolge-Regel wie
-    `/cases/due-for-archival` unten)."""
+    """For the new `mail-connector` (2.5/3.3, P15-S3) - registered before
+    `/cases/{case_id}` so that `"by-vorgangsnummer"` isn't interpreted as
+    `{case_id}` (same route-ordering rule as `/cases/due-for-archival`
+    below)."""
     await _require_case_permission(x_dms_principal, access_type="read")
     return await repository.list_cases_by_vorgangsnummer(session, value)
 
@@ -266,16 +269,16 @@ async def list_cases_by_vorgangsnummer(
 async def list_cases_due_for_archival(
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
-    """Interner Aufruf von `archival-service` (5.6, seit P7-S3b) - vor
-    `/cases/{case_id}` registriert, damit `"due-for-archival"` nicht als
-    `{case_id}` interpretiert wird (gleiche Route-Reihenfolge-Regel wie
-    `/documents/deleted` in document-service). Bewusst UNGEGATET (Post-
-    Roadmap Phase 19 Session 5, ADR 0070) - reiner Maschine-zu-Maschine-
-    Rückruf ohne menschlichen Principal, `archival-service` sendet dafür
-    aktuell keinerlei Identitäts-Header. Gleiche, bereits vorbestehende
-    Lücke wie `document-service`s analoges `PUT /documents/{id}/archived`
-    (ebenfalls ungegatet) - eine allgemeine Service-zu-Service-Authentisierung
-    ist eine größere, projektweite Entscheidung außerhalb dieser Session."""
+    """Internal call from `archival-service` (5.6, since P7-S3b) -
+    registered before `/cases/{case_id}` so that `"due-for-archival"` isn't
+    interpreted as `{case_id}` (same route-ordering rule as
+    `/documents/deleted` in document-service). Deliberately UNGATED
+    (post-roadmap Phase 19 Session 5, ADR 0070) - a pure machine-to-machine
+    callback with no human principal, `archival-service` currently sends no
+    identity header for this at all. Same, already-preexisting gap as
+    `document-service`'s analogous `PUT /documents/{id}/archived` (also
+    ungated) - a general service-to-service authentication scheme is a
+    larger, project-wide decision outside the scope of this session."""
     return await repository.list_due_for_archival(session)
 
 
@@ -377,9 +380,9 @@ async def request_case_archive(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
-    """Manueller Aussonderungs-Trigger (5.6, seit P7-S3b) - `409`, wenn die
-    Umlaufmappe noch nicht abgeschlossen ist. Menschliche Aktion (anders als
-    `PUT .../archived` unten), daher seit P19-S5 gegated."""
+    """Manual records disposal trigger (5.6, since P7-S3b) - `409` if the
+    circulation folder is not yet closed. A human action (unlike `PUT
+    .../archived` below), therefore gated since P19-S5."""
     await _require_case_permission(x_dms_principal, access_type="write")
     try:
         case = await repository.request_archive(session, case_id)
@@ -409,11 +412,11 @@ async def get_case_archive_status(
 
 @app.put("/cases/{case_id}/archived", response_model=CaseOut)
 async def mark_case_archived(case_id: str, session: AsyncSession = Depends(get_session)) -> CaseOut:
-    """Interner Rueckruf von `archival-service`, sobald das XDOMEA-Paket
-    verifiziert ist (5.6, seit P7-S3b). Bewusst UNGEGATET (Post-Roadmap
-    Phase 19 Session 5, ADR 0070) - gleiche Begründung wie
-    `GET /cases/due-for-archival` oben: reiner Maschine-zu-Maschine-Rückruf,
-    `archival-service` sendet dafür keinen `X-DMS-Principal`."""
+    """Internal callback from `archival-service` once the XDOMEA package is
+    verified (5.6, since P7-S3b). Deliberately UNGATED (post-roadmap Phase
+    19 Session 5, ADR 0070) - same rationale as `GET /cases/due-for-archival`
+    above: a pure machine-to-machine callback, `archival-service` sends no
+    `X-DMS-Principal` for this."""
     try:
         case = await repository.mark_archived(session, case_id)
     except repository.NotFoundError as exc:

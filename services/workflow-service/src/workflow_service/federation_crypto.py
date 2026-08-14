@@ -1,17 +1,16 @@
-"""Ende-zu-Ende-Verschlüsselung zwischen Installationen (7.4, P6-S9, ADR 0028) -
-der Federation Hub selbst besitzt nie einen privaten Schlüssel und sieht daher
-nie Klartext, siehe `docs/services/federation-hub-service.md`. Gleiche
-Bibliothek/Serialisierung wie `signature-service`s interne CA (RSA-2048,
-PEM/PKCS8, `cryptography`) - hier zusätzlich echtes Verschlüsseln/Signaturprüfen
-statt nur Signieren.
+"""End-to-end encryption between installations (7.4, P6-S9, ADR 0028) -
+the Federation Hub itself never holds a private key and therefore never
+sees plaintext, see `docs/services/federation-hub-service.md`. Same
+library/serialization as `signature-service`'s internal CA (RSA-2048,
+PEM/PKCS8, `cryptography`) - here additionally real encryption/signature
+verification instead of just signing.
 
-Envelope-Schema (hybrid, wie TLS/PGP): ein frischer AES-256-GCM-Schlüssel
-verschlüsselt die eigentliche JSON-Payload, RSA-OAEP verschlüsselt wiederum
-diesen AES-Schlüssel mit dem öffentlichen RSA-Schlüssel der Zielinstallation -
-nur deren privater Schlüssel kann ihn wieder freilegen. Das gesamte Envelope
-(``encrypted_key``/``nonce``/``ciphertext``, je base64) wird selbst nochmal
-base64-kodiert als einzelner opaker String übertragen (`encrypted_payload` in
-`federation_hub_service.schemas.HandoverCreate`)."""
+Envelope schema (hybrid, like TLS/PGP): a fresh AES-256-GCM key encrypts
+the actual JSON payload, RSA-OAEP in turn encrypts this AES key with the
+target installation's public RSA key - only its private key can unlock it
+again. The entire envelope (``encrypted_key``/``nonce``/``ciphertext``, each
+base64) is itself base64-encoded again and transmitted as a single opaque
+string (`encrypted_payload` in `federation_hub_service.schemas.HandoverCreate`)."""
 
 import base64
 import json
@@ -27,14 +26,14 @@ _OAEP_PADDING = padding.OAEP(
 
 
 class DecryptionError(Exception):
-    """Envelope nicht entschlüsselbar (falscher privater Schlüssel, manipulierte
-    Bytes, oder kein gültiges Envelope-JSON)."""
+    """Envelope cannot be decrypted (wrong private key, tampered bytes, or
+    no valid envelope JSON)."""
 
 
 def generate_keypair() -> tuple[bytes, bytes]:
-    """Gibt ``(private_key_pem, public_key_pem)`` zurück - wird genau einmal
-    beim ersten Start mit konfiguriertem Federation Hub aufgerufen, siehe
-    `main.py._ensure_federation_identity` (Singleton-Muster wie
+    """Returns ``(private_key_pem, public_key_pem)`` - called exactly once
+    on the first start with a configured Federation Hub, see
+    `main.py._ensure_federation_identity` (singleton pattern like
     `signature-service.connectors.internal.generate_root_ca`)."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_pem = key.private_bytes(
@@ -74,13 +73,13 @@ def decrypt_with(private_key_pem: bytes, encrypted_payload: str) -> dict:
             base64.b64decode(envelope["nonce"]), base64.b64decode(envelope["ciphertext"]), None
         )
         return json.loads(plaintext)
-    except Exception as exc:  # ungültiges Envelope-JSON, falscher Schlüssel, manipulierte Bytes
+    except Exception as exc:  # invalid envelope JSON, wrong key, tampered bytes
         raise DecryptionError(f"Payload nicht entschlüsselbar: {exc}") from exc
 
 
 def sign_body(private_key_pem: bytes, body: bytes) -> str:
-    """Signiert einen ausgehenden Request-Body (RSA-PSS/SHA-256) - genutzt für
-    eigene Aufrufe gegen den Hub, gleiches Schema wie
+    """Signs an outgoing request body (RSA-PSS/SHA-256) - used for our own
+    calls against the Hub, same scheme as
     `federation_hub_service.crypto_utils.sign_body`."""
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     signature = private_key.sign(
@@ -92,9 +91,9 @@ def sign_body(private_key_pem: bytes, body: bytes) -> str:
 
 
 def verify_body(public_key_pem: bytes, body: bytes, signature_b64: str) -> bool:
-    """Verifiziert eine vom Hub signierte Zustellung (`X-Federation-Hub-
-    Signature`) gegen den beim Registrieren einmalig abgerufenen öffentlichen
-    Hub-Schlüssel (Trust-on-First-Use, siehe `models.FederationIdentity`)."""
+    """Verifies a delivery signed by the Hub (`X-Federation-Hub-Signature`)
+    against the public Hub key retrieved once during registration
+    (trust-on-first-use, see `models.FederationIdentity`)."""
     try:
         public_key = serialization.load_pem_public_key(public_key_pem)
         public_key.verify(

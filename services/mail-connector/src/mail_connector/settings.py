@@ -1,10 +1,10 @@
 from dms_common import BaseServiceSettings
 
-# Feste Sonderordner-IDs des folder-service (2.5/3.3, P15-S3) - dieselben
-# hartcodierten Strings wie `folder_service.settings.INBOX_FOLDER_ID`/
-# `OUTBOX_FOLDER_ID`, hier unabhängig dupliziert statt importiert (kein
-# Cross-Service-Code-Import in diesem Projekt, siehe CONTRIBUTING.md "Ein
-# Service ... kommuniziert mit anderen Services nur über deren API").
+# Fixed special-folder IDs of folder-service (2.5/3.3, P15-S3) - the same
+# hard-coded strings as `folder_service.settings.INBOX_FOLDER_ID`/
+# `OUTBOX_FOLDER_ID`, duplicated here independently instead of imported (no
+# cross-service code import in this project, see CONTRIBUTING.md "A
+# service ... communicates with other services only via their API").
 INBOX_FOLDER_ID = "inbox"
 OUTBOX_FOLDER_ID = "outbox"
 
@@ -18,38 +18,38 @@ class Settings(BaseServiceSettings):
     virus_scan_service_base_url: str = "http://localhost:8010"
     document_service_base_url: str = "http://localhost:8006"
     case_service_base_url: str = "http://localhost:8016"
-    # Post-Roadmap Phase 19 Session 11 - Kandidaten-Muster wird aus den
-    # tatsächlich konfigurierten `kennzeichen_format`-Werten abgeleitet
-    # (matching.py), statt fest kodiert zu sein.
+    # Post-Roadmap Phase 19 Session 11 - candidate pattern is derived from
+    # the actually configured `kennzeichen_format` values (matching.py),
+    # instead of being hard-coded.
     object_type_service_base_url: str = "http://localhost:8007"
 
-    # Austauschbares Abhol-Protokoll nach demselben Plugin-Prinzip wie die
-    # Storage-Backends/Virenscan-Engines (3.3/3.6/10.3) - "pop3" (Default) und
-    # seit P24-S3 "imap" implementiert (siehe backends/pop3_backend.py bzw.
-    # backends/imap_backend.py). Microsoft Graph (Exchange/O365) ist über
-    # dasselbe `MailboxBackend`-Interface vorbereitet, aber bewusst nicht
-    # Teil dieser Session (siehe docs/services/mail-connector.md "Offene
-    # Punkte").
+    # Interchangeable retrieval protocol following the same plugin principle
+    # as the storage backends/virus-scan engines (3.3/3.6/10.3) - "pop3"
+    # (default) and, since P24-S3, "imap" implemented (see
+    # backends/pop3_backend.py and backends/imap_backend.py respectively).
+    # Microsoft Graph (Exchange/O365) is prepared for via the same
+    # `MailboxBackend` interface, but deliberately not part of this session
+    # (see docs/services/mail-connector.md "Open Points").
     inbound_protocol: str = "pop3"
 
-    # Entwicklungsstandard: der bereits vorhandene `mailpit`-Container dient
-    # als Selbst-Loopback-Quelle (SMTP-Einlieferung + eigener POP3-Server,
-    # seit mailpit v1.15) - kein externer Mailserver nötig, um den gesamten
-    # Empfangspfad echt zu testen. Zugangsdaten müssen zum in
-    # `infra/docker-compose.yml` hinterlegten `--pop3-auth-file` passen.
+    # Development standard: the already-existing `mailpit` container serves
+    # as the self-loopback source (SMTP submission + its own POP3 server,
+    # since mailpit v1.15) - no external mail server needed to genuinely
+    # test the entire receiving path. Credentials must match the
+    # `--pop3-auth-file` configured in `infra/docker-compose.yml`.
     pop3_host: str = "localhost"
     pop3_port: int = 1110
     pop3_username: str = "mailconnector"
     pop3_password: str = "mailconnector"
     pop3_use_tls: bool = False
 
-    # IMAP-Gegenstück (P24-S3) - `mailpit` (Stand v1.30.6, siehe
-    # `docker run axllent/mailpit --help`) bringt anders als beim POP3-Server
-    # KEINEN eigenen IMAP-Server mit, es gibt deshalb (noch) keinen
-    # Entwicklungsstandard-Selbst-Loopback für IMAP wie bei POP3 - Defaults
-    # hier sind reine Platzhalter für einen echten externen IMAP-Server.
-    # `imap_mailbox` ist IMAP-spezifisch (POP3 kennt keine benannten Ordner,
-    # dort wird stets das gesamte - flache - Postfach abgeholt).
+    # IMAP counterpart (P24-S3) - unlike the POP3 server, `mailpit` (as of
+    # v1.30.6, see `docker run axllent/mailpit --help`) does NOT ship its own
+    # IMAP server, so there is (still) no development-standard self-loopback
+    # for IMAP as there is for POP3 - the defaults here are pure placeholders
+    # for a real external IMAP server. `imap_mailbox` is IMAP-specific (POP3
+    # has no named folders, there the entire - flat - mailbox is always
+    # retrieved).
     imap_host: str = "localhost"
     imap_port: int = 993
     imap_username: str = "mailconnector"
@@ -57,9 +57,9 @@ class Settings(BaseServiceSettings):
     imap_use_tls: bool = True
     imap_mailbox: str = "INBOX"
 
-    # Postausgang (2.5, P15-S3) - eigener SMTP-Versand statt Wiederverwendung
-    # von notification-service (dessen `POST /notifications` ist auf bereits
-    # bekannte DMS-Nutzer beschränkt, siehe ADR 0053), gleicher Zuschnitt wie
+    # Outbound mail (2.5, P15-S3) - dedicated SMTP dispatch instead of
+    # reusing notification-service (whose `POST /notifications` is limited to
+    # already-known DMS users, see ADR 0053), same shape as
     # notification-service's `delivery.py`.
     smtp_host: str = "mailpit"
     smtp_port: int = 1025
@@ -68,15 +68,15 @@ class Settings(BaseServiceSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
 
-    # Wie oft der Poll-Loop neue Nachrichten abholt (gleiches Idiom wie
-    # document-service's `retention_poll_interval_seconds`) - deutlich
-    # kürzer als dort, da Poststelle-Betrieb auf zeitnahe Sichtbarkeit
-    # eingehender Post angewiesen ist, nicht auf einen groben Datumsvergleich.
+    # How often the poll loop retrieves new messages (same idiom as
+    # document-service's `retention_poll_interval_seconds`) - considerably
+    # shorter than there, since mail room operation depends on timely
+    # visibility of incoming mail, not on a coarse date comparison.
     poll_interval_seconds: float = 20.0
 
-    # "Eine eigene, eng begrenzte Rolle darf den ungesichteten Zulauf sehen/
-    # bearbeiten" (Konzept 2.5, wörtlich) - bewusst NICHT `dms-admin` als
-    # Default (anders als die übrigen Rollen-Settings dieses Projekts): die
-    # Poststelle ist laut Konzept eine eigenständige Betriebsrolle, keine
-    # IT-Administration.
+    # "A dedicated, narrowly scoped role may view/process the unreviewed
+    # intake" (concept 2.5, verbatim) - deliberately NOT `dms-admin` as the
+    # default (unlike the other role settings in this project): per the
+    # concept, the mail room is a standalone operational role, not IT
+    # administration.
     poststelle_role: str = "dms-poststelle"

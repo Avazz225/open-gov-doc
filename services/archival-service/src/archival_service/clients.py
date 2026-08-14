@@ -2,9 +2,9 @@ import httpx
 
 
 class DocumentClient:
-    """Duenner HTTP-Client gegen document-service (5.6) - document-service
-    bleibt alleinige Autoritaet fuer Dokument-Lebenszyklusfelder, dieser
-    Service ruft nur die dafuer vorgesehenen internen Endpunkte auf."""
+    """Thin HTTP client against document-service (5.6) - document-service
+    remains the sole authority for document lifecycle fields; this service
+    only calls the internal endpoints provided for that purpose."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -58,15 +58,15 @@ class DocumentClient:
 
 
 class RenderingClient:
-    """Duenner HTTP-Client gegen rendering-service - liest die bereits vom
-    regulaeren Rendition-Pipeline erzeugte `pdf_archive`-Ersatzdarstellung
-    (P7-S3-Erweiterung von `PdfArchiveRenderer`), triggert selbst keine neue
-    Konvertierung.
+    """Thin HTTP client against rendering-service - reads the `pdf_archive`
+    rendition already produced by the regular rendition pipeline (P7-S3
+    extension of `PdfArchiveRenderer`); does not itself trigger a new
+    conversion.
 
     RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073): `GET /renditions`/
-    `.../content` verlangen seither `rendering.read` - beide hier genutzten
-    Aufrufe laufen als reiner Maschine-zu-Maschine-Aufruf ohne menschlichen
-    Principal, gleiches `system:<Service>`-Muster wie `CaseClient` unten."""
+    `.../content` have since required `rendering.read` - both calls used
+    here run as a pure machine-to-machine call without a human principal,
+    the same `system:<Service>` pattern as `CaseClient` below."""
 
     _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:archival-service"}
 
@@ -95,9 +95,9 @@ class RenderingClient:
 
 
 class StorageClient:
-    """Duenner HTTP-Client gegen storage-service - sowohl das reguläre
-    Live-Ziel (Rueckholung, `upload`) als auch die neuen Archiv-Ziel-
-    Endpunkte (P7-S3)."""
+    """Thin HTTP client against storage-service - both the regular live
+    target (retrieval, `upload`) and the new archive-target endpoints
+    (P7-S3)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=60.0)
@@ -133,8 +133,8 @@ class StorageClient:
 
 
 class ObjectTypeClient:
-    """Duenner HTTP-Client gegen object-type-service - nur zum Nachschlagen
-    von `archive_encryption_enabled` pro Objekttyp."""
+    """Thin HTTP client against object-type-service - only for looking up
+    `archive_encryption_enabled` per object type."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -149,21 +149,21 @@ class ObjectTypeClient:
 
 
 class CaseClient:
-    """Duenner HTTP-Client gegen case-service (5.6, seit P7-S3b) - fuer die
-    XDOMEA-Aussonderung von Umlaufmappen. case-service bleibt alleinige
-    Autoritaet fuer Case-Lebenszyklusfelder, gleiches Prinzip wie
-    `DocumentClient` gegenueber document-service.
+    """Thin HTTP client against case-service (5.6, since P7-S3b) - for the
+    XDOMEA records disposal of circulation folders. case-service remains
+    the sole authority for case lifecycle fields, the same principle as
+    `DocumentClient` toward document-service.
 
-    RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070): case-service prueft
-    seit dieser Session `case.read`/`case.write` und verlangt dafuer einen
-    `X-DMS-Principal`-Header. Die lesenden Aufrufe hier (`get_case`,
-    `list_document_references`, `get_archival_config`) laufen als reiner
-    Maschine-zu-Maschine-Aufruf ohne menschlichen Principal - synthetischer
-    Identifikator nach demselben "system:<Service>"-Muster wie an anderer
-    Stelle im Projekt (z. B. `actor="system:archival-service"` bei
-    publizierten Events). `list_due_for_archival`/`mark_archived` bleiben
-    bewusst ohne Header - case-service laesst genau diese beiden Endpunkte
-    unveraendert ungegatet (siehe dortige Docstrings)."""
+    RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070): since this session,
+    case-service checks `case.read`/`case.write` and requires an
+    `X-DMS-Principal` header for that. The read calls here (`get_case`,
+    `list_document_references`, `get_archival_config`) run as a pure
+    machine-to-machine call without a human principal - a synthetic
+    identifier following the same "system:<Service>" pattern used elsewhere
+    in the project (e.g. `actor="system:archival-service"` on published
+    events). `list_due_for_archival`/`mark_archived` deliberately remain
+    without the header - case-service leaves exactly these two endpoints
+    ungated, unchanged (see the docstrings there)."""
 
     _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:archival-service"}
 

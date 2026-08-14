@@ -8,8 +8,8 @@ from storage_service.backends.interface import ObjectNotFoundError, StorageBacke
 
 
 class S3Backend(StorageBackend):
-    """S3-kompatibles Backend (3.6) - Werkseinstellung MinIO, funktioniert
-    identisch gegen jeden S3-kompatiblen Provider (AWS S3, Ceph RGW, ...)."""
+    """S3-compatible backend (3.6) - defaults to MinIO, works identically
+    against any S3-compatible provider (AWS S3, Ceph RGW, ...)."""
 
     def __init__(
         self,
@@ -27,10 +27,10 @@ class S3Backend(StorageBackend):
         self._secret_key = secret_key
         self._bucket = bucket
         self._region = region
-        # WORM/Object-Lock (5.1/5.2a, seit P7-S1) - siehe
-        # `BackendTargetConfig.object_lock_mode`. Nur relevant für
-        # `ensure_bucket()`/`write()`, `delete()` erhält `bypass_governance`
-        # unabhängig davon direkt vom Aufrufer.
+        # WORM/Object Lock (5.1/5.2a, since P7-S1) - see
+        # `BackendTargetConfig.object_lock_mode`. Only relevant for
+        # `ensure_bucket()`/`write()`; `delete()` receives
+        # `bypass_governance` directly from the caller regardless.
         self._object_lock_enabled = object_lock_enabled
 
     def _client(self):
@@ -47,14 +47,14 @@ class S3Backend(StorageBackend):
             try:
                 await s3.head_bucket(Bucket=self._bucket)
             except ClientError:
-                # `ObjectLockEnabledForBucket` lässt sich NICHT nachträglich
-                # auf einen bereits bestehenden Bucket aktivieren (S3-API-
-                # Grenze) - dieser Zweig greift deshalb bewusst nur bei der
-                # allerersten Anlage. Ein längst existierender Bucket (wie in
-                # dieser Entwicklungsumgebung) bleibt über den
-                # `head_bucket`-Erfolgszweig oben unangetastet, auch wenn
-                # `object_lock_mode` nachträglich gesetzt wird - siehe ADR
-                # 0030 für die bewusst unterlassene automatische Migration.
+                # `ObjectLockEnabledForBucket` CANNOT be enabled after the
+                # fact on an already-existing bucket (S3 API limitation) -
+                # this branch therefore deliberately only applies on the
+                # very first creation. A bucket that has long existed (as
+                # in this development environment) remains untouched via
+                # the `head_bucket` success branch above, even if
+                # `object_lock_mode` is set afterward - see ADR 0030 for
+                # why automatic migration was deliberately not implemented.
                 kwargs = {"ObjectLockEnabledForBucket": True} if self._object_lock_enabled else {}
                 await s3.create_bucket(Bucket=self._bucket, **kwargs)
 
@@ -78,17 +78,16 @@ class S3Backend(StorageBackend):
         async with self._client() as s3:
             kwargs: dict = {}
             if self._object_lock_enabled:
-                # Object-Lock-Buckets haben zwingend Versionierung aktiv
-                # (siehe ensure_bucket). Ein `delete_object()` OHNE VersionId
-                # würde auf einem versionierten Bucket nur einen Delete-
-                # Marker anlegen und die eigentliche, gesperrte Version
-                # unangetastet (und weiter abrechenbar) zurücklassen -
-                # Governance-Mode kann nur greifen, wenn die konkrete Version
-                # explizit adressiert wird.
+                # Object Lock buckets always have versioning enabled (see
+                # ensure_bucket). A `delete_object()` WITHOUT VersionId on a
+                # versioned bucket would only create a delete marker and
+                # leave the actual, locked version untouched (and still
+                # billable) - Governance mode can only take effect when the
+                # specific version is addressed explicitly.
                 try:
                     head = await s3.head_object(Bucket=self._bucket, Key=key)
                 except ClientError:
-                    return  # bereits nicht (mehr) vorhanden - idempotent wie sonst auch
+                    return  # already gone - idempotent as usual
                 version_id = head.get("VersionId")
                 if version_id:
                     kwargs["VersionId"] = version_id

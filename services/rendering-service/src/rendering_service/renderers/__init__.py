@@ -5,12 +5,12 @@ from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
 from rendering_service.renderers.pptx_text import PptxTextExtractionRenderer
 from rendering_service.renderers.thumbnail import ThumbnailRenderer
 
-# Regeltabelle "Quellformat -> Ersatzdarstellung(en)" (2.4/3.7). Bewusst auf
-# Formate beschränkt, die ohne OCR auskommen (Office-Dokumente, Rasterbilder,
-# PDF) - bildbasierte/gescannte Dokumente folgen als Nachzieheffekt von P5-S3
-# (siehe IMPLEMENTATION_PLAN.md). Ein Video-Transkriptions-Plugin (2.4) ist
-# laut Konzept selbst optional ("sofern verfügbar") und bewusst nicht Teil
-# dieser Session - es existiert (noch) keine Transkriptions-Engine.
+# Rule table "source format -> rendition(s)" (2.4/3.7). Deliberately limited
+# to formats that work without OCR (Office documents, raster images, PDF) -
+# image-based/scanned documents follow as a follow-up effect of P5-S3
+# (see IMPLEMENTATION_PLAN.md). A video transcription plugin (2.4) is
+# itself optional per the concept ("if available") and deliberately not
+# part of this session - no transcription engine exists (yet).
 RENDERERS: list[Renderer] = [
     ThumbnailRenderer(),
     DocxTextExtractionRenderer(),
@@ -25,13 +25,13 @@ def select_renderers(*, content_type: str | None, filename: str) -> list[Rendere
 
 
 def get_renderer_by_type(rendition_type: str) -> Renderer | None:
-    """Für den Retry-Poll-Loop (Post-Roadmap Phase 20 Session 4, ADR 0080):
-    eine fehlgeschlagene Rendition-Zeile kennt nur ihren `rendition_type`
-    (nicht mehr die ursprüngliche Content-Type-/Dateinamen-Zuordnung, die zur
-    Renderer-Auswahl führte) - ein Wiederholungsversuch muss gezielt NUR den
-    einen betroffenen Renderer erneut aufrufen, nicht `select_renderers()`
-    erneut über alle Regeln laufen lassen (würde auch bereits erfolgreiche
-    Renditions unnötig neu erzeugen)."""
+    """For the retry poll loop (post-roadmap phase 20 session 4, ADR 0080):
+    a failed rendition row only knows its `rendition_type` (no longer the
+    original content-type/filename mapping that led to the renderer
+    selection) - a retry must specifically call ONLY the one affected
+    renderer again, not run `select_renderers()` again over all rules
+    (which would also unnecessarily regenerate already successful
+    renditions)."""
     for renderer in RENDERERS:
         if renderer.rendition_type == rendition_type:
             return renderer

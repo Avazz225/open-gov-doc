@@ -8,13 +8,13 @@ Base = make_declarative_base("signature")
 
 
 class InternalCa(Base):
-    """Selbstsignierte interne Root-CA (3.10, "systeminterne/selbstsignierte
-    Schlüssel") - bewusst eine einzelne Zeile mit fester `id=1`, gleiches
-    Singleton-Muster wie `OcrConfig`/`SystemMaintenanceMode` (eine Installation,
-    keine Mandantentrennung, 3a). Wird beim ersten Start generiert (RSA 2048 +
-    selbstsigniertes Root-Zertifikat, siehe `connectors/internal.py`) und danach
-    idempotent wiederverwendet - jede spätere Signatur wird mit einem von dieser
-    Root ausgestellten, kurzlebigen Leaf-Zertifikat erzeugt (siehe
+    """Self-signed internal root CA (3.10, "system-internal/self-signed
+    keys") - deliberately a single row with a fixed `id=1`, same singleton
+    pattern as `OcrConfig`/`SystemMaintenanceMode` (one installation, no
+    tenant separation, 3a). Generated on first startup (RSA 2048 +
+    self-signed root certificate, see `connectors/internal.py`) and then
+    reused idempotently - every later signature is produced with a
+    short-lived leaf certificate issued by this root (see
     `Signature.certificate_serial`)."""
 
     __tablename__ = "internal_ca"
@@ -26,14 +26,13 @@ class InternalCa(Base):
 
 
 class Signature(Base):
-    """Eine einzelne elektronische Signatur (3.10) - gebunden an eine konkrete,
-    neu erzeugte Dokumentversion bei document-service (2.1a): das Signieren
-    verändert zwangsläufig die PDF-Bytes (PAdES bettet die Signatur in die
-    Datei selbst ein), die signierten Bytes werden deshalb als eigenständige,
-    für immer erhaltene Version eingecheckt statt die Ursprungsversion zu
-    überschreiben - `source_version_number` verweist auf die signierte
-    Ausgangsversion, `version_number` auf die neu entstandene, signierte
-    Version."""
+    """A single electronic signature (3.10) - bound to a specific, newly
+    created document version at document-service (2.1a): signing
+    necessarily changes the PDF bytes (PAdES embeds the signature into the
+    file itself), so the signed bytes are checked in as a standalone,
+    permanently retained version instead of overwriting the source
+    version - `source_version_number` refers to the signed source version,
+    `version_number` to the newly created, signed version."""
 
     __tablename__ = "signature"
 
@@ -54,15 +53,15 @@ class Signature(Base):
 
 
 class SignatureConfig(Base):
-    """Admin-UI-editierbare Connector-Niveaus (3.10, Post-Roadmap Phase 22
-    Session 6, ADR 0091) - einzelne Zeile mit fester `id=1`, gleiches
-    Singleton-Muster wie `InternalCa`/`OcrConfig`. `provider_levels` bildet
-    NUR `SignatureProviderConfig.levels` je bereits per Env-Var konfiguriertem
-    Connector ab (`{connector_id: [level, ...]}`) - `id`/`type` bleiben
-    strukturell fest (env-var, keine Geheimnisse involviert, aber neue
-    Connector-Typen brauchen ohnehin Code, siehe `connectors/__init__.py`).
-    Bei jedem Signaturvorgang frisch aus der DB gelesen (kein `app.state`-
-    Cache), daher ohne Neustart wirksam."""
+    """Admin-UI-editable connector levels (3.10, post-roadmap phase 22
+    session 6, ADR 0091) - single row with a fixed `id=1`, same singleton
+    pattern as `InternalCa`/`OcrConfig`. `provider_levels` maps ONLY
+    `SignatureProviderConfig.levels` per already env-var-configured
+    connector (`{connector_id: [level, ...]}`) - `id`/`type` remain
+    structurally fixed (env var, no secrets involved, but new connector
+    types need code anyway, see `connectors/__init__.py`). Read fresh from
+    the DB on every signing operation (no `app.state` cache), hence
+    effective without a restart."""
 
     __tablename__ = "signature_config"
 

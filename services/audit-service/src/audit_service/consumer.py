@@ -15,15 +15,15 @@ def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
     deletion_ledger_path: Path,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Ein Handler wird über alle abonnierten Subjects hinweg geteilt (siehe
-    ``start_consuming``) - NATS ruft je Subject-Subscription unabhängig auf,
-    Events aus verschiedenen Streams (z. B. "registry.>" und "document.>")
-    können also nebenläufig eintreffen. ``append_event`` liest den aktuellen
-    Kettenkopf, bevor es die neue Zeile schreibt - ohne Serialisierung könnten
-    zwei nebenläufige Aufrufe denselben ``prev_hash`` lesen und die Kette
-    korrumpieren. Ein einfacher In-Prozess-Lock genügt, da der Audit Service
-    als Single-Writer für seine eigene Kette konzipiert ist (keine horizontale
-    Skalierung mehrerer Audit-Service-Instanzen auf derselben Kette).
+    """A handler is shared across all subscribed subjects (see
+    ``start_consuming``) - NATS invokes it independently per subject
+    subscription, so events from different streams (e.g. "registry.>" and
+    "document.>") can arrive concurrently. ``append_event`` reads the
+    current chain head before writing the new row - without serialization,
+    two concurrent calls could read the same ``prev_hash`` and corrupt the
+    chain. A simple in-process lock suffices, since the Audit Service is
+    designed as the single writer for its own chain (no horizontal scaling
+    of multiple Audit Service instances on the same chain).
     """
     append_lock = asyncio.Lock()
 
@@ -32,9 +32,10 @@ def make_handler(
         async with append_lock, session_factory() as session:
             await repository.append_event(session, event)
             await session.commit()
-        # Loeschregister-Ledger (10.4, P11-S4): bewusst NACH dem Commit und
-        # AUSSERHALB des append_lock/der DB-Transaktion - eine eigene Datei,
-        # kein Teil der Hash-Kette, darf deren Serialisierung nicht blockieren.
+        # Deletion register ledger (10.4, P11-S4): deliberately AFTER the
+        # commit and OUTSIDE the append_lock/DB transaction - a separate
+        # file, not part of the hash chain, must not block its
+        # serialization.
         deletion_ledger.append_if_force_deletion(event, deletion_ledger_path)
 
     return handle
@@ -46,15 +47,15 @@ async def start_consuming(
     session_factory: async_sessionmaker[AsyncSession],
     deletion_ledger_path: Path,
 ) -> None:
-    """Ein durable Consumer je konfiguriertem Subject - `durable="audit-service"`
-    sorgt dafür, dass ein Neustart des Audit Service dort weitermacht, wo er
-    aufgehört hat (kein `deliver_new`: die Kette darf keine Lücke haben).
+    """A durable consumer per configured subject - `durable="audit-service"`
+    ensures that a restart of the Audit Service resumes where it left off
+    (no `deliver_new`: the chain must not have any gaps).
 
-    Existiert für ein Subject (noch) kein Stream - z. B. weil der jeweilige
-    Producer-Service noch nie gelaufen ist -, wird es übersprungen statt den
-    Service-Start zu blockieren (analog zu permission-service, ADR 0001).
-    **Bekannte Grenze**: taucht der Stream später auf, wird er ohne Neustart
-    dieses Service nicht automatisch nachgeholt.
+    If a stream does not (yet) exist for a subject - e.g. because the
+    respective producer service has never run - it is skipped instead of
+    blocking service startup (analogous to permission-service, ADR 0001).
+    **Known limitation**: if the stream appears later, it is not
+    automatically caught up without a restart of this service.
     """
     handler = make_handler(session_factory, deletion_ledger_path)
     for subject in subjects:

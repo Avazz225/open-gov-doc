@@ -4,9 +4,9 @@ import httpx
 
 
 class DocumentNotFoundError(Exception):
-    """Dokument/Version wurde beim Document Service nicht (mehr) gefunden -
-    z. B. inzwischen gelöscht, während das Rendering-Event noch in der
-    Zustellung war."""
+    """Document/version was not (or no longer) found at the Document Service -
+    e.g. deleted in the meantime while the rendering event was still in
+    delivery."""
 
 
 @dataclass
@@ -16,11 +16,11 @@ class VersionMetadata:
 
 
 class DocumentServiceClient:
-    """HTTP-Client gegen den Document Service (3.1: eigenes Schema pro Service,
-    kein direkter DB-/Storage-Key-Zugriff). Der Rendering Service kennt weder
-    das interne Datenmodell noch den content-addressierten Storage-Key einer
-    Version - beides bleibt Sache des Document Service, Original-Metadaten und
-    -Inhalt werden ausschließlich über dessen öffentliche API bezogen."""
+    """HTTP client against the Document Service (3.1: own schema per service,
+    no direct DB/storage key access). The Rendering Service knows neither
+    the internal data model nor the content-addressed storage key of a
+    version - both remain the Document Service's responsibility, original
+    metadata and content are obtained exclusively via its public API."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

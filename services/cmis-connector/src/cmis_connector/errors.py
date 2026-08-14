@@ -1,7 +1,7 @@
-"""CMIS-Services-Exceptions (5.2.10 "Error Handling and Return Codes") - der
-JSON-Fehlerkörper MUSS `{"exception": ..., "message": ...}` an der Wurzel
-tragen, nicht in FastAPIs Standard-`{"detail": ...}`-Hülle verpackt (daher
-ein eigener Exception-Handler statt `HTTPException.detail`)."""
+"""CMIS service exceptions (5.2.10 "Error Handling and Return Codes") - the
+JSON error body MUST carry `{"exception": ..., "message": ...}` at the root,
+not wrapped in FastAPI's standard `{"detail": ...}` envelope (hence a
+dedicated exception handler instead of `HTTPException.detail`)."""
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse

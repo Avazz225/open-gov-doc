@@ -10,10 +10,10 @@ LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
 
 
 class LicenseStatusClient:
-    """Fragt den eigenen Lizenzstatus beim `registry-service` ab (Konzept
-    9.1/9.3, P9-S2-Muster, siehe `workflow_service.license_client`) - Konzept
-    9.1 nennt "Migration-Service" wörtlich als Beispiel für eine separat
-    lizenzierbare Komponente."""
+    """Queries its own license status from `registry-service` (concept
+    9.1/9.3, P9-S2 pattern, see `workflow_service.license_client`) - concept
+    9.1 names "Migration-Service" verbatim as an example of a separately
+    licensable component."""
 
     def __init__(
         self,

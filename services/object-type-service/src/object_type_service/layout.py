@@ -1,11 +1,11 @@
-"""Smart-Layout-Generierung (2.2b): leitet ein Standard-Formular-Layout
-(Zeilen/Spalten-Grid) aus der Attributliste eines Objekttyps ab, solange keine
-über den Layout-Designer (P5b-S3) explizit gespeicherte Abweichung existiert.
+"""Smart layout generation (2.2b): derives a standard form layout (row/column
+grid) from an object type's attribute list, as long as no explicit deviation
+saved via the Layout Designer (P5b-S3) exists.
 
-Dieselbe Generierung wird für alle drei Verwendungszwecke (Anzeige/Suche/
-Upload) verwendet - Zweck-spezifische Unterschiede entstehen laut Konzept 2.2b
-erst durch individuelles Nachjustieren im Layout-Designer, nicht durch
-unterschiedliche Default-Heuristiken.
+The same generation logic is used for all three usage purposes (display/
+search/upload) - per Concept 2.2b, purpose-specific differences only arise
+through individual adjustment in the Layout Designer, not through different
+default heuristics.
 """
 
 COLUMNS_PER_ROW = 2
@@ -13,13 +13,13 @@ DEFAULT_RESPONSIVE_BREAKPOINT_PX = 600
 
 
 def generate_smart_layout(attributes: list[dict]) -> dict:
-    """Packt Attribute in Anlage-Reihenfolge zu je ``COLUMNS_PER_ROW`` Feldern
-    pro Zeile. ``label`` startet als Kopie des technischen Attributnamens -
-    eine eigene Anzeigename-Vergabe ist erst mit dem GUI-Editor (P5b-S3)
-    vorgesehen; bis dahin ist die Attributliste die einzige verfügbare
-    Quelle. ``required`` spiegelt den Attribut-Stand zum Generierungszeitpunkt
-    (Snapshot, keine live Referenz - eine spätere Layout-Anpassung entkoppelt
-    sich bewusst von der Objekttyp-Definition, siehe ADR 0014)."""
+    """Packs attributes, in creation order, into groups of ``COLUMNS_PER_ROW``
+    fields per row. ``label`` starts as a copy of the technical attribute
+    name - assigning a dedicated display name is only planned for the GUI
+    editor (P5b-S3); until then, the attribute list is the only available
+    source. ``required`` reflects the attribute state at generation time
+    (a snapshot, not a live reference - a later layout adjustment
+    deliberately decouples from the object type definition, see ADR 0014)."""
     rows = []
     for start in range(0, len(attributes), COLUMNS_PER_ROW):
         chunk = attributes[start : start + COLUMNS_PER_ROW]

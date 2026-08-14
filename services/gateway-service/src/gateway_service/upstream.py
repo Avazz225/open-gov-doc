@@ -22,24 +22,24 @@ HOP_BY_HOP_HEADERS = frozenset(
 
 
 def filter_headers(headers) -> dict[str, str]:
-    """Entfernt Hop-by-Hop-Header UND jeden vom Client mitgeschickten
-    ``X-DMS-*``-Header (Sicherheitsfund, P14-S11-Live-Verifikation): diese
-    Header sind ausschließlich für die vom Gateway selbst injizierte,
-    JWT-abgeleitete Identität vorgesehen (``X-DMS-Principal``/`-Username`/
-    `-Roles`/`-Maintenance-Active`) - ohne diesen Filter würde ein Client
-    mit gültigem Bearer-Token einen eigenen ``X-DMS-Principal``-Header
-    mitschicken können, der NICHT überschrieben, sondern als zusätzlicher,
-    andersgroßgeschriebener Dict-Eintrag neben dem echten landete (Python-
-    Dict-Keys sind case-sensitive, ``"x-dms-principal"`` aus den ASGI-
-    normalisierten eingehenden Headern und ``"X-DMS-Principal"`` aus
-    ``proxy()``s ``identity_headers`` sind zwei verschiedene Schlüssel) -
-    beide Header wurden dadurch an den Downstream weitergereicht, der
-    tatsächlich verwendete Wert hing vom jeweiligen HTTP-Parser ab. Live
-    verifiziert: ein authentifizierter Aufrufer konnte sich dadurch als
-    beliebiger anderer Principal ausgeben. Betraf jeden Endpunkt, der
-    ``X-DMS-Principal``/`-Roles` auswertet (u. a. P5e-S2 Kennzeichen-Admin-
-    Rolle, P14-S6 Teamspace-Mitgliedschaft, P14-S10 Freigabelink-Ersteller,
-    P14-S11 Stellvertretung) - siehe ADR 0049."""
+    """Removes hop-by-hop headers AND any ``X-DMS-*`` header sent by the
+    client (security finding, P14-S11 live verification): these headers
+    are reserved exclusively for the JWT-derived identity injected by the
+    gateway itself (``X-DMS-Principal``/`-Username`/`-Roles`/
+    `-Maintenance-Active`) - without this filter, a client with a valid
+    bearer token could send its own ``X-DMS-Principal`` header, which
+    would NOT be overwritten but would end up as an additional,
+    differently-cased dict entry alongside the real one (Python dict keys
+    are case-sensitive, ``"x-dms-principal"`` from the ASGI-normalized
+    incoming headers and ``"X-DMS-Principal"`` from ``proxy()``'s
+    ``identity_headers`` are two different keys) - both headers were
+    thereby passed on to the downstream service, and the value actually
+    used depended on the respective HTTP parser. Verified live: an
+    authenticated caller could impersonate any other principal this way.
+    Affected every endpoint that evaluates ``X-DMS-Principal``/`-Roles`
+    (among others, P5e-S2 reference-number admin role, P14-S6 teamspace
+    membership, P14-S10 share-link creator, P14-S11 delegation) - see
+    ADR 0049."""
     return {
         k: v
         for k, v in headers.items()
@@ -48,12 +48,12 @@ def filter_headers(headers) -> dict[str, str]:
 
 
 class InstanceResolver:
-    """Fragt für jeden `service_type` die Registry nach aktiven Instanzen (3.2a)
-    und cached das Ergebnis kurz (`instance_cache_ttl_seconds`), damit nicht
-    jeder proxied Request einen zusätzlichen Registry-Roundtrip kostet.
-    Schlägt der Registry-Aufruf fehl, wird der letzte bekannte Stand
-    weiterverwendet statt sofort auf 503 zu gehen (kurzzeitige Registry-
-    Ausfälle sollen laufenden Betrieb nicht sofort lahmlegen).
+    """Queries the registry for active instances of each `service_type`
+    (3.2a) and caches the result briefly (`instance_cache_ttl_seconds`), so
+    not every proxied request costs an additional registry round trip. If
+    the registry call fails, the last known state continues to be used
+    instead of immediately returning 503 (brief registry outages should
+    not immediately cripple ongoing operation).
     """
 
     def __init__(
@@ -63,14 +63,14 @@ class InstanceResolver:
         self._registry_base_url = registry_base_url.rstrip("/")
         self._cache_ttl = cache_ttl_seconds
         self._cache: dict[str, tuple[float, list[dict]]] = {}
-        # Workload-bewusste Auswahl (P25-S4): Zähler offener Anfragen je
-        # Instanz-Adresse, rein in-process (siehe `pick()`/`reserve()`/
-        # `release()` unten). Bewusst NICHT wie der Rate Limiter (P25-S3,
-        # ADR 0097) über Redis geteilt - dieser Zähler soll die tatsächlich
-        # gerade von DIESER Gateway-Replika offenen Requests je Ziel
-        # widerspiegeln, nicht einen installationsweiten Wert. Bei mehreren
-        # Gateway-Replikas sieht jede Replika nur ihre eigene Teilmenge der
-        # Last, siehe docs/services/gateway-service.md.
+        # Workload-aware selection (P25-S4): counter of open requests per
+        # instance address, purely in-process (see `pick()`/`reserve()`/
+        # `release()` below). Deliberately NOT shared via Redis like the
+        # rate limiter (P25-S3, ADR 0097) - this counter is meant to
+        # reflect the requests actually currently open toward each target
+        # FROM THIS gateway replica, not an installation-wide value. With
+        # multiple gateway replicas, each replica sees only its own subset
+        # of the load, see docs/services/gateway-service.md.
         self._open_requests: dict[str, int] = {}
 
     async def resolve(self, service_type: str) -> list[dict]:
@@ -82,10 +82,11 @@ class InstanceResolver:
         try:
             response = await self._client.get(f"{self._registry_base_url}/instances/{service_type}")
             response.raise_for_status()
-            # Drain-Mechanismus (10.5/3.8, P10-S2): eine "draining" Instanz
-            # bleibt erreichbar (laufende Vorgaenge schliessen regulaer ab),
-            # bekommt aber keine NEUEN Anfragen mehr - sie faellt hier aus
-            # dem Auswahl-Pool, statt eigens abgefragt/gekillt zu werden.
+            # Drain mechanism (10.5/3.8, P10-S2): a "draining" instance
+            # remains reachable (ongoing operations complete normally), but
+            # no longer receives NEW requests - it drops out of the
+            # selection pool here, instead of being separately queried or
+            # killed.
             instances = [
                 i for i in response.json() if i["healthy"] and i.get("status", "active") == "active"
             ]
@@ -96,44 +97,46 @@ class InstanceResolver:
         return instances
 
     def pick(self, instances: list[dict]) -> dict:
-        """Wählt die Instanz mit den wenigsten aktuell offenen Anfragen
-        (P25-S4) statt wie zuvor rein zufällig (ADR 0005). Instanzen ohne
-        bisherige Reservierung zählen als 0. Tie-Break bei mehreren Instanzen
-        mit demselben Minimum: zufällig unter den Minimum-Kandidaten statt
-        z. B. immer der ersten in der Liste - insbesondere beim Start (alle
-        Zähler 0) würde "erste in der Liste" sonst jede Anfrage an dieselbe
-        Instanz schicken, bis diese als Erste einen offenen Request hat, statt
-        die Last von Anfang an gleichmäßig zu streuen.
+        """Selects the instance with the fewest currently open requests
+        (P25-S4) instead of purely at random as before (ADR 0005).
+        Instances without a prior reservation count as 0. Tie-break among
+        multiple instances with the same minimum: random among the
+        minimum candidates instead of, e.g., always the first in the list
+        - especially at startup (all counters at 0), "first in the list"
+        would otherwise send every request to the same instance until it
+        is the first to have an open request, instead of spreading the
+        load evenly from the start.
         """
         min_open = min(self._open_requests.get(i["address"], 0) for i in instances)
         candidates = [i for i in instances if self._open_requests.get(i["address"], 0) == min_open]
         return random.choice(candidates)
 
     def reserve(self, instance: dict) -> None:
-        """Erhöht den Zähler offener Anfragen für `instance` um eins - vor
-        dem eigentlichen Upstream-Aufruf zu rufen, siehe `reserved_instance()`
-        unten für die empfohlene Verwendung (deckt auch Exceptions ab)."""
+        """Increments the counter of open requests for `instance` by one -
+        to be called before the actual upstream call, see
+        `reserved_instance()` below for the recommended usage (also covers
+        exceptions)."""
         address = instance["address"]
         self._open_requests[address] = self._open_requests.get(address, 0) + 1
 
     def release(self, instance: dict) -> None:
-        """Gegenstück zu `reserve()` - nach Abschluss (Erfolg ODER Exception)
-        des Upstream-Aufrufs zu rufen. `max(0, ...)` als Schutz gegen ein
-        Unterlaufen unter 0 bei einem unerwarteten Reserve/Release-Ungleich-
-        gewicht, statt dass der Zähler dauerhaft negativ bliebe."""
+        """Counterpart to `reserve()` - to be called after the upstream
+        call completes (success OR exception). `max(0, ...)` as protection
+        against dropping below 0 in case of an unexpected reserve/release
+        imbalance, instead of leaving the counter permanently negative."""
         address = instance["address"]
         self._open_requests[address] = max(0, self._open_requests.get(address, 0) - 1)
 
     @asynccontextmanager
     async def reserved_instance(self, instances: list[dict]) -> AsyncIterator[dict]:
-        """Wählt eine Instanz (`pick()`) und hält sie für die Dauer des
-        `with`-Blocks als "offen" reserviert - `release()` läuft in einem
-        `finally`, deckt also auch den Fall ab, dass der eigentliche Upstream-
-        Aufruf mit einer Exception abbricht (z. B. `httpx.HTTPError`). Ohne
-        dieses `finally` würde ein fehlschlagender Upstream-Aufruf seinen
-        reservierten Slot dauerhaft belegt lassen ("Leak"), wodurch diese
-        Instanz fälschlich dauerhaft als ausgelastet gilt und nie wieder
-        bevorzugt ausgewählt würde."""
+        """Selects an instance (`pick()`) and holds it reserved as "open"
+        for the duration of the `with` block - `release()` runs in a
+        `finally`, so it also covers the case where the actual upstream
+        call aborts with an exception (e.g. `httpx.HTTPError`). Without
+        this `finally`, a failing upstream call would leave its reserved
+        slot permanently occupied (a "leak"), causing this instance to be
+        incorrectly considered permanently busy and never preferentially
+        selected again."""
         instance = self.pick(instances)
         self.reserve(instance)
         try:
@@ -143,16 +146,16 @@ class InstanceResolver:
 
 
 class MaintenanceStateClient:
-    """Fragt den Wartungsmodus-Status (4.8, P6-S6) direkt bei `permission-service`
-    ab - über denselben `InstanceResolver` wie jeder proxied Request, da das
-    Gateway keine feste Service-URL kennt (alles läuft über die Registry).
-    Kurzes Caching (`cache_ttl_seconds`) wie bei `InstanceResolver`, aus
-    demselben Grund: nicht jeder einzelne Request soll einen zusätzlichen
-    Roundtrip kosten. Schlägt die Abfrage fehl (`permission-service`
-    unerreichbar), wird **nicht** aktiv angenommen (fail-open) - ein
-    kurzzeitig unerreichbarer `permission-service` soll nicht versehentlich
-    das gesamte System lahmlegen, das wäre ein Verfügbarkeits-Eigentor,
-    keine Sicherheitsmaßnahme."""
+    """Queries the maintenance-mode status (4.8, P6-S6) directly from
+    `permission-service` - via the same `InstanceResolver` as every
+    proxied request, since the gateway does not know a fixed service URL
+    (everything goes through the registry). Short caching
+    (`cache_ttl_seconds`) as with `InstanceResolver`, for the same reason:
+    not every single request should cost an additional round trip. If the
+    query fails (`permission-service` unreachable), it is **not** assumed
+    to be active (fail-open) - a briefly unreachable `permission-service`
+    should not accidentally cripple the entire system, that would be an
+    availability own-goal, not a security measure."""
 
     def __init__(
         self, *, client: httpx.AsyncClient, resolver: InstanceResolver, cache_ttl_seconds: float

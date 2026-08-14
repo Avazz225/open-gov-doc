@@ -50,13 +50,12 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
 
 
 def _is_fleet_agent(authorization: str | None) -> bool:
-    """3a/P13-S2: der unabhängig betriebene `fleet-management-service` hat
-    keinen Keycloak-Principal in dieser Installation - er authentisiert sich
-    stattdessen über das installationsweite, optionale
-    `settings.fleet_agent_api_key` (`DMS_FLEET_AGENT_API_KEY`,
-    `dms_common.BaseServiceSettings`). Ist der Schlüssel nicht konfiguriert
-    (Default), ist dieser Pfad vollständig deaktiviert - reines Opt-in (3a:
-    "optional, separater Baustein")."""
+    """3a/P13-S2: the independently operated `fleet-management-service` has
+    no Keycloak principal in this installation - it authenticates instead
+    via the installation-wide, optional `settings.fleet_agent_api_key`
+    (`DMS_FLEET_AGENT_API_KEY`, `dms_common.BaseServiceSettings`). If the
+    key is not configured (default), this path is completely disabled -
+    pure opt-in (3a: "optional, separate building block")."""
     return bool(settings.fleet_agent_api_key) and authorization == (
         f"Bearer {settings.fleet_agent_api_key}"
     )
@@ -65,10 +64,10 @@ def _is_fleet_agent(authorization: str | None) -> bool:
 async def _require_license_permission(
     x_dms_principal: str, authorization: str | None = None
 ) -> None:
-    """Aktiviert erstmals die seit Langem vorgeseedete Domain-Admin-Rolle
-    `domain-admin-license` (`admin.license`) - der aktivierte Superuser (4.6)
-    und der Fleet-Agent-Schlüssel sind die beiden Ausnahmen, gleiches
-    Gate-Muster wie query-service (Superuser-Bypass)."""
+    """Activates for the first time the long-since-preseeded domain-admin
+    role `domain-admin-license` (`admin.license`) - the activated
+    superuser (4.6) and the fleet-agent key are the two exceptions, same
+    gating pattern as query-service (superuser bypass)."""
     if _is_fleet_agent(authorization):
         return
     is_superuser = await _is_active_superuser(x_dms_principal)
@@ -202,10 +201,10 @@ async def upload_license(
     authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> LicenseStatusOut:
-    """9.2: signierte Lizenzdatei installieren. Nur eine ungueltige Signatur
-    fuehrt zu `400` - eine signaturgueltige, aber bereits abgelaufene Lizenz
-    wird trotzdem gespeichert und ueber den Status als ungueltig angezeigt
-    (siehe PROGRESS.md Architekturentscheidung "Upload-Ablehnung")."""
+    """9.2: install a signed license file. Only an invalid signature
+    results in `400` - a license with a valid signature but already
+    expired is still stored and shown as invalid via the status (see
+    PROGRESS.md architecture decision "Upload rejection")."""
     await _require_license_permission(x_dms_principal, authorization)
 
     try:
@@ -234,9 +233,9 @@ async def upload_license(
 
 @app.get("/license/status", response_model=LicenseStatusOut)
 async def license_status(session: AsyncSession = Depends(get_session)) -> LicenseStatusOut:
-    """Ungegatet (Konzept 9.3: "Registry Service liefert jedem sich
-    registrierenden Service den Lizenzstatus mit") - wird auch von anderen
-    Services ohne Principal-Header abgefragt, siehe P9-S2."""
+    """Ungated (concept 9.3: "Registry Service delivers the license status
+    to every registering service") - is also queried by other services
+    without a principal header, see P9-S2."""
     license_row = await license_state.get_installed(session)
     if license_row is None:
         return await _status_out(None)

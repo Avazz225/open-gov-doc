@@ -13,8 +13,8 @@ class NotFoundError(Exception):
 
 
 class UnauthorizedError(Exception):
-    """Fehlender/ungültiger `Authorization: Bearer`-Header bei einem
-    eingehenden Aufruf von einer gepaarten Installation (7.2)."""
+    """Missing/invalid `Authorization: Bearer` header on an
+    incoming call from a paired installation (7.2)."""
 
 
 def generate_api_key() -> str:
@@ -60,10 +60,10 @@ async def delete_paired_installation(session: AsyncSession, installation_id: str
 
 
 async def authenticate_peer(session: AsyncSession, presented_key: str | None) -> PairedInstallation:
-    """Ordnet einen eingehenden `Authorization: Bearer`-Wert einer gepaarten
-    Installation zu (7.2) - `hmac.compare_digest` statt `==`, um
-    Timing-Seitenkanäle beim Key-Vergleich zu vermeiden (derselbe Grund wie
-    bei jedem anderen Secret-Vergleich im Projekt, z. B. Passwort-Hashes)."""
+    """Maps an incoming `Authorization: Bearer` value to a paired
+    installation (7.2) - uses `hmac.compare_digest` instead of `==` to
+    avoid timing side-channels during the key comparison (same reason as
+    for every other secret comparison in the project, e.g. password hashes)."""
     if not presented_key:
         raise UnauthorizedError("Authorization: Bearer-Header fehlt")
     result = await session.execute(select(PairedInstallation))

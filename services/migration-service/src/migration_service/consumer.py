@@ -12,10 +12,11 @@ def make_handler(
     start_transfer: Callable[..., Awaitable[None]],
     action_type: str,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Vier-Augen-Rückkanal (4.3, P6-S4-Muster, siehe `document_service.consumer`):
-    ein zuvor per `ApprovalClient.create_request()` zurückgestellter Transfer-Start
-    wird erst hier tatsächlich ausgeführt, sobald `permission.approval.approved`
-    für `action_type="migration.transfer.start"` eintrifft."""
+    """Four-eyes return channel (4.3, P6-S4 pattern, see
+    `document_service.consumer`): a transfer start previously deferred via
+    `ApprovalClient.create_request()` is only actually executed here once
+    `permission.approval.approved` arrives for
+    `action_type="migration.transfer.start"`."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)

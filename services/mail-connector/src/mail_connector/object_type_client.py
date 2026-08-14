@@ -2,11 +2,11 @@ import httpx
 
 
 class ObjectTypeClient:
-    """Dünner HTTP-Client gegen object-type-service (Post-Roadmap Phase 19
-    Session 11) - liest die je Objekttyp konfigurierten `kennzeichen_format`-
-    Werte, aus denen `matching.py` das tatsächlich konfigurierte Kandidaten-
-    Muster ableitet, statt eines fest kodierten generischen Musters.
-    `GET /object-types` ist ungegated, kein Identitäts-Header nötig."""
+    """Thin HTTP client against object-type-service (Post-Roadmap Phase 19
+    Session 11) - reads the `kennzeichen_format` (reference number format)
+    values configured per object type, from which `matching.py` derives the
+    actually configured candidate pattern, instead of a hard-coded generic
+    pattern. `GET /object-types` is ungated, no identity header needed."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

@@ -23,10 +23,11 @@ def is_raster_image(*, content_type: str | None, filename: str) -> bool:
 
 
 class TesseractEngine(TextLayerExtractor):
-    """Rasterbild-OCR (3.9) für gescannte PDFs (kein nutzbarer Textlayer) und
-    für Rasterbilder direkt. Tatsächlich verdrahtete Standard-Engine anstelle
-    des im Konzept genannten PaddleOCR (siehe ADR 0011 für die Abwägung -
-    paddlepaddle ist als ML-Framework in dieser Umgebung nicht praktikabel)."""
+    """Raster-image OCR (3.9) for scanned PDFs (no usable text layer) and
+    for raster images directly. The actually wired-up default engine
+    instead of the PaddleOCR named in the concept (see ADR 0011 for the
+    trade-off - paddlepaddle is not practical as an ML framework in this
+    environment)."""
 
     engine_name = "tesseract"
 
@@ -34,7 +35,7 @@ class TesseractEngine(TextLayerExtractor):
         self, *, content_type: str | None, filename: str, native_text_available: bool | None
     ) -> bool:
         if native_text_available is False:
-            return True  # gescanntes PDF ohne nutzbaren Textlayer
+            return True  # scanned PDF without a usable text layer
         return native_text_available is None and is_raster_image(
             content_type=content_type, filename=filename
         )
@@ -80,12 +81,12 @@ class TesseractEngine(TextLayerExtractor):
                         page_number=1, width=image.width, height=image.height, words=words
                     )
                 ],
-                page_images=[],  # Rasterbild - kein eigenständiges Seitenbild nötig
+                page_images=[],  # raster image - no separate page image needed
                 page_image_content_type=None,
             )
 
-        # Mehrseitiges PDF: jede Seite einzeln rastern und OCR'en (nicht nur
-        # Seite 1, siehe `OcrExtractionResult.page_images`-Kommentar).
+        # Multi-page PDF: rasterize and OCR each page individually (not just
+        # page 1, see the `OcrExtractionResult.page_images` comment).
         doc = fitz.open(stream=data, filetype="pdf")
         pages: list[OcrPageResult] = []
         page_images: list[bytes] = []

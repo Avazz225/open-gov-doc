@@ -71,15 +71,15 @@ async def delete_managed_installation(session: AsyncSession, installation_id: st
 async def rotate_managed_installation_key(
     session: AsyncSession, installation_id: str, *, new_api_key: str | None = None
 ) -> tuple[ManagedInstallation, str]:
-    """Schluesselrotation (Post-Roadmap Phase 21 Session 1, ADR 0084) - ein
-    atomarer Ersetzungsvorgang ohne Uebergangsfenster (gleiches Muster wie
-    `federation-hub-service.repository.rotate_installation_key`, ADR 0039:
-    kein zeitbasiertes "beide Schluessel kurz gueltig", sondern ein
-    unmittelbarer Austausch). Anders als dort gibt es hier aber keine
-    Live-Rueckkopplung zur Zielinstallation (die verifiziert nur gegen ihren
-    eigenen, statisch per `DMS_FLEET_AGENT_API_KEY`-Env-Var konfigurierten
-    Wert) - der Betreiber muss die Installation manuell auf den neuen Wert
-    umstellen, siehe `main.py`s Endpunkt-Docstring."""
+    """Key rotation (Post-Roadmap Phase 21 Session 1, ADR 0084) - an atomic
+    replacement operation without a transition window (same pattern as
+    `federation-hub-service.repository.rotate_installation_key`, ADR 0039: no
+    time-based "both keys briefly valid", but an immediate swap). Unlike
+    there, however, there is no live feedback loop to the target
+    installation here (it only verifies against its own value, statically
+    configured via the `DMS_FLEET_AGENT_API_KEY` env var) - the operator must
+    manually switch the installation to the new value, see `main.py`'s
+    endpoint docstring."""
     installation = await get_managed_installation(session, installation_id)
     api_key = new_api_key or generate_api_key()
     installation.fleet_agent_api_key = api_key
@@ -88,7 +88,7 @@ async def rotate_managed_installation_key(
     return installation, api_key
 
 
-# --- Flotten-Update-Orchestrierung (3a-Erweiterung, P13-S2b) ----------------
+# --- Fleet update orchestration (3a extension, P13-S2b) --------------------
 
 
 async def create_group(session: AsyncSession, name: str) -> InstallationGroup:
@@ -171,9 +171,9 @@ async def get_update_plan(session: AsyncSession, plan_id: str) -> UpdatePlan:
 async def resolve_rollout_installation_ids(
     session: AsyncSession, *, group_id: str | None, include: list[str], exclude: list[str]
 ) -> list[str]:
-    """3a: "Installationen lassen sich gezielt ein-/ausschließen, ohne den
-    Plan für die übrigen Installationen zu verändern" - Gruppenmitglieder
-    plus `include`, minus `exclude`."""
+    """3a: "installations can be deliberately included/excluded, without
+    changing the plan for the remaining installations" - group members plus
+    `include`, minus `exclude`."""
     base_ids: set[str] = set()
     if group_id is not None:
         await get_group(session, group_id)
@@ -291,11 +291,10 @@ async def set_run_status(
 
 
 async def advance_run(session: AsyncSession, run: InstallationRun, plan: UpdatePlan) -> str:
-    """Rückt einen erfolgreich abgeschlossenen Schritt weiter. Gibt den neuen
-    Status zurück (``"wait_external"`` fuer den naechsten Gate-Schritt,
-    ``"completed"`` wenn das der letzte Schritt war) - der eigentliche
-    ``"verify"``-Sofortversuch fuer einen neuen Schritt passiert in
-    `main.py`, nicht hier (reines I/O-freies Zustandsupdate)."""
+    """Advances a successfully completed step. Returns the new status
+    (``"wait_external"`` for the next gate step, ``"completed"`` if that was
+    the last step) - the actual immediate ``"verify"`` attempt for a new
+    step happens in `main.py`, not here (a pure, I/O-free state update)."""
     run.current_step_index += 1
     run.last_outcome = None
     run.error_message = None

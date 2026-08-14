@@ -7,13 +7,13 @@ from auth_service.models import TechnicalAccount
 
 
 async def ensure_domain_admin_account(session_factory, *, username: str, role_name: str) -> None:
-    """Domänen-Admin-Konto (4.6, seit P6-S5/P6-S6, seit P18-S3 als
-    `TechnicalAccount` statt Keycloak-Nutzer): idempotent angelegt,
-    **immer** `enabled=True` - anders als der Superuser (`superuser.py`) kein
-    Break-Glass-Mechanismus, sondern ein dauerhaft nutzbares technisches
-    Konto für die jeweilige Domäne. Default-Passwort = Username, wie zuvor
-    beim Keycloak-Konto - sollte vom Betreiber geändert werden (noch kein
-    Passwort-Änderungs-Endpunkt, siehe "Offene Punkte")."""
+    """Domain admin account (4.6, since P6-S5/P6-S6, as a `TechnicalAccount`
+    instead of a Keycloak user since P18-S3): created idempotently,
+    **always** `enabled=True` - unlike the superuser (`superuser.py`), no
+    break-glass mechanism, but a permanently usable technical account for
+    the respective domain. Default password = username, as before with the
+    Keycloak account - should be changed by the operator (no password change
+    endpoint yet, see "Open Points")."""
     async with session_factory() as session:
         existing = await session.scalar(
             select(TechnicalAccount).where(TechnicalAccount.username == username)
@@ -35,13 +35,13 @@ async def ensure_domain_admin_account(session_factory, *, username: str, role_na
 
 
 async def get_technical_account_id(session_factory, username: str) -> str | None:
-    """Stabile ID eines technischen Kontos (`TechnicalAccount.id` als String)
-    - genutzt beim Lifespan-Start, um die Rollenzuweisung gegen
-    `permission-service` mit der `principal_id` durchzuführen, die auch als
-    `sub`-Claim in dessen Tokens landet (siehe
-    `main.py._mint_technical_account_tokens`). `None`, falls das Konto noch
-    nicht angelegt wurde - der Aufrufer behandelt das wie "noch nicht
-    bereit", identisch zum bisherigen Keycloak-`next(... )`-Fallback."""
+    """Stable ID of a technical account (`TechnicalAccount.id` as a string)
+    - used at lifespan startup to perform the role assignment against
+    `permission-service` with the `principal_id` that also ends up as the
+    `sub` claim in its tokens (see
+    `main.py._mint_technical_account_tokens`). `None` if the account has not
+    been created yet - the caller treats this as "not yet ready", identical
+    to the previous Keycloak `next(...)` fallback."""
     async with session_factory() as session:
         account = await session.scalar(
             select(TechnicalAccount).where(TechnicalAccount.username == username)

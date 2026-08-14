@@ -8,23 +8,26 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Provisorischer Vertrag (siehe docs/services/permission-service.md): welche
-    # Subjects Struktur-Events (Ressource angelegt/verschoben/gelöscht) liefern.
-    # Erwarteter Producer: Folder Service (P3-S3, noch nicht gebaut) unter
-    # Stream "folder" - bis dahin per Tests simuliert.
+    # Provisional contract (see docs/services/permission-service.md): which
+    # subjects deliver structure events (resource created/moved/deleted).
+    # Expected producer: Folder Service (P3-S3, not yet built) under stream
+    # "folder" - simulated via tests until then.
     structure_subjects: list[str] = ["folder.>"]
 
-    # Selbst-Konsum des eigenen Vier-Augen-Approval-Events (4.3, P6-S4) für
-    # Aktionstypen, die permission-service selbst ausführt (Bereichssperren,
-    # seit P6-S6 zusätzlich die Not-Shutdown-Auslösung) - siehe approval_consumer.py.
+    # Self-consumption of its own four-eyes approval event (4.3, P6-S4) for
+    # action types that permission-service executes itself (scope locks,
+    # plus the emergency shutdown trigger since P6-S6) - see
+    # approval_consumer.py.
     approval_subjects: list[str] = ["permission.approval.approved"]
 
-    # Erster Cross-Service-Aufruf dieses Service (P6-S6, 4.8): nur der aktive
-    # Superuser darf den Wartungsmodus aufheben, dessen Identität lebt in auth-service.
+    # First cross-service call by this service (P6-S6, 4.8): only the active
+    # superuser may lift maintenance mode, whose identity lives in
+    # auth-service.
     auth_service_base_url: str = "http://localhost:8003"
 
-    # Stellvertretung (4.4a, P14-S11): wer eine Delegation vorzeitig widerrufen
-    # darf, ohne die vertretene Person selbst zu sein - gleiches unabhängig
-    # konfigurierbares Rollen-Setting-Muster wie document-services
-    # `share_link_revoke_admin_role` (P14-S10), auch wenn der Default identisch ist.
+    # Delegation (4.4a, P14-S11): who may revoke a delegation early without
+    # being the delegating person themself - same independently configurable
+    # role-setting pattern as document-service's
+    # `share_link_revoke_admin_role` (P14-S10), even though the default is
+    # identical.
     delegation_revoke_admin_role: str = "dms-admin"

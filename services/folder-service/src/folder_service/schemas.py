@@ -37,7 +37,7 @@ class FolderOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# --- Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit P7-S1b) ---
+# --- Retention/legal hold/forced deletion for folders (5.2/5.2a, since P7-S1b) ---
 
 
 class TrashRequest(BaseModel):
@@ -45,12 +45,12 @@ class TrashRequest(BaseModel):
 
 
 class TrashResult(BaseModel):
-    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - zwei
-    mögliche Ausgänge, gleiches Wrapper-Muster wie `document_service.
-    ForceReleaseResult`/`TrashResult`: sofort ausgeführt, oder per
-    Vier-Augen-Prinzip (Aktionstyp `folder.delete`, unabhängig von der
-    bereits bestehenden retentionsgetriggerten `folder.force_delete`)
-    zurückgestellt."""
+    """Deletion request workflow for regular users (5.2, since P7-S1c) -
+    two possible outcomes, same wrapper pattern as
+    `document_service.ForceReleaseResult`/`TrashResult`: executed
+    immediately, or deferred via the four-eyes principle (action type
+    `folder.delete`, independent of the already-existing
+    retention-triggered `folder.force_delete`)."""
 
     status: Literal["trashed", "pending_approval"]
     folder: FolderOut | None = None
@@ -98,7 +98,8 @@ class DeletionRegisterEntryOut(BaseModel):
 
 
 class ReconcileRestoreDeletionRequest(BaseModel):
-    """Löschabgleich nach Restore (10.4, P11-S4) - strukturgleich zu
+    """Deletion reconciliation after restore (10.4, P11-S4) - structurally
+    identical to
     `document_service.schemas.ReconcileRestoreDeletionRequest`."""
 
     original_entry_id: str
@@ -126,12 +127,12 @@ class TrashConfigOut(TrashConfigIn):
     updated_at: datetime
 
 
-# --- Struktur-Vorlagen (2.5/7.3, seit P15-S6) ---
+# --- Structure templates (2.5/7.3, since P15-S6) ---
 
 
 class FolderTemplateNode(BaseModel):
-    """Ein Knoten im verschachtelten Struktur-Baum einer Vorlage - bewusst
-    kein `attributes`-Feld, ein Rohbau erfasst nur Name + Objekttyp."""
+    """A node in the nested structure tree of a template - deliberately no
+    `attributes` field, a skeleton captures only name + object type."""
 
     name: str
     object_type_id: int | None = None

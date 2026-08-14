@@ -4,10 +4,10 @@ import httpx
 
 
 class DocumentServiceError(Exception):
-    """Der Document Service hat die Freigabe eines Quarantäne-Falls abgelehnt
-    (2.5, P15-S2) - z. B. unbekannte `folder_id`/`object_type_id` (400/422),
-    fehlende Freigabe-Rolle auf Document-Service-Seite (401/403) oder
-    ausgeschöpftes Lizenzlimit (403)."""
+    """The Document Service rejected the release of a quarantine case
+    (2.5, P15-S2) - e.g. unknown `folder_id`/`object_type_id` (400/422),
+    missing release role on the Document Service side (401/403), or an
+    exhausted license limit (403)."""
 
     def __init__(self, status_code: int, detail: object) -> None:
         self.status_code = status_code
@@ -16,10 +16,10 @@ class DocumentServiceError(Exception):
 
 
 class DocumentClient:
-    """Dünner HTTP-Client gegen den internen Anlage-Pfad des Document Service
-    (`POST /documents/from-quarantine-release`, 2.5/10.3) - ruft bewusst NICHT
-    den regulären `POST /documents`-Endpunkt auf, da dieser jede Anlage
-    ungefragt erneut scannen würde (siehe document-service main.py)."""
+    """Thin HTTP client against the Document Service's internal creation
+    path (`POST /documents/from-quarantine-release`, 2.5/10.3) - deliberately
+    does NOT call the regular `POST /documents` endpoint, since that would
+    unconditionally re-scan every creation (see document-service main.py)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

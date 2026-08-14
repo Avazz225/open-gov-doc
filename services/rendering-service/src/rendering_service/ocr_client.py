@@ -2,17 +2,17 @@ import httpx
 
 
 class OcrServiceClient:
-    """Dünner HTTP-Client gegen den OCR Service (3.1) - für den Nachzieheffekt
-    aus P5-S3 (2.4/3.9: der OCR-Volltext speist eine `substitute_text`-
-    Ersatzdarstellung für Dokumente, die P5-S2 mangels OCR nicht bedienen
-    konnte). `ocr.completed`-Events tragen bewusst nur Statusfelder, nicht den
-    potenziell großen Volltext selbst (siehe consumer.py) - dieser Client holt
-    ihn bei Bedarf per HTTP nach."""
+    """Thin HTTP client against the OCR Service (3.1) - for the follow-up
+    effect from P5-S3 (2.4/3.9: the OCR full text feeds a `substitute_text`
+    rendition for documents that P5-S2 could not serve for lack of OCR).
+    `ocr.completed` events deliberately carry only status fields, not the
+    potentially large full text itself (see consumer.py) - this client
+    fetches it via HTTP on demand."""
 
-    # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - `GET /ocr-results/
-    # {id}` verlangt seither `ocr.read`; dieser Aufruf läuft aus einem
-    # NATS-Consumer heraus, kein menschlicher Principal verfügbar - gleiches
-    # `system:<Service>`-Muster wie `archival-service`s `CaseClient`.
+    # RBAC (post-roadmap phase 19 session 8, ADR 0073) - `GET /ocr-results/
+    # {id}` has required `ocr.read` ever since; this call runs from within a
+    # NATS consumer, no human principal available - same `system:<Service>`
+    # pattern as `archival-service`'s `CaseClient`.
     _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:rendering-service"}
 
     def __init__(self, base_url: str) -> None:

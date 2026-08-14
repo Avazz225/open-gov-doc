@@ -4,18 +4,17 @@ from virus_scan_service.engines.interface import ScanEngine, ScanVerdict
 
 
 class ClamdEngine(ScanEngine):
-    """Produktiv einsetzbare Engine gegen einen separat betriebenen
-    `clamd`-Daemon über dessen INSTREAM-Protokoll (längenpräfixierte
-    TCP-Chunks) - kein externes Client-Paket nötig, das Protokoll ist einfach
-    genug für eine direkte `asyncio`-Socket-Implementierung.
+    """Production-ready engine against a separately operated `clamd` daemon
+    via its INSTREAM protocol (length-prefixed TCP chunks) - no external
+    client package needed, the protocol is simple enough for a direct
+    `asyncio` socket implementation.
 
-    In dieser Entwicklungsumgebung nicht die Standard-Engine (siehe
-    `EicarSignatureEngine`/ADR 0010): `clamd` lädt beim ersten Start seine
-    Signaturdatenbank über `freshclam` nach, was Minuten dauert und
-    Internetzugriff auf die ClamAV-Mirrors voraussetzt - für einen
-    reproduzierbaren `docker compose up` in dieser Umgebung nicht verlässlich
-    genug. Über `DMS_SCAN_ENGINE=clamd` gegen einen selbst betriebenen
-    `clamd` aktivierbar.
+    Not the default engine in this development environment (see
+    `EicarSignatureEngine`/ADR 0010): on first start, `clamd` downloads its
+    signature database via `freshclam`, which takes minutes and requires
+    internet access to the ClamAV mirrors - not reliable enough for a
+    reproducible `docker compose up` in this environment. Can be activated
+    via `DMS_SCAN_ENGINE=clamd` against a self-hosted `clamd`.
     """
 
     def __init__(self, host: str, port: int, timeout: float) -> None:
@@ -41,8 +40,8 @@ class ClamdEngine(ScanEngine):
             await writer.wait_closed()
 
         text = response.decode("utf-8", errors="replace").strip()
-        # Antwortformat lt. ClamAV-Doku: "stream: OK" oder
-        # "stream: <Signaturname> FOUND".
+        # Response format per ClamAV docs: "stream: OK" or
+        # "stream: <signature name> FOUND".
         if text.endswith("OK"):
             return ScanVerdict(clean=True)
         if "FOUND" in text:

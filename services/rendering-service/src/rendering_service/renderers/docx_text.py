@@ -9,10 +9,10 @@ _DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessi
 
 
 class DocxTextExtractionRenderer(Renderer):
-    """Ersatzdarstellung für Word-Dokumente (2.4): Textextraktion nach .txt,
-    damit der Inhalt auch bei einem Ausfall der Office-Rendering-Komponente
-    zugänglich bleibt - genau das im Konzept genannte Beispiel ".docx -> immer
-    .txt-Ersatzdarstellung"."""
+    """Rendition for Word documents (2.4): text extraction to .txt, so that
+    the content remains accessible even if the Office rendering component
+    fails - exactly the example named in the concept ".docx -> always a
+    .txt rendition"."""
 
     rendition_type = "substitute_text"
 

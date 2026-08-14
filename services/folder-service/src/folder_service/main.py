@@ -52,9 +52,9 @@ logger = logging.getLogger(__name__)
 async def _resolve_deletion_reason_required(
     session: AsyncSession, object_type_id: int | None
 ) -> bool:
-    """Löschgrund-Pflicht (5.2a) - installationsweiter Default aus
-    `RetentionConfig`, je Objekttyp per `deletion_reason_required_override`
-    überschreibbar. Identisches Muster wie
+    """Deletion reason requirement (5.2a) - installation-wide default from
+    `RetentionConfig`, overridable per object type via
+    `deletion_reason_required_override`. Identical pattern to
     `document_service.main._resolve_deletion_reason_required` (P7-S1)."""
     config = await repository.get_retention_config(session)
     if object_type_id is not None:
@@ -68,13 +68,13 @@ async def _resolve_deletion_reason_required(
 
 
 async def _execute_or_defer_forced_deletion(session: AsyncSession, folder: Folder) -> None:
-    """Physische Ordner-Zwangslöschung (5.2a, seit P7-S1b) - anders als bei
-    Dokumenten (P7-S1) wird hier zusätzlich geprüft, ob der Teilbaum noch
-    aktive Unterordner/Dokumente enthält: ist das der Fall, wird die
-    Zwangslöschung für diesen Tick übersprungen (kein automatisches
-    Mit-Zwangslöschen enthaltener Objekte, siehe docs/services/
-    folder-service.md "Offene Punkte"). Ansonsten identisches Vier-Augen-
-    Muster wie `document_service.main._execute_or_defer_forced_deletion`."""
+    """Physical forced folder deletion (5.2a, since P7-S1b) - unlike
+    documents (P7-S1), this additionally checks whether the subtree still
+    contains active subfolders/documents: if so, the forced deletion is
+    skipped for this tick (no automatic cascading forced deletion of
+    contained objects, see docs/services/folder-service.md "Open Points").
+    Otherwise identical four-eyes pattern to
+    `document_service.main._execute_or_defer_forced_deletion`."""
     folder_id = folder.id
     subtree_ids = await repository.list_active_subtree_ids(session, folder_id)
     if (
@@ -118,9 +118,9 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, folder: Folde
 
 
 async def _retention_poll_loop(session_factory) -> None:
-    """Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
-    P7-S1b) - identisches Poll-Loop-Idiom wie `document_service.main.
-    _retention_poll_loop` (P7-S1, seinerseits ADR 0020)."""
+    """Retention/legal hold/forced deletion for folders (5.2/5.2a, since
+    P7-S1b) - identical poll-loop idiom to `document_service.main.
+    _retention_poll_loop` (P7-S1, itself following ADR 0020)."""
     while True:
         try:
             async with session_factory() as session:
@@ -194,9 +194,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS folder"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
-        # CONTRIBUTING.md) - Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a,
-        # seit P7-S1b), gleiches Muster wie document-service (P7-S1).
+        # Ad-hoc schema extension (no Alembic in this early phase, see
+        # CONTRIBUTING.md) - retention/legal hold/forced deletion (5.2/5.2a,
+        # since P7-S1b), same pattern as document-service (P7-S1).
         await conn.execute(
             text("ALTER TABLE folder.folder ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ")
         )
@@ -239,7 +239,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS force_delete_approval_requested_at TIMESTAMPTZ"
             )
         )
-        # Persönlicher Papierkorb (2.5, P15-S1) - gleiches Ad-hoc-Migrationsmuster.
+        # Personal trash (2.5, P15-S1) - same ad-hoc migration pattern.
         await conn.execute(
             text("ALTER TABLE folder.folder ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(128)")
         )
@@ -248,10 +248,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with app.state.session_factory() as session:
         await repository.ensure_root_folder(session)
-        # Posteingang/Postausgang (2.5/3.3, P15-S3).
+        # Inbox/Outbox (2.5/3.3, P15-S3).
         await repository.ensure_special_folders(session)
-        # Singleton-Configs einmalig vor dem ersten Request/Poll-Tick anlegen
-        # (Race-Vermeidung, siehe document-service P7-S1).
+        # Create singleton configs once before the first request/poll tick
+        # (race avoidance, see document-service P7-S1).
         await repository.get_retention_config(session)
         await repository.get_trash_config(session)
         await session.commit()
@@ -265,9 +265,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    # Erster Konsument dieses Service überhaupt (5.2a, seit P7-S1b) - eigener
-    # Client (ensure_stream=False), da folder-service den Stream "permission"
-    # nicht selbst besitzt (gleiches Zwei-Client-Prinzip wie document-service).
+    # First consumer of this service at all (5.2a, since P7-S1b) - separate
+    # client (ensure_stream=False), since folder-service does not own the
+    # "permission" stream itself (same two-client principle as document-service).
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
     app.state.consumer_bus = consumer_bus
@@ -383,9 +383,9 @@ async def create_folder(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Aufbewahrung (5.2, seit P7-S1): Typ-Default einmalig in ein konkretes
-    # Datum übersetzt, identisches Muster wie document-service. Gilt bereits
-    # seit P7-S1 objektartübergreifend für `applies_to="folder"`.
+    # Retention (5.2, since P7-S1): type default translated once into a
+    # concrete date, identical pattern to document-service. Has already
+    # applied since P7-S1 across object types for `applies_to="folder"`.
     if payload.object_type_id is not None:
         object_type = await app.state.object_type_client.get(payload.object_type_id)
         if object_type and object_type.get("default_retention_days") is not None:
@@ -416,17 +416,16 @@ async def list_deleted_folders(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[FolderOut]:
-    """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1b) - Route MUSS vor
-    `/folders/{folder_id}` registriert sein, sonst würde FastAPI "deleted"
-    fälschlich als `folder_id` interpretieren (gleiche Falle wie bei
-    document-service, siehe main.py dort). Ohne `scope` unverändertes
-    Verhalten (kein Auth-Check, `parent_id` erforderlich) - alle bisherigen
-    Aufrufer/Tests bleiben unberührt. Seit P15-S1 (2.5) zusätzlich zwei
-    installationsweite, per `scope` explizit angeforderte Sichten: `personal`
-    (nur eigene Löschmarkierungen) und `admin` (vollständiger Papierkorb,
-    Löschadministration) - keine `admin_classified`-Variante wie bei
-    document-service, Konzept 2.5 kennzeichnet nur Dokumente als
-    Verschlusssache, keine Ordner."""
+    """Trash contents of a folder (5.2, since P7-S1b) - route MUST be
+    registered before `/folders/{folder_id}`, otherwise FastAPI would
+    incorrectly interpret "deleted" as `folder_id` (same trap as in
+    document-service, see main.py there). Without `scope`, unchanged
+    behavior (no auth check, `parent_id` required) - all existing
+    callers/tests remain unaffected. Since P15-S1 (2.5), two additional
+    installation-wide views explicitly requested via `scope`: `personal`
+    (only one's own deletion markers) and `admin` (full trash, deletion
+    administration) - no `admin_classified` variant as in document-service,
+    concept 2.5 marks only documents as classified documents, not folders."""
     if scope is None:
         if parent_id is None:
             raise HTTPException(
@@ -461,15 +460,15 @@ async def purge_folder(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Manuelle, sofortige endgültige Löschung aus dem Papierkorb (2.5,
-    P15-S1) - Löschadministration vorausgesetzt, unabhängig vom automatischen
-    `_retention_poll_loop` (der nach Ablauf von `TrashConfig.
-    restore_period_days` dieselbe `retention_actions.purge_expired_trash_
-    entry` mit `trigger="trash_expiry"` aufruft - hier `trigger="manual_
-    purge"` mit dem echten Principal als `triggered_by`). Gleiche
-    Sicherheitsprüfung wie die Zwangslöschung (`_execute_or_defer_forced_
-    deletion`): erst wenn der Teilbaum keine aktiven Unterordner/Dokumente
-    mehr enthält, wird tatsächlich gelöscht."""
+    """Manual, immediate permanent deletion from trash (2.5, P15-S1) -
+    requires deletion administration, independent of the automatic
+    `_retention_poll_loop` (which, after `TrashConfig.
+    restore_period_days` expires, calls the same
+    `retention_actions.purge_expired_trash_entry` with
+    `trigger="trash_expiry"` - here `trigger="manual_purge"` with the real
+    principal as `triggered_by`). Same safety check as forced deletion
+    (`_execute_or_defer_forced_deletion`): deletion only actually happens
+    once the subtree no longer contains any active subfolders/documents."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
@@ -535,10 +534,9 @@ async def update_folder(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Posteingang/Postausgang (2.5, P15-S3): dürfen weder umbenannt noch
-    # verschoben werden - "ein Sonderbereich existiert genau einmal je
-    # Installation", eine Umbenennung/Verschiebung würde das UI-seitige
-    # Wiederfinden über die feste ID (siehe user-ui PoststellePane) brechen.
+    # Inbox/Outbox (2.5, P15-S3): must not be renamed or moved - "a special
+    # area exists exactly once per installation", a rename/move would break
+    # the UI-side lookup via the fixed ID (see user-ui PoststellePane).
     if folder_id in PROTECTED_FOLDER_IDS and (
         payload.name is not None or payload.parent_id is not None
     ):
@@ -547,15 +545,14 @@ async def update_folder(
             detail=f"Sonderordner {folder_id!r} kann nicht umbenannt/verschoben werden",
         )
 
-    # Bugfix (P14-S12, gefunden bei der Recherche zur Sammelbearbeitung von
-    # Metadaten, 8): Constraint-Prüfung (4.5) griff bislang NUR bei einer
-    # tatsächlichen Verschiebung (`is_move`) - eine reine Attribut-/Namens-
-    # änderung ohne Verschiebung überging die Objekttyp-Validierung
-    # vollständig, anders als document-services `update_document` (dort läuft
-    # `object_type_client.validate(...)` bei JEDER PATCH-Anfrage, sobald ein
-    # Objekttyp gesetzt ist - Platzierungs-Parameter nur bei einer
-    # Verschiebung befüllt, sonst leer). Jetzt symmetrisch zu documents:
-    # validiert bei jeder Änderung, nicht nur bei Verschiebung.
+    # Bugfix (P14-S12, found while researching bulk metadata editing, 8):
+    # constraint checking (4.5) previously applied ONLY on an actual move
+    # (`is_move`) - a pure attribute/name change without a move bypassed
+    # object-type validation entirely, unlike document-service's
+    # `update_document` (there, `object_type_client.validate(...)` runs on
+    # EVERY PATCH request as soon as an object type is set - placement
+    # parameters are only populated on a move, otherwise empty). Now
+    # symmetric with documents: validates on every change, not just on move.
     is_move = payload.parent_id is not None and payload.parent_id != current.parent_id
     if current.object_type_id is not None:
         placement_kwargs: dict = {}
@@ -589,9 +586,9 @@ async def update_folder(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     if moved:
-        # Kein Akteur bekannt - FolderUpdate verfolgt bislang nicht, wer die
-        # Verschiebung/Umbenennung ausgeloest hat (P7-S2: nur bereits
-        # vorhandene Angaben first-class gemacht, keine neuen Felder ergaenzt).
+        # No actor known - FolderUpdate does not yet track who triggered the
+        # move/rename (P7-S2: only made already-existing data first-class,
+        # no new fields added).
         await publish_event(
             "folder.resource.moved",
             subject=folder.id,
@@ -602,9 +599,9 @@ async def update_folder(
 
 @app.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_session)) -> None:
-    """Sofortiger Hard-Delete - bleibt als Fallback für bereits-leere,
-    nie-retention-behaftete Fälle bestehen. Der reguläre Weg ist seit
-    P7-S1b `POST /folders/{folder_id}/trash`."""
+    """Immediate hard delete - remains as a fallback for already-empty
+    cases that never had retention applied. The regular path since P7-S1b
+    is `POST /folders/{folder_id}/trash`."""
     if folder_id in PROTECTED_FOLDER_IDS:
         raise HTTPException(
             status_code=409, detail=f"Sonderordner {folder_id!r} kann nicht gelöscht werden"
@@ -616,7 +613,7 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
     except repository.FolderNotEmptyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    # Kein Akteur bekannt - der Endpunkt nimmt keinen deleted_by entgegen.
+    # No actor known - the endpoint does not accept a deleted_by.
     await publish_event(
         "folder.resource.deleted", subject=folder_id, payload={"resource_id": folder_id}
     )
@@ -626,15 +623,15 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
 async def trash_folder(
     folder_id: str, payload: TrashRequest, session: AsyncSession = Depends(get_session)
 ) -> TrashResult:
-    """Papierkorb-Weg (5.2, seit P7-S1b) - kaskadiert über den gesamten
-    aktiven Teilbaum (Unterordner + enthaltene Dokumente, siehe
-    repository.soft_delete_folder). Seit P7-S1c optional per generischem
-    Vier-Augen-Mechanismus gegated (4.3, Aktionstyp `folder.delete`,
-    unabhängig von der bereits bestehenden retentionsgetriggerten
-    `folder.force_delete`) - Löschantrag-Workflow für reguläre Nutzer,
-    exaktes Muster wie `document_service.main.trash_document`/
-    `force_release_lock` (P6-S4). Per Default (keine Konfiguration) bleibt
-    das Verhalten unverändert: sofortige Ausführung."""
+    """Trash path (5.2, since P7-S1b) - cascades over the entire active
+    subtree (subfolders + contained documents, see
+    repository.soft_delete_folder). Since P7-S1c, optionally gated via the
+    generic four-eyes mechanism (4.3, action type `folder.delete`,
+    independent of the already-existing retention-triggered
+    `folder.force_delete`) - deletion request workflow for regular users,
+    exact pattern as `document_service.main.trash_document`/
+    `force_release_lock` (P6-S4). By default (no configuration), behavior
+    remains unchanged: immediate execution."""
     if folder_id in PROTECTED_FOLDER_IDS:
         raise HTTPException(
             status_code=409,
@@ -669,9 +666,9 @@ async def trash_folder(
 
 @app.post("/folders/{folder_id}/restore", response_model=FolderOut)
 async def restore_folder(folder_id: str, session: AsyncSession = Depends(get_session)) -> FolderOut:
-    """Papierkorb-Wiederherstellung (5.2, seit P7-S1b) - nur innerhalb der
-    konfigurierten Frist möglich, stellt kaskadiert gelöschte Unterordner/
-    Dokumente mit wieder her."""
+    """Trash restore (5.2, since P7-S1b) - only possible within the
+    configured retention period, also restores subfolders/documents that
+    were deleted via cascade."""
     try:
         folder = await repository.restore_folder(
             session, folder_id, document_client=app.state.document_client
@@ -683,7 +680,7 @@ async def restore_folder(folder_id: str, session: AsyncSession = Depends(get_ses
     except repository.RestorePeriodExpiredError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    # Kein Akteur bekannt - der Endpunkt nimmt keinen restored_by entgegen.
+    # No actor known - the endpoint does not accept a restored_by.
     await publish_event("folder.restored", subject=folder_id, payload={})
     return folder
 
@@ -692,8 +689,8 @@ async def restore_folder(folder_id: str, session: AsyncSession = Depends(get_ses
 async def put_retention(
     folder_id: str, payload: RetentionUpdate, session: AsyncSession = Depends(get_session)
 ) -> FolderOut:
-    """Aufbewahrung/Zwangslöschung terminieren (5.2/5.2a, seit P7-S1b) - der
-    eigentliche Vollzug erfolgt asynchron über `_retention_poll_loop`."""
+    """Schedule retention/forced deletion (5.2/5.2a, since P7-S1b) - actual
+    enforcement happens asynchronously via `_retention_poll_loop`."""
     try:
         folder = await repository.get_folder(session, folder_id)
     except repository.NotFoundError as exc:
@@ -716,8 +713,8 @@ async def put_retention(
         notify_email=payload.notify_email,
     )
     await session.commit()
-    # Kein Akteur bekannt - RetentionUpdate verfolgt bislang nicht, wer die
-    # Frist geaendert hat.
+    # No actor known - RetentionUpdate does not yet track who changed the
+    # retention period.
     await publish_event(
         "folder.retention.updated",
         subject=folder_id,
@@ -732,10 +729,10 @@ async def put_retention(
 
 
 async def _require_legal_hold_permission(x_dms_principal: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075) - identisches
-    Muster wie `document-service`s gleichnamiger Helfer: prüft die neue
-    Domain-Admin-Capability `admin.legal_hold`, bewusst NICHT in der
-    "everyone"-Gruppe. `GET /legal-holds` bleibt ungegatet."""
+    """RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075) - identical pattern
+    to `document-service`'s helper of the same name: checks the new
+    domain-admin capability `admin.legal_hold`, deliberately NOT in the
+    "everyone" group. `GET /legal-holds` remains ungated."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     if not await app.state.permission_client.has_permission(x_dms_principal, "admin.legal_hold"):
@@ -750,9 +747,9 @@ async def create_legal_hold(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
-    """Legal Hold setzen (5.2, seit P7-S1b) - überschreibt jede fällige
-    Aktion im Poll-Loop, bis er wieder aufgehoben wird. Seit P19-S10
-    `admin.legal_hold`-gegated, siehe `_require_legal_hold_permission`."""
+    """Set a legal hold (5.2, since P7-S1b) - overrides any due action in
+    the poll loop until it is released again. Since P19-S10 gated by
+    `admin.legal_hold`, see `_require_legal_hold_permission`."""
     await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.create_legal_hold(
@@ -825,9 +822,10 @@ async def reconcile_restore_deletion(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Löschabgleich nach Restore (10.4, P11-S4) - strukturgleich zu
-    `document_service.main.reconcile_restore_deletion`: "derselbe Mechanismus
-    wie bei der ursprünglichen Zwangslöschung" (10.4 wörtlich)."""
+    """Deletion reconciliation after restore (10.4, P11-S4) -
+    structurally identical to
+    `document_service.main.reconcile_restore_deletion`: "the same mechanism
+    as for the original forced deletion" (10.4 verbatim)."""
     if not _has_admin_role(x_dms_roles):
         raise HTTPException(
             status_code=403,
@@ -835,9 +833,9 @@ async def reconcile_restore_deletion(
             "nach Restore auslösen",
         )
     try:
-        # Existenz zuerst pruefen (siehe document-service-Pendant) - sonst
-        # legt execute_forced_deletion einen verwaisten Registereintrag an,
-        # bevor der 404 greift.
+        # Check existence first (see document-service counterpart) -
+        # otherwise execute_forced_deletion creates an orphaned register
+        # entry before the 404 kicks in.
         await repository.get_folder(session, folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -899,7 +897,7 @@ async def put_trash_config(
     return config
 
 
-# --- Struktur-Vorlagen (2.5/7.3, seit P15-S6) ---
+# --- Structure templates (2.5/7.3, since P15-S6) ---
 
 
 @app.post(
@@ -908,9 +906,9 @@ async def put_trash_config(
 async def create_folder_template(
     payload: FolderTemplateCreate, session: AsyncSession = Depends(get_session)
 ) -> FolderTemplateOut:
-    """Erfasst den aktiven Teilbaum ab `payload.source_folder_id` als
-    benannte, wiederverwendbare Struktur-Vorlage (2.5/7.3, z. B. Aktenplan-
-    Rohbau) - siehe `repository.build_template_structure`/ADR 0056."""
+    """Captures the active subtree starting at `payload.source_folder_id`
+    as a named, reusable structure template (2.5/7.3, e.g. a file plan
+    skeleton) - see `repository.build_template_structure`/ADR 0056."""
     try:
         structure = await repository.build_template_structure(session, payload.source_folder_id)
     except repository.NotFoundError as exc:
@@ -960,11 +958,11 @@ async def apply_folder_template(
     payload: FolderTemplateApplyRequest,
     session: AsyncSession = Depends(get_session),
 ) -> FolderTemplateApplyResult:
-    """Wendet eine Struktur-Vorlage unterhalb `payload.target_parent_id` an -
-    erzeugt echte Ordner (siehe `repository.apply_template`) und publiziert
-    für jeden davon ein reguläres `folder.resource.created`-Event, damit
-    `permission-service`s `ResourceNode`-Baum synchron bleibt (identisches
-    Event wie bei einer einzelnen `POST /folders`)."""
+    """Applies a structure template below `payload.target_parent_id` -
+    creates real folders (see `repository.apply_template`) and publishes a
+    regular `folder.resource.created` event for each of them, so that
+    `permission-service`'s `ResourceNode` tree stays in sync (identical
+    event to a single `POST /folders`)."""
     try:
         template = await repository.get_template(session, template_id)
     except repository.NotFoundError as exc:

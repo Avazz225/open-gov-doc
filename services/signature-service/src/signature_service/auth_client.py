@@ -4,15 +4,15 @@ from signature_service.connectors.interface import SignerInfo
 
 
 class AuthServiceClient:
-    """HTTP-Client gegen den Auth Service - `signer_principal_id` bleibt ein
-    selbstberichtetes Feld (konsistent mit `triggered_by`/`approved_by`/
-    `completed_by`/`lifted_by` im gesamten Projekt), wird aber - gleiches
-    Retrofit-Muster wie bei notification-service (P6-S6) - gegen ein echtes
-    `auth-service`-Konto geprüft und liefert Anzeigename/E-Mail fürs
-    AES-Zertifikat (3.10: "eindeutig einer Person zuordenbar"). `GET /users`
-    ist seit P6-S5 gegated - Anmeldung über das technische `users-admin`-Konto,
-    kein Token-Caching (siehe notification-service.auth_client für dieselbe
-    Abwägung)."""
+    """HTTP client against the Auth Service - `signer_principal_id` remains
+    a self-reported field (consistent with `triggered_by`/`approved_by`/
+    `completed_by`/`lifted_by` throughout the project), but is - same
+    retrofit pattern as with notification-service (P6-S6) - checked against
+    a real `auth-service` account and returns the display name/email for
+    the AES certificate (3.10: "uniquely attributable to a person").
+    `GET /users` has been gated since P6-S5 - logs in via the technical
+    `users-admin` account, no token caching (see notification-service.
+    auth_client for the same trade-off)."""
 
     def __init__(self, base_url: str, *, admin_username: str, admin_password: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

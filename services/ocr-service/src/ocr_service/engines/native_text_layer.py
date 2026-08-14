@@ -11,9 +11,9 @@ _settings = Settings()
 
 
 class NativeTextLayerEngine(TextLayerExtractor):
-    """Nutzt den bereits vorhandenen PDF-Textlayer (3.9: "automatische
-    Erkennung, ob OCR überhaupt nötig ist") statt teurer Bilderkennung -
-    schnell, exakt, Konfidenz immer 100.0."""
+    """Uses the PDF text layer that already exists (3.9: "automatic
+    detection of whether OCR is needed at all") instead of expensive image
+    recognition - fast, exact, confidence always 100.0."""
 
     engine_name = "native_text_layer"
 
@@ -26,17 +26,17 @@ class NativeTextLayerEngine(TextLayerExtractor):
         self, data: bytes, *, filename: str, content_type: str | None
     ) -> OcrExtractionResult:
         doc = fitz.open(stream=data, filetype="pdf")
-        # get_text("words") liefert Koordinaten in PDF-Punkten (1/72"); der
-        # Faktor skaliert sie in dasselbe Pixelraster wie das gleichzeitig per
-        # get_pixmap(dpi=raster_dpi) erzeugte Seitenbild, damit Overlay und
-        # Bild exakt übereinanderliegen.
+        # get_text("words") returns coordinates in PDF points (1/72"); the
+        # factor scales them into the same pixel grid as the page image
+        # generated simultaneously via get_pixmap(dpi=raster_dpi), so the
+        # overlay and the image line up exactly.
         scale = _settings.raster_dpi / 72
 
         pages: list[OcrPageResult] = []
         page_images: list[bytes] = []
         full_text_parts: list[str] = []
-        # Alle Seiten durchlaufen, nicht nur die erste (Bugfix: mehrseitige
-        # PDF-Vorschau zeigte bislang immer nur Seite 1).
+        # Iterate over all pages, not just the first (bugfix: multi-page
+        # PDF preview used to always show only page 1).
         for page in doc:
             pixmap = page.get_pixmap(dpi=_settings.raster_dpi)
             raw_words = page.get_text("words")  # (x0,y0,x1,y1,text,block_no,line_no,word_no)

@@ -1,17 +1,15 @@
-"""Gemeinsame (major, minor)-Versionsparsung (7.4) - von `schemas.py`
-(Validierung bei der Registrierung) UND `repository.py`
-(Kompatibilitätsvergleich) genutzt, um eine doppelte Implementierung zu
-vermeiden. Bewusst ein einfaches Zahlenschema statt einer SemVer-Bibliothek
-(siehe ADR 0028).
+"""Shared (major, minor) version parsing (7.4) - used by `schemas.py`
+(validation at registration) AND `repository.py` (compatibility comparison)
+to avoid a duplicate implementation. Deliberately a simple numeric scheme
+instead of a SemVer library (see ADR 0028).
 
-P13-S3-Fund: vor dieser Validierung akzeptierte `POST /installations` jeden
-beliebigen `version`-String anstandslos - ein nicht-numerischer Wert (z. B.
-durch einen Tippfehler oder ein missverstandenes Versionsschema) wurde
-klaglos gespeichert und ließ erst später, bei einer völlig anderen
-Installations-Paarung, `POST /handovers` mit einem unbehandelten
-`ValueError` (HTTP 500) abstürzen - ein Fehler an der Stelle, an der er
-tatsächlich entsteht (Registrierung), statt an einer beliebigen späteren
-Vermittlung."""
+P13-S3 finding: before this validation, `POST /installations` accepted any
+arbitrary `version` string without complaint - a non-numeric value (e.g. due
+to a typo or a misunderstood version scheme) was stored without complaint
+and only later crashed `POST /handovers` with an unhandled `ValueError`
+(HTTP 500) during a completely unrelated installation pairing - an error at
+the point where it actually originates (registration), instead of at some
+arbitrary later mediation."""
 
 
 class InvalidVersionFormatError(ValueError):

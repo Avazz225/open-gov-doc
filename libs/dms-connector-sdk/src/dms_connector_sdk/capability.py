@@ -1,21 +1,19 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-# Wörtlich aus Konzept 3.3: "Capability-Beschreibung: lesen, schreiben,
-# Metadaten, Locking, Versionierung - je nach Zielsystem unterschiedlich
-# unterstützt".
+# Verbatim from concept 3.3: "capability description: read, write,
+# metadata, locking, versioning - support varies by target system".
 ConnectorCapability = Literal["read", "write", "metadata", "locking", "versioning"]
 
 
 @dataclass(frozen=True)
 class ConnectorDescriptor:
-    """Was ein einzelner Connector-Service tatsächlich unterstützt - dient
-    sowohl als Selbstregistrierungs-Payload (`capabilities` bei
-    `dms-registry-client`) als auch als dokumentierte Grundlage für ein
-    künftiges Connector-Protokoll-Versions-Handshake (3.3). `version` nutzt
-    absichtlich dasselbe Feld, das `registry-service`s `RegisterRequest`
-    bereits für jeden Service kennt (`version: str`) - keine zweite,
-    connector-spezifische Versionierung nötig."""
+    """What a single connector service actually supports - serves both as
+    the self-registration payload (`capabilities` for `dms-registry-client`)
+    and as a documented basis for a future connector protocol version
+    handshake (3.3). `version` deliberately reuses the same field that
+    `registry-service`'s `RegisterRequest` already has for every service
+    (`version: str`) - no second, connector-specific versioning needed."""
 
     protocol: str
     capabilities: frozenset[ConnectorCapability] = field(default_factory=frozenset)

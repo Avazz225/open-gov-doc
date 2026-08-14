@@ -10,10 +10,10 @@ LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
 
 
 class LicenseStatusClient:
-    """Identisches Verhalten wie `webdav_connector.license_client` (P12-S1,
-    P9-S2-Muster) - bewusst synchron, da FastAPI normale `def`-Endpunkte
-    (kein `async def`) ohnehin automatisch im eigenen Threadpool ausführt
-    (siehe ADR 0033/0036)."""
+    """Identical behavior to `webdav_connector.license_client` (P12-S1,
+    P9-S2 pattern) - deliberately synchronous, since FastAPI already runs
+    regular `def` endpoints (not `async def`) automatically in their own
+    threadpool anyway (see ADR 0033/0036)."""
 
     def __init__(self, registry_base_url: str, service_type: str, cache_ttl_seconds: float) -> None:
         self._client = httpx.Client(base_url=registry_base_url, timeout=10.0)

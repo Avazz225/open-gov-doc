@@ -79,10 +79,10 @@ _SSO_CONFIG_ID = 1
 
 
 async def _superuser_poll_loop() -> None:
-    """Erzwingt die Zeitbefristung der Break-Glass-Aktivierung (4.6) - gleiches
-    Poll- statt Push-Prinzip wie workflow-services SLA-Zeitüberwachung
-    (ADR 0020), seit Phase 18 (ADR 0063) auf eine `technical_account`-Zeile
-    statt eines Keycloak-Attributs angewandt."""
+    """Enforces the time limit of the break-glass activation (4.6) - same
+    poll-instead-of-push principle as workflow-service's SLA time
+    monitoring (ADR 0020), applied to a `technical_account` row instead of
+    a Keycloak attribute since Phase 18 (ADR 0063)."""
     while True:
         try:
             if await superuser.deactivate_if_expired(app.state.session_factory):
@@ -101,12 +101,13 @@ async def _superuser_poll_loop() -> None:
 async def _ensure_federation_identity(
     session_factory,
 ) -> FederationHubClient | None:
-    """Einmalige Selbstregistrierung am Federation Hub für die föderierte
-    Kontaktsuche (2.5/7.4, P15-S4) - opt-in, bleibt `None` ohne konfigurierten
-    `settings.federation_hub_base_url`. Gleiches Muster wie `workflow_service.
-    main._ensure_federation_identity` (ADR 0028/0039), hier bewusst eine
-    eigene, von workflow-services Registrierung unabhängige Installation im
-    selben Adressbuch (siehe `models.FederationIdentity`-Docstring/ADR 0054)."""
+    """One-time self-registration with the Federation Hub for the federated
+    contact directory search (2.5/7.4, P15-S4) - opt-in, stays `None`
+    without a configured `settings.federation_hub_base_url`. Same pattern
+    as `workflow_service.main._ensure_federation_identity` (ADR 0028/0039),
+    deliberately a separate installation in the same address book here,
+    independent of workflow-service's registration (see
+    `models.FederationIdentity` docstring/ADR 0054)."""
     if not settings.federation_hub_base_url:
         return None
     client = FederationHubClient(settings.federation_hub_base_url)
@@ -171,12 +172,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = make_session_factory(engine)
     app.state.federation_hub_client = await _ensure_federation_identity(app.state.session_factory)
 
-    # Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR 0063):
-    # der lokale Signierschlüssel braucht einen DB-Zugriff, ist also erst ab
-    # hier (nach dem Engine-Setup oben) verfügbar - `_LazyValidator` (unten)
-    # verzögert den eigentlichen Zugriff auf `app.state.combined_validator`
-    # bis zum ersten echten Request, sodass `get_current_user` trotzdem schon
-    # beim Modul-Import als fertige Dependency existieren kann.
+    # Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR 0063):
+    # the local signing key needs DB access, so it's only available from here
+    # on (after the engine setup above) - `_LazyValidator` (below) delays the
+    # actual access to `app.state.combined_validator` until the first real
+    # request, so that `get_current_user` can still exist as a finished
+    # dependency already at module import time.
     signing_key = await local_token_issuer.ensure_signing_key(app.state.session_factory)
     app.state.local_signing_key = signing_key
     app.state.combined_validator = MultiIssuerTokenValidator(
@@ -190,26 +191,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ]
     )
 
-    # Auth-Entkopplung von Keycloak (Phase 18, ADR 0063): der Superuser lebt
-    # seit dieser Session als `TechnicalAccount`-Zeile statt eines
-    # Keycloak-Kontos - idempotente Anlage direkt hier statt in
-    # `bootstrap.ensure_realm_and_client` (die dortige Funktion ist synchron
-    # und rein Keycloak-fokussiert, ein DB-Zugriff passt strukturell besser
-    # neben den Signierschlüssel oben).
+    # Auth decoupling from Keycloak (Phase 18, ADR 0063): the superuser has
+    # lived as a `TechnicalAccount` row instead of a Keycloak account since
+    # this session - created idempotently right here instead of in
+    # `bootstrap.ensure_realm_and_client` (that function is synchronous and
+    # purely Keycloak-focused, DB access fits structurally better next to
+    # the signing key above).
     await superuser.ensure_superuser_account(app.state.session_factory)
 
-    # Auth-Entkopplung von Keycloak (Phase 18, ADR 0065): Domain-Admin-Konten
-    # leben seit dieser Session ebenfalls als `TechnicalAccount`-Zeilen statt
-    # Keycloak-Konten - Anlage direkt hier, neben dem Superuser oben, statt in
-    # `bootstrap.ensure_realm_and_client` (rein Keycloak-fokussiert).
+    # Auth decoupling from Keycloak (Phase 18, ADR 0065): domain admin
+    # accounts have also lived as `TechnicalAccount` rows instead of
+    # Keycloak accounts since this session - created right here, next to
+    # the superuser above, instead of in `bootstrap.ensure_realm_and_client`
+    # (purely Keycloak-focused).
     for username, role_name in DOMAIN_ADMIN_ACCOUNTS:
         await domain_admins.ensure_domain_admin_account(
             app.state.session_factory, username=username, role_name=role_name
         )
 
-    # Best-Effort (P6-S5, seit P6-S6 für zwei Domänen statt einer): der
-    # Permission Service könnte beim eigenen Start noch nicht erreichbar sein
-    # - kein Retry-Loop, heilt beim nächsten Neustart (gleiches Prinzip wie
+    # Best-effort (P6-S5, for two domains instead of one since P6-S6): the
+    # Permission Service might not yet be reachable at its own startup - no
+    # retry loop, self-heals on the next restart (same principle as
     # SubjectNotFoundError in structure_consumer.py).
     for username, role_name in DOMAIN_ADMIN_ACCOUNTS:
         try:
@@ -233,10 +235,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    # Erster Konsument dieses Service überhaupt (P6-S5, 4.6): getrennter
-    # Client (ensure_stream=False), da auth-service den Stream "permission"
-    # nicht selbst besitzt - gleiches Zwei-Client-Prinzip wie document-service
-    # seit P6-S4 (ADR 0022).
+    # First consumer of this service ever (P6-S5, 4.6): a separate client
+    # (ensure_stream=False), since auth-service does not itself own the
+    # "permission" stream - same two-client principle as document-service
+    # since P6-S4 (ADR 0022).
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
     app.state.consumer_bus = consumer_bus
@@ -287,12 +289,12 @@ _keycloak_validator = TokenValidator(
 
 
 class _LazyValidator:
-    """Auth-Entkopplung (Phase 18): `app.state.combined_validator` existiert
-    erst nach dem Lifespan-Start (braucht einen DB-Zugriff für den lokalen
-    Signierschlüssel, siehe `lifespan()`) - dieser Wrapper verzögert den
-    eigentlichen Zugriff bis zum ersten tatsächlichen Request.
-    `make_current_user_dependency` selbst bekommt trotzdem wie gewohnt ein
-    sofort verfügbares Objekt mit `.validate()` (reines Duck-Typing)."""
+    """Auth decoupling (Phase 18): `app.state.combined_validator` only
+    exists after lifespan startup (needs DB access for the local signing
+    key, see `lifespan()`) - this wrapper delays the actual access until
+    the first real request. `make_current_user_dependency` itself still
+    gets an immediately available object with `.validate()` as usual
+    (pure duck typing)."""
 
     def validate(self, token: str) -> dict:
         return app.state.combined_validator.validate(token)
@@ -320,23 +322,23 @@ def healthz() -> dict:
 
 @app.get("/.well-known/jwks.json")
 def get_local_jwks() -> dict:
-    """Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
-    0063) - JWKS für Tokens technischer Konten (Superuser/Domain-Admins),
-    analog zu Keycloaks `/protocol/openid-connect/certs`. Ungegatet wie jeder
-    JWKS-Endpunkt (öffentlicher Schlüssel, keine sensiblen Daten)."""
+    """Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR
+    0063) - JWKS for tokens of technical accounts (superuser/domain admins),
+    analogous to Keycloak's `/protocol/openid-connect/certs`. Ungated like
+    any JWKS endpoint (public key, no sensitive data)."""
     return local_token_issuer.build_jwks(
         app.state.local_signing_key.public_key_pem, app.state.local_signing_key.kid
     )
 
 
 def _mint_technical_account_tokens(account: TechnicalAccount) -> TokenResponse:
-    """Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - baut dieselbe
-    `TokenResponse`-Form wie ein Keycloak-Login, nur mit lokal signierten
-    Tokens. `role_name` (falls gesetzt, z. B. künftig für Domain-Admins) wird
-    als einzige Rolle in `realm_access.roles` getragen - der Superuser selbst
-    hat keine Rolle (`role_name=None`), seine Sonderrechte laufen über den
-    direkten Namensvergleich (`SUPERUSER_USERNAME`) an mehreren Stellen im
-    System, nicht über RBAC."""
+    """Auth decoupling from Keycloak (Phase 18, ADR 0063) - builds the same
+    `TokenResponse` shape as a Keycloak login, just with locally signed
+    tokens. `role_name` (if set, e.g. for future domain admins) is carried
+    as the sole role in `realm_access.roles` - the superuser itself has no
+    role (`role_name=None`), its special privileges run through a direct
+    name comparison (`SUPERUSER_USERNAME`) at several points in the system,
+    not through RBAC."""
     signing_key = app.state.local_signing_key
     roles = [account.role_name] if account.role_name else []
     access_token = local_token_issuer.mint_token(
@@ -366,11 +368,11 @@ def _mint_technical_account_tokens(account: TechnicalAccount) -> TokenResponse:
 
 
 async def _login_technical_account(account: TechnicalAccount, password: str) -> TokenResponse:
-    # Bewusst dieselbe generische Fehlermeldung für falsches Passwort UND für
-    # ein (noch) nicht aktiviertes/abgelaufenes Konto - unterscheidbare
-    # Meldungen würden verraten, ob ein Konto existiert bzw. ob es nur derzeit
-    # deaktiviert ist (identisches Prinzip wie zuvor Keycloaks eigene, ebenso
-    # opake Fehlermeldung für ein deaktiviertes Konto).
+    # Deliberately the same generic error message for a wrong password AND
+    # for a (not yet) activated/expired account - distinguishable messages
+    # would reveal whether an account exists or is merely currently
+    # disabled (identical principle to Keycloak's own, equally opaque error
+    # message for a disabled account).
     invalid = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Ungültige Anmeldedaten"
     )
@@ -389,18 +391,19 @@ async def login(
     x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
-    """Not-Shutdown (4.8, P6-S6): das Gateway broadcastet den Wartungsmodus-
-    Status auf jedem durchgelassenen Request per Header, statt dass jeder
-    Backend-Service selbst bei `permission-service` pollen muss (siehe ADR
-    0024). Ist der Wartungsmodus aktiv, werden neue Logins außer für den
-    Superuser abgelehnt - der Superuser-Login funktioniert unabhängig davon
-    ohnehin nur, wenn das Konto zuvor per Break-Glass (4.6) aktiviert wurde.
+    """Emergency shutdown (4.8, P6-S6): the gateway broadcasts the
+    maintenance mode status via header on every request it passes through,
+    instead of every backend service having to poll `permission-service`
+    itself (see ADR 0024). If maintenance mode is active, new logins are
+    rejected except for the superuser - the superuser login only works
+    independently of that anyway if the account was previously activated
+    via break-glass (4.6).
 
-    Auth-Entkopplung von Keycloak (Phase 18, ADR 0063): passt der Benutzername
-    auf ein `TechnicalAccount` (aktuell nur der Superuser, Domain-Admins
-    folgen in P18-S3), authentifiziert dieser Endpunkt lokal statt gegen
-    Keycloak weiterzuleiten - Keycloaks Erreichbarkeit spielt für den
-    Superuser-Login damit keine Rolle mehr."""
+    Auth decoupling from Keycloak (Phase 18, ADR 0063): if the username
+    matches a `TechnicalAccount` (currently only the superuser, domain
+    admins follow in P18-S3), this endpoint authenticates locally instead
+    of forwarding to Keycloak - Keycloak's reachability therefore no longer
+    matters for the superuser login."""
     maintenance_active = x_dms_maintenance_active.lower() == "true"
     if maintenance_active and payload.username != superuser.SUPERUSER_USERNAME:
         raise HTTPException(
@@ -424,12 +427,12 @@ async def login(
 async def _refresh_technical_account_token(
     refresh_token_value: str, session: AsyncSession
 ) -> TokenResponse:
-    """Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - Gegenstück zu
-    `keycloak_client.refresh` für lokal ausgestellte Refresh-Tokens: kein
-    echtes Keycloak-Refresh-Grant möglich (rein lokale Konten haben keine
-    Keycloak-Session), stattdessen erneute Signaturprüfung über den bereits
-    vorhandenen `combined_validator` und ein frisches Token-Paar, sofern das
-    zugrundeliegende Konto weiterhin aktiv ist."""
+    """Auth decoupling from Keycloak (Phase 18, ADR 0063) - counterpart to
+    `keycloak_client.refresh` for locally issued refresh tokens: no real
+    Keycloak refresh grant possible (purely local accounts have no Keycloak
+    session), instead a renewed signature check via the already-existing
+    `combined_validator` and a fresh token pair, provided the underlying
+    account is still active."""
     try:
         claims = app.state.combined_validator.validate(refresh_token_value)
     except InvalidTokenError as exc:
@@ -463,21 +466,21 @@ async def refresh_token(
 async def me(
     user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
 ) -> dict:
-    """Normalisierte Identität aus dem Token (4.4) - die Übersetzung in
-    interne DMS-Rollen übernimmt der Permission Service (4.1, P2-S2), nicht
-    der Auth Service selbst.
+    """Normalized identity from the token (4.4) - the translation into
+    internal DMS roles is handled by the Permission Service (4.1, P2-S2),
+    not the Auth Service itself.
 
-    Seit P24-S2: `realm_roles` enthält zusätzlich zu Keycloaks rohen
-    `realm_access.roles` auch die aus dem `groups`-JWT-Claim abgeleiteten
-    Rollen (`ad_group_mapping.resolve_roles_for_groups`, konfigurierbares
-    AD-Gruppe->Rolle-Mapping, 4.4) - bewusst in dieselbe Liste gemerged statt
-    ein separates Feld, da jeder bestehende Aufrufer (`permission-service`s
-    Rollenzuweisungs-Abgleich, Frontend-Rollenprüfungen) bereits `realm_roles`
-    liest und eine Rolle aus Sicht des restlichen Systems gleich behandelt
-    werden soll, unabhängig davon, ob sie direkt als Keycloak-Realm-Rolle
-    zugewiesen oder über eine Gruppenmitgliedschaft abgeleitet ist -
-    Duplikate (z. B. dieselbe Rolle sowohl direkt zugewiesen als auch über
-    eine Gruppe abgeleitet) werden dedupliziert."""
+    Since P24-S2: `realm_roles` contains, in addition to Keycloak's raw
+    `realm_access.roles`, also the roles derived from the `groups` JWT
+    claim (`ad_group_mapping.resolve_roles_for_groups`, configurable AD
+    group->role mapping, 4.4) - deliberately merged into the same list
+    instead of a separate field, since every existing caller
+    (`permission-service`'s role assignment reconciliation, frontend role
+    checks) already reads `realm_roles`, and a role should be treated the
+    same from the rest of the system's perspective regardless of whether it
+    was assigned directly as a Keycloak realm role or derived via a group
+    membership - duplicates (e.g. the same role both assigned directly and
+    derived via a group) are deduplicated."""
     realm_roles = list(user.get("realm_access", {}).get("roles", []))
     mapped_roles = await ad_group_mapping.resolve_roles_for_groups(
         session, user.get("groups", []) or []
@@ -492,9 +495,9 @@ async def me(
 
 @app.get("/me/preferences", response_model=ThemePreference)
 def get_my_preferences(user: dict = Depends(get_current_user)) -> ThemePreference:
-    """Cross-UI-Theming (8, P4-S6) - Präferenz hängt am Nutzerkonto (Keycloak-
-    Attribut), nicht an einer einzelnen Installation/einem einzelnen Browser,
-    damit sie geräteübergreifend wirkt (Nutzer-Feedback nach P4-S5)."""
+    """Cross-UI theming (8, P4-S6) - the preference is attached to the user
+    account (Keycloak attribute), not a single installation/single browser,
+    so it applies across devices (user feedback after P4-S5)."""
     theme = admin_users.get_theme_preference(app.state.keycloak_admin, user["sub"])
     return ThemePreference(theme=theme)
 
@@ -508,20 +511,20 @@ def update_my_preferences(
 
 
 async def _require_permission(user: dict, permission: str, message: str) -> None:
-    """Generischer Capability-Check gegen permission-service (Post-Roadmap
-    Phase 19 Session 3, ADR 0068) - `_require_user_management` unten bleibt
-    als benannter Spezialfall mit eigener Fehlermeldung bestehen, neue
-    Aufrufer (`lookup_user`/`search_directory`) nutzen diesen Helfer direkt."""
+    """Generic capability check against permission-service (post-roadmap
+    Phase 19 Session 3, ADR 0068) - `_require_user_management` below
+    remains as a named special case with its own error message, new callers
+    (`lookup_user`/`search_directory`) use this helper directly."""
     allowed = await app.state.permission_client.has_permission(user["sub"], permission)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
 
 
 async def _require_user_management(user: dict) -> None:
-    """Retrofit (P6-S5, 4.6): Nutzerverwaltung ist seit P4-S3 ungated -
-    Domäne "Nutzer-/Rechteverwaltung", durchgesetzt über einen echten
-    Permission-Service-Check statt eines `X-DMS-Roles`-Stringvergleichs (die
-    Rolle lebt systemeigen in permission-service, nicht in Keycloak)."""
+    """Retrofit (P6-S5, 4.6): user management has been ungated since P4-S3 -
+    "user/permission management" domain, now enforced via a real
+    permission-service check instead of an `X-DMS-Roles` string comparison
+    (the role natively lives in permission-service, not Keycloak)."""
     await _require_permission(
         user, "admin.user_management", "Fehlende Domain-Admin-Rolle 'Nutzer-/Rechteverwaltung'"
     )
@@ -529,23 +532,23 @@ async def _require_user_management(user: dict) -> None:
 
 @app.get("/users", response_model=list[UserOut])
 async def list_users(user: dict = Depends(get_current_user)) -> list[dict]:
-    """Nutzerverwaltung für die Admin-UI (8, seit P4-S3) - liest direkt aus
-    Keycloak, keine eigene Nutzertabelle (siehe README: Konten sind bereits
-    vollständig durch Keycloak abgedeckt)."""
+    """User management for the admin UI (8, since P4-S3) - reads directly
+    from Keycloak, no own user table (see README: accounts are already
+    fully covered by Keycloak)."""
     await _require_user_management(user)
     return admin_users.list_users(app.state.keycloak_admin)
 
 
 @app.get("/users/lookup", response_model=UserLookupOut)
 async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> dict:
-    """Exakte Namensauflösung (2.5, P14-S6) - bewusst OHNE
-    `admin.user_management`-Gate wie `GET /users` oben, siehe
-    `admin_users.find_user_by_username`. Seit Post-Roadmap Phase 19 Session 3
-    (ADR 0068) über die "everyone"-Gruppe aus permission-service gegated
-    (`users.lookup`, seit P19-S2 vorgeseedet) statt komplett offen zu sein -
-    am Ist-Verhalten ändert sich dadurch nichts (jeder authentifizierte
-    Principal ist implizit Mitglied), die Berechtigung ist jetzt aber
-    systemeigen admin-editierbar statt hartkodiert."""
+    """Exact name resolution (2.5, P14-S6) - deliberately WITHOUT the
+    `admin.user_management` gate like `GET /users` above, see
+    `admin_users.find_user_by_username`. Since post-roadmap Phase 19
+    Session 3 (ADR 0068), gated via the "everyone" group from
+    permission-service (`users.lookup`, pre-seeded since P19-S2) instead of
+    being completely open - the actual behavior doesn't change (every
+    authenticated principal is implicitly a member), but the permission is
+    now natively admin-editable instead of hardcoded."""
     await _require_permission(
         user, "users.lookup", "Fehlende Berechtigung 'users.lookup' (everyone-Gruppe entzogen?)"
     )
@@ -557,11 +560,12 @@ async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> 
 
 @app.get("/users/directory", response_model=list[DirectoryEntryOut])
 async def search_directory(q: str, user: dict = Depends(get_current_user)) -> list[dict]:
-    """Verzeichnis zum Auffinden anderer Mitarbeitender (2.5/4.4, P15-S4) -
-    kein `admin.user_management`-Gate, siehe `admin_users.search_users`. Seit
-    Post-Roadmap Phase 19 Session 3 (ADR 0068) über die "everyone"-Gruppe aus
-    permission-service gegated (`users.directory`, seit P19-S2 vorgeseedet)
-    statt komplett offen zu sein - gleiches Prinzip wie `lookup_user` oben."""
+    """Directory for finding other employees (2.5/4.4, P15-S4) - no
+    `admin.user_management` gate, see `admin_users.search_users`. Since
+    post-roadmap Phase 19 Session 3 (ADR 0068), gated via the "everyone"
+    group from permission-service (`users.directory`, pre-seeded since
+    P19-S2) instead of being completely open - same principle as
+    `lookup_user` above."""
     await _require_permission(
         user,
         "users.directory",
@@ -574,9 +578,10 @@ async def search_directory(q: str, user: dict = Depends(get_current_user)) -> li
 async def directory_federation_status(
     session: AsyncSession = Depends(get_session),
 ) -> DirectoryFederationStatusOut:
-    """Ob die föderierte Kontaktsuche auf dieser Installation aktiviert ist
-    (2.5: "eigene, explizit opt-in konfigurierbare Fähigkeit") - das Frontend
-    zeigt die entsprechende UI-Sektion nur, wenn `enabled=true`."""
+    """Whether the federated contact directory search is enabled on this
+    installation (2.5: "own, explicitly opt-in configurable capability") -
+    the frontend only shows the corresponding UI section when
+    `enabled=true`."""
     if not settings.federated_directory_enabled or app.state.federation_hub_client is None:
         return DirectoryFederationStatusOut(enabled=False, peer_installation_count=0)
     identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
@@ -593,11 +598,12 @@ async def search_federated_directory(
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
-    """Installationsübergreifende Kontaktsuche (2.5/7.4, P15-S4) - fragt jede
-    über den Federation Hub bekannte, für Kontaktsuche freigegebene Peer-
-    Installation DIREKT an (nicht über den Hub relayt, siehe ADR 0054). Liefert
-    ausschließlich Treffer ANDERER Installationen - das Frontend ruft
-    zusätzlich `GET /users/directory` für die lokalen aus."""
+    """Cross-installation contact directory search (2.5/7.4, P15-S4) -
+    queries every peer installation known via the Federation Hub and
+    approved for the contact directory search DIRECTLY (not relayed
+    through the Hub, see ADR 0054). Returns exclusively hits from OTHER
+    installations - the frontend additionally calls `GET /users/directory`
+    for local ones."""
     if not settings.federated_directory_enabled or app.state.federation_hub_client is None:
         raise HTTPException(
             status_code=403,
@@ -612,12 +618,12 @@ async def search_federated_directory(
 
 @app.post("/users/directory/federated-search-inbound", response_model=list[DirectoryEntryOut])
 async def federated_search_inbound(request: Request) -> list[dict]:
-    """Empfängt eine signierte Verzeichnis-Suchanfrage einer Peer-Installation
-    (2.5/7.4, P15-S4) - bewusst öffentlich (kein `X-DMS-Principal`, analog zu
-    `workflow_service.main.federation_inbound`), authentisiert stattdessen
-    über `X-Installation-Signature`, verifiziert gegen den beim Hub
-    hinterlegten öffentlichen Schlüssel der ANFRAGENDEN Installation (live
-    abgerufen, kein lokal gecachter Peer-Schlüsselspeicher - siehe ADR 0054)."""
+    """Receives a signed directory search request from a peer installation
+    (2.5/7.4, P15-S4) - deliberately public (no `X-DMS-Principal`,
+    analogous to `workflow_service.main.federation_inbound`), instead
+    authenticates via `X-Installation-Signature`, verified against the
+    REQUESTING installation's public key stored at the Hub (fetched live,
+    no locally cached peer key store - see ADR 0054)."""
     if not settings.federated_directory_enabled or app.state.federation_hub_client is None:
         raise HTTPException(
             status_code=403,
@@ -645,18 +651,18 @@ async def federated_search_inbound(request: Request) -> list[dict]:
 
 @app.get("/users/count")
 def count_users() -> dict:
-    """Installationsweite Nutzerzahl (9.1 "benannte Accounts"-Modell, seit
-    P9-S1) - ungegatet fuer `license-service`s internen Aufruf (kein
-    Service hat einen echten Keycloak-Bearer-Token fuer `Depends(get_current_
-    user)`, siehe PROGRESS.md-Recherche)."""
+    """Installation-wide user count (9.1 "named accounts" model, since
+    P9-S1) - ungated for `license-service`'s internal call (no service has
+    a real Keycloak bearer token for `Depends(get_current_user)`, see the
+    PROGRESS.md research)."""
     return {"count": len(admin_users.list_users(app.state.keycloak_admin))}
 
 
 @app.get("/sessions/count")
 def count_sessions() -> dict:
-    """Installationsweite Anzahl gleichzeitiger Sessions (9.1 "gleichzeitige
-    Nutzer"-Modell, seit P9-S1) - fertige Keycloak-Admin-API-Methode, kein
-    neues Session-Tracking noetig. Ungegatet, gleiche Begruendung wie
+    """Installation-wide count of concurrent sessions (9.1 "concurrent
+    users" model, since P9-S1) - ready-made Keycloak admin API method, no
+    new session tracking needed. Ungated, same rationale as
     `/users/count`."""
     stats = app.state.keycloak_admin.get_client_sessions_stats()
     for entry in stats:
@@ -683,16 +689,16 @@ async def create_user(payload: UserCreate, user: dict = Depends(get_current_user
 
 @app.get("/users/{user_id}", response_model=UserLookupOut)
 async def get_user(user_id: str, user: dict = Depends(get_current_user)) -> dict:
-    """Rückwärts-Identitätsauflösung (Post-Roadmap Phase 19 Session 4, ADR
-    0069) - Gegenstück zu `GET /users/lookup` oben (Name → UUID): `teamspace-
-    service`s Mitgliederlisten und `permission-service`s Delegationen kennen
-    nur die rohe `principal_id`-UUID, kein Frontend konnte sie bislang in
-    einen Nutzernamen auflösen. Gleiches Gate wie `lookup_user`
-    (`users.lookup`, "everyone"-Gruppe) - dieselbe Vertrauensstufe, nur die
-    Suchrichtung ist umgekehrt. **Muss nach allen statischen `/users/...`-
-    Routen (`/users/lookup`, `/users/directory`, `/users/count`, ...)
-    registriert sein** - FastAPI matcht Pfade in Registrierungsreihenfolge,
-    ein früher registriertes `/users/{user_id}` würde sie sonst verdecken."""
+    """Reverse identity resolution (post-roadmap Phase 19 Session 4, ADR
+    0069) - counterpart to `GET /users/lookup` above (name -> UUID):
+    `teamspace-service`'s member lists and `permission-service`'s
+    delegations only know the raw `principal_id` UUID, no frontend could
+    previously resolve it into a username. Same gate as `lookup_user`
+    (`users.lookup`, "everyone" group) - same trust level, just the search
+    direction is reversed. **Must be registered after all static
+    `/users/...` routes** (`/users/lookup`, `/users/directory`,
+    `/users/count`, ...) - FastAPI matches paths in registration order, an
+    earlier-registered `/users/{user_id}` would otherwise shadow them."""
     await _require_permission(
         user, "users.lookup", "Fehlende Berechtigung 'users.lookup' (everyone-Gruppe entzogen?)"
     )
@@ -711,9 +717,9 @@ async def delete_user(user_id: str, user: dict = Depends(get_current_user)) -> N
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-# Keycloak legt diese Realm-Rollen selbst an (Default-Verhalten seit jeher) -
-# eine Paket-getriebene Liste (14.1/P17-S1) soll sie nicht als "eigene"
-# DMS-Rolle mit auflisten.
+# Keycloak creates these realm roles itself (default behavior since
+# forever) - a package-driven list (14.1/P17-S1) should not list them as an
+# "own" DMS role.
 _KEYCLOAK_BUILTIN_REALM_ROLE_PREFIXES = ("default-roles-",)
 _KEYCLOAK_BUILTIN_REALM_ROLE_NAMES = {"offline_access", "uma_authorization"}
 
@@ -725,12 +731,13 @@ def _is_builtin_realm_role(name: str) -> bool:
 
 
 async def _require_service_user_management(x_dms_principal: str) -> None:
-    """Wie `_require_user_management` oben, aber für Service-zu-Service-Aufrufe
-    ohne Keycloak-JWT (`X-DMS-Principal`-Header statt `Depends(get_current_user)`)
-    - identisches Muster wie `workflow_service.main._require_object_config`.
-    Genutzt von `config-service`s Konfigurationspaket-Import (14.1, P17-S1),
-    das im eigenen Namen (`X-DMS-Principal: config-service`) neue Realm-Rollen
-    anlegen können muss."""
+    """Like `_require_user_management` above, but for service-to-service
+    calls without a Keycloak JWT (`X-DMS-Principal` header instead of
+    `Depends(get_current_user)`) - identical pattern to
+    `workflow_service.main._require_object_config`. Used by
+    `config-service`'s configuration package import (14.1, P17-S1), which
+    needs to be able to create new realm roles under its own name
+    (`X-DMS-Principal: config-service`)."""
     allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
         x_dms_principal, "admin.user_management"
     )
@@ -743,11 +750,11 @@ async def _require_service_user_management(x_dms_principal: str) -> None:
 
 @app.get("/realm-roles", response_model=list[RealmRoleOut])
 def list_realm_roles() -> list[dict]:
-    """Aktuell existierende Keycloak-Realm-Rollen (14.1, P17-S1) - Grundlage
-    für den Export-Zweig eines Konfigurationspakets (`config-service`s
-    `realm_roles`-Kategorie). Ungegatet wie `GET /users/count` u. ä. - liefert
-    nur Namen, keine sensiblen Daten, identisches Vertrauensmodell wie
-    `permission-service`s `GET /roles`, das ebenfalls ungegatet ist."""
+    """Currently existing Keycloak realm roles (14.1, P17-S1) - basis for
+    the export branch of a configuration package (`config-service`'s
+    `realm_roles` category). Ungated like `GET /users/count` etc. - returns
+    only names, no sensitive data, identical trust model to
+    `permission-service`'s `GET /roles`, which is likewise ungated."""
     roles = app.state.keycloak_admin.get_realm_roles()
     return [{"name": role["name"]} for role in roles if not _is_builtin_realm_role(role["name"])]
 
@@ -756,13 +763,13 @@ def list_realm_roles() -> list[dict]:
 async def ensure_realm_roles(
     payload: RealmRolesRequest, x_dms_principal: str = Header(default="")
 ) -> None:
-    """Legt die übergebenen Realm-Rollen idempotent an (14.1, P17-S1) -
-    identisches Primitiv wie `bootstrap._ensure_dms_admin_role`
-    (`create_realm_role(..., skip_exists=True)`), hier für beliebige, von
-    einem Konfigurationspaket vorgegebene Namen (z. B. `dms-poststelle`, 2.5)
-    statt fest codiert für `dms-admin`. Legt nur die Rolle an, weist sie
-    niemandem zu - Zuweisung bleibt wie bisher außerhalb dieses Service über
-    die Keycloak Admin Console (siehe `bootstrap.py`)."""
+    """Creates the given realm roles idempotently (14.1, P17-S1) - identical
+    primitive to `bootstrap._ensure_dms_admin_role`
+    (`create_realm_role(..., skip_exists=True)`), here for arbitrary names
+    supplied by a configuration package (e.g. `dms-poststelle`, 2.5)
+    instead of hardcoded for `dms-admin`. Only creates the role, does not
+    assign it to anyone - assignment continues to happen outside this
+    service via the Keycloak Admin Console (see `bootstrap.py`)."""
     await _require_service_user_management(x_dms_principal)
     for name in payload.names:
         app.state.keycloak_admin.create_realm_role(payload={"name": name}, skip_exists=True)
@@ -772,10 +779,10 @@ async def ensure_realm_roles(
 async def list_ad_group_mappings(
     user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
 ) -> list[AdGroupRoleMapping]:
-    """AD-Gruppe->interne-Rolle-Mapping (4.4, P24-S2, Admin-CRUD) - gegated
-    wie `GET /users` (`admin.user_management`, gleiche Domäne
-    "Nutzer-/Rechteverwaltung", da eine falsch konfigurierte Zuordnung
-    Nutzer stillschweigend zusätzliche Rollen verleihen kann)."""
+    """AD group->internal role mapping (4.4, P24-S2, admin CRUD) - gated
+    like `GET /users` (`admin.user_management`, same "user/permission
+    management" domain, since a misconfigured mapping can silently grant
+    users additional roles)."""
     await _require_user_management(user)
     return await ad_group_mapping.list_mappings(session)
 
@@ -790,12 +797,12 @@ async def create_ad_group_mapping(
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> AdGroupRoleMapping:
-    """Legt eine neue Zuordnung an - wirkt sich ab der nächsten `GET
-    /me`-Auflösung aus (keine Caching-Verzögerung, siehe
-    `ad_group_mapping.resolve_roles_for_groups`). Auditiert über
-    `auth.ad_group_role_mapping.created` (`audit-service` konsumiert bereits
-    `auth.>`, kein neuer Audit-Mechanismus nötig) sowie `created_by`/
-    `created_at` direkt an der Zeile."""
+    """Creates a new mapping - takes effect starting with the next `GET
+    /me` resolution (no caching delay, see
+    `ad_group_mapping.resolve_roles_for_groups`). Audited via
+    `auth.ad_group_role_mapping.created` (`audit-service` already consumes
+    `auth.>`, no new audit mechanism needed) as well as `created_by`/
+    `created_at` directly on the row."""
     await _require_user_management(user)
     mapping = await ad_group_mapping.create_mapping(
         session,
@@ -822,8 +829,8 @@ async def delete_ad_group_mapping(
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Löscht eine Zuordnung - wirkt sich wie die Anlage ab der nächsten
-    `GET /me`-Auflösung aus. `404` bei unbekannter `mapping_id`."""
+    """Deletes a mapping - takes effect the same way as creation, starting
+    with the next `GET /me` resolution. `404` for an unknown `mapping_id`."""
     await _require_user_management(user)
     try:
         mapping = await ad_group_mapping.delete_mapping(session, mapping_id)
@@ -843,10 +850,11 @@ async def delete_ad_group_mapping(
 
 @app.get("/superuser/status", response_model=SuperuserStatus)
 async def get_superuser_status() -> SuperuserStatus:
-    """Break-Glass-Status (4.6) für die Admin-UI-Banner-Anzeige - Aktivierung
-    selbst läuft über den bereits bestehenden generischen Approval-Flow des
-    Permission Service (`POST /approval-requests` mit
-    `action_type="auth.superuser.activate"`), nicht über einen Endpunkt hier."""
+    """Break-glass status (4.6) for the admin UI banner display - activation
+    itself runs through the Permission Service's already-existing generic
+    approval flow (`POST /approval-requests` with
+    `action_type="auth.superuser.activate"`), not through an endpoint
+    here."""
     try:
         active, expires_at = await superuser.get_status(app.state.session_factory)
     except superuser.SuperuserNotConfiguredError as exc:
@@ -860,15 +868,15 @@ async def get_superuser_status() -> SuperuserStatus:
 
 @app.post("/superuser/deactivate", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_superuser() -> None:
-    """Vorzeitiges, freiwilliges Beenden der Aktivierung (4.6) - ergänzt den
-    automatischen Ablauf über den Poll-Loop."""
+    """Early, voluntary termination of the activation (4.6) - complements
+    the automatic expiry via the poll loop."""
     try:
         await superuser.deactivate(app.state.session_factory)
     except superuser.SuperuserNotConfiguredError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    # Kein authentifizierter Aufrufer-Kontext an diesem Endpunkt - das
-    # deaktivierte Superuser-Konto selbst ist die naechstbeste Angabe (es
-    # gibt nur eines, siehe get_superuser_status).
+    # No authenticated caller context at this endpoint - the deactivated
+    # superuser account itself is the next-best attribution (there's only
+    # one, see get_superuser_status).
     await publish_event(
         "auth.superuser.deactivated",
         {"reason": "manual"},
@@ -876,7 +884,7 @@ async def deactivate_superuser() -> None:
     )
 
 
-# --- SSO/automatischer Login (Post-Roadmap-Feature, Kerberos/SPNEGO über
+# --- SSO/automatic login (post-roadmap feature, Kerberos/SPNEGO via
 # Keycloak) --------------------------------------------------------------
 
 
@@ -890,10 +898,10 @@ async def _get_or_create_sso_config(session: AsyncSession) -> SsoConfig:
 
 
 def _redirect_uri_origin_allowed(redirect_uri: str) -> bool:
-    """Open-Redirect-Absicherung für `GET /oidc/authorize`/`POST /oidc/
-    callback` - `redirect_uri` kommt vom Client, muss also gegen eine feste
-    Allow-Liste geprüft werden, exakt gleiches Prinzip wie gateway-services
-    `cors_allowed_origins`."""
+    """Open-redirect protection for `GET /oidc/authorize`/`POST /oidc/
+    callback` - `redirect_uri` comes from the client, so it must be checked
+    against a fixed allow list, exactly the same principle as
+    gateway-service's `cors_allowed_origins`."""
     parsed = urlparse(redirect_uri)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     return origin in settings.sso_redirect_uri_allowed_origins
@@ -901,10 +909,10 @@ def _redirect_uri_origin_allowed(redirect_uri: str) -> bool:
 
 @app.get("/oidc/authorize", response_model=OidcAuthorizeOut)
 async def oidc_authorize(redirect_uri: str, state: str) -> OidcAuthorizeOut:
-    """SSO/automatischer Login - der Login-Einstiegspunkt selbst, daher
-    öffentlich (kein DMS-Token existiert an dieser Stelle noch). Liefert nur
-    die URL zurück, der Client navigiert selbst dorthin (kein serverseitiger
-    Redirect, konsistent mit dem übrigen Service-Stil dieses Projekts)."""
+    """SSO/automatic login - the login entry point itself, therefore public
+    (no DMS token exists at this point yet). Returns only the URL, the
+    client navigates there itself (no server-side redirect, consistent with
+    the rest of this project's service style)."""
     if not _redirect_uri_origin_allowed(redirect_uri):
         raise HTTPException(status_code=400, detail="redirect_uri nicht erlaubt")
     state_param = state or str(uuid.uuid4())
@@ -919,17 +927,17 @@ async def oidc_authorize(redirect_uri: str, state: str) -> OidcAuthorizeOut:
 async def oidc_callback(
     payload: OidcCallbackRequest, x_dms_maintenance_active: str = Header(default="false")
 ) -> TokenResponse:
-    """Tauscht den von Keycloaks Redirect gelieferten `code` serverseitig
-    gegen Tokens - identisches Antwortformat wie `POST /login`, damit sich am
-    Frontend-Token-Speichermechanismus nichts ändern muss. Öffentlich wie
-    `/oidc/authorize` (der Aufrufer hat noch kein DMS-Token).
+    """Exchanges the `code` delivered by Keycloak's redirect for tokens
+    server-side - identical response format to `POST /login`, so nothing
+    needs to change in the frontend's token storage mechanism. Public like
+    `/oidc/authorize` (the caller has no DMS token yet).
 
-    Gleiche Not-Shutdown-Sperre wie `POST /login` (4.8) - dort wird VOR dem
-    eigentlichen Login geprüft, hier erst DANACH (der Benutzername ist vor
-    dem Code-Austausch nicht bekannt): ist der Wartungsmodus aktiv und der
-    Token gehört nicht dem Superuser, werden die frisch ausgestellten Tokens
-    verworfen statt zurückgegeben - sonst würde SSO die Sperre umgehen, die
-    der Formular-Login bereits durchsetzt."""
+    Same emergency-shutdown lock as `POST /login` (4.8) - there it's
+    checked BEFORE the actual login, here only AFTERWARD (the username is
+    not known before the code exchange): if maintenance mode is active and
+    the token does not belong to the superuser, the freshly issued tokens
+    are discarded instead of being returned - otherwise SSO would bypass
+    the lock that the form login already enforces."""
     if not _redirect_uri_origin_allowed(payload.redirect_uri):
         raise HTTPException(status_code=400, detail="redirect_uri nicht erlaubt")
     try:
@@ -951,9 +959,9 @@ async def oidc_callback(
 
 @app.get("/sso-config", response_model=SsoConfigOut)
 async def get_sso_config(session: AsyncSession = Depends(get_session)) -> SsoConfigOut:
-    """Ungegatet wie `GET /share-link-config` bei document-service - reine
-    Information, ob SSO aktiv ist, keine sensiblen Daten. `login/page.tsx`
-    fragt dies VOR dem Anzeigen des Passwort-Formulars ab."""
+    """Ungated like `GET /share-link-config` in document-service - purely
+    information about whether SSO is active, no sensitive data.
+    `login/page.tsx` queries this BEFORE showing the password form."""
     config = await _get_or_create_sso_config(session)
     await session.commit()
     return config
@@ -965,9 +973,8 @@ async def put_sso_config(
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> SsoConfigOut:
-    """Anders als `GET` gegated - ein An-/Ausschalten von SSO ist
-    sicherheitsrelevant (`admin.user_management`, gleiche Domäne wie
-    Nutzerverwaltung selbst)."""
+    """Unlike `GET`, gated - turning SSO on/off is security-relevant
+    (`admin.user_management`, same domain as user management itself)."""
     await _require_user_management(user)
     config = await _get_or_create_sso_config(session)
     config.enabled = payload.enabled
@@ -978,9 +985,10 @@ async def put_sso_config(
 
 @app.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(payload: LogoutRequest) -> None:
-    """Beendet die Sitzung wirklich auf Keycloak-Seite (siehe
-    `keycloak_client.end_session`-Docstring) - ohne diesen Endpunkt gab es
-    bislang GAR KEINEN Logout-Mechanismus, "Abmelden" löschte nur lokale
-    Tokens. Best-effort aus Sicht des Frontends (`auth-context.tsx`s
-    `logout()` blockiert den lokalen Logout nicht bei einem Fehler hier)."""
+    """Actually ends the session on Keycloak's side (see
+    `keycloak_client.end_session` docstring) - without this endpoint there
+    was previously NO logout mechanism at all, "log out" only deleted
+    local tokens. Best-effort from the frontend's perspective
+    (`auth-context.tsx`'s `logout()` does not block the local logout on an
+    error here)."""
     await keycloak_client.end_session(settings, payload.refresh_token)

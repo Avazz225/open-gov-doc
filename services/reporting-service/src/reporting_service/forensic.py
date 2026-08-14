@@ -7,11 +7,11 @@ _DELETE_SUFFIXES = (".deleted", ".force_deleted", ".trash_purged")
 
 
 def categorize_event_type(event_type: str) -> str:
-    """Leitet die Aktionstyp-Kategorie fuer den Forensik-Trace (5.4b) aus dem
-    `event_type`-Suffix ab - feste, aus der bereits etablierten Event-
-    Namenskonvention ableitbare Kategorisierung statt einer neuen Taxonomie-
-    Pflege. Reihenfolge ist relevant: download/view/delete zuerst geprueft,
-    alles andere faellt in die Rest-Kategorie "change"."""
+    """Derives the action-type category for the forensic trace (5.4b) from
+    the `event_type` suffix - a fixed categorization derivable from the
+    already established event naming convention instead of maintaining a
+    new taxonomy. Order matters: download/view/delete are checked first,
+    everything else falls into the remaining "change" category."""
     if event_type.endswith(_DOWNLOAD_SUFFIXES):
         return "download"
     if event_type.endswith(_VIEW_SUFFIXES):
@@ -24,11 +24,11 @@ def categorize_event_type(event_type: str) -> str:
 def detect_download_anomalies(
     events: list[dict], *, threshold_count: int, threshold_minutes: int
 ) -> list[str]:
-    """Einziger Anomalie-Regeltyp laut Konzept 5.4b ("zunaechst ausschliesslich
-    ueber konfigurierbare statische Schwellwerte"): mehr als `threshold_count`
-    Downloads durch denselben Akteur innerhalb eines `threshold_minutes`-
-    breiten Zeitfensters. Sliding-Window (Zwei-Zeiger) je Akteur ueber dessen
-    sortierte Download-Zeitstempel."""
+    """Only anomaly rule type per concept 5.4b ("initially exclusively via
+    configurable static thresholds"): more than `threshold_count` downloads
+    by the same actor within a `threshold_minutes`-wide time window.
+    Sliding window (two-pointer) per actor over their sorted download
+    timestamps."""
     if threshold_count <= 0:
         return []
     window = timedelta(minutes=threshold_minutes)

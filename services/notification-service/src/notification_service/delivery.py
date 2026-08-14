@@ -1,9 +1,9 @@
-"""Reine Zustell-Funktionen, isoliert wie `spiff_adapter.py` in workflow-service -
-`repository.py` kennt weder `aiosmtplib` noch `httpx` direkt. Jede wirft bei einem
-Zustellfehler `DeliveryError`; der Aufrufer übersetzt das in `status="failed"`. Kein
-Retry (Konzept 7.1/P6-S2, siehe ADR 0020 und "Offene Punkte" in
-docs/services/notification-service.md) - ein einzelner fehlgeschlagener Versuch bleibt
-als solcher stehen."""
+"""Pure delivery functions, isolated like `spiff_adapter.py` in workflow-service -
+`repository.py` knows neither `aiosmtplib` nor `httpx` directly. Each raises
+`DeliveryError` on a delivery failure; the caller translates that into `status="failed"`.
+No retry (concept 7.1/P6-S2, see ADR 0020 and "Open Points" in
+docs/services/notification-service.md) - a single failed attempt remains
+as such."""
 
 from email.message import EmailMessage
 
@@ -14,7 +14,7 @@ from notification_service.settings import Settings
 
 
 class DeliveryError(Exception):
-    """Zustellung (E-Mail oder Webhook) ist fehlgeschlagen."""
+    """Delivery (email or webhook) has failed."""
 
 
 async def send_email(settings: Settings, recipient: str, subject: str, body: str) -> None:

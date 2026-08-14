@@ -5,23 +5,23 @@ from ocr_service.engines.interface import OcrPageResult
 
 logger = logging.getLogger(__name__)
 
-# PDF-Standard-Textrendermodus 3 = unsichtbar (Tr 3 im Content-Stream) - exakt
-# das Prinzip, mit dem auch ocrmypdf seinen OCR-Textlayer einbettet: der Text
-# ist durchsuch-/markierbar, aber nie sichtbar gezeichnet.
+# PDF standard text render mode 3 = invisible (Tr 3 in the content stream) -
+# exactly the principle ocrmypdf also uses to embed its OCR text layer: the
+# text is searchable/selectable but never drawn visibly.
 _INVISIBLE_RENDER_MODE = 3
 
 
 def embed_text_layer(pdf_bytes: bytes, pages: list[OcrPageResult], raster_dpi: int) -> bytes:
-    """Fügt `pages` (Tesseract-Wortboxen, in Pixel-Koordinaten bei `raster_dpi`
-    rasterisiert, siehe engines/tesseract_ocr.py) als unsichtbaren Textlayer
-    in eine Kopie von `pdf_bytes` ein - macht aus einem reinen Scan eine
-    durchsuchbare/markierbare PDF, ohne das sichtbare Erscheinungsbild zu
-    verändern (Nutzer-Feedback: "PDF ohne Textlayer wird PDF mit Textlayer").
+    """Embeds `pages` (Tesseract word boxes, rasterized to pixel coordinates
+    at `raster_dpi`, see engines/tesseract_ocr.py) as an invisible text layer
+    into a copy of `pdf_bytes` - turns a plain scan into a searchable/
+    selectable PDF without changing the visible appearance (user feedback:
+    "PDF without a text layer becomes a PDF with a text layer").
 
-    Pixel→Punkt-Umrechnung: die Rasterung erfolgte bei `raster_dpi` DPI,
-    PDF-Koordinaten sind in Punkten (72 pro Zoll) - derselbe Ursprung
-    (oben links, y wächst nach unten) in Pixmap und PDF-Seite, keine
-    Achsenspiegelung nötig."""
+    Pixel-to-point conversion: rasterization happened at `raster_dpi` DPI,
+    PDF coordinates are in points (72 per inch) - same origin (top left, y
+    grows downward) in the pixmap and the PDF page, no axis mirroring
+    needed."""
     scale = 72.0 / raster_dpi
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
@@ -45,8 +45,8 @@ def embed_text_layer(pdf_bytes: bytes, pages: list[OcrPageResult], raster_dpi: i
                         render_mode=_INVISIBLE_RENDER_MODE,
                     )
                 except Exception:
-                    # Einzelnes Wort (z. B. nicht darstellbares Zeichen) darf
-                    # den gesamten Textlayer nicht zum Scheitern bringen.
+                    # A single word (e.g. an unrenderable character) must not
+                    # fail the entire text layer.
                     logger.warning("Konnte Wort %r nicht in Textlayer einbetten", text)
         return doc.tobytes()
     finally:

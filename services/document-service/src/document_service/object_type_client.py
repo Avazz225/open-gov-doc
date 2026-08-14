@@ -2,15 +2,15 @@ import httpx
 
 
 class MissingKennzeichenAttributeError(Exception):
-    """Ein im `kennzeichen_format` referenzierter Attribut-Platzhalter
-    (P17-S2, 14.2) hat beim Anlegen keinen Wert erhalten - object-type-service
-    liefert dafür `422`, siehe dortiges `repository.MissingKennzeichenAttributeError`."""
+    """An attribute placeholder referenced in `kennzeichen_format`
+    (P17-S2, 14.2) did not receive a value when creating - object-type-service
+    returns `422` for this, see its `repository.MissingKennzeichenAttributeError`."""
 
 
 class ObjectTypeClient:
-    """HTTP-Client gegen den Object-Type Service (2.2/4.5) - Document Service
-    ruft dessen `/validate`-Endpunkt auf, statt die Constraint-Engine-Lib
-    selbst einzubinden (kein Import fremder Service-Interna)."""
+    """HTTP client for the Object-Type Service (2.2/4.5) - Document Service
+    calls its `/validate` endpoint instead of embedding the
+    constraint-engine library itself (no import of foreign service internals)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -37,10 +37,10 @@ class ObjectTypeClient:
         return response.json()["errors"]
 
     async def get(self, object_type_id: int) -> dict | None:
-        """Aufbewahrung (5.2, seit P7-S1): liest `default_retention_days`/
-        `deletion_reason_required_override` für den Objekttyp - `None` bei
-        unbekannter `object_type_id` statt eines Fehlers, da der Aufrufer die
-        Existenz an dieser Stelle bereits über `validate()` geprüft hat."""
+        """Retention (5.2, since P7-S1): reads `default_retention_days`/
+        `deletion_reason_required_override` for the object type - `None` for
+        an unknown `object_type_id` instead of an error, since the caller has
+        already checked its existence via `validate()` at this point."""
         response = await self._client.get(f"/object-types/{object_type_id}")
         if response.status_code == 404:
             return None
@@ -50,11 +50,12 @@ class ObjectTypeClient:
     async def next_kennzeichen(
         self, object_type_id: int, attributes: dict | None = None
     ) -> str | None:
-        """Kennzeichengenerator (2.2, P5e-S2, seit P17-S2 mit Attributwerten
-        für attributbasierte Platzhalter wie `{Federführung}`, 14.2) - `None`
-        bedeutet, dass für diese Dokumentklasse kein Generator konfiguriert
-        ist (404), nicht dass der Objekttyp selbst unbekannt wäre (der wurde
-        bereits über `validate()` geprüft, bevor dieser Aufruf erfolgt)."""
+        """Reference number generator (2.2, P5e-S2, since P17-S2 with
+        attribute values for attribute-based placeholders like
+        `{Federführung}`, 14.2) - `None` means that no generator is
+        configured for this document class (404), not that the object type
+        itself is unknown (that was already checked via `validate()` before
+        this call is made)."""
         response = await self._client.post(
             f"/object-types/{object_type_id}/next-kennzeichen",
             json={"attributes": attributes or {}},
@@ -67,10 +68,10 @@ class ObjectTypeClient:
         return response.json()["kennzeichen"]
 
     async def list_classified_document_type_ids(self) -> set[int]:
-        """Verschlusssachen-Papierkorb (2.5, P15-S1) - liefert die IDs aller
-        als Verschlusssache eingestuften Dokument-Objekttypen, damit
-        document-service den Papierkorb strukturell trennen kann, ohne pro
-        gelöschtem Dokument einen einzelnen `get()`-Aufruf zu machen."""
+        """Classified documents trash (2.5, P15-S1) - returns the IDs of
+        all document object types classified as classified documents, so
+        that document-service can structurally separate the trash without
+        making an individual `get()` call per deleted document."""
         response = await self._client.get(
             "/object-types", params={"applies_to": "document", "is_classified": "true"}
         )

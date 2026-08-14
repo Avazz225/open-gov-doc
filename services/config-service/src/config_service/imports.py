@@ -1,8 +1,8 @@
-"""Wendet ein `ConfigDocument` an (7.3) - Upsert per natürlichem Schlüssel
-(Name/Aktionstyp) je Kategorie, damit ein wiederholter Import (z. B.
-Staging→Produktion nach einer erneuten Änderung) nicht jedes Mal Duplikate
-anlegt. Best-effort je Eintrag: ein einzelner fehlerhafter Eintrag bricht
-nicht den gesamten Import ab (Fehler landen in `CategoryResult.errors`)."""
+"""Applies a `ConfigDocument` (7.3) - upsert by natural key
+(name/action type) per category, so that a repeated import (e.g.
+staging -> production after a further change) does not create duplicates
+every time. Best-effort per entry: a single faulty entry does not abort
+the entire import (errors end up in `CategoryResult.errors`)."""
 
 from config_service.clients import (
     AuthServiceClient,
@@ -58,7 +58,7 @@ async def apply_object_types(client: ObjectTypeServiceClient, entries: list) -> 
                         "responsive_breakpoint_px": layout["responsive_breakpoint_px"],
                     },
                 )
-        except Exception as exc:  # noqa: BLE001 - ein Eintrag darf den Rest nicht blockieren
+        except Exception as exc:  # noqa: BLE001 - a single entry must not block the rest
             result.errors.append(f"{entry.name}: {exc}")
     return result
 
@@ -67,10 +67,10 @@ async def apply_workflows(client: WorkflowServiceClient, entries: list) -> Categ
     result = CategoryResult()
     for entry in entries:
         try:
-            # workflow-service versioniert beim Hochladen unter demselben Namen
-            # bereits automatisch neu (siehe docs/services/workflow-service.md
-            # "Versionierung") - kein eigener Vorher-Check nötig, jeder Import
-            # zählt als "created" (eine neue Version).
+            # workflow-service already versions automatically on upload under the same
+            # name (see docs/services/workflow-service.md
+            # "Versioning") - no separate pre-check needed, every import
+            # counts as "created" (a new version).
             await client.create_process_definition(name=entry.name, bpmn_xml=entry.bpmn_xml)
             result.created += 1
         except Exception as exc:  # noqa: BLE001
@@ -82,9 +82,9 @@ async def apply_dmn_definitions(client: WorkflowServiceClient, entries: list) ->
     result = CategoryResult()
     for entry in entries:
         try:
-            # Wie `apply_workflows`: workflow-service versioniert beim Hochladen
-            # unter demselben Namen bereits automatisch neu - jeder Import zählt
-            # als "created" (eine neue Version).
+            # Like `apply_workflows`: workflow-service already versions automatically
+            # on upload under the same name - every import counts
+            # as "created" (a new version).
             await client.create_dmn_definition(name=entry.name, dmn_xml=entry.dmn_xml)
             result.created += 1
         except Exception as exc:  # noqa: BLE001
@@ -93,10 +93,10 @@ async def apply_dmn_definitions(client: WorkflowServiceClient, entries: list) ->
 
 
 async def apply_business_calendars(client: WorkflowServiceClient, entries: list) -> CategoryResult:
-    """Upsert per `name` (P14-S5) - anders als `apply_workflows`/
-    `apply_dmn_definitions` KEIN Versionierungsmuster (siehe
-    `workflow_service.models.BusinessCalendar`), ein wiederholter Import
-    aktualisiert denselben Kalender statt eine neue Version anzulegen."""
+    """Upsert by `name` (P14-S5) - unlike `apply_workflows`/
+    `apply_dmn_definitions`, NO versioning pattern (see
+    `workflow_service.models.BusinessCalendar`), a repeated import
+    updates the same calendar instead of creating a new version."""
     result = CategoryResult()
     existing = {c["name"]: c for c in await client.list_business_calendars()}
     for entry in entries:
@@ -147,8 +147,8 @@ async def apply_approval_config(client: PermissionServiceClient, entries: list) 
     result = CategoryResult()
     for entry in entries:
         try:
-            # `PUT /approval-config/{action_type}` ist bereits ein Upsert
-            # (permission-service legt eine fehlende Zeile bei Bedarf an).
+            # `PUT /approval-config/{action_type}` is already an upsert
+            # (permission-service creates a missing row as needed).
             await client.put_approval_config(
                 entry.action_type, requires_approval=entry.requires_approval
             )
@@ -184,12 +184,12 @@ async def apply_federation_config(client: WorkflowServiceClient, entry) -> Categ
 
 
 async def apply_realm_roles(client: AuthServiceClient, names: list[str]) -> CategoryResult:
-    """Keine Upsert-per-Name-Logik wie bei `apply_roles` nötig -
-    `auth-service`s `POST /realm-roles` ist selbst bereits idempotent
-    (`create_realm_role(..., skip_exists=True)`, siehe dortiges
-    `ensure_realm_roles`). Best-effort dennoch je Name statt einem
-    Sammelaufruf, damit ein einzelner ungültiger Name (z. B. leerer String)
-    nicht den ganzen Batch scheitern lässt."""
+    """No upsert-by-name logic like `apply_roles` needed -
+    `auth-service`'s `POST /realm-roles` is itself already idempotent
+    (`create_realm_role(..., skip_exists=True)`, see its
+    `ensure_realm_roles`). Still best-effort per name instead of a
+    batch call, so that a single invalid name (e.g. an empty string)
+    does not fail the entire batch."""
     result = CategoryResult()
     for name in names:
         try:
@@ -213,11 +213,11 @@ async def apply_import(
     results: dict[str, CategoryResult] = {}
     if "object_types" in categories and doc.object_types is not None:
         results["object_types"] = await apply_object_types(object_type_client, doc.object_types)
-    # `dmn_definitions` bewusst VOR `workflows`: ein `businessRuleTask` mit
-    # `camunda:decisionRef` löst sich nur auf, wenn die referenzierte
-    # DMN-Familie bei workflow-service bereits existiert (P14-S4, siehe
-    # spiff_adapter.py-Moduldocstring dort - DMN muss vor dem referenzierenden
-    # BPMN geladen sein).
+    # `dmn_definitions` deliberately BEFORE `workflows`: a `businessRuleTask` with
+    # `camunda:decisionRef` only resolves if the referenced
+    # DMN family already exists in workflow-service (P14-S4, see
+    # the spiff_adapter.py module docstring there - DMN must be loaded before the
+    # referencing BPMN).
     if "dmn_definitions" in categories and doc.dmn_definitions is not None:
         results["dmn_definitions"] = await apply_dmn_definitions(
             workflow_client, doc.dmn_definitions

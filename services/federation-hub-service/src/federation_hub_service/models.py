@@ -8,27 +8,27 @@ Base = make_declarative_base("federation")
 
 
 class HubIdentity(Base):
-    """Eigenes Signaturschlüsselpaar des Hub (RSA-2048, `cryptography`, gleiche
-    Konvention wie `signature-service`s interne CA, ADR 0025) - bewusst eine
-    einzelne Zeile mit fester ``id=1``, gleiches Singleton-Muster wie
-    `InternalCa`. Der Hub signiert damit jede an eine Installation zugestellte
-    Nachricht (``X-Federation-Hub-Signature``), sodass die empfangende
-    Installation echt verifizieren kann, dass die Zustellung tatsächlich vom
-    Hub stammt - ohne dass irgendwo ein geteiltes Geheimnis im Klartext
-    gespeichert werden müsste (siehe ADR 0028).
+    """The hub's own signing key pair (RSA-2048, `cryptography`, same
+    convention as `signature-service`'s internal CA, ADR 0025) - deliberately
+    a single row with a fixed ``id=1``, same singleton pattern as
+    `InternalCa`. The hub uses it to sign every message delivered to an
+    installation (``X-Federation-Hub-Signature``), so the receiving
+    installation can genuinely verify that the delivery actually came from
+    the hub - without needing to store a shared secret in plaintext anywhere
+    (see ADR 0028).
 
-    ``ca_certificate_pem`` (seit Post-Roadmap Phase 21 Session 2, ADR 0085) -
-    dasselbe Schlüsselpaar zusätzlich als selbstsigniertes X.509-Root-CA-
-    Zertifikat verpackt (analog `signature-service`s `InternalCa`, ADR 0025) -
-    KEIN separates Schlüsselpaar, nur eine zusätzliche Zertifikatshülle um
-    denselben privaten Schlüssel. Damit kann der Hub jeder Installation ein
-    von ihm signiertes, zeitlich begrenztes Zertifikat ausstellen
-    (`Installation.certificate_pem`), statt nur einen rohen, unbegrenzt
-    gültigen öffentlichen Schlüssel zu speichern. Bewusst KEIN echtes
-    Transport-mTLS (siehe ADR 0039 "Kein Ort für eine echte PKI in diesem
-    Projekt" - dessen Begründung unverändert gilt, kein Service dieses Repos
-    terminiert TLS selbst) - die Zertifikatsprüfung passiert weiterhin auf
-    Anwendungsebene, zusätzlich zur bestehenden Signaturprüfung."""
+    ``ca_certificate_pem`` (since Post-Roadmap Phase 21 Session 2, ADR 0085)
+    - the same key pair additionally wrapped as a self-signed X.509 root CA
+    certificate (analogous to `signature-service`'s `InternalCa`, ADR 0025) -
+    NOT a separate key pair, just an additional certificate wrapper around
+    the same private key. This lets the hub issue each installation a
+    certificate it signs, with a limited validity period
+    (`Installation.certificate_pem`), instead of only storing a raw,
+    indefinitely valid public key. Deliberately NOT real transport mTLS (see
+    ADR 0039 "No room for a real PKI in this project" - whose reasoning still
+    applies unchanged, no service in this repo terminates TLS itself) - the
+    certificate check still happens at the application level, in addition to
+    the existing signature check."""
 
     __tablename__ = "hub_identity"
 
@@ -40,42 +40,39 @@ class HubIdentity(Base):
 
 
 class Installation(Base):
-    """Ein Eintrag im Adressbuch (7.4) - eine bei diesem Hub angemeldete,
-    vollständig unabhängige Installation. ``id`` ist die von der Installation
-    selbst gewählte öffentliche Kennung (nicht vom Hub vergeben).
-    ``public_key_pem`` ist der öffentliche Schlüssel, mit dem **andere**
-    Installationen für diese hier bestimmte Payloads verschlüsseln (Ende-zu-
-    Ende, der Hub selbst besitzt nie den privaten Schlüssel dazu) - seit
-    P13-S4 (ADR 0039) dient derselbe Schlüssel zusätzlich als kryptografische
-    Identität dieser Installation: jede schreibende Anfrage an den Hub muss
-    mit dem passenden privaten Schlüssel signiert sein (ersetzt das zuvor
-    verwendete ``api_key_hash``-Feld, ein reines geteiltes Geheimnis). Ein
-    Schlüsselwechsel läuft ausschließlich über ``POST
-    /installations/{id}/rotate-key`` (signiert mit dem noch aktuellen
-    Schlüssel) - eine reguläre Re-Registrierung überschreibt ``public_key_pem``
-    nicht mehr stillschweigend. ``revoked_at``/``revoked_reason`` erlauben
-    einem Hub-Betreiber, eine kompromittierte Installation sofort zu sperren
-    (``POST /installations/{id}/revoke``), unabhängig davon, ob die
-    Installation selbst noch signieren kann.
+    """An entry in the address book (7.4) - a fully independent installation
+    registered with this hub. ``id`` is the public identifier chosen by the
+    installation itself (not assigned by the hub). ``public_key_pem`` is the
+    public key that **other** installations use to encrypt payloads destined
+    for this one (end-to-end, the hub itself never has the corresponding
+    private key) - since P13-S4 (ADR 0039) the same key additionally serves
+    as this installation's cryptographic identity: every write request to
+    the hub must be signed with the matching private key (replaces the
+    previously used ``api_key_hash`` field, a plain shared secret). A key
+    change goes exclusively through ``POST /installations/{id}/rotate-key``
+    (signed with the still-current key) - a regular re-registration no
+    longer silently overwrites ``public_key_pem``. ``revoked_at``/
+    ``revoked_reason`` allow a hub operator to immediately lock a compromised
+    installation (``POST /installations/{id}/revoke``), regardless of
+    whether the installation itself can still sign.
 
-    ``certificate_pem`` (seit Post-Roadmap Phase 21 Session 2, ADR 0085) - ein
-    vom Hub ausgestelltes, zeitlich begrenztes X.509-Zertifikat, das
-    ``public_key_pem`` bindet (Certificate-Pinning-Äquivalent: die
-    Installation UND jeder Dritte kann anhand der Hub-CA prüfen, dass genau
-    dieser Schlüssel zu genau dieser ``id`` gehört, mit einer klaren
-    Gültigkeitsgrenze statt unbegrenzter Gültigkeit). `authenticate_signed_
-    request` verifiziert bei jeder Anfrage die vollständige Kette bis zur
-    Hub-CA UND das Gültigkeitsfenster erneut aus den Zertifikats-Bytes selbst
-    (`crypto_utils.verify_installation_certificate`) - ``certificate_not_after``
-    ist nur ein daraus abgeleiteter, denormalisierter Anzeigewert (Admin-UI/
-    Migrationserkennung), keine eigenständige Sicherheitsprüfung. Beide Felder
-    werden bei Registrierung und bei jeder Schlüsselrotation neu gesetzt (der
-    alte Schlüssel würde sonst ein Zertifikat für einen nicht mehr aktuellen
-    Schlüssel behalten). ``NULL`` bei Installationen, die vor dieser Session
-    registriert wurden UND noch nicht rotiert/neu ausgestellt wurden -
-    `authenticate_signed_request` überspringt die Zertifikatsprüfung in
-    diesem Fall (Bestandsschutz), verlangt aber weiterhin die bereits
-    bestehende Signaturprüfung."""
+    ``certificate_pem`` (since Post-Roadmap Phase 21 Session 2, ADR 0085) - a
+    time-limited X.509 certificate issued by the hub that binds
+    ``public_key_pem`` (certificate-pinning equivalent: the installation AND
+    any third party can use the hub CA to verify that exactly this key
+    belongs to exactly this ``id``, with a clear validity boundary instead of
+    indefinite validity). `authenticate_signed_request` re-verifies, on
+    every request, the full chain up to the hub CA AND the validity window
+    from the certificate bytes themselves
+    (`crypto_utils.verify_installation_certificate`) -
+    ``certificate_not_after`` is only a derived, denormalized display value
+    (admin UI/migration detection), not an independent security check. Both
+    fields are reset on registration and on every key rotation (otherwise the
+    old key would keep a certificate for a no-longer-current key). ``NULL``
+    for installations that were registered before this session AND have not
+    yet been rotated/reissued - `authenticate_signed_request` skips the
+    certificate check in this case (grandfathering), but still requires the
+    already-existing signature check."""
 
     __tablename__ = "installation"
 
@@ -98,16 +95,16 @@ class Installation(Base):
 
 
 class Handover(Base):
-    """Metadaten einer einzelnen Übergabe-Vermittlung (7.4: "protokolliert nur
-    Metadaten des Vermittlungsvorgangs ... nicht die Dokumentinhalte selbst") -
-    bewusst **kein** Feld für den (Ende-zu-Ende verschlüsselten) Payload selbst,
-    der wird synchron weitergeleitet, nie hier persistiert. Seit Post-Roadmap
-    Phase 20 Session 5 (ADR 0081) gilt das weiterhin - ein zwischenzeitlich
-    per Retry erneut zuzustellender Payload wird nur FLÜCHTIG im Prozess-
-    speicher gehalten (`app.state.pending_handover_payloads`), nie in dieser
-    Tabelle - ein Neustart des Hub während eines offenen Retry-Fensters
-    verliert daher die Möglichkeit zur automatischen Nachzustellung (siehe
-    docs/services/federation-hub-service.md "Offene Punkte")."""
+    """Metadata of a single handover mediation (7.4: "logs only the metadata
+    of the mediation process ... not the document contents themselves") -
+    deliberately **no** field for the (end-to-end encrypted) payload itself,
+    which is forwarded synchronously and never persisted here. This still
+    holds since Post-Roadmap Phase 20 Session 5 (ADR 0081) - a payload that
+    still needs to be redelivered via retry is kept only EPHEMERALLY in
+    process memory (`app.state.pending_handover_payloads`), never in this
+    table - a restart of the hub during an open retry window therefore loses
+    the ability to automatically redeliver (see
+    docs/services/federation-hub-service.md "Open Points")."""
 
     __tablename__ = "handover"
 
@@ -117,9 +114,9 @@ class Handover(Base):
     process_type: Mapped[str] = mapped_column(String(256))
     # "pending" -> "delivered"|"pending_retry"->...->"delivery_failed" ->
     # "completed"|"result_delivery_failed" (Post-Roadmap Phase 20 Session 5,
-    # ADR 0081: "pending_retry" ist neu, "delivery_failed" wird erst nach
-    # Erschoepfung von max_handover_delivery_attempts erreicht statt wie
-    # zuvor sofort bei jedem einzelnen Fehlschlag).
+    # ADR 0081: "pending_retry" is new, "delivery_failed" is now only reached
+    # after max_handover_delivery_attempts is exhausted instead of, as
+    # before, immediately on every single failure).
     status: Mapped[str] = mapped_column(String(32))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

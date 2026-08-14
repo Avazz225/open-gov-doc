@@ -8,15 +8,15 @@ Base = make_declarative_base("migration")
 
 
 class PairedInstallation(Base):
-    """Eine direkt (ohne Hub, siehe ADR 0033-Nachfolge-ADR dieser Session)
-    gepaarte Ziel-/Quell-Installation (7.2). Anders als `federation-hub-
-    service`s `Installation` (die nur einen Hash speichert, da der Hub den
-    Klartext-Key nie wieder braucht) speichert diese Tabelle den Key im
-    **Klartext**: diese Installation muss ihn sowohl beim ausgehenden Aufruf
-    als Quelle PRÄSENTIEREN als auch beim eingehenden Aufruf als Ziel
-    VERIFIZIEREN - ein reiner Hash würde die erste Rolle unmöglich machen.
-    Derselbe Schlüssel wird auf beiden gepaarten Seiten hinterlegt (vom Admin
-    einmalig manuell übertragen, siehe `POST /paired-installations`)."""
+    """A target/source installation paired directly (without a hub, see the
+    successor ADR to ADR 0033 in this session) (7.2). Unlike
+    `federation-hub-service`'s `Installation` (which only stores a hash,
+    since the hub never needs the plaintext key again), this table stores
+    the key in **plaintext**: this installation must both PRESENT it on
+    outgoing calls as the source and VERIFY it on incoming calls as the
+    target - a pure hash would make the first role impossible. The same key
+    is stored on both paired sides (transferred once manually by the admin,
+    see `POST /paired-installations`)."""
 
     __tablename__ = "paired_installation"
 
@@ -28,11 +28,11 @@ class PairedInstallation(Base):
 
 
 class Transfer(Base):
-    """Ein Migrations-Vorgang, bei dem DIESE Installation die Quelle ist
-    (7.2). Zustandsmaschine analog zu `archival-service`s `ArchivalTransfer`,
-    hier aber über einen echten BPMN-Workflow in `workflow-service`
-    vorangetrieben (`workflow_instance_id`), nicht über einen eigenen
-    Poll-Loop - siehe docs/services/migration-service.md."""
+    """A migration operation in which THIS installation is the source (7.2).
+    State machine analogous to `archival-service`'s `ArchivalTransfer`, but
+    here driven by a real BPMN workflow in `workflow-service`
+    (`workflow_instance_id`), not by a dedicated poll loop - see
+    docs/services/migration-service.md."""
 
     __tablename__ = "transfer"
 
@@ -42,7 +42,7 @@ class Transfer(Base):
     dry_run: Mapped[bool] = mapped_column(Boolean, default=False)
     retention_days: Mapped[int] = mapped_column(Integer)
     # pending -> locked -> copied -> verified -> released -> deletion_scheduled -> deleted
-    # (+ dry_run_completed, failed - erreichbar aus jedem aktiven Zwischenstatus)
+    # (+ dry_run_completed, failed - reachable from any active intermediate status)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     workflow_instance_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     scope_lock_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -64,11 +64,12 @@ class Transfer(Base):
 
 
 class InboundTransfer(Base):
-    """Diese Installation ist das ZIEL eines von einer gepaarten Quelle
-    ausgelösten Transfers (7.2) - bewusst eine eigene, schlanke Tabelle statt
-    Wiederverwendung von `Transfer`: die Zielseite ist ein passiver Empfänger
-    ohne eigene Workflow-Orchestrierung, braucht nur die Zuordnung
-    `transfer_id -> lokaler Zielordner` für die Dauer des Vorgangs."""
+    """This installation is the TARGET of a transfer triggered by a paired
+    source (7.2) - deliberately a dedicated, lean table instead of reusing
+    `Transfer`: the target side is a passive recipient without its own
+    workflow orchestration, only needing the mapping
+    `transfer_id -> local target folder` for the duration of the
+    operation."""
 
     __tablename__ = "inbound_transfer"
 

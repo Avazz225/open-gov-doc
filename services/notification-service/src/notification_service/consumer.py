@@ -9,9 +9,9 @@ from notification_service.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Siehe start_consuming(): ein Durable-Name ist pro Stream eindeutig, nicht
-# pro Subject. Jeder Eintrag hier teilt sich seinen Stream mit mindestens
-# einem weiteren Subject und braucht deshalb einen eigenen Durable-Namen.
+# See start_consuming(): a durable name is unique per stream, not
+# per subject. Every entry here shares its stream with at least
+# one other subject and therefore needs its own durable name.
 _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     "workflow.federation.inbound_received": "notification-service-federation",
     "license.limit_exceeded": "notification-service-license-limit-exceeded",
@@ -25,11 +25,11 @@ def make_handler(
     settings: Settings,
     publish_event: Callable[[str, str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Übersetzt `workflow.task.escalated` in Benachrichtigungen (Konzept 7.1, P6-S2):
-    immer eine In-App-Notification (Empfänger = Lane-Name, sonst `"unassigned"` - keine
-    Rollen-Auflösung ohne RBAC, siehe ADR 0020), zusätzlich eine E-Mail, falls die
-    Prozessinstanz einen `escalation_email`-Wert mitgegeben hat (opakes Prozessdatum,
-    Konvention wie `business_key` in workflow-service)."""
+    """Translates `workflow.task.escalated` into notifications (concept 7.1, P6-S2):
+    always an in-app notification (recipient = lane name, otherwise `"unassigned"` - no
+    role resolution without RBAC, see ADR 0020), plus an email if the
+    process instance provided an `escalation_email` value (opaque process datum,
+    convention like `business_key` in workflow-service)."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -109,13 +109,13 @@ async def _handle_federation_inbound_received(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Benachrichtigung der Zielinstallation bei einer eingehenden föderierten
-    Übergabe (7.4, P6-S9) - gleiches `notify_email`-Muster wie
-    `escalation_email` bei `_handle_task_escalated`: ein optionales, opakes
-    Prozessdatum aus der Payload der Absenderseite, keine feste
-    Empfänger-Auflösung (workflow-service kennt kein RBAC-Konzept für
-    Federation). Immer zusätzlich eine In-App-Notification, da es keinen
-    Lane-Namen für einen frisch von außen gestarteten Prozess gibt."""
+    """Notifies the target installation of an incoming federated
+    handoff (7.4, P6-S9) - same `notify_email` pattern as
+    `escalation_email` in `_handle_task_escalated`: an optional, opaque
+    process datum from the sender side's payload, no fixed
+    recipient resolution (workflow-service has no RBAC concept for
+    federation). Always additionally an in-app notification, since there
+    is no lane name for a process freshly started from outside."""
     data = event.payload
     from_installation_id = data.get("from_installation_id", "?")
     process_type = data.get("process_type", "?")
@@ -152,11 +152,11 @@ async def _handle_deletion_reminder(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Löscherinnerung vor einer terminierten Aufbewahrungsfrist/
-    Zwangslöschung (5.2a, P7-S1) - gleiches `notify_email`-Muster wie
-    `escalation_email`/`notify_email` an anderer Stelle: ein optionales,
-    opakes Datum aus der Payload des Producers (document-service), keine
-    Empfänger-Auflösung über Rollen/Konten."""
+    """Deletion reminder before a scheduled retention period/
+    forced deletion (5.2a, P7-S1) - same `notify_email` pattern as
+    `escalation_email`/`notify_email` elsewhere: an optional,
+    opaque date from the producer's payload (document-service), no
+    recipient resolution via roles/accounts."""
     data = event.payload
     title = data.get("title", "?")
     full_deletion = data.get("full_deletion", False)
@@ -194,9 +194,9 @@ async def _handle_folder_deletion_reminder(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Löscherinnerung für Ordner (5.2a, P7-S1b) - 1:1 dasselbe Muster wie
-    `_handle_deletion_reminder` (P7-S1), nur für `folder-service`s
-    `name`-Feld statt `title`."""
+    """Deletion reminder for folders (5.2a, P7-S1b) - 1:1 the same pattern as
+    `_handle_deletion_reminder` (P7-S1), just for `folder-service`'s
+    `name` field instead of `title`."""
     data = event.payload
     name = data.get("name", "?")
     full_deletion = data.get("full_deletion", False)
@@ -234,10 +234,10 @@ async def _handle_superuser_activated(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Optionale Sicherheitsbenachrichtigung bei Break-Glass-Aktivierung (4.6,
-    P6-S5) - E-Mail an eine fest hinterlegte Sicherheitsverantwortliche
-    Adresse, kein Empfänger-Auflösungsmechanismus nötig (anders als bei
-    `escalation_email`, das aus dem Event selbst kommt)."""
+    """Optional security notification on break-glass activation (4.6,
+    P6-S5) - email to a fixed configured security officer
+    address, no recipient resolution mechanism needed (unlike
+    `escalation_email`, which comes from the event itself)."""
     expires_at = event.payload.get("expires_at", "?")
     async with session_factory() as session:
         notification = await repository.create_and_send(
@@ -258,8 +258,8 @@ async def _handle_maintenance_mode_activated(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Sicherheitsbenachrichtigung bei Not-Shutdown-Aktivierung (4.8, P6-S6) -
-    gleiches Muster wie `_handle_superuser_activated` (P6-S5)."""
+    """Security notification on emergency-shutdown activation (4.8, P6-S6) -
+    same pattern as `_handle_superuser_activated` (P6-S5)."""
     triggered_by = event.payload.get("triggered_by", "?")
     reason = event.payload.get("reason") or "kein Grund angegeben"
     async with session_factory() as session:
@@ -281,9 +281,9 @@ async def _handle_license_limit_exceeded(
     publish_event: Callable[[str, str, dict], Awaitable[None]],
     event: Event,
 ) -> None:
-    """Lizenz-Statusbenachrichtigung (9.2, seit P9-S1) - gleiches Muster wie
-    `_handle_maintenance_mode_activated`, nur einmal je Flankenwechsel
-    publiziert (siehe `license_service.poll_loop`)."""
+    """License status notification (9.2, since P9-S1) - same pattern as
+    `_handle_maintenance_mode_activated`, published only once per edge
+    change (see `license_service.poll_loop`)."""
     dimension = event.payload.get("dimension", "?")
     current = event.payload.get("current")
     limit = event.payload.get("limit")
@@ -343,8 +343,8 @@ async def _handle_license_invalid(
 async def publish_notification_result(
     publish_event: Callable[[str, str, dict], Awaitable[None]], notification
 ) -> None:
-    # Systemseitig ausgeloester Zustellversuch, kein menschlicher Akteur
-    # (siehe P7-S2-Konvention "system:<komponente>").
+    # System-triggered delivery attempt, not a human actor
+    # (see P7-S2 convention "system:<component>").
     if notification.status == "sent":
         await publish_event(
             "notification.sent",
@@ -374,19 +374,19 @@ async def start_consuming(
 ) -> None:
     handler = make_handler(session_factory, settings, publish_event)
     for subject in subjects:
-        # Ein durable-Konsumentenname ist pro Stream eindeutig, nicht pro Subject -
-        # `workflow.federation.inbound_received` (seit P6-S9) teilt sich den
-        # "workflow"-Stream mit dem bereits bestehenden `workflow.task.escalated`
-        # (P6-S2). Ein zweiter `subscribe()`-Aufruf mit demselben Durable-Namen
-        # "notification-service" für ein anderes Filter-Subject auf demselben
-        # Stream schlägt mit "consumer is already bound to a subscription" fehl -
-        # daher ein eigener Durable-Name je zusätzlichem Subject, das sich einen
-        # Stream mit Geschwister-Subjects teilt. Die drei ursprünglichen Subjects
-        # behalten ihren Durable-Namen (keine Neuzustellung ihres bisherigen
-        # Verlaufs). Die drei "license.>"-Subjects (P9-S1) teilen sich alle den
-        # neuen "license"-Stream miteinander - bekommen deshalb je einen eigenen
-        # Durable-Namen statt nur eines default+zwei Ausnahmen (Symmetrie/
-        # Lesbarkeit, kein technischer Zwang fuer das erste der drei).
+        # A durable consumer name is unique per stream, not per subject -
+        # `workflow.federation.inbound_received` (since P6-S9) shares the
+        # "workflow" stream with the already existing `workflow.task.escalated`
+        # (P6-S2). A second `subscribe()` call with the same durable name
+        # "notification-service" for a different filter subject on the same
+        # stream fails with "consumer is already bound to a subscription" -
+        # hence a dedicated durable name for each additional subject that
+        # shares a stream with sibling subjects. The three original subjects
+        # keep their durable name (no redelivery of their existing
+        # history). The three "license.>" subjects (P9-S1) all share the
+        # new "license" stream with each other - so each gets its own
+        # durable name instead of just one default+two exceptions (symmetry/
+        # readability, no technical necessity for the first of the three).
         durable = _SHARED_STREAM_DURABLE_OVERRIDES.get(subject, "notification-service")
         try:
             await bus.subscribe(subject, handler, durable=durable)

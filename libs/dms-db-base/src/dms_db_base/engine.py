@@ -2,9 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 
 def build_engine(dsn: str, *, echo: bool = False) -> AsyncEngine:
-    """Erstellt die Async-Engine für einen Service.
+    """Creates the async engine for a service.
 
-    ``dsn`` muss den ``postgresql+asyncpg://``-Treiber verwenden (1a). Pool-Defaults
-    von SQLAlchemy sind für den Start ausreichend - Tuning erfolgt bei Bedarf pro Service.
+    ``dsn`` must use the ``postgresql+asyncpg://`` driver (1a). SQLAlchemy's
+    pool defaults are sufficient to start with - tuning happens per service as needed.
     """
     return create_async_engine(dsn, echo=echo, pool_pre_ping=True)

@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
 
-# Auth-Entkopplung von Keycloak (Phase 18, ADR 0063): muss exakt
-# `auth_service.local_token_issuer.LOCAL_ISSUER` entsprechen. Bewusst als
-# eigener String dupliziert statt einer neuen Shared-Lib-Konstante - kein
-# `libs/`-Paket kennt diesen Wert bisher, `gateway-service` importiert (wie
-# jeder andere Service) ohnehin keinen Code aus `auth-service` selbst.
+# Auth decoupling from Keycloak (Phase 18, ADR 0063): must exactly match
+# `auth_service.local_token_issuer.LOCAL_ISSUER`. Deliberately duplicated as
+# its own string instead of a new shared-lib constant - no `libs/` package
+# knows this value yet, `gateway-service` (like every other service)
+# doesn't import any code from `auth-service` itself anyway.
 _LOCAL_TOKEN_ISSUER = "dms-auth-service-local"
 
 
@@ -63,9 +63,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolver=app.state.instance_resolver,
         cache_ttl_seconds=settings.maintenance_cache_ttl_seconds,
     )
-    # Auf app.state statt Modulkonstante, damit Tests eine gegen lokale
-    # Test-Schlüssel validierende Instanz einsetzen können, ohne einen echten
-    # Keycloak zu benötigen (analog zu libs/dms-auth-client/tests).
+    # On app.state instead of a module constant, so tests can inject an
+    # instance that validates against local test keys, without needing a
+    # real Keycloak (analogous to libs/dms-auth-client/tests).
     app.state.token_validator = _build_token_validator(settings)
 
     startup_end = time.time()
@@ -79,9 +79,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
 
-# Muss vor den Routen registriert werden, damit Starlette Preflight-
-# OPTIONS-Requests abfängt, bevor sie auf die generische Proxy-Route treffen
-# würden (dort ist OPTIONS gar nicht als Methode registriert).
+# Must be registered before the routes, so Starlette intercepts preflight
+# OPTIONS requests before they would hit the generic proxy route (OPTIONS
+# is not even registered as a method there).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
@@ -113,11 +113,12 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     rate_limit_key = client_host
     identity_headers: dict[str, str] = {}
 
-    # Not-Shutdown (4.8, P6-S6): einziger zentraler Durchsetzungspunkt, da
-    # jeder proxied Request diese Funktion durchläuft. Eine kleine Allow-Liste
-    # bleibt erreichbar (Login/Refresh/Me/Superuser-Status, die beiden
-    # Wartungsmodus-Endpunkte selbst) - `auth-service` lehnt Logins für jeden
-    # außer den Superuser selbst zusätzlich serverseitig ab (siehe unten).
+    # Emergency shutdown (4.8, P6-S6): single central enforcement point,
+    # since every proxied request passes through this function. A small
+    # allow list remains reachable (login/refresh/me/superuser status, the
+    # two maintenance-mode endpoints themselves) - `auth-service` also
+    # rejects logins server-side for anyone except the superuser (see
+    # below).
     maintenance_active = await request.app.state.maintenance_state.is_active()
     if maintenance_active and route_key not in settings.maintenance_mode_allowed_routes:
         raise HTTPException(
@@ -158,16 +159,17 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     body = await request.body()
     headers = filter_headers(request.headers)
     headers.update(identity_headers)
-    # Broadcast statt Polling (ADR 0024): jeder durchgelassene Backend-Service
-    # kann den Wartungsmodus-Status auswerten, ohne selbst eine Verbindung zu
-    # permission-service aufzubauen (z. B. auth-service `POST /login`).
+    # Broadcast instead of polling (ADR 0024): every backend service that
+    # requests get through can evaluate the maintenance-mode status without
+    # establishing its own connection to permission-service (e.g.
+    # auth-service `POST /login`).
     headers["X-DMS-Maintenance-Active"] = "true" if maintenance_active else "false"
 
-    # Workload-bewusste Instanzauswahl (P25-S4): `reserved_instance()` wählt
-    # die Instanz mit den wenigsten aktuell offenen Anfragen und hält den
-    # Zähler für die gesamte Dauer des Upstream-Aufrufs offen - das
-    # `finally` in `reserved_instance()` gibt den Slot auch bei einer
-    # `httpx.HTTPError` unten wieder frei, kein dauerhaftes Leaken.
+    # Workload-aware instance selection (P25-S4): `reserved_instance()`
+    # picks the instance with the fewest currently open requests and keeps
+    # the counter open for the entire duration of the upstream call - the
+    # `finally` in `reserved_instance()` releases the slot again even on an
+    # `httpx.HTTPError` below, no permanent leaking.
     async with resolver.reserved_instance(instances) as instance:
         try:
             upstream_response = await request.app.state.http_client.request(

@@ -10,11 +10,11 @@ class SignatureCreate(BaseModel):
     document_id: str
     level: SignatureLevel
     signer_principal_id: str
-    # Ohne Angabe wird die aktuelle Hauptversion signiert. Eine explizit
-    # angegebene, nicht mehr aktuelle Version erzeugt beim Einchecken bei
-    # document-service eine Konfliktkopie statt die Hauptversion zu
-    # verschieben (optimistische Konflikterkennung, 4.2) - beide Fälle
-    # liefern eine gültige, dauerhaft abrufbare signierte Version.
+    # If not specified, the current main version is signed. An explicitly
+    # specified version that is no longer current produces a conflict copy
+    # when checking in at document-service instead of advancing the main
+    # version (optimistic conflict detection, 4.2) - both cases yield a
+    # valid, permanently retrievable signed version.
     version_number: int | None = None
     reason: str | None = None
 
@@ -46,9 +46,9 @@ class VerificationOut(BaseModel):
 
 
 class SignatureProviderStatusOut(BaseModel):
-    """Ein konfigurierter Connector (3.10, Post-Roadmap Phase 22 Session 6) -
-    `id`/`type` sind strukturell fest (`Settings.signature_providers`),
-    `levels` ist der aktuell wirksame, admin-editierbare Wert."""
+    """A configured connector (3.10, post-roadmap phase 22 session 6) -
+    `id`/`type` are structurally fixed (`Settings.signature_providers`),
+    `levels` is the currently effective, admin-editable value."""
 
     id: str
     type: Literal["internal", "qtsp"]

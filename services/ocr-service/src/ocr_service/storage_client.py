@@ -2,9 +2,9 @@ import httpx
 
 
 class StorageClient:
-    """Dünner HTTP-Client gegen den Storage Service (3.6) - eigenständige
-    OCR-Seitenbilder (PDFs) werden dort dauerhaft abgelegt, nicht im OCR
-    Service selbst oder in einem flüchtigen Cache."""
+    """Thin HTTP client against the storage service (3.6) - standalone OCR
+    page images (PDFs) are stored there permanently, not in the OCR service
+    itself or in a transient cache."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

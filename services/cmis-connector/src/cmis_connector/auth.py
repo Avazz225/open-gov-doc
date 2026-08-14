@@ -1,9 +1,9 @@
-"""HTTP-Basic-Auth (5.2.9.1 "Basic Authentication for Non-Browser Clients")
-gegen die bereits bestehende Authentifizierung geprüft - identisches Muster
-wie `webdav_connector.domain_controller.DmsAuthDomainController` (P12-S1),
-nur als FastAPI-Dependency statt wsgidav-`BaseDomainController`, da dieser
-Connector (anders als der WSGI-basierte WebDAV-Connector) eine normale
-FastAPI-App ist."""
+"""HTTP Basic Auth (5.2.9.1 "Basic Authentication for Non-Browser Clients")
+checked against the already existing authentication - identical pattern
+to `webdav_connector.domain_controller.DmsAuthDomainController` (P12-S1),
+just as a FastAPI dependency instead of wsgidav's `BaseDomainController`, since
+this connector (unlike the WSGI-based WebDAV connector) is a regular
+FastAPI app."""
 
 import base64
 import binascii
@@ -42,9 +42,9 @@ def _unauthorized() -> HTTPException:
 
 
 def parse_basic_auth(authorization: str | None = Header(default=None)) -> tuple[str, str]:
-    """Eigenständige Dependency statt FastAPIs `HTTPBasic`-Security-Klasse,
-    da diese bei fehlendem Header immer 403 statt des von CMIS 5.2.9.1
-    vorgesehenen "401 + WWW-Authenticate"-Herausforderungsmusters wirft."""
+    """Standalone dependency instead of FastAPI's `HTTPBasic` security class,
+    since that always raises 403 when the header is missing instead of the
+    "401 + WWW-Authenticate" challenge pattern mandated by CMIS 5.2.9.1."""
     if authorization is None or not authorization.startswith("Basic "):
         raise _unauthorized()
     try:

@@ -2,14 +2,14 @@ import httpx
 
 
 class OcrServiceClient:
-    """HTTP-Client gegen den OCR Service (3.9, P5-S3) - bevorzugte
-    Volltextquelle für den Suchindex (siehe consumer.py: OCR zuerst, sonst
-    substitute_text-Rendition als Fallback)."""
+    """HTTP client against the OCR Service (3.9, P5-S3) - preferred full-text
+    source for the search index (see consumer.py: OCR first, otherwise
+    substitute_text rendition as fallback)."""
 
     # RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - `GET /ocr-results`
-    # verlangt seither `ocr.read`; dieser Aufruf läuft aus einem
-    # NATS-Consumer heraus, kein menschlicher Principal verfügbar - gleiches
-    # `system:<Service>`-Muster wie `archival-service`s `CaseClient`.
+    # has since required `ocr.read`; this call runs from within a NATS
+    # consumer, no human principal available - same `system:<Service>`
+    # pattern as `archival-service`'s `CaseClient`.
     _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "system:search-service"}
 
     def __init__(self, base_url: str) -> None:

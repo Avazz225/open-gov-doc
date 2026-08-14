@@ -5,14 +5,13 @@ from reportlab.pdfgen import canvas
 
 
 def add_text_watermark(data: bytes, text: str) -> bytes:
-    """On-Demand-Wasserzeichen (3.7) - anders als die Ersatzdarstellungen
-    (2.4) kein automatisch bei jedem Upload erzeugtes, persistiertes Objekt:
-    ein Wasserzeichen (z. B. "VERTRAULICH", Empfängername bei einem Export)
-    ist typischerweise eine bewusste Einzelaktion für einen konkreten Anlass,
-    kein Standardschritt für jedes hochgeladene PDF. Bewusst einfach gehalten:
-    ein diagonaler, halbtransparenter Textstempel über jede Seite, keine
-    Positions-/Farb-/Wiederholungs-Konfiguration - siehe Offene Punkte in
-    docs/services/rendering-service.md."""
+    """On-demand watermark (3.7) - unlike renditions (2.4), not a persisted
+    object automatically generated on every upload: a watermark (e.g.
+    "CONFIDENTIAL", recipient name on an export) is typically a deliberate
+    one-off action for a specific occasion, not a standard step for every
+    uploaded PDF. Deliberately kept simple: a diagonal, semi-transparent text
+    stamp across every page, no position/color/repeat configuration - see
+    Open Points in docs/services/rendering-service.md."""
     reader = PdfReader(BytesIO(data))
     if not reader.pages:
         raise ValueError("PDF enthält keine Seiten")

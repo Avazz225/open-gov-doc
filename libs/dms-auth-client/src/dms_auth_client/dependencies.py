@@ -7,8 +7,8 @@ from dms_auth_client.jwt import InvalidTokenError, TokenValidator
 
 
 def make_current_user_dependency(validator: TokenValidator) -> Callable[..., dict]:
-    """Baut eine FastAPI-Dependency, die den Bearer-Token gegen ``validator`` prüft
-    und die Claims zurückgibt, oder 401 wirft. Ein Aufruf je Service-Startup.
+    """Builds a FastAPI dependency that validates the bearer token against
+    ``validator`` and returns the claims, or raises 401. One call per service startup.
     """
     scheme = HTTPBearer(auto_error=True)
 

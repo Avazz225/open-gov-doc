@@ -20,10 +20,10 @@ class ProcessDefinitionDetailOut(ProcessDefinitionOut):
 
 
 class ProcessDefinitionImportResult(BaseModel):
-    """Wie `config_service.schemas.ImportActionResult`/`document_service`s
-    `ForceReleaseResult` - `POST /process-definitions` kann seit Post-Roadmap
-    Phase 21 Session 4 (ADR 0087) optional per generischem Vier-Augen-
-    Mechanismus gegated sein (`workflow.process_definition.import`)."""
+    """Like `config_service.schemas.ImportActionResult`/`document_service`'s
+    `ForceReleaseResult` - since Post-Roadmap Phase 21 Session 4 (ADR 0087),
+    `POST /process-definitions` can optionally be gated via the generic
+    four-eyes mechanism (`workflow.process_definition.import`)."""
 
     status: Literal["applied", "pending_approval"]
     result: ProcessDefinitionOut | None = None
@@ -49,14 +49,13 @@ class ProcessInstanceCreate(BaseModel):
     created_by: str
     business_key: str | None = None
     initial_data: dict = {}
-    # Optional: der Aufrufer bestimmt seine eigene Instanz-ID statt eine vom
-    # Server generierte entgegenzunehmen (P12-S2, gleiches Muster wie
-    # federation-hub-service's `handover_id`, ADR 0028) - wichtig, wenn der
-    # allererste automatische Schritt fehlschlagen kann: ohne eine im Voraus
-    # bekannte ID hätte der Aufrufer bei einem Fehlschlag von
-    # `POST .../instances` selbst keine Möglichkeit, die (dennoch bereits
-    # angelegte, siehe repository.start_instance) Instanz für einen späteren
-    # `/retry`-Aufruf wiederzufinden.
+    # Optional: the caller determines its own instance ID instead of
+    # accepting a server-generated one (P12-S2, same pattern as
+    # federation-hub-service's `handover_id`, ADR 0028) - important when the
+    # very first automatic step can fail: without an ID known in advance,
+    # the caller would have no way, on a failure of `POST .../instances`
+    # itself, to find the instance again (which was nonetheless already
+    # created, see repository.start_instance) for a later `/retry` call.
     instance_id: str | None = None
 
 
@@ -78,18 +77,18 @@ class ReadyTaskOut(BaseModel):
     name: str
     lane: str | None
     data: dict
-    # Camunda-`extensionElements`-Properties (3.10, P6-S7) - insbesondere
-    # `taskType=signature`/`requiredLevel=...` bei einem Signature Task, siehe
-    # spiff_adapter.py. Leer bei jedem gewöhnlichen Manual Task.
+    # Camunda `extensionElements` properties (3.10, P6-S7) - in particular
+    # `taskType=signature`/`requiredLevel=...` for a Signature Task, see
+    # spiff_adapter.py. Empty for every ordinary Manual Task.
     extensions: dict[str, str] = {}
 
 
 class ReadyTaskWithInstanceOut(ReadyTaskOut):
-    """`GET /tasks` (8, P14-S2) - dieselbe Task-Information wie `ReadyTaskOut`,
-    zusätzlich um den instanzbezogenen Kontext ergänzt, der bei einer
-    Cross-Instanz-Liste erst sichtbar gemacht werden muss (bei
-    `GET /instances/{id}/tasks` ist die Instanz bereits durch die URL
-    bekannt)."""
+    """`GET /tasks` (8, P14-S2) - the same task information as `ReadyTaskOut`,
+    additionally augmented with the instance-related context that first
+    needs to be made visible in a cross-instance list (with
+    `GET /instances/{id}/tasks` the instance is already known via the
+    URL)."""
 
     instance_id: str
     process_definition_id: int
@@ -99,16 +98,16 @@ class ReadyTaskWithInstanceOut(ReadyTaskOut):
 class TaskCompleteRequest(BaseModel):
     completed_by: str
     data: dict = {}
-    # Pflicht, wenn die Task laut `extensions["taskType"] == "signature"`
-    # markiert ist (3.10) - verweist auf eine zuvor beim Signature Service
-    # erzeugte Signatur, siehe main.py._require_valid_signature_if_needed.
+    # Required if the task is marked via `extensions["taskType"] == "signature"`
+    # (3.10) - references a signature previously created at the Signature
+    # Service, see main.py._require_valid_signature_if_needed.
     signature_id: str | None = None
-    # Stellvertretung bei Abwesenheit (4.4a, P14-S11): gesetzt, wenn diese
-    # Aufgabe im Auftrag einer abwesenden Person abgeschlossen wird - die
-    # tatsächlich handelnde Person bleibt der über `X-DMS-Principal`
-    # gemeldete Aufrufer (nicht `completed_by`, das ein ungeprüftes
-    # Freitextfeld bleibt, siehe main.py.complete_task), NICHT dieses Feld -
-    # `on_behalf_of_principal_id` ist nur die vertretene Person.
+    # Deputizing during absence (4.4a, P14-S11): set when this task is
+    # completed on behalf of an absent person - the person actually acting
+    # remains the caller reported via `X-DMS-Principal` (not `completed_by`,
+    # which remains an unvalidated free-text field, see
+    # main.py.complete_task), NOT this field - `on_behalf_of_principal_id`
+    # is only the person being represented.
     on_behalf_of_principal_id: str | None = None
 
 

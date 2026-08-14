@@ -10,12 +10,12 @@ LicenseComponentStatus = Literal["licensed", "demo", "unlicensed"]
 
 
 class LicenseStatusClient:
-    """Bewusst synchron (`httpx.Client`, nicht `AsyncClient`) - anders als bei
-    `workflow_service.license_client.LicenseStatusClient` wird dieser Client
-    aus `dav_provider.py`s durchgehend synchronen wsgidav-Callback-Methoden
-    heraus aufgerufen (siehe `dms_connector_sdk.DmsTreeClient`s Docstring für
-    dieselbe Begründung). Identisches Verhalten wie das async Original
-    (P9-S2): Lazy-TTL-Cache, fail-open auf `"licensed"`."""
+    """Deliberately synchronous (`httpx.Client`, not `AsyncClient`) - unlike
+    `workflow_service.license_client.LicenseStatusClient`, this client is
+    called from `dav_provider.py`'s consistently synchronous wsgidav
+    callback methods (see `dms_connector_sdk.DmsTreeClient`'s docstring for
+    the same reasoning). Identical behavior to the async original (P9-S2):
+    lazy TTL cache, fail-open to `"licensed"`."""
 
     def __init__(self, registry_base_url: str, service_type: str, cache_ttl_seconds: float) -> None:
         self._client = httpx.Client(base_url=registry_base_url, timeout=10.0)

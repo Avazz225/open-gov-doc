@@ -4,20 +4,22 @@ from dms_db_base import make_declarative_base
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-# Schema-Name "case" ist ein reserviertes SQL-Schlüsselwort (CASE WHEN) -
-# SQLAlchemy quotet ihn in generierten DDL-Statements automatisch (verifiziert
-# gegen PGIdentifierPreparer), rohe SQL-Strings in main.py/tests/conftest.py
-# müssen ihn dagegen selbst als `"case"` quoten. Tabellenname bewusst "cases"
-# (Plural) statt "case", um diese Quoting-Pflicht nicht auch dort zu brauchen.
+# Schema name "case" is a reserved SQL keyword (CASE WHEN) - SQLAlchemy
+# quotes it automatically in generated DDL statements (verified against
+# PGIdentifierPreparer), whereas raw SQL strings in
+# main.py/tests/conftest.py must quote it themselves as `"case"`. Table
+# name deliberately "cases" (plural) instead of "case", to avoid needing
+# this quoting requirement there as well.
 Base = make_declarative_base("case")
 
 
 class Case(Base):
-    """Umlaufmappe (2.3): eigenständiges, objekttypfähiges Objekt mit eigenem
-    Lebenszyklus über eine workflow-service-Prozessinstanz (P6-S1).
-    `process_instance_id`s `business_key` ist bewusst identisch mit `id`
-    (kein separates Feld nötig) - Grundlage dafür, wie `consumer.py` den
-    Abschluss der zugehörigen Prozessinstanz einer Umlaufmappe zuordnet."""
+    """Circulation folder (2.3): a standalone, object-type-capable object
+    with its own lifecycle via a workflow-service process instance
+    (P6-S1). `process_instance_id`'s `business_key` is deliberately
+    identical to `id` (no separate field needed) - the basis for how
+    `consumer.py` matches the completion of the associated process
+    instance to a circulation folder."""
 
     __tablename__ = "cases"
 
@@ -25,40 +27,41 @@ class Case(Base):
     name: Mapped[str] = mapped_column(String(512))
     object_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     attributes: Mapped[dict] = mapped_column(JSON, default=dict)
-    # "open" waehrend der Bearbeitung, "closed" nach Erreichen des
-    # BPMN-Endzustands (Abschluss-Snapshot, siehe close_case in repository.py).
+    # "open" while being processed, "closed" after reaching the BPMN end
+    # state (closure snapshot, see close_case in repository.py).
     status: Mapped[str] = mapped_column(String(32), default="open")
     process_definition_id: Mapped[int] = mapped_column(Integer)
     process_instance_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Aussonderung (5.6, seit P7-S3b) - `archive_after` wird erst bei
-    # Abschluss aufgeloest (siehe repository.close_case), nicht bei Anlage
-    # wie `Document.archive_after`, da nur geschlossene Umlaufmappen
-    # aussonderungsfaehig sind.
+    # Records disposal (5.6, since P7-S3b) - `archive_after` is only
+    # resolved on closure (see repository.close_case), not on creation like
+    # `Document.archive_after`, since only closed circulation folders are
+    # eligible for disposal.
     archive_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Vorgangsnummer (2.3/2.5, P15-S3): server-generierter, installationsweit
-    # eindeutiger Bezug (anders als `Document.attributes["Kennzeichen"]", das
-    # nur je Objekttyp+Jahr eindeutig ist) - Grundlage für den neuen
-    # `mail-connector`, der eingehende Post anhand eines im Betreff/Text
-    # gefundenen Tokens automatisch einer Umlaufmappe zuordnen können muss.
-    # Nullable, da nur für ab dieser Session neu angelegte Fälle vergeben
-    # (kein rückwirkendes Befüllen bestehender Zeilen). Bewusst NICHT über
-    # PATCH änderbar (anders als Kennzeichen) - ein stabiler, rein
-    # systemseitig vergebener Bezug ist Voraussetzung für verlässliches
-    # Matching.
+    # Case number (2.3/2.5, P15-S3): server-generated, installation-wide
+    # unique reference (unlike `Document.attributes["Kennzeichen"]`, which
+    # is only unique per object type + year) - basis for the new
+    # `mail-connector`, which needs to automatically match incoming mail to
+    # a circulation folder based on a token found in the subject/body.
+    # Nullable, since it's only assigned for cases newly created from this
+    # session onward (no retroactive backfill of existing rows).
+    # Deliberately NOT changeable via PATCH (unlike the reference number) -
+    # a stable, purely system-assigned reference is a prerequisite for
+    # reliable matching.
     vorgangsnummer: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class CaseDocumentReference(Base):
-    """Referenz einer Umlaufmappe auf ein Dokument (2.3) - waehrend der
-    Bearbeitung dynamisch (Version wird bei jedem Lesezugriff live aus dem
-    Document Service aufgeloest, siehe repository.list_document_references),
-    ab Abschluss der Umlaufmappe fixiert in `snapshot_version_number`
-    (Abschluss-Snapshot). Entfernte Referenzen werden weich geloescht
-    (`removed_by`/`removed_at`) statt hart entfernt - Nachvollziehbarkeit."""
+    """A circulation folder's reference to a document (2.3) - dynamic while
+    processing is ongoing (version is resolved live from the Document
+    Service on every read access, see repository.list_document_references),
+    fixed in `snapshot_version_number` from the circulation folder's
+    closure onward (closure snapshot). Removed references are soft-deleted
+    (`removed_by`/`removed_at`) instead of hard-removed - for
+    traceability."""
 
     __tablename__ = "case_document_reference"
 
@@ -73,11 +76,11 @@ class CaseDocumentReference(Base):
 
 
 class CaseArchivalConfig(Base):
-    """Installationsweite Aussonderungs-Konfiguration (5.6, seit P7-S3b) -
-    einzelne Zeile (`id=1`, gleiches Muster wie document-services
-    `RetentionConfig`). Kein Pendant zu `ObjectType.default_archive_after_
-    days`/`archive_encryption_enabled`: `ObjectType.applies_to` kennt nur
-    `"document"`/`"folder"`, keine eigene Kategorie fuer Umlaufmappen - siehe
+    """Installation-wide records disposal configuration (5.6, since P7-S3b)
+    - single row (`id=1`, same pattern as document-service's
+    `RetentionConfig`). No counterpart to `ObjectType.default_archive_after_
+    days`/`archive_encryption_enabled`: `ObjectType.applies_to` only knows
+    `"document"`/`"folder"`, no own category for circulation folders - see
     docs/services/archival-service.md."""
 
     __tablename__ = "case_archival_config"
@@ -89,14 +92,14 @@ class CaseArchivalConfig(Base):
 
 
 class CaseNumberConfig(Base):
-    """Installationsweiter Format-String für die Vorgangsnummer (2.3/2.5,
-    P15-S3) - einzelne Zeile (`id=1`), gleiches Muster wie
-    `CaseArchivalConfig`. Bewusst EIN installationsweites Schema statt eines
-    je-Objekttyp-Generators wie beim Kennzeichen (object-type-service kennt
-    "case" nicht als eigene `applies_to`-Kategorie, siehe Kommentar an
-    `CaseArchivalConfig` oben) - für den hier verfolgten Zweck (verlässliches
-    Matching eingehender Post) reicht ein einzelner, garantiert eindeutiger
-    Zähler."""
+    """Installation-wide format string for the case number (2.3/2.5,
+    P15-S3) - single row (`id=1`), same pattern as `CaseArchivalConfig`.
+    Deliberately ONE installation-wide scheme instead of a per-object-type
+    generator like for the reference number (object-type-service does not
+    know "case" as its own `applies_to` category, see the comment on
+    `CaseArchivalConfig` above) - for the purpose pursued here (reliable
+    matching of incoming mail), a single, guaranteed-unique counter is
+    sufficient."""
 
     __tablename__ = "case_number_config"
 
@@ -106,10 +109,10 @@ class CaseNumberConfig(Base):
 
 
 class CaseSequence(Base):
-    """Atomarer, gegen Nebenläufigkeit abgesicherter Jahres-Zähler für die
-    Vorgangsnummer (P15-S3) - gleiches Idiom wie object-type-services
-    `ObjectTypeSequence` (P5e-S1), hier ohne Objekttyp-Dimension (eine Zeile
-    je Jahr statt je Objekttyp+Jahr)."""
+    """Atomic, concurrency-safe yearly counter for the case number
+    (P15-S3) - same idiom as object-type-service's `ObjectTypeSequence`
+    (P5e-S1), here without an object-type dimension (one row per year
+    instead of per object type + year)."""
 
     __tablename__ = "case_sequence"
 

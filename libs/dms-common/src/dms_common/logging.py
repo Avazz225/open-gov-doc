@@ -25,10 +25,10 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(settings: BaseServiceSettings) -> None:
-    """Setzt Root-Logger auf strukturiertes JSON-Logging nach stdout.
+    """Configures the root logger for structured JSON logging to stdout.
 
-    Jeder Log-Eintrag enthält automatisch ``service_name``/``environment``,
-    damit Log-Aggregation (10.1) Einträge ohne Zusatzparsing zuordnen kann.
+    Every log entry automatically includes ``service_name``/``environment``,
+    so log aggregation (10.1) can attribute entries without extra parsing.
     """
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())

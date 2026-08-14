@@ -25,24 +25,25 @@ class NotFoundError(Exception):
 
 
 class ApprovalRequestNotPendingError(Exception):
-    """Der Request wurde bereits genehmigt/abgelehnt - keine zweite Entscheidung möglich."""
+    """The request has already been approved/rejected - a second decision is not possible."""
 
 
 class NotInitiatorAllowedError(Exception):
-    """Vier-Augen-Kernregel (4.3): die genehmigende Person darf nicht mit der
-    initiierenden Person identisch sein."""
+    """Core four-eyes rule (4.3): the approving person must not be identical
+    to the initiating person."""
 
 
 class MissingRequiredPermissionError(Exception):
-    """Verschärfung für 4.6 (Break-Glass): der Aktionstyp verlangt laut
-    ``ApprovalActionConfig.required_permission`` eine bestimmte Capability an
-    der Wurzelressource - weder Initiator noch Genehmiger sind davon
-    ausgenommen."""
+    """Tightening for 4.6 (break-glass): the action type requires a specific
+    capability at the root resource, as stated by
+    ``ApprovalActionConfig.required_permission`` - neither the initiator nor
+    the approver is exempt from this."""
 
 
 async def invalidate_cache(session: AsyncSession) -> None:
-    """Leert den gesamten materialisierten Cache (siehe Docstring an
-    ``EffectivePermissionCache`` für die Begründung der Grobkörnigkeit)."""
+    """Clears the entire materialized cache (see the docstring on
+    ``EffectivePermissionCache`` for the rationale behind the coarse
+    granularity)."""
     await session.execute(delete(EffectivePermissionCache))
 
 
@@ -72,15 +73,15 @@ async def list_roles(session: AsyncSession) -> list[Role]:
 async def update_role(
     session: AsyncSession, role_id: int, *, description: str, permissions: list[str]
 ) -> Role:
-    """Invalidiert seit Phase 19 Session 3 (ADR 0068) den Effective-
-    Permissions-Cache - vorher fehlte das hier (anders als bei jeder anderen
-    rechte-verändernden Operation in diesem Modul), unkritisch, solange
-    Rollen nur selten und ohne akute Sicherheitserwartung editiert wurden.
-    Mit der "everyone"-Gruppe (P19-S2/S3) editiert ein Admin diese Rolle
-    jetzt potenziell gezielt, um einem bereits gecachten Principal umgehend
-    eine Berechtigung zu entziehen - ohne Invalidierung hätte das bis zur
-    nächsten, unabhängigen Cache-Leerung (z. B. einer anderen Rollen-
-    zuweisung) keine Wirkung gezeigt."""
+    """Invalidates the effective-permissions cache since Phase 19 Session 3
+    (ADR 0068) - previously missing here (unlike every other permission-
+    changing operation in this module), which was not a problem as long as
+    roles were edited only rarely and without an acute security expectation.
+    With the "everyone" group (P19-S2/S3), an admin might now deliberately
+    edit this role to immediately revoke a permission from an already
+    cached principal - without invalidation, that would have had no effect
+    until the next, independent cache clear (e.g. from another role
+    assignment)."""
     role = await session.get(Role, role_id)
     if role is None:
         raise NotFoundError(f"role_id {role_id!r} unbekannt")
@@ -96,17 +97,17 @@ async def get_role_by_name(session: AsyncSession, name: str) -> Role | None:
     return result.scalars().first()
 
 
-# Domänengetrennte Admin-Rollen (4.6) - systemeigen (in diesem Service, NICHT
-# als Keycloak-Realm-Rollen), damit sie unabhängig vom Identity Provider
-# funktionieren. "domain-admin-users" bekam als erste ein zugeordnetes
-# technisches Keycloak-Konto + tatsächliche Durchsetzung (siehe auth-service).
-# "domain-admin-query-console"/"-manipulate" bekamen ihre tatsächliche
-# Durchsetzung in query-service (P8-S1/P8-S2, kein eigenes technisches Konto
-# nötig - reine Rollenzuweisung reicht). Die übrigen Domänen sind laut 4.6
-# "standardmäßig mitgeliefert", aber bewusst noch ohne Enforcement (deren
-# fachliche Funktionen existieren teils noch gar nicht, z. B.
-# Lizenzverwaltung). "breakglass-approver" ist keine Domäne aus 4.6, sondern
-# die Gruppen-Rolle für die Vier-Augen-Freigabe der Superuser-Aktivierung.
+# Domain-separated admin roles (4.6) - native to this service (NOT as
+# Keycloak realm roles), so they work independently of the identity
+# provider. "domain-admin-users" was the first to get an associated
+# technical Keycloak account + actual enforcement (see auth-service).
+# "domain-admin-query-console"/"-manipulate" got their actual enforcement in
+# query-service (P8-S1/P8-S2, no own technical account needed - a plain
+# role assignment suffices). The remaining domains are, per 4.6, "shipped by
+# default" but deliberately still without enforcement (their functional
+# capabilities partly don't exist yet, e.g. license management).
+# "breakglass-approver" is not a domain from 4.6, but the group role for the
+# four-eyes approval of superuser activation.
 DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     ("domain-admin-users", "Nutzer-/Rechteverwaltung", ["admin.user_management"]),
     ("domain-admin-config", "Objekttyp-/Workflow-Konfiguration", ["admin.object_config"]),
@@ -125,40 +126,40 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         ["admin.deletion_classified"],
     ),
     ("breakglass-approver", "Freigabegruppe Superuser-Break-Glass (4.6)", ["breakglass.approve"]),
-    # Ebenfalls kein Konzept-4.6-Domänen-Eintrag, sondern die Auslöse-Rolle für
-    # die Notfallsperre (4.8, P6-S6) - bewusst ohne automatisches technisches
-    # Konto (wie breakglass-approver, nicht wie users-admin/config-admin):
-    # eine Notfallsperre soll einer echten, individuell zurechenbaren Person
-    # zugeordnet bleiben, kein geteiltes Konto.
+    # Also not a concept-4.6 domain entry, but the trigger role for the
+    # emergency lock (4.8, P6-S6) - deliberately without an automatic
+    # technical account (like breakglass-approver, unlike users-admin/
+    # config-admin): an emergency lock should remain attributed to a real,
+    # individually accountable person, not a shared account.
     ("domain-admin-emergency", "Not-Shutdown-Auslösung (4.8)", ["system.not_shutdown.trigger"]),
-    # Wie "domain-admin-license" (P9-S1) entsteht diese Domäne erst mit dem
-    # tatsächlichen Feature (Plugin Orchestration Service, 3.8, P10-S1) -
-    # Konzept 4.6 nennt seine Domänen-Liste ausdrücklich nur beispielhaft.
+    # Like "domain-admin-license" (P9-S1), this domain only comes into being
+    # with the actual feature (Plugin Orchestration Service, 3.8, P10-S1) -
+    # concept 4.6 explicitly calls its domain list only exemplary.
     ("domain-admin-orchestration", "Plugin-Orchestrierung", ["admin.orchestration"]),
-    # Wie "domain-admin-orchestration" (P10-S1) entsteht diese Domäne erst mit
-    # dem tatsächlichen Feature (Sensor-Konzept/monitoring-service, 10.1,
-    # P11-S1) - Deaktivieren sicherheitsrelevanter Sensoren ist laut Konzept
-    # selbst ein sicherheitsrelevanter, auditierter Vorgang.
+    # Like "domain-admin-orchestration" (P10-S1), this domain only comes into
+    # being with the actual feature (sensor concept/monitoring-service, 10.1,
+    # P11-S1) - deactivating security-relevant sensors is, per the concept,
+    # itself a security-relevant, audited operation.
     ("domain-admin-monitoring", "Monitoring-/Sensor-Konfiguration", ["admin.monitoring"]),
-    # Post-Roadmap Phase 19 Session 8 (ADR 0073): ersetzt virus-scan-services
-    # bisheriges reines `X-DMS-Roles`-Gate (`quarantine_admin_role`,
-    # "dms-admin") - "eine eigene, eng begrenzte Rolle darf einen
-    # Quarantäne-Fall einsehen, endgültig löschen oder ... freigeben"
-    # (Konzept 2.5, wörtlich) ist jetzt eine echte, admin-editierbare Domäne
-    # statt eines hartkodierten Keycloak-Realm-Rollennamens.
+    # Post-Roadmap Phase 19 Session 8 (ADR 0073): replaces virus-scan-
+    # service's previous plain `X-DMS-Roles` gate (`quarantine_admin_role`,
+    # "dms-admin") - "a dedicated, narrowly scoped role may view a
+    # quarantine case, permanently delete it, or ... release it" (concept
+    # 2.5, verbatim) is now a real, admin-editable domain instead of a
+    # hard-coded Keycloak realm role name.
     ("domain-admin-virus-scan", "Virenschutz-/Quarantäne-Verwaltung", ["admin.quarantine"]),
-    # Post-Roadmap Phase 19 Session 10 (ADR 0075): Konzept 5.2 nennt keine
-    # eigene Rolle für Legal Hold - eine eigene Domäne statt Wiederverwendung
-    # von "domain-admin-deletion" (Löschadministration), da beide inhaltlich
-    # gegensätzlich sind (Hold verhindert Löschung, Deletion-Admin führt sie
-    # aus) - siehe ADR 0075 "Begründung".
+    # Post-Roadmap Phase 19 Session 10 (ADR 0075): concept 5.2 does not name
+    # a dedicated role for legal hold - a separate domain instead of reusing
+    # "domain-admin-deletion" (records disposal administration), since the
+    # two are conceptually opposite (a hold prevents deletion, deletion
+    # admin performs it) - see ADR 0075 "Rationale".
     ("domain-admin-legal-hold", "Legal-Hold-Verwaltung", ["admin.legal_hold"]),
-    # Post-Roadmap Phase 22 Session 5: `teamspace-service`s neuer
-    # installationsweiter Übersichts-Endpunkt (`GET /admin/teamspaces`,
-    # zeigt ALLE Teamspaces, nicht nur die des anfragenden Principals wie
-    # `GET /teamspaces`) ist die erste Stelle in diesem Service, die eine
-    # echte Rechteprüfung braucht - Teamspaces selbst bleiben weiterhin
-    # selbstverwaltet (2.5, kein Capability-Gate für Anlegen/Beitreten).
+    # Post-Roadmap Phase 22 Session 5: `teamspace-service`'s new
+    # installation-wide overview endpoint (`GET /admin/teamspaces`, shows
+    # ALL teamspaces, not just those of the requesting principal like
+    # `GET /teamspaces`) is the first place in this service that needs a
+    # real permission check - teamspaces themselves remain self-managed
+    # (2.5, no capability gate for creation/joining).
     ("domain-admin-teamspaces", "Teamspace-Aufsicht", ["admin.teamspace_management"]),
 ]
 
@@ -169,75 +170,75 @@ async def ensure_domain_admin_roles(session: AsyncSession) -> None:
             await create_role(session, name, description, permissions)
 
 
-# "everyone"-Gruppe (Post-Roadmap Phase 19 Session 2, ADR 0067): jeder
-# authentifizierte Principal ist implizit Mitglied, ohne dass irgendein Konto
-# einzeln zugewiesen werden muss - `_collect_effective_roles` unten
-# behandelt eine `RoleAssignment` mit genau diesem
-# `(principal_type, principal_id)`-Paar an jedem durchlaufenen Resource-Knoten
-# als für JEDEN Principal zutreffend. Ersetzt die zuvor hartkodierten
-# "jeder authentifizierte Nutzer darf..."-Bypässe in `auth-service`
-# (`GET /users/lookup`, `GET /users/directory`, siehe P19-S3) durch eine
-# echte, admin-editierbare Rolle - am Ist-Verhalten ändert die Umstellung
-# selbst nichts, nur die Durchsetzung wird systemeigen statt fest verdrahtet.
+# "everyone" group (Post-Roadmap Phase 19 Session 2, ADR 0067): every
+# authenticated principal is implicitly a member, without any account
+# needing to be assigned individually - `_collect_effective_roles` below
+# treats a `RoleAssignment` with exactly this `(principal_type,
+# principal_id)` pair at every traversed resource node as applying to EVERY
+# principal. Replaces the previously hard-coded "any authenticated user
+# may..." bypasses in `auth-service` (`GET /users/lookup`, `GET
+# /users/directory`, see P19-S3) with a real, admin-editable role - the
+# switch itself changes nothing about actual behavior, only enforcement
+# becomes native instead of hard-wired.
 EVERYONE_PRINCIPAL_TYPE = "group"
 EVERYONE_PRINCIPAL_ID = "everyone"
 EVERYONE_ROLE_NAME = "everyone"
 EVERYONE_ROLE_DESCRIPTION = (
     "Jeder authentifizierte Principal (implizite Mitgliedschaft, keine Zuweisung pro Konto nötig)"
 )
-# Seit Phase 19 Session 5 (ADR 0070) zusätzlich `case.read`/`case.write` -
-# case-service hatte zuvor GAR KEINE Berechtigungsprüfung, diese Erweiterung
-# erhält das bisherige De-facto-offene Verhalten, macht es aber admin-
-# editierbar statt hartkodiert (gleiches Prinzip wie users.lookup/directory
-# in P19-S3). WICHTIG: `ensure_everyone_role` unten aktualisiert eine BEREITS
-# angelegte Rolle nicht automatisch (kein Alembic-artiges Migrations-
-# Mechanismus in diesem Projekt, siehe `ensure_domain_admin_roles` mit
-# derselben Einschränkung) - auf einer bereits laufenden Installation muss
-# diese Erweiterung einmalig manuell per `PUT /roles/{id}` nachgezogen
-# werden (wie es ein echter Admin täte), sonst gilt sie nur für Instanzen,
-# die "everyone" noch nicht besitzen. Bewusst NICHT self-healing: ein Admin
-# könnte sonst eine gezielte Entziehung (z. B. ADR 0068s users.lookup-
-# Beispiel) bei jedem Neustart ungewollt rückgängig gemacht bekommen.
+# Since Phase 19 Session 5 (ADR 0070) additionally `case.read`/`case.write` -
+# case-service previously had NO permission check whatsoever; this extension
+# preserves the previous de-facto-open behavior but makes it admin-editable
+# instead of hard-coded (same principle as users.lookup/directory in
+# P19-S3). IMPORTANT: `ensure_everyone_role` below does not automatically
+# update an ALREADY created role (no Alembic-like migration mechanism in
+# this project, see `ensure_domain_admin_roles` with the same limitation) -
+# on an already-running installation, this extension must be applied once
+# manually via `PUT /roles/{id}` (as a real admin would do), otherwise it
+# only takes effect for instances that don't yet have "everyone".
+# Deliberately NOT self-healing: otherwise an admin's targeted revocation
+# (e.g. ADR 0068's users.lookup example) could get unintentionally undone on
+# every restart.
 EVERYONE_ROLE_PERMISSIONS: list[str] = [
     "users.lookup",
     "users.directory",
     "case.read",
     "case.write",
     # Post-Roadmap Phase 19 Session 7 (ADR 0072): archival-service/
-    # reporting-service hatten zuvor GAR KEINE RBAC-Prüfung.
+    # reporting-service previously had NO RBAC check whatsoever.
     "archival.read",
     "archival.write",
     "reporting.read",
     "reporting.write",
     "reporting.forensic_trace",
     # Post-Roadmap Phase 19 Session 8 (ADR 0073): ocr-service/rendering-
-    # service hatten zuvor GAR KEINE RBAC-Prüfung. `admin.quarantine`
-    # (virus-scan-service, dieselbe Session) ist bewusst NICHT hier gelistet
-    # - anders als diese beiden war der Quarantäne-Bereich schon vorher eine
-    # echte, auf eine dedizierte Rolle beschränkte Berechtigung, keine
-    # bislang de-facto offene Lücke.
+    # service previously had NO RBAC check whatsoever. `admin.quarantine`
+    # (virus-scan-service, same session) is deliberately NOT listed here -
+    # unlike these two, the quarantine area was already a real permission
+    # restricted to a dedicated role before, not a previously de-facto-open
+    # gap.
     "ocr.read",
     "ocr.write",
     "rendering.read",
     "rendering.write",
-    # Post-Roadmap Phase 19 Session 9 (ADR 0074): Workflow-Instanzstart/
-    # Task-Abschluss waren zuvor eine bewusste, hartkodierte "für jeden
-    # authentifizierten Principal offen"-Entscheidung (P6-S6) - "everyone"
-    # erhält dieses Verhalten, macht es aber admin-editierbar.
+    # Post-Roadmap Phase 19 Session 9 (ADR 0074): starting workflow
+    # instances/completing tasks were previously a deliberate, hard-coded
+    # "open to every authenticated principal" decision (P6-S6) - "everyone"
+    # preserves this behavior but makes it admin-editable.
     "workflow.write",
 ]
 
 
 async def ensure_everyone_role(session: AsyncSession) -> None:
-    """Idempotent (gleiches Muster wie `ensure_domain_admin_roles`) - legt
-    zusätzlich zur Rolle selbst auch deren `RoleAssignment` an der
-    Wurzelressource an, da die "everyone"-Gruppe (anders als Domain-Admin-
-    Rollen) kein externes Konto hat, dem die Zuweisung sonst zugeordnet
-    würde. Läuft NACH `ensure_root_resource` (braucht `ROOT_RESOURCE_ID` als
-    FK-Ziel) und bewusst direkt gegen die Session statt über den
-    Vier-Augen-gegateten `POST /role-assignments`-Endpunkt - dies ist
-    Bootstrap-Infrastruktur wie `ensure_domain_admin_roles`, keine
-    Laufzeit-Admin-Aktion."""
+    """Idempotent (same pattern as `ensure_domain_admin_roles`) - in addition
+    to the role itself, also creates its `RoleAssignment` at the root
+    resource, since the "everyone" group (unlike domain-admin roles) has no
+    external account the assignment could otherwise be attributed to. Runs
+    AFTER `ensure_root_resource` (needs `ROOT_RESOURCE_ID` as the FK target)
+    and deliberately acts directly against the session instead of through
+    the four-eyes-gated `POST /role-assignments` endpoint - this is
+    bootstrap infrastructure like `ensure_domain_admin_roles`, not a
+    runtime admin action."""
     role = await get_role_by_name(session, EVERYONE_ROLE_NAME)
     if role is None:
         role = await create_role(
@@ -257,11 +258,11 @@ async def ensure_everyone_role(session: AsyncSession) -> None:
         )
 
 
-# Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen die
-# obige, hartkodierte "everyone"-Gruppe um echte, admin-verwaltete Gruppen.
-# Gleiches Gating wie Rollen selbst (``_require_role_management`` in
-# ``main.py``, `admin.user_management`), da eine Gruppe letztlich nur ein
-# weiterer Baustein der Rechteverwaltung ist.
+# Admin-creatable groups (Post-Roadmap Phase 22 Session 2) - complement the
+# hard-coded "everyone" group above with real, admin-managed groups. Same
+# gating as roles themselves (``_require_role_management`` in ``main.py``,
+# `admin.user_management`), since a group is ultimately just another
+# building block of permission management.
 async def create_group(session: AsyncSession, name: str, description: str) -> Group:
     group = Group(
         id=str(uuid.uuid4()), name=name, description=description, created_at=datetime.now(UTC)
@@ -277,12 +278,12 @@ async def list_groups(session: AsyncSession) -> list[Group]:
 
 
 async def delete_group(session: AsyncSession, group_id: str) -> None:
-    """Löscht die Gruppe samt ihrer Mitgliedschaften. Bewusst KEINE Prüfung
-    auf noch bestehende `RoleAssignment`-Zeilen, die auf diese Gruppe zeigen
-    (``principal_id=group_id``) - eine solche Zeile matcht danach einfach
-    keinen Principal mehr (leere Mitgliederliste), gleiches Verhalten wie
-    eine Gruppe ohne je zugewiesene Mitglieder. Konsistent mit `Role`, das
-    ebenfalls keinen Lösch-Endpunkt/keine Referenzprüfung kennt."""
+    """Deletes the group along with its memberships. Deliberately NO check
+    for still-existing `RoleAssignment` rows pointing at this group
+    (``principal_id=group_id``) - such a row simply no longer matches any
+    principal afterward (empty member list), the same behavior as a group
+    that never had any members assigned. Consistent with `Role`, which
+    likewise has no delete endpoint/reference check."""
     group = await session.get(Group, group_id)
     if group is None:
         raise NotFoundError(f"group_id {group_id!r} unbekannt")
@@ -364,8 +365,8 @@ async def create_role_assignment(
 async def list_role_assignments(
     session: AsyncSession, *, principal_id: str | None = None, resource_id: str | None = None
 ) -> list[RoleAssignment]:
-    """Grundlage der Admin-UI-Nutzer-/Rollenverwaltung (P4-S3) - bisher gab es
-    nur Erstellen/Löschen einzelner Zuweisungen, kein Auflisten."""
+    """Basis for the admin UI's user/role management (P4-S3) - previously
+    there was only creation/deletion of individual assignments, no listing."""
     query = select(RoleAssignment)
     if principal_id is not None:
         query = query.where(RoleAssignment.principal_id == principal_id)
@@ -398,20 +399,20 @@ async def set_resource_inherit(
 async def _collect_effective_roles(
     session: AsyncSession, principal_id: str, resource_id: str
 ) -> list[Role]:
-    """Läuft die Vorfahrenkette von ``resource_id`` nach oben und sammelt alle
-    Rollen, die dem Principal an jedem durchlaufenen Knoten zugewiesen sind.
-    Ein Knoten mit ``inherit=False`` beendet den Aufstieg NACH Auswertung
-    seiner eigenen Zuweisungen (4.1: Vererbung mit Override-Möglichkeit,
-    Standard-DMS-Verhalten wie SharePoint/Alfresco).
+    """Walks the ancestor chain of ``resource_id`` upward and collects all
+    roles assigned to the principal at every traversed node. A node with
+    ``inherit=False`` stops the ascent AFTER evaluating its own assignments
+    (4.1: inheritance with override capability, standard DMS behavior like
+    SharePoint/Alfresco).
 
-    Schließt seit Phase 19 Session 2 zusätzlich Zuweisungen an die
-    "everyone"-Gruppe ein (``principal_type="group", principal_id="everyone"``,
-    siehe ``ensure_everyone_role``) - jeder authentifizierte Principal gilt
-    dafür implizit als Mitglied, unabhängig von seiner eigenen `principal_id`.
-    Seit Post-Roadmap Phase 22 Session 2 zusätzlich Zuweisungen an jede echte,
-    admin-angelegte Gruppe (``Group``/``GroupMembership``), der der Principal
-    per expliziter Mitgliedschaft angehört - anders als "everyone" braucht das
-    hier eine tatsächliche Zeile.
+    Since Phase 19 Session 2, also includes assignments to the "everyone"
+    group (``principal_type="group", principal_id="everyone"``, see
+    ``ensure_everyone_role``) - every authenticated principal implicitly
+    counts as a member for this purpose, regardless of their own
+    `principal_id`. Since Post-Roadmap Phase 22 Session 2, also includes
+    assignments to any real, admin-created group (``Group``/
+    ``GroupMembership``) that the principal belongs to via explicit
+    membership - unlike "everyone", this requires an actual row.
     """
     collected: dict[int, Role] = {}
     current_id: str | None = resource_id
@@ -528,10 +529,10 @@ async def list_scope_locks(session: AsyncSession, resource_id: str | None) -> li
 async def get_active_scope_locks_for_resource(
     session: AsyncSession, resource_id: str
 ) -> list[ScopeLock]:
-    """Läuft die Vorfahrenkette von ``resource_id`` nach oben (wie
-    ``_collect_effective_roles``) und sammelt alle aktiven Bereichssperren
-    (4.7) - unabhängig vom ``inherit``-Flag, das nur die RBAC-Vererbung
-    betrifft: eine Bereichssperre gilt immer für den gesamten Unterbaum."""
+    """Walks the ancestor chain of ``resource_id`` upward (like
+    ``_collect_effective_roles``) and collects all active scope locks (4.7) -
+    independent of the ``inherit`` flag, which only affects RBAC
+    inheritance: a scope lock always applies to the entire subtree."""
     now = datetime.now(UTC)
     active: list[ScopeLock] = []
     current_id: str | None = resource_id
@@ -552,11 +553,11 @@ async def get_active_scope_locks_for_resource(
 
 
 async def get_approval_config(session: AsyncSession, action_type: str) -> ApprovalActionConfig:
-    """Liest die Vier-Augen-Konfiguration für einen Aktionstyp (4.3). Fehlt
-    die Zeile, wird ein transientes (nicht persistiertes) Default-Objekt mit
-    ``requires_approval=False`` zurückgegeben - "konfigurierbar pro
-    Aktionstyp, nicht global erzwungen" heißt: ohne explizite Aktivierung
-    bleibt jede Aktion ungated."""
+    """Reads the four-eyes configuration for an action type (4.3). If the
+    row is missing, a transient (non-persisted) default object with
+    ``requires_approval=False`` is returned - "configurable per action type,
+    not globally enforced" means: without explicit activation, every action
+    stays ungated."""
     config = await session.get(ApprovalActionConfig, action_type)
     if config is None:
         return ApprovalActionConfig(
@@ -595,10 +596,10 @@ async def set_approval_config(
 
 
 async def require_capability(session: AsyncSession, principal_id: str, permission: str) -> None:
-    """Direkte Baseline-Rechteprüfung an der Wurzelressource - anders als
-    `_require_permission_if_configured` unten (die nur *im Kontext eines
-    Approval-Requests* greift) auch für Endpunkte ohne jedes Vier-Augen-
-    Zwischenspiel nutzbar (z. B. `POST /maintenance-mode/trigger`, wenn
+    """Direct baseline permission check at the root resource - unlike
+    `_require_permission_if_configured` below (which only applies *in the
+    context of an approval request*), also usable for endpoints without
+    any four-eyes involvement (e.g. `POST /maintenance-mode/trigger`, when
     `requires_approval=False`, 4.8/P6-S6)."""
     entry = await get_effective_permissions(session, principal_id, ROOT_RESOURCE_ID)
     if permission not in entry.permissions:
@@ -693,10 +694,10 @@ MAINTENANCE_MODE_ID = 1
 
 
 async def get_or_seed_maintenance_mode(session: AsyncSession) -> SystemMaintenanceMode:
-    """Singleton-Zeile (4.8, P6-S6) - wird beim ersten Zugriff angelegt statt
-    beim Service-Start unbedingt vorausgesetzt, gleiches Muster wie
-    `get_approval_config`s transientes Default-Objekt, nur hier tatsächlich
-    persistiert (der Status muss über Neustarts hinweg erhalten bleiben)."""
+    """Singleton row (4.8, P6-S6) - created on first access instead of being
+    unconditionally required at service start, same pattern as
+    `get_approval_config`'s transient default object, only actually
+    persisted here (the status must survive restarts)."""
     mode = await session.get(SystemMaintenanceMode, MAINTENANCE_MODE_ID)
     if mode is None:
         mode = SystemMaintenanceMode(id=MAINTENANCE_MODE_ID, active=False)
@@ -728,7 +729,7 @@ async def lift_maintenance_mode(session: AsyncSession, *, lifted_by: str) -> Sys
     return mode
 
 
-# --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------
+# --- Delegation during absence (4.4a, P14-S11) -------------------------
 
 
 async def create_delegation(
@@ -809,11 +810,11 @@ def _delegation_scope_matches(
     object_type_id: int | None,
     folder_resource_id: str | None,
 ) -> bool:
-    """Eine gesetzte Scope-Liste schränkt auf genau diese IDs ein; eine leere/
-    ``None``-Liste bedeutet "auf dieser Dimension uneingeschränkt". Wird die
-    jeweils zugehörige ID des zu prüfenden Vorgangs nicht mitgeliefert
-    (Aufrufer kennt sie nicht), gilt eine gesetzte Scope-Liste als NICHT
-    erfüllt (fail closed) - siehe main.py ``GET /delegations/check``."""
+    """A set scope list restricts to exactly these IDs; an empty/``None``
+    list means "unrestricted on this dimension". If the corresponding ID of
+    the operation being checked is not supplied (the caller doesn't know
+    it), a set scope list counts as NOT satisfied (fail closed) - see
+    main.py ``GET /delegations/check``."""
     if delegation.scope_process_definition_ids:
         if process_definition_id is None or process_definition_id not in (
             delegation.scope_process_definition_ids
@@ -839,11 +840,10 @@ async def is_active_deputy_for(
     object_type_id: int | None = None,
     folder_resource_id: str | None = None,
 ) -> bool:
-    """Kern der Delegationsprüfung (4.4a) - wahr, wenn mindestens eine aktive,
-    nicht widerrufene Delegation von ``delegator_principal_id`` an
-    ``deputy_principal_id`` existiert, deren Gültigkeitsfenster ``now``
-    einschließt und deren Scope (falls eingeschränkt) zum geprüften Vorgang
-    passt."""
+    """Core of the delegation check (4.4a) - true if at least one active,
+    non-revoked delegation from ``delegator_principal_id`` to
+    ``deputy_principal_id`` exists whose validity window includes ``now``
+    and whose scope (if restricted) matches the operation being checked."""
     delegations = await list_delegations(
         session,
         delegator_principal_id=delegator_principal_id,

@@ -10,11 +10,11 @@ class InvalidTokenError(Exception):
 
 
 class TokenValidator:
-    """Zustandslose JWT-Prüfung gegen ein JWKS (4.4) - keine Rückfrage bei Keycloak
-    im laufenden Betrieb, nur eine gecachte JWKS-Aktualisierung.
+    """Stateless JWT validation against a JWKS (4.4) - no round trip to Keycloak
+    during normal operation, just a cached JWKS refresh.
 
-    Für Tests kann ``jwks`` statt ``jwks_url`` direkt übergeben werden, ohne einen
-    echten Keycloak zu benötigen.
+    For tests, ``jwks`` can be passed directly instead of ``jwks_url``, without
+    needing a real Keycloak instance.
     """
 
     def __init__(
@@ -78,14 +78,14 @@ class TokenValidator:
 
 
 class MultiIssuerTokenValidator:
-    """SSO/Auth-Entkopplung (Post-Roadmap-Feature, Phase 18) - delegiert an eine
-    von mehreren `TokenValidator`-Instanzen, ausgewählt über den `iss`-Claim
-    des jeweiligen Tokens. Grund: `auth-service` kann seit Phase 18 zusätzlich
-    zu Keycloak selbst Tokens für technische Konten (Superuser/Domain-Admins)
-    ausstellen (eigener Issuer, eigenes JWKS) - Downstream-Konsumenten
-    (`make_current_user_dependency`) sollen davon nichts wissen müssen, daher
-    dieselbe `.validate(token) -> dict`-Schnittstelle wie `TokenValidator`
-    selbst (reines Duck-Typing, kein gemeinsamer Basistyp nötig)."""
+    """SSO/auth decoupling (post-roadmap feature, phase 18) - delegates to one of
+    several `TokenValidator` instances, selected via the `iss` claim of the
+    respective token. Reason: since phase 18, `auth-service` can issue tokens
+    for technical accounts (superusers/domain admins) itself, in addition to
+    Keycloak (own issuer, own JWKS) - downstream consumers
+    (`make_current_user_dependency`) should not need to know about this, hence
+    the same `.validate(token) -> dict` interface as `TokenValidator`
+    itself (pure duck typing, no shared base type needed)."""
 
     def __init__(self, validators: list[TokenValidator]) -> None:
         if not validators:

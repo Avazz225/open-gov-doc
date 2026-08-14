@@ -2,8 +2,8 @@ import httpx
 
 
 class AuthServiceClient:
-    """Superuser-Status (4.6) - 1:1 Kopie des `license-service`/
-    `plugin-orchestration-service`-Musters."""
+    """Superuser status (4.6) - 1:1 copy of the `license-service`/
+    `plugin-orchestration-service` pattern."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -19,9 +19,9 @@ class AuthServiceClient:
 
 
 class PermissionServiceClient:
-    """Gate-Client fuer die domaenengetrennte Admin-Rolle
-    `domain-admin-monitoring` (`admin.monitoring`) - 1:1 Kopie des
-    `license-service`/`plugin-orchestration-service`-Musters."""
+    """Gate client for the domain-separated admin role
+    `domain-admin-monitoring` (`admin.monitoring`) - 1:1 copy of the
+    `license-service`/`plugin-orchestration-service` pattern."""
 
     ROOT_RESOURCE_ID = "root"
 
@@ -50,23 +50,23 @@ class RegistryInstance:
 
 
 class RegistryClient:
-    """Liest die aktuell aktiven, gesunden Instanzen aller Servicetypen bei
-    `registry-service` (`GET /instances`) - sowohl als Scrape-Zielliste
-    (`scraper.scrape_and_merge`) als auch als Quelle für den aggregierten
-    Sensor-Katalog (`repository.list_sensors`). Kein neuer Endpunkt in
-    `registry-service` nötig (P11-S1-Entscheidung: das bereits vorhandene
-    `sensors`-Feld auf `InstanceOut` reicht)."""
+    """Reads the currently active, healthy instances of all service types from
+    `registry-service` (`GET /instances`) - both as the scrape target list
+    (`scraper.scrape_and_merge`) and as the source for the aggregated
+    sensor catalog (`repository.list_sensors`). No new endpoint in
+    `registry-service` needed (P11-S1 decision: the already existing
+    `sensors` field on `InstanceOut` is sufficient)."""
 
     def __init__(self, base_url: str, *, client: httpx.AsyncClient | None = None) -> None:
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=10.0)
 
     async def list_active_instances(self) -> list[RegistryInstance]:
-        """Nur Instanzen mit mindestens einem deklarierten Sensor - die
-        meisten registrierten Services haben (noch) keinen `/metrics`-
-        Endpunkt (kein Vollretrofit, P11-S0-Befund); ein Scrape-Versuch
-        gegen sie wäre ein strukturell erwarteter 404, kein echter
-        Ausfall, und würde `monitoring_scrape_failures_total` mit
-        Falschmeldungen fluten."""
+        """Only instances with at least one declared sensor - most
+        registered services do not (yet) have a `/metrics`
+        endpoint (no full retrofit, P11-S0 finding); a scrape attempt
+        against them would be a structurally expected 404, not a real
+        failure, and would flood `monitoring_scrape_failures_total` with
+        false alarms."""
         response = await self._client.get("/instances")
         response.raise_for_status()
         return [

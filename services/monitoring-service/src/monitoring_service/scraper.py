@@ -11,13 +11,12 @@ from prometheus_client.samples import Sample
 
 
 def merge_metric_families(bodies: dict[str, str]) -> list[Metric]:
-    """Führt die roh gescrapten Exposition-Texte mehrerer Instanzen zu einer
-    Liste von Metrik-Familien zusammen - echtes Proxy/Federation-Muster statt
-    Text-Konkatenation: bloßes Aneinanderhängen würde bei gleichnamigen
-    Metriken über mehrere Instanzen hinweg die Gruppierungsregel des
-    Exposition-Formats verletzen (HELP/TYPE müssen zusammenhängend stehen).
-    Jede Sample bekommt stattdessen ein zusätzliches `instance`-Label zur
-    Disambiguierung."""
+    """Merges the raw scraped exposition texts of multiple instances into a
+    list of metric families - a real proxy/federation pattern instead of
+    text concatenation: mere concatenation would violate the exposition
+    format's grouping rule for same-named metrics across multiple
+    instances (HELP/TYPE must be contiguous). Each sample instead gets an
+    additional `instance` label for disambiguation."""
     merged: dict[str, Metric] = {}
     for instance_id, body in bodies.items():
         for family in text_string_to_metric_families(body):
@@ -40,11 +39,11 @@ async def scrape_targets(
     timeout_seconds: float,
     on_failure: Callable[[], None],
 ) -> dict[str, str]:
-    """Ruft `/metrics` aller übergebenen Instanzen parallel ab. Ein
-    fehlschlagendes Ziel blockiert die anderen nicht (`asyncio.gather` ohne
-    `return_exceptions`-Propagation nach außen) und erhöht `on_failure()`
-    (der immer-aktive `monitoring.scrape.failures_total`-Zähler, siehe
-    `main.py` - bewusst außerhalb des konfigurierbaren Sensor-Katalogs)."""
+    """Fetches `/metrics` of all given instances in parallel. A
+    failing target does not block the others (`asyncio.gather` without
+    propagating `return_exceptions` outward) and increments `on_failure()`
+    (the always-active `monitoring.scrape.failures_total` counter, see
+    `main.py` - deliberately outside the configurable sensor catalog)."""
 
     async def fetch(instance: RegistryInstance) -> tuple[str, str] | None:
         try:

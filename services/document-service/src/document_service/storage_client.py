@@ -9,21 +9,22 @@ def compute_checksum(data: bytes) -> str:
 
 
 class ObjectNotFoundError(Exception):
-    """Der Storage Service kennt den angefragten Object-Key nicht (mehr) -
-    z. B. weil die zugehörige Metadaten-Zeile verloren ging, während die
-    Bytes selbst evtl. noch auf der Platte liegen (Inkonsistenz außerhalb
-    der Kontrolle des Document Service)."""
+    """The Storage Service does not (no longer) know the requested
+    object key - e.g. because the associated metadata row was lost while
+    the bytes themselves may still be on disk (inconsistency outside the
+    control of the Document Service)."""
 
 
 class DeletionBlockedError(Exception):
-    """Der Storage Service lehnt die Löschung wegen einer aktiven
-    Governance-Mode-Sperre ab (5.1/5.2a, seit P7-S1)."""
+    """The Storage Service refuses deletion due to an active
+    governance-mode lock (5.1/5.2a, since P7-S1)."""
 
 
 class StorageClient:
-    """Dünner HTTP-Client gegen die Storage-Service-API (3.6). Document
-    Service hält nie selbst Dateiinhalte - reine Service-zu-Service-Kommunikation
-    über die öffentliche API, kein Zugriff auf Storage-Service-Interna."""
+    """Thin HTTP client for the Storage Service API (3.6). Document
+    Service never holds file content itself - pure service-to-service
+    communication via the public API, no access to Storage Service
+    internals."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -36,13 +37,13 @@ class StorageClient:
         *,
         retain_until: datetime | None = None,
     ) -> None:
-        """`retain_until` (5.1/5.2a, seit P7-S1) wird nur übergeben, wenn die
-        Aufbewahrungsfrist bereits beim Schreiben bekannt ist (z. B. aus
-        `ObjectType.default_retention_days`) - eine später über
-        `PUT /documents/{id}/retention` gesetzte/geänderte Frist wirkt sich
-        NICHT rückwirkend auf bereits gespeicherte Inhalte aus (kein
-        Nachrüst-Endpunkt in storage-service, siehe docs/services/
-        document-service.md "Offene Punkte")."""
+        """`retain_until` (5.1/5.2a, since P7-S1) is only passed when the
+        retention period is already known at write time (e.g. from
+        `ObjectType.default_retention_days`) - a retention period set/changed
+        later via `PUT /documents/{id}/retention` does NOT apply
+        retroactively to already stored content (no retrofit endpoint in
+        storage-service, see docs/services/document-service.md "Open
+        Points")."""
         headers = {"Content-Type": content_type} if content_type else {}
         params = {"retain_until": retain_until.isoformat()} if retain_until else None
         response = await self._client.put(
@@ -68,7 +69,7 @@ class StorageClient:
         if response.status_code == 403:
             raise DeletionBlockedError(response.json().get("detail", "Löschung blockiert"))
         if response.status_code == 404:
-            return  # bereits nicht (mehr) vorhanden - idempotent
+            return  # already (no longer) present - idempotent
         response.raise_for_status()
 
     async def close(self) -> None:

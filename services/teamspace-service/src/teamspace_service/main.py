@@ -94,9 +94,10 @@ async def publish_event(
 async def _require_member(
     session: AsyncSession, teamspace_id: str, principal_id: str
 ) -> TeamspaceMember:
-    """Das eigentliche, von der übrigen RBAC (4.1) unabhängige Zugriffsregime
-    dieses Service (2.5, P14-S6) - eine reine Mitgliedschaftsprüfung gegen die
-    eigene `teamspace_member`-Tabelle, kein Aufruf gegen `permission-service`."""
+    """The actual access regime of this service, independent of the rest
+    of the RBAC (4.1) (2.5, P14-S6) - a pure membership check against the
+    service's own `teamspace_member` table, no call to
+    `permission-service`."""
     if not principal_id:
         raise HTTPException(status_code=403, detail="X-DMS-Principal fehlt")
     member = await repository.get_member(session, teamspace_id, principal_id)
@@ -125,9 +126,9 @@ async def create_teamspace(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> TeamspaceOut:
-    """Jeder authentifizierte Principal darf einen neuen Teamspace anlegen
-    (Konzept 2.5: "ohne dass eine administrative Vorabeinrichtung nötig
-    ist") - bewusst kein Capability-Gate wie bei Prozess-/DMN-Definitionen."""
+    """Any authenticated principal may create a new teamspace (concept 2.5:
+    "without needing any administrative pre-setup") - deliberately no
+    capability gate as with process/DMN definitions."""
     if not x_dms_principal:
         raise HTTPException(status_code=403, detail="X-DMS-Principal fehlt")
     folder = await app.state.folder_client.create_folder(
@@ -166,11 +167,11 @@ async def list_teamspaces(
 async def list_all_teamspaces(
     x_dms_principal: str = Header(default=""), session: AsyncSession = Depends(get_session)
 ) -> list[TeamspaceAdminOut]:
-    """Installationsweite Übersicht (Post-Roadmap Phase 22 Session 5,
-    Admin-UI) - anders als `GET /teamspaces` NICHT nach Mitgliedschaft
-    gefiltert, daher eine echte `permission-service`-Rechteprüfung statt
-    der sonst in diesem Service üblichen `_require_member`/`_require_
-    manager`-Prüfung gegen die eigene `teamspace_member`-Tabelle."""
+    """Installation-wide overview (Post-Roadmap Phase 22 Session 5,
+    admin UI) - unlike `GET /teamspaces`, NOT filtered by membership,
+    hence a real `permission-service` permission check instead of the
+    `_require_member`/`_require_manager` check against the service's own
+    `teamspace_member` table otherwise used in this service."""
     if not x_dms_principal:
         raise HTTPException(status_code=403, detail="X-DMS-Principal fehlt")
     if not await app.state.permission_client.has_permission(
@@ -213,8 +214,8 @@ async def delete_teamspace(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Löscht nur die Teamspace-Metadaten, siehe
-    `repository.delete_teamspace` - der Wurzelordner bleibt bestehen."""
+    """Deletes only the teamspace metadata, see
+    `repository.delete_teamspace` - the root folder remains."""
     try:
         teamspace = await repository.get_teamspace(session, teamspace_id)
     except repository.NotFoundError as exc:
@@ -309,11 +310,11 @@ async def remove_member(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Die eigene Mitgliedschaft zu entfernen ("Teamspace verlassen") ist
-    jedem Mitglied erlaubt; das Entfernen ANDERER Mitglieder verlangt
-    `can_manage_members`. Bewusste Grenze: kein Schutz davor, dass sich das
-    letzte verwaltungsberechtigte Mitglied selbst entfernt und der Teamspace
-    dadurch unverwaltbar wird (siehe `docs/services/teamspace-service.md`)."""
+    """Removing one's own membership ("leaving a teamspace") is allowed
+    for every member; removing OTHER members requires
+    `can_manage_members`. Deliberate boundary: no protection against the
+    last member with management rights removing themselves, making the
+    teamspace unmanageable (see `docs/services/teamspace-service.md`)."""
     try:
         teamspace = await repository.get_teamspace(session, teamspace_id)
     except repository.NotFoundError as exc:
@@ -383,8 +384,8 @@ async def delete_appointment(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Jedes Mitglied darf jeden Termin löschen - bewusst vollständig
-    geteilt, kein Ersteller-exklusives Recht (siehe `models.py`)."""
+    """Every member may delete every appointment - deliberately fully
+    shared, no creator-exclusive right (see `models.py`)."""
     await _require_member(session, teamspace_id, x_dms_principal)
     try:
         await repository.delete_appointment(session, teamspace_id, appointment_id)

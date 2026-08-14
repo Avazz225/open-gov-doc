@@ -24,14 +24,14 @@ async def process_version(
     publish_event: PublishEvent,
     max_attempts: int,
 ) -> list[Rendition]:
-    """Wendet die Ersatzdarstellungs-Regeltabelle (2.4) auf eine Dokumentversion
-    an. Wird sowohl vom NATS-Consumer (`consumer.py`, automatischer Pfad nach
-    `document.created`/`document.version.created`) als auch direkt in Tests
-    aufgerufen. Ein fehlschlagender Renderer blockiert die übrigen nicht -
-    jede Regel wird unabhängig verarbeitet und einzeln als "failed" vermerkt,
-    damit z. B. ein korruptes .docx nicht auch die Thumbnail-Erzeugung eines
-    anderen Formats verhindern könnte (hier zwar dieselbe Datei, aber dasselbe
-    Prinzip gilt, sobald mehrere Regeln auf ein Format zutreffen)."""
+    """Applies the rendition rule table (2.4) to a document version. Called
+    both by the NATS consumer (`consumer.py`, automatic path after
+    `document.created`/`document.version.created`) and directly in tests. A
+    failing renderer does not block the others - each rule is processed
+    independently and individually marked as "failed", so that e.g. a
+    corrupt .docx cannot also prevent thumbnail generation of another format
+    (here it's admittedly the same file, but the same principle applies once
+    several rules apply to one format)."""
     try:
         metadata = await document_client.get_version(document_id, version_number)
 
@@ -41,12 +41,11 @@ async def process_version(
 
         data = await document_client.download_content(document_id, version_number)
     except DocumentNotFoundError:
-        # Permanenter Zustand (Version gelöscht, oder deren Inhalt im Storage
-        # Service nicht mehr auffindbar) - anders als ein transienter
-        # Netzwerk-/5xx-Fehler wird ein erneuter NATS-Redelivery-Versuch nie
-        # erfolgreich sein. Hier abbrechen und die Nachricht trotzdem acken
-        # (siehe consumer.py) statt eine Endlos-Redelivery-Schleife gegen den
-        # Document Service auszulösen.
+        # Permanent state (version deleted, or its content no longer findable
+        # in the Storage Service) - unlike a transient network/5xx error, a
+        # renewed NATS redelivery attempt will never succeed. Abort here and
+        # ack the message anyway (see consumer.py) instead of triggering an
+        # endless redelivery loop against the Document Service.
         logger.warning(
             "Dokument %r Version %s nicht (mehr) verfügbar - Rendering übersprungen",
             document_id,
@@ -77,7 +76,7 @@ async def process_version(
                     status="ready",
                     error_message=None,
                 )
-            except Exception as exc:  # Plugin-Fehler isolieren (fremde Bibliotheken/Formate)
+            except Exception as exc:  # isolate plugin errors (third-party libraries/formats)
                 logger.exception(
                     "Renderer %r fehlgeschlagen für %r Version %s",
                     renderer.rendition_type,
@@ -122,12 +121,12 @@ async def retry_rendition(
     publish_event: PublishEvent,
     max_attempts: int,
 ) -> Rendition | None:
-    """Wiederholt gezielt NUR den einen fehlgeschlagenen Renderer (Post-Roadmap
-    Phase 20 Session 4, ADR 0080) - anders als `process_version` (läuft alle
-    zutreffenden Regeln neu) wird hier über `get_renderer_by_type` genau der
-    betroffene Renderer nachgeschlagen, damit ein Wiederholungsversuch nicht
-    auch bereits erfolgreiche Renditions unnötig neu erzeugt. Aufgerufen vom
-    Retry-Poll-Loop UND vom manuellen `POST .../retry`-Endpunkt (main.py)."""
+    """Retries specifically ONLY the one failed renderer (post-roadmap
+    phase 20 session 4, ADR 0080) - unlike `process_version` (reruns all
+    applicable rules), here `get_renderer_by_type` looks up exactly the
+    affected renderer, so a retry does not unnecessarily regenerate already
+    successful renditions too. Called from the retry poll loop AND from the
+    manual `POST .../retry` endpoint (main.py)."""
     renderer = get_renderer_by_type(rendition_type)
     if renderer is None:
         logger.warning(
@@ -171,7 +170,7 @@ async def retry_rendition(
                 status="ready",
                 error_message=None,
             )
-        except Exception as exc:  # Plugin-Fehler isolieren, gleiches Muster wie process_version
+        except Exception as exc:  # isolate plugin errors, same pattern as process_version
             logger.exception(
                 "Renderer %r erneut fehlgeschlagen für %r Version %s",
                 renderer.rendition_type,
@@ -213,14 +212,13 @@ async def process_ocr_text(
     storage: StorageClient,
     publish_event: PublishEvent,
 ) -> Rendition | None:
-    """Nachzieheffekt (Konzept 3.9/2.4, P5-S2-Lücke): erzeugt eine
-    substitute_text-Rendition aus dem OCR-Volltext für Dokumente, die diese
-    Session mangels OCR nicht bedienen konnte (gescannte/bildbasierte
-    Dokumente) - als beabsichtigter Nebeneffekt auch für PDFs mit echtem
-    Textlayer, für die es bislang keine Textextraktion gab, nur die
-    PDF/A-Archivkopie. Wird vom OCR-Consumer-Zweig aufgerufen (consumer.py),
-    nachdem geprüft wurde, dass noch keine substitute_text-Rendition
-    existiert."""
+    """Follow-up effect (concept 3.9/2.4, P5-S2 gap): creates a
+    substitute_text rendition from the OCR full text for documents that this
+    session could not serve for lack of OCR (scanned/image-based documents) -
+    as an intended side effect also for PDFs with a real text layer, for
+    which no text extraction previously existed, only the PDF/A archive
+    copy. Called from the OCR consumer branch (consumer.py) after checking
+    that no substitute_text rendition exists yet."""
     if not full_text.strip():
         return None
     key = f"renditions/{document_id}/{version_number}/substitute_text"

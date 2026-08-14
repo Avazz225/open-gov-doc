@@ -27,10 +27,9 @@ class LogoutRequest(BaseModel):
 
 
 class OidcAuthorizeOut(BaseModel):
-    """SSO/automatischer Login (Post-Roadmap-Feature) - der Client navigiert
-    selbst zu dieser URL, kein serverseitiger 307-Redirect (konsistent mit
-    dem übrigen "Service liefert Daten, Client navigiert"-Stil dieses
-    Projekts)."""
+    """SSO/automatic login (post-roadmap feature) - the client navigates to
+    this URL itself, no server-side 307 redirect (consistent with this
+    project's overall "service returns data, client navigates" style)."""
 
     authorization_url: str
 
@@ -68,18 +67,18 @@ class UserOut(BaseModel):
 
 
 class UserLookupOut(BaseModel):
-    """Minimale Antwort für `GET /users/lookup` (2.5, P14-S6) - bewusst nur
-    `id`/`username`, siehe `admin_users.find_user_by_username`."""
+    """Minimal response for `GET /users/lookup` (2.5, P14-S6) - deliberately
+    only `id`/`username`, see `admin_users.find_user_by_username`."""
 
     id: str
     username: str
 
 
 class DirectoryEntryOut(BaseModel):
-    """Verzeichnis-Eintrag (2.5/4.4, P15-S4) - bewusst ohne `enabled`
-    (Freigabestatus eines Kontos ist eine administrative Angelegenheit,
-    keine für das reine Auffinden einer Person nötige Information), sonst
-    identisches Feldset wie `UserOut`."""
+    """Directory entry (2.5/4.4, P15-S4) - deliberately without `enabled`
+    (an account's enabled status is an administrative matter, not
+    information needed for merely finding a person), otherwise identical
+    field set to `UserOut`."""
 
     id: str
     username: str
@@ -89,18 +88,18 @@ class DirectoryEntryOut(BaseModel):
 
 
 class FederatedDirectoryEntryOut(DirectoryEntryOut):
-    """Wie `DirectoryEntryOut`, ergänzt um die Herkunftsinstallation (2.5,
-    "installationsübergreifende Kontaktsuche") - notwendig, da zwei
-    Installationen unabhängige Nutzerpopulationen mit potenziell
-    kollidierenden `id`s/Namen führen."""
+    """Like `DirectoryEntryOut`, extended with the originating installation
+    (2.5, "cross-installation contact directory search") - necessary since
+    two installations maintain independent user populations with
+    potentially colliding `id`s/names."""
 
     installation_id: str
     installation_display_name: str
 
 
 class DirectorySearchRequest(BaseModel):
-    """Payload einer eingehenden, signierten Verzeichnis-Suchanfrage einer
-    Peer-Installation (`POST /users/directory/federated-search-inbound`)."""
+    """Payload of an incoming, signed directory search request from a peer
+    installation (`POST /users/directory/federated-search-inbound`)."""
 
     query: str
 
@@ -119,17 +118,18 @@ class RealmRoleOut(BaseModel):
 
 
 class RealmRolesRequest(BaseModel):
-    """Konfigurationspakete (14.1, P17-S1) können neue Keycloak-Realm-Rollen
-    mitbringen (z. B. `dms-poststelle`, 2.5), für die es bislang keinen
-    Importweg gab - siehe `bootstrap._ensure_dms_admin_role` für dasselbe
-    Primitiv, hier auf beliebige, vom Paket vorgegebene Namen verallgemeinert."""
+    """Configuration packages (14.1, P17-S1) can bring new Keycloak realm
+    roles (e.g. `dms-poststelle`, 2.5), for which there was previously no
+    import path - see `bootstrap._ensure_dms_admin_role` for the same
+    primitive, generalized here to arbitrary names supplied by the
+    package."""
 
     names: list[str]
 
 
 class AdGroupRoleMappingIn(BaseModel):
-    """Payload für `POST /ad-group-mappings` (4.4, P24-S2) - bewusst nur
-    einfache 1:1-Zuordnung, siehe `models.AdGroupRoleMapping`-Docstring."""
+    """Payload for `POST /ad-group-mappings` (4.4, P24-S2) - deliberately
+    only simple 1:1 mapping, see `models.AdGroupRoleMapping` docstring."""
 
     ad_group_name: str
     role_name: str
@@ -146,6 +146,6 @@ class AdGroupRoleMappingOut(AdGroupRoleMappingIn):
 class SuperuserStatus(BaseModel):
     active: bool
     expires_at: str | None = None
-    # Seit P6-S6 (4.8): permission-service muss prüfen können, ob ein
-    # `POST /maintenance-mode/lift`-Aufrufer tatsächlich der aktive Superuser ist.
+    # Since P6-S6 (4.8): permission-service must be able to check whether a
+    # `POST /maintenance-mode/lift` caller is actually the active superuser.
     principal_id: str | None = None

@@ -33,10 +33,10 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
-# Drei Domain-Admin-Rollen, die die von diesem Service angesprochenen
-# Schreib-Endpunkte verlangen (workflow-service: admin.object_config,
-# monitoring-service: admin.monitoring, seit P17-S1 zusätzlich auth-service:
-# admin.user_management für die `realm_roles`-Kategorie, 14.1) - siehe
+# Three domain admin roles required by the write endpoints this service
+# calls (workflow-service: admin.object_config,
+# monitoring-service: admin.monitoring, since P17-S1 additionally auth-service:
+# admin.user_management for the `realm_roles` category, 14.1) - see
 # `_ensure_bootstrap_permissions`.
 _REQUIRED_ROLE_NAMES = ("domain-admin-config", "domain-admin-monitoring", "domain-admin-users")
 
@@ -51,11 +51,11 @@ def _resolve_categories(categories: list[str] | None) -> set[str]:
 
 
 async def _ensure_bootstrap_permissions() -> None:
-    """`config-service` braucht `admin.object_config` (Workflow-Uploads),
-    `admin.monitoring` (Sensor-Konfiguration) UND seit P17-S1
-    `admin.user_management` (`realm_roles`-Kategorie, 14.1), um Importe
-    tatsächlich anwenden zu können - idempotente Selbstzuweisung beim Start,
-    gleiches Bootstrap-Muster wie `migration-service`s
+    """`config-service` needs `admin.object_config` (workflow uploads),
+    `admin.monitoring` (sensor configuration) AND, since P17-S1,
+    `admin.user_management` (`realm_roles` category, 14.1), to actually be
+    able to apply imports - idempotent self-assignment at startup,
+    the same bootstrap pattern as `migration-service`'s
     `_ensure_config_admin_permission` (P12-S2)."""
     async with httpx.AsyncClient(
         base_url=settings.permission_service_base_url, timeout=10.0
@@ -87,13 +87,13 @@ async def _ensure_bootstrap_permissions() -> None:
 
 
 def _is_fleet_agent(authorization: str | None) -> bool:
-    """3a/P13-S2: derselbe installationsweite, optionale
-    `settings.fleet_agent_api_key` wie bei `license-service` erlaubt dem
-    unabhängig betriebenen `fleet-management-service` (kein Keycloak-Principal
-    in dieser Installation), zentral ein Konfigurationspaket zu provisionieren.
-    Seit P17-S1 ausschließlich von `_require_fleet_agent`/`POST /config/
-    fleet-import` geprüft - `_require_import_permission` (RBAC, `POST /config/
-    import`) hat keinen Fleet-Bypass mehr, siehe dortiger Docstring."""
+    """3a/P13-S2: the same installation-wide, optional
+    `settings.fleet_agent_api_key` as in `license-service` lets the
+    independently operated `fleet-management-service` (no Keycloak principal
+    in this installation) centrally provision a configuration package.
+    Since P17-S1 checked exclusively by `_require_fleet_agent`/`POST /config/
+    fleet-import` - `_require_import_permission` (RBAC, `POST /config/
+    import`) no longer has a fleet bypass, see its docstring."""
     return bool(settings.fleet_agent_api_key) and authorization == (
         f"Bearer {settings.fleet_agent_api_key}"
     )
@@ -120,12 +120,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
     await _ensure_bootstrap_permissions()
 
-    # Seit P17-S3 (4.3/14.2): reiner Konsument, kein eigener Stream
-    # (`ensure_stream=False`) - config-service hat nichts Eigenes zu
-    # publizieren, es reagiert nur auf permission-services bereits
-    # bestehendes `permission.approval.approved`-Event, um einen per
-    # Vier-Augen-Prinzip zurückgestellten `config.import` nach Genehmigung
-    # anzuwenden (siehe consumer.py).
+    # Since P17-S3 (4.3/14.2): pure consumer, no stream of its own
+    # (`ensure_stream=False`) - config-service has nothing of its own to
+    # publish, it only reacts to permission-service's already
+    # existing `permission.approval.approved` event, to apply a
+    # `config.import` deferred via the four-eyes principle after approval
+    # (see consumer.py).
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
     app.state.consumer_bus = consumer_bus
@@ -176,12 +176,12 @@ async def export_config(categories: list[str] | None = Query(default=None)) -> C
 
 @app.post("/config/compare", response_model=CompareResult)
 async def compare_config(payload: CompareRequest) -> CompareResult:
-    """Delta-/Vergleichsfunktion (7.5, P14-S1) - rein lesend/diagnostisch,
-    ungegated wie `GET /config/export` (verändert nichts, deckt keine
-    installationsspezifischen Daten wie Lizenzstand/Registry-Erreichbarkeit
-    auf, die ohnehin kein Teil von `ConfigDocument` sind). Fehlt `base`, wird
-    der eigene aktuelle Live-Export als Basisinstanz verwendet - Anwendungsfall
-    "was würde sich ändern, wenn ich `compare` importiere"."""
+    """Delta/comparison function (7.5, P14-S1) - purely read-only/diagnostic,
+    ungated like `GET /config/export` (does not change anything, does not expose
+    any installation-specific data such as license state/registry reachability,
+    which is not part of `ConfigDocument` anyway). If `base` is missing,
+    its own current live export is used as the base instance - use case
+    "what would change if I import `compare`"."""
     resolved = _resolve_categories(payload.categories)
     if payload.ignore_regex:
         for pattern in payload.ignore_regex.values():
@@ -213,15 +213,15 @@ async def compare_config(payload: CompareRequest) -> CompareResult:
 
 
 async def _apply_config_document(payload: dict, categories: list[str] | None) -> ImportResult:
-    """`payload` wird bewusst als rohes `dict` entgegengenommen (nicht direkt
-    als `ConfigDocument`), damit `migrations.upgrade_to_current()` zuerst auf
-    dem rohen Dict ansetzen kann, bevor die aktuelle Schema-Version validiert
-    wird. Gemeinsame Anwendungslogik für `POST /config/import` (RBAC),
-    `POST /config/fleet-import` (Fleet-Agent-Schlüssel, P17-S1) und - seit
-    P17-S3 - `consumer.py`s Nachvollzug eines per Vier-Augen-Prinzip
-    genehmigten `config.import` (4.3/14.2) - alle drei Zugriffswege wenden
-    dasselbe Dokument identisch an, nur die Authentisierung/der Auslöser
-    unterscheidet sich."""
+    """`payload` is deliberately accepted as a raw `dict` (not directly
+    as `ConfigDocument`), so that `migrations.upgrade_to_current()` can operate
+    on the raw dict first, before the current schema version is validated.
+    Shared application logic for `POST /config/import` (RBAC),
+    `POST /config/fleet-import` (fleet agent key, P17-S1) and - since
+    P17-S3 - `consumer.py`'s replay of a `config.import` approved via the
+    four-eyes principle (4.3/14.2) - all three access paths apply
+    the same document identically, only the authentication/trigger
+    differs."""
     resolved = _resolve_categories(categories)
     try:
         upgraded = migrations.upgrade_to_current(payload)
@@ -246,26 +246,26 @@ async def import_config(
     categories: list[str] | None = Query(default=None),
     x_dms_principal: str = Header(default=""),
 ) -> ImportActionResult:
-    """Gegated hinter `admin.object_config` (dieselbe Domain-Admin-Capability
-    wie workflow-service's Prozessdefinition-Upload) - ein voller
-    Konfigurationsimport ist eine Erweiterung derselben Verantwortung, siehe
-    `settings.py`. Seit P17-S1 KEIN öffentlicher Gateway-Pfad mehr (siehe
-    `gateway_service.settings.public_routes`) - der Gateway validiert hier
-    also einen echten Keycloak-Bearer-Token und setzt `X-DMS-Principal`
-    korrekt (vorher, als dieser Pfad noch öffentlich war, blieb der Header für
-    JEDEN Aufruf leer, auch für echte eingeloggte Admins - der RBAC-Zweig war
-    faktisch unerreichbar, siehe ADR zu P17-S1). Der Fleet-Agent-Zugriffsweg
-    lebt seitdem getrennt unter `POST /config/fleet-import` (reines RBAC hier,
-    kein Fleet-Bypass mehr).
+    """Gated behind `admin.object_config` (the same domain admin capability
+    as workflow-service's process definition upload) - a full
+    configuration import is an extension of the same responsibility, see
+    `settings.py`. Since P17-S1 NO LONGER a public gateway path (see
+    `gateway_service.settings.public_routes`) - the gateway therefore validates
+    a real Keycloak bearer token here and sets `X-DMS-Principal`
+    correctly (previously, when this path was still public, the header stayed
+    empty for EVERY call, even for genuinely logged-in admins - the RBAC branch was
+    effectively unreachable, see the ADR for P17-S1). The fleet agent access path
+    has since lived separately under `POST /config/fleet-import` (pure RBAC here,
+    no more fleet bypass).
 
-    Seit P17-S3 zusätzlich optional per generischem Vier-Augen-Mechanismus
-    gegated (4.3, `config.import`) - 14.2 nennt "Konfigurationsimport"
-    wörtlich als sensiblen Aktionstyp für die Vier-Augen-Vorbelegung des
-    eGov-Pakets. Per Default (keine Konfiguration) bleibt das Verhalten
-    unverändert: sofortige Anwendung. `POST /config/fleet-import` bleibt
-    bewusst ungegated - der automatisierte, kopflose Provisionierungspfad des
-    Fleet-Agents hat kein Mensch-im-Loop, der einen später ausstehenden
-    Freigabe-Request sinnvoll bestätigen könnte (ADR 0037)."""
+    Since P17-S3 additionally optionally gated via the generic four-eyes
+    mechanism (4.3, `config.import`) - 14.2 explicitly names "configuration
+    import" as a sensitive action type for the four-eyes default
+    preset of the eGov package. By default (no configuration), the behavior
+    remains unchanged: immediate application. `POST /config/fleet-import` remains
+    deliberately ungated - the automated, headless provisioning path of the
+    fleet agent has no human in the loop who could meaningfully confirm a
+    later pending approval request (ADR 0037)."""
     await _require_import_permission(x_dms_principal)
     if await app.state.approval_client.requires_approval("config.import"):
         request = await app.state.approval_client.create_request(
@@ -293,14 +293,14 @@ async def fleet_import_config(
     categories: list[str] | None = Query(default=None),
     authorization: str | None = Header(default=None),
 ) -> ImportResult:
-    """Dedizierter Pfad für den installationsunabhängigen
-    `fleet-management-service` (3a/P13-S2, ADR 0037) - dieser Pfad bleibt am
-    Gateway öffentlich (`gateway-service.settings.public_routes`, kein
-    Keycloak-Principal in dieser Installation), authentisiert stattdessen
-    ausschließlich über `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>`.
-    Seit P17-S1 von `POST /config/import` getrennt - vorher teilten sich
-    beide Zugriffswege denselben öffentlichen Pfad, wodurch der Gateway für
-    JEDEN Aufruf keinen Bearer-Token validierte und admin-ui-Aufrufer nie
-    autorisiert werden konnten."""
+    """Dedicated path for the installation-independent
+    `fleet-management-service` (3a/P13-S2, ADR 0037) - this path remains
+    public at the gateway (`gateway-service.settings.public_routes`, no
+    Keycloak principal in this installation), authenticating instead
+    exclusively via `Authorization: Bearer <DMS_FLEET_AGENT_API_KEY>`.
+    Separated from `POST /config/import` since P17-S1 - previously
+    both access paths shared the same public path, so the gateway
+    validated no bearer token for ANY call, and admin-ui callers could
+    never be authorized."""
     await _require_fleet_agent(authorization)
     return await _apply_config_document(payload, categories)

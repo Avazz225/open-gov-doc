@@ -4,10 +4,10 @@ from auth_service.settings import Settings
 
 
 def _declare_profile_attribute(admin: KeycloakAdmin, *, name: str, display_name: str) -> None:
-    """Gemeinsamer Deklarations-Helfer (P6-S5, extrahiert aus der vorherigen
-    Theme-spezifischen Funktion) - Keycloaks Declarative User Profile (seit
-    Keycloak 25 Default) verwirft jedes nicht deklarierte Attribut bei
-    `update_user` still, kein Fehler, einfach kein Effekt."""
+    """Shared declaration helper (P6-S5, extracted from the previous
+    theme-specific function) - Keycloak's Declarative User Profile (the
+    default since Keycloak 25) silently drops any undeclared attribute on
+    `update_user`, no error, simply no effect."""
     profile = admin.get_realm_users_profile()
     if any(attribute["name"] == name for attribute in profile["attributes"]):
         return
@@ -23,34 +23,34 @@ def _declare_profile_attribute(admin: KeycloakAdmin, *, name: str, display_name:
 
 
 def _ensure_theme_attribute(admin: KeycloakAdmin) -> None:
-    """Theme-Präferenz (8, P4-S6). Ohne diese Deklaration würde
-    `admin_users.set_theme_preference` klaglos ins Leere laufen."""
+    """Theme preference (8, P4-S6). Without this declaration,
+    `admin_users.set_theme_preference` would silently have no effect."""
     _declare_profile_attribute(admin, name="dms_theme", display_name="DMS Theme-Präferenz")
 
 
 def _ensure_dms_admin_role(admin: KeycloakAdmin) -> None:
-    """Realm-Rolle für die erste echte Rollenprüfung im gesamten System
-    (P5e-S2, privilegierte Kennzeichen-Änderung im Document Service) - idempotent
-    angelegt wie das Theme-Attribut oben, `skip_exists=True` macht Wiederholung
-    ungefährlich. Zuweisung an konkrete Nutzer erfolgt (vorerst) außerhalb dieses
-    Service über die Keycloak Admin Console - eine eigene Rollenverwaltungs-API/
-    -UI existiert noch nicht, siehe PROGRESS.md."""
+    """Realm role for the first real role check in the entire system
+    (P5e-S2, privileged reference number change in the Document Service) -
+    created idempotently like the theme attribute above, `skip_exists=True`
+    makes repetition harmless. Assignment to concrete users happens (for now)
+    outside this service via the Keycloak Admin Console - a dedicated role
+    management API/UI does not exist yet, see PROGRESS.md."""
     admin.create_realm_role(payload={"name": "dms-admin"}, skip_exists=True)
 
 
 DOMAIN_ADMIN_USERS_USERNAME = "users-admin"
 DOMAIN_ADMIN_CONFIG_USERNAME = "config-admin"
 
-# Technische Konten je Domäne, für die diese Session bereits eine echte
-# Durchsetzung verdrahtet (`(username, systemeigene Permission-Service-Rolle)`)
-# - `users-admin`/"Nutzer-/Rechteverwaltung" seit P6-S5, `config-admin`/
-# "Objekttyp-/Workflow-Konfiguration" seit P6-S6 (Workflow-Definitionen/
-# Script-Task-Upload). Die übrigen 5 in
-# `permission_service.repository.DOMAIN_ADMIN_ROLES` geseedeten Domänen
-# bekommen bewusst noch kein Konto (siehe dortige Begründung). Seit P18-S3
-# leben diese Konten als `TechnicalAccount` in der eigenen DB statt in
-# Keycloak (siehe `domain_admins.py`) - daher kein Nachname-Feld mehr, das war
-# reine Keycloak-Profil-Pflicht.
+# Technical accounts per domain for which this session already wires up
+# real enforcement (`(username, native permission-service role)`) -
+# `users-admin`/"user/permission management" since P6-S5, `config-admin`/
+# "object type/workflow configuration" since P6-S6 (workflow definitions/
+# script task upload). The remaining 5 domains seeded in
+# `permission_service.repository.DOMAIN_ADMIN_ROLES` deliberately don't get
+# an account yet (see the rationale there). Since P18-S3 these accounts
+# live as `TechnicalAccount` in this service's own DB instead of in
+# Keycloak (see `domain_admins.py`) - hence no last-name field anymore,
+# that was a pure Keycloak profile requirement.
 DOMAIN_ADMIN_ACCOUNTS: list[tuple[str, str]] = [
     (DOMAIN_ADMIN_USERS_USERNAME, "domain-admin-users"),
     (DOMAIN_ADMIN_CONFIG_USERNAME, "domain-admin-config"),
@@ -62,13 +62,13 @@ _KERBEROS_COMPONENT_NAME = "dms-kerberos"
 
 
 def _ensure_client_updated(admin: KeycloakAdmin, settings: Settings) -> None:
-    """SSO/automatischer Login (Post-Roadmap-Feature) - behebt die oben
-    dokumentierte `skip_exists`-Lücke für die SSO-relevanten Client-Felder:
-    läuft bei JEDEM Start (nicht nur bei Ersteinrichtung), aktiviert den
-    Authorization-Code-Flow (`standardFlowEnabled`) und registriert die
-    Redirect-URIs der erlaubten Frontends. Läuft UNABHÄNGIG von Kerberos -
-    das ist genau der Teil, der den Redirect-zu-Keycloaks-eigenem-Formular-
-    Fallback ermöglicht, auch ohne Kerberos konfiguriert."""
+    """SSO/automatic login (post-roadmap feature) - fixes the `skip_exists`
+    gap documented above for the SSO-relevant client fields: runs on EVERY
+    startup (not just initial setup), enables the authorization code flow
+    (`standardFlowEnabled`) and registers the redirect URIs of the allowed
+    frontends. Runs INDEPENDENTLY of Kerberos - this is exactly the part
+    that enables the redirect-to-Keycloak's-own-form fallback, even without
+    Kerberos configured."""
     client_uuid = admin.get_client_id(settings.keycloak_client_id)
     if client_uuid is None:
         return
@@ -81,21 +81,22 @@ def _ensure_client_updated(admin: KeycloakAdmin, settings: Settings) -> None:
 
 
 def _ensure_groups_mapper(admin: KeycloakAdmin, settings: Settings) -> None:
-    """AD-Gruppe -> interne Rolle-Mapping (4.4, P24-S2): Keycloak trägt
-    Gruppenmitgliedschaften NICHT automatisch in den Access-Token ein
-    (anders als Rollen über `realm_access.roles`) - dafür braucht der Client
-    einen expliziten `oidc-group-membership-mapper`. Ohne diesen Claim wäre
-    `ad_group_mapping.resolve_roles_for_groups` (siehe `main.py`s `/me`)
-    immer wirkungslos, da `user.get("groups")` stets leer bliebe.
+    """AD group -> internal role mapping (4.4, P24-S2): Keycloak does NOT
+    automatically include group memberships in the access token (unlike
+    roles via `realm_access.roles`) - the client needs an explicit
+    `oidc-group-membership-mapper` for that. Without this claim,
+    `ad_group_mapping.resolve_roles_for_groups` (see `main.py`'s `/me`)
+    would always be a no-op, since `user.get("groups")` would always stay
+    empty.
 
-    Läuft wie `_ensure_client_updated` bei JEDEM Start (nicht nur bei
-    Ersteinrichtung) - `create_client(..., skip_exists=True)` oben würde
-    einen bereits bestehenden Client (jede Installation vor dieser Session)
-    sonst nie um diesen Mapper ergänzen, siehe `ensure_realm_and_client`s
-    "Bekannte Grenze"-Docstring. `full.path=false` liefert nur den blanken
-    Gruppennamen (z. B. `sales`), keinen Keycloak-internen Pfad
-    (`/sales`) - passend zur bewusst einfachen 1:1-Namensabbildung dieser
-    Session (kein hierarchisches Gruppen-Matching)."""
+    Runs like `_ensure_client_updated` on EVERY startup (not just initial
+    setup) - `create_client(..., skip_exists=True)` above would otherwise
+    never add this mapper to an already-existing client (any installation
+    predating this session), see `ensure_realm_and_client`'s "known
+    limitation" docstring. `full.path=false` yields only the bare group
+    name (e.g. `sales`), not a Keycloak-internal path (`/sales`) -
+    consistent with this session's deliberately simple 1:1 name mapping
+    (no hierarchical group matching)."""
     client_uuid = admin.get_client_id(settings.keycloak_client_id)
     if client_uuid is None:
         return
@@ -121,17 +122,17 @@ def _ensure_groups_mapper(admin: KeycloakAdmin, settings: Settings) -> None:
 
 
 def _ensure_kerberos(admin: KeycloakAdmin, settings: Settings) -> None:
-    """Kerberos/SPNEGO-Realmkonfiguration (Post-Roadmap-Feature, SSO) - läuft
-    NUR, wenn alle drei Kerberos-Einstellungen gesetzt sind (fehlt eine,
-    bleibt SSO auf den reinen OIDC-Redirect-zu-Keycloaks-Formular-Fallback
-    beschränkt, siehe `_ensure_client_updated` - keine KDC/Keytab-Pflicht für
-    eine frische/sandbox-artige Installation). Keycloaks eingebauter
-    `browser`-Flow bringt eine `auth-spnego`-Ausführung bereits mit (nur
-    standardmäßig deaktiviert) - `copy_authentication_flow` dupliziert den
-    kompletten Flow inkl. dieser deaktivierten Ausführung (identisch zu
-    Keycloak-Admin-Console-"Duplizieren"), hier wird sie nur aktiviert statt
-    neu angelegt (`create_authentication_flow_execution` hätte sonst eine
-    zweite, doppelte Kerberos-Stufe erzeugt)."""
+    """Kerberos/SPNEGO realm configuration (post-roadmap feature, SSO) - runs
+    ONLY if all three Kerberos settings are set (if one is missing, SSO
+    stays limited to the plain OIDC redirect-to-Keycloak's-form fallback,
+    see `_ensure_client_updated` - no KDC/keytab requirement for a
+    fresh/sandbox-like installation). Keycloak's built-in `browser` flow
+    already ships with an `auth-spnego` execution (just disabled by
+    default) - `copy_authentication_flow` duplicates the entire flow
+    including this disabled execution (identical to the Keycloak Admin
+    Console's "Duplicate"), here it is merely enabled instead of newly
+    created (`create_authentication_flow_execution` would otherwise have
+    produced a second, duplicate Kerberos stage)."""
     if not (
         settings.kerberos_enabled
         and settings.kerberos_realm
@@ -154,10 +155,10 @@ def _ensure_kerberos(admin: KeycloakAdmin, settings: Settings) -> None:
 
     admin.update_realm(settings.keycloak_realm, payload={"browserFlow": _KERBEROS_FLOW_ALIAS})
 
-    # Keycloaks `RealmRepresentation.id` ist (anders als bei Clients, die
-    # eine separate interne UUID haben) für den Realm selbst identisch zum
-    # Realm-Namen - `parentId` eines Realm-weiten Components ist deshalb
-    # direkt `settings.keycloak_realm`, keine zusätzliche Auflösung nötig.
+    # Keycloak's `RealmRepresentation.id` is (unlike for clients, which have
+    # a separate internal UUID) identical to the realm name for the realm
+    # itself - `parentId` of a realm-wide component is therefore directly
+    # `settings.keycloak_realm`, no additional resolution needed.
     existing_components = admin.get_components(
         query={
             "parent": settings.keycloak_realm,
@@ -171,9 +172,9 @@ def _ensure_kerberos(admin: KeycloakAdmin, settings: Settings) -> None:
                 "providerId": "kerberos",
                 "providerType": "org.keycloak.storage.UserStorageProvider",
                 "parentId": settings.keycloak_realm,
-                # Keycloaks Component-Config ist `Map<String, List<String>>` -
-                # jeder Wert MUSS eine Einzelelement-Liste sein, kein nackter
-                # String.
+                # Keycloak's component config is `Map<String, List<String>>` -
+                # every value MUST be a single-element list, not a bare
+                # string.
                 "config": {
                     "kerberosRealm": [settings.kerberos_realm],
                     "serverPrincipal": [settings.kerberos_server_principal],
@@ -190,15 +191,15 @@ def _ensure_kerberos(admin: KeycloakAdmin, settings: Settings) -> None:
 
 
 def ensure_realm_and_client(settings: Settings) -> None:
-    """Idempotente Ersteinrichtung (analog zum `CREATE SCHEMA IF NOT EXISTS`-Muster
-    der übrigen Services): legt Realm und OIDC-Client an, falls sie noch nicht
-    existieren. Läuft bei jedem Start - ``skip_exists=True`` macht Wiederholung
-    ungefährlich.
+    """Idempotent initial setup (analogous to the `CREATE SCHEMA IF NOT EXISTS`
+    pattern of the other services): creates the realm and OIDC client if they
+    don't already exist. Runs on every startup - ``skip_exists=True`` makes
+    repetition harmless.
 
-    Bekannte Grenze: Wird der Client-Payload (z. B. der Audience-Mapper unten)
-    später geändert, zieht ein bereits bestehender Client das nicht automatisch
-    nach - `skip_exists` überspringt die Erstellung komplett. Für die
-    Dev-/Testumgebung unkritisch (Realm wird bei Bedarf manuell neu angelegt).
+    Known limitation: if the client payload (e.g. the audience mapper below)
+    is changed later, an already-existing client does not pick that up
+    automatically - `skip_exists` skips creation entirely. Not critical for
+    the dev/test environment (the realm is manually recreated when needed).
     """
     admin = KeycloakAdmin(
         server_url=settings.keycloak_base_url,
@@ -220,9 +221,9 @@ def ensure_realm_and_client(settings: Settings) -> None:
             "standardFlowEnabled": False,
             "serviceAccountsEnabled": False,
             "enabled": True,
-            # Ohne Audience-Mapper trägt der Access-Token nur "account" als aud
-            # (Keycloak-Default) - TokenValidator prüft aber gezielt gegen den
-            # eigenen Client-Namen (4.4).
+            # Without an audience mapper, the access token only carries
+            # "account" as aud (Keycloak default) - but TokenValidator checks
+            # specifically against this service's own client name (4.4).
             "protocolMappers": [
                 {
                     "name": "audience-mapper",

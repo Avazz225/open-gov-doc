@@ -8,20 +8,20 @@ Base = make_declarative_base("notification")
 
 
 class Notification(Base):
-    """Ein Zustellversuch (Konzept 7.1, P6-S2). `recipient` ist je nach `channel`
-    heterogen (E-Mail-Adresse / Nutzerkennung-oder-Lane-Name / Webhook-URL) -
-    bewusst ein einziges generisches Feld statt dreier kanalspezifischer Spalten, um das
-    Modell für dieses Grundgerüst einfach zu halten. Der erste Versuch passiert
-    synchron beim Anlegen (`repository.create_and_send`) - seit Post-Roadmap Phase 20
-    Session 3 (ADR 0079) sind fehlgeschlagene `email`/`webhook`-Zustellungen nicht mehr
-    sofort terminal: `status` bleibt `"failed"` (retry-fähig) mit steigendem `attempts`
-    und einem per Full-Jitter-Backoff gesetzten `next_retry_at`, den ein neuer,
-    eigenständiger Poll-Loop abarbeitet (Zustellung selbst bleibt synchron/inline im
-    NATS-Handler bzw. im `POST /notifications`-Endpunkt - nur die WIEDERHOLUNG läuft
-    asynchron, um den Handler nicht zu blockieren). Erst nach `max_notification_
-    attempts` erfolglosen Versuchen wechselt `status` auf das echte Terminalstatus
-    `failed_permanent`. `in_app` hat keinen echten Zustellschritt und ist daher nie
-    retry-fähig - immer sofort `"sent"`."""
+    """A single delivery attempt (Concept 7.1, P6-S2). `recipient` is heterogeneous
+    depending on `channel` (email address / username-or-lane-name / webhook URL) -
+    deliberately a single generic field instead of three channel-specific columns, to
+    keep the model simple for this baseline. The first attempt happens synchronously
+    on creation (`repository.create_and_send`) - since Post-Roadmap Phase 20 Session
+    3 (ADR 0079), failed `email`/`webhook` deliveries are no longer immediately
+    terminal: `status` stays `"failed"` (retry-capable) with an increasing `attempts`
+    and a `next_retry_at` set via full-jitter backoff, which a new, independent poll
+    loop works through (delivery itself remains synchronous/inline in the NATS
+    handler or the `POST /notifications` endpoint - only the RETRY runs
+    asynchronously, so as not to block the handler). Only after
+    `max_notification_attempts` unsuccessful attempts does `status` switch to the
+    real terminal status `failed_permanent`. `in_app` has no real delivery step and
+    is therefore never retry-capable - always immediately `"sent"`."""
 
     __tablename__ = "notification"
 

@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from registry_service import repository
 
-# registry-service ist einer der zwei Sensor-Piloten (10.1, P11-S1, siehe
-# P11-S0-Befund: kein Vollretrofit aller Services). Beide Sensor-Namen sind
-# bewusst wörtlich aus Konzept 10.1s eigener Beispielliste übernommen, wo
-# vorhanden ("registry.service.heartbeat.miss").
+# registry-service is one of the two sensor pilots (10.1, P11-S1, see
+# P11-S0 finding: no full retrofit of all services). Both sensor names are
+# deliberately taken verbatim from concept 10.1's own example list, where
+# available ("registry.service.heartbeat.miss").
 ACTIVE_INSTANCES = SensorSpec(
     name="registry.instances.active_total",
     group="capacity",

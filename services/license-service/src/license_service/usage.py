@@ -1,8 +1,8 @@
-"""Nutzungspruefung (9.2: "prueft laufend ... aktuelle Nutzung gegen
-Limits") - vereint die vier Konzept-9.1-Dimensionen (Nutzeranzahl,
-Applikationskomponenten, Speichervolumen, Dokumentenzahl) zu einem
-Snapshot. Jede Dimension ist `None`-limitierbar ("unlimited", Konzept 9.1
-woertlich) - `None` bedeutet dann nie ueberschritten."""
+"""Usage check (9.2: "continuously checks ... current usage against
+limits") - combines the four concept-9.1 dimensions (user count,
+application components, storage volume, document count) into a single
+snapshot. Each dimension is limitable via `None` ("unlimited", concept 9.1
+verbatim) - `None` then means never exceeded."""
 
 from __future__ import annotations
 
@@ -50,14 +50,14 @@ async def compute_usage(
     auth_client,
     local_installation_id: str | None = None,
 ) -> UsageSnapshot:
-    """``local_installation_id`` bindet die Prüfung an die Installations-ID
-    (3a, P13-S1): ``claims["installation_id"]`` ist ein optionales Claim -
-    fehlt es (ältere/Test-Lizenzdateien vor dieser Erweiterung), wird nichts
-    geprüft (rückwärtskompatibler Übergang, keine Migration bestehender
-    Lizenzdateien nötig). Ist es gesetzt, muss es exakt der eigenen,
-    lokal konfigurierten ``installation_id`` entsprechen - sonst wurde diese
-    Lizenzdatei für eine andere Installation ausgestellt und ist hier
-    ungültig, selbst bei gültiger Signatur/Gültigkeitsdauer."""
+    """``local_installation_id`` binds the check to the installation ID
+    (3a, P13-S1): ``claims["installation_id"]`` is an optional claim - if
+    it is missing (older/test license files predating this extension),
+    nothing is checked (backward-compatible transition, no migration of
+    existing license files needed). If it is set, it must exactly match
+    the local, locally-configured ``installation_id`` - otherwise this
+    license file was issued for a different installation and is invalid
+    here, even with a valid signature/validity period."""
     now = datetime.now(UTC)
     issued_at = _to_datetime(claims.get("iat"))
     expires_at = _to_datetime(claims.get("exp"))

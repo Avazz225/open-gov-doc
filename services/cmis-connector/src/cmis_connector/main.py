@@ -1,11 +1,11 @@
-"""CMIS 1.1 Browser Binding (Kapitel 5 der OASIS-CMIS-1.1-Spezifikation) -
-von Hand implementiert, da keine gepflegte Python-CMIS-*Server*-Bibliothek
-existiert (siehe ADR 0036). Reicht bewusst nur einen Teilumfang ab (~14
-Endpunkte: repositoryInfo/children/object/content lesend, createDocument/
+"""CMIS 1.1 Browser Binding (chapter 5 of the OASIS CMIS 1.1 specification) -
+implemented by hand, since no maintained Python CMIS *server* library
+exists (see ADR 0036). Deliberately covers only a partial scope (~14
+endpoints: repositoryInfo/children/object/content for reading, createDocument/
 createFolder/update/move/delete/deleteTree/setContent/checkOut/
-cancelCheckOut/checkIn schreibend) - vergleichbar im Umfang mit dem
-WebDAV-Kernmethodenset aus P12-S1, aber ohne eine `wsgidav`-Entsprechung zum
-Anlehnen. Details/Scope-Begründung siehe docs/services/cmis-connector.md."""
+cancelCheckOut/checkIn for writing) - comparable in scope to the
+WebDAV core method set from P12-S1, but without a `wsgidav` equivalent to
+lean on. See docs/services/cmis-connector.md for details/scope rationale."""
 
 import asyncio
 import logging
@@ -39,8 +39,8 @@ _DESCRIPTOR = ConnectorDescriptor(
     capabilities=frozenset({"read", "write", "metadata", "locking", "versioning"}),
 )
 
-# Bewusst auf Modulebene konstruiert (gleiches Muster wie webdav_connector.main,
-# P12-S1): alle drei Clients sind synchron, kein async-Connect-Schritt nötig.
+# Deliberately constructed at module level (same pattern as webdav_connector.main,
+# P12-S1): all three clients are synchronous, no async connect step needed.
 _tree = DmsTreeClient(
     document_service_base_url=settings.document_service_base_url,
     folder_service_base_url=settings.folder_service_base_url,
@@ -55,9 +55,9 @@ _auth_client = BasicAuthClient(settings.auth_service_base_url)
 
 
 def _check_license(action: str) -> None:
-    """Demo-Modus/Sperrverhalten (9.3, P9-S2-Muster) - Connectoren sind laut
-    3.3 wörtlich als lizenzierbare Komponente genannt, identisches Verhalten
-    wie `webdav_connector.dav_provider.DmsDavProvider.check_license`."""
+    """Demo mode/lockout behavior (9.3, P9-S2 pattern) - connectors are
+    explicitly named as a licensable component per 3.3, identical behavior
+    to `webdav_connector.dav_provider.DmsDavProvider.check_license`."""
     status_ = _license_client.get_status()
     if status_ == "unlicensed":
         raise CmisError(
@@ -136,7 +136,7 @@ def _object_envelope_for(resolved: ResolvedObject) -> dict:
     return _document_envelope(resolved.document)
 
 
-# --- Lesen (GET, cmisselector) -----------------------------------------
+# --- Reading (GET, cmisselector) -----------------------------------------
 
 
 def _default_selector(resolved: ResolvedObject) -> str:
@@ -174,7 +174,7 @@ def _handle_read(repository_id: str, path: str, cmisselector: str | None, object
     raise CmisError("notSupported", f"cmisselector {selector!r} wird nicht unterstützt")
 
 
-# --- Schreiben (POST, cmisaction) ---------------------------------------
+# --- Writing (POST, cmisaction) ---------------------------------------
 
 
 def _extract_property(form, name: str) -> str | None:
@@ -227,9 +227,9 @@ def _do_create_folder(target: ResolvedObject, form, actor: str) -> tuple[dict, i
 
 
 def _do_update(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
-    # Diese Referenzimplementierung bildet ausschliesslich `cmis:name` auf
-    # ein DMS-Attribut ab (Umbenennen) - eigene Objekttyp-Attribute werden
-    # nicht als CMIS-Properties exponiert, siehe "Bewusste Grenzen".
+    # This reference implementation maps exclusively `cmis:name` onto
+    # a DMS attribute (renaming) - custom object type attributes are
+    # not exposed as CMIS properties, see "Deliberate Limitations".
     name = _extract_property(form, "cmis:name")
     if name is None:
         return _object_envelope_for(target), 200
@@ -256,11 +256,11 @@ def _do_move(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
 
 def _do_delete(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
     if target.kind == "folder":
-        # `folder-service`s Hard-Delete prüft nur eigene Unterordner, nicht
-        # Dokumente (die in einem anderen Service/Schema leben, siehe
-        # docs/services/cmis-connector.md "Bewusste Grenzen") - CMIS'
-        # `delete` MUSS aber bei JEDEM Kind (Ordner ODER Dokument)
-        # ablehnen, daher die vollständige Prüfung hier statt dort.
+        # `folder-service`'s hard delete only checks its own subfolders, not
+        # documents (which live in a different service/schema, see
+        # docs/services/cmis-connector.md "Deliberate Limitations") - CMIS's
+        # `delete` MUST, however, reject on ANY child (folder OR document),
+        # hence the complete check here instead of there.
         subfolders, documents = _tree.list_children(target.folder.id)
         if subfolders or documents:
             raise CmisError("constraint", "Ordner ist nicht leer")
@@ -303,12 +303,12 @@ def _do_set_content(target: ResolvedObject, form, actor: str) -> tuple[dict, int
 
 
 def _do_check_out(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
-    """Kein separates PWC-Objekt: `document-service` kennt keine "Working
-    Copy" als eigenständige Entität - die reale document-service-Sperre
-    (4.2) übernimmt exakt die Rolle, die CMIS dem PWC-Mechanismus zuschreibt
-    (kein Schreibzugriff durch andere bis Checkin/CancelCheckout). Die
-    zurückgegebene "PWC"-Objekt-Id ist deshalb bewusst identisch zur
-    Original-Dokument-Id, siehe docs/services/cmis-connector.md."""
+    """No separate PWC object: `document-service` has no concept of a "Working
+    Copy" as a standalone entity - the real document-service lock
+    (4.2) takes on exactly the role that CMIS attributes to the PWC mechanism
+    (no write access by others until checkin/cancelCheckout). The
+    returned "PWC" object ID is therefore deliberately identical to the
+    original document ID, see docs/services/cmis-connector.md."""
     if target.kind != "document":
         raise CmisError("invalidArgument", "checkOut ist nur für Dokumente gültig")
     try:
@@ -334,10 +334,10 @@ def _do_check_in(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
         raise CmisError("invalidArgument", "checkIn ist nur für Dokumente gültig")
     upload = form.get("content")
     if upload is None or isinstance(upload, str):
-        # Bewusste Grenze: `document-service`s Versions-Endpunkt verlangt je
-        # Version zwingend eine Datei (`UploadFile = File(...)`) - ein
-        # inhaltsloses Checkin (nur Metadaten/Kommentar) ist in dieser
-        # Referenzimplementierung deshalb nicht möglich.
+        # Deliberate limitation: `document-service`'s version endpoint requires
+        # a file for every version (`UploadFile = File(...)`) - a
+        # contentless checkin (metadata/comment only) is therefore not
+        # possible in this reference implementation.
         raise CmisError(
             "invalidArgument",
             "checkIn ohne neuen Inhalt wird nicht unterstützt (document-service "
@@ -385,18 +385,17 @@ def _dispatch_write(
 async def _handle_write(
     repository_id: str, path: str, url_object_id: str | None, request: Request, actor: str
 ) -> JSONResponse:
-    """`await request.form()` ist eine Starlette-`async`-only-API (streamt
-    den Multipart-Body), der eigentliche `DmsTreeClient`-Aufruf ist dagegen
-    bewusst synchron (siehe dessen Docstring) - `asyncio.to_thread()` lagert
-    ihn aus dem Event-Loop-Thread aus, statt ihn direkt in diesem `async def`
-    zu blockieren (gleiches, bei ADR 0034 als künftiger Präzedenzfall
-    festgehaltenes Muster).
+    """`await request.form()` is a Starlette `async`-only API (streams
+    the multipart body), whereas the actual `DmsTreeClient` call is
+    deliberately synchronous (see its docstring) - `asyncio.to_thread()` offloads
+    it from the event loop thread instead of blocking it directly in this `async def`
+    (the same pattern, recorded as a future precedent in ADR 0034).
 
-    `objectId` kann sowohl als URL-Query-Parameter (5.3.4, adressiert bei
-    `createDocument`/`createFolder` den Zielordner der Anfrage-URL selbst)
-    als auch als Formular-Control (5.4.4.3.3, adressiert bei `update`/
-    `move`/`delete`/... das zu bearbeitende Objekt) übergeben werden - das
-    Formular-Control hat Vorrang, falls beide vorkommen."""
+    `objectId` can be passed either as a URL query parameter (5.3.4, addresses
+    the target folder of the request URL itself for `createDocument`/`createFolder`)
+    or as a form control (5.4.4.3.3, addresses the object to operate on
+    for `update`/`move`/`delete`/...) - the form control takes precedence
+    if both are present."""
     _require_repository(repository_id)
     form = await request.form()
     action = str(form.get("cmisaction") or "").strip().lower()

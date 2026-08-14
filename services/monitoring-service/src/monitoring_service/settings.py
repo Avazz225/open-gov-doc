@@ -12,8 +12,8 @@ class Settings(BaseServiceSettings):
 
     monitoring_permission: str = "admin.monitoring"
 
-    # Timeout je Scrape-Ziel beim Zusammenführen (`GET /metrics`, 10.1) - ein
-    # einzelnes langsames/unerreichbares Ziel darf die anderen nicht
-    # verzögern, siehe `scraper.scrape_and_merge` (paralleler `asyncio.gather`
-    # mit `return_exceptions=True`).
+    # Timeout per scrape target when merging (`GET /metrics`, 10.1) - a
+    # single slow/unreachable target must not delay the others,
+    # see `scraper.scrape_and_merge` (parallel `asyncio.gather`
+    # with `return_exceptions=True`).
     scrape_timeout_seconds: float = 5.0

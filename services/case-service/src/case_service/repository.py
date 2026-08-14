@@ -28,13 +28,13 @@ class InvalidFieldError(Exception):
 
 
 class CaseClosedError(Exception):
-    """Eine bereits abgeschlossene Umlaufmappe akzeptiert keine
-    Referenzaenderungen mehr (2.3: Referenzstruktur ist ab Abschluss fixiert)."""
+    """An already-closed circulation folder no longer accepts reference
+    changes (2.3: the reference structure is fixed from closure onward)."""
 
 
 class CaseNotClosedError(Exception):
-    """Aussonderung (5.6, seit P7-S3b) ist nur fuer bereits abgeschlossene
-    Umlaufmappen moeglich."""
+    """Records disposal (5.6, since P7-S3b) is only possible for already-
+    closed circulation folders."""
 
 
 async def create_case(
@@ -67,12 +67,12 @@ async def create_case(
 
 
 async def list_cases_by_vorgangsnummer(session: AsyncSession, vorgangsnummer: str) -> list[Case]:
-    """Für den neuen `mail-connector` (2.5/3.3, P15-S3), der eingehende Post
-    anhand einer in Betreff/Text gefundenen Vorgangsnummer einer Umlaufmappe
-    zuordnen will. Liefert eine Liste statt eines Einzelobjekts, konsistent
-    mit `document_service.repository.list_documents_by_kennzeichen` - auch
-    wenn die Vorgangsnummer per Konstruktion global eindeutig ist, bleibt der
-    Aufrufer robust gegenüber einer künftigen Formatänderung."""
+    """For the new `mail-connector` (2.5/3.3, P15-S3), which wants to match
+    incoming mail to a circulation folder based on a case number found in
+    the subject/body. Returns a list instead of a single object, consistent
+    with `document_service.repository.list_documents_by_kennzeichen` - even
+    though the case number is globally unique by construction, this keeps
+    the caller robust against a future format change."""
     result = await session.execute(select(Case).where(Case.vorgangsnummer == vorgangsnummer))
     return list(result.scalars().all())
 
@@ -111,9 +111,9 @@ async def update_case_number_format(session: AsyncSession, *, format: str) -> Ca
 
 
 async def _next_case_sequence_number(session: AsyncSession, jahr: int) -> int:
-    """Atomarer Jahres-Zähler (P15-S3) - identisches Idiom wie
-    object_type_service.repository._next_sequence_number (P5e-S1), hier ohne
-    Objekttyp-Dimension."""
+    """Atomic yearly counter (P15-S3) - identical idiom to
+    object_type_service.repository._next_sequence_number (P5e-S1), here
+    without an object-type dimension."""
     insert_stmt = (
         pg_insert(CaseSequence)
         .values(jahr=jahr, naechste_nummer=1)
@@ -223,17 +223,17 @@ async def get_active_references(session: AsyncSession, case_id: str) -> list[Cas
 
 
 async def close_case(session: AsyncSession, case: Case, *, snapshots: dict[str, int]) -> Case:
-    """Abschluss-Snapshot (2.3): fixiert fuer jede aktive Referenz die zum
-    Abschlusszeitpunkt aktuelle Version - spaetere Aenderungen am
-    referenzierten Originaldokument wirken sich danach nicht mehr auf diese
-    Umlaufmappe aus. `snapshots` fehlende `document_id`s (z. B. weil das
-    Dokument beim Abschluss nicht mehr erreichbar war) bleiben ohne
-    `snapshot_version_number` - dieselbe "bleibt nachvollziehbar bestehen"-
-    Behandlung wie beim regulaeren Lesezugriff einer offenen Umlaufmappe.
+    """Closure snapshot (2.3): fixes, for every active reference, the
+    version current at the time of closure - later changes to the
+    referenced original document no longer affect this circulation folder
+    afterward. `document_id`s missing from `snapshots` (e.g. because the
+    document was no longer reachable at closure) are left without a
+    `snapshot_version_number` - the same "remains traceably present"
+    handling as for regular read access to an open circulation folder.
 
-    Loest zugleich `archive_after` auf (5.6, seit P7-S3b) - anders als bei
-    `Document.archive_after` (bei Anlage aufgeloest) erst hier, da nur
-    geschlossene Umlaufmappen aussonderungsfaehig sind."""
+    Also resolves `archive_after` at the same time (5.6, since P7-S3b) -
+    unlike `Document.archive_after` (resolved on creation), only here,
+    since only closed circulation folders are eligible for disposal."""
     case.status = "closed"
     case.closed_at = datetime.now(UTC)
     active = await get_active_references(session, case.id)
@@ -280,8 +280,8 @@ async def update_archival_config(
 
 
 async def list_due_for_archival(session: AsyncSession) -> list[Case]:
-    """Geschlossene Umlaufmappen mit faelliger Aussonderung (5.6, seit
-    P7-S3b) - `archival-service` ruft dies periodisch ab (`GET /cases/due-
+    """Closed circulation folders with due records disposal (5.6, since
+    P7-S3b) - `archival-service` polls this periodically (`GET /cases/due-
     for-archival`)."""
     now = datetime.now(UTC)
     result = await session.execute(
@@ -296,10 +296,9 @@ async def list_due_for_archival(session: AsyncSession) -> list[Case]:
 
 
 async def request_archive(session: AsyncSession, case_id: str) -> Case:
-    """Manueller Aussonderungs-Trigger (5.6, `POST /cases/{id}/archive-
-    request`) - nur fuer bereits geschlossene Umlaufmappen, setzt
-    `archive_after` auf jetzt, falls noch nicht gesetzt oder noch nicht
-    faellig."""
+    """Manual records disposal trigger (5.6, `POST /cases/{id}/archive-
+    request`) - only for already-closed circulation folders, sets
+    `archive_after` to now if not yet set or not yet due."""
     case = await get_case(session, case_id)
     if case.status != "closed":
         raise CaseNotClosedError(f"Umlaufmappe {case_id!r} ist noch nicht abgeschlossen")
@@ -311,9 +310,9 @@ async def request_archive(session: AsyncSession, case_id: str) -> Case:
 
 
 async def mark_archived(session: AsyncSession, case_id: str) -> Case:
-    """Rueckruf von `archival-service`, sobald das XDOMEA-Paket verifiziert
-    ist (`PUT /cases/{id}/archived`) - die `Case`-Zeile selbst bleibt
-    vollstaendig erhalten (wörtliche Konzeptvorgabe, s. models.py)."""
+    """Callback from `archival-service` once the XDOMEA package is verified
+    (`PUT /cases/{id}/archived`) - the `Case` row itself remains fully
+    intact (verbatim concept requirement, see models.py)."""
     case = await get_case(session, case_id)
     case.archived_at = datetime.now(UTC)
     await session.flush()

@@ -43,9 +43,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS object_type"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
-        # CONTRIBUTING.md): `create_all` legt fehlende TABELLEN an, ändert aber
-        # keine bestehenden - beide Spalten kamen erst in P5b-S1 dazu (2.2a).
+        # Ad-hoc schema extension (no Alembic at this early phase, see
+        # CONTRIBUTING.md): `create_all` creates missing TABLES, but doesn't
+        # alter existing ones - both columns were only added in P5b-S1 (2.2a).
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
@@ -55,8 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE object_type.object_type ADD COLUMN IF NOT EXISTS icon VARCHAR(64)")
         )
-        # Kennzeichengenerator-Spalten (P5e-S1) - `object_type_sequence` ist
-        # eine neue Tabelle und wird bereits von `create_all` angelegt.
+        # Reference number generator columns (P5e-S1) - `object_type_sequence`
+        # is a new table and is already created by `create_all`.
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
@@ -69,14 +69,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS kennzeichen_display_override BOOLEAN"
             )
         )
-        # Mindest-Signaturniveau (3.10, P6-S7) - gleiches Ad-hoc-Migrationsmuster.
+        # Minimum signature level (3.10, P6-S7) - same ad-hoc migration pattern.
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
                 "ADD COLUMN IF NOT EXISTS required_signature_level VARCHAR(8)"
             )
         )
-        # Aufbewahrung (5.2, P7-S1) - gleiches Ad-hoc-Migrationsmuster.
+        # Retention (5.2, P7-S1) - same ad-hoc migration pattern.
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS deletion_reason_required_override BOOLEAN"
             )
         )
-        # Aussonderung (5.6, P7-S3) - gleiches Ad-hoc-Migrationsmuster.
+        # Records disposal (5.6, P7-S3) - same ad-hoc migration pattern.
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
@@ -102,12 +102,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS archive_encryption_enabled BOOLEAN NOT NULL DEFAULT false"
             )
         )
-        # Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2) -
-        # gleiches Ad-hoc-Migrationsmuster. `is_classified` (das bis P17-S1
-        # rein binäre Vorgängerfeld) wird hier bewusst nicht mehr angelegt -
-        # eine bereits laufende Installation behält die alte Spalte
-        # unbenutzt in der DB (kein Datenverlust, keine destruktive
-        # Migration), ein frischer Stack legt sie gar nicht erst an.
+        # Classified-documents classification (2.5, P15-S1, multi-level since
+        # P17-S2) - same ad-hoc migration pattern. `is_classified` (the
+        # purely binary predecessor field up to P17-S1) is deliberately no
+        # longer created here - an already-running installation keeps the
+        # old column unused in the DB (no data loss, no destructive
+        # migration), and a fresh stack never creates it in the first place.
         await conn.execute(
             text(
                 "ALTER TABLE object_type.object_type "
@@ -217,10 +217,10 @@ async def validate_against_object_type(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Auflösung der Platzierungs-Information (2.2a): der Aufrufer kennt nur die
-    # object_type_id des Elternordners (bzw. dass er die Wurzel ist) - der Name
-    # wird hier aufgelöst, damit Object-Type Service die einzige Quelle für
-    # Objekttyp-Namen bleibt (kein zusätzlicher Roundtrip beim Aufrufer nötig).
+    # Resolution of placement information (2.2a): the caller only knows the
+    # object_type_id of the parent folder (or that it is the root) - the name
+    # is resolved here so that Object-Type Service remains the single source
+    # for object type names (no extra roundtrip needed by the caller).
     if payload.parent_is_root:
         parent_type_name = ROOT_PARENT_TYPE
     elif payload.parent_object_type_id is not None:

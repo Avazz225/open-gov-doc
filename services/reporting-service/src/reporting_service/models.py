@@ -9,12 +9,11 @@ Base = make_declarative_base("reporting")
 
 
 class DocumentCreatedEvent(Base):
-    """Read-Modell fuer den Dokumentenaufkommen-Bericht (5.4a) - eine Zeile
-    je konsumiertem `document.created`-Event. Bewusst insert-only (kein
-    Update/Delete bei spaeterer Loeschung des Dokuments): "Aufkommen"
-    bedeutet Zufluss ueber die Zeit, nicht der aktuelle Bestand - eine
-    spaetere Loeschung aendert nichts daran, dass das Dokument in diesem
-    Zeitraum/Ordner angelegt wurde."""
+    """Read model for the document volume report (5.4a) - one row per
+    consumed `document.created` event. Deliberately insert-only (no
+    update/delete on later deletion of the document): "volume" means
+    inflow over time, not the current stock - a later deletion does not
+    change the fact that the document was created in this period/folder."""
 
     __tablename__ = "document_created_event"
 
@@ -25,9 +24,9 @@ class DocumentCreatedEvent(Base):
 
 
 class ReportSchedule(Base):
-    """Planbarer, wiederkehrender Berichtsversand (5.4a "planbar (regel-
-    mässiger Versand über den Notification Service)") - `_report_schedule_
-    poll_loop` (main.py) generiert bei Faelligkeit den Bericht neu."""
+    """Schedulable, recurring report delivery (5.4a "schedulable (regular
+    sending via the Notification Service)") - `_report_schedule_poll_loop`
+    (main.py) regenerates the report when due."""
 
     __tablename__ = "report_schedule"
 
@@ -43,10 +42,10 @@ class ReportSchedule(Base):
 
 
 class ReportRun(Base):
-    """Ein tatsaechlich erzeugter, persistierter Berichtslauf - nur fuer
-    geplante Versendungen (Ad-hoc-Exporte ueber `.../export` werden nicht
-    persistiert, siehe docs/services/reporting-service.md). Der eigentliche
-    Inhalt liegt im Storage Service, hier nur die Referenz (3.6-Prinzip)."""
+    """An actually generated, persisted report run - only for scheduled
+    deliveries (ad-hoc exports via `.../export` are not persisted, see
+    docs/services/reporting-service.md). The actual content lives in the
+    Storage Service, only the reference is kept here (3.6 principle)."""
 
     __tablename__ = "report_run"
 

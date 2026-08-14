@@ -6,96 +6,99 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Document Service hält keine Dateiinhalte selbst, sondern spricht dafür
-    # ausschließlich die HTTP-API des Storage Service an (3.6) - kein Import
-    # von dessen Interna, reine Service-zu-Service-Kommunikation.
+    # Document Service does not hold any file content itself, but
+    # instead exclusively talks to the Storage Service's HTTP API (3.6) - no
+    # import of its internals, pure service-to-service communication.
     storage_service_base_url: str = "http://localhost:8005"
 
-    # Seit P3-S3: Existenzprüfung des Ordners (2.1) bzw. Constraint-Validierung
-    # der Attribute gegen den Objekttyp (2.2/4.5) - beide optional, nur wenn
-    # `folder_id`/`object_type_id` beim Anlegen gesetzt werden.
+    # Since P3-S3: existence check of the folder (2.1) and/or
+    # constraint validation of the attributes against the object type
+    # (2.2/4.5) - both optional, only when `folder_id`/`object_type_id` are
+    # set during creation.
     folder_service_base_url: str = "http://localhost:8008"
     object_type_service_base_url: str = "http://localhost:8007"
 
-    # Verpflichtender Virenscan vor Freigabe eines Uploads (10.3, ADR 0010) -
-    # synchron aufgerufen, bevor Inhalt/Metadaten persistiert werden.
+    # Mandatory virus scan before an upload is released (10.3, ADR
+    # 0010) - called synchronously before content/metadata are persisted.
     virus_scan_service_base_url: str = "http://localhost:8010"
 
-    # Timeout ohne Aktivität, nach dem eine Bearbeitungssperre automatisch als
-    # abgelaufen gilt (4.2) - kein Hintergrund-Sweep nötig, siehe repository.py.
+    # Timeout without activity after which an editing lock is
+    # automatically considered expired (4.2) - no background sweep needed,
+    # see repository.py.
     default_lock_timeout_seconds: float = 1800.0
 
-    # Erste echte Rollenprüfung im gesamten System (P5e-S2): nur Principals,
-    # deren vom Gateway injizierter `X-DMS-Roles`-Header diese Rolle enthält,
-    # dürfen ein bereits vergebenes Kennzeichen (attributes["Kennzeichen"])
-    # nachträglich ändern - für alle anderen ist es rein lesbar.
+    # First genuine role check in the entire system (P5e-S2): only
+    # principals whose `X-DMS-Roles` header injected by the gateway contains
+    # this role may subsequently change an already assigned reference number
+    # (attributes["Kennzeichen"]) - for everyone else it is read-only.
     kennzeichen_admin_role: str = "dms-admin"
 
-    # Generischer Vier-Augen-Approval-Mechanismus (4.3, P6-S4) - Force-Unlock
-    # fragt hier ab, ob Genehmigung nötig ist, und legt bei Bedarf einen
-    # Freigabe-Request an, statt sofort auszuführen.
+    # Generic four-eyes-principle approval mechanism (4.3, P6-S4) -
+    # force-unlock checks here whether approval is required, and creates an
+    # approval request if needed instead of executing immediately.
     permission_service_base_url: str = "http://localhost:8004"
 
-    # Welche Subjects document-service konsumiert (P6-S4) - erster Konsument
-    # dieses Service überhaupt, bisher reiner Producer. Force-Unlock UND
-    # (seit P7-S1) Zwangslöschung reagieren hier auf genehmigte
-    # Freigabe-Requests, siehe consumer.py.
+    # Which subjects document-service consumes (P6-S4) - the first
+    # consumer of this service at all, previously a pure producer.
+    # Force-unlock AND (since P7-S1) forced deletion react here to approved
+    # approval requests, see consumer.py.
     subjects: list[str] = ["permission.approval.approved"]
 
-    # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - Poll-
-    # Intervall des `_retention_poll_loop` (main.py), gleiches Idiom wie
-    # workflow-service's `sla_poll_interval_seconds` (ADR 0020). Datumsbasierte
-    # Fristen brauchen keine minütliche Auflösung, Default entsprechend grob.
+    # Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) -
+    # poll interval of `_retention_poll_loop` (main.py), same idiom as
+    # workflow-service's `sla_poll_interval_seconds` (ADR 0020). Date-based
+    # deadlines don't need minute-level resolution, default is coarse
+    # accordingly.
     retention_poll_interval_seconds: float = 3600.0
 
-    # Rolle, mit der document-service sich beim Storage Service ausweist,
-    # wenn es im Zuge einer sanktionierten Zwangslöschung eine aktive
-    # Governance-Mode-Sperre bewusst umgeht (5.1/5.2a) - muss mit
-    # `storage-service`s `governance_bypass_role` übereinstimmen (Default
-    # auf beiden Seiten `dms-admin`, unabhängig konfigurierbar wie
-    # `kennzeichen_admin_role`).
+    # Role with which document-service identifies itself to the
+    # Storage Service when it deliberately bypasses an active governance-mode
+    # lock in the course of a sanctioned forced deletion (5.1/5.2a) - must
+    # match `storage-service`'s `governance_bypass_role` (default `dms-admin`
+    # on both sides, independently configurable like `kennzeichen_admin_role`).
     governance_bypass_role: str = "dms-admin"
 
-    # Lizenz-Limit-Blockade bei Neuanlagen (Konzept 9.3, P9-S2): "verhindert
-    # aber neue Anlagen, bis das Limit wieder eingehalten oder die Lizenz
-    # erweitert wird" - bestehende Dokumente/Versionen/Wiederherstellung
-    # bleiben unberührt (Check nur in `POST /documents`). Fail-open (TTL-
-    # Cache) bei nicht erreichbarem license-service, gleiche Konvention wie
-    # jeder andere Cross-Service-Cache im Projekt.
+    # License limit block on new creations (concept 9.3, P9-S2):
+    # "prevents new items until the limit is met again or the license is
+    # extended" - existing documents/versions/restoration remain unaffected
+    # (check only in `POST /documents`). Fail-open (TTL cache) if
+    # license-service is unreachable, same convention as every other
+    # cross-service cache in the project.
     license_service_base_url: str = "http://localhost:8023"
     license_limit_cache_ttl_seconds: float = 30.0
 
-    # Sensor-Konzept (10.1, P11-S1): document-service ist einer der zwei
-    # Piloten (kein Vollretrofit, siehe P11-S0-Befund). Aktivierungsstatus
-    # kommt vom `monitoring-service`.
+    # Sensor concept (10.1, P11-S1): document-service is one of the
+    # two pilots (no full retrofit, see P11-S0 finding). Activation status
+    # comes from `monitoring-service`.
     monitoring_service_base_url: str = "http://localhost:8026"
     sensor_sample_interval_seconds: float = 15.0
 
-    # Öffentlicher Freigabelink (4.2a, P14-S10): wer einen Link vorzeitig
-    # widerrufen darf, ohne dessen Ersteller zu sein - gleiches unabhängig
-    # konfigurierbares Rollen-Setting-Muster wie `kennzeichen_admin_role`/
-    # `governance_bypass_role`, auch wenn der Default identisch ist.
+    # Public share link (4.2a, P14-S10): who may revoke a link
+    # early without being its creator - same independently configurable
+    # role-setting pattern as `kennzeichen_admin_role`/`governance_bypass_role`,
+    # even though the default is identical.
     share_link_revoke_admin_role: str = "dms-admin"
 
-    # Office-Direktbearbeitung (Post-Roadmap-Feature, WebDAV-Edit-Token):
-    # bewusst großzügiger als ein Freigabelink bemessen (Stunden statt
-    # Minuten) - eine Office-Bearbeitungssitzung stellt über die gesamte
-    # Öffnungsdauer hinweg WebDAV-Anfragen (Sperren/Lesen/Zwischenspeichern/
-    # Entsperren), nicht nur einmalig beim Start.
+    # Direct Office editing (post-roadmap feature, WebDAV edit
+    # token): deliberately sized more generously than a share link (hours
+    # instead of minutes) - an Office editing session makes WebDAV requests
+    # (lock/read/cache/unlock) throughout the entire duration it is open,
+    # not just once at the start.
     webdav_edit_token_ttl_hours: float = 8.0
 
-    # Papierkorb-Familie (2.5, P15-S1): endgültiges Löschen aus dem Papierkorb
-    # ist zwei domänengetrennten Admin-Rollen vorbehalten (4.6, gleiches
-    # Setting-Muster wie oben) - eine reguläre und eine engere für als
-    # Verschlusssache eingestufte Dokumente (`ObjectType.classification_level`,
-    # mehrstufig seit P17-S2), die nicht zwingend personell identisch besetzt sind.
+    # Trash family (2.5, P15-S1): permanent deletion from the trash
+    # is reserved for two domain-separated admin roles (4.6, same setting
+    # pattern as above) - one regular and one narrower one for documents
+    # classified as classified documents (`ObjectType.classification_level`,
+    # multi-level since P17-S2), which are not necessarily staffed by the
+    # same people.
     trash_hard_delete_admin_role: str = "dms-admin"
     classified_trash_hard_delete_admin_role: str = "dms-admin"
 
-    # Quarantäne-Bereich (2.5/10.3, P15-S2): zweites, unabhängiges Rollen-Gate
-    # für `POST /documents/from-quarantine-release` (interner Anlage-Pfad, der
-    # bewusst keinen erneuten Virenscan auslöst) - der virus-scan-service
-    # prüft dieselbe Freigabe-Berechtigung bereits selbst
-    # (`quarantine_admin_role`), unabhängig konfigurierbar wie jedes andere
-    # Rollen-Setting-Paar in diesem Projekt.
+    # Quarantine area (2.5/10.3, P15-S2): second, independent role
+    # gate for `POST /documents/from-quarantine-release` (internal creation
+    # path that deliberately does not trigger another virus scan) - the
+    # virus-scan-service already checks the same release permission itself
+    # (`quarantine_admin_role`), independently configurable like every other
+    # role-setting pair in this project.
     quarantine_release_admin_role: str = "dms-admin"

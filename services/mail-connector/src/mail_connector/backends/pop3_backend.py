@@ -6,19 +6,18 @@ from mail_connector.backends.interface import MailboxBackend, RawIncomingMessage
 
 
 class Pop3Backend(MailboxBackend):
-    """Echte, standardprotokoll-basierte Abholung über POP3 (`poplib`,
-    Standardbibliothek - kein zusätzliches Paket nötig). Im Entwicklungsbetrieb
-    gegen den bereits vorhandenen `mailpit`-Container gerichtet, dessen
-    eigener POP3-Server (`--pop3`/`--pop3-auth-file`, seit mailpit v1.15) exakt
-    dieselben abgefangenen Nachrichten zurückliefert, die zuvor über SMTP
-    eingeliefert wurden - ein Selbst-Loopback-Test ohne externe Infrastruktur,
-    gleiches Prinzip wie der Federation-Hub-Selbst-Loopback (P6-S9). Gegen
-    einen echten Mailserver identisch nutzbar, nur mit anderen `host`/`port`/
-    Zugangsdaten.
+    """Real, standard-protocol-based retrieval via POP3 (`poplib`,
+    standard library - no additional package needed). In development this
+    targets the already-existing `mailpit` container, whose own POP3 server
+    (`--pop3`/`--pop3-auth-file`, since mailpit v1.15) returns exactly the
+    same intercepted messages that were previously submitted via SMTP - a
+    self-loopback test without external infrastructure, same principle as
+    the federation hub self-loopback (P6-S9). Usable identically against a
+    real mail server, just with different `host`/`port`/credentials.
 
-    `poplib` ist synchron/blockierend - jeder Aufruf läuft über
-    `asyncio.to_thread`, damit ein langsamer/hängender POP3-Server nicht den
-    gesamten Event-Loop blockiert."""
+    `poplib` is synchronous/blocking - every call runs via
+    `asyncio.to_thread` so that a slow/hanging POP3 server doesn't block the
+    entire event loop."""
 
     def __init__(
         self, host: str, port: int, username: str, password: str, *, use_tls: bool
@@ -35,12 +34,12 @@ class Pop3Backend(MailboxBackend):
         try:
             client.user(self._username)
             client.pass_(self._password)
-            # UIDL liefert einen über Sitzungen hinweg stabilen Bezeichner je
-            # Nachricht (RFC 1939) - Grundlage für die Idempotenz-Prüfung in
-            # `repository.get_by_source_uid`, ohne die Nachricht serverseitig
-            # löschen zu müssen (kein `client.dele()` hier, bewusst - ein
-            # Betreiber kann dieselbe Mailbox parallel noch anderweitig
-            # einsehen wollen).
+            # UIDL provides an identifier for each message that is stable
+            # across sessions (RFC 1939) - basis for the idempotency check
+            # in `repository.get_by_source_uid`, without having to delete
+            # the message server-side (no `client.dele()` here, deliberately
+            # - an operator may still want to view the same mailbox in
+            # parallel via other means).
             _, uidl_lines, _ = client.uidl()
             messages: list[RawIncomingMessage] = []
             for line in uidl_lines:

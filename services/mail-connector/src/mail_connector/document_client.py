@@ -2,13 +2,13 @@ import httpx
 
 
 class DocumentClient:
-    """Dünner HTTP-Client gegen die öffentliche Document-Service-API - ruft
-    bewusst den REGULÄREN `POST /documents`-Pfad auf (nicht den internen
-    Quarantäne-Freigabe-Pfad aus P15-S2): Anhänge wurden hier bereits über
-    `VirusScanClient.scan()` separat geprüft, ein erneuter Scan durch
-    `POST /documents` selbst ist redundant, aber harmlos (kein struktureller
-    Blocker wie bei der Quarantäne-Freigabe, wo dieselben, bereits als
-    infiziert erkannten Bytes erneut vorgelegt würden) - siehe ADR 0053."""
+    """Thin HTTP client against the public document-service API - deliberately
+    calls the REGULAR `POST /documents` path (not the internal quarantine
+    release path from P15-S2): attachments here have already been checked
+    separately via `VirusScanClient.scan()`, so a repeat scan by
+    `POST /documents` itself is redundant but harmless (not a structural
+    blocker like with quarantine release, where the same bytes already
+    identified as infected would be resubmitted) - see ADR 0053."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -42,12 +42,12 @@ class DocumentClient:
         return response.json()
 
     async def get_current_version(self, document_id: str) -> dict | None:
-        """Liefert die Datei-Metadaten (`filename`/`content_type`/
-        `storage_object_key`) der aktuellen Version - `DocumentOut` selbst
-        trägt diese nicht, document-service versioniert Inhalte getrennt vom
-        Dokument-Datensatz (`DocumentVersionOut`, siehe dortiges
-        `schemas.py`). Genutzt vom Postausgang-Anhang-Pfad (P24-S3,
-        `main.py`s `_attach_related_document`)."""
+        """Returns the file metadata (`filename`/`content_type`/
+        `storage_object_key`) of the current version - `DocumentOut` itself
+        does not carry these, document-service versions content separately
+        from the document record (`DocumentVersionOut`, see its own
+        `schemas.py`). Used by the outbound-mail attachment path (P24-S3,
+        `main.py`'s `_attach_related_document`)."""
         document = await self.get(document_id)
         if document is None:
             return None

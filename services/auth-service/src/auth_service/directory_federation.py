@@ -8,13 +8,13 @@ from auth_service.models import FederationIdentity
 
 logger = logging.getLogger(__name__)
 
-# Kapazitäts-Marker (2.5/7.4, P15-S4): `Installation.supported_process_types`
-# ist ein generisches, bereits bestehendes String-Listenfeld im Adressbuch
-# des Federation Hub - hier zweckentfremdet als Fähigkeits-Kennung für "diese
-# Registrierung ist eine Kontaktsuche-Teilnahme", nicht ein echter
-# BPMN-Prozesstyp. Bewusst KEIN neues Feld in federation-hub-service (kein
-# Code-Change an einem bereits stabilen, von anderen Services genutzten
-# Service nötig) - siehe ADR 0054.
+# Capability marker (2.5/7.4, P15-S4): `Installation.supported_process_types`
+# is a generic, already-existing string list field in the Federation Hub's
+# address book - repurposed here as a capability identifier for "this
+# registration is a contact directory participant", not an actual BPMN
+# process type. Deliberately NO new field in federation-hub-service (no
+# code change needed to an already-stable service used by other services) -
+# see ADR 0054.
 CONTACT_DIRECTORY_CAPABILITY = "dms.contact-directory.v1"
 
 
@@ -23,9 +23,9 @@ class PeerQueryError(Exception):
 
 
 async def query_peer(installation: dict, identity: FederationIdentity, query: str) -> list[dict]:
-    """Direkter, signierter Aufruf gegen die andere Installation - NICHT über
-    den Hub relayt (der vermittelt hier nur die Adress-/Schlüssel-Auffindung
-    über sein bereits ungegatet lesbares Adressbuch, siehe ADR 0054)."""
+    """Direct, signed call against the other installation - NOT relayed
+    through the Hub (which only mediates address/key discovery here via its
+    already ungated, readable address book, see ADR 0054)."""
     body = json.dumps({"query": query}).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
@@ -60,10 +60,9 @@ def eligible_peers(installations: list[dict], own_installation_id: str) -> list[
 async def search_all_peers(
     installations: list[dict], identity: FederationIdentity, query: str
 ) -> list[dict]:
-    """Fragt jede berechtigte Peer-Installation einzeln ab (2.5) - ein
-    einzelner nicht erreichbarer/ablehnender Peer blockiert die übrigen
-    nicht (`PeerQueryError` wird geloggt und übersprungen, kein
-    Gesamtabbruch)."""
+    """Queries each eligible peer installation individually (2.5) - a single
+    unreachable/rejecting peer does not block the others (`PeerQueryError`
+    is logged and skipped, no overall abort)."""
     results: list[dict] = []
     for installation in eligible_peers(installations, identity.installation_id):
         try:

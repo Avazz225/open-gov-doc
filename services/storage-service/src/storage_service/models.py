@@ -10,16 +10,16 @@ Base = make_declarative_base("storage")
 
 
 class ObjectMetadata(Base):
-    """Metadaten je gespeichertem Objekt - der eigentliche Inhalt liegt nie
-    in der Shared DB, nur Referenz, Prüfsumme und Größe (Konzept 3.6)."""
+    """Metadata per stored object - the actual content never lives in the
+    shared DB, only reference, checksum, and size (concept 3.6)."""
 
     __tablename__ = "object_metadata"
 
     object_key: Mapped[str] = mapped_column(String(1024), primary_key=True)
-    # Primärziel-`id` zum Zeitpunkt der Anlage/letzten Überschreibung (3.6,
-    # kein FK auf ein Backend-Verzeichnis - Ziele sind reine Settings, keine
-    # eigene Tabelle). Seit P5b-S6 eine Ziel-`id` statt eines Backend-*Typs*
-    # (mehrere Instanzen desselben Typs sind jetzt möglich, ADR 0017).
+    # Primary target `id` at the time of creation/last overwrite (3.6, no
+    # FK to a backend directory - targets are pure settings, not their own
+    # table). Since P5b-S6 a target `id` instead of a backend *type*
+    # (multiple instances of the same type are now possible, ADR 0017).
     backend: Mapped[str] = mapped_column(String(64))
     checksum_sha256: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(Integer)
@@ -29,18 +29,18 @@ class ObjectMetadata(Base):
 
 
 class ObjectCopy(Base):
-    """Je Objekt eine Zeile pro konfiguriertem Redundanz-Ziel (3.6) - Grundlage
-    für Lesezugriffs-Fallback, Fixity-Checks je Kopie und die Retry-Queue bei
-    asynchroner Replikation. ``status``: ``pending`` (noch nicht repliziert),
-    ``ok``, ``failed`` (nächster process-pending-Lauf versucht es erneut) oder
-    ``failed_permanent`` (max_replication_attempts erreicht, siehe Settings).
-    ``next_retry_at`` (seit Post-Roadmap Phase 20 Session 6, ADR 0082): der
-    ursprüngliche `process-pending`-Endpunkt griff jede `failed`-Zeile bei
-    JEDEM Aufruf sofort erneut auf, ohne jede Wartezeit - `libs/dms-retry`s
-    Full-Jitter-Backoff (gleiche Formel wie bei den vier anderen
-    Resilienz-Stellen dieser Phase) verzögert jetzt den nächsten
-    berechtigten Versuch; `NULL` bedeutet sofort fällig (neue Zeile oder noch
-    kein Fehlschlag)."""
+    """One row per object per configured redundancy target (3.6) - the
+    basis for read-access fallback, per-copy fixity checks, and the retry
+    queue for asynchronous replication. ``status``: ``pending`` (not yet
+    replicated), ``ok``, ``failed`` (next process-pending run retries it),
+    or ``failed_permanent`` (max_replication_attempts reached, see
+    Settings). ``next_retry_at`` (since Post-Roadmap Phase 20 Session 6,
+    ADR 0082): the original `process-pending` endpoint picked up every
+    `failed` row again immediately on EVERY call, with no wait time at
+    all - `libs/dms-retry`'s full-jitter backoff (same formula as the
+    other four resilience spots from this phase) now delays the next
+    eligible attempt; `NULL` means due immediately (new row or no failure
+    yet)."""
 
     __tablename__ = "object_copy"
 
@@ -53,23 +53,24 @@ class ObjectCopy(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Aufbewahrung/WORM (5.1/5.2a, seit P7-S1): steht diese Kopie noch unter
-    # einer in der Zukunft liegenden Frist, blockiert `retention_guard` ihre
-    # Löschung - unabhängig vom Backend-Typ (auch `local`, das kein echtes
-    # Object Lock kennen kann). Nur bei Zielen mit `object_lock_mode` in der
-    # Settings-Konfiguration wird zusätzlich echtes S3 Object Lock genutzt.
+    # Retention/WORM (5.1/5.2a, since P7-S1): if this copy is still under
+    # a retention period that lies in the future, `retention_guard` blocks
+    # its deletion - independent of the backend type (including `local`,
+    # which cannot have a real Object Lock). Only for targets with
+    # `object_lock_mode` set in the Settings configuration is real S3
+    # Object Lock additionally used.
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class BackendIdentity(Base):
-    """Zuletzt bekannte Geräte-ID je konfiguriertem Ziel (3.6 "Datenträger-
-    Wechsel-Sensibilität", P5b-S6). Bewusst eine eigene Tabelle statt sich
-    allein auf die vom Backend selbst gelesene Identitätsdatei zu verlassen:
-    Ein ausgetauschtes/zurückgesetztes Ziel hat womöglich gar keine
-    Identitätsdatei mehr - der Vergleichswert muss deshalb unabhängig vom
-    Ziel selbst gespeichert sein, siehe ADR 0017."""
+    """Last known device ID per configured target (3.6 "storage device
+    swap sensitivity", P5b-S6). Deliberately a separate table instead of
+    relying solely on the identity file read from the backend itself: a
+    swapped/reset target may no longer have an identity file at all - the
+    comparison value must therefore be stored independently of the target
+    itself, see ADR 0017."""
 
     __tablename__ = "backend_identity"
 
@@ -79,15 +80,15 @@ class BackendIdentity(Base):
 
 
 class GuardConfig(Base):
-    """Admin-UI-editierbare Laufzeit-Konfiguration des Redundanz-Wächters
-    (3.6, P5b-S6) - einzelne Zeile mit fester `id=1`, gleiches Muster wie
-    `OcrConfig` (ocr-service, P5b-S5/ADR 0016). Bewusst eine **proaktiv**
-    gesetzte Standing-Policy ("falls je ein Datenträger-Wechsel erkannt
-    wird, degradierten Start erlauben"), nicht ein Notfall-Schalter im
-    Moment eines bereits verweigerten Starts - der Service, der die
-    Freigabe entgegennehmen müsste, liefe in diesem Moment ja gerade nicht
-    (siehe ADR 0017 für die Begründung, warum das trotzdem funktioniert:
-    Postgres selbst ist von einem defekten Storage-Backend unabhängig)."""
+    """Admin-UI-editable runtime configuration of the redundancy guard
+    (3.6, P5b-S6) - a single row with fixed `id=1`, same pattern as
+    `OcrConfig` (ocr-service, P5b-S5/ADR 0016). Deliberately a
+    **proactively** set standing policy ("if a storage device swap is
+    ever detected, allow a degraded start"), not an emergency switch at
+    the moment of an already-refused start - the service that would need
+    to receive the approval wouldn't actually be running at that moment
+    (see ADR 0017 for why this works anyway: Postgres itself is
+    independent of a broken storage backend)."""
 
     __tablename__ = "guard_config"
 
@@ -97,17 +98,17 @@ class GuardConfig(Base):
 
 
 class OperationalConfig(Base):
-    """Admin-UI-editierbare Schreibstrategie/Retry-Parameter (3.6, Post-
-    Roadmap Phase 22 Session 6) - einzelne Zeile mit fester `id=1`, gleiches
-    Muster wie `GuardConfig`/`OcrConfig`. Anders als `Settings.targets`
-    (env-only, Zugangsdaten - bleibt bewusst unveränderlich zur Laufzeit,
-    siehe ADR 0091) sind das reine Betriebsparameter ohne Geheimnisse: bei
-    jedem Schreibzugriff frisch aus der DB gelesen (kein `app.state`-Cache),
-    daher ohne Neustart wirksam. Seed-Werte kommen bei der ersten Zeile aus
-    den bisherigen Env-Var-Defaults (`Settings.write_strategy` u. a.) - eine
-    bereits laufende Installation ändert damit beim Upgrade auf diese
-    Session ihr Verhalten nicht, bis ein Admin bewusst `PUT
-    /operational-config` aufruft."""
+    """Admin-UI-editable write strategy/retry parameters (3.6, Post-
+    Roadmap Phase 22 Session 6) - a single row with fixed `id=1`, same
+    pattern as `GuardConfig`/`OcrConfig`. Unlike `Settings.targets` (env-
+    only, credentials - deliberately remains immutable at runtime, see
+    ADR 0091), these are pure operational parameters without secrets: read
+    fresh from the DB on every access (no `app.state` cache), so they take
+    effect without a restart. Seed values for the first row come from the
+    previous env-var defaults (`Settings.write_strategy` etc.) - an
+    already-running installation therefore does not change its behavior
+    when upgrading to this session, until an admin deliberately calls
+    `PUT /operational-config`."""
 
     __tablename__ = "operational_config"
 
@@ -119,18 +120,20 @@ class OperationalConfig(Base):
 
 
 class TargetOverride(Base):
-    """Admin-UI-editierbare Ziel-Metadaten je bereits konfiguriertem Backend
-    (3.6, Post-Roadmap Phase 22 Session 7, ADR 0092) - NUR `object_lock_mode`/
-    `role`, NICHT Zugangsdaten/Struktur (`id`/`type`/`base_path`/... bleiben
-    env-var-only, dieselbe Begründung wie bei `OperationalConfig`/ADR 0091:
-    neue Ziele brauchen echte Infrastruktur, keine Admin-UI-Aktion). Bewusst
-    **sparse** statt eines Singletons mit vollständiger Liste: nur Ziele mit
-    tatsächlich gesetztem Override haben überhaupt eine Zeile - fehlt eine,
-    gilt unverändert der Env-Var-Wert aus `Settings.targets`. `main.py`s
-    `_compute_target_state()` merged beide Quellen bei jedem Aufruf zu einer
-    effektiven Zielliste und schreibt das Ergebnis sofort in `app.state`
-    zurück (Live-Reload ohne Neustart, ohne dass jeder einzelne Lesezugriff
-    im restlichen Code selbst neu aus der DB lesen müsste)."""
+    """Admin-UI-editable target metadata per already-configured backend
+    (3.6, Post-Roadmap Phase 22 Session 7, ADR 0092) - ONLY
+    `object_lock_mode`/`role`, NOT credentials/structure (`id`/`type`/
+    `base_path`/... remain env-var-only, same rationale as
+    `OperationalConfig`/ADR 0091: new targets require real infrastructure,
+    not an admin-UI action). Deliberately **sparse** instead of a
+    singleton with a full list: only targets with an actually set override
+    have a row at all - if one is missing, the env-var value from
+    `Settings.targets` still applies unchanged. `main.py`'s
+    `_compute_target_state()` merges both sources on every call into an
+    effective target list and writes the result immediately back to
+    `app.state` (live reload without a restart, without every individual
+    read access in the rest of the code having to read fresh from the DB
+    itself)."""
 
     __tablename__ = "target_override"
 

@@ -1,5 +1,5 @@
-"""Baut ein `ConfigDocument` (7.3) durch Zusammenlesen aus den jeweiligen
-Owner-Services - config-service hat keine eigene Kopie dieser Daten."""
+"""Builds a `ConfigDocument` (7.3) by aggregating reads from the respective
+owner services - config-service has no copy of this data of its own."""
 
 from datetime import UTC, datetime
 
@@ -33,10 +33,10 @@ async def export_object_types(client: ObjectTypeServiceClient) -> list[ObjectTyp
         layouts = []
         for purpose in _LAYOUT_PURPOSES:
             layout = await client.get_layout(object_type["id"], purpose)
-            # Nur explizit gespeicherte Layouts exportieren, keine generativ
-            # aus den aktuellen Attributen abgeleiteten "Smart Layouts" (2.2b)
-            # - sonst würde ein Reimport ein bislang bewusst automatisch
-            # abgeleitetes Layout dauerhaft einfrieren.
+            # Only export explicitly saved layouts, not "Smart Layouts" (2.2b)
+            # derived generatively from the current attributes
+            # - otherwise a reimport would permanently freeze a layout that was
+            # deliberately being derived automatically until now.
             if layout.get("is_custom"):
                 layouts.append(
                     ObjectTypeLayoutExport(
@@ -69,12 +69,12 @@ async def export_object_types(client: ObjectTypeServiceClient) -> list[ObjectTyp
 
 
 async def export_workflows(client: WorkflowServiceClient) -> list[WorkflowExport]:
-    # Nur die jeweils NEUESTE Version je Prozessfamilie (`GET /process-definitions`
-    # ohne `name`-Filter liefert bereits genau das) - ein Reimport soll den
-    # aktuellen Stand übertragen, nicht die komplette Versionshistorie
-    # rekonstruieren (workflow-service versioniert beim Wiederhochladen
-    # ohnehin automatisch neu, siehe docs/services/workflow-service.md
-    # "Versionierung").
+    # Only the respective LATEST version per process family (`GET /process-definitions`
+    # without a `name` filter already delivers exactly that) - a reimport is meant to
+    # transfer the current state, not reconstruct the
+    # complete version history (workflow-service already versions
+    # automatically on re-upload anyway, see docs/services/workflow-service.md
+    # "Versioning").
     definitions = await client.list_latest_process_definitions()
     result = []
     for definition in definitions:
@@ -84,8 +84,8 @@ async def export_workflows(client: WorkflowServiceClient) -> list[WorkflowExport
 
 
 async def export_dmn_definitions(client: WorkflowServiceClient) -> list[DmnDefinitionExport]:
-    """Wie `export_workflows`: nur die jeweils neueste Version je DMN-Familie
-    (`GET /dmn-definitions` ohne `name`-Filter liefert bereits genau das)."""
+    """Like `export_workflows`: only the respective latest version per DMN family
+    (`GET /dmn-definitions` without a `name` filter already delivers exactly that)."""
     definitions = await client.list_latest_dmn_definitions()
     result = []
     for definition in definitions:

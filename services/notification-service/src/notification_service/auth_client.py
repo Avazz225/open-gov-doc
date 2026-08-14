@@ -2,17 +2,17 @@ import httpx
 
 
 class AuthServiceClient:
-    """HTTP-Client gegen den Auth Service - Retrofit P6-S6 (Aufrufautorisierung):
-    `POST /notifications` prüft für `channel in {"email","in_app"}`, ob der
-    angegebene Empfänger ein echtes Konto ist, statt ihn blind zu übernehmen.
-    Betrifft ausschließlich diesen öffentlichen Endpunkt - der interne SLA-/
-    Break-Glass-/Not-Shutdown-Alarmierungspfad in `consumer.py` ruft
-    `repository.create_and_send` direkt auf, ohne über diesen Client zu gehen.
+    """HTTP client against the Auth Service - retrofit P6-S6 (call authorization):
+    `POST /notifications` checks for `channel in {"email","in_app"}` whether
+    the given recipient is a real account, instead of accepting it blindly.
+    Affects exclusively this public endpoint - the internal SLA/
+    break-glass/emergency-shutdown alerting path in `consumer.py` calls
+    `repository.create_and_send` directly, without going through this client.
 
-    `GET /users` ist seit P6-S5 selbst gegated - dieser Client meldet sich
-    dafür mit dem technischen `users-admin`-Konto an. Kein Token-Caching (der
-    Aufruf ist selten genug, dass eine frische Anmeldung je Prüfung die
-    Ablaufzeit-Komplexität nicht wert ist)."""
+    `GET /users` has itself been gated since P6-S5 - this client logs in
+    with the technical `users-admin` account for that purpose. No token caching (the
+    call is rare enough that a fresh login per check is not worth the
+    expiration-time complexity)."""
 
     def __init__(self, base_url: str, *, admin_username: str, admin_password: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -29,7 +29,7 @@ class AuthServiceClient:
 
     async def recipient_exists(self, recipient: str, *, channel: str) -> bool:
         if channel == "webhook":
-            return True  # Ziel ist eine URL, keine Identität - nichts zu prüfen.
+            return True  # Target is a URL, not an identity - nothing to check.
         response = await self._client.get("/users", headers=await self._admin_headers())
         response.raise_for_status()
         users = response.json()

@@ -6,9 +6,9 @@ SensorCost = Literal["cheap", "expensive"]
 
 
 class SensorOut(BaseModel):
-    """Ein Eintrag der Sensor-Registry (10.1) - aggregiert aus den
-    Selbstdeklarationen aller aktuell bei `registry-service` bekannten
-    Instanzen, angereichert um den aufgelösten Aktivierungsstatus."""
+    """An entry of the sensor registry (10.1) - aggregated from the
+    self-declarations of all instances currently known to `registry-service`,
+    enriched with the resolved activation status."""
 
     name: str
     group: str
@@ -28,6 +28,6 @@ class GlobalSensorConfigIn(BaseModel):
 
 
 class SensorOverrideIn(BaseModel):
-    # `None` löscht einen bestehenden Override wieder - der Sensor fällt
-    # dann zurück auf die globale Grundeinstellung.
+    # `None` deletes an existing override again - the sensor then
+    # falls back to the global base setting.
     enabled: bool | None

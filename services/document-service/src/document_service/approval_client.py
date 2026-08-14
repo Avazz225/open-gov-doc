@@ -2,10 +2,10 @@ import httpx
 
 
 class ApprovalClient:
-    """HTTP-Client gegen den generischen Vier-Augen-Approval-Mechanismus im
-    Permission Service (4.3, P6-S4) - document-service fragt vor dem
-    Force-Unlock ab, ob dieser Aktionstyp gerade Genehmigung erfordert, und
-    legt bei Bedarf einen Freigabe-Request an, statt sofort auszuführen."""
+    """HTTP client for the generic four-eyes-principle approval mechanism in
+    the Permission Service (4.3, P6-S4) - before a force-unlock, document-service
+    checks whether this action type currently requires approval, and creates
+    an approval request if needed instead of executing immediately."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)

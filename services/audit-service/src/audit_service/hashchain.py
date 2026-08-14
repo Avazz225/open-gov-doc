@@ -5,8 +5,8 @@ GENESIS_HASH = "0" * 64
 
 
 def canonical_json(fields: dict) -> str:
-    """Deterministische Serialisierung - Voraussetzung dafür, dass derselbe
-    Eintrag immer denselben Hash erzeugt, unabhängig von Feld-/Dict-Reihenfolge.
+    """Deterministic serialization - a prerequisite for the same entry
+    always producing the same hash, independent of field/dict ordering.
     """
     return json.dumps(fields, sort_keys=True, default=str, ensure_ascii=False)
 

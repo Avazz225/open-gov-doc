@@ -14,15 +14,16 @@ from object_type_service.models import (
 )
 from object_type_service.schemas import LayoutIn, ObjectTypeCreate, ObjectTypeUpdate
 
-# Kennzeichengenerator-Platzhalter (P5e-S1) - siehe PROGRESS.md "Kennzeichengenerator".
-# Datums-/Zähler-Platzhalter sind fest verdrahtet; jeder andere Platzhalter
-# wird seit P17-S2 (14.2) als Attributname interpretiert (z. B.
-# `{Federführung}`), siehe _validate_kennzeichen_format/_render_kennzeichen.
+# Reference number generator placeholders (P5e-S1) - see PROGRESS.md
+# "Kennzeichengenerator". Date/counter placeholders are hard-wired; every
+# other placeholder has been interpreted as an attribute name since P17-S2
+# (14.2) (e.g. `{Federführung}`), see
+# _validate_kennzeichen_format/_render_kennzeichen.
 KENNZEICHEN_PLACEHOLDERS = {"YYYY", "YY", "MM", "DD", "Laufende_Nummer"}
-# `\w` statt `[A-Za-z_]`, damit Unicode-Attributnamen (Umlaute wie in
-# "Federführung") als Platzhalter funktionieren - Python-Bezeichner/-format()
-# unterstützen das ohnehin bereits (PEP 3131), die alte Regex war hier enger
-# als nötig.
+# `\w` instead of `[A-Za-z_]`, so that Unicode attribute names (umlauts as in
+# "Federführung") work as placeholders - Python identifiers/format() already
+# support this anyway (PEP 3131), the old regex was narrower here than
+# necessary.
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 _KENNZEICHEN_CONFIG_ID = 1
 
@@ -36,34 +37,34 @@ class DuplicateNameError(Exception):
 
 
 class NoKennzeichenFormatError(Exception):
-    """Kein `kennzeichen_format` für diesen Objekttyp konfiguriert - vom
-    Aufrufer als 404 zu behandeln (P5e-S1)."""
+    """No `kennzeichen_format` configured for this object type - to be
+    treated as a 404 by the caller (P5e-S1)."""
 
 
 class MissingKennzeichenAttributeError(Exception):
-    """Ein im `kennzeichen_format` referenzierter Attribut-Platzhalter (P17-S2,
-    14.2) hat beim Anlegen keinen Wert erhalten - vom Aufrufer als 422 zu
-    behandeln. Tritt nur auf, wenn das referenzierte Attribut nicht als
-    Pflichtfeld markiert ist (ein Pflichtattribut wäre bereits vorher durch
-    `object_type_client.validate()` durchgesetzt worden)."""
+    """An attribute placeholder referenced in `kennzeichen_format` (P17-S2,
+    14.2) received no value on creation - to be treated as a 422 by the
+    caller. Only occurs if the referenced attribute is not marked as a
+    required field (a required attribute would already have been enforced
+    earlier by `object_type_client.validate()`)."""
 
 
 class InvalidFieldError(Exception):
-    """Fachlicher Validierungsfehler an einem der neuen 2.2a-Felder
-    (``allowed_parent_types``/``icon``) - vom Aufrufer als 422 zu behandeln,
-    anders als der 404/409 der übrigen Repository-Fehler."""
+    """Business validation error on one of the new 2.2a fields
+    (``allowed_parent_types``/``icon``) - to be treated as a 422 by the
+    caller, unlike the 404/409 of the other repository errors."""
 
 
 async def _validate_allowed_parent_types(
     session: AsyncSession, allowed_parent_types: list[str] | None
 ) -> None:
-    """``allowedParentTypes`` (2.2a) darf nur auf ``"$ROOT"`` oder bereits
-    existierende Ordnerklassen (``applies_to == "folder"``) verweisen - nur
-    Ordner können Elternobjekte sein. Keine rückwirkende Prüfung bestehender
-    Ablagen, falls eine referenzierte Klasse später gelöscht wird (siehe
-    Konzept 13, offener Punkt) - eine dann "hängende" Referenz führt lediglich
-    dazu, dass der betroffene Elterntyp beim nächsten Platzierungs-Check nicht
-    mehr aufgelöst werden kann und wie ein unbekannter Typ behandelt wird."""
+    """``allowedParentTypes`` (2.2a) may only reference ``"$ROOT"`` or already
+    existing folder classes (``applies_to == "folder"``) - only folders can
+    be parent objects. No retroactive check of existing storage locations if
+    a referenced class is deleted later (see Concept 13, open point) - a then
+    "dangling" reference merely means that the affected parent type can no
+    longer be resolved on the next placement check and is treated like an
+    unknown type."""
     if not allowed_parent_types:
         return
     names_to_check = {name for name in allowed_parent_types if name != ROOT_PARENT_TYPE}
@@ -101,12 +102,12 @@ def _validate_kennzeichen_format(
             "kennzeichen_format ist nur für Dokumentklassen (applies_to='document') zulässig"
         )
     used = set(_PLACEHOLDER_RE.findall(kennzeichen_format))
-    # Seit P17-S2 (14.2): ein Platzhalter, der kein Datums-/Zähler-Platzhalter
-    # ist, muss auf ein tatsächlich am Objekttyp definiertes Attribut
-    # verweisen (z. B. {Federführung}) - kein beliebiger freier Name, sonst
-    # würde ein Tippfehler erst beim ersten tatsächlichen Anlegen eines
-    # Dokuments (KeyError, siehe _render_kennzeichen) statt schon beim
-    # Speichern des Formats auffallen.
+    # Since P17-S2 (14.2): a placeholder that is not a date/counter
+    # placeholder must reference an attribute actually defined on the object
+    # type (e.g. {Federführung}) - not an arbitrary free name, otherwise a
+    # typo would only surface on the first actual creation of a document
+    # (KeyError, see _render_kennzeichen) instead of already when the format
+    # is saved.
     attribute_names = {a["name"] for a in (attributes or []) if "name" in a}
     unknown = sorted(used - KENNZEICHEN_PLACEHOLDERS - attribute_names)
     if unknown:
@@ -129,9 +130,9 @@ def _validate_kennzeichen_display_override(applies_to: str, value: bool | None) 
 
 
 def _validate_required_signature_level(applies_to: str, value: str | None) -> None:
-    """Mindest-Signaturniveau (3.10, seit P6-S7) ist nur für Dokumentklassen
-    sinnvoll - Ordner werden nicht signiert, gleiche Einschränkung wie beim
-    Kennzeichengenerator."""
+    """Minimum signature level (3.10, since P6-S7) only makes sense for
+    document classes - folders are not signed, same restriction as for the
+    reference number generator."""
     if value is not None and applies_to != "document":
         raise InvalidFieldError(
             "required_signature_level ist nur für Dokumentklassen (applies_to='document') zulässig"
@@ -139,26 +140,26 @@ def _validate_required_signature_level(applies_to: str, value: str | None) -> No
 
 
 def _validate_default_retention_days(value: int | None) -> None:
-    """Aufbewahrung (5.2, seit P7-S1) gilt für Dokument- UND Ordnerklassen
-    gleichermaßen (anders als Kennzeichen/Signatur) - keine applies_to-
-    Einschränkung, nur ein Wertebereichscheck."""
+    """Retention (5.2, since P7-S1) applies equally to document AND folder
+    classes (unlike reference number/signature) - no applies_to restriction,
+    just a value range check."""
     if value is not None and value < 0:
         raise InvalidFieldError("default_retention_days darf nicht negativ sein")
 
 
 def _validate_default_archive_after_days(value: int | None) -> None:
-    """Aussonderung (5.6, seit P7-S3) - gleiches Muster wie
-    default_retention_days, ebenfalls für Dokument- und Ordnerklassen gültig."""
+    """Records disposal (5.6, since P7-S3) - same pattern as
+    default_retention_days, likewise valid for document and folder classes."""
     if value is not None and value < 0:
         raise InvalidFieldError("default_archive_after_days darf nicht negativ sein")
 
 
 def _validate_classification_level(applies_to: str, value: str | None) -> None:
-    """Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2) ist
-    laut Konzepttext nur für Dokumentklassen vorgesehen - gleiche
-    Einschränkung wie beim Kennzeichengenerator/Signaturniveau. Die konkrete
-    Stufe selbst wird hier nicht geprüft (Pydantic's `Literal` an der
-    Schema-Grenze übernimmt das bereits, siehe ClassificationLevel)."""
+    """Classified-documents classification (2.5, P15-S1, multi-level since
+    P17-S2) is, per the concept text, only intended for document classes -
+    same restriction as for the reference number generator/signature level.
+    The specific level itself is not checked here (Pydantic's `Literal` at
+    the schema boundary already handles that, see ClassificationLevel)."""
     if value is not None and applies_to != "document":
         raise InvalidFieldError(
             "classification_level ist nur für Dokumentklassen (applies_to='document') zulässig"
@@ -213,10 +214,10 @@ async def get_object_type(session: AsyncSession, object_type_id: int) -> ObjectT
 async def list_object_types(
     session: AsyncSession, *, applies_to: str | None = None, is_classified: bool | None = None
 ) -> list[ObjectType]:
-    """``is_classified`` bleibt als Filter-Parametername erhalten (Aufrufer,
-    z. B. document-service, fragen "irgendeine Verschlusssachen-Einstufung
-    oder keine", nicht nach einer konkreten Stufe) - übersetzt seit P17-S2
-    intern auf ``classification_level IS (NOT) NULL``."""
+    """``is_classified`` remains the filter parameter name (callers, e.g.
+    document-service, ask "some classification or none", not for a specific
+    level) - translated internally, since P17-S2, to
+    ``classification_level IS (NOT) NULL``."""
     query = select(ObjectType)
     if applies_to is not None:
         query = query.where(ObjectType.applies_to == applies_to)
@@ -269,10 +270,10 @@ async def delete_object_type(session: AsyncSession, object_type_id: int) -> None
 
 
 def _validate_layout_attributes(object_type: ObjectType, payload: LayoutIn) -> None:
-    """Ein Layout darf nur Attribute referenzieren, die auch tatsächlich zum
-    Objekttyp gehören (2.2b) - analog zur Referenzprüfung von
-    ``allowedParentTypes`` (2.2a), verhindert verwaiste Feldverweise nach
-    Tippfehlern oder nachträglich entfernten Attributen."""
+    """A layout may only reference attributes that actually belong to the
+    object type (2.2b) - analogous to the reference check of
+    ``allowedParentTypes`` (2.2a), prevents orphaned field references after
+    typos or attributes removed later."""
     known = {attribute["name"] for attribute in object_type.attributes}
     referenced = {field.attribute for row in payload.rows for field in row.columns}
     unknown = referenced - known
@@ -317,9 +318,9 @@ async def upsert_layout(
 
 
 async def delete_layout(session: AsyncSession, object_type_id: int, purpose: str) -> None:
-    """Setzt ein Layout auf das generierte Smart-Layout zurück (2.2b) -
-    idempotent, da das Fehlen einer Override-Zeile bereits dem Default
-    entspricht (kein Fehler, falls nie eine Abweichung gespeichert wurde)."""
+    """Resets a layout to the generated smart layout (2.2b) - idempotent,
+    since the absence of an override row already corresponds to the default
+    (no error if no deviation was ever saved)."""
     existing = await get_layout(session, object_type_id, purpose)
     if existing is not None:
         await session.delete(existing)
@@ -342,13 +343,13 @@ def _render_kennzeichen(
         "DD": f"{tag:02d}",
         "Laufende_Nummer": f"{laufende_nummer:03d}",
     }
-    # Attributbasierte Platzhalter (P17-S2, 14.2, z. B. {Federführung}) -
-    # `_validate_kennzeichen_format` stellt beim Speichern des Formats bereits
-    # sicher, dass jeder hier nicht abgedeckte Platzhalter ein Attribut des
-    # Objekttyps ist; fehlt der Wert trotzdem (Attribut nicht als Pflichtfeld
-    # markiert, siehe MissingKennzeichenAttributeError), bricht `.format()``
-    # unten mit `KeyError` ab statt eine unvollständige Kennzeichnung
-    # stillschweigend mit einer leeren Lücke zu erzeugen.
+    # Attribute-based placeholders (P17-S2, 14.2, e.g. {Federführung}) -
+    # `_validate_kennzeichen_format` already ensures, when the format is
+    # saved, that every placeholder not covered here is an attribute of the
+    # object type; if the value is still missing (attribute not marked as a
+    # required field, see MissingKennzeichenAttributeError), `.format()``
+    # below aborts with `KeyError` instead of silently producing an
+    # incomplete reference number with an empty gap.
     for name, value in (attribute_values or {}).items():
         values[name] = "" if value is None else str(value)
     try:
@@ -360,13 +361,12 @@ def _render_kennzeichen(
 
 
 async def _next_sequence_number(session: AsyncSession, object_type_id: int, jahr: int) -> int:
-    """Atomarer, gegen Nebenläufigkeit abgesicherter Jahres-Zähler (P5e-S1).
-    ``INSERT ... ON CONFLICT DO NOTHING`` legt die Zähler-Zeile bei Bedarf an,
-    ohne dass zwei gleichzeitige Erstaufrufe an einem Unique-Constraint
-    scheitern; das anschließende ``SELECT ... FOR UPDATE`` sperrt die (jetzt
-    garantiert existierende) Zeile für die restliche Transaktion, sodass
-    parallele Aufrufe serialisiert statt gleichzeitig gelesen/geschrieben
-    werden."""
+    """Atomic, concurrency-safe yearly counter (P5e-S1). ``INSERT ... ON
+    CONFLICT DO NOTHING`` creates the counter row if needed, without two
+    simultaneous first calls failing on a unique constraint; the subsequent
+    ``SELECT ... FOR UPDATE`` locks the (now guaranteed to exist) row for the
+    rest of the transaction, so parallel calls are serialized instead of
+    being read/written concurrently."""
     insert_stmt = (
         pg_insert(ObjectTypeSequence)
         .values(object_type_id=object_type_id, jahr=jahr, naechste_nummer=1)
@@ -410,10 +410,10 @@ async def generate_next_kennzeichen(
 
 
 async def get_kennzeichen_config(session: AsyncSession) -> KennzeichenConfig:
-    """Liest die (einzige) globale Anzeige-Konfiguration, legt sie mit Default
-    an, falls sie noch nie gespeichert wurde (frischer Service, vor dem ersten
-    `PUT /kennzeichen-config`) - gleiches Muster wie `OcrConfig`/`UploadConfig`
-    der anderen Services."""
+    """Reads the (single) global display configuration, creates it with
+    defaults if it has never been saved before (fresh service, before the
+    first `PUT /kennzeichen-config`) - same pattern as
+    `OcrConfig`/`UploadConfig` of the other services."""
     config = await session.get(KennzeichenConfig, _KENNZEICHEN_CONFIG_ID)
     if config is None:
         config = KennzeichenConfig(

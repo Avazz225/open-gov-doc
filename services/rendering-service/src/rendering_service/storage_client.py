@@ -2,9 +2,9 @@ import httpx
 
 
 class StorageClient:
-    """Dünner HTTP-Client gegen den Storage Service (3.6) - Ersatzdarstellungen/
-    Vorschauen werden dort dauerhaft abgelegt, nicht im Rendering Service selbst
-    oder in einem flüchtigen Cache (2.4)."""
+    """Thin HTTP client against the Storage Service (3.6) - renditions/previews
+    are stored there persistently, not in the Rendering Service itself or in
+    a transient cache (2.4)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

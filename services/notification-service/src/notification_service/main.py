@@ -25,16 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_retry_tick(session_factory) -> None:
-    """Ein einzelner Durchlauf der fälligen Wiederholungsversuche - ausgelagert
-    aus `_notification_retry_poll_loop`, damit ein Tick isoliert testbar ist
-    (gleiches Muster wie archival-service's `run_active_transfers_tick`)."""
+    """A single pass of the due retry attempts - factored out
+    of `_notification_retry_poll_loop` so that a tick is independently testable
+    (same pattern as archival-service's `run_active_transfers_tick`)."""
     async with session_factory() as session:
         due = await repository.list_due_for_retry(session)
     for stale in due:
         async with session_factory() as session:
             notification = await session.get(Notification, stale.id)
             if notification is None or notification.status != "failed":
-                continue  # zwischenzeitlich anders behandelt (z. B. manueller Retry)
+                continue  # handled differently in the meantime (e.g. manual retry)
             await repository.attempt_delivery(
                 session, settings, notification, max_attempts=settings.max_notification_attempts
             )
@@ -43,11 +43,11 @@ async def _run_retry_tick(session_factory) -> None:
 
 
 async def _notification_retry_poll_loop(session_factory) -> None:
-    """Wiederholt fehlgeschlagene E-Mail-/Webhook-Zustellungen (Post-Roadmap
-    Phase 20 Session 3, ADR 0079) - der erste Zustellversuch bleibt bewusst
-    synchron im NATS-Handler bzw. in `POST /notifications` (schnelle Antwort im
-    Regelfall), nur die WIEDERHOLUNG läuft asynchron in diesem eigenen
-    Poll-Loop, um den Handler nicht zu blockieren. Gleiches Idiom wie
+    """Retries failed email/webhook deliveries (post-roadmap
+    Phase 20 Session 3, ADR 0079) - the first delivery attempt deliberately
+    remains synchronous in the NATS handler resp. in `POST /notifications` (fast
+    response in the normal case), only the RETRY runs asynchronously in this
+    own poll loop, so as not to block the handler. Same idiom as
     archival-service's `_archival_poll_loop`."""
     while True:
         try:
@@ -67,9 +67,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS notification"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Migration fuer bereits laufende Installationen (Post-Roadmap
-        # Phase 20 Session 3, ADR 0079) - `create_all` legt nur neue Tabellen an,
-        # aendert aber keine bestehenden (gleiches Muster wie archival-service).
+        # Ad-hoc migration for already running installations (post-roadmap
+        # Phase 20 Session 3, ADR 0079) - `create_all` only creates new tables,
+        # but does not alter existing ones (same pattern as archival-service).
         await conn.execute(
             text(
                 "ALTER TABLE notification.notification "
@@ -90,11 +90,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         admin_password=settings.auth_service_admin_password,
     )
 
-    # Producer (eigener Stream "notification", `notification.sent`/`.failed`) UND
-    # Konsument (`workflow.task.escalated`) - zwei getrennte Client-Instanzen, wie in
-    # docs/services/workflow-service.md als Konvention für Services mit beiden Rollen
-    # notiert (audit-service ist bisher reiner Konsument, workflow-service reiner
-    # Producer - hier zum ersten Mal beides tatsächlich gebraucht).
+    # Producer (own stream "notification", `notification.sent`/`.failed`) AND
+    # consumer (`workflow.task.escalated`) - two separate client instances, as
+    # noted in docs/services/workflow-service.md as the convention for services
+    # with both roles (audit-service has so far been a pure consumer, workflow-service
+    # a pure producer - here both are actually needed for the first time).
     producer = NatsEventBusClient(settings.nats_url, stream="notification")
     await producer.connect()
     app.state.producer = producer
@@ -162,12 +162,12 @@ def healthz() -> dict:
 async def create_notification(
     payload: NotificationCreate, session: AsyncSession = Depends(get_session)
 ) -> NotificationOut:
-    """Retrofit P6-S6 (Aufrufautorisierung): der öffentliche Endpunkt prüft
-    seit dieser Session, dass `recipient` für `channel in {"email","in_app"}`
-    ein echtes `auth-service`-Konto ist, statt ihn blind zu übernehmen -
-    `channel="webhook"` bleibt ungeprüft (Ziel ist eine URL, keine Identität).
-    Der interne Alarmierungspfad (SLA/Break-Glass/Not-Shutdown) läuft nie über
-    diesen Endpunkt, siehe `auth_client.py`."""
+    """Retrofit P6-S6 (call authorization): since this session, the public
+    endpoint checks that `recipient` for `channel in {"email","in_app"}` is
+    a real `auth-service` account, instead of accepting it blindly -
+    `channel="webhook"` remains unchecked (the target is a URL, not an identity).
+    The internal alerting path (SLA/break-glass/emergency-shutdown) never runs
+    through this endpoint, see `auth_client.py`."""
     if not await app.state.auth_client.recipient_exists(payload.recipient, channel=payload.channel):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -212,10 +212,10 @@ async def get_notification(
 async def retry_notification(
     notification_id: int, session: AsyncSession = Depends(get_session)
 ) -> NotificationOut:
-    """Manueller Neustart einer dauerhaft fehlgeschlagenen Zustellung
-    (Post-Roadmap Phase 20 Session 3, ADR 0079) - nur fuer `failed_permanent`
-    sinnvoll (409 sonst); unternimmt sofort einen neuen synchronen
-    Zustellversuch statt auf den naechsten Poll-Tick zu warten."""
+    """Manual restart of a permanently failed delivery
+    (post-roadmap Phase 20 Session 3, ADR 0079) - only useful for
+    `failed_permanent` (409 otherwise); immediately makes a new synchronous
+    delivery attempt instead of waiting for the next poll tick."""
     try:
         notification = await repository.get_notification(session, notification_id)
     except repository.NotFoundError as exc:

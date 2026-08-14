@@ -9,10 +9,10 @@ class ScanVerdict:
 
 
 class ScanEngine(ABC):
-    """Einheitliches Interface für Virenscan-Engine-Plugins (10.3, ADR 0010),
-    nach demselben "Dazustellen"-Prinzip wie die Storage-Backends (3.3/3.6):
-    neue Engines implementieren nur dieses Interface, der Rest des Service
-    bleibt unverändert."""
+    """Uniform interface for virus scan engine plugins (10.3, ADR 0010),
+    following the same "plug in alongside" principle as the storage backends
+    (3.3/3.6): new engines only need to implement this interface, the rest
+    of the service stays unchanged."""
 
     @abstractmethod
     async def scan(self, data: bytes) -> ScanVerdict: ...

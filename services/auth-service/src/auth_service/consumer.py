@@ -14,12 +14,13 @@ def make_handler(
     activation_minutes: int,
     publish_event: Callable[[str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Erster Konsument dieses Service überhaupt (P6-S5, 4.6): führt die
-    Break-Glass-Aktivierung erst nach Genehmigung aus, exakt dasselbe
-    Selbst-/Fremd-Konsum-Prinzip wie in ADR 0022 - dieser Service konsumiert
-    sein eigenes, ihm zugeordnetes `action_type`, ignoriert alle anderen.
-    `session_factory` statt `KeycloakAdmin` seit Phase 18 (ADR 0063) - der
-    Superuser lebt seither als DB-Zeile, nicht mehr als Keycloak-Konto."""
+    """First consumer of this service ever (P6-S5, 4.6): executes the
+    break-glass activation only after approval, exactly the same
+    self/foreign-consumption principle as in ADR 0022 - this service
+    consumes its own, assigned `action_type`, ignoring all others.
+    `session_factory` instead of `KeycloakAdmin` since Phase 18 (ADR 0063) -
+    the superuser has lived as a DB row rather than a Keycloak account
+    ever since."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -37,9 +38,9 @@ def make_handler(
                 request_id,
             )
             return
-        # Reicht den Akteur des genehmigenden permission.approval.approved-
-        # Events weiter (seit P7-S2) - das ist die Person, die die
-        # Aktivierung tatsaechlich freigegeben hat.
+        # Passes through the actor of the approving permission.approval.approved
+        # event (since P7-S2) - that's the person who actually approved the
+        # activation.
         await publish_event(
             "auth.superuser.activated",
             {"request_id": request_id, "expires_at": expires_at.isoformat()},

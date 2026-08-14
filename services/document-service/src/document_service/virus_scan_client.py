@@ -2,7 +2,7 @@ import httpx
 
 
 class ScanRejectedError(Exception):
-    """Der Virus-Scan-Dienst hat die Datei als infiziert eingestuft (10.3)."""
+    """The virus scan service has classified the file as infected (10.3)."""
 
     def __init__(self, threat_name: str | None) -> None:
         self.threat_name = threat_name
@@ -10,14 +10,14 @@ class ScanRejectedError(Exception):
 
 
 class ScanUnavailableError(Exception):
-    """Der Virus-Scan-Dienst war nicht erreichbar - fail-closed (ADR 0010):
-    ein Upload wird nicht durchgelassen, nur weil der Scan fehlschlägt."""
+    """The virus scan service was unreachable - fail-closed (ADR 0010):
+    an upload is not let through just because the scan failed."""
 
 
 class VirusScanClient:
-    """HTTP-Client gegen den Virus-Scan Service (10.3) - wird *vor* jedem
-    Schreiben von Inhalt/Metadaten synchron aufgerufen (ADR 0010), damit ein
-    Upload nie ohne sauberen Scan freigegeben wird."""
+    """HTTP client for the Virus Scan Service (10.3) - called
+    synchronously *before* every write of content/metadata (ADR 0010), so
+    that an upload is never released without a clean scan."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

@@ -1,19 +1,17 @@
-"""Krypto-Bausteine des Hub (ADR 0028, seit P13-S4 auch ADR 0039, seit
-Post-Roadmap Phase 21 Session 2 auch ADR 0085): der Hub verschlüsselt/
-entschlüsselt selbst **nie** Nutzdaten (die Ende-zu-Ende-Verschlüsselung
-findet ausschließlich zwischen den Installationen statt, siehe
-`workflow_service.federation_crypto` in der jeweiligen Installation) - er
-braucht nur (a) ein eigenes Signaturschlüsselpaar, mit dem er jede Zustellung
-an eine Installation signiert, (b) seit P13-S4 die Fähigkeit, eine von einer
-Installation mit ihrem eigenen privaten Schlüssel signierte Anfrage zu
-verifizieren (ersetzt das bis dahin verwendete API-Key-Hashing - siehe
-ADR 0039: "mTLS-äquivalent auf Anwendungsebene" statt eines geteilten
-Geheimnisses), und (c) seit Post-Roadmap Phase 21 Session 2 die Fähigkeit,
-als eigene kleine interne CA zeitlich begrenzte X.509-Zertifikate für
-Installationen auszustellen und zu prüfen (ADR 0085, gleiche Bibliothek/
-Konvention wie `signature-service`s interne CA, ADR 0025) - weiterhin
-Anwendungsebene, kein echtes Transport-mTLS (siehe ADR 0039s unverändert
-gültige Begründung)."""
+"""Crypto building blocks of the hub (ADR 0028, since P13-S4 also ADR 0039,
+since Post-Roadmap Phase 21 Session 2 also ADR 0085): the hub itself
+**never** encrypts/decrypts payload data (end-to-end encryption happens
+exclusively between installations, see `workflow_service.federation_crypto`
+in the respective installation) - it only needs (a) its own signing key pair,
+with which it signs every delivery to an installation, (b) since P13-S4 the
+ability to verify a request signed by an installation with its own private
+key (replaces the API-key hashing used up to that point - see ADR 0039:
+"mTLS-equivalent at the application level" instead of a shared secret), and
+(c) since Post-Roadmap Phase 21 Session 2 the ability to act as its own small
+internal CA, issuing and checking time-limited X.509 certificates for
+installations (ADR 0085, same library/convention as `signature-service`'s
+internal CA, ADR 0025) - still application level, no real transport mTLS
+(see ADR 0039's still-valid reasoning)."""
 
 import base64
 from datetime import UTC, datetime, timedelta
@@ -23,21 +21,22 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
-# Bewusst deutlich kürzer als signature-service's Leaf-Zertifikate (5 Jahre,
-# ADR 0025) - dort verhindert eine lange Laufzeit, dass eine später ohne
-# Zeitstempeldienst geprüfte PDF-Signatur fälschlich als "abgelaufen" gilt.
-# Hier gibt es dieses Problem nicht (Zertifikat und Prüfung passieren beide
-# "jetzt", keine Langzeitarchivierung einer Signatur) - eine kürzere Laufzeit
-# gibt der Zertifikatsebene stattdessen einen echten, wiederkehrenden
-# Erneuerungs-Rhythmus (siehe ADR 0085 "Begründung").
+# Deliberately much shorter than signature-service's leaf certificates
+# (5 years, ADR 0025) - there, a long validity period prevents a PDF
+# signature that is later checked without a timestamping service from being
+# incorrectly considered "expired". That problem doesn't exist here
+# (certificate issuance and verification both happen "now", no long-term
+# archival of a signature) - a shorter validity period instead gives the
+# certificate layer a real, recurring renewal cadence (see ADR 0085
+# "Rationale").
 _INSTALLATION_CERTIFICATE_VALIDITY = timedelta(days=365)
 
 
 def generate_hub_keypair() -> tuple[bytes, bytes]:
-    """Erzeugt das Hub-eigene RSA-2048-Schlüsselpaar - wird genau einmal beim
-    ersten Start aufgerufen, siehe `repository.get_or_create_hub_identity`
-    (Singleton-Muster wie `signature-service`s `get_or_create_ca`). Gibt
-    ``(private_key_pem, public_key_pem)`` zurück."""
+    """Generates the hub's own RSA-2048 key pair - called exactly once on the
+    first startup, see `repository.get_or_create_hub_identity` (singleton
+    pattern like `signature-service`'s `get_or_create_ca`). Returns
+    ``(private_key_pem, public_key_pem)``."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -52,11 +51,11 @@ def generate_hub_keypair() -> tuple[bytes, bytes]:
 
 
 def generate_ca_certificate(private_key_pem: bytes, public_key_pem: bytes) -> bytes:
-    """Verpackt das bereits vorhandene Hub-Schlüsselpaar als selbstsigniertes
-    X.509-Root-CA-Zertifikat (ADR 0085) - KEIN neues Schlüsselpaar, derselbe
-    private Schlüssel, der auch `sign_body` unten verwendet. Gleiches Muster
-    wie `signature-service.connectors.internal.generate_root_ca`, hier aber
-    um ein bereits existierendes Schlüsselpaar herum statt eines neuen."""
+    """Wraps the already-existing hub key pair as a self-signed X.509 root CA
+    certificate (ADR 0085) - NOT a new key pair, the same private key also
+    used by `sign_body` below. Same pattern as
+    `signature-service.connectors.internal.generate_root_ca`, but here built
+    around an already-existing key pair instead of a new one."""
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     public_key = serialization.load_pem_public_key(public_key_pem)
     subject = issuer = x509.Name(
@@ -101,12 +100,11 @@ def issue_installation_certificate(
     installation_id: str,
     installation_public_key_pem: str,
 ) -> tuple[str, datetime]:
-    """Stellt ein von der Hub-CA signiertes Zertifikat aus, das den
-    ÖFFENTLICHEN Schlüssel der Installation bindet - der Hub erzeugt dabei
-    KEIN neues Schlüsselpaar (die Installation besitzt und behält ihren
-    eigenen privaten Schlüssel, vereinfachtes CSR-Äquivalent ohne
-    tatsächliches CSR-Objekt). ``installation_id`` wird als `CommonName`
-    eingebettet. Gibt ``(certificate_pem, not_valid_after)`` zurück."""
+    """Issues a certificate signed by the hub CA that binds the installation's
+    PUBLIC key - the hub does NOT generate a new key pair here (the
+    installation owns and keeps its own private key; a simplified CSR
+    equivalent without an actual CSR object). ``installation_id`` is embedded
+    as the `CommonName`. Returns ``(certificate_pem, not_valid_after)``."""
     ca_cert = x509.load_pem_x509_certificate(ca_certificate_pem)
     ca_private_key = serialization.load_pem_private_key(ca_private_key_pem, password=None)
     installation_public_key = serialization.load_pem_public_key(
@@ -151,18 +149,16 @@ def verify_installation_certificate(
     installation_id: str,
     installation_public_key_pem: str,
 ) -> bool:
-    """Prüft, dass ``certificate_pem`` tatsächlich von der Hub-CA ausgestellt
-    wurde (Signaturkette), aktuell innerhalb seiner Gültigkeit liegt, UND
-    tatsächlich zu GENAU DIESER Installation gehört (`CommonName` ==
-    ``installation_id`` UND eingebetteter öffentlicher Schlüssel ==
-    ``installation_public_key_pem``) - ohne die letzten beiden Prüfungen
-    könnte ein beliebiges, gültig vom Hub ausgestelltes Zertifikat (z. B. das
-    einer anderen Installation) untergeschoben werden, ohne dass die
-    Kettenprüfung allein das bemerken würde. Alle vier Prüfungen zusammen
-    sind die eigentliche neue Sicherheitseigenschaft dieser Session
-    (ADR 0085): ein roher öffentlicher Schlüssel allein hatte weder eine
-    geprüfte Herkunft noch eine Gültigkeitsgrenze noch eine gebundene
-    Identität."""
+    """Checks that ``certificate_pem`` was actually issued by the hub CA
+    (signature chain), is currently within its validity period, AND actually
+    belongs to EXACTLY THIS installation (`CommonName` == ``installation_id``
+    AND embedded public key == ``installation_public_key_pem``) - without
+    these last two checks, any certificate validly issued by the hub (e.g.
+    that of a different installation) could be substituted in without the
+    chain check alone noticing. All four checks together are the actual new
+    security property of this session (ADR 0085): a raw public key alone had
+    neither a verified origin, nor a validity boundary, nor a bound
+    identity."""
     try:
         ca_cert = x509.load_pem_x509_certificate(ca_certificate_pem)
         certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
@@ -182,11 +178,11 @@ def verify_installation_certificate(
 
 
 def sign_body(private_key_pem: bytes, body: bytes) -> str:
-    """Signiert die rohen Bytes eines an eine Installation zugestellten
-    Request-Bodys (RSA-PSS/SHA-256) - die empfangende Installation verifiziert
-    mit dem beim Registrieren einmalig abgerufenen öffentlichen Hub-Schlüssel
-    (`GET /public-key`), ohne dass irgendwo ein geteiltes Geheimnis im
-    Klartext gespeichert werden müsste (siehe ADR 0028)."""
+    """Signs the raw bytes of a request body delivered to an installation
+    (RSA-PSS/SHA-256) - the receiving installation verifies it using the
+    hub's public key, fetched once during registration (`GET /public-key`),
+    without needing to store a shared secret in plaintext anywhere (see
+    ADR 0028)."""
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     signature = private_key.sign(
         body,
@@ -197,12 +193,12 @@ def sign_body(private_key_pem: bytes, body: bytes) -> str:
 
 
 def verify_body(public_key_pem: str, body: bytes, signature_b64: str) -> bool:
-    """Verifiziert eine von einer Installation mit ihrem eigenen privaten
-    Schlüssel signierte eingehende Anfrage (P13-S4, ADR 0039) - Gegenstück zu
-    `sign_body` oben, gleiches Schema wie `workflow_service.federation_crypto.
-    verify_body`. Der Hub speichert dafür nur den öffentlichen Schlüssel jeder
-    Installation (``Installation.public_key_pem``, ohnehin bereits für die
-    Ende-zu-Ende-Verschlüsselung vorhanden) - kein zusätzliches Geheimnis."""
+    """Verifies an incoming request signed by an installation with its own
+    private key (P13-S4, ADR 0039) - counterpart to `sign_body` above, same
+    scheme as `workflow_service.federation_crypto.verify_body`. For this, the
+    hub only stores each installation's public key (``Installation.
+    public_key_pem``, already present anyway for end-to-end encryption) - no
+    additional secret."""
     try:
         public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
         public_key.verify(

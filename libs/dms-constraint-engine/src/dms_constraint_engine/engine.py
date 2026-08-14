@@ -2,16 +2,16 @@ import re
 from datetime import date
 from typing import Any
 
-# Erweiterbarkeit (4.5: "sollte erweiterbar sein um eigene Validierungs-Plugins"):
-# neue Attributtypen werden hier als weiterer Eintrag ergänzt, nicht über eine
-# generische Plugin-Ladeinfrastruktur - für den aktuellen Bedarf ausreichend,
-# ein echter Plugin-Lademechanismus wäre verfrühte Komplexität.
+# Extensibility (4.5: "should be extensible with custom validation plugins"):
+# new attribute types are added here as another entry, not via a generic
+# plugin-loading infrastructure - sufficient for current needs; a real
+# plugin-loading mechanism would be premature complexity.
 _NUMERIC_TYPES = {"decimal", "integer"}
 
 _CONDITION_RE = re.compile(r"^\s*([A-Za-z0-9_äöüÄÖÜß]+)\s*(>=|<=|==|!=|>|<)\s*(.+?)\s*$")
 
-# Sentinel für "direkt unter der Wurzel platziert" in ``allowedParentTypes``
-# (2.2a) - kein echter Objekttyp-Name, daher als Konstante statt Freitext.
+# Sentinel for "placed directly under the root" in ``allowedParentTypes``
+# (2.2a) - not a real object type name, hence a constant instead of free text.
 ROOT_PARENT_TYPE = "$ROOT"
 
 
@@ -60,10 +60,10 @@ def _validate_attribute(attr_def: dict, attributes: dict[str, Any], errors: list
         except ValueError:
             errors.append(f"Attribut '{name}' ist kein gültiges ISO-Datum: {value!r}")
     elif attr_type == "reference":
-        # Bewusste Vereinfachung: nur Formatprüfung (nicht-leerer String), keine
-        # Existenzprüfung gegen den referenzierten Service - würde eine generische
-        # Auflösung "Referenztyp -> zuständiger Service" voraussetzen, die es
-        # noch nicht gibt. Siehe docs/services/object-type-service.md.
+        # Deliberate simplification: only format validation (non-empty string),
+        # no existence check against the referenced service - would require a
+        # generic "reference type -> responsible service" resolution that
+        # doesn't exist yet. See docs/services/object-type-service.md.
         if not isinstance(value, str) or not value.strip():
             errors.append(f"Attribut '{name}' muss eine nicht-leere Referenz-ID sein")
 
@@ -90,8 +90,8 @@ def _validate_naming(
         value = attributes.get(field)
         return re.escape(str(value)) if value is not None else ".+"
 
-    # re.escape() escapiert auch die von uns eingefügten Platzhalter-Klammern zu
-    # "\{"/"\}" - das Ersetzungsmuster muss diese escapte Form matchen.
+    # re.escape() also escapes the placeholder braces we inserted into
+    # "\{"/"\}" - the substitution pattern must match this escaped form.
     regex_source = re.sub(
         r"\\\{([A-Za-z0-9_äöüÄÖÜß]+)\\\}", _escape_and_substitute, re.escape(pattern)
     )
@@ -135,12 +135,13 @@ def _apply_then(action: str, attributes: dict[str, Any], errors: list[str]) -> N
 
 
 def _validate_parent(schema: dict, parent_type_name: str | None, errors: list[str]) -> None:
-    """Erzwungene Objekt-Hierarchie (2.2a): ``allowedParentTypes`` listet die
-    Namen zulässiger Eltern-Ordnerklassen, ``ROOT_PARENT_TYPE`` steht für die
-    Platzierung direkt unter der Wurzel. Fehlt ``allowedParentTypes`` oder ist
-    die Liste leer, ist der Typ überall platzierbar (Rückwärtskompatibilität).
-    ``parent_type_name=None`` bedeutet "Elternordner ohne eigenen Objekttyp"
-    (kein Alias für die Wurzel - dafür ist ``ROOT_PARENT_TYPE`` zuständig)."""
+    """Enforced object hierarchy (2.2a): ``allowedParentTypes`` lists the
+    names of permitted parent folder classes, ``ROOT_PARENT_TYPE`` stands for
+    placement directly under the root. If ``allowedParentTypes`` is missing
+    or the list is empty, the type can be placed anywhere (backward
+    compatibility). ``parent_type_name=None`` means "parent folder without
+    its own object type" (not an alias for the root - ``ROOT_PARENT_TYPE`` is
+    responsible for that)."""
     allowed = schema.get("allowedParentTypes")
     if not allowed:
         return
@@ -159,14 +160,15 @@ def validate(
     attributes: dict[str, Any],
     parent_type_name: str | None = None,
 ) -> list[str]:
-    """Validiert ``attributes`` (und ``name``) gegen ein Objekttyp-Schema (2.2).
+    """Validates ``attributes`` (and ``name``) against an object type schema (2.2).
 
-    Unterstützt Pflichtfelder, bedingte Pflichtfelder, Musterprüfung für Namen
-    und Werte, Wertebereiche (min/max) - die in 4.5 als Minimum geforderten
-    Regeltypen - sowie die erzwungene Platzierungs-Hierarchie aus 2.2a
-    (``allowedParentTypes`` im Schema, ``parent_type_name`` als aufgelöster
-    Name der Elternklasse bzw. ``ROOT_PARENT_TYPE`` für die Wurzel). Gibt eine
-    Liste menschenlesbarer Fehlermeldungen zurück (leer = gültig).
+    Supports required fields, conditionally required fields, pattern
+    validation for names and values, value ranges (min/max) - the rule types
+    required as a minimum in 4.5 - as well as the enforced placement
+    hierarchy from 2.2a (``allowedParentTypes`` in the schema,
+    ``parent_type_name`` as the resolved name of the parent class or
+    ``ROOT_PARENT_TYPE`` for the root). Returns a list of human-readable
+    error messages (empty = valid).
     """
     errors: list[str] = []
 

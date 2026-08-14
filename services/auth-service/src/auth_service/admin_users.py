@@ -13,9 +13,10 @@ class UserNotFoundError(Exception):
 
 
 def build_admin_client(settings: Settings) -> KeycloakAdmin:
-    """Eigener, auf den Anwendungs-Realm (nicht `master`) fixierter Admin-Client
-    für Nutzerverwaltung (4.4/8, Admin-UI seit P4-S3) - getrennt von der
-    Bootstrap-Nutzung in `bootstrap.py`, die realmübergreifend arbeitet."""
+    """A dedicated admin client fixed to the application realm (not
+    `master`) for user management (4.4/8, Admin UI since P4-S3) - separate
+    from the bootstrap usage in `bootstrap.py`, which operates across
+    realms."""
     admin = KeycloakAdmin(
         server_url=settings.keycloak_base_url,
         username=settings.keycloak_admin_username,
@@ -43,32 +44,33 @@ def list_users(admin: KeycloakAdmin) -> list[dict]:
 
 
 def search_users(admin: KeycloakAdmin, query: str) -> list[dict]:
-    """Verzeichnis-Suche (2.5/4.4, P15-S4) - anders als `list_users()` bewusst
-    OHNE `admin.user_management`-Gate (siehe `find_user_by_username` für
-    dasselbe Muster), seit P19-S3 aber über die "everyone"-Gruppe aus
-    permission-service gegated statt komplett offen (`main.py.search_
-    directory`). Nutzt Keycloaks eingebauten `search`-Query-Parameter
-    statt eines eigenen Filter-Mechanismus - identisches Verhalten wie die
-    Nutzersuche im Keycloak-eigenen Admin-Konsolen-UI. Per Live-Verifikation
-    (P15-S4) bestätigt: kein echtes Teilstring-/Infix-Matching, sondern ein
-    Präfix-Treffer je Feld (Benutzername/Vor-/Nachname/E-Mail) - z. B. matcht
-    "config" oder "conf" den Benutzernamen "config-admin", "admin" (mitten im
-    String) hingegen nicht. Case-insensitive, serverseitig in Keycloak selbst
-    umgesetzt."""
+    """Directory search (2.5/4.4, P15-S4) - unlike `list_users()`,
+    deliberately WITHOUT the `admin.user_management` gate (see
+    `find_user_by_username` for the same pattern); since P19-S3, however,
+    gated via the "everyone" group from permission-service instead of being
+    completely open (`main.py.search_directory`). Uses Keycloak's built-in
+    `search` query parameter instead of a custom filter mechanism -
+    identical behavior to the user search in Keycloak's own admin console
+    UI. Confirmed via live verification (P15-S4): not true
+    substring/infix matching, but a prefix match per field
+    (username/first name/last name/email) - e.g. "config" or "conf" matches
+    the username "config-admin", whereas "admin" (in the middle of the
+    string) does not. Case-insensitive, implemented server-side in Keycloak
+    itself."""
     return [_to_user_dict(u) for u in admin.get_users(query={"search": query})]
 
 
 def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
-    """Exakte Namenssuche für `GET /users/lookup` (2.5, P14-S6) - anders als
-    `list_users()` bewusst OHNE `admin.user_management`-Gate, seit P19-S3
-    aber über die "everyone"-Gruppe aus permission-service gegated statt
-    komplett offen (`main.py.lookup_user`): ein einzelner, exakt benannter
-    Account darf aufgelöst werden (nötig, um z. B. jemanden per Username in
-    einen Teamspace einzuladen - `X-DMS-Principal` ist die Keycloak-`sub`-
-    UUID, kein Nutzer kennt die UUID einer anderen Person auswendig). Liefert
-    deshalb auch bewusst nur `id`/`username` zurück, keine E-Mail/Namen/
-    Freigabestatus wie `list_users()` - keine allgemeine Verzeichnis-
-    Funktion, siehe `docs/services/auth-service.md`."""
+    """Exact name search for `GET /users/lookup` (2.5, P14-S6) - unlike
+    `list_users()`, deliberately WITHOUT the `admin.user_management` gate;
+    since P19-S3, however, gated via the "everyone" group from
+    permission-service instead of being completely open
+    (`main.py.lookup_user`): a single, exactly named account may be
+    resolved (needed e.g. to invite someone into a teamspace by username -
+    `X-DMS-Principal` is the Keycloak `sub` UUID, and no user knows another
+    person's UUID by heart). Deliberately returns only `id`/`username`
+    accordingly, no email/name/enabled status like `list_users()` - not a
+    general directory function, see `docs/services/auth-service.md`."""
     matches = admin.get_users(query={"username": username, "exact": True})
     if not matches:
         return None
@@ -76,14 +78,14 @@ def find_user_by_username(admin: KeycloakAdmin, username: str) -> dict | None:
 
 
 def find_user_by_id(admin: KeycloakAdmin, user_id: str) -> dict | None:
-    """Rückwärts-Identitätsauflösung für `GET /users/{user_id}` (Post-Roadmap
-    Phase 19 Session 4, ADR 0069) - Gegenstück zu `find_user_by_username`
-    oben: `X-DMS-Principal`/`delegator_principal_id`/`principal_id` u. ä. sind
-    überall im System die Keycloak-`sub`-UUID, kein Nutzer kennt sie
-    auswendig - Frontends zeigten diese UUIDs bislang roh an (Delegationen,
-    Teamspace-Mitgliederlisten), mangels einer Rückwärtsauflösung. Liefert
-    bewusst nur `id`/`username` zurück, gleiches Muster wie
-    `find_user_by_username` - keine allgemeine Verzeichnis-Funktion."""
+    """Reverse identity resolution for `GET /users/{user_id}` (Post-Roadmap
+    Phase 19 Session 4, ADR 0069) - the counterpart to `find_user_by_username`
+    above: `X-DMS-Principal`/`delegator_principal_id`/`principal_id` etc.
+    are the Keycloak `sub` UUID everywhere in the system, and no user knows
+    it by heart - frontends previously displayed these UUIDs raw
+    (delegations, teamspace member lists), for lack of a reverse
+    resolution. Deliberately returns only `id`/`username`, the same pattern
+    as `find_user_by_username` - not a general directory function."""
     try:
         raw = admin.get_user(user_id)
     except KeycloakGetError as exc:
@@ -102,9 +104,10 @@ def create_user(
     first_name: str,
     last_name: str,
 ) -> dict:
-    """`emailVerified`+`firstName`/`lastName` sind Pflicht - ohne sie löst
-    Keycloak 25s Default-User-Profile beim ersten Login "Account is not fully
-    set up" aus (dieselbe Falle wie in `bootstrap.py`/den Auth-Service-Tests)."""
+    """`emailVerified`+`firstName`/`lastName` are mandatory - without them,
+    Keycloak 25's default user profile triggers "Account is not fully set
+    up" on first login (the same trap as in `bootstrap.py`/the Auth Service
+    tests)."""
     try:
         user_id = admin.create_user(
             payload={
@@ -138,10 +141,10 @@ _THEME_ATTRIBUTE = "dms_theme"
 
 
 def get_theme_preference(admin: KeycloakAdmin, user_id: str) -> str:
-    """Theme-Präferenz aus einem Keycloak-Nutzerattribut (P4-S6, Konzept 8) -
-    kein neuer Persistenz-Baustein nötig, da Nutzerkonten ohnehin vollständig
-    in Keycloak leben (s. `list_users`). Keycloak liefert Attribute als
-    Listen zurück, unabhängig davon, ob sie single- oder multi-valued sind.
+    """Theme preference from a Keycloak user attribute (P4-S6, concept 8) -
+    no new persistence component needed, since user accounts already live
+    entirely in Keycloak (see `list_users`). Keycloak returns attributes as
+    lists regardless of whether they are single- or multi-valued.
     """
     raw = admin.get_user(user_id)
     values = raw.get("attributes", {}).get(_THEME_ATTRIBUTE)
@@ -149,9 +152,9 @@ def get_theme_preference(admin: KeycloakAdmin, user_id: str) -> str:
 
 
 def set_theme_preference(admin: KeycloakAdmin, user_id: str, theme: str) -> None:
-    """Attribute einzeln zusammenführen statt zu überschreiben - ein Update
-    ohne bestehende Attribute im Payload würde sie bei Keycloak sonst
-    löschen."""
+    """Merge attributes individually instead of overwriting - an update
+    without existing attributes in the payload would otherwise delete them
+    in Keycloak."""
     raw = admin.get_user(user_id)
     attributes = dict(raw.get("attributes", {}))
     attributes[_THEME_ATTRIBUTE] = [theme]

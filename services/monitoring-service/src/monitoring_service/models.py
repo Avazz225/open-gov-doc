@@ -8,12 +8,12 @@ GLOBAL_DEFAULT_KEY = "__global__"
 
 
 class SensorConfigEntry(Base):
-    """Sensor-Aktivierungskonfiguration (10.1, P11-S1) - ein Sonderschlüssel
-    `__global__` trägt die Grundeinstellung ("alles"/"nichts" überwachen),
-    jeder andere Schlüssel ist ein sensorspezifischer Override, der die
-    Grundeinstellung für genau diesen Sensor überschreibt. Bewusst keine
-    Anbindung an 7.3 (Konfigurationsexport existiert erst P12-S3, siehe
-    P11-S0-Befund) - eigenständige, auditierte Persistenz bis dahin."""
+    """Sensor activation configuration (10.1, P11-S1) - a special key
+    `__global__` holds the base setting ("monitor everything"/"nothing"),
+    every other key is a sensor-specific override that overrides the
+    base setting for exactly that sensor. Deliberately no
+    connection to 7.3 (configuration export only exists from P12-S3, see
+    P11-S0 finding) - standalone, audited persistence until then."""
 
     __tablename__ = "sensor_config"
 

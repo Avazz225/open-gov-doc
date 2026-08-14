@@ -32,14 +32,13 @@ async def upsert_ocr_result(
     attempts: int = 0,
     next_retry_at: datetime | None = None,
 ) -> OcrResult:
-    """Legt ein OCR-Ergebnis an oder überschreibt eine bereits vorhandene Zeile
-    mit demselben natürlichen Schlüssel (siehe models.py) - macht erneutes
-    Verarbeiten derselben Version idempotent statt Duplikate anzuhäufen.
-    `attempts`/`next_retry_at` werden bei Erfolg/Skip auf die Defaults (0/None)
-    gesetzt - ein erfolgreicher Neudurchlauf nach vorherigen Fehlschlägen
-    räumt deren Backoff-Zustand auf. Fehlschläge laufen über `record_failure`
-    unten, das die tatsächlichen Werte berechnet (Post-Roadmap Phase 20
-    Session 4, ADR 0080)."""
+    """Creates an OCR result or overwrites an already existing row with the
+    same natural key (see models.py) - makes reprocessing the same version
+    idempotent instead of accumulating duplicates. `attempts`/`next_retry_at`
+    are reset to the defaults (0/None) on success/skip - a successful rerun
+    after previous failures clears their backoff state. Failures go through
+    `record_failure` below, which computes the actual values (Post-Roadmap
+    Phase 20 Session 4, ADR 0080)."""
     key = ocr_result_id(document_id, version_number)
     now = datetime.now(UTC)
     result = await session.get(OcrResult, key)
@@ -71,13 +70,12 @@ async def record_failure(
     error: str,
     max_attempts: int,
 ) -> OcrResult:
-    """Zeichnet einen technischen Fehlschlag auf (Post-Roadmap Phase 20
-    Session 4, ADR 0080) - liest zuerst die bisherige `attempts`-Zahl (falls
-    die Zeile schon existiert), erhöht sie und setzt `status`/`next_retry_at`
-    entsprechend: unterhalb `max_attempts` bleibt `status="failed"`
-    (retry-fähig) mit einem per `compute_backoff_seconds` gesetzten
-    `next_retry_at`, ab `max_attempts` wechselt `status` auf das echte
-    Terminalstatus `failed_permanent`."""
+    """Records a technical failure (Post-Roadmap Phase 20 Session 4, ADR 0080) -
+    first reads the existing `attempts` count (if the row already exists),
+    increments it, and sets `status`/`next_retry_at` accordingly: below
+    `max_attempts`, `status` stays `"failed"` (retryable) with a
+    `next_retry_at` set via `compute_backoff_seconds`; at `max_attempts`,
+    `status` switches to the true terminal status `failed_permanent`."""
     key = ocr_result_id(document_id, version_number)
     existing = await session.get(OcrResult, key)
     attempts = (existing.attempts if existing is not None else 0) + 1
@@ -105,14 +103,14 @@ async def record_failure(
 
 
 async def reset_for_retry(session: AsyncSession, result: OcrResult) -> None:
-    """Setzt `attempts`/`error_message`/`next_retry_at` vor einem manuellen
-    Neustart zurück (Post-Roadmap Phase 20 Session 4, ADR 0080) - MUSS vor
-    einem erneuten `process_version`-Aufruf laufen: sonst zählt
-    `record_failure` von der bereits erschöpften `attempts`-Zahl weiter und
-    ein `failed_permanent`-Ergebnis könnte nie wieder aus diesem Zustand
-    herauskommen (bei der Live-Verifikation dieser Session als echter Bug
-    gefunden - `retry_ocr_result` rief `process_version` zunächst ohne
-    diesen Reset auf)."""
+    """Resets `attempts`/`error_message`/`next_retry_at` before a manual
+    restart (Post-Roadmap Phase 20 Session 4, ADR 0080) - MUST run before a
+    renewed `process_version` call: otherwise `record_failure` keeps
+    counting up from the already exhausted `attempts` number and a
+    `failed_permanent` result could never escape this state again (found as
+    a genuine bug during live verification of this session -
+    `retry_ocr_result` initially called `process_version` without this
+    reset)."""
     result.attempts = 0
     result.error_message = None
     result.next_retry_at = None
@@ -120,8 +118,8 @@ async def reset_for_retry(session: AsyncSession, result: OcrResult) -> None:
 
 
 async def list_due_for_retry(session: AsyncSession) -> list[OcrResult]:
-    """Retry-fähige OCR-Ergebnisse, deren Backoff-Fenster bereits abgelaufen
-    ist (Post-Roadmap Phase 20 Session 4, ADR 0080) - abgearbeitet vom neuen
+    """Retryable OCR results whose backoff window has already expired
+    (Post-Roadmap Phase 20 Session 4, ADR 0080) - processed by the new
     `_ocr_retry_poll_loop`."""
     now = datetime.now(UTC)
     result = await session.execute(
@@ -147,10 +145,10 @@ async def list_ocr_results(
     version_number: int | None = None,
     status: str | None = None,
 ) -> list[OcrResult]:
-    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
-    ohne ihn liefert dies eine dokumentübergreifende Liste (Admin-UI-Bedarf:
-    alle `failed_permanent`-Ergebnisse sehen, nicht nur die eines einzelnen
-    Dokuments)."""
+    """``document_id`` has been optional since Post-Roadmap Phase 20
+    Session 7 - without it, this returns a cross-document list (admin UI
+    need: see all `failed_permanent` results, not just those of a single
+    document)."""
     query = select(OcrResult)
     if document_id is not None:
         query = query.where(OcrResult.document_id == document_id)
@@ -163,18 +161,18 @@ async def list_ocr_results(
 
 
 async def get_config(session: AsyncSession) -> OcrConfig:
-    """Liest die (einzige) Konfigurationszeile, legt sie mit Defaults an, falls
-    sie noch nie gespeichert wurde (frischer Service, vor dem ersten `PUT
-    /config`) - macht ein separates Migrations-/Seed-Skript überflüssig."""
+    """Reads the (single) configuration row, creating it with defaults if it
+    has never been saved before (fresh service, before the first `PUT
+    /config`) - makes a separate migration/seed script unnecessary."""
     config = await session.get(OcrConfig, _CONFIG_ID)
     if config is None:
         config = OcrConfig(
             id=_CONFIG_ID,
             max_word_count=None,
             batch_size=DEFAULT_BATCH_SIZE,
-            # Standardmäßig nur PDFs (Nutzer-Feedback) - Rasterbilder erfordern
-            # eine bewusste Admin-Freigabe über PUT /config, kein automatischer
-            # OCR-Lauf auf jedes hochgeladene Bild.
+            # Only PDFs by default (user feedback) - raster images require a
+            # deliberate admin opt-in via PUT /config, no automatic OCR run
+            # on every uploaded image.
             allowed_content_types=["application/pdf"],
             updated_at=datetime.now(UTC),
         )

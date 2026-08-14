@@ -1,58 +1,58 @@
-"""Serverseitiges Neutralisieren externer Subressourcen-Referenzen in
-HTML-Vorschauinhalten (Post-Roadmap Phase 21 Session 3, ADR 0086) - siehe
-`main.py`s `download_current_content`/`download_version_content`.
+"""Server-side neutralization of external sub-resource references in
+HTML preview content (post-roadmap phase 21 session 3, ADR 0086) - see
+`main.py`'s `download_current_content`/`download_version_content`.
 
-Grund: `user-ui`s `PreviewPane` rendert HTML-Dokumente über ein
-`sandbox=""`-iframe mit `srcDoc` (kein `src` auf eine eigene Origin) -
-`sandbox=""` blockiert Skriptausführung/Top-Navigation/Formulare, aber NICHT
-das normale Nachladen von Subressourcen (Bilder, Stylesheets, ...), und ein
-CSP-Header wirkt bei `srcDoc`-Inhalten ohne eigene Origin nur eingeschränkt
-(kein fester Origin, an den sich ein Header binden ließe). Ein hochgeladenes
-HTML-Dokument mit z. B. ``<img src="https://tracker.example/pixel.gif?...">``
-würde diese Anfrage sonst beim bloßen Öffnen der Vorschau auslösen
-(Tracking-/Datenleck-Risiko), unabhängig vom Sandbox-Attribut."""
+Reason: `user-ui`'s `PreviewPane` renders HTML documents via a
+`sandbox=""` iframe with `srcDoc` (no `src` pointing to its own origin) -
+`sandbox=""` blocks script execution/top-level navigation/forms, but NOT
+the normal loading of sub-resources (images, stylesheets, ...), and a
+CSP header only has limited effect on `srcDoc` content without its own
+origin (no fixed origin for a header to bind to). An uploaded HTML
+document with, e.g., ``<img src="https://tracker.example/pixel.gif?...">``
+would otherwise trigger this request simply by opening the preview
+(tracking/data-leak risk), regardless of the sandbox attribute."""
 
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
-# mailto:/tel: lösen selbst bei einem Klick keinen Netzwerk-Request innerhalb
-# der Seite aus (öffnen höchstens einen externen Handler), data: ist bereits
-# vollständig im Dokument eingebettet - keines der drei ist ein externer
-# Subressourcen-Request.
+# mailto:/tel: do not trigger a network request within the page
+# even on click (they open an external handler at most), data: is already
+# fully embedded in the document - none of the three is an external
+# sub-resource request.
 _ALLOWED_SCHEMES = {"data", "mailto", "tel"}
 
 
 def _is_blocked(value: str) -> bool:
     value = value.strip()
     if not value:
-        # Ein leerer `src`/`href`-Wert lässt manche Browser die aktuelle
-        # Seite erneut anfordern (bekannte Eigenart) - sicherheitshalber
-        # ebenfalls blockiert statt als harmlos behandelt.
+        # An empty `src`/`href` value causes some browsers to re-request
+        # the current page (a known quirk) - blocked as a precaution
+        # instead of being treated as harmless.
         return True
     if value.startswith("#"):
         return False
     parts = urlsplit(value)
     if parts.scheme:
         return parts.scheme.lower() not in _ALLOWED_SCHEMES
-    # Kein Schema: entweder schema-relativ ("//host/...", `urlsplit` liefert
-    # dafür ein leeres `scheme` mit gesetztem `netloc`) oder ein relativer
-    # Pfad - beides blockiert, da ein `srcDoc`-Inhalt keine sichere, im
-    # Vorschaukontext auflösbare Basis-URL hat.
+    # No scheme: either scheme-relative ("//host/...", for which
+    # `urlsplit` returns an empty `scheme` with `netloc` set) or a relative
+    # path - both are blocked, since `srcDoc` content has no safe base URL
+    # that can be resolved in the preview context.
     return True
 
 
 def rewrite_external_references(html_bytes: bytes) -> bytes:
-    """Ersetzt jede externe `src`/`href`-Referenz irgendeines Tags durch
-    nichts (Attribut entfernt, verhindert die Anfrage) und fügt direkt danach
-    eine sichtbare Markierung ein - `data:`/`mailto:`/`tel:`-URIs und reine
-    Fragment-Anker (``#...``) bleiben unverändert (kein Netzwerkzugriff).
-    Attribut-getrieben statt Tag-Namen-getrieben (kein hartkodiertes
-    ``img``/``script``/``iframe``/...-Set) - erfasst damit automatisch auch
-    unübliche Tags mit `src`/`href`. Bewusst NICHT abgedeckt (siehe ADR 0086
-    "Konsequenzen"): `srcset`, `poster`, `background`, sowie `url(...)`
-    innerhalb von `style`-Attributen/`<style>`-Blöcken - der Plan nennt
-    ausdrücklich nur `src`/`href`."""
+    """Replaces every external `src`/`href` reference of any tag with
+    nothing (attribute removed, prevents the request) and inserts a
+    visible marker directly after it - `data:`/`mailto:`/`tel:` URIs and
+    plain fragment anchors (``#...``) are left unchanged (no network
+    access). Attribute-driven rather than tag-name-driven (no hardcoded
+    ``img``/``script``/``iframe``/... set) - this automatically also
+    covers unusual tags with `src`/`href`. Deliberately NOT covered (see
+    ADR 0086 "Consequences"): `srcset`, `poster`, `background`, as well as
+    `url(...)` within `style` attributes/`<style>` blocks - the plan
+    explicitly names only `src`/`href`."""
     soup = BeautifulSoup(html_bytes, "html.parser")
 
     meta_charset = soup.find("meta", charset=True)

@@ -15,24 +15,24 @@ from wsgidav.util import join_uri
 from webdav_connector.license_client import LicenseStatusClient
 
 _DEFAULT_ACTOR = "webdav-connector"
-# WebDAV-Sitzungs-Kennung fuer die document-service-Sperre (4.2) - eine
-# Basic-Auth-Sitzung hat kein natives Session-Konzept wie ein Browser-Login,
-# daher ein pro Request stabiler, aber ueber mehrere Requests desselben
-# WebDAV-Clients wiederverwendbarer Wert: der Nutzername selbst reicht als
-# Unterscheidungsmerkmal, da document-service Sperren ohnehin pro Dokument
-# fuehrt (siehe docs/services/webdav-connector.md fuer die bewusste Grenze
-# - eine ueber ein echtes WebDAV-LOCK gehaltene Sperre wird NICHT ueber die
-# gesamte Bearbeitungsdauer gespiegelt, nur waehrend jeder einzelnen
-# Schreiboperation).
+# WebDAV session identifier for the document-service lock (4.2) - a
+# Basic-Auth session has no native session concept like a browser login,
+# so this is a value that is stable per request but reusable across
+# multiple requests from the same WebDAV client: the username itself is
+# sufficient as a distinguishing feature, since document-service locking is
+# per-document anyway (see docs/services/webdav-connector.md for the
+# deliberate boundary - a lock held via a real WebDAV LOCK is NOT mirrored
+# over the entire editing duration, only during each individual write
+# operation).
 _SESSION_PREFIX = "webdav:"
 
 
 class _CapturingBuffer(BytesIO):
-    """`wsgidav`s echter `do_PUT`-Handler ruft `fileobj.close()` auf, BEVOR er
-    `res.end_write()` aufruft (request_server.py) - ein `getvalue()` danach
-    wuerde `ValueError: I/O operation on closed file` werfen. Deshalb wird der
-    Inhalt hier beim Schliessen abgegriffen, statt ihn erst in `end_write()`
-    aus dem (zu dem Zeitpunkt schon geschlossenen) Puffer zu lesen."""
+    """`wsgidav`'s real `do_PUT` handler calls `fileobj.close()` BEFORE
+    calling `res.end_write()` (request_server.py) - a `getvalue()`
+    afterwards would raise `ValueError: I/O operation on closed file`.
+    Therefore the content is captured here upon closing, instead of only
+    being read from the (by then already closed) buffer in `end_write()`."""
 
     def __init__(self, on_close) -> None:
         super().__init__()
@@ -52,12 +52,12 @@ _BY_ID_PREFIX = "by-id/"
 
 
 def _parse_by_id_path(path: str) -> str | None:
-    """Office-Direktbearbeitung (Post-Roadmap-Feature): `/webdav/by-id/
-    <document-id>.<ext>` statt eines Ordnerpfads - `document-id` ist ein
-    punktloses `uuid4()` (siehe document-service), das Splitten auf den
-    LETZTEN Punkt trennt also zuverlässig die rein kosmetische `.ext`-Endung
-    ab. Liefert `None`, wenn der Pfad kein `by-id/...`-Pfad ist (normaler
-    ordnerpfadbasierter Zugriff bleibt komplett unverändert)."""
+    """Office direct editing (post-roadmap feature): `/webdav/by-id/
+    <document-id>.<ext>` instead of a folder path - `document-id` is a
+    dot-free `uuid4()` (see document-service), so splitting on the LAST dot
+    reliably strips off the purely cosmetic `.ext` suffix. Returns `None`
+    if the path is not a `by-id/...` path (normal folder-path-based access
+    remains completely unchanged)."""
     trimmed = path.strip("/")
     if not trimmed.startswith(_BY_ID_PREFIX):
         return None
@@ -66,9 +66,9 @@ def _parse_by_id_path(path: str) -> str | None:
 
 
 def _split_dest_path(dest_path: str) -> tuple[str, str]:
-    """Zerlegt einen WebDAV-Zielpfad (aus dem `Destination`-Header, von
-    wsgidav bereits auf den reinen Ressourcenpfad reduziert) in
-    (Elternpfad, neuer Name)."""
+    """Splits a WebDAV destination path (from the `Destination` header,
+    already reduced by wsgidav to the plain resource path) into
+    (parent path, new name)."""
     trimmed = dest_path.strip("/")
     if "/" not in trimmed:
         return "", trimmed
@@ -77,18 +77,18 @@ def _split_dest_path(dest_path: str) -> tuple[str, str]:
 
 
 class _ByIdVirtualCollection(DAVCollection):
-    """Office-Direktbearbeitung (Post-Roadmap-Feature): rein synthetische
-    Kollektion für den `by-id/`-Namensraum selbst (kein echter `TreeFolder`).
-    Nötig, weil wsgidavs `do_PUT`-Handler VOR jedem Schreibzugriff den
-    Elternpfad des Ziels auflöst und `is_collection` darauf prüft
-    (`request_server.py`, "PUT parent must be a collection") - ohne diese
-    Klasse würde `get_resource_inst("by-id")` (der von wsgidav berechnete
-    Elternpfad von `by-id/<document-id>.<ext>`) ins Leere laufen (kein realer
-    Ordner dieses Namens), und jedes Einchecken einer neuen Version über den
-    Office-Direktbearbeitungs-Pfad würde mit `409` fehlschlagen. Nicht
-    durchsuchbar (`get_member_names` liefert bewusst nichts) - die einzige
-    unterstützte Zugriffsart ist `by-id/<document-id>.<ext>` direkt, nie eine
-    Auflistung des Namensraums."""
+    """Office direct editing (post-roadmap feature): a purely synthetic
+    collection for the `by-id/` namespace itself (not a real `TreeFolder`).
+    Necessary because wsgidav's `do_PUT` handler resolves the target's
+    parent path and checks `is_collection` against it BEFORE every write
+    access (`request_server.py`, "PUT parent must be a collection") -
+    without this class, `get_resource_inst("by-id")` (the parent path of
+    `by-id/<document-id>.<ext>` as computed by wsgidav) would resolve to
+    nothing (no real folder of that name), and every check-in of a new
+    version via the Office direct editing path would fail with `409`. Not
+    browsable (`get_member_names` deliberately returns nothing) - the only
+    supported access pattern is `by-id/<document-id>.<ext>` directly, never
+    a listing of the namespace."""
 
     def get_member_names(self) -> list[str]:
         return []
@@ -134,9 +134,9 @@ class DmsDavFolder(DAVCollection):
         return DmsDavFolder(join_uri(self.path, name), self.environ, created)
 
     def create_empty_resource(self, name: str):
-        # Wird fuer PUT auf einen noch nicht existierenden Pfad aufgerufen -
-        # das eigentliche Anlegen in document-service passiert erst in
-        # `DmsDavDocument.end_write()`, sobald der volle Inhalt vorliegt.
+        # Called for a PUT to a path that does not yet exist - the actual
+        # creation in document-service only happens in
+        # `DmsDavDocument.end_write()`, once the full content is available.
         return DmsDavDocument(
             join_uri(self.path, name),
             self.environ,
@@ -146,9 +146,9 @@ class DmsDavFolder(DAVCollection):
         )
 
     def handle_delete(self) -> bool:
-        # Native Behandlung statt wsgidavs generischem "Mitglied fuer
-        # Mitglied loeschen" (spart O(Kinder) HTTP-Rundreisen und passt zur
-        # ohnehin vorhandenen Baumstruktur).
+        # Native handling instead of wsgidav's generic "delete member by
+        # member" (saves O(children) HTTP round trips and fits the tree
+        # structure that already exists anyway).
         self.provider.check_license("write")
         folders, documents = self._tree.list_children(self.folder.id)
         for document in documents:
@@ -231,11 +231,11 @@ class DmsDavDocument(DAVNonCollection):
         content = self._write_content
         actor = _actor(self.environ)
 
-        # Neuanlage (kein `self.document` bislang) braucht keine Sperre -
-        # es existiert noch nichts, das eine parallele Bearbeitung stoeren
-        # koennte. Ein Update haelt document-services echte Sperre fuer die
-        # Dauer des Schreibvorgangs (4.2) - sichtbar in der User-UI, waehrend
-        # der WebDAV-Client gerade schreibt.
+        # New creation (no `self.document` so far) needs no lock - nothing
+        # exists yet that a concurrent edit could disturb. An update holds
+        # document-service's real lock for the duration of the write
+        # operation (4.2) - visible in the user UI while the WebDAV client
+        # is currently writing.
         if self.document is None:
             self.document = self._tree.write_document(
                 folder_id=self.folder_id,
@@ -288,10 +288,10 @@ class DmsDavDocument(DAVNonCollection):
 
 
 class DmsDavProvider(DAVProvider):
-    """wsgidav-`DAVProvider`, der `folder-service`/`document-service` über
-    `dms-connector-sdk`s `DmsTreeClient` bedient (3.3, P12-S1) - kein eigenes
-    Dateisystem, jede Anfrage übersetzt sich live in HTTP-Aufrufe gegen die
-    bestehenden DMS-Services."""
+    """wsgidav `DAVProvider` that serves `folder-service`/`document-service`
+    via `dms-connector-sdk`'s `DmsTreeClient` (3.3, P12-S1) - no filesystem
+    of its own, every request translates live into HTTP calls against the
+    existing DMS services."""
 
     def __init__(self, tree: DmsTreeClient, license_client: LicenseStatusClient) -> None:
         super().__init__()
@@ -299,11 +299,11 @@ class DmsDavProvider(DAVProvider):
         self.license_client = license_client
 
     def check_license(self, action: Literal["read", "write"]) -> None:
-        """Demo-Modus/Sperrverhalten (Konzept 9.3, P9-S2-Muster) - Connectoren
-        sind laut 3.3 wörtlich als lizenzierbare Komponente genannt. Anders
-        als `workflow_service`s `Depends()`-Gate (dort echte FastAPI-Routen)
-        greift dies hier direkt in den wsgidav-Callback-Methoden, da der
-        eigentliche WebDAV-Verkehr nicht über FastAPI-Routen läuft."""
+        """Demo mode/lock behavior (concept 9.3, P9-S2 pattern) - connectors
+        are explicitly named in 3.3 as a licensable component. Unlike
+        `workflow_service`'s `Depends()` gate (real FastAPI routes there),
+        this hooks in directly within the wsgidav callback methods, since
+        actual WebDAV traffic does not run through FastAPI routes."""
         status = self.license_client.get_status()
         if status == "unlicensed":
             raise DAVError(
@@ -316,20 +316,20 @@ class DmsDavProvider(DAVProvider):
     def get_resource_inst(self, path: str, environ: dict):
         self.check_license("read")
         if path.strip("/") == "by-id":
-            # wsgidavs `do_PUT`-Handler löst vor jedem Schreibzugriff den
-            # Elternpfad des Ziels auf und prüft `is_collection` - für
-            # `by-id/<document-id>.<ext>` ist das genau dieser bare
-            # Namensraum-Pfad, siehe `_ByIdVirtualCollection`-Docstring.
+            # wsgidav's `do_PUT` handler resolves the target's parent path
+            # and checks `is_collection` before every write access - for
+            # `by-id/<document-id>.<ext>` that is exactly this bare
+            # namespace path, see the `_ByIdVirtualCollection` docstring.
             return _ByIdVirtualCollection(path, environ)
         by_id = _parse_by_id_path(path)
         if by_id is not None:
-            # Office-Direktbearbeitung (Post-Roadmap-Feature): direkte
-            # ID-Auflösung statt des ansonsten üblichen ordnerpfadbasierten
-            # `resolve_path()`-Baumdurchlaufs (O(Tiefe) HTTP-Aufrufe) - die
-            # Start-URL kennt nur die Dokument-ID, keinen Ordnerpfad. Die
-            # `.ext`-Endung im Pfad dient nur der lokalen Dateityp-Erkennung
-            # von Office selbst und wird hier verworfen (der echte
-            # Content-Type kommt weiterhin aus den Dokumentmetadaten).
+            # Office direct editing (post-roadmap feature): direct ID
+            # resolution instead of the otherwise usual folder-path-based
+            # `resolve_path()` tree traversal (O(depth) HTTP calls) - the
+            # start URL only knows the document ID, not a folder path. The
+            # `.ext` suffix in the path only serves Office's own local file
+            # type detection and is discarded here (the real content type
+            # still comes from the document metadata).
             try:
                 node = self.tree.get_document(by_id)
             except PathNotFoundError:

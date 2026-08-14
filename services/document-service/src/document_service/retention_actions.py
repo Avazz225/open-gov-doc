@@ -33,12 +33,13 @@ async def execute_forced_deletion(
     triggered_by: str | None,
     governance_bypass_role: str,
 ) -> None:
-    """Physische Zwangslöschung (5.2a) - eine aktive Governance-Mode-Sperre
-    wird hier bewusst umgangen (`bypass_governance=True`): genau das ist laut
-    Konzept 5.2a der sanktionierte Ausnahmefall, für den Governance- statt
-    Compliance-Mode überhaupt gewählt wurde (siehe ADR 0030). Entfernt
-    anschließend Storage-Inhalte, Document-/DocumentVersion-Zeilen
-    vollständig und hinterlässt nur den `DeletionRegisterEntry` als Nachweis."""
+    """Physical forced deletion (5.2a) - an active governance-mode lock
+    is deliberately bypassed here (`bypass_governance=True`): according to
+    concept 5.2a, this is exactly the sanctioned exception case for which
+    governance mode was chosen over compliance mode in the first place (see
+    ADR 0030). Subsequently removes storage content and Document/
+    DocumentVersion rows completely, leaving only the `DeletionRegisterEntry`
+    as evidence."""
     await _delete_all_versions_from_storage(
         session,
         storage,
@@ -60,17 +61,16 @@ async def purge_expired_trash_entry(
     trigger: str = "trash_expiry",
     triggered_by: str | None = None,
 ) -> bool:
-    """Papierkorb-Bereinigung (5.2) - routinemäßig nach Ablauf der
-    Wiederherstellungsfrist (`trigger="trash_expiry"`, Default, vom
-    `_retention_poll_loop` aufgerufen) ODER manuell auf Abruf durch die
-    Löschadministration (2.5, P15-S1, `trigger="manual_purge"` mit echtem
-    `triggered_by`) - identische Ausführung, nur der Auslöser/das
-    Löschregister-Trigger-Feld unterscheiden sich. Im Unterschied zur
-    Zwangslöschung KEIN automatischer Governance-Bypass: ein unter
-    Object-Lock stehendes Dokument bleibt blockiert (beim automatischen Weg
-    bis zum nächsten Durchlauf, beim manuellen Weg meldet der Aufrufer das
-    dem Endpunkt-Aufrufer als 409). Gibt zurück, ob die Bereinigung
-    tatsächlich stattgefunden hat."""
+    """Trash cleanup (5.2) - routinely after the restoration period
+    expires (`trigger="trash_expiry"`, default, called by
+    `_retention_poll_loop`) OR manually on demand by the deletion
+    administration (2.5, P15-S1, `trigger="manual_purge"` with a real
+    `triggered_by`) - identical execution, only the trigger/the deletion
+    register trigger field differs. Unlike forced deletion, NO automatic
+    governance bypass: a document under object lock remains blocked (on the
+    automatic path until the next run, on the manual path the caller
+    reports this to the endpoint caller as 409). Returns whether the
+    cleanup actually took place."""
     try:
         await _delete_all_versions_from_storage(
             session, storage, document_id, bypass_governance=False, x_dms_roles=""

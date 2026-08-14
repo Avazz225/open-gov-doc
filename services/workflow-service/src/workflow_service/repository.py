@@ -17,9 +17,10 @@ from workflow_service.models import (
 
 @dataclass
 class TimerAdvanceResult:
-    """Ergebnis eines Poll-Ticks der SLA-Zeitüberwachung (P6-S2) für eine einzelne
-    Instanz - `main.py` übersetzt daraus `workflow.task.escalated`-/
-    `workflow.instance.completed`-Events, ohne selbst SpiffWorkflow-Typen zu kennen."""
+    """Result of an SLA time monitoring poll tick (P6-S2) for a single
+    instance - `main.py` translates this into `workflow.task.escalated`/
+    `workflow.instance.completed` events, without knowing SpiffWorkflow
+    types itself."""
 
     instance: ProcessInstance
     fired: list[spiff_adapter.FiredBoundaryEvent]
@@ -31,58 +32,61 @@ class NotFoundError(Exception):
 
 
 class InvalidBpmnError(Exception):
-    """Die hochgeladene BPMN-Datei ist nicht parsbar oder die referenzierte/
-    automatisch aufgelöste Prozess-ID ist ungültig. Umhüllt
-    `spiff_adapter.BpmnParseError`, damit `spiff_adapter` die Fehlerhierarchie
-    dieses Moduls nicht kennen muss."""
+    """The uploaded BPMN file cannot be parsed or the referenced/
+    automatically resolved process ID is invalid. Wraps
+    `spiff_adapter.BpmnParseError`, so `spiff_adapter` doesn't need to know
+    this module's error hierarchy."""
 
 
 class ProcessDefinitionInUseError(Exception):
-    """Löschung abgelehnt, weil noch Prozessinstanzen existieren."""
+    """Deletion rejected because process instances still exist."""
 
 
 class InvalidDmnError(Exception):
-    """Die hochgeladene DMN-Datei ist nicht parsbar oder enthält nicht genau eine
-    `<decision>` (P14-S4). Umhüllt `spiff_adapter.DmnParseError`, analog zu
-    `InvalidBpmnError`."""
+    """The uploaded DMN file cannot be parsed or does not contain exactly
+    one `<decision>` (P14-S4). Wraps `spiff_adapter.DmnParseError`, analogous
+    to `InvalidBpmnError`."""
 
 
 class DuplicateDecisionIdError(Exception):
-    """Die aus der DMN-Datei extrahierte `decision_id` kollidiert mit der jeweils
-    NEUESTEN Version einer anderen DMN-Familie (P14-S4, siehe `models.DmnDefinition`) -
-    SpiffWorkflow lädt für jeden BPMN-Parse immer nur die neueste Version jeder Familie
-    in denselben Parser (`list_latest_dmn_xml`), zwei Familien mit kollidierender
-    `decision_id` wären darin nicht mehr unterscheidbar."""
+    """The `decision_id` extracted from the DMN file collides with the
+    respective NEWEST version of another DMN family (P14-S4, see
+    `models.DmnDefinition`) - for every BPMN parse, SpiffWorkflow always
+    loads only the newest version of each family into the same parser
+    (`list_latest_dmn_xml`); two families with a colliding `decision_id`
+    would no longer be distinguishable there."""
 
 
 class DuplicateBusinessCalendarNameError(Exception):
-    """`name` eines Geschäftskalenders (P14-S5) ist bereits vergeben - anders als
-    Prozess-/DMN-Definitionen KEIN Versionierungsmuster (siehe `models.BusinessCalendar`),
-    ein Name ist deshalb dauerhaft eindeutig statt automatisch neu zu versionieren."""
+    """`name` of a business calendar (P14-S5) is already taken - unlike
+    process/DMN definitions, NO versioning pattern (see
+    `models.BusinessCalendar`), so a name is permanently unique instead of
+    automatically getting a new version."""
 
 
 class InvalidBusinessCalendarError(Exception):
-    """Ein Eintrag in `non_working_dates` ist kein gültiges ISO-Datum
+    """An entry in `non_working_dates` is not a valid ISO date
     (`YYYY-MM-DD`, P14-S5)."""
 
 
 class TaskNotReadyError(Exception):
-    """Der angegebene Task ist unter den aktuell bereiten Manual/User Tasks
-    dieser Instanz nicht (mehr) zu finden - bereits abgeschlossen, falsche
-    ID, oder die Instanz ist bereits fertig."""
+    """The specified task is not (or no longer) found among this
+    instance's currently ready Manual/User Tasks - already completed,
+    wrong ID, or the instance has already finished."""
 
 
 class InstanceNotRunningError(Exception):
-    """`POST /instances/{id}/retry` (P12-S2) auf eine bereits `completed`-Instanz -
-    nichts zum Wiederholen."""
+    """`POST /instances/{id}/retry` (P12-S2) on an already `completed`
+    instance - nothing to retry."""
 
 
-# Postgres-Advisory-Lock-Namespaces (P25-S1, ADR 0096) für `create_process_definition`/
-# `create_dmn_definition` - zwei feste `key1`-Werte für die Zwei-Integer-Variante von
-# `pg_advisory_xact_lock(key1, key2)`, damit eine Prozessdefinition und eine
-# DMN-Definition mit zufällig demselben `name` sich NICHT gegenseitig sperren (beide
-# Familien sind unabhängig versioniert, siehe `models.py`). `key2` ist jeweils
-# `hashtext(name)` - beliebig, aber deterministisch je Familienname.
+# Postgres advisory lock namespaces (P25-S1, ADR 0096) for
+# `create_process_definition`/`create_dmn_definition` - two fixed `key1`
+# values for the two-integer variant of `pg_advisory_xact_lock(key1, key2)`,
+# so that a process definition and a DMN definition that happen to share
+# the same `name` do NOT lock each other out (both families are versioned
+# independently, see `models.py`). `key2` is `hashtext(name)` in each case -
+# arbitrary, but deterministic per family name.
 _PROCESS_DEFINITION_LOCK_NAMESPACE = 1
 _DMN_DEFINITION_LOCK_NAMESPACE = 2
 
@@ -90,27 +94,27 @@ _DMN_DEFINITION_LOCK_NAMESPACE = 2
 async def create_process_definition(
     session: AsyncSession, *, name: str, bpmn_xml: str, process_id: str | None
 ) -> ProcessDefinition:
-    """``name`` ist seit P6-S8 der Prozessfamilien-Schlüssel (2.1a-artiges
-    Versionierungsmuster, wie bei Dokumentversionen) - ein Aufruf unter einem
-    bereits existierenden Namen legt automatisch die nächste Version an,
-    statt abgelehnt zu werden. Frühere Versionen bleiben unverändert
-    abrufbar/startbar, kein Überschreiben.
+    """Since P6-S8, ``name`` is the process family key (a 2.1a-style
+    versioning pattern, like with document versions) - a call under an
+    already-existing name automatically creates the next version instead
+    of being rejected. Earlier versions remain retrievable/startable
+    unchanged, no overwriting.
 
-    **P25-S1 (ADR 0096)**: vor dem Lesen von `max(version)` wird ein
-    transaktionsgebundener Postgres-Advisory-Lock auf `name` genommen
-    (`pg_advisory_xact_lock`), der beim COMMIT/ROLLBACK dieser Transaktion
-    automatisch wieder freigegeben wird. Anders als bei `object_type_service`s
-    `_next_sequence_number`/`case_service`s `_next_case_sequence_number` gibt es
-    hier KEINE separate, immer schon existierende Zähler-Zeile, die sich per
-    `SELECT ... FOR UPDATE` sperren ließe: für eine brandneue Familie (noch keine
-    einzige `ProcessDefinition`-Zeile mit diesem `name`) gäbe es unter Postgres'
-    Standard-Isolationsstufe (READ COMMITTED, kein Predicate Locking) schlicht
-    nichts, was `SELECT ... FOR UPDATE` sperren könnte - zwei gleichzeitige
-    Erstanlagen derselben neuen Familie würden beide `next_version = 1` berechnen
-    und weiterhin an der `(name, version)`-Unique-Constraint scheitern. Der
-    Advisory-Lock sperrt stattdessen rein über den `name`-Hash, unabhängig vom
-    aktuellen Zeilenbestand, und deckt dadurch sowohl die Erstanlage als auch
-    nachfolgende Versionen ab."""
+    **P25-S1 (ADR 0096)**: before reading `max(version)`, a transaction-
+    scoped Postgres advisory lock is taken on `name`
+    (`pg_advisory_xact_lock`), which is automatically released on
+    COMMIT/ROLLBACK of this transaction. Unlike `object_type_service`'s
+    `_next_sequence_number`/`case_service`'s `_next_case_sequence_number`,
+    there is NO separate, always-already-existing counter row here that
+    could be locked via `SELECT ... FOR UPDATE`: for a brand-new family
+    (not a single `ProcessDefinition` row with this `name` yet), under
+    Postgres' default isolation level (READ COMMITTED, no predicate
+    locking) there would simply be nothing that `SELECT ... FOR UPDATE`
+    could lock - two concurrent first-creations of the same new family
+    would both compute `next_version = 1` and still fail on the
+    `(name, version)` unique constraint. The advisory lock instead locks
+    purely via the `name` hash, independent of the current row inventory,
+    and thereby covers both the first creation and subsequent versions."""
     await session.execute(
         select(func.pg_advisory_xact_lock(_PROCESS_DEFINITION_LOCK_NAMESPACE, func.hashtext(name)))
     )
@@ -153,12 +157,12 @@ async def get_process_definition(
 async def list_process_definitions(
     session: AsyncSession, *, name: str | None = None
 ) -> list[ProcessDefinition]:
-    """Ohne `name`-Filter wird je Prozessfamilie nur die jeweils neueste
-    Version geliefert (`DISTINCT ON`, Postgres-spezifisch wie an anderen
-    Stellen dieses Projekts, z. B. `INSERT ... ON CONFLICT DO NOTHING`) -
-    eine wachsende Versionshistorie soll die Übersichtsliste nicht zumüllen.
-    Mit `name`-Filter wird stattdessen die vollständige Versionshistorie
-    dieser einen Familie geliefert, neueste Version zuerst."""
+    """Without a `name` filter, only the respective newest version is
+    returned per process family (`DISTINCT ON`, Postgres-specific like
+    elsewhere in this project, e.g. `INSERT ... ON CONFLICT DO NOTHING`) -
+    a growing version history should not clutter the overview list. With
+    a `name` filter, the complete version history of that one family is
+    returned instead, newest version first."""
     if name is not None:
         result = await session.execute(
             select(ProcessDefinition)
@@ -191,16 +195,17 @@ async def delete_process_definition(session: AsyncSession, process_definition_id
 
 
 async def create_dmn_definition(session: AsyncSession, *, name: str, dmn_xml: str) -> DmnDefinition:
-    """Gleiches Versionierungsmuster wie `create_process_definition` (`name` ist der
-    Familienschlüssel). Prüft zusätzlich, dass die extrahierte `decision_id` unter den
-    jeweils neuesten Versionen ALLER Familien eindeutig ist (siehe
-    `DuplicateDecisionIdError`) - eine ältere, nicht mehr aktuelle Version einer anderen
-    Familie darf dabei kollidieren, da `list_latest_dmn_xml` sie ohnehin nie lädt.
+    """Same versioning pattern as `create_process_definition` (`name` is the
+    family key). Additionally checks that the extracted `decision_id` is
+    unique among the respective newest versions of ALL families (see
+    `DuplicateDecisionIdError`) - an older, no-longer-current version of
+    another family may collide here, since `list_latest_dmn_xml` never
+    loads it anyway.
 
-    **P25-S1 (ADR 0096)**: gleicher Advisory-Lock-Schutz gegen die Versions-Race-
-    Condition wie `create_process_definition` - siehe dortigen Docstring für die
-    Begründung, warum hier `pg_advisory_xact_lock` statt `SELECT ... FOR UPDATE`
-    auf einer Zähler-Zeile verwendet wird."""
+    **P25-S1 (ADR 0096)**: same advisory-lock protection against the
+    version race condition as `create_process_definition` - see its
+    docstring for the reasoning why `pg_advisory_xact_lock` is used here
+    instead of `SELECT ... FOR UPDATE` on a counter row."""
     await session.execute(
         select(func.pg_advisory_xact_lock(_DMN_DEFINITION_LOCK_NAMESPACE, func.hashtext(name)))
     )
@@ -254,8 +259,9 @@ async def list_latest_dmn_definitions(session: AsyncSession) -> list[DmnDefiniti
 async def list_dmn_definitions(
     session: AsyncSession, *, name: str | None = None
 ) -> list[DmnDefinition]:
-    """Analog zu `list_process_definitions`: ohne `name`-Filter nur die jeweils
-    neueste Version je Familie, mit Filter die vollständige Versionshistorie."""
+    """Analogous to `list_process_definitions`: without a `name` filter,
+    only the respective newest version per family, with a filter the
+    complete version history."""
     if name is not None:
         result = await session.execute(
             select(DmnDefinition)
@@ -267,36 +273,36 @@ async def list_dmn_definitions(
 
 
 async def delete_dmn_definition(session: AsyncSession, dmn_definition_id: int) -> None:
-    """Bewusst KEINE "in use"-Prüfung (anders als `delete_process_definition`) -
-    das würde ein Durchsuchen aller BPMN-XML-Texte nach `camunda:decisionRef`
-    erfordern, um festzustellen, ob ein `businessRuleTask` diese Familie
-    referenziert. Dokumentierte, bewusste Grenze dieser Referenzimplementierung
-    (siehe docs/services/workflow-service.md) - eine Löschung kann eine
-    bestehende Prozessdefinition beim nächsten Instanzstart mit einer
-    SpiffWorkflow-`ValidationException` (übersetzt: `InvalidBpmnError`)
-    fehlschlagen lassen, bereits laufende Instanzen sind unberührt (ihr
-    `workflow_state` enthält die zum Startzeitpunkt geladene Decision bereits
-    vollständig)."""
+    """Deliberately NO "in use" check (unlike `delete_process_definition`) -
+    that would require searching all BPMN XML texts for
+    `camunda:decisionRef` to determine whether a `businessRuleTask`
+    references this family. A documented, deliberate limitation of this
+    reference implementation (see docs/services/workflow-service.md) - a
+    deletion can cause an existing process definition to fail at the next
+    instance start with a SpiffWorkflow `ValidationException` (translated:
+    `InvalidBpmnError`); already-running instances are unaffected (their
+    `workflow_state` already fully contains the decision loaded at start
+    time)."""
     definition = await get_dmn_definition(session, dmn_definition_id)
     await session.delete(definition)
     await session.flush()
 
 
 async def list_latest_dmn_xml(session: AsyncSession) -> list[str]:
-    """DMN-XML-Inhalte der jeweils neuesten Version jeder Familie - werden vor
-    jedem BPMN-Parse geladen (`create_process_definition`/`start_instance`), da
-    zum Parse-Zeitpunkt nicht bekannt ist, welche `decisionRef`s ein
-    `businessRuleTask` in der BPMN-Datei tatsächlich referenziert (siehe
-    `spiff_adapter`-Moduldocstring - unreferenzierte Decisions sind harmlos,
-    ihr Laden kostet nur etwas Parse-Zeit)."""
+    """DMN XML contents of the respective newest version of each family -
+    loaded before every BPMN parse (`create_process_definition`/
+    `start_instance`), since at parse time it is not known which
+    `decisionRef`s a `businessRuleTask` in the BPMN file actually
+    references (see `spiff_adapter` module docstring - unreferenced
+    decisions are harmless, loading them only costs some parse time)."""
     definitions = await list_latest_dmn_definitions(session)
     return [d.dmn_xml for d in definitions]
 
 
 def _parse_non_working_dates(non_working_dates: list[str]) -> None:
-    """Nur Validierung (P14-S5) - `spiff_adapter.register_business_calendars()`
-    erwartet `date`-Objekte, `non_working_dates` selbst bleibt als Liste von
-    ISO-Strings persistiert (JSON-Spalte, siehe `models.BusinessCalendar`)."""
+    """Validation only (P14-S5) - `spiff_adapter.register_business_calendars()`
+    expects `date` objects, `non_working_dates` itself remains persisted as
+    a list of ISO strings (JSON column, see `models.BusinessCalendar`)."""
     for raw in non_working_dates:
         try:
             date.fromisoformat(raw)
@@ -307,10 +313,10 @@ def _parse_non_working_dates(non_working_dates: list[str]) -> None:
 
 
 async def refresh_business_calendar_cache(session: AsyncSession) -> None:
-    """Lädt ALLE Geschäftskalender neu in `spiff_adapter`s In-Memory-Cache
-    (P14-S5) - nach jedem Schreibzugriff aufgerufen, damit `business_days()`
-    nie einen veralteten Stand sieht. Auch der Einstiegspunkt für `main.py`s
-    einmaligen Ladevorgang beim Service-Start."""
+    """Reloads ALL business calendars into `spiff_adapter`'s in-memory cache
+    (P14-S5) - called after every write access, so `business_days()` never
+    sees a stale state. Also the entry point for `main.py`'s one-time load
+    at service start."""
     result = await session.execute(select(BusinessCalendar))
     calendars = list(result.scalars().all())
     cache = {c.name: {date.fromisoformat(d) for d in c.non_working_dates} for c in calendars}
@@ -433,14 +439,14 @@ async def start_instance(
     session.add(instance)
     await session.flush()
 
-    # `try`/`finally` statt eines einfachen sequenziellen Ablaufs (P12-S2,
-    # Resumability, 7.2): wirft `run_ready_steps()` (z. B. ein `connector_call`-
-    # Service-Task, dessen Ziel nicht erreichbar war), MUSS der dadurch entstandene
-    # `ERROR`-Zustand trotzdem persistiert werden - sonst gäbe es für
-    # `POST /instances/{id}/retry` gar keine Instanz-Zeile mit dem richtigen
-    # Zwischenstand zum Fortsetzen. Ohne dieses `finally` würde die Instanz bei
-    # einer Exception hier überhaupt nie in der DB landen (real gefunden beim
-    # Schreiben des zugehörigen API-Tests).
+    # `try`/`finally` instead of a simple sequential flow (P12-S2,
+    # resumability, 7.2): if `run_ready_steps()` raises (e.g. a
+    # `connector_call` service task whose target was unreachable), the
+    # resulting `ERROR` state MUST still be persisted - otherwise there
+    # would be no instance row at all with the correct intermediate state
+    # for `POST /instances/{id}/retry` to resume. Without this `finally`,
+    # the instance would never end up in the DB at all on an exception
+    # here (found for real while writing the corresponding API test).
     try:
         spiff_adapter.run_ready_steps(wf)
     finally:
@@ -496,13 +502,13 @@ async def complete_task(
             f"task_id {task_id!r} ist bei instance_id {instance_id!r} nicht bereit"
         )
 
-    # completed_by fließt bewusst nicht in die Prozessvariablen ein (würde mit
-    # eigenen BPMN-Prozessvariablen kollidieren können) - nur als Event-Payload
-    # beim Publizieren in main.py verwendet, siehe dort.
+    # completed_by is deliberately not merged into the process variables
+    # (could collide with a BPMN process's own variables) - only used as
+    # event payload when publishing in main.py, see there.
     spiff_adapter.complete_task(task, data)
-    # `try`/`finally`: siehe `start_instance` - ein nachfolgender automatischer
-    # Schritt (z. B. `connector_call`) kann fehlschlagen, der bereits abgeschlossene
-    # Manual Task darf dabei nicht verloren gehen (P12-S2).
+    # `try`/`finally`: see `start_instance` - a subsequent automatic step
+    # (e.g. `connector_call`) can fail, and the already-completed Manual
+    # Task must not be lost in that case (P12-S2).
     try:
         spiff_adapter.run_ready_steps(wf)
     finally:
@@ -518,13 +524,14 @@ async def complete_task(
 
 
 async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInstance:
-    """Resumability für einen fehlgeschlagenen automatischen Schritt (7.2, P12-S2) -
-    generisches Primitiv, nicht migrationsspezifisch: setzt `ERROR`-Tasks zurück
-    (`spiff_adapter.retry_errored_tasks`) und versucht danach erneut, den Workflow
-    voranzubringen. Persistiert den neuen Zwischenstand auch bei einem erneuten
-    Fehlschlag (`try`/`finally`, siehe `start_instance`) - sonst bliebe die Instanz
-    für einen dritten `retry`-Versuch am ursprünglichen Fehlerpunkt hängen, statt am
-    tatsächlich letzten (ggf. wieder fehlgeschlagenen) Stand."""
+    """Resumability for a failed automatic step (7.2, P12-S2) - a generic
+    primitive, not migration-specific: resets `ERROR` tasks
+    (`spiff_adapter.retry_errored_tasks`) and then tries again to advance
+    the workflow. Persists the new intermediate state even on a repeated
+    failure (`try`/`finally`, see `start_instance`) - otherwise the
+    instance would stay stuck at the original failure point for a third
+    `retry` attempt, instead of at the actually last (possibly again
+    failed) state."""
     instance = await get_instance(session, instance_id)
     if instance.status != "running":
         raise InstanceNotRunningError(f"instance_id {instance_id!r} ist nicht 'running'")
@@ -546,11 +553,12 @@ async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInst
 
 
 async def advance_timers(session: AsyncSession) -> list[TimerAdvanceResult]:
-    """Ein Poll-Tick der SLA-Zeitüberwachung (P6-S2, ADR 0020): deserialisiert **jede**
-    laufende Instanz, lässt fällige Boundary-Timer feuern und persistiert den Blob neu -
-    unabhängig davon, ob dabei etwas gefeuert hat, da sich der interne Timer-Zustand
-    (nächste Fälligkeit) auch sonst ändern kann. Die bereits in ADR 0019 dokumentierte
-    Konsequenz (keine effiziente Cross-Instanz-Abfrage möglich) gilt hier unverändert."""
+    """A poll tick of SLA time monitoring (P6-S2, ADR 0020): deserializes
+    **every** running instance, lets due boundary timers fire, and
+    re-persists the blob - regardless of whether anything fired, since the
+    internal timer state (next due time) can also change otherwise. The
+    consequence already documented in ADR 0019 (no efficient cross-instance
+    query possible) applies unchanged here."""
     running = await list_instances(session, status="running")
     results: list[TimerAdvanceResult] = []
     now = datetime.now(UTC)
@@ -580,10 +588,9 @@ async def create_federation_task(
     origin_installation_id: str | None,
     status: str,
 ) -> FederationTask:
-    """Bindeglied zu einem beim Federation Hub laufenden Handover (7.4,
-    P6-S9) - siehe `models.FederationTask`. Ein `unique`-Index auf
-    `handover_id` verhindert, dass derselbe Handover versehentlich zweimal
-    verknüpft wird."""
+    """Link to a handover running on the Federation Hub (7.4, P6-S9) - see
+    `models.FederationTask`. A `unique` index on `handover_id` prevents the
+    same handover from being accidentally linked twice."""
     now = datetime.now(UTC)
     federation_task = FederationTask(
         process_instance_id=process_instance_id,
@@ -615,11 +622,11 @@ async def get_federation_task_by_task(
 async def get_federation_task_by_handover(
     session: AsyncSession, handover_id: str, *, direction: str = "outbound"
 ) -> FederationTask | None:
-    """Default `direction="outbound"`: `POST /federation/inbound-result` meldet
-    stets das Ergebnis eines selbst initiierten (outbound) Handover zurück.
-    Ohne den Richtungsfilter wäre die Zeile im Selbst-Loopback-Smoke-Test
-    (dieselbe `handover_id` existiert dort sowohl als outbound- als auch als
-    inbound-Zeile, siehe `models.FederationTask`) nicht eindeutig."""
+    """Default `direction="outbound"`: `POST /federation/inbound-result`
+    always reports back the result of a self-initiated (outbound) handover.
+    Without the direction filter, the row would not be unique in the
+    self-loopback smoke test (the same `handover_id` exists there as both
+    an outbound and an inbound row, see `models.FederationTask`)."""
     result = await session.execute(
         select(FederationTask).where(
             FederationTask.handover_id == handover_id, FederationTask.direction == direction
@@ -631,12 +638,12 @@ async def get_federation_task_by_handover(
 async def get_inbound_federation_task_for_instance(
     session: AsyncSession, process_instance_id: str
 ) -> FederationTask | None:
-    """Findet den eingehenden Handover, der diese (per `POST
-    /federation/inbound` gestartete) Instanz ausgelöst hat - Grundlage dafür,
-    an welche `origin_installation_id`/welchen `handover_id` ein
-    `federated_return`-Task in dieser Instanz sein Ergebnis zurückschickt.
-    Bewusst vereinfachend genau ein eingehender Handover je Instanz (siehe
-    docs/services/workflow-service.md "Offene Punkte")."""
+    """Finds the inbound handover that triggered this instance (started via
+    `POST /federation/inbound`) - the basis for which
+    `origin_installation_id`/`handover_id` a `federated_return` task in
+    this instance sends its result back to. Deliberately simplified to
+    exactly one inbound handover per instance (see
+    docs/services/workflow-service.md "Open Points")."""
     result = await session.execute(
         select(FederationTask).where(
             FederationTask.process_instance_id == process_instance_id,
@@ -657,11 +664,11 @@ async def update_federation_task_status(
 async def mark_inbound_federation_task_returned(
     session: AsyncSession, federation_task: FederationTask, *, task_id: str, status: str
 ) -> None:
-    """Verknüpft den bislang task-losen eingehenden `FederationTask`-Eintrag
-    (siehe `get_inbound_federation_task_for_instance`) nachträglich mit dem
-    `federated_return`-Task, der das Ergebnis tatsächlich zurückgeschickt hat -
-    dient danach als Dispatch-Sperre gegen ein doppeltes Zurücksenden
-    (`get_federation_task_by_task` findet die Zeile ab jetzt über `task_id`)."""
+    """Retroactively links the previously task-less inbound `FederationTask`
+    entry (see `get_inbound_federation_task_for_instance`) with the
+    `federated_return` task that actually sent the result back - afterwards
+    serves as a dispatch lock against a duplicate send-back
+    (`get_federation_task_by_task` now finds the row via `task_id`)."""
     federation_task.task_id = task_id
     federation_task.status = status
     federation_task.updated_at = datetime.now(UTC)

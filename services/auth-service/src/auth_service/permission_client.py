@@ -2,11 +2,11 @@ import httpx
 
 
 class PermissionServiceClient:
-    """HTTP-Client gegen den Permission Service - erste Cross-Service-
-    Abhängigkeit von `auth-service` überhaupt (P6-S5). Nutzt ausschließlich
-    bereits bestehende, ungegatete Endpunkte (`/roles`, `/role-assignments`,
-    `/effective-permissions/{principal_id}/{resource_id}`) - kein neuer
-    permission-service-Endpunkt nötig."""
+    """HTTP client against the Permission Service - `auth-service`'s first
+    ever cross-service dependency (P6-S5). Uses exclusively already-existing,
+    ungated endpoints (`/roles`, `/role-assignments`,
+    `/effective-permissions/{principal_id}/{resource_id}`) - no new
+    permission-service endpoint needed."""
 
     ROOT_RESOURCE_ID = "root"
 
@@ -22,9 +22,9 @@ class PermissionServiceClient:
         return None
 
     async def ensure_role_assignment(self, *, principal_id: str, role_name: str) -> None:
-        """Idempotent (P6-S5): weist `principal_id` die per Name benannte,
-        systemeigene Domain-Admin-Rolle (4.6) an der Wurzelressource zu,
-        sofern das noch nicht der Fall ist."""
+        """Idempotent (P6-S5): assigns `principal_id` the native domain
+        admin role (4.6) named by name at the root resource, provided this
+        is not already the case."""
         role_id = await self.get_role_id(role_name)
         if role_id is None:
             raise RoleNotFoundError(f"Rolle {role_name!r} ist im Permission Service unbekannt")
@@ -49,14 +49,14 @@ class PermissionServiceClient:
             },
         )
         response.raise_for_status()
-        # Seit P17-S3 liefert `POST /role-assignments` immer 2xx, auch wenn
-        # `permission.role_assignment.create` auf dieser Installation
-        # Vier-Augen-pflichtig ist ("Berechtigungsänderung", ADR 0060) - die
-        # Zuweisung selbst existiert dann noch NICHT, nur ein offener
-        # Genehmigungsantrag. Ohne diese Prüfung würde die Methode fälschlich
-        # Erfolg melden - der Aufrufer in `main.py`s Lifespan fängt
-        # `Exception` bereits ab und protokolliert einen Retry beim nächsten
-        # Neustart, exakt das richtige Verhalten für diesen Fall.
+        # Since P17-S3, `POST /role-assignments` always returns 2xx, even
+        # when `permission.role_assignment.create` requires the four-eyes
+        # principle on this installation ("permission change", ADR 0060) -
+        # the assignment itself does NOT yet exist then, only an open
+        # approval request. Without this check, the method would falsely
+        # report success - the caller in `main.py`'s lifespan already
+        # catches `Exception` and logs a retry on the next restart, exactly
+        # the right behavior for this case.
         if response.json()["status"] != "created":
             raise RoleAssignmentPendingApprovalError(
                 f"Rollenzuweisung für {principal_id!r}/{role_name!r} wartet auf Genehmigung "

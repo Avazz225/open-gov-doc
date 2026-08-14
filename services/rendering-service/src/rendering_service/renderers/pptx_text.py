@@ -9,14 +9,13 @@ _PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentation
 
 
 class PptxTextExtractionRenderer(Renderer):
-    """Ersatzdarstellung für PowerPoint-Präsentationen (2.4): Textextraktion
-    nach .txt statt der im Konzept beispielhaft genannten .pdf-Konvertierung -
-    eine echte .pptx->.pdf-Konvertierung bräuchte eine externe
-    Office-Rendering-Komponente (z. B. LibreOffice headless), die in dieser
-    Umgebung nicht verlässlich/schnell verfügbar ist (dieselbe Abwägung wie
-    ClamAV vs. EICAR-Engine in P5-S1, siehe ADR 0010 und PROGRESS.md). Text
-    bleibt trotzdem eine vollwertige, ausfallsichere Ersatzdarstellung im
-    Sinne von 2.4."""
+    """Rendition for PowerPoint presentations (2.4): text extraction to .txt
+    instead of the .pdf conversion named as an example in the concept -
+    a real .pptx->.pdf conversion would need an external Office rendering
+    component (e.g. LibreOffice headless), which is not reliably/quickly
+    available in this environment (the same trade-off as ClamAV vs. the
+    EICAR engine in P5-S1, see ADR 0010 and PROGRESS.md). Text nonetheless
+    remains a fully valid, fail-safe rendition in the sense of 2.4."""
 
     rendition_type = "substitute_text"
 

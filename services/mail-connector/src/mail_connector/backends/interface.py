@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 @dataclass
 class RawIncomingMessage:
-    """Eine unverarbeitete, vom Backend abgerufene Nachricht - `uid` ist der
-    stabile, backend-eigene Bezeichner (POP3-UIDL), über den ein wiederholter
-    Poll-Tick bereits verarbeitete Nachrichten erkennt (siehe
+    """An unprocessed message retrieved from the backend - `uid` is the
+    stable, backend-native identifier (POP3 UIDL) by which a repeated poll
+    tick recognizes already-processed messages (see
     `repository.get_by_source_uid`)."""
 
     uid: str
@@ -14,11 +14,11 @@ class RawIncomingMessage:
 
 
 class MailboxBackend(ABC):
-    """Einheitliches Interface für Posteingang-Abruf-Plugins (2.5/3.3),
-    nach demselben "Dazustellen"-Prinzip wie die Storage-Backends (3.6) und
-    die Virenscan-Engines (10.3, ADR 0010): ein neues Protokoll (z. B. IMAP,
-    Microsoft Graph für Exchange/O365) implementiert nur dieses Interface,
-    der Rest des Service bleibt unverändert."""
+    """Uniform interface for inbox-retrieval plugins (2.5/3.3), following
+    the same "add-alongside" principle as the storage backends (3.6) and
+    the virus-scan engines (10.3, ADR 0010): a new protocol (e.g. IMAP,
+    Microsoft Graph for Exchange/O365) only implements this interface, the
+    rest of the service remains unchanged."""
 
     @abstractmethod
     async def fetch_new_messages(self) -> list[RawIncomingMessage]: ...

@@ -9,9 +9,9 @@ Base = make_declarative_base("folder")
 
 
 class Folder(Base):
-    """Ordner als hierarchischer Container (2.1). Publiziert Struktur-Events,
-    die der Permission Service konsumiert, um seinen `ResourceNode`-Baum
-    synchron zu halten (siehe docs/services/permission-service.md)."""
+    """Folder as a hierarchical container (2.1). Publishes structure events
+    that the Permission Service consumes to keep its `ResourceNode` tree in
+    sync (see docs/services/permission-service.md)."""
 
     __tablename__ = "folder"
 
@@ -20,23 +20,23 @@ class Folder(Base):
     parent_id: Mapped[str | None] = mapped_column(
         String(128), ForeignKey("folder.folder.id"), nullable=True, index=True
     )
-    # Opake Referenz auf object-type-service - keine FK-Erzwingung über
-    # Service-Grenzen hinweg (analog zu document-service).
+    # Opaque reference to object-type-service - no FK enforcement across
+    # service boundaries (analogous to document-service).
     object_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     attributes: Mapped[dict] = mapped_column(JSON, default=dict)
-    # Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
-    # P7-S1b) - 1:1 dasselbe Feldpaar-Muster wie `document_service.Document`
-    # (siehe P7-S1), hier zusätzlich um die Kaskaden-Herkunft ergänzt.
+    # Retention/legal hold/forced deletion for folders (5.2/5.2a, since
+    # P7-S1b) - exactly the same field-pair pattern as
+    # `document_service.Document` (see P7-S1), here additionally extended
+    # with the cascade origin.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Wer die Löschmarkierung gesetzt hat (2.5, P15-S1) - Voraussetzung für den
-    # persönlichen Papierkorb, gleiche, bei P15-S0 gefundene Nachrüst-Lücke
-    # wie bei document-service (`deleted_by` wurde entgegengenommen, aber nie
-    # persistiert).
+    # Who set the deletion marker (2.5, P15-S1) - prerequisite for the
+    # personal trash, same retrofit gap found at P15-S0 as in
+    # document-service (`deleted_by` was accepted but never persisted).
     deleted_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # Gesetzt, wenn dieser Ordner nicht einzeln, sondern weil ein
-    # übergeordneter Ordner in den Papierkorb verschoben wurde, mitgelöscht
-    # wurde - `restore_folder` stellt beim Wiederherstellen des Elternordners
-    # NUR dadurch kaskadierte Unterordner wieder her.
+    # Set when this folder was not deleted individually but as a cascade
+    # because a parent folder was moved to trash - when restoring the
+    # parent folder, `restore_folder` restores ONLY subfolders that were
+    # cascaded this way.
     deleted_via_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     full_deletion: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -54,13 +54,13 @@ class Folder(Base):
 
 
 class FolderTemplate(Base):
-    """Struktur-Vorlagen (2.5/7.3, seit P15-S6) - ein Ordner-Teilbaum als
-    benannte, wiederverwendbare Vorlage (z. B. Aktenplan-Rohbau). `structure`
-    ist ein verschachtelter Baum ({"name", "object_type_id", "children"}) -
-    erfasst bewusst NUR Struktur (Name + Objekttyp je Knoten), keine
-    Attributwerte: ein "Rohbau" wird nach dem Anwenden erst befüllt, siehe
-    ADR 0056. Kein FK auf `Folder` - eine Vorlage bleibt unabhängig vom
-    Fortbestehen ihres ursprünglichen Quellordners gültig."""
+    """Structure templates (2.5/7.3, since P15-S6) - a folder subtree as a
+    named, reusable template (e.g. a file plan skeleton). `structure` is a
+    nested tree ({"name", "object_type_id", "children"}) - deliberately
+    captures ONLY structure (name + object type per node), no attribute
+    values: a "skeleton" is only populated after being applied, see
+    ADR 0056. No FK on `Folder` - a template remains valid independent of
+    whether its original source folder continues to exist."""
 
     __tablename__ = "folder_template"
 
@@ -73,10 +73,10 @@ class FolderTemplate(Base):
 
 
 class LegalHold(Base):
-    """Legal Hold für Ordner (5.2, seit P7-S1b) - strukturgleich zu
-    `document_service.LegalHold` (P7-S1), aber eigenständige Tabelle im
-    `folder`-Schema statt einer Wiederverwendung über Service-Grenzen
-    hinweg. Aktiv = ``released_at IS NULL``."""
+    """Legal hold for folders (5.2, since P7-S1b) - structurally identical
+    to `document_service.LegalHold` (P7-S1), but a standalone table in the
+    `folder` schema instead of reuse across service boundaries.
+    Active = ``released_at IS NULL``."""
 
     __tablename__ = "legal_hold"
 
@@ -90,16 +90,16 @@ class LegalHold(Base):
 
 
 class DeletionRegisterEntry(Base):
-    """Löschregister für Ordner (5.2a, seit P7-S1b) - strukturgleich zu
-    `document_service.DeletionRegisterEntry`. Bewusst kein FK auf
-    ``Folder.id`` - der gelöschte Ordner existiert zu diesem Zeitpunkt
-    bereits nicht mehr."""
+    """Deletion register for folders (5.2a, since P7-S1b) - structurally
+    identical to `document_service.DeletionRegisterEntry`. Deliberately no
+    FK on ``Folder.id`` - the deleted folder no longer exists at this
+    point."""
 
     __tablename__ = "deletion_register_entry"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     folder_id: Mapped[str] = mapped_column(String(128), index=True)
-    # "forced_deletion" | "trash_expiry" | "manual_purge" (letzteres seit P15-S1)
+    # "forced_deletion" | "trash_expiry" | "manual_purge" (the latter since P15-S1)
     trigger: Mapped[str] = mapped_column(String(32))
     reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     triggered_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -107,10 +107,10 @@ class DeletionRegisterEntry(Base):
 
 
 class RetentionConfig(Base):
-    """Admin-UI-editierbare Aufbewahrungs-Grundeinstellungen für Ordner
-    (5.2/5.2a, seit P7-S1b) - eigene Konfiguration, unabhängig von
-    `document_service.RetentionConfig` (ein Installationsbetreiber kann für
-    Ordner andere Vorgaben brauchen als für Dokumente)."""
+    """Admin-UI-editable base retention settings for folders (5.2/5.2a,
+    since P7-S1b) - separate configuration, independent of
+    `document_service.RetentionConfig` (an installation operator may need
+    different rules for folders than for documents)."""
 
     __tablename__ = "retention_config"
 
@@ -121,8 +121,8 @@ class RetentionConfig(Base):
 
 
 class TrashConfig(Base):
-    """Papierkorb-Wiederherstellungsfrist für Ordner (5.2, seit P7-S1b) -
-    eigene Konfiguration, unabhängig von `document_service.TrashConfig`."""
+    """Trash restore period for folders (5.2, since P7-S1b) - separate
+    configuration, independent of `document_service.TrashConfig`."""
 
     __tablename__ = "trash_config"
 

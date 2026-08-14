@@ -7,11 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class LicenseLimitClient:
-    """Fragt beim `license-service` (P9-S1) ab, ob eine Nutzungsdimension
-    aktuell überschritten ist (Konzept 9.3: "verhindert neue Anlagen").
-    Lazy-TTL-Cache, fail-open (nicht überschritten) bei nicht erreichbarem
-    license-service - eine seltene Randbedingung soll nicht das gesamte
-    Hochladen blockieren."""
+    """Queries the `license-service` (P9-S1) whether a usage dimension
+    is currently exceeded (concept 9.3: "prevents new items"). Lazy TTL
+    cache, fail-open (not exceeded) if license-service is unreachable - a
+    rare edge case should not block the entire upload."""
 
     def __init__(
         self,

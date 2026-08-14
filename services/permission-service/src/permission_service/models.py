@@ -8,12 +8,11 @@ Base = make_declarative_base("permission")
 
 
 class ResourceNode(Base):
-    """Generischer Knoten einer Ressourcen-Hierarchie (aktuell: Ordner).
+    """Generic node of a resource hierarchy (currently: folders).
 
-    Wird nicht von diesem Service selbst erzeugt (mit Ausnahme des
-    Wurzelknotens), sondern über Struktur-Events des jeweiligen
-    Owner-Service (Folder Service, P3-S3) synchron gehalten - siehe
-    ``structure_consumer.py``.
+    Not created by this service itself (with the exception of the root
+    node), but kept in sync via structure events from the respective owner
+    service (Folder Service, P3-S3) - see ``structure_consumer.py``.
     """
 
     __tablename__ = "resource_node"
@@ -23,7 +22,7 @@ class ResourceNode(Base):
         String(128), ForeignKey("permission.resource_node.resource_id"), nullable=True
     )
     resource_type: Mapped[str] = mapped_column(String(64), default="folder")
-    # Vererbung ein/aus (4.1) - False bricht die Vererbungskette an diesem Knoten ab.
+    # Inheritance on/off (4.1) - False breaks the inheritance chain at this node.
     inherit: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -54,11 +53,11 @@ class RoleAssignment(Base):
 
 
 class ScopeLock(Base):
-    """Bereichssperre (4.7): sperrt einen Ressourcen-Teilbaum vorübergehend für
-    reguläre Nutzer, unabhängig von den sonst geltenden RBAC-Rechten - ein
-    eigenständiges, RBAC überlagerndes statt veränderndes Konstrukt. Wird nie
-    hart gelöscht (``released_at``/``released_by`` dokumentieren die
-    Aufhebung), damit der Verlauf auditierbar bleibt (5.3)."""
+    """Scope lock (4.7): temporarily locks a resource subtree for regular
+    users, independent of the otherwise applicable RBAC rights - a standalone
+    construct that overlays RBAC rather than modifying it. Never hard
+    deleted (``released_at``/``released_by`` document the release), so the
+    history remains auditable (5.3)."""
 
     __tablename__ = "scope_lock"
 
@@ -68,7 +67,7 @@ class ScopeLock(Base):
     )
     locked_by: Mapped[str] = mapped_column(String(128))
     reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    # False (Default) blockiert nur Schreibzugriffe, True zusätzlich Lesezugriffe.
+    # False (default) blocks only write access, True also blocks read access.
     blocks_read: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -77,32 +76,31 @@ class ScopeLock(Base):
 
 
 class ApprovalActionConfig(Base):
-    """Vier-Augen-Konfiguration je Aktionstyp (4.3): "konfigurierbar pro
-    Aktionstyp, nicht global erzwungen" - fehlt eine Zeile für einen
-    Aktionstyp, gilt implizit ``requires_approval=False`` (siehe
+    """Four-eyes configuration per action type (4.3): "configurable per
+    action type, not globally enforced" - if a row is missing for an action
+    type, ``requires_approval=False`` applies implicitly (see
     ``repository.get_approval_config``)."""
 
     __tablename__ = "approval_action_config"
 
     action_type: Mapped[str] = mapped_column(String(128), primary_key=True)
     requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Optionale Verschärfung von 4.3 auf 4.6 (Break-Glass): ist gesetzt, müssen
-    # sowohl Initiator als auch Genehmiger diese Capability an der Wurzel-
-    # ressource halten (zusätzlich zur Initiator≠Genehmiger-Regel) - ohne das
-    # wäre "irgendeine zweite Person" (4.3) zu schwach für "zwei verschiedene
-    # Mitglieder einer Berechtigungsgruppe" (4.6).
+    # Optional tightening of 4.3 into 4.6 (break-glass): if set, both the
+    # initiator and the approver must hold this capability at the root
+    # resource (in addition to the initiator != approver rule) - without
+    # this, "any second person" (4.3) would be too weak for "two different
+    # members of a permission group" (4.6).
     required_permission: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ApprovalRequest(Base):
-    """Generischer Freigabe-Request (4.3): eine Aktion mit aktivem Vier-Augen-
-    Flag legt hier eine Zeile an, statt sofort ausgeführt zu werden. Nach
-    Genehmigung führt NICHT dieser Service die eigentliche Aktion aus,
-    sondern publiziert ``permission.approval.approved`` - der initiierende
-    Service (oder dieser Service selbst als Konsument seines eigenen
-    Events, siehe ``approval_consumer.py``) führt die Aktion anhand von
-    ``payload`` aus."""
+    """Generic approval request (4.3): an action with the four-eyes flag
+    active creates a row here instead of being executed immediately. After
+    approval, this service does NOT execute the actual action itself, but
+    publishes ``permission.approval.approved`` - the initiating service (or
+    this service itself as a consumer of its own event, see
+    ``approval_consumer.py``) executes the action based on ``payload``."""
 
     __tablename__ = "approval_request"
 
@@ -119,11 +117,11 @@ class ApprovalRequest(Base):
 
 
 class EffectivePermissionCache(Base):
-    """Materialisierter Cache (4.1) - wird bei jeder Rechte-/Strukturänderung
-    vollständig geleert (siehe repository.invalidate_cache) statt granular je
-    betroffenem Teilbaum invalidiert. Bewusste Vereinfachung für den Start;
-    Ergebnis bleibt korrekt, nur der Neuaufbau nach einer Änderung ist etwas
-    breiter als unbedingt nötig.
+    """Materialized cache (4.1) - fully cleared on every permission/structure
+    change (see repository.invalidate_cache) instead of being invalidated
+    granularly per affected subtree. A deliberate simplification for the
+    initial version; the result stays correct, only the rebuild after a
+    change is somewhat broader than strictly necessary.
     """
 
     __tablename__ = "effective_permission_cache"
@@ -136,17 +134,16 @@ class EffectivePermissionCache(Base):
 
 
 class Delegation(Base):
-    """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - zeitlich befristete,
-    umfangsbegrenzte Übertragung der Aufgabenwahrnehmung von einer
-    abwesenden Person (``delegator_principal_id``) an eine Stellvertretung
-    (``deputy_principal_id``). Bewusst KEIN Identitätswechsel: die
-    Stellvertretung handelt weiterhin unter dem eigenen Konto - dieser
-    Datensatz ist nur die Grundlage für die Berechtigungsprüfung
-    (``GET /delegations/check``, von workflow-service beim Aufgabenabschluss
-    aufgerufen) und den Audit-Vermerk "im Auftrag von" (5.3), kein Login-
-    Mechanismus. Wird nie hart gelöscht (``revoked_at``/``revoked_by``
-    dokumentieren die vorzeitige Beendigung), gleiches Muster wie
-    ``ScopeLock`` oben bzw. document-services ``ShareLink`` (P14-S10)."""
+    """Delegation during absence (4.4a, P14-S11) - time-limited,
+    scope-limited transfer of task handling from an absent person
+    (``delegator_principal_id``) to a deputy (``deputy_principal_id``).
+    Deliberately NOT an identity switch: the deputy continues to act under
+    their own account - this record is only the basis for the permission
+    check (``GET /delegations/check``, called by workflow-service when
+    completing a task) and the "on behalf of" audit note (5.3), not a login
+    mechanism. Never hard deleted (``revoked_at``/``revoked_by`` document the
+    early termination), same pattern as ``ScopeLock`` above and
+    document-service's ``ShareLink`` (P14-S10)."""
 
     __tablename__ = "delegation"
 
@@ -155,15 +152,15 @@ class Delegation(Base):
     deputy_principal_id: Mapped[str] = mapped_column(String(128), index=True)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # None = keine Einschränkung auf dieser Dimension - sind alle drei None,
-    # gilt die "vollständige Übernahme aller offenen Aufgaben" (4.4a).
-    # `scope_process_definition_ids` ist der einzige Wortlaut-Dimension, die
-    # sich beim heutigen Konsumenten (workflow-service) tatsächlich ohne
-    # zusätzlichen Cross-Service-Umweg prüfen lässt (Prozessinstanzen
-    # tragen `process_definition_id` bereits direkt) - die beiden anderen
-    # Felder werden dennoch mitgespeichert (Konzept-Wortlaut "Objekttypen ...
-    # Ordnerbereiche"), auch wenn sie aktuell von keinem Endpunkt ausgewertet
-    # werden (siehe ADR 0048, "Offene Punkte").
+    # None = no restriction on this dimension - if all three are None, the
+    # "full takeover of all open tasks" (4.4a) applies. `scope_process_
+    # definition_ids` is the only one of the concept-wording dimensions that
+    # can actually be checked by today's consumer (workflow-service) without
+    # an additional cross-service detour (process instances already carry
+    # `process_definition_id` directly) - the other two fields are still
+    # stored (concept wording "object types ... folder areas"), even though
+    # they are not currently evaluated by any endpoint (see ADR 0048, "Open
+    # Points").
     scope_object_type_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     scope_process_definition_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     scope_folder_resource_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
@@ -173,15 +170,15 @@ class Delegation(Base):
 
 
 class Group(Base):
-    """Admin-anlegbare Gruppen (Post-Roadmap Phase 22 Session 2) - ergänzen
-    die seit Phase 19 Session 2 bestehende, hartkodierte "everyone"-Gruppe
-    (siehe ``repository.EVERYONE_*``) um echte, admin-verwaltete Gruppen mit
-    expliziter Mitgliedschaft (``GroupMembership``). Eine Rollenzuweisung an
-    eine dieser Gruppen (``RoleAssignment.principal_type="group"``,
-    ``principal_id=<group.id>``) gilt für jedes eingetragene Mitglied, ohne
-    die Rolle jedem einzeln zuzuweisen - anders als "everyone" (implizite
-    Mitgliedschaft, keine eigene Zeile) braucht jede echte Gruppe explizite
-    ``GroupMembership``-Zeilen, siehe ``repository._collect_effective_roles``.
+    """Admin-creatable groups (Post-Roadmap Phase 22 Session 2) - complement
+    the hard-coded "everyone" group that has existed since Phase 19 Session 2
+    (see ``repository.EVERYONE_*``) with real, admin-managed groups with
+    explicit membership (``GroupMembership``). A role assignment to one of
+    these groups (``RoleAssignment.principal_type="group"``,
+    ``principal_id=<group.id>``) applies to every enrolled member, without
+    having to assign the role to each individually - unlike "everyone"
+    (implicit membership, no own row), every real group needs explicit
+    ``GroupMembership`` rows, see ``repository._collect_effective_roles``.
     """
 
     __tablename__ = "group"
@@ -204,11 +201,11 @@ class GroupMembership(Base):
 
 
 class SystemMaintenanceMode(Base):
-    """Systemweite Notfallsperre & Wartungsmodus (4.8, P6-S6) - Singleton
-    (feste ``id=1``, gleiches Muster wie ``OcrConfig``/``GuardConfig`` in
-    anderen Services). Wird nie gelöscht, nur umgeschaltet - ``triggered_by``/
-    ``lifted_by`` bleiben als Audit-Spur auch nach Aufhebung stehen, bis zur
-    nächsten Aktivierung."""
+    """System-wide emergency lock & maintenance mode (4.8, P6-S6) - singleton
+    (fixed ``id=1``, same pattern as ``OcrConfig``/``GuardConfig`` in other
+    services). Never deleted, only toggled - ``triggered_by``/``lifted_by``
+    remain in place as an audit trail even after being lifted, until the
+    next activation."""
 
     __tablename__ = "system_maintenance_mode"
 

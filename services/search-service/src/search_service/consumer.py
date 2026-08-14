@@ -21,9 +21,9 @@ def make_document_handler(
     ocr_client: OcrServiceClient,
     rendering_client: RenderingServiceClient,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Reagiert auf `document.>` (3.1) - Dokument-Events sind bewusst dünn
-    (siehe pipeline.py), daher wird bei jedem relevanten Event der volle
-    Zustand per HTTP nachgeladen statt aus dem Event-Payload zu lesen."""
+    """Reacts to `document.>` (3.1) - document events are deliberately thin
+    (see pipeline.py), so on every relevant event the full state is
+    reloaded via HTTP instead of read from the event payload."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -64,11 +64,11 @@ def make_text_update_handler(
     ocr_client: OcrServiceClient,
     rendering_client: RenderingServiceClient,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Reagiert auf `ocr.completed` und `rendering.completed`
-    (`rendition_type == "substitute_text"` only) - Nachindexierung, da OCR/
-    Rendering zeitlich nach dem initialen Upload-Event abschließen. Ruft
-    dieselbe `reindex_document()` wie der Dokument-Handler auf (siehe deren
-    Docstring zur Backfill-Race zwischen Streams)."""
+    """Reacts to `ocr.completed` and `rendering.completed`
+    (`rendition_type == "substitute_text"` only) - re-indexing, since OCR/
+    rendering complete after the initial upload event, timewise. Calls the
+    same `reindex_document()` as the document handler (see its docstring on
+    the backfill race between streams)."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -146,8 +146,9 @@ async def start_consuming_text_updates(
     )
     for subject in subjects:
         try:
-            # Eigener Durable-Name, getrennt vom document.>-Abo - beide laufen
-            # über denselben event_bus-Client, aber auf verschiedenen Streams.
+            # Own durable name, separate from the document.> subscription -
+            # both run through the same event_bus client, but on different
+            # streams.
             await bus.subscribe(subject, handler, durable="search-service-text")
         except SubjectNotFoundError:
             logger.warning(

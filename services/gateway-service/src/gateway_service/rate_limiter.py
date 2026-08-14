@@ -5,21 +5,21 @@ from redis import asyncio as redis
 
 
 class RateLimiter:
-    """Sliding-Window-Rate-Limiting je Client (3.5) - geteilter Redis-Store
-    statt in-process `dict` (siehe ADR 0005 für den ursprünglichen
-    In-Prozess-Entwurf und ADR 0097 für diese Umstellung): mehrere horizontal
-    skalierte Gateway-Instanzen sehen denselben Zähler je Client-Schlüssel,
-    statt jeweils ihr eigenes, unabhängiges Limit zu führen.
+    """Sliding-window rate limiting per client (3.5) - shared Redis store
+    instead of an in-process `dict` (see ADR 0005 for the original
+    in-process design and ADR 0097 for this migration): multiple
+    horizontally scaled gateway instances see the same counter per client
+    key, instead of each maintaining its own, independent limit.
 
-    Sliding Window via Sorted Set (`ZADD`/`ZREMRANGEBYSCORE`/`ZCARD`) statt der
-    einfacheren Fixed-Window-Variante (`INCR`+`EXPIRE`): ein Fixed-Window
-    erlaubt an der Fensterkante kurzzeitig bis zu 2x `max_requests` (Ende von
-    Fenster N und Anfang von Fenster N+1 fallen für einen Client zeitlich
-    zusammen) - für einen Login-Schutz (Brute-Force, gilt auch für öffentliche
-    Routen, siehe `docs/services/gateway-service.md`) eine reale Schwäche. Der
-    Preis dafür ist ein Sorted-Set-Member pro Request statt eines einzelnen
-    Zählers - bei den hier üblichen Fenstern (Default 600 Requests/60s je
-    Client) vernachlässigbar gegenüber der saubereren Garantie.
+    Sliding window via sorted set (`ZADD`/`ZREMRANGEBYSCORE`/`ZCARD`)
+    instead of the simpler fixed-window variant (`INCR`+`EXPIRE`): a fixed
+    window briefly allows up to 2x `max_requests` at the window edge (the
+    end of window N and the start of window N+1 coincide in time for a
+    client) - a real weakness for login protection (brute force, also
+    applies to public routes, see `docs/services/gateway-service.md`). The
+    price for this is one sorted-set member per request instead of a
+    single counter - negligible for the windows typical here (default 600
+    requests/60s per client) compared to the cleaner guarantee.
     """
 
     def __init__(self, *, redis_url: str, max_requests: int, window_seconds: float) -> None:
@@ -31,28 +31,29 @@ class RateLimiter:
         now = time.time()
         window_start = now - self.window_seconds
         redis_key = f"gateway:rate-limit:{key}"
-        # uuid-Suffix statt reinem Zeitstempel als Member: zwei Requests
-        # innerhalb derselben Fließkomma-Auflösung dürfen sich in der Sorted
-        # Set nicht gegenseitig überschreiben (sonst zählt Redis sie als
-        # einen einzigen Member).
+        # uuid suffix instead of a plain timestamp as the member: two
+        # requests within the same floating-point resolution must not
+        # overwrite each other in the sorted set (otherwise Redis would
+        # count them as a single member).
         member = f"{now:.6f}:{uuid.uuid4().hex}"
 
-        # Eine einzelne MULTI/EXEC-Transaktion: alte Einträge entfernen, neuen
-        # hinzufügen, danach zählen - der neue Eintrag ist im Zählergebnis
-        # bereits enthalten. Bei Überschreitung wird er gleich im Anschluss
-        # per ZREM wieder entfernt (siehe unten), statt ihn vorab bedingt
-        # hinzuzufügen - Redis kennt kein bedingtes ZADD "nur falls ZCARD
-        # danach <= max_requests", ein serverseitiges Lua-Skript wäre die
-        # einzige Alternative, hier bewusst nicht gewählt (mehr bewegliche
-        # Teile für denselben Effekt).
+        # A single MULTI/EXEC transaction: remove old entries, add the new
+        # one, then count - the new entry is already included in the count
+        # result. If the limit is exceeded, it is immediately removed again
+        # via ZREM right after (see below), instead of adding it
+        # conditionally up front - Redis has no conditional ZADD "only if
+        # ZCARD afterward <= max_requests", a server-side Lua script would
+        # be the only alternative, deliberately not chosen here (more
+        # moving parts for the same effect).
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.zremrangebyscore(redis_key, 0, window_start)
             pipe.zadd(redis_key, {member: now})
             pipe.zcard(redis_key)
-            # TTL als Sicherheitsnetz, falls ein Client dauerhaft verschwindet
-            # (kein weiterer Request räumt den Key dann sonst nie ab) - etwas
-            # großzügiger als das Fenster selbst, damit ein knapp
-            # laufender Request die Historie nicht vorzeitig verliert.
+            # TTL as a safety net in case a client disappears permanently
+            # (no further request would ever clean up the key otherwise) -
+            # slightly more generous than the window itself, so a request
+            # running close to the edge doesn't prematurely lose its
+            # history.
             pipe.expire(redis_key, int(self.window_seconds) + 1)
             _, _, count, _ = await pipe.execute()
 

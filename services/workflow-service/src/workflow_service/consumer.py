@@ -9,16 +9,16 @@ logger = logging.getLogger(__name__)
 def make_handler(
     apply_import: Callable[[str, str, str | None], Awaitable[object]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Führt einen zuvor per Vier-Augen-Prinzip (4.3, Post-Roadmap Phase 21
-    Session 4, ADR 0087) zurückgestellten BPMN-Import erst nach Genehmigung
-    aus - reiner Konsument (`ensure_stream=False` in `main.py`s Lifespan):
-    workflow-service besitzt dafür keinen eigenen Stream (sein eigener
-    `event_bus`/Stream `"workflow"` ist ein separater Producer für
-    `workflow.*`-Events, siehe `main.py`), hier reagiert es nur auf
-    permission-services bereits bestehendes `permission.approval.approved`-
-    Event, identisches Selbst-/Fremd-Konsum-Muster wie `config_service.
-    consumer`. Andere Aktionstypen gehören nicht zu diesem Service und
-    werden ignoriert."""
+    """Executes a BPMN import previously deferred via the four-eyes
+    principle (4.3, post-roadmap phase 21 session 4, ADR 0087) only after
+    approval - pure consumer (`ensure_stream=False` in `main.py`'s
+    lifespan): workflow-service owns no stream of its own for this (its own
+    `event_bus`/stream `"workflow"` is a separate producer for
+    `workflow.*` events, see `main.py`); here it merely reacts to
+    permission-service's already existing `permission.approval.approved`
+    event, the same self-/foreign-consumption pattern as `config_service.
+    consumer`. Other action types do not belong to this service and are
+    ignored."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -28,11 +28,11 @@ def make_handler(
         name = action_payload.get("name")
         bpmn_xml = action_payload.get("bpmn_xml")
         if not name or not bpmn_xml:
-            # Fremd-/Fehlform-Payload (z. B. ein zu Testzwecken über
-            # /approval-requests angelegter Request mit demselben
-            # action_type, aber ohne name/bpmn_xml) - loggen statt crashen,
-            # sonst bleibt die NATS-Nachricht unbestätigt und wird endlos
-            # erneut zugestellt (siehe dms-eventbus-client._callback).
+            # Foreign/malformed payload (e.g. a request created for testing
+            # purposes via /approval-requests with the same action_type but
+            # without name/bpmn_xml) - log instead of crashing, otherwise
+            # the NATS message remains unacknowledged and gets redelivered
+            # endlessly (see dms-eventbus-client._callback).
             logger.warning(
                 "permission.approval.approved für workflow.process_definition.import ohne "
                 "name/bpmn_xml im payload erhalten - ignoriert: %r",

@@ -32,13 +32,13 @@ async def upsert_rendition(
     attempts: int = 0,
     next_retry_at: datetime | None = None,
 ) -> Rendition:
-    """Legt eine Ersatzdarstellung/Vorschau an oder überschreibt eine bereits
-    vorhandene Zeile mit demselben natürlichen Schlüssel (siehe models.py) -
-    macht erneutes Verarbeiten derselben Version idempotent statt Duplikate
-    anzuhäufen. `attempts`/`next_retry_at` werden bei Erfolg auf die Defaults
-    (0/None) gesetzt - ein erfolgreicher Neudurchlauf nach vorherigen
-    Fehlschlägen räumt deren Backoff-Zustand auf. Fehlschläge laufen über
-    `record_failure` unten (Post-Roadmap Phase 20 Session 4, ADR 0080)."""
+    """Creates a rendition/preview or overwrites an already existing row with
+    the same natural key (see models.py) - makes reprocessing the same
+    version idempotent instead of accumulating duplicates. `attempts`/
+    `next_retry_at` are reset to the defaults (0/None) on success - a
+    successful rerun after previous failures clears their backoff state.
+    Failures go through `record_failure` below (Post-Roadmap Phase 20
+    Session 4, ADR 0080)."""
     key = rendition_id(document_id, version_number, rendition_type)
     now = datetime.now(UTC)
     rendition = await session.get(Rendition, key)
@@ -77,13 +77,13 @@ async def record_failure(
     error: str,
     max_attempts: int,
 ) -> Rendition:
-    """Zeichnet einen technischen Renderer-Fehlschlag auf (Post-Roadmap
-    Phase 20 Session 4, ADR 0080) - liest zuerst die bisherige `attempts`-
-    Zahl (falls die Zeile schon existiert), erhöht sie und setzt `status`/
-    `next_retry_at` entsprechend: unterhalb `max_attempts` bleibt
-    `status="failed"` (retry-fähig) mit einem per `compute_backoff_seconds`
-    gesetzten `next_retry_at`, ab `max_attempts` wechselt `status` auf das
-    echte Terminalstatus `failed_permanent`."""
+    """Records a technical renderer failure (Post-Roadmap Phase 20 Session 4,
+    ADR 0080) - first reads the existing `attempts` count (if the row
+    already exists), increments it and sets `status`/`next_retry_at`
+    accordingly: below `max_attempts` it stays `status="failed"`
+    (retryable) with a `next_retry_at` set via `compute_backoff_seconds`,
+    from `max_attempts` onward `status` switches to the true terminal
+    status `failed_permanent`."""
     key = rendition_id(document_id, version_number, rendition_type)
     existing = await session.get(Rendition, key)
     attempts = (existing.attempts if existing is not None else 0) + 1
@@ -113,13 +113,13 @@ async def record_failure(
 
 
 async def reset_for_retry(session: AsyncSession, rendition: Rendition) -> None:
-    """Setzt `attempts`/`error_message`/`next_retry_at` vor einem manuellen
-    Neustart zurück (Post-Roadmap Phase 20 Session 4, ADR 0080) - MUSS vor
-    einem erneuten `retry_rendition`-Aufruf laufen: sonst zählt
-    `record_failure` von der bereits erschöpften `attempts`-Zahl weiter und
-    eine `failed_permanent`-Rendition könnte nie wieder aus diesem Zustand
-    herauskommen (bei der Live-Verifikation dieser Session als echter Bug in
-    ocr-service gefunden und hier vorsorglich gleich mitbehoben)."""
+    """Resets `attempts`/`error_message`/`next_retry_at` before a manual
+    restart (Post-Roadmap Phase 20 Session 4, ADR 0080) - MUST run before
+    another `retry_rendition` call: otherwise `record_failure` keeps
+    counting up from the already exhausted `attempts` value and a
+    `failed_permanent` rendition could never leave that state again (found
+    as a real bug in ocr-service during this session's live verification
+    and fixed here as a precaution at the same time)."""
     rendition.attempts = 0
     rendition.error_message = None
     rendition.next_retry_at = None
@@ -127,8 +127,8 @@ async def reset_for_retry(session: AsyncSession, rendition: Rendition) -> None:
 
 
 async def list_due_for_retry(session: AsyncSession) -> list[Rendition]:
-    """Retry-fähige Renditions, deren Backoff-Fenster bereits abgelaufen ist
-    (Post-Roadmap Phase 20 Session 4, ADR 0080) - abgearbeitet vom neuen
+    """Retryable renditions whose backoff window has already expired
+    (Post-Roadmap Phase 20 Session 4, ADR 0080) - processed by the new
     `_rendition_retry_poll_loop`."""
     now = datetime.now(UTC)
     result = await session.execute(
@@ -141,10 +141,10 @@ async def list_due_for_retry(session: AsyncSession) -> list[Rendition]:
 
 
 async def get_rendition_optional(session: AsyncSession, rendition_key: str) -> Rendition | None:
-    """Wie `get_rendition()`, aber ohne `NotFoundError` - für die Prüfung im
-    OCR-Nachzieheffekt (consumer.py), ob bereits eine `substitute_text`-
-    Rendition existiert (z. B. durch `DocxTextExtractionRenderer` erzeugt),
-    ohne Exception-Handling nur für diese einfache Existenzprüfung."""
+    """Like `get_rendition()`, but without `NotFoundError` - for the check in
+    the OCR follow-up effect (consumer.py) of whether a `substitute_text`
+    rendition already exists (e.g. produced by `DocxTextExtractionRenderer`),
+    without exception handling just for this simple existence check."""
     return await session.get(Rendition, rendition_key)
 
 
@@ -162,10 +162,10 @@ async def list_renditions(
     version_number: int | None = None,
     status: str | None = None,
 ) -> list[Rendition]:
-    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
-    ohne ihn liefert dies eine dokumentübergreifende Liste (Admin-UI-Bedarf:
-    alle `failed_permanent`-Renditions sehen, nicht nur die eines einzelnen
-    Dokuments)."""
+    """``document_id`` has been optional since Post-Roadmap Phase 20
+    Session 7 - without it this returns a cross-document list (admin UI
+    need: see all `failed_permanent` renditions, not just those of a single
+    document)."""
     query = select(Rendition)
     if document_id is not None:
         query = query.where(Rendition.document_id == document_id)

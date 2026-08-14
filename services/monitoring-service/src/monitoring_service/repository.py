@@ -49,11 +49,11 @@ async def set_sensor_override(
 
 
 async def list_sensors(session: AsyncSession, instances: list[RegistryInstance]) -> list[SensorOut]:
-    """Aggregiert den Sensor-Katalog aus den Selbstdeklarationen aller
-    aktuell aktiven Instanzen (10.1) - dedupliziert nach Sensor-Name; bei
-    widersprüchlichen Deklarationen (unwahrscheinlich, da derselbe Sensor
-    i. d. R. vom selben Servicetyp kommt) gewinnt die zuletzt gesehene
-    Deklaration, dokumentierte Vereinfachung."""
+    """Aggregates the sensor catalog from the self-declarations of all
+    currently active instances (10.1) - deduplicated by sensor name; in
+    case of conflicting declarations (unlikely, since the same sensor
+    usually comes from the same service type), the most recently seen
+    declaration wins, a documented simplification."""
     config = await get_sensor_config(session)
     catalog: dict[str, dict] = {}
     service_types: dict[str, set[str]] = {}

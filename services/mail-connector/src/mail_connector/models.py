@@ -8,11 +8,10 @@ Base = make_declarative_base("mail_connector")
 
 
 class InboundMessage(Base):
-    """Eine über den Posteingang abgeholte, noch nicht (oder bereits)
-    zugeordnete Nachricht (2.5/10.3). `source_uid` ist der backend-eigene,
-    stabile Bezeichner (POP3-UIDL) - Grundlage der Idempotenz-Prüfung, damit
-    derselbe Poll-Tick eine bereits verarbeitete Nachricht nicht doppelt
-    anlegt."""
+    """A message retrieved via the inbound mail path, not yet (or already)
+    assigned (2.5/10.3). `source_uid` is the backend's own stable identifier
+    (POP3 UIDL) - basis for the idempotency check, so that the same poll
+    tick doesn't create an already-processed message twice."""
 
     __tablename__ = "inbound_message"
 
@@ -22,10 +21,10 @@ class InboundMessage(Base):
     subject: Mapped[str] = mapped_column(String(998))
     body_text: Mapped[str] = mapped_column(String)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # "unassigned" (kein/mehrdeutiger Treffer) | "proposed_match" (genau ein
-    # Kennzeichen-/Vorgangsnummer-Treffer, wartet auf Bestätigung) |
-    # "confirmed" (zugeordnet, Dokument(e) angelegt) | "rejected" (von der
-    # Poststelle verworfen, z. B. Spam).
+    # "unassigned" (no/ambiguous match) | "proposed_match" (exactly one
+    # reference number/case number match, awaiting confirmation) |
+    # "confirmed" (assigned, document(s) created) | "rejected" (discarded by
+    # the mail room, e.g. spam).
     status: Mapped[str] = mapped_column(String(16), default="unassigned")
     match_type: Mapped[str | None] = mapped_column(
         String(16), nullable=True
@@ -35,9 +34,9 @@ class InboundMessage(Base):
         String(16), nullable=True
     )  # "document"|"case"
     proposed_target_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # Alle im Betreff/Text gefundenen Kandidaten-Token (auch bei 0/N
-    # Treffern) - Transparenz für die manuelle Zuordnung durch die
-    # Poststelle, siehe matching.py.
+    # All candidate tokens found in the subject/body (even with 0/N matches)
+    # - transparency for manual assignment by the mail room, see
+    # matching.py.
     match_candidates: Mapped[list] = mapped_column(JSON, default=list)
     confirmed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -45,12 +44,11 @@ class InboundMessage(Base):
 
 
 class InboundAttachment(Base):
-    """Ein Anhang einer `InboundMessage` (2.5/10.3) - durchläuft bei der
-    Ankunft bereits den verpflichtenden Virenscan (siehe
-    `virus_scan_client.py`); ein sauberer Anhang wird bis zur Zuordnung unter
-    `storage_object_key` zwischengelagert, ein infizierter landet
-    ausschließlich in der bereits bestehenden Quarantäne (P15-S2) - keine
-    doppelte Ablage."""
+    """An attachment of an `InboundMessage` (2.5/10.3) - already goes through
+    the mandatory virus scan upon arrival (see `virus_scan_client.py`); a
+    clean attachment is stored under `storage_object_key` until assignment,
+    an infected one ends up exclusively in the already-existing quarantine
+    (P15-S2) - no duplicate storage."""
 
     __tablename__ = "inbound_attachment"
 
@@ -63,16 +61,16 @@ class InboundAttachment(Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     scan_id: Mapped[str] = mapped_column(String(36))
     scan_status: Mapped[str] = mapped_column(String(16))  # "clean" | "infected"
-    # Nur bei scan_status="clean" gesetzt - Zwischenlagerung bis zur
-    # Zuordnung, danach gelöscht (siehe repository/main.py confirm/assign).
+    # Only set when scan_status="clean" - temporary storage until
+    # assignment, then deleted (see repository/main.py confirm/assign).
     storage_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     resulting_document_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class OutboundMessage(Base):
-    """Postausgang (2.5) - jede über `POST /outbound` versandte externe
-    Korrespondenz, auditierbar mit optionalem Bezug auf das auslösende
-    Dokument/die auslösende Umlaufmappe."""
+    """Outbound mail (2.5) - every external correspondence sent via
+    `POST /outbound`, auditable with an optional reference to the
+    triggering document/circulation folder."""
 
     __tablename__ = "outbound_message"
 

@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_due_schedules(session_factory) -> None:
-    """Ein einzelner Poll-Tick, ausgelagert aus `_report_schedule_poll_loop`
-    fuer direkte Testbarkeit (keine Endlosschleife/kein `sleep` hier). Erzeugt
-    bei Faelligkeit den Bericht, laedt ihn im Storage Service ab und
-    benachrichtigt per E-Mail mit einem Downloadlink (kein Anhang, siehe
+    """A single poll tick, extracted from `_report_schedule_poll_loop` for
+    direct testability (no infinite loop/no `sleep` here). Generates the
+    report when due, uploads it to the Storage Service and notifies via
+    email with a download link (no attachment, see
     docs/services/reporting-service.md)."""
     async with session_factory() as session:
         due = await repository.list_due_schedules(session, now=datetime.now(UTC))
@@ -90,7 +90,7 @@ async def _run_due_schedules(session_factory) -> None:
 
 
 async def _report_schedule_poll_loop(session_factory) -> None:
-    """Faelligkeits-Poll fuer geplante Berichte (5.4a) - gleiches Idiom wie
+    """Due-date poll for scheduled reports (5.4a) - same idiom as
     document-service's `_retention_poll_loop`/workflow-service's `_sla_poll_
     loop`."""
     while True:
@@ -186,10 +186,10 @@ async def _fetch_forensic_trace(
     until: datetime | None,
     limit: int,
 ) -> tuple[list[ForensicTraceEntry], list[str]]:
-    """Forensik-Trace (5.4b, seit P7-S2c): ruft die rohe Ereignisliste ueber
-    die P7-S2-Filter-API von audit-service ab, kategorisiert client-seitig
-    (audit-service kennt selbst keine "category") und berechnet Anomalien
-    ausschliesslich ueber die tatsaechlich zurueckgegebenen Treffer."""
+    """Forensic trace (5.4b, since P7-S2c): fetches the raw event list via
+    audit-service's P7-S2 filter API, categorizes it client-side
+    (audit-service itself has no concept of "category") and computes
+    anomalies exclusively over the actually returned hits."""
     raw_events = await app.state.audit_client.list_events(
         actor=actor, subject=subject, event_type=event_type, since=since, until=until, limit=limit
     )
@@ -231,9 +231,9 @@ async def _record_trace_query(
     since: datetime | None,
     until: datetime | None,
 ) -> None:
-    """Selbst-Auditierung des Trace-Zugriffs (5.4b, wörtliche Konzeptvorgabe:
-    "selbst wieder als Zugriff auditiert") - unconditional, kein Abschalten
-    möglich, da dies selbst der Kontrollmechanismus ist."""
+    """Self-auditing of trace access (5.4b, literal concept requirement:
+    "itself audited again as an access") - unconditional, cannot be
+    disabled, since this is itself the control mechanism."""
     await publish_event(
         "reporting.forensic_trace.queried",
         subject,
@@ -265,10 +265,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.notification_client = NotificationClient(settings.notification_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
-    # Eigener Producer-Bus (5.4b, seit P7-S2c) - fuer die Selbst-Auditierung
-    # des Forensik-Trace-Zugriffs ("wer hat wann welchen Trace abgefragt").
-    # Gleiches Dual-Bus-Muster wie document-service: consumer_bus (unten)
-    # bleibt fuer document.> bestehen, event_bus ist neu und eigenstaendig.
+    # Own producer bus (5.4b, since P7-S2c) - for self-auditing forensic
+    # trace access ("who queried which trace and when"). Same dual-bus
+    # pattern as document-service: consumer_bus (below) remains for
+    # document.>, event_bus is new and independent.
     event_bus = NatsEventBusClient(settings.nats_url, stream="reporting")
     await event_bus.connect()
     app.state.event_bus = event_bus
@@ -325,16 +325,16 @@ async def _require_reporting_permission(
     x_dms_principal: str, *, permission: str, access_type: str
 ) -> None:
     """RBAC (Post-Roadmap Phase 19 Session 7, ADR 0072) - reporting-service
-    hatte zuvor GAR KEINE Berechtigungsprüfung, auch nicht der Forensik-Trace
-    trotz dessen erhöhter Sensibilität. Prüft an der Wurzelressource (`root`)
-    - reporting-service registriert keine eigenen Ressourcen-Baumknoten.
-    Standardberichte/Planungen nutzen `reporting.read`/`reporting.write`,
-    der Forensik-Trace die separate, engere `reporting.forensic_trace`
-    (eigene Permission statt `reporting.read`, da er potenziell sensible
-    Nutzeraktivität offenlegt, siehe docs/services/reporting-service.md
-    "Offene Punkte"). Die "everyone"-Gruppe (ADR 0067) gewährt alle drei
-    standardmäßig - erhält das bisherige De-facto-offene Verhalten, macht es
-    aber admin-editierbar."""
+    previously had NO permission check at all, not even for the forensic
+    trace despite its heightened sensitivity. Checks against the root
+    resource (`root`) - reporting-service does not register its own
+    resource tree nodes. Standard reports/schedules use
+    `reporting.read`/`reporting.write`, the forensic trace the separate,
+    narrower `reporting.forensic_trace` (its own permission instead of
+    `reporting.read`, since it potentially exposes sensitive user activity,
+    see docs/services/reporting-service.md "Open Points"). The "everyone"
+    group (ADR 0067) grants all three by default - preserves the previous
+    de-facto-open behavior while making it admin-editable."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     allowed = await app.state.permission_client.check(

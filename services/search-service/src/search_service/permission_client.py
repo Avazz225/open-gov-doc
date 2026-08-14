@@ -4,11 +4,11 @@ import httpx
 
 
 class PermissionServiceClient:
-    """HTTP-Client gegen den Permission Service (3.1) - nutzt den neuen
-    `POST /check/batch` (P5-S4). Suchergebnisse werden über ihre `folder_id`
-    geprüft, nicht über die `document_id` selbst: Dokumente sind keine eigenen
-    Permission-Resources, nur Ordner werden als `ResourceNode` geführt (siehe
-    docs/services/search-service.md, Abschnitt Berechtigungsfilterung)."""
+    """HTTP client against the Permission Service (3.1) - uses the new
+    `POST /check/batch` (P5-S4). Search results are checked via their
+    `folder_id`, not via the `document_id` itself: documents are not their
+    own permission resources, only folders are maintained as `ResourceNode`
+    (see docs/services/search-service.md, permission filtering section)."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)

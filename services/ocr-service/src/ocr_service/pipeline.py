@@ -15,9 +15,9 @@ _settings = Settings()
 
 PublishEvent = Callable[[str, str, dict], Awaitable[None]]
 
-# Actor-Kennung für vom OCR Service selbst erzeugte Versionen (Textlayer-
-# Einbettung, siehe unten) - auch die Erkennungsgrundlage dafür, eine solche
-# Version nicht ein zweites Mal einzubetten (siehe Kommentar dort).
+# Actor identifier for versions created by the OCR Service itself (text
+# layer embedding, see below) - also the basis for detecting such a version
+# so it is not embedded a second time (see comment there).
 OCR_SERVICE_ACTOR = "system:ocr-service"
 
 
@@ -31,12 +31,13 @@ async def process_version(
     publish_event: PublishEvent,
     max_attempts: int,
 ) -> OcrResult | None:
-    """Wird sowohl vom NATS-Consumer (`consumer.py`, automatischer Pfad nach
-    `document.created`/`document.version.created`) als auch direkt in Tests
-    aufgerufen. Spiegelt `rendering_service.pipeline.process_version()`s
-    Try/Except-Form exakt: beide Aufrufe an den Document Service in einem
-    Block um `DocumentNotFoundError`, da ein permanent fehlendes Dokument/
-    Storage-Objekt sonst über NATS-Redelivery in eine Endlosschleife liefe."""
+    """Called both by the NATS consumer (`consumer.py`, automatic path after
+    `document.created`/`document.version.created`) and directly in tests.
+    Exactly mirrors `rendering_service.pipeline.process_version()`'s
+    try/except shape: both calls to the Document Service in one block
+    around `DocumentNotFoundError`, since a permanently missing
+    document/storage object would otherwise loop endlessly via NATS
+    redelivery."""
     try:
         metadata = await document_client.get_version(document_id, version_number)
         data = await document_client.download_content(document_id, version_number)
@@ -64,7 +65,7 @@ async def process_version(
         )
 
     if engine is None:
-        return None  # Format ohne OCR-Bedarf (.docx/.pptx/Video/...) - keine Zeile, kein Event
+        return None  # format with no OCR need (.docx/.pptx/video/...) - no row, no event
 
     async with session_factory() as session:
         config = await repository.get_config(session)
@@ -112,7 +113,7 @@ async def process_version(
         extraction = await engine.extract(
             data, filename=metadata.filename, content_type=metadata.content_type
         )
-    except Exception as exc:  # Engine-Fehler isolieren (fremde Bibliotheken/Formate)
+    except Exception as exc:  # isolate engine errors (third-party libraries/formats)
         logger.exception(
             "OCR-Engine %r fehlgeschlagen für %r Version %s",
             engine.engine_name,
@@ -129,10 +130,10 @@ async def process_version(
             max_attempts=max_attempts,
         )
 
-    # `page_image_storage_key` ist ein Präfix, keine vollständige Objekt-ID
-    # mehr - die tatsächlichen Objekte liegen als `{prefix}-{seite}.png`, eine
-    # Datei je Seite (Bugfix: mehrseitige PDFs zeigten bislang immer nur
-    # Seite 1, weil hier ausschließlich "page-1.png" geschrieben wurde).
+    # `page_image_storage_key` is a prefix, no longer a complete object ID -
+    # the actual objects are stored as `{prefix}-{page}.png`, one file per
+    # page (bugfix: multi-page PDFs used to always show only page 1, because
+    # only "page-1.png" was written here).
     page_image_storage_key = None
     if extraction.page_images:
         page_image_storage_key = f"ocr/{document_id}/{version_number}/page"
@@ -163,25 +164,26 @@ async def process_version(
         )
         await session.commit()
 
-    # Durchsuchbare PDF statt reinem Scan (Nutzer-Feedback): nur wenn Tesseract
-    # tatsächlich lief (die PDF hatte noch keinen nutzbaren Textlayer), die
-    # Quelle wirklich ein PDF ist (für Bilder gibt es kein PDF-Textlayer-
-    # Konzept, sie behalten stattdessen ihr Bildformat, siehe PreviewPane.tsx),
-    # Tesseract mindestens ein Wort erkannt hat (eine komplett leere Seite
-    # bekäme sonst eine sinnlose neue Version mit leerem Textlayer - real beim
-    # Testen entdeckt: eine leere Test-Fixture-PDF erzeugte unnötig neue
-    # Versionen und störte Versionsnummern-Annahmen in anderen Services'
-    # Tests) - UND diese Version nicht bereits selbst vom OCR Service erzeugt
-    # wurde. Der letzte Punkt ist zwingend, nicht nur eine Optimierung: ohne
-    # ihn würde die eigene neue Version erneut verarbeitet, erneut per
-    # Tesseract erkannt (die eingebetteten, unsichtbaren Wörter verändern die
-    # von Tesseract gesehenen Pixel nicht, `_native_text_available()`s grobe
-    # Zeichen-Schwelle greift bei kurzem erkanntem Text u. U. noch nicht) und
-    # erneut eingebettet - real beim Testen beobachtet: ein einzelnes kurzes
-    # Wort brauchte zwei Anläufe, bis genug Text für die Schwelle akkumuliert
-    # war, und hätte ohne diese Sperre unbegrenzt weiterversioniert.
-    # Nicht-blockierend: ein Fehlschlag hier darf den bereits erfolgreichen
-    # OCR-Befund für die Originalversion nicht zunichtemachen.
+    # Searchable PDF instead of a plain scan (user feedback): only if
+    # Tesseract actually ran (the PDF had no usable text layer yet), the
+    # source is really a PDF (there is no PDF-text-layer concept for
+    # images, they instead keep their image format, see PreviewPane.tsx),
+    # Tesseract recognized at least one word (a completely empty page would
+    # otherwise get a pointless new version with an empty text layer - found
+    # in real testing: an empty test fixture PDF unnecessarily created new
+    # versions and interfered with version-number assumptions in other
+    # services' tests) - AND this version was not already produced by the
+    # OCR Service itself. The last point is mandatory, not just an
+    # optimization: without it, the service's own new version would be
+    # processed again, recognized again by Tesseract (the embedded,
+    # invisible words don't change the pixels Tesseract sees;
+    # `_native_text_available()`'s rough character threshold may not yet
+    # trigger for short recognized text) and embedded again - observed in
+    # real testing: a single short word needed two passes before enough
+    # text had accumulated to reach the threshold, and would have kept
+    # versioning indefinitely without this guard. Non-blocking: a failure
+    # here must not invalidate the already-successful OCR finding for the
+    # original version.
     is_pdf_source = (
         metadata.content_type == "application/pdf" or metadata.filename.lower().endswith(".pdf")
     )
@@ -236,10 +238,10 @@ async def _persist_failure(
     publish_event: PublishEvent,
     max_attempts: int,
 ) -> OcrResult:
-    """Post-Roadmap Phase 20 Session 4 (ADR 0080): nutzt `repository.
-    record_failure` statt eines direkten `upsert_ocr_result`-Aufrufs - bleibt
-    unterhalb `max_attempts` bei `status="failed"` (retry-fähig), wechselt
-    erst bei Erschöpfung auf `failed_permanent`."""
+    """Post-Roadmap Phase 20 Session 4 (ADR 0080): uses `repository.
+    record_failure` instead of a direct `upsert_ocr_result` call - stays at
+    `status="failed"` (retry-capable) below `max_attempts`, only switches to
+    `failed_permanent` once exhausted."""
     async with session_factory() as session:
         result = await repository.record_failure(
             session,
@@ -268,10 +270,10 @@ async def _persist_skip(
     session_factory: async_sessionmaker[AsyncSession],
     publish_event: PublishEvent,
 ) -> OcrResult:
-    """Eigener Status statt `failed` - eine übersprungene Verarbeitung wegen
-    der konfigurierten Wortobergrenze (3.9) ist kein Fehler, sondern eine
-    bewusste, im Audit-Trail sichtbare Entscheidung (sonst nicht von einem
-    "noch nicht verarbeitet" unterscheidbar)."""
+    """Dedicated status instead of `failed` - processing skipped due to the
+    configured word limit (3.9) is not an error, but a deliberate decision
+    visible in the audit trail (otherwise indistinguishable from "not yet
+    processed")."""
     error = (
         f"Übersprungen: geschätzt {estimated_words} Wörter über der konfigurierten "
         f"Obergrenze von {max_word_count}"
@@ -307,10 +309,10 @@ async def _persist_content_type_skip(
     session_factory: async_sessionmaker[AsyncSession],
     publish_event: PublishEvent,
 ) -> OcrResult:
-    """Eigener Status statt `failed`/keine Zeile - ein per admin-konfigurierter
-    Positivliste nicht abgedeckter Content-Type (P5d-S1) ist wie die
-    Wortobergrenze (`_persist_skip`) eine bewusste, im Audit-Trail sichtbare
-    Entscheidung, kein technischer Fehler."""
+    """Dedicated status instead of `failed`/no row - a content type not
+    covered by the admin-configured allowlist (P5d-S1) is, like the word
+    limit (`_persist_skip`), a deliberate decision visible in the audit
+    trail, not a technical error."""
     error = (
         f"Übersprungen: Content-Type {content_type!r} steht nicht auf der "
         "admin-konfigurierten OCR-Positivliste"

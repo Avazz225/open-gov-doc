@@ -11,11 +11,11 @@ class RenderOutput:
 
 
 class Renderer(ABC):
-    """Eine Regel "Quellformat -> Zielformat" (2.4/3.7), analog zum
-    Backend-Plugin-Prinzip des Storage Service (3.3/3.8): neue Formate/
-    Fähigkeiten werden ergänzt, indem eine weitere `Renderer`-Klasse in
-    `renderers/__init__.py` registriert wird, ohne bestehende Renderer oder
-    die Pipeline (`pipeline.py`) zu ändern."""
+    """A rule "source format -> target format" (2.4/3.7), analogous to the
+    backend plugin principle of the Storage Service (3.3/3.8): new formats/
+    capabilities are added by registering another `Renderer` class in
+    `renderers/__init__.py`, without changing existing renderers or the
+    pipeline (`pipeline.py`)."""
 
     rendition_type: str
 

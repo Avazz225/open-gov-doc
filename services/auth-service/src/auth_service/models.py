@@ -8,22 +8,21 @@ Base = make_declarative_base("auth")
 
 
 class FederationIdentity(Base):
-    """Eigene Federation-Identität für die optionale föderierte Kontaktsuche
-    (2.5/7.4, P15-S4) - erstes eigenes Postgres-Schema dieses Service
-    überhaupt (bislang zustandslos, siehe README/docs/services/
-    auth-service.md), bewusst gerechtfertigt durch genau eine Singleton-Zeile
-    (``id=1``, gleiches Muster wie `workflow_service.FederationIdentity`).
+    """Own federation identity for the optional federated contact directory
+    search (2.5/7.4, P15-S4) - this service's first own Postgres schema
+    ever (previously stateless, see README/docs/services/
+    auth-service.md), deliberately justified by exactly one singleton row
+    (``id=1``, same pattern as `workflow_service.FederationIdentity`).
 
-    Registriert sich als EIGENER, von `workflow-service`s Federation-Hub-
-    Teilnahme unabhängiger Eintrag im selben Adressbuch (frischer `uuid4()`
-    statt eines geteilten `installation_id`, gleiches Erzeugungsmuster wie
-    dort) - der Hub kennt "Installation" nur als generischen, von jedem
-    Service unabhängig registrierbaren Adressbuch-Eintrag, keine
-    fest-verdrahtete 1:1-Zuordnung zu einer bestimmten Installation. Zwei
-    Einträge (einer für Workflow-Föderation, einer für Kontaktsuche) je
-    physischer Installation ist eine bewusste, dokumentierte Vereinfachung
-    gegenüber einer einzigen, service-übergreifend geteilten Identität -
-    siehe ADR 0054 "Konsequenzen"."""
+    Registers as its OWN entry in the same address book, independent of
+    `workflow-service`'s Federation Hub participation (fresh `uuid4()`
+    instead of a shared `installation_id`, same generation pattern as
+    there) - the Hub only knows "installation" as a generic address book
+    entry that can be registered independently by any service, no
+    hardwired 1:1 mapping to a specific installation. Two entries (one for
+    workflow federation, one for contact directory search) per physical
+    installation is a deliberate, documented simplification compared to a
+    single, cross-service shared identity - see ADR 0054 "Consequences"."""
 
     __tablename__ = "federation_identity"
 
@@ -35,11 +34,11 @@ class FederationIdentity(Base):
 
 
 class SsoConfig(Base):
-    """SSO/automatischer Login (Post-Roadmap-Feature) - installationsweiter
-    Schalter, gleiches Einzelzeilen-Muster wie document-services
-    `ShareLinkConfig`. `enabled=False` (Default) bedeutet: `login/page.tsx`
-    zeigt weiterhin unverändert das Passwort-Formular, keine automatische
-    Weiterleitung zu Keycloak."""
+    """SSO/automatic login (post-roadmap feature) - installation-wide
+    switch, same single-row pattern as document-service's
+    `ShareLinkConfig`. `enabled=False` (default) means: `login/page.tsx`
+    continues to show the password form unchanged, no automatic redirect
+    to Keycloak."""
 
     __tablename__ = "sso_config"
 
@@ -49,14 +48,13 @@ class SsoConfig(Base):
 
 
 class LocalSigningKey(Base):
-    """Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
-    0063) - eigenes RSA-Schlüsselpaar für Tokens technischer Konten
-    (Superuser/Domain-Admins), unabhängig von Keycloak ausgestellt.
-    Singleton-Zeile (`id=1`), gleiches Muster wie `FederationIdentity` oben.
-    `kid` ist der `kid`-Claim im Token-Header - stabil über Neustarts hinweg
-    (kein neuer Schlüssel bei jedem Start), sonst würden bereits
-    ausgestellte, noch gültige Tokens plötzlich keinen passenden Schlüssel
-    mehr im JWKS finden."""
+    """Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR
+    0063) - own RSA key pair for tokens of technical accounts
+    (superuser/domain admins), issued independently of Keycloak.
+    Singleton row (`id=1`), same pattern as `FederationIdentity` above.
+    `kid` is the `kid` claim in the token header - stable across restarts
+    (no new key on every startup), otherwise already-issued, still-valid
+    tokens would suddenly find no matching key in the JWKS anymore."""
 
     __tablename__ = "local_signing_key"
 
@@ -68,19 +66,19 @@ class LocalSigningKey(Base):
 
 
 class TechnicalAccount(Base):
-    """Auth-Entkopplung von Keycloak (Post-Roadmap-Feature, Phase 18, ADR
-    0063) - Superuser- und Domain-Admin-Konten leben ab dieser Phase
-    ausschließlich hier, nicht mehr als Keycloak-Nutzerkonten. `password_hash`
-    ist ein bcrypt-Hash (erstes Mal, dass dieser Service selbst ein Passwort
-    hasht - bislang übernahm Keycloak das vollständig). `role_name` ist die
-    an `permission-service` zu übermittelnde Rolle (z. B. `domain-admin-
-    users`), identisch zum bisherigen Keycloak-Konten-Muster - `NULL` für den
-    Superuser (P18-S2), dessen Sonderrechte nicht über eine permission-
-    service-Rolle laufen, sondern über direkten Namensvergleich an mehreren
-    Stellen im System (z. B. Not-Shutdown, query-services `_is_active_
-    superuser`). `enabled`/`expires_at` tragen weiterhin die Break-Glass-
-    Semantik für den Superuser (4.6) - jetzt rein app-seitig, ohne
-    Keycloak-Attribut."""
+    """Auth decoupling from Keycloak (post-roadmap feature, Phase 18, ADR
+    0063) - superuser and domain admin accounts live exclusively here from
+    this phase on, no longer as Keycloak user accounts. `password_hash` is
+    a bcrypt hash (the first time this service hashes a password itself -
+    previously Keycloak handled that entirely). `role_name` is the role to
+    be submitted to `permission-service` (e.g. `domain-admin-users`),
+    identical to the previous Keycloak account pattern - `NULL` for the
+    superuser (P18-S2), whose special privileges don't run through a
+    permission-service role but via direct name comparison at several
+    points in the system (e.g. emergency shutdown, query-service's
+    `_is_active_superuser`). `enabled`/`expires_at` continue to carry the
+    break-glass semantics for the superuser (4.6) - now purely app-side,
+    without a Keycloak attribute."""
 
     __tablename__ = "technical_account"
 
@@ -95,25 +93,25 @@ class TechnicalAccount(Base):
 
 
 class AdGroupRoleMapping(Base):
-    """Konfigurierbares AD-/Keycloak-Gruppe -> interne-Rolle-Mapping (4.4,
-    P24-S2). EIGENE, schlanke Tabelle statt Wiederverwendung von
+    """Configurable AD/Keycloak group -> internal role mapping (4.4,
+    P24-S2). OWN, lean table instead of reusing
     `permission_service.models.Group`/`GroupMembership`/`RoleAssignment`
-    (Post-Roadmap Phase 22) - jene bilden ADMIN-ANGELEGTE Gruppen mit
-    expliziter, synchron zu haltender Mitgliedschaftstabelle ab, eine
-    andere, unabhängige Funktion. Dieses Mapping bildet stattdessen EXTERNE
-    Keycloak-/AD-Gruppenclaims (`groups`-JWT-Claim, siehe
-    `bootstrap._ensure_groups_mapper`) auf interne Rollennamen ab - keine
-    eigene Mitgliedschaftstabelle nötig, da der Claim bei jedem Tokenbezug
-    ohnehin frisch aus Keycloak kommt und dynamisch bei jeder `/me`-Anfrage
-    ausgewertet wird (siehe `ad_group_mapping.resolve_roles_for_groups`).
+    (post-roadmap Phase 22) - those model ADMIN-CREATED groups with an
+    explicit, synchronously maintained membership table, a different,
+    independent function. This mapping instead maps EXTERNAL Keycloak/AD
+    group claims (`groups` JWT claim, see
+    `bootstrap._ensure_groups_mapper`) onto internal role names - no own
+    membership table needed, since the claim comes fresh from Keycloak on
+    every token acquisition anyway and is evaluated dynamically on every
+    `/me` request (see `ad_group_mapping.resolve_roles_for_groups`).
 
-    Bewusster Scope-Cut dieser Session (siehe docs/services/auth-service.md
-    "Offene Punkte" und ADR 0093): nur einfache 1:1-Zuordnung (eine
-    `ad_group_name` -> eine `role_name`), keine zusammengesetzten Regeln
-    (Gruppe UND Attribut, mehrere Gruppen -> eine Rolle via UND-Logik), die
-    Konzept 4.4 als volle Zielausbaustufe beschreibt. Ein AD-Gruppenname
-    kann mehrfach vorkommen (z. B. auf zwei verschiedene Rollen gemappt
-    sein) - `UniqueConstraint` verhindert nur exakt doppelte Zeilen."""
+    Deliberate scope cut for this session (see docs/services/auth-service.md
+    "Open Points" and ADR 0093): only simple 1:1 mapping (one
+    `ad_group_name` -> one `role_name`), no composite rules (group AND
+    attribute, multiple groups -> one role via AND logic), which concept
+    4.4 describes as the full target scope. An AD group name can occur
+    multiple times (e.g. mapped to two different roles) -
+    `UniqueConstraint` only prevents exact duplicate rows."""
 
     __tablename__ = "ad_group_role_mapping"
     __table_args__ = (

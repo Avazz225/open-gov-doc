@@ -5,10 +5,10 @@ from datetime import datetime
 
 @dataclass
 class SignerInfo:
-    """Identität, die ins ausgestellte Zertifikat einfließt (siehe
-    `InternalSelfSignedConnector.sign`) - `display_name`/`email` kommen vom
-    Aufrufer aus einer echten `auth-service`-Kontenprüfung, nie ungeprüft vom
-    Client übernommen (`auth_client.py`)."""
+    """Identity that flows into the issued certificate (see
+    `InternalSelfSignedConnector.sign`) - `display_name`/`email` come from
+    the caller via a real `auth-service` account check, never taken
+    unchecked from the client (`auth_client.py`)."""
 
     principal_id: str
     display_name: str
@@ -32,11 +32,11 @@ class VerificationResult:
 
 
 class SignatureProviderConnector(ABC):
-    """Einheitliches Interface für Signature-Provider-Connector-Plugins
-    (Konzept 3.10, Plugin-Prinzip wie die Storage-Backends/CMIS, 3.3): neue
-    Anbieter (insbesondere ein akkreditierter externer QTSP für QES)
-    implementieren nur dieses Interface - der Rest des Signature Service
-    bleibt unverändert ("Dazustellen"-Prinzip, wie bei `StorageBackend`)."""
+    """Uniform interface for signature provider connector plugins (concept
+    3.10, plugin principle like the storage backends/CMIS, 3.3): new
+    providers (especially an accredited external QTSP for QES) only
+    implement this interface - the rest of the Signature Service stays
+    unchanged ("plug in alongside" principle, as with `StorageBackend`)."""
 
     @abstractmethod
     async def sign(self, pdf_bytes: bytes, *, signer: SignerInfo, level: str) -> SignedResult: ...

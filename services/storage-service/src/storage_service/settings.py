@@ -5,10 +5,11 @@ from pydantic import BaseModel, model_validator
 
 
 class BackendTargetConfig(BaseModel):
-    """Eine einzelne Backend-Instanz im Ziel-Set (3.6). Seit P5b-S6 (ADR 0017)
-    ist `id` - nicht `type` - der eindeutige Schlüssel, daher sind beliebig
-    viele gleichartige Instanzen möglich (z. B. zwei S3-Provider gleichzeitig
-    im selben Ziel-Set), jede mit eigenen Zugangsdaten/Mount-Parametern."""
+    """A single backend instance in the target set (3.6). Since P5b-S6
+    (ADR 0017), `id` - not `type` - is the unique key, so any number of
+    instances of the same type is possible (e.g. two S3 providers
+    simultaneously in the same target set), each with its own
+    credentials/mount parameters."""
 
     id: str
     type: Literal["local", "s3", "azure"]
@@ -18,28 +19,30 @@ class BackendTargetConfig(BaseModel):
     secret_key: str | None = None
     bucket: str | None = None
     region: str | None = None
-    # Azure Blob Storage (3.6, Konzept 1a) - Verbindungsstring-Auth (kein
-    # azure-identity/AAD), siehe AzureBlobBackend/docs/services/
-    # storage-service.md. `container` ist das Azure-Pendant zu `bucket`
-    # (eigenes Feld statt Wiederverwendung von `bucket`, um beide Typen in
-    # Fehlermeldungen/Konfiguration eindeutig unterscheidbar zu halten).
+    # Azure Blob Storage (3.6, concept 1a) - connection-string auth (no
+    # azure-identity/AAD), see AzureBlobBackend/docs/services/
+    # storage-service.md. `container` is the Azure counterpart to `bucket`
+    # (its own field instead of reusing `bucket`, so both types remain
+    # unambiguously distinguishable in error messages/configuration).
     connection_string: str | None = None
     container: str | None = None
-    # WORM/Object-Lock (5.1/5.2a, seit P7-S1) - bewusst nur "governance" als
-    # gültiger Wert (kein "compliance"): Compliance-Mode würde die vom
-    # Konzept verlangte Zwangslöschungs-Ausnahme technisch unmöglich machen.
-    # Nur für type="s3" wirksam als echtes S3 Object Lock (siehe
-    # S3Backend.ensure_bucket/write) - der Anwendungsschicht-Guard
-    # (retention_guard.py) greift unabhängig vom Backend-Typ. Für type="azure"
-    # ebenso wie für type="local" ohne technische Entsprechung (dokumentierter
-    # No-Op, siehe AzureBlobBackend) - lediglich entgegengenommen, damit ein
-    # Azure-Ziel trotzdem am Anwendungsschicht-Guard teilnehmen kann.
+    # WORM/Object Lock (5.1/5.2a, since P7-S1) - deliberately only
+    # "governance" as a valid value (no "compliance"): compliance mode
+    # would make the forced-deletion exception required by the concept
+    # technically impossible. Only effective for type="s3" as real S3
+    # Object Lock (see S3Backend.ensure_bucket/write) - the application-
+    # layer guard (retention_guard.py) applies independent of the backend
+    # type. For type="azure" as well as type="local", there is no
+    # technical equivalent (documented no-op, see AzureBlobBackend) - it
+    # is merely accepted so that an Azure target can still participate in
+    # the application-layer guard.
     object_lock_mode: Literal["governance"] | None = None
-    # Aussonderung (5.6, seit P7-S3): "archive"-Ziele sind NICHT Teil der
-    # regulären Upload-Replikation (`resolve_targets` schließt sie aus) -
-    # sie empfangen Inhalte ausschließlich über die neuen `.../archive-copy`-
-    # Endpunkte, die `archival-service` explizit aufruft. `None` (Default)
-    # = normales Replikationsziel, unverändertes bestehendes Verhalten.
+    # Records disposal (5.6, since P7-S3): "archive" targets are NOT part
+    # of the regular upload replication (`resolve_targets` excludes
+    # them) - they receive content exclusively via the new
+    # `.../archive-copy` endpoints, which `archival-service` calls
+    # explicitly. `None` (default) = normal replication target,
+    # unchanged existing behavior.
     role: Literal["archive"] | None = None
 
     @model_validator(mode="after")
@@ -65,31 +68,34 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Ziel-Set (3.6) - seit P5b-S6 eine echte Liste von Backend-Instanzen statt
-    # der vorherigen festen Zwei-Slot-Struktur (backend/secondary_backend,
-    # siehe ADR 0004/0017). Primärziel ist immer der erste Eintrag (bestimmt
-    # auch die Lesepriorität, siehe replication.read_with_fallback).
+    # Target set (3.6) - since P5b-S6 a real list of backend instances
+    # instead of the previous fixed two-slot structure (backend/
+    # secondary_backend, see ADR 0004/0017). The primary target is always
+    # the first entry (this also determines read priority, see
+    # replication.read_with_fallback).
     targets: list[BackendTargetConfig] = [
         BackendTargetConfig(id="local", type="local", base_path="/tmp/dms-storage-dev")
     ]
 
-    # Schreibstrategie (3.6): "quorum" = synchron, Erfolg erst ab quorum_count
-    # bestätigten Zielen (Werkseinstellung für hohen Schutzbedarf laut Konzept);
-    # "primary_async" = synchron nur aufs Primärziel, weitere Ziele werden als
-    # "pending" vermerkt und über POST /replication/process-pending nachgezogen
-    # (Werkseinstellung für den allgemeinen Arbeitsbetrieb).
+    # Write strategy (3.6): "quorum" = synchronous, success only once
+    # quorum_count targets have confirmed (default for high protection
+    # needs per the concept); "primary_async" = synchronous only to the
+    # primary target, additional targets are marked "pending" and caught
+    # up via POST /replication/process-pending (default for general
+    # day-to-day operation).
     write_strategy: Literal["quorum", "primary_async"] = "primary_async"
     quorum_count: int = 1
 
-    # Nach so vielen erfolglosen Replikationsversuchen gilt eine Kopie als
-    # dauerhaft fehlgeschlagen ("failed_permanent") statt weiter für
-    # process-pending vorgemerkt zu bleiben - Ersatz für die im Konzept
-    # geforderte "Alarmierung", solange kein Notification Service existiert
-    # (folgt Phase 6): wird stattdessen als Error-Log-Zeile ausgegeben.
+    # After this many unsuccessful replication attempts, a copy is
+    # considered permanently failed ("failed_permanent") instead of
+    # remaining queued for process-pending - a stand-in for the
+    # "alerting" required by the concept, as long as no Notification
+    # Service exists (planned for Phase 6): an error-log line is emitted
+    # instead.
     max_replication_attempts: int = 5
 
-    # Rolle, die eine Löschung trotz aktiver Governance-Sperre erzwingen darf
-    # (`?bypass_governance=true`, 5.1/5.2a) - geprüft über den vom Gateway
-    # weitergereichten `X-DMS-Roles`-Header, gleiches serverseitige
-    # Rollen-Header-Muster wie `document_service.kennzeichen_admin_role`.
+    # Role that may force a deletion despite an active governance lock
+    # (`?bypass_governance=true`, 5.1/5.2a) - checked via the
+    # `X-DMS-Roles` header forwarded by the gateway, the same server-side
+    # role-header pattern as `document_service.kennzeichen_admin_role`.
     governance_bypass_role: str = "dms-admin"

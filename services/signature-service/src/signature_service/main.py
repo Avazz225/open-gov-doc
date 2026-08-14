@@ -101,10 +101,10 @@ def _default_provider_levels() -> dict[str, list[str]]:
 
 
 async def _effective_providers(session: AsyncSession) -> list[SignatureProviderConfig]:
-    """Frisch aus der DB gelesen bei jedem Aufruf (kein `app.state`-Cache) -
-    Post-Roadmap Phase 22 Session 6, ADR 0091: macht `levels` ohne Neustart
-    wirksam. `id`/`type` bleiben strukturell aus `Settings`, nur `levels`
-    kann von der `SignatureConfig`-Zeile überschrieben sein."""
+    """Read fresh from the DB on every call (no `app.state` cache) -
+    post-roadmap phase 22 session 6, ADR 0091: makes `levels` take effect
+    without a restart. `id`/`type` still come structurally from `Settings`,
+    only `levels` can be overridden by the `SignatureConfig` row."""
     config = await repository.get_signature_config(
         session, default_provider_levels=_default_provider_levels()
     )
@@ -253,11 +253,11 @@ async def get_signature_config(
 async def put_signature_config(
     body: list[SignatureProviderLevelsIn], session: AsyncSession = Depends(get_session)
 ) -> list[SignatureProviderStatusOut]:
-    """Connector-Niveaus (Post-Roadmap Phase 22 Session 6, ADR 0091) - `id`/
-    `type` bleiben strukturell aus `Settings.signature_providers`
-    ("nur bestehende Einträge bearbeiten"), nur `levels` ist editierbar.
-    Dieselbe Validierung wie `SignatureProviderConfig._check_levels`
-    (Settings-Schema), hier zur Laufzeit statt beim Start."""
+    """Connector levels (post-roadmap phase 22 session 6, ADR 0091) - `id`/
+    `type` still come structurally from `Settings.signature_providers`
+    ("only edit existing entries"), only `levels` is editable. Same
+    validation as `SignatureProviderConfig._check_levels` (settings
+    schema), here at runtime instead of at startup."""
     known_provider_types = {p.id: p.type for p in settings.signature_providers}
     try:
         await repository.update_signature_config(

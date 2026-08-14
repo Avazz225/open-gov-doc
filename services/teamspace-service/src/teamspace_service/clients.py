@@ -1,8 +1,8 @@
-"""Dünne HTTP-Clients gegen `folder-service`/`permission-service` (2.5, P14-S6)
-- `teamspace-service` besitzt keinen eigenen Dokument-/Ordner-Speicher (analog
-`case-service`s opaken `document_id`-Referenzen), sondern legt bei der Anlage
-eines Teamspace einen echten `folder-service`-Ordner an und hält dessen `id`
-als `root_folder_id` fest."""
+"""Thin HTTP clients against `folder-service`/`permission-service` (2.5,
+P14-S6) - `teamspace-service` has no document/folder storage of its own
+(analogous to `case-service`'s opaque `document_id` references), but
+instead creates a real `folder-service` folder when a teamspace is
+created and keeps its `id` as `root_folder_id`."""
 
 import httpx
 
@@ -12,13 +12,14 @@ class FolderServiceClient:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
 
     async def create_folder(self, *, name: str, created_by: str) -> dict:
-        """Legt den Teamspace-Wurzelordner direkt unter dem globalen
-        `folder-service`-Wurzelordner (`parent_id="root"`) an - bewusst OHNE
-        `object_type_id` (Feld ist optional, `folder-service` überspringt die
-        sonst live gegen `object-type-service` laufende Validierung dann
-        vollständig, verifiziert): ein Teamspace-Ordner braucht keine eigenen
-        Attribute/Constraints, ein dediziertes Objekttyp nur für diesen Zweck
-        anzulegen wäre unnötige Komplexität."""
+        """Creates the teamspace root folder directly under the global
+        `folder-service` root folder (`parent_id="root"`) - deliberately
+        WITHOUT `object_type_id` (the field is optional; `folder-service`
+        then skips entirely the validation that otherwise runs live
+        against `object-type-service`, verified): a teamspace folder
+        needs no attributes/constraints of its own, and creating a
+        dedicated object type just for this purpose would be unnecessary
+        complexity."""
         response = await self._client.post(
             "/folders", json={"name": name, "parent_id": "root", "created_by": created_by}
         )
@@ -30,18 +31,18 @@ class FolderServiceClient:
 
 
 class PermissionServiceClient:
-    """Verknüpft eine Teamspace-Mitgliedschaft zusätzlich mit einer echten,
-    ressourcen-skopierten `permission-service`-Rollenzuweisung auf dem
-    Teamspace-Wurzelordner (P14-S6) - NICHT die primäre Zugriffskontrolle
-    dieses Service (das ist die eigene `teamspace_member`-Tabelle, siehe
-    `models.py`/`main.py._require_member`), sondern eine zusätzliche,
-    forward-kompatible Verankerung: `search-service` prüft bereits heute real
-    `document.read` auf Ordnerebene (`POST /check/batch`) - Suchergebnisse aus
-    einem Teamspace respektieren die Mitgliedschaft dadurch schon jetzt, ohne
-    dass dieser Service `search-service` kennen muss. Andere, noch nicht
-    RBAC-durchsetzende Services (`folder-service`/`document-service` selbst,
-    siehe `docs/architecture.md`) profitieren erst von einer künftigen
-    Durchsetzung dort."""
+    """Additionally links a teamspace membership with a real, resource-
+    scoped `permission-service` role assignment on the teamspace root
+    folder (P14-S6) - NOT the primary access control of this service
+    (that is the service's own `teamspace_member` table, see
+    `models.py`/`main.py._require_member`), but an additional, forward-
+    compatible anchoring: `search-service` already really checks
+    `document.read` at folder level today (`POST /check/batch`) - search
+    results from a teamspace therefore already respect membership now,
+    without this service needing to know about `search-service`. Other
+    services that don't yet enforce RBAC (`folder-service`/
+    `document-service` themselves, see `docs/architecture.md`) will only
+    benefit once enforcement is added there in the future."""
 
     TEAMSPACE_MEMBER_ROLE_NAME = "teamspace-member"
     TEAMSPACE_MEMBER_ROLE_PERMISSIONS = [
@@ -56,11 +57,11 @@ class PermissionServiceClient:
         self._role_id: int | None = None
 
     async def _ensure_role(self) -> int:
-        """Get-or-Create der Rolle per Name (gleiches Muster wie
-        `migration-service`s `apply_role_assignment` für migrierte
-        Berechtigungen) - `POST /roles`/`POST /role-assignments` sind bei
-        `permission-service` bewusst ungegatet (verifiziert), kein
-        technisches Konto/Principal für diesen Bootstrap-Aufruf nötig."""
+        """Get-or-create the role by name (same pattern as
+        `migration-service`'s `apply_role_assignment` for migrated
+        permissions) - `POST /roles`/`POST /role-assignments` are
+        deliberately ungated on `permission-service` (verified), no
+        technical account/principal needed for this bootstrap call."""
         if self._role_id is not None:
             return self._role_id
         response = await self._client.get("/roles")
@@ -98,11 +99,11 @@ class PermissionServiceClient:
         response.raise_for_status()
 
     async def has_permission(self, principal_id: str, permission: str) -> bool:
-        """Post-Roadmap Phase 22 Session 5 - Domain-Admin-Capability-Prüfung
-        (`admin.teamspace_management`) für die neue installationsweite
-        Teamspace-Übersicht, gleiches Muster wie `document_service.
-        permission_client.PermissionServiceClient.has_permission`: globale
-        Rolle an der Wurzelressource, keine ressourcenskalierte Prüfung."""
+        """Post-Roadmap Phase 22 Session 5 - domain-admin capability check
+        (`admin.teamspace_management`) for the new installation-wide
+        teamspace overview, same pattern as `document_service.
+        permission_client.PermissionServiceClient.has_permission`: global
+        role on the root resource, no resource-scoped check."""
         response = await self._client.get(f"/effective-permissions/{principal_id}/root")
         response.raise_for_status()
         return permission in response.json()["permissions"]

@@ -67,10 +67,10 @@ async def _is_active_superuser(x_dms_principal: str) -> bool:
 
 
 async def _require_query_console(x_dms_principal: str, is_superuser: bool) -> None:
-    """Konzept 6.1: "ohne Authentifizierung ist keine einzige Abfrage
-    möglich" - der aktivierte Superuser (4.6) ist die einzige Ausnahme, sonst
-    ist die Domain-Admin-Rolle "Query-Konsole" (`admin.query_console`)
-    zwingend, gleiches Gate-Muster wie `workflow-service._require_object_
+    """Concept 6.1: "without authentication, not a single query is
+    possible" - the activated superuser (4.6) is the only exception,
+    otherwise the domain-admin role "query console" (`admin.query_console`)
+    is mandatory, same gate pattern as `workflow-service._require_object_
     config`/`auth-service._require_user_management`."""
     if is_superuser:
         return
@@ -85,9 +85,9 @@ async def _require_query_console(x_dms_principal: str, is_superuser: bool) -> No
 
 
 async def _require_manipulate_permission(x_dms_principal: str, is_superuser: bool) -> None:
-    """Konzept 6.1 nennt "keine Manipulation" explizit als separat vergebbare
-    Einschraenkung - eigene, feingranulare Berechtigung getrennt von der
-    Lese-Berechtigung `admin.query_console` oben."""
+    """Concept 6.1 explicitly names "no manipulation" as a separately
+    grantable restriction - its own, fine-grained permission separate from
+    the read permission `admin.query_console` above."""
     if is_superuser:
         return
     allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
@@ -101,9 +101,9 @@ async def _require_manipulate_permission(x_dms_principal: str, is_superuser: boo
 
 
 async def _require_manipulation_mode_active(session: AsyncSession, is_superuser: bool) -> None:
-    """Schutzschalter (Konzept 6.1 Punkt 1) - der aktivierte Superuser (4.6)
-    "kann uneingeschraenkt lesen und schreiben" und muss ihn nicht separat
-    aktivieren."""
+    """Safety switch (concept 6.1 item 1) - the activated superuser (4.6)
+    "can read and write without restriction" and does not need to activate
+    it separately."""
     if is_superuser:
         return
     mode = await manipulation_mode.get_status(session)
@@ -125,9 +125,9 @@ def _manipulation_clients() -> _ManipulationClients:
 async def _record_query(
     *, principal_id: str, source: str, params: dict, total_before: int, total_after: int
 ) -> None:
-    """Selbst-Auditierung jeder Abfrage (Konzept 6.1 Punkt 5, "Vollständige
-    Protokollierung") - unconditional, kein Abschalten möglich, gleiches
-    Muster wie reporting-service's `_record_trace_query` (5.4b)."""
+    """Self-auditing of every query (concept 6.1 item 5, "complete
+    logging") - unconditional, cannot be turned off, same pattern as
+    reporting-service's `_record_trace_query` (5.4b)."""
     await publish_event(
         "query.executed",
         None,
@@ -189,10 +189,10 @@ async def _run_query(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
 
-    # Genuin eigener Zustand (Schutzschalter, seit P8-S2) - kein Read-Modell
-    # eines fremden Service, reversiert die P8-S1-Entscheidung "keine eigene
-    # Datenhaltung" nicht (die sich nur gegen das Duplizieren fremder
-    # Read-Modelle richtete), siehe models.py.
+    # Genuinely own state (safety switch, since P8-S2) - not a read model of
+    # a foreign service, does not reverse the P8-S1 decision "no own data
+    # storage" (which was only directed against duplicating foreign read
+    # models), see models.py.
     engine = build_engine(settings.postgres_dsn)
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS query"))
@@ -206,14 +206,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
-    # Producer-Bus fuer die Selbst-Auditierung (Punkt 5, 6.1).
+    # Producer bus for self-auditing (item 5, 6.1).
     event_bus = NatsEventBusClient(settings.nats_url, stream="query")
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    # Neuer Consumer-Bus seit P8-S2 (P8-S1 hatte nur den Producer oben) -
-    # fuehrt zuvor per Vier-Augen zurueckgestellte Manipulations-Aktionen
-    # nach Genehmigung aus, identisches Dual-Bus-Muster wie document-service.
+    # New consumer bus since P8-S2 (P8-S1 only had the producer above) -
+    # executes manipulation actions previously deferred via four-eyes after
+    # approval, identical dual-bus pattern as document-service.
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
     app.state.consumer_bus = consumer_bus
@@ -338,9 +338,9 @@ async def activate_manipulation_mode(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ManipulationModeStatusOut:
-    """Schutzschalter (Konzept 6.1 Punkt 1) - "vergleichbar einem
-    Break-Glass-Zugang", aber ein eigener, leichterer Mechanismus (siehe
-    docs/services/query-service.md fuer die Abgrenzung zu 4.6)."""
+    """Safety switch (concept 6.1 item 1) - "comparable to a break-glass
+    access", but its own, lighter-weight mechanism (see
+    docs/services/query-service.md for the distinction from 4.6)."""
     is_superuser = await _is_active_superuser(x_dms_principal)
     await _require_manipulate_permission(x_dms_principal, is_superuser)
     mode = await manipulation_mode.activate(
@@ -384,10 +384,9 @@ async def manipulate_dry_run(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DryRunResult:
-    """Konzept 6.1 Punkt 2: "Jede schreibende Abfrage wird zunaechst nur
-    simuliert" - fuer ALLE Aufrufer verpflichtend, auch den aktivierten
-    Superuser (das Konzept nennt hier keine Ausnahme, nur fuer
-    Schutzschalter/RBAC)."""
+    """Concept 6.1 item 2: "every write query is initially only simulated" -
+    mandatory for ALL callers, including the activated superuser (the
+    concept names no exception here, only for the safety switch/RBAC)."""
     is_superuser = await _is_active_superuser(x_dms_principal)
     await _require_manipulate_permission(x_dms_principal, is_superuser)
     await _require_manipulation_mode_active(session, is_superuser)
@@ -436,10 +435,10 @@ async def manipulate_execute(
     params = claims["params"]
     action = manipulation.get_action(action_type)
 
-    # Konzept 6.1 Punkt 4: kritische Aktionen erzwingen Vier-Augen immer,
-    # unabhaengig von der installationsweiten Konfiguration - auch fuer den
-    # aktivierten Superuser (die einzige Stelle, an der der Superuser nicht
-    # "uneingeschraenkt" agieren darf).
+    # Concept 6.1 item 4: critical actions always enforce four-eyes,
+    # independent of the installation-wide configuration - even for the
+    # activated superuser (the only place where the superuser may not act
+    # "without restriction").
     requires_approval = action.is_critical
     if not requires_approval:
         requires_approval = await app.state.permission_client.requires_approval(action_type)

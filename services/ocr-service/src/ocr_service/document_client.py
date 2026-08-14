@@ -4,8 +4,8 @@ import httpx
 
 
 class DocumentNotFoundError(Exception):
-    """Dokument/Version wurde beim Document Service nicht (mehr) gefunden -
-    z. B. inzwischen gelöscht, während das Event noch in der Zustellung war."""
+    """Document/version was not (or no longer) found at the Document Service
+    - e.g. deleted in the meantime while the event was still in delivery."""
 
 
 @dataclass
@@ -16,11 +16,11 @@ class VersionMetadata:
 
 
 class DocumentServiceClient:
-    """HTTP-Client gegen den Document Service (3.1: eigenes Schema pro Service,
-    kein direkter DB-/Storage-Key-Zugriff). Der OCR Service kennt weder das
-    interne Datenmodell noch den content-adressierten Storage-Key einer
-    Version - beides bleibt Sache des Document Service, Original-Metadaten und
-    -Inhalt werden ausschließlich über dessen öffentliche API bezogen."""
+    """HTTP client against the Document Service (3.1: separate schema per
+    service, no direct DB/storage key access). The OCR Service knows neither
+    the internal data model nor the content-addressed storage key of a
+    version - both remain the Document Service's responsibility; original
+    metadata and content are obtained exclusively via its public API."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
@@ -57,11 +57,12 @@ class DocumentServiceClient:
         created_by: str,
         comment: str,
     ) -> dict:
-        """Checkt eine vom OCR Service veränderte Datei (Textlayer-Einbettung,
-        siehe text_layer.py) als neue Dokumentversion ein - identisches Muster
-        wie signature_service.document_client.checkin_signed_version() (ADR
-        0025: Verarbeitung, die die Bytes verändert, erzeugt serverseitig eine
-        neue Version statt die Originalversion zu überschreiben)."""
+        """Checks in a file modified by the OCR Service (text layer
+        embedding, see text_layer.py) as a new document version - identical
+        pattern to
+        signature_service.document_client.checkin_signed_version() (ADR
+        0025: processing that changes the bytes creates a new version
+        server-side instead of overwriting the original version)."""
         response = await self._client.post(
             f"/documents/{document_id}/versions",
             data={

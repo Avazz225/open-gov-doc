@@ -6,44 +6,44 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
-    # Welche Subjects der Audit Service konsumiert (Konzept 3.4: "konsumiert alle
-    # Events"). Wildcard je Producer-Stream, damit neue Services sich nur hier
-    # eintragen müssen, ohne Code-Änderung. "document.>" wurde in P3-S2 ergänzt,
-    # da 4.2 explizit vollständige Auditierung von Force-Unlock/Konfliktkopie
-    # verlangt. "permission.>" kam in P3-S4 dazu, da 4.7 explizit vollständige
-    # Auditierung von Bereichssperren (setzen/aufheben) verlangt - andere
-    # Services (Auth/Storage) folgen bei Bedarf. "virus_scan.>" kam in P5-S1
-    # dazu - 10.3/5.3 verlangen explizit die Auditierung von Scan-Ergebnissen.
-    # "rendering.>" kam in P5-S2 dazu - erzeugte/gescheiterte Ersatzdarstellungen
-    # sind ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung. "ocr.>"
-    # kam in P5-S3 dazu - 3.9/5.3 verlangen explizit die Auditierung von
-    # OCR-Ergebnissen (inkl. needs_review-Fällen). "workflow.>" kam in P6-S1
-    # dazu - Prozessinstanz-Start/-Abschluss und Task-Abschlüsse sind Teil
-    # der nachvollziehbaren Dokumentverarbeitung. "notification.>" kam in P6-S2
-    # dazu - Zustellversuche (erfolgreich/fehlgeschlagen) sind ebenfalls Teil der
-    # nachvollziehbaren Systemaktionen (5.3). "case.>" kam in P6-S3 dazu -
-    # Anlage/Referenzänderung/Abschluss einer Umlaufmappe (2.3) sind ebenfalls
-    # Teil der nachvollziehbaren Vorgangsbearbeitung. "auth.>" kam in P6-S5
-    # dazu - Superuser-Break-Glass-Aktivierung/-Deaktivierung (4.6) verlangt
-    # explizit erhöhte Auditierungspriorität für den Lebenszyklus selbst
-    # (siehe ADR 0023 für die bewusst NICHT umgesetzte Priorisierung
-    # einzelner *während* der Aktivierung durchgeführter Fremdaktionen).
-    # "signature.>" kam in P6-S7 dazu - elektronische Signaturen (3.10) sind
-    # kryptografisch an eine konkrete Dokumentversion gebunden und damit
-    # ebenfalls Teil der nachvollziehbaren Dokumentverarbeitung. "favorite.>"
-    # kam in P7-S1d dazu - Favoriten-Änderungen sollen wie jede andere
-    # Nutzeraktion im Audit-Trail nachvollziehbar bleiben. "folder.>" fehlte
-    # bislang komplett (echter, beim P7-S2-Live-Smoke-Test entdeckter
-    # Bestandsfehler - folder-service hat seit P7-S1b einen eigenen
-    # Event-Stream, wurde aber nie in diese Liste aufgenommen) - ohne dieses
-    # Subject wäre die Forensik-Trace (5.4b) für sämtliche Ordner-Aktionen
-    # blind, direkt im Widerspruch zum Zweck dieser Session. "query.>" kam
-    # in P8-S1 dazu - die Query- & Trace-Konsole (6.1) auditiert jede
-    # ausgeführte Abfrage selbst (`query.executed`, Konzept-Punkt 5
-    # "Vollständige Protokollierung"), proaktiv gleich mit ergänzt statt den
-    # "folder.>"-Fehler ein zweites Mal zu wiederholen. "license.>" kam in
-    # P9-S1 dazu - `license-service`s Installations-/Statusänderungs-
-    # Ereignisse (9.2) sollen ebenfalls im Audit-Trail landen.
+    # Which subjects the Audit Service consumes (concept 3.4: "consumes all
+    # events"). Wildcard per producer stream, so new services only need to
+    # register here, without code changes. "document.>" was added in P3-S2,
+    # since 4.2 explicitly requires complete auditing of force-unlock/
+    # conflict copy. "permission.>" was added in P3-S4, since 4.7 explicitly
+    # requires complete auditing of scope locks (set/release) - other
+    # services (Auth/Storage) follow as needed. "virus_scan.>" was added in
+    # P5-S1 - 10.3/5.3 explicitly require auditing of scan results.
+    # "rendering.>" was added in P5-S2 - generated/failed renditions are
+    # likewise part of traceable document processing. "ocr.>" was added in
+    # P5-S3 - 3.9/5.3 explicitly require auditing of OCR results (including
+    # needs_review cases). "workflow.>" was added in P6-S1 - process
+    # instance start/completion and task completions are part of traceable
+    # document processing. "notification.>" was added in P6-S2 - delivery
+    # attempts (successful/failed) are likewise part of traceable system
+    # actions (5.3). "case.>" was added in P6-S3 - creation/reference
+    # change/completion of a circulation folder (2.3) are likewise part of
+    # traceable case processing. "auth.>" was added in P6-S5 - superuser
+    # break-glass activation/deactivation (4.6) explicitly requires elevated
+    # audit priority for the lifecycle itself (see ADR 0023 for the
+    # deliberately NOT implemented prioritization of individual third-party
+    # actions performed *during* activation). "signature.>" was added in
+    # P6-S7 - electronic signatures (3.10) are cryptographically bound to a
+    # specific document version and are therefore likewise part of traceable
+    # document processing. "favorite.>" was added in P7-S1d - favorite
+    # changes should remain traceable in the audit trail like any other user
+    # action. "folder.>" was missing entirely until now (a genuine
+    # pre-existing bug discovered during the P7-S2 live smoke test -
+    # folder-service has had its own event stream since P7-S1b, but was
+    # never added to this list) - without this subject, the forensic trace
+    # (5.4b) would be blind for all folder actions, directly contradicting
+    # the purpose of this session. "query.>" was added in P8-S1 - the Query
+    # & Trace Console (6.1) audits every executed query itself
+    # (`query.executed`, concept point 5 "complete logging"), proactively
+    # added at the same time instead of repeating the "folder.>" mistake a
+    # second time. "license.>" was added in P9-S1 - `license-service`'s
+    # installation/status-change events (9.2) should likewise end up in the
+    # audit trail.
     subjects: list[str] = [
         "registry.>",
         "document.>",
@@ -61,29 +61,29 @@ class Settings(BaseServiceSettings):
         "reporting.>",
         "query.>",
         "license.>",
-        # "orchestration.>" kam in P10-S1 dazu - der Plugin Orchestration
-        # Service (3.8) auditiert seine eigenen Platzierungsentscheidungen
-        # ("orchestration.placement.decided") ueber denselben Event-Trail.
+        # "orchestration.>" was added in P10-S1 - the Plugin Orchestration
+        # Service (3.8) audits its own placement decisions
+        # ("orchestration.placement.decided") via the same event trail.
         "orchestration.>",
-        # "monitoring.>" kam in P11-S1 dazu - der monitoring-service auditiert
-        # jede Sensor-Konfigurationsaenderung ("monitoring.sensor.config_changed",
-        # 10.1: Deaktivieren sicherheitsrelevanter Sensoren ist selbst ein
-        # sicherheitsrelevanter Vorgang).
+        # "monitoring.>" was added in P11-S1 - monitoring-service audits
+        # every sensor configuration change ("monitoring.sensor.config_changed",
+        # 10.1: disabling security-relevant sensors is itself a
+        # security-relevant action).
         "monitoring.>",
-        # "teamspace.>" kam in P14-S6 dazu - der neue teamspace-service (2.5)
-        # auditiert Anlage/Loeschung eines Team-Arbeitsbereichs sowie
-        # Einladen/Entfernen von Mitgliedern (sicherheitsrelevant, da dies das
-        # eigentliche, von der uebrigen RBAC unabhaengige Zugriffsregime ist).
+        # "teamspace.>" was added in P14-S6 - the new teamspace-service (2.5)
+        # audits creation/deletion of a team workspace as well as
+        # inviting/removing members (security-relevant, since this is the
+        # actual access regime independent of the rest of RBAC).
         "teamspace.>",
-        # "mail_connector.>" kam in P15-S3 dazu - der neue mail-connector
-        # (2.5/3.3) auditiert Empfang/Zuordnung/Versand externer Korrespondenz
-        # durch die Poststelle-Rolle.
+        # "mail_connector.>" was added in P15-S3 - the new mail connector
+        # (2.5/3.3) audits receipt/assignment/dispatch of external
+        # correspondence by the mail room role.
         "mail_connector.>",
     ]
 
-    # Loeschregister-Ledger (10.4, P11-S4): Append-only-Datei auf einem
-    # eigenen Docker-Volume (deletion-ledger-data), bewusst AUSSERHALB der
-    # gemeinsamen Postgres-Instanz - ein DB-Restore (scripts/restore.sh)
-    # rollt dieses Register damit nicht mit zurueck, siehe
+    # Deletion register ledger (10.4, P11-S4): an append-only file on its
+    # own Docker volume (deletion-ledger-data), deliberately OUTSIDE the
+    # shared Postgres instance - a DB restore (scripts/restore.sh) therefore
+    # does not roll this register back too, see
     # docs/operations/backup-restore.md.
     deletion_ledger_path: str = "/deletion-ledger/deletion-register.jsonl"

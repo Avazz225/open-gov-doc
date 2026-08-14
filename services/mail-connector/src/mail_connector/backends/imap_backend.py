@@ -9,39 +9,39 @@ _UIDVALIDITY_RE = re.compile(rb"UIDVALIDITY (\d+)")
 
 
 class ImapBackend(MailboxBackend):
-    """Echte, standardprotokoll-basierte Abholung über IMAP (`imaplib`,
-    Standardbibliothek - kein zusätzliches Paket nötig), zweite Umsetzung des
-    in `interface.py`s Docstring bereits vorgesehenen Plugin-Musters neben
-    `Pop3Backend`. Anders als POP3 organisiert IMAP eine Mailbox in benannten
-    Ordnern (`mailbox`, Default `INBOX`) - welcher Ordner abgeholt wird, ist
-    deshalb konfigurierbar (`DMS_IMAP_MAILBOX`).
+    """Real, standard-protocol-based retrieval via IMAP (`imaplib`, standard
+    library - no additional package needed), second implementation of the
+    plugin pattern already envisioned in `interface.py`'s docstring
+    alongside `Pop3Backend`. Unlike POP3, IMAP organizes a mailbox into
+    named folders (`mailbox`, default `INBOX`) - which folder is fetched
+    is therefore configurable (`DMS_IMAP_MAILBOX`).
 
-    Nutzt bewusst den UID-basierten Befehlssatz (`UID SEARCH`/`UID FETCH`,
-    RFC 3501 §6.4.8), NICHT den sequenznummer-basierten (`SEARCH`/`FETCH`):
-    Sequenznummern verschieben sich bei jeder Löschung/jedem Zugriff
-    innerhalb derselben Sitzung, UIDs sind über Sitzungen hinweg stabil -
-    dieselbe Anforderung wie POP3s `UIDL` (siehe `pop3_backend.py`).
+    Deliberately uses the UID-based command set (`UID SEARCH`/`UID FETCH`,
+    RFC 3501 §6.4.8), NOT the sequence-number-based one (`SEARCH`/`FETCH`):
+    sequence numbers shift with every deletion/access within the same
+    session, UIDs are stable across sessions - the same requirement as
+    POP3's `UIDL` (see `pop3_backend.py`).
 
-    Eine reine IMAP-UID ist allerdings nur INNERHALB derselben
-    `UIDVALIDITY`-Epoche stabil (RFC 3501 §2.3.1.1) - baut ein Server das
-    Postfach neu auf (seltener Sonderfall), kann er dieselbe UID-Zahl einer
-    ANDEREN Nachricht zuweisen. Der an `repository.get_by_source_uid`
-    weitergereichte `RawIncomingMessage.uid` ist deshalb ein zusammengesetzter
-    Bezeichner `f"{uidvalidity}:{uid}"` statt der bloßen UID - eine spätere
-    UIDVALIDITY-Änderung macht sich so als (bewusst gewollte) Neu-Ingestion
-    aller Nachrichten bemerkbar, statt eine falsche Nachricht stillschweigend
-    als bereits verarbeitet zu überspringen (oder umgekehrt).
+    A plain IMAP UID, however, is only stable WITHIN the same
+    `UIDVALIDITY` epoch (RFC 3501 §2.3.1.1) - if a server rebuilds the
+    mailbox (a rare special case), it may assign the same UID number to a
+    DIFFERENT message. The `RawIncomingMessage.uid` passed on to
+    `repository.get_by_source_uid` is therefore a composite identifier
+    `f"{uidvalidity}:{uid}"` instead of the bare UID - a later UIDVALIDITY
+    change thus manifests as a (deliberately intended) re-ingestion of all
+    messages, instead of silently skipping a wrong message as already
+    processed (or vice versa).
 
-    `BODY.PEEK[]` statt `RFC822`/`BODY[]` beim Abruf - Letztere markieren die
-    Nachricht implizit als `\\Seen`, was hier unerwünscht ist (gleiche
-    Begründung wie POP3s bewusst unterlassenes `client.dele()`: ein Betreiber
-    kann dieselbe Mailbox parallel noch anderweitig einsehen wollen). `select`
-    läuft zusätzlich mit `readonly=True`, als zweite Absicherung gegen
-    serverseitige Seiteneffekte.
+    `BODY.PEEK[]` instead of `RFC822`/`BODY[]` on fetch - the latter
+    implicitly mark the message as `\\Seen`, which is undesirable here
+    (same reasoning as POP3's deliberately omitted `client.dele()`: an
+    operator may want to view the same mailbox in parallel elsewhere as
+    well). `select` additionally runs with `readonly=True`, as a second
+    safeguard against server-side side effects.
 
-    `imaplib` ist wie `poplib` synchron/blockierend - jeder Aufruf läuft über
-    `asyncio.to_thread`, damit ein langsamer/hängender IMAP-Server nicht den
-    gesamten Event-Loop blockiert."""
+    `imaplib`, like `poplib`, is synchronous/blocking - every call runs
+    via `asyncio.to_thread`, so a slow/hanging IMAP server does not block
+    the entire event loop."""
 
     def __init__(
         self,

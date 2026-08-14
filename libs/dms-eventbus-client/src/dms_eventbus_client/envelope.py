@@ -5,11 +5,11 @@ from pydantic import BaseModel, Field
 
 
 class Event(BaseModel):
-    """Gemeinsames Wire-Format für alle publizierten Ereignisse (Konzept 3.4/5.3).
+    """Shared wire format for all published events (concept 3.4/5.3).
 
-    Jeder Producer nutzt dieselbe Hülle, damit Konsumenten (allen voran der
-    Audit Service) Ereignisse verschiedener Services einheitlich verarbeiten
-    können, ohne je Producer ein eigenes Format zu kennen.
+    Every producer uses the same envelope, so consumers (chiefly the audit
+    service) can process events from different services uniformly, without
+    needing to know a separate format per producer.
     """
 
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -18,19 +18,19 @@ class Event(BaseModel):
     service_name: str
     subject: str | None = None
     payload: dict = Field(default_factory=dict)
-    # Handelnde Person (first-class statt ad-hoc-payload-Konvention, seit
-    # P7-S2, Voraussetzung fuer die Forensik-Trace 5.4b) - Nutzername, wo ein
-    # Mensch die Aktion ausgeloest hat, sonst "system:<komponente>" (gleiche
-    # Konvention wie bereits document-service/folder-services
-    # "system:retention-poll"). None nur fuer Alt-Events vor diesem Feld.
+    # Acting person (first-class instead of an ad-hoc payload convention,
+    # since P7-S2, prerequisite for the forensic trace 5.4b) - username where
+    # a human triggered the action, otherwise "system:<component>" (same
+    # convention already used by document-service/folder-services
+    # "system:retention-poll"). None only for legacy events predating this field.
     actor: str | None = None
-    # Stellvertretung bei Abwesenheit (4.4a, seit P14-S11): gesetzt, wenn
-    # ``actor`` im Auftrag einer anderen Person gehandelt hat (Konzept-
-    # Wortlaut 4.4a/5.3, "ein zusaetzlicher Vermerk, in wessen Auftrag sie
-    # erfolgte") - bewusst ein ZWEITES Feld statt ``actor`` zu ueberschreiben:
-    # die handelnde Identitaet bleibt immer die tatsaechlich anmeldende
-    # Person, kein Identitaetswechsel. None fuer jede normale, nicht
-    # delegierte Aktion (der weit ueberwiegende Regelfall).
+    # Representation during absence (4.4a, since P14-S11): set when
+    # ``actor`` acted on behalf of another person (concept wording 4.4a/5.3,
+    # "an additional note of on whose behalf it was performed") -
+    # deliberately a SECOND field instead of overwriting ``actor``: the
+    # acting identity always remains the person who actually logged in, no
+    # identity switch. None for every normal, non-delegated action (the
+    # vast majority case).
     on_behalf_of: str | None = None
 
     def to_bytes(self) -> bytes:

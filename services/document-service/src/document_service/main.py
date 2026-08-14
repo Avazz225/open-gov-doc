@@ -98,9 +98,9 @@ configure_logging(settings)
 logger = logging.getLogger(__name__)
 
 
-# Reservierter Attributschlüssel für den Kennzeichengenerator (2.2, P5e-S2) -
-# ein vom Client mitgesendeter Wert wird bei der Anlage verworfen, die
-# Vergabe erfolgt ausschließlich serverseitig über den Object-Type Service.
+# Reserved attribute key for the reference number generator (2.2, P5e-S2) -
+# a value sent by the client is discarded on creation; assignment happens
+# exclusively server-side via the Object-Type Service.
 KENNZEICHEN_ATTRIBUTE = "Kennzeichen"
 
 
@@ -115,10 +115,11 @@ def _has_quarantine_release_role(x_dms_roles: str) -> bool:
 
 
 def _is_html_content_type(content_type: str | None) -> bool:
-    """Post-Roadmap Phase 21 Session 3 (ADR 0086) - entscheidet, ob
-    `rewrite_external_references` vor der Auslieferung greifen muss.
-    Parametersuffixe (``; charset=...``) werden abgeschnitten, `python-magic`
-    liefert sie zwar üblicherweise nicht mit, sicherheitshalber trotzdem."""
+    """Post-roadmap Phase 21 Session 3 (ADR 0086) - decides whether
+    `rewrite_external_references` must apply before delivery.
+    Parameter suffixes (``; charset=...``) are stripped; `python-magic`
+    usually doesn't include them anyway, but this is done as a safety
+    measure regardless."""
     if not content_type:
         return False
     return content_type.split(";", 1)[0].strip().lower() == "text/html"
@@ -127,10 +128,10 @@ def _is_html_content_type(content_type: str | None) -> bool:
 async def _should_log_document_access(
     session: AsyncSession, category: str, x_dms_roles: str
 ) -> bool:
-    """Forensik-Trace (5.4b, seit P7-S2c): entscheidet, ob eine `document.
-    viewed`/`document.downloaded`-Aktion für den aktuellen Aufrufer
-    protokolliert werden soll - Basis-Konfiguration + Rollen-Overrides aus
-    dem gateway-injizierten `X-DMS-Roles`-Header, siehe repository.resolve_should_log."""
+    """Forensic trace (5.4b, since P7-S2c): decides whether a `document.
+    viewed`/`document.downloaded` action should be logged for the current
+    caller - base configuration + role overrides from the gateway-injected
+    `X-DMS-Roles` header, see repository.resolve_should_log."""
     config = await repository.get_audit_trace_config(session)
     overrides = await repository.list_role_overrides(session)
     roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
@@ -138,21 +139,21 @@ async def _should_log_document_access(
 
 
 def _object_key(document_id: str, checksum_sha256: str) -> str:
-    # Inhaltsadressiert statt versionsnummer-basiert (2.1a): vermeidet die
-    # Henne-Ei-Reihenfolge "Upload braucht Versionsnummer, Versionsnummer
-    # braucht abgeschlossenen DB-Schreibzugriff" und dedupliziert identische
-    # Inhalte innerhalb desselben Dokuments automatisch.
+    # Content-addressed instead of version-number-based (2.1a): avoids the
+    # chicken-and-egg ordering "upload needs a version number, version number
+    # needs a completed DB write" and automatically deduplicates identical
+    # content within the same document.
     return f"documents/{document_id}/{checksum_sha256}"
 
 
 async def _execute_or_defer_forced_deletion(session: AsyncSession, document: Document) -> None:
-    """Physische Zwangslöschung (5.2a) - optional per Vier-Augen-Prinzip
-    gegated (4.3, gleiches Muster wie `force_release_lock`): wird
-    `document.force_delete` genehmigungspflichtig konfiguriert, legt dieser
-    Tick nur EINMAL einen Freigabe-Request an (`force_delete_approval_
-    requested_at` verhindert wiederholte Requests bei jedem weiteren Tick,
-    solange die Genehmigung aussteht) - die eigentliche Ausführung übernimmt
-    dann `consumer.py`, sobald `permission.approval.approved` eintrifft."""
+    """Physical forced deletion (5.2a) - optionally gated by the four-eyes
+    principle (4.3, same pattern as `force_release_lock`): if
+    `document.force_delete` is configured to require approval, this tick
+    creates an approval request only ONCE (`force_delete_approval_
+    requested_at` prevents repeated requests on every subsequent tick while
+    approval is pending) - the actual execution is then handled by
+    `consumer.py` once `permission.approval.approved` arrives."""
     document_id = document.id
     reason = document.pending_deletion_reason
     if await app.state.approval_client.requires_approval("document.force_delete"):
@@ -189,16 +190,15 @@ async def _execute_or_defer_forced_deletion(session: AsyncSession, document: Doc
 
 
 async def _retention_poll_loop(session_factory) -> None:
-    """Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - Poll-
-    Loop statt eines echten BPMN-Prozesses (workflow-service kennt keinen
-    generischen "Callback nach N Tagen"-Mechanismus außerhalb echter
-    Prozessinstanzen mit Timer-/Boundary-Events, siehe ADR 0030) - gleiches
-    Idiom wie workflow-service's `_sla_poll_loop` (ADR 0020, P6-S2). Ein
-    Fehler in einem Tick bricht die Schleife nicht ab, damit ein einzelnes
-    defektes Dokument nicht die Aufbewahrungs-Überwachung aller anderen
-    stoppt. Drei unabhängige Phasen je Durchlauf: Löscherinnerung, fällige
-    Aufbewahrungsfrist (Soft-Delete oder Zwangslöschung), abgelaufene
-    Papierkorb-Fristen."""
+    """Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - poll
+    loop instead of a real BPMN process (workflow-service has no generic
+    "callback after N days" mechanism outside of actual process instances
+    with timer/boundary events, see ADR 0030) - same idiom as
+    workflow-service's `_sla_poll_loop` (ADR 0020, P6-S2). An error in one
+    tick doesn't abort the loop, so a single broken document doesn't stop
+    retention monitoring for all others. Three independent phases per pass:
+    deletion reminder, due retention period (soft delete or forced
+    deletion), expired trash deadlines."""
     while True:
         try:
             async with session_factory() as session:
@@ -274,18 +274,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS document"))
         await conn.run_sync(Base.metadata.create_all)
-        # Ad-hoc-Schema-Erweiterung (kein Alembic in dieser frühen Phase, siehe
-        # CONTRIBUTING.md): `create_all` legt fehlende TABELLEN an, ändert aber
-        # keine bestehenden - `attributes` kam erst in P3-S3 dazu. Idempotent
-        # dank IF NOT EXISTS, betrifft nur additive, defaultbehaftete Spalten.
+        # Ad-hoc schema extension (no Alembic in this early phase, see
+        # CONTRIBUTING.md): `create_all` creates missing TABLES but doesn't
+        # alter existing ones - `attributes` was only added in P3-S3. Idempotent
+        # thanks to IF NOT EXISTS, only affects additive columns with defaults.
         await conn.execute(
             text(
                 "ALTER TABLE document.document "
                 "ADD COLUMN IF NOT EXISTS attributes JSON DEFAULT '{}'::json NOT NULL"
             )
         )
-        # Bearbeitungskopien (2.3, P6-S3) - additive, nullable Herkunftsfelder,
-        # gleiches Ad-hoc-Migrationsmuster wie oben.
+        # Working copies (2.3, P6-S3) - additive, nullable provenance fields,
+        # same ad-hoc migration pattern as above.
         await conn.execute(
             text(
                 "ALTER TABLE document.document "
@@ -305,10 +305,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS originating_case_id VARCHAR(128)"
             )
         )
-        # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, P7-S1) - gleiches
-        # Ad-hoc-Migrationsmuster wie oben. `legal_hold`/`deletion_register_entry`/
-        # `retention_config`/`trash_config` sind neue Tabellen und werden
-        # bereits von `create_all` angelegt.
+        # Retention/legal hold/forced deletion (5.2/5.2a, P7-S1) - same
+        # ad-hoc migration pattern as above. `legal_hold`/`deletion_register_entry`/
+        # `retention_config`/`trash_config` are new tables and are already
+        # created by `create_all`.
         await conn.execute(
             text(
                 "ALTER TABLE document.document ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ"
@@ -344,14 +344,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS force_delete_approval_requested_at TIMESTAMPTZ"
             )
         )
-        # Kaskaden-Herkunft für Ordner-Papierkorb (5.2, seit P7-S1b).
+        # Cascade provenance for folder trash (5.2, since P7-S1b).
         await conn.execute(
             text(
                 "ALTER TABLE document.document "
                 "ADD COLUMN IF NOT EXISTS deleted_via_folder_id VARCHAR(128)"
             )
         )
-        # Aussonderung (5.6, seit P7-S3) - gleiches Ad-hoc-Migrationsmuster.
+        # Records disposal (5.6, since P7-S3) - same ad-hoc migration pattern.
         await conn.execute(
             text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS archive_after TIMESTAMPTZ")
         )
@@ -366,21 +366,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS dehydrated_at TIMESTAMPTZ")
         )
-        # Persönlicher Papierkorb (2.5, P15-S1) - gleiches Ad-hoc-Migrationsmuster.
+        # Personal trash (2.5, P15-S1) - same ad-hoc migration pattern.
         await conn.execute(
             text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(128)")
         )
-        # Schema-Drift-Korrektur (P15-S1, live gefunden): in lange laufenden
-        # Installationen (dieses Dev-Environment eingeschlossen) trägt
-        # `object_type_id` aus einer sehr frühen Projektphase noch den
-        # damaligen VARCHAR-Typ, obwohl das Model schon lange `Integer`
-        # deklariert - `create_all` ändert nie den Typ bereits bestehender
-        # Spalten. Unauffällig bei einfachen Gleichheits-Vergleichen (impliziter
-        # Cast durch asyncpg), aber `object_type_id NOT IN (...)` (neu für den
-        # Verschlusssachen-Papierkorb-Filter) schlägt dann mit "operator does
-        # not exist: character varying <> integer" fehl. Nur ausgeführt, wenn
-        # der Spaltentyp tatsächlich noch abweicht (kein Lock/Rewrite bei jedem
-        # Start auf bereits korrigierten Installationen).
+        # Schema drift correction (P15-S1, found live): in long-running
+        # installations (including this dev environment), `object_type_id`
+        # from a very early project phase still carries the VARCHAR type from
+        # back then, even though the model has long since declared `Integer`
+        # - `create_all` never changes the type of already-existing columns.
+        # Unnoticeable with simple equality comparisons (implicit cast by
+        # asyncpg), but `object_type_id NOT IN (...)` (new for the classified
+        # documents trash filter) then fails with "operator does not exist:
+        # character varying <> integer". Only executed when the column type
+        # actually still differs (no lock/rewrite on every startup on
+        # installations that are already corrected).
         drift = await conn.execute(
             text(
                 "SELECT data_type FROM information_schema.columns "
@@ -398,14 +398,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
-    # Singleton-Configs einmalig vor dem ersten Request/Poll-Tick anlegen
-    # (5.2/5.2a, seit P7-S1) - ohne das würden der sofort beim ersten
-    # `_retention_poll_loop`-Durchlauf feuernde Zugriff und ein zeitgleicher
-    # API-Aufruf (z. B. `GET /trash-config`) beide das Fehlen der Zeile sehen
-    # und gleichzeitig versuchen, sie anzulegen (`get_or_create`-Race,
-    # `UniqueViolationError`) - anders als bei den selten gleichzeitig
-    # zugegriffenen Configs anderer Services macht der hier neu hinzukommende
-    # Poll-Loop das zu einem echten Risiko.
+    # Create singleton configs once, before the first request/poll tick
+    # (5.2/5.2a, since P7-S1) - without this, the access firing immediately on
+    # the first `_retention_poll_loop` pass and a concurrent API call (e.g.
+    # `GET /trash-config`) could both see the row missing and try to create it
+    # at the same time (`get_or_create` race, `UniqueViolationError`) - unlike
+    # the rarely concurrently accessed configs of other services, the poll
+    # loop newly added here makes this a real risk.
     async with app.state.session_factory() as session:
         await repository.get_retention_config(session)
         await repository.get_trash_config(session)
@@ -421,10 +420,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
     )
 
-    # Sensor-Konzept (10.1, P11-S1): document-service ist einer der zwei
-    # Piloten (siehe P11-S0-Befund). Aktivierungsstatus kommt vom
-    # `monitoring-service`, TTL-Poll statt NATS-Invalidierung (bewusste
-    # Scope-Entscheidung, gleiches Muster wie `registry-service`).
+    # Sensor concept (10.1, P11-S1): document-service is one of the two
+    # pilots (see P11-S0 finding). Activation status comes from
+    # `monitoring-service`, TTL poll instead of NATS invalidation (deliberate
+    # scope decision, same pattern as `registry-service`).
     app.state.sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await app.state.sensor_config_client.start()
     sensor_registry, upload_duration_sensor, active_documents_gauge = metrics.build_sensor_registry(
@@ -441,10 +440,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    # Erster Konsument dieses Service überhaupt (P6-S4, 4.3): getrennter
-    # Client (ensure_stream=False), da document-service den Stream
-    # "permission" nicht selbst besitzt - gleiches Zwei-Client-Prinzip wie
-    # bei notification-service/case-service.
+    # First consumer of this service at all (P6-S4, 4.3): separate client
+    # (ensure_stream=False), since document-service doesn't own the
+    # "permission" stream itself - same two-client principle as
+    # notification-service/case-service.
     consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer_bus.connect()
     app.state.consumer_bus = consumer_bus
@@ -465,8 +464,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sensors=metrics.sensor_declarations(),
     )
 
-    # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) - gleiches
-    # Poll-Loop-Idiom wie workflow-service's SLA-Zeitüberwachung (ADR 0020).
+    # Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - same
+    # poll loop idiom as workflow-service's SLA time monitoring (ADR 0020).
     retention_poll_task = asyncio.create_task(_retention_poll_loop(app.state.session_factory))
 
     startup_end = time.time()
@@ -518,10 +517,10 @@ async def publish_event(
 
 
 async def _resolve_content_type(session: AsyncSession, data: bytes) -> str:
-    """Sniffing statt ungeprüftem Client-Header (P5d-S1) + Abgleich gegen die
-    admin-editierbare Format-Whitelist. Wird vor dem Virenscan aufgerufen -
-    ein von vornherein abgelehntes Format muss den Scan-Dienst nicht erst
-    bemühen."""
+    """Sniffing instead of an unchecked client header (P5d-S1) + comparison
+    against the admin-editable format whitelist. Called before the virus
+    scan - a format rejected outright doesn't need to bother the scan
+    service first."""
     content_type = sniff_content_type(data)
     config = await repository.get_upload_config(session)
     if config.allowed_content_types and content_type not in config.allowed_content_types:
@@ -535,9 +534,9 @@ async def _resolve_content_type(session: AsyncSession, data: bytes) -> str:
 async def _resolve_deletion_reason_required(
     session: AsyncSession, object_type_id: int | None
 ) -> bool:
-    """Löschgrund-Pflicht (5.2a): installationsweiter Default aus
-    `RetentionConfig`, je Objekttyp per `deletion_reason_required_override`
-    überschreibbar (Tri-State, gleiches Muster wie
+    """Deletion reason requirement (5.2a): installation-wide default from
+    `RetentionConfig`, overridable per object type via
+    `deletion_reason_required_override` (tri-state, same pattern as
     `kennzeichen_display_override`)."""
     config = await repository.get_retention_config(session)
     if object_type_id is not None:
@@ -557,8 +556,8 @@ def healthz() -> dict:
 
 @app.get("/metrics")
 def get_metrics() -> Response:
-    """Prometheus-Exposition der zwei eigenen Sensoren (10.1, P11-S1) - wird
-    vom `monitoring-service` gescraped, nicht direkt von Prometheus."""
+    """Prometheus exposition of the two in-house sensors (10.1, P11-S1) -
+    scraped by `monitoring-service`, not directly by Prometheus."""
     body, content_type = metrics_payload(app.state.sensor_registry)
     return Response(content=body, media_type=content_type)
 
@@ -636,8 +635,8 @@ async def delete_audit_trace_role_override(
 async def list_documents_due_for_archival(
     session: AsyncSession = Depends(get_session),
 ) -> list[DocumentOut]:
-    """Interner Aufruf von `archival-service` (5.6, seit P7-S3) - Kandidaten
-    für den nächsten Poll-Tick."""
+    """Internal call from `archival-service` (5.6, since P7-S3) - candidates
+    for the next poll tick."""
     return await repository.list_due_for_archival(session)
 
 
@@ -645,8 +644,8 @@ async def list_documents_due_for_archival(
 async def request_document_archive(
     document_id: str, session: AsyncSession = Depends(get_session)
 ) -> DocumentOut:
-    """Manueller Aussonderungs-Trigger (5.6) - setzt `archive_after` auf
-    jetzt, falls noch nicht fällig."""
+    """Manual records disposal trigger (5.6) - sets `archive_after` to now,
+    if not already due."""
     try:
         document = await repository.request_archive(session, document_id)
     except repository.NotFoundError as exc:
@@ -676,9 +675,9 @@ async def get_document_archive_status(
 async def get_document_has_active_hold(
     document_id: str, session: AsyncSession = Depends(get_session)
 ) -> HasActiveHoldOut:
-    """Interner Aufruf von `archival-service` (5.6) - ein aktiver Legal Hold
-    (5.2) blockiert den Dehydrierungs-Schritt, nicht das Anlegen der
-    Archivkopie selbst."""
+    """Internal call from `archival-service` (5.6) - an active legal hold
+    (5.2) blocks the dehydration step, not the creation of the archive copy
+    itself."""
     return HasActiveHoldOut(has_active_hold=await repository.has_active_hold(session, document_id))
 
 
@@ -686,8 +685,8 @@ async def get_document_has_active_hold(
 async def mark_document_archived(
     document_id: str, payload: MarkArchivedRequest, session: AsyncSession = Depends(get_session)
 ) -> DocumentOut:
-    """Rückruf von `archival-service`, sobald die Archivkopie verifiziert
-    ist (5.6)."""
+    """Callback from `archival-service` once the archive copy has been
+    verified (5.6)."""
     try:
         document = await repository.mark_archived(
             session, document_id, archive_format=payload.archive_format
@@ -708,8 +707,8 @@ async def mark_document_archived(
 async def mark_document_dehydrated(
     document_id: str, session: AsyncSession = Depends(get_session)
 ) -> DocumentOut:
-    """Rückruf von `archival-service`, nachdem die Live-Speicherkopie nach
-    Ablauf der Übergangsfrist entfernt wurde (5.6)."""
+    """Callback from `archival-service` after the live storage copy was
+    removed once the transition period expired (5.6)."""
     try:
         document = await repository.mark_dehydrated(session, document_id)
     except repository.NotFoundError as exc:
@@ -723,7 +722,7 @@ async def mark_document_dehydrated(
 async def mark_document_rehydrated(
     document_id: str, session: AsyncSession = Depends(get_session)
 ) -> DocumentOut:
-    """Rückruf von `archival-service` nach erfolgreicher Rückholung (5.6)."""
+    """Callback from `archival-service` after successful retrieval (5.6)."""
     try:
         document = await repository.mark_rehydrated(session, document_id)
     except repository.NotFoundError as exc:
@@ -743,10 +742,10 @@ async def _prepare_document_fields(
     derived_from_document_id: str | None,
     derived_from_version_number: int | None,
 ) -> tuple[dict, datetime | None, datetime | None]:
-    """Geteilte Validierung/Ableitung für jeden Dokument-Neuanlage-Pfad -
-    identisch für `POST /documents` und `POST /documents/
-    from-quarantine-release` (2.5, P15-S2), die sich nur im Scan-Schritt
-    unterscheiden."""
+    """Shared validation/derivation for every document creation path -
+    identical for `POST /documents` and `POST /documents/
+    from-quarantine-release` (2.5, P15-S2), which differ only in the scan
+    step."""
     try:
         parsed_attributes = json.loads(attributes) if attributes else {}
     except json.JSONDecodeError as exc:
@@ -795,16 +794,16 @@ async def _prepare_document_fields(
         if kennzeichen is not None:
             parsed_attributes[KENNZEICHEN_ATTRIBUTE] = kennzeichen
 
-        # Aufbewahrung (5.2, seit P7-S1): Typ-Default einmalig in ein
-        # konkretes Datum übersetzt, keine manuelle Angabe beim Anlegen nötig
-        # (kann danach jederzeit über PUT .../retention überschrieben werden).
+        # Retention (5.2, since P7-S1): type default translated once into a
+        # concrete date, no manual entry needed at creation time (can be
+        # overridden at any time afterwards via PUT .../retention).
         object_type = await app.state.object_type_client.get(object_type_id)
         if object_type and object_type.get("default_retention_days") is not None:
             retention_until = datetime.now(UTC) + timedelta(
                 days=object_type["default_retention_days"]
             )
-        # Aussonderung (5.6, seit P7-S3): unabhaengig von retention_until,
-        # ergaenzend zur regulaeren Aufbewahrungsfrist (siehe Docstring oben).
+        # Records disposal (5.6, since P7-S3): independent of retention_until,
+        # complementary to the regular retention period (see docstring above).
         if object_type and object_type.get("default_archive_after_days") is not None:
             archive_after = datetime.now(UTC) + timedelta(
                 days=object_type["default_archive_after_days"]
@@ -879,15 +878,15 @@ async def create_document(
     originating_case_id: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
-    # Sensor "document.upload.duration" (10.1, P11-S1): Startzeit wird nur
-    # genommen, wenn der Sensor aktuell aktiv ist - bei Deaktivierung
-    # unterbleibt selbst dieser minimale Overhead vollständig.
+    # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
+    # captured if the sensor is currently active - when disabled, even this
+    # minimal overhead is avoided entirely.
     upload_sensor = app.state.upload_duration_sensor
     upload_started_at = time.monotonic() if upload_sensor.is_active() else None
 
-    # Lizenz-Limit-Blockade (Konzept 9.3, P9-S2): nur echte Neuanlagen, nicht
-    # Versionierung/Wiederherstellung bestehender Dokumente - "blockiert nicht
-    # rückwirkend bestehende Daten, verhindert aber neue Anlagen".
+    # License limit block (concept 9.3, P9-S2): only genuine new creations,
+    # not versioning/restoration of existing documents - "doesn't
+    # retroactively block existing data, but prevents new creations".
     if await app.state.license_limit_client.is_exceeded("documents"):
         raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
 
@@ -959,18 +958,18 @@ async def create_document_from_quarantine_release(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
-    """Interner Anlage-Pfad ausschließlich für den virus-scan-service beim
-    Freigeben eines als Fehlalarm geklärten Quarantäne-Falls (2.5/10.3,
-    P15-S2). Löst bewusst KEINEN erneuten Scan über `virus_scan_client` aus
-    (im Unterschied zu `POST /documents`): die Datei wurde bereits gescannt,
-    genau dieser (jetzt als falsch positiv eingestufte) Scan ist der Anlass
-    der Freigabe - ein erneuter Scan würde denselben Befund reproduzieren und
-    die Freigabe strukturell unmöglich machen (siehe ADR 0052). Eigenes
-    Rollen-Gate (`quarantine_release_admin_role`) als zweite Instanz neben der
-    Rollenprüfung im virus-scan-service selbst, das die Rollen des
-    ursprünglichen Aufrufers weiterreicht - kein Endpunkt, der den
-    verpflichtenden Virenscan umgeht, sollte allein von einer Prüfung
-    abhängen."""
+    """Internal creation path exclusively for virus-scan-service when
+    releasing a quarantine case that has been cleared as a false positive
+    (2.5/10.3, P15-S2). Deliberately does NOT trigger another scan via
+    `virus_scan_client` (unlike `POST /documents`): the file has already
+    been scanned, and precisely this scan (now classified as a false
+    positive) is the reason for the release - a repeat scan would reproduce
+    the same finding and make the release structurally impossible (see ADR
+    0052). Has its own role gate (`quarantine_release_admin_role`) as a
+    second instance alongside the role check in virus-scan-service itself,
+    which forwards the roles of the original caller - no endpoint that
+    bypasses the mandatory virus scan should depend on a single check
+    alone."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     if not _has_quarantine_release_role(x_dms_roles):
@@ -1026,13 +1025,13 @@ async def list_documents(
 async def list_documents_by_kennzeichen(
     value: str, session: AsyncSession = Depends(get_session)
 ) -> list[DocumentOut]:
-    """Objekttyp-übergreifende Kennzeichen-Suche (2.5/3.3, P15-S3) - Route
-    MUSS vor `/documents/{document_id}` registriert sein, sonst würde
-    FastAPI `"by-kennzeichen"` fälschlich als `document_id` interpretieren
-    (gleiches Muster wie `/documents/deleted`). Liefert eine Liste statt
-    eines Einzeltreffers - `Kennzeichen` ist nicht global eindeutig (siehe
-    `repository.list_documents_by_kennzeichen`), der Aufrufer (z. B.
-    `mail-connector`) muss selbst auf 0/1/N Treffer prüfen."""
+    """Cross-object-type reference number search (2.5/3.3, P15-S3) - route
+    MUST be registered before `/documents/{document_id}`, otherwise FastAPI
+    would incorrectly interpret `"by-kennzeichen"` as `document_id` (same
+    pattern as `/documents/deleted`). Returns a list instead of a single
+    match - `Kennzeichen` is not globally unique (see
+    `repository.list_documents_by_kennzeichen`), the caller (e.g.
+    `mail-connector`) must check for 0/1/N matches itself."""
     return await repository.list_documents_by_kennzeichen(session, value)
 
 
@@ -1044,17 +1043,17 @@ async def list_deleted_documents(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[DocumentOut]:
-    """Papierkorb-Inhalt eines Ordners (5.2, seit P7-S1) - Route MUSS vor
-    `/documents/{document_id}` registriert sein, sonst würde FastAPI
-    "deleted" fälschlich als `document_id` interpretieren. Ohne `scope`
-    unverändertes Verhalten (kein Auth-Check, `folder_id` erforderlich) - alle
-    bisherigen Aufrufer/Tests bleiben unberührt. Seit P15-S1 (2.5) zusätzlich
-    drei installationsweite, per `scope` explizit angeforderte Sichten:
-    `personal` (nur eigene Löschmarkierungen, persönlicher Papierkorb),
-    `admin` (vollständiger, aber nicht-klassifizierter Papierkorb, reguläre
-    Löschadministration) und `admin_classified` (strukturell getrennter
-    Verschlusssachen-Papierkorb) - `folder_id` bleibt in allen drei
-    zusätzlich als optionaler Filter nutzbar."""
+    """Trash content of a folder (5.2, since P7-S1) - route MUST be
+    registered before `/documents/{document_id}`, otherwise FastAPI would
+    incorrectly interpret "deleted" as `document_id`. Without `scope`,
+    behavior is unchanged (no auth check, `folder_id` required) - all
+    existing callers/tests remain unaffected. Since P15-S1 (2.5), three
+    additional installation-wide views explicitly requested via `scope`:
+    `personal` (only your own deletion markers, personal trash), `admin`
+    (complete but non-classified trash, regular deletion administration),
+    and `admin_classified` (structurally separate classified documents
+    trash) - `folder_id` remains additionally usable as an optional filter
+    in all three."""
     if scope is None:
         if folder_id is None:
             raise HTTPException(
@@ -1105,13 +1104,14 @@ async def purge_document(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Manuelle, sofortige endgültige Löschung aus dem Papierkorb (2.5,
-    P15-S1) - Löschadministration vorausgesetzt (regulär oder
-    Verschlusssachen, je nach `ObjectType.classification_level`), unabhängig
-    vom automatischen `_retention_poll_loop` (der nach Ablauf von
-    `TrashConfig.restore_period_days` dieselbe `retention_actions.
-    purge_expired_trash_entry` mit `trigger="trash_expiry"` aufruft - hier
-    `trigger="manual_purge"` mit dem echten Principal als `triggered_by`)."""
+    """Manual, immediate permanent deletion from trash (2.5, P15-S1) -
+    requires deletion administration (regular or classified documents,
+    depending on `ObjectType.classification_level`), independent of the
+    automatic `_retention_poll_loop` (which calls the same
+    `retention_actions.purge_expired_trash_entry` with
+    `trigger="trash_expiry"` once `TrashConfig.restore_period_days` has
+    elapsed - here `trigger="manual_purge"` with the real principal as
+    `triggered_by`)."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     try:
@@ -1124,8 +1124,9 @@ async def purge_document(
     is_classified = False
     if document.object_type_id is not None:
         object_type = await app.state.object_type_client.get(document.object_type_id)
-        # Jede gesetzte Stufe (unabhängig davon, welche) loest denselben Gate
-        # aus wie das bis P17-S1 rein binaere `is_classified` (P17-S2, 14.2).
+        # Any level being set (regardless of which one) triggers the same
+        # gate as the purely binary `is_classified` used up to P17-S1
+        # (P17-S2, 14.2).
         is_classified = bool(object_type and object_type.get("classification_level"))
     required_role = (
         settings.classified_trash_hard_delete_admin_role
@@ -1165,13 +1166,13 @@ async def purge_document(
 async def cascade_trash(
     payload: CascadeTrashRequest, session: AsyncSession = Depends(get_session)
 ) -> CascadeResult:
-    """Interner Service-zu-Service-Aufruf von `folder-service` (5.2, seit
-    P7-S1b): soft-löscht alle aktiven Dokumente in den angegebenen Ordnern,
-    wenn deren Ordner (samt Teilbaum) in den Papierkorb verschoben wird -
-    synchron statt eventbasiert, damit ein sofortiges `GET /documents/deleted`
-    danach bereits konsistent ist. Keine eigene Rollenprüfung, gleiche
-    Vertrauensstellung wie der bestehende `FolderClient`-Aufruf in
-    umgekehrter Richtung."""
+    """Internal service-to-service call from `folder-service` (5.2, since
+    P7-S1b): soft-deletes all active documents in the given folders when
+    their folder (including subtree) is moved to trash - synchronous
+    instead of event-based, so an immediate `GET /documents/deleted`
+    afterwards is already consistent. No own role check, same trust
+    relationship as the existing `FolderClient` call in the reverse
+    direction."""
     document_ids = await repository.cascade_trash_by_folder_ids(
         session,
         payload.folder_ids,
@@ -1193,14 +1194,13 @@ async def cascade_trash(
 async def cascade_restore(
     payload: CascadeRestoreRequest, session: AsyncSession = Depends(get_session)
 ) -> CascadeResult:
-    """Gegenstück zu `cascade_trash` - stellt beim Wiederherstellen eines
-    Ordners nur die dadurch kaskadiert gelöschten Dokumente wieder her."""
+    """Counterpart to `cascade_trash` - when restoring a folder, restores
+    only the documents that were cascade-deleted as a result."""
     document_ids = await repository.cascade_restore_by_via_folder_id(session, payload.via_folder_id)
     await session.commit()
-    # Kein Akteur bekannt - CascadeRestoreRequest verfolgt bislang nicht, wer
-    # die zugrunde liegende Ordner-Wiederherstellung ausgelöst hat (P7-S2:
-    # nur bereits vorhandene Angaben first-class gemacht, keine neuen
-    # Felder ergänzt).
+    # No actor known - CascadeRestoreRequest doesn't yet track who triggered
+    # the underlying folder restoration (P7-S2: only made already-existing
+    # data first-class, no new fields added).
     for document_id in document_ids:
         await publish_event("document.restored", subject=document_id, payload={})
     return CascadeResult(document_ids=document_ids)
@@ -1210,17 +1210,17 @@ async def cascade_restore(
 async def count_active(
     payload: CountActiveRequest, session: AsyncSession = Depends(get_session)
 ) -> CountActiveResult:
-    """Nicht-leer-Prüfung vor Ordner-Zwangslöschung (5.2a, seit P7-S1b) -
-    `folder-service` fragt vor der physischen Entfernung eines Ordners ab,
-    ob dessen Teilbaum noch aktive Dokumente enthält."""
+    """Non-empty check before forced folder deletion (5.2a, since P7-S1b) -
+    `folder-service` checks before physically removing a folder whether its
+    subtree still contains active documents."""
     count = await repository.count_active_by_folder_ids(session, payload.folder_ids)
     return CountActiveResult(count=count)
 
 
 @app.get("/documents/count-active-total", response_model=CountActiveResult)
 async def count_active_total(session: AsyncSession = Depends(get_session)) -> CountActiveResult:
-    """Installationsweite Dokumentenzahl (9.1, seit P9-S1) - ungegatet fuer
-    `license-service`s interne Nutzungspruefung, kein Ordnerfilter."""
+    """Installation-wide document count (9.1, since P9-S1) - ungated for
+    `license-service`'s internal usage check, no folder filter."""
     count = await repository.count_active_total(session)
     return CountActiveResult(count=count)
 
@@ -1264,10 +1264,10 @@ async def update_document(
                 f"Attribut {KENNZEICHEN_ATTRIBUTE!r} ändern",
             )
 
-    # Verschieben (P12-S1, WebDAV-Connector-Nutzerwunsch): nur wenn sich der
-    # Ordner tatsaechlich aendert - Existenz-/Platzierungs-Constraint-Pruefung
-    # analog zum bestehenden Anlege-Pfad (`app.state.folder_client.get(...)`,
-    # siehe `create_document` oben) statt einer neuen, zweiten Implementierung.
+    # Move (P12-S1, WebDAV connector user request): only if the folder
+    # actually changes - existence/placement constraint check analogous to
+    # the existing creation path (`app.state.folder_client.get(...)`, see
+    # `create_document` above) instead of a new, second implementation.
     is_move = payload.folder_id is not None and payload.folder_id != document.folder_id
     target_parent_folder = None
     if is_move:
@@ -1305,8 +1305,8 @@ async def update_document(
         folder_id=payload.folder_id if is_move else None,
     )
     await session.commit()
-    # Kein Akteur bekannt - DocumentUpdate verfolgt bislang nicht, wer die
-    # Metadaten geaendert hat (siehe cascade_restore-Kommentar oben).
+    # No actor known - DocumentUpdate doesn't yet track who changed the
+    # metadata (see cascade_restore comment above).
     await publish_event(
         "document.metadata.updated", subject=document_id, payload={"title": updated.title}
     )
@@ -1335,18 +1335,17 @@ async def delete_document(
 async def trash_document(
     document_id: str, payload: TrashRequest, session: AsyncSession = Depends(get_session)
 ) -> TrashResult:
-    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - optional
-    per generischem Vier-Augen-Mechanismus gegated (4.3, Aktionstyp
-    `document.delete`, unabhängig von der bereits bestehenden
-    retentionsgetriggerten `document.force_delete`): ist `document.delete`
-    genehmigungspflichtig konfiguriert, wird NICHT sofort gelöscht, sondern
-    ein Freigabe-Request angelegt - die eigentliche Ausführung folgt erst
-    über `consumer.py`, sobald `permission.approval.approved` eintrifft. Per
-    Default (keine Konfiguration) bleibt das Verhalten unverändert: sofortige
-    Ausführung, exaktes Muster wie `force_release_lock` (4.2, P6-S4). Neben
-    dem bestehenden `DELETE /documents/{id}` - dieser Endpunkt bleibt
-    unverändert als ungegateter Weg bestehen, da bislang kein Frontend ihn
-    überhaupt aufruft."""
+    """Deletion request workflow for regular users (5.2, since P7-S1c) -
+    optionally gated by the generic four-eyes mechanism (4.3, action type
+    `document.delete`, independent of the already existing
+    retention-triggered `document.force_delete`): if `document.delete` is
+    configured to require approval, it is NOT deleted immediately, but an
+    approval request is created instead - the actual execution then follows
+    via `consumer.py` once `permission.approval.approved` arrives. By
+    default (no configuration), behavior is unchanged: immediate execution,
+    the exact same pattern as `force_release_lock` (4.2, P6-S4). Alongside
+    the existing `DELETE /documents/{id}` - this endpoint remains unchanged
+    as an ungated path, since no frontend calls it at all so far."""
     if await app.state.approval_client.requires_approval("document.delete"):
         request = await app.state.approval_client.create_request(
             action_type="document.delete",
@@ -1375,8 +1374,8 @@ async def trash_document(
 async def restore_document(
     document_id: str, session: AsyncSession = Depends(get_session)
 ) -> DocumentOut:
-    """Papierkorb-Wiederherstellung (5.2, seit P7-S1) - nur innerhalb der
-    konfigurierten Frist möglich (`GET/PUT /trash-config`)."""
+    """Trash restoration (5.2, since P7-S1) - only possible within the
+    configured deadline (`GET/PUT /trash-config`)."""
     try:
         document = await repository.restore_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -1386,8 +1385,8 @@ async def restore_document(
     except repository.RestorePeriodExpiredError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    # Kein Akteur bekannt - der Endpunkt nimmt bislang keinen restored_by
-    # entgegen (siehe cascade_restore-Kommentar oben).
+    # No actor known - the endpoint doesn't yet accept a restored_by
+    # parameter (see cascade_restore comment above).
     await publish_event("document.restored", subject=document_id, payload={})
     return document
 
@@ -1396,9 +1395,9 @@ async def restore_document(
 async def put_retention(
     document_id: str, payload: RetentionUpdate, session: AsyncSession = Depends(get_session)
 ) -> DocumentOut:
-    """Aufbewahrung/Zwangslöschung terminieren (5.2/5.2a, seit P7-S1) - der
-    eigentliche Vollzug erfolgt asynchron über `_retention_poll_loop`, sobald
-    `retention_until` erreicht ist (siehe main.py)."""
+    """Schedule retention/forced deletion (5.2/5.2a, since P7-S1) - the
+    actual enforcement happens asynchronously via `_retention_poll_loop`,
+    once `retention_until` is reached (see main.py)."""
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -1421,8 +1420,8 @@ async def put_retention(
         notify_email=payload.notify_email,
     )
     await session.commit()
-    # Kein Akteur bekannt - RetentionUpdate verfolgt bislang nicht, wer die
-    # Frist geaendert hat (siehe cascade_restore-Kommentar oben).
+    # No actor known - RetentionUpdate doesn't yet track who changed the
+    # deadline (see cascade_restore comment above).
     await publish_event(
         "document.retention.updated",
         subject=document_id,
@@ -1437,14 +1436,13 @@ async def put_retention(
 
 
 async def _require_legal_hold_permission(x_dms_principal: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075) - Legal Hold setzen/
-    aufheben hatte zuvor GAR KEINE Berechtigungsprüfung. Prüft die neue
-    Domain-Admin-Capability `admin.legal_hold` (Rolle "domain-admin-legal-
-    hold") - bewusst NICHT in der "everyone"-Gruppe, ein Legal Hold ist eine
-    rechtlich bedeutsame, administrative Aktion (5.2), keine reguläre
-    Fachnutzung. `GET /legal-holds` bleibt bewusst ungegatet - jeder Nutzer,
-    der ein Dokument betrachtet, muss sehen können, ob/warum es gesperrt
-    ist."""
+    """RBAC (post-roadmap Phase 19 Session 10, ADR 0075) - setting/releasing
+    a legal hold previously had NO permission check at all. Checks the new
+    domain admin capability `admin.legal_hold` (role "domain-admin-legal-
+    hold") - deliberately NOT in the "everyone" group, a legal hold is a
+    legally significant, administrative action (5.2), not regular business
+    use. `GET /legal-holds` remains deliberately ungated - any user viewing
+    a document must be able to see whether/why it is held."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     if not await app.state.permission_client.has_permission(x_dms_principal, "admin.legal_hold"):
@@ -1459,9 +1457,9 @@ async def create_legal_hold(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> LegalHoldOut:
-    """Legal Hold setzen (5.2, seit P7-S1) - überschreibt jede fällige
-    Aktion im Poll-Loop, bis er wieder aufgehoben wird. Seit P19-S10
-    `admin.legal_hold`-gegated, siehe `_require_legal_hold_permission`."""
+    """Set a legal hold (5.2, since P7-S1) - overrides any due action in
+    the poll loop until it is released again. Gated by `admin.legal_hold`
+    since P19-S10, see `_require_legal_hold_permission`."""
     await _require_legal_hold_permission(x_dms_principal)
     try:
         hold = await repository.create_legal_hold(
@@ -1518,8 +1516,8 @@ async def list_legal_holds(
 async def get_deletion_register(
     document_id: str | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[DeletionRegisterEntryOut]:
-    """Löschregister (5.2a, seit P7-S1) - siehe docs/services/document-service.md
-    zur bewusst noch fehlenden separaten Backup-Politik (Phase 11)."""
+    """Deletion register (5.2a, since P7-S1) - see docs/services/document-service.md
+    regarding the deliberately still-missing separate backup policy (Phase 11)."""
     return await repository.list_deletion_register(session, document_id=document_id)
 
 
@@ -1533,14 +1531,14 @@ async def reconcile_restore_deletion(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Löschabgleich nach Restore (10.4, P11-S4): ein Restore auf einen
-    Zeitpunkt VOR dieser bereits durchgeführten Zwangslöschung würde das
-    Dokument unbeabsichtigt wiederaufleben lassen - dieser Endpunkt führt
-    "denselben Mechanismus wie bei der ursprünglichen Zwangslöschung" (10.4
-    wörtlich) erneut aus, statt eine zweite, potenziell abweichende
-    Implementierung zu pflegen. Gate wie beim Kennzeichen-Feld (P5e-S2) -
-    kein neuer PermissionServiceClient für einen so seltenen, rein
-    operativen Endpunkt."""
+    """Deletion reconciliation after restore (10.4, P11-S4): a restore to a
+    point in time BEFORE this already-executed forced deletion would
+    unintentionally bring the document back to life - this endpoint
+    executes "the same mechanism as for the original forced deletion" (10.4
+    verbatim) again, instead of maintaining a second, potentially divergent
+    implementation. Gated the same way as the reference number field
+    (P5e-S2) - no new PermissionServiceClient for such a rare, purely
+    operational endpoint."""
     if not _has_kennzeichen_admin_role(x_dms_roles):
         raise HTTPException(
             status_code=403,
@@ -1548,10 +1546,10 @@ async def reconcile_restore_deletion(
             "Löschabgleich nach Restore auslösen",
         )
     try:
-        # Existenz zuerst pruefen: execute_forced_deletion legt den
-        # DeletionRegisterEntry an, BEVOR es die Dokumentzeile entfernt -
-        # ohne diesen Vorab-Check wuerde ein unbekanntes document_id einen
-        # verwaisten Registereintrag hinterlassen, bevor der 404 greift.
+        # Check existence first: execute_forced_deletion creates the
+        # DeletionRegisterEntry BEFORE it removes the document row -
+        # without this upfront check, an unknown document_id would leave
+        # behind an orphaned register entry before the 404 kicks in.
         await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1651,9 +1649,9 @@ async def create_share_link(
 
     config = await repository.get_share_link_config(session)
     if not config.enabled:
-        # Konzept 4.2a: bei Deaktivierung "keine API-Route erreichbar" - hier
-        # als `404` statt `403` umgesetzt (eine FastAPI-Route lässt sich zur
-        # Laufzeit nicht ohne Neustart abmelden), siehe ADR 0047.
+        # Concept 4.2a: when disabled, "no API route reachable" - implemented
+        # here as `404` instead of `403` (a FastAPI route cannot be
+        # unregistered at runtime without a restart), see ADR 0047.
         raise HTTPException(status_code=404, detail="Not Found")
 
     try:
@@ -1746,11 +1744,12 @@ async def revoke_share_link_endpoint(
     )
 
 
-# --- Office-Direktbearbeitung (Post-Roadmap-Feature, WebDAV-Edit-Token) -----
+# --- Office direct editing (post-roadmap feature, WebDAV edit token) -------
 # `ms-word:ofe|u|<url>`/`ms-excel:ofe|u|<url>`/`ms-powerpoint:ofe|u|<url>`
-# gegen `webdav-connector` - strukturell an den Freigabelink-Block oben
-# angelehnt, aber NICHT rein lesend (siehe `check_write` statt `check_read`)
-# und mit deutlich großzügigerer Gültigkeitsdauer (siehe settings.py).
+# against `webdav-connector` - structurally modeled on the share link block
+# above, but NOT purely read-only (see `check_write` instead of
+# `check_read`) and with a significantly more generous validity duration
+# (see settings.py).
 
 
 @app.post(
@@ -1771,9 +1770,8 @@ async def create_webdav_edit_token(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # Schreibrecht, nicht nur Leserecht - dieses Token gewährt tatsächliche
-    # Bearbeitungsfähigkeit (Check-in per WebDAV-PUT), anders als ein
-    # Freigabelink.
+    # Write permission, not just read permission - this token grants actual
+    # editing capability (check-in via WebDAV PUT), unlike a share link.
     allowed = await app.state.permission_client.check_write(
         principal_id=x_dms_principal, resource_id=document.folder_id or "root"
     )
@@ -1855,12 +1853,12 @@ async def revoke_webdav_edit_token_endpoint(
 async def resolve_webdav_edit_token(
     token: str, session: AsyncSession = Depends(get_session)
 ) -> WebdavEditTokenResolveOut:
-    """Rein Ost-West: wird von `webdav-connector`s `DmsAuthDomainController`
-    direkt gegen `document_service_base_url` aufgerufen (kein Gateway, kein
-    `X-DMS-Principal` - das Token selbst IST hier die Authentisierung).
-    Erneute Rechteprüfung bewusst nicht nötig (nur bei Ausstellung geprüft,
-    siehe ADR) - hier wird nur Ablauf/Widerruf sowie die fortgesetzte
-    Existenz des Dokuments geprüft."""
+    """Purely east-west: called directly by `webdav-connector`'s
+    `DmsAuthDomainController` against `document_service_base_url` (no
+    gateway, no `X-DMS-Principal` - the token itself IS the authentication
+    here). A repeat permission check is deliberately not needed (only
+    checked at issuance, see ADR) - only expiry/revocation and the
+    document's continued existence are checked here."""
     edit_token = await repository.get_webdav_edit_token(session, token)
     if edit_token is None:
         raise HTTPException(status_code=404, detail="WebDAV-Edit-Token unbekannt")
@@ -1880,9 +1878,9 @@ async def resolve_webdav_edit_token(
     )
 
 
-# --- Öffentliche, unauthentifizierte Endpunkte (4.2a) -----------------------
-# Erreichbar über die Gateway-`public_routes`-Ausnahmeliste (kein
-# X-DMS-Principal, da anonym) - siehe docs/services/gateway-service.md.
+# --- Public, unauthenticated endpoints (4.2a) --------------------------------
+# Reachable via the gateway's `public_routes` exception list (no
+# X-DMS-Principal, since anonymous) - see docs/services/gateway-service.md.
 
 
 async def _resolve_active_share_link(session: AsyncSession, token: str):
@@ -2057,10 +2055,10 @@ async def checkin_version(
             status_code=503, detail="Virenscan-Dienst nicht erreichbar - Upload abgelehnt"
         ) from exc
 
-    # Aufbewahrung (5.1/5.2a, seit P7-S1): trägt der Dokument bereits eine
-    # Frist, bekommt auch diese neue Version dieselbe Storage-Level-Sperre
-    # mit (nur beim Schreiben selbst möglich, siehe storage_client.upload
-    # Docstring) - ein unbekanntes Dokument lässt `retention_until=None`.
+    # Retention (5.1/5.2a, since P7-S1): if the document already carries a
+    # deadline, this new version also gets the same storage-level lock
+    # (only possible at write time, see storage_client.upload docstring) -
+    # an unknown document leaves `retention_until=None`.
     try:
         existing_document = await repository.get_document(session, document_id)
         retention_until = existing_document.retention_until
@@ -2145,14 +2143,14 @@ async def release_lock(
 async def force_release_lock(
     document_id: str, payload: LockForceReleaseRequest, session: AsyncSession = Depends(get_session)
 ) -> ForceReleaseResult:
-    """Administrativer Force-Unlock (4.2) - besonders sensibler Audit-Fall.
-    Seit P6-S4 optional per generischem Vier-Augen-Mechanismus gegated (4.3):
-    ist `document.force_unlock` in permission-service als
-    genehmigungspflichtig konfiguriert, wird die Sperre NICHT sofort
-    aufgehoben, sondern ein Freigabe-Request angelegt - die eigentliche
-    Ausführung folgt erst über `consumer.py`, sobald das
-    `permission.approval.approved`-Event eintrifft. Per Default (keine
-    Konfiguration) bleibt das Verhalten unverändert: sofortige Ausführung."""
+    """Administrative force unlock (4.2) - a particularly sensitive audit
+    case. Since P6-S4 optionally gated by the generic four-eyes mechanism
+    (4.3): if `document.force_unlock` is configured in permission-service to
+    require approval, the lock is NOT released immediately, but an approval
+    request is created instead - the actual execution then follows via
+    `consumer.py` once the `permission.approval.approved` event arrives. By
+    default (no configuration), behavior is unchanged: immediate
+    execution."""
     if await app.state.approval_client.requires_approval("document.force_unlock"):
         request = await app.state.approval_client.create_request(
             action_type="document.force_unlock",

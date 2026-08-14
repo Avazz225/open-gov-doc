@@ -11,13 +11,13 @@ _ODS_CONTENT_TYPE = "application/vnd.oasis.opendocument.spreadsheet"
 
 
 class OdsTextExtractionRenderer(Renderer):
-    """Ersatzdarstellung für OpenDocument-Tabellen (2.4): Textextraktion nach
-    .txt, gleiches Muster wie Word/PowerPoint (`DocxTextExtractionRenderer`/
-    `PptxTextExtractionRenderer`) - bislang gab es für .ods gar keinen
-    Renderer, weshalb dafür bisher überhaupt keine Ersatzdarstellung/Vorschau
-    entstand (Nutzer-Feedback: ".ods-Vorschau geht nicht"). Eine echte
-    .ods->.pdf-Konvertierung bräuchte wie bei .pptx eine externe
-    Office-Rendering-Komponente, siehe dortige Begründung."""
+    """Rendition for OpenDocument spreadsheets (2.4): text extraction to
+    .txt, same pattern as Word/PowerPoint (`DocxTextExtractionRenderer`/
+    `PptxTextExtractionRenderer`) - previously there was no renderer at all
+    for .ods, so no rendition/preview was ever produced for it (user
+    feedback: ".ods preview doesn't work"). A real .ods->.pdf conversion
+    would need an external Office rendering component, as with .pptx - see
+    the reasoning there."""
 
     rendition_type = "substitute_text"
 

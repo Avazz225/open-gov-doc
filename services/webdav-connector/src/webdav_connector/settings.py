@@ -8,20 +8,21 @@ class Settings(BaseServiceSettings):
     folder_service_base_url: str = "http://localhost:8008"
     auth_service_base_url: str = "http://localhost:8003"
 
-    # Konzept-3.2a-Lizenzvermittlung (P9-S2-Muster): Poll-Intervall des
-    # Lizenzstatus-Caches gegen registry-service.
+    # Concept 3.2a license mediation (P9-S2 pattern): poll interval of the
+    # license status cache against registry-service.
     license_status_cache_ttl_seconds: float = 30.0
 
     webdav_root_folder_id: str = "root"
 
-    # WebDAV-Locking (4.2) läuft doppelt: wsgidav verwaltet die eigentlichen
-    # Opaque-Lock-Tokens/Timeouts/If-Header-Prüfung selbst (RFC 4918, siehe
-    # docs/services/webdav-connector.md), zusätzlich hält der Connector für
-    # die Dauer jeder Schreiboperation (PUT/DELETE/MOVE) die reale
-    # document-service-Sperre - Standard-Timeout dafür, falls die Operation
-    # ungewöhnlich lange dauert.
+    # WebDAV locking (4.2) runs in duplicate: wsgidav manages the actual
+    # opaque lock tokens/timeouts/If-header checking itself (RFC 4918, see
+    # docs/services/webdav-connector.md), and additionally the connector
+    # holds the real document-service lock for the duration of each write
+    # operation (PUT/DELETE/MOVE) - default timeout for that, in case the
+    # operation takes unusually long.
     document_lock_timeout_seconds: float = 60.0
 
-    # Port, unter dem wsgidav intern läuft, bevor `WsgiToAsgi` es unter
-    # `/webdav` in die FastAPI-App mountet - kein eigener Netzwerk-Listener.
+    # Port on which wsgidav runs internally, before `WsgiToAsgi` mounts it
+    # under `/webdav` in the FastAPI app - not a network listener of its
+    # own.
     webdav_mount_path: str = "/webdav"

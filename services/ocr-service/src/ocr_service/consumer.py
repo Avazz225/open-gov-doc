@@ -19,10 +19,10 @@ def make_handler(
     publish_event: PublishEvent,
     max_attempts: int,
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Reagiert auf `document.created` (erste Version, Payload enthält keine
-    `version_number`) und `document.version.created` (Check-in, `version_
-    number` im Payload) - beide docken nach dem Scan-Gating aus P5-S1 an
-    (ADR 0010). Gleiches Ein-Abo-mit-Dispatch-Muster wie
+    """Reacts to `document.created` (first version, payload contains no
+    `version_number`) and `document.version.created` (check-in, `version_
+    number` in the payload) - both hook in after the scan gating from P5-S1
+    (ADR 0010). Same single-subscription-with-dispatch pattern as
     rendering_service/consumer.py."""
 
     async def handle(payload: bytes) -> None:
@@ -52,10 +52,10 @@ def make_handler(
 
 
 async def _current_batch_size(session_factory: async_sessionmaker[AsyncSession]) -> int:
-    """Wird von `NatsEventBusClient.subscribe()` bei jeder Nachricht neu
-    aufgerufen (P5b-S5 "Verarbeitungs-Batch-Size") - liest die Admin-UI-
-    editierbare `OcrConfig`-Zeile live, ohne dass ein Neustart nötig wäre, um
-    eine geänderte Batch-Size wirksam werden zu lassen."""
+    """Called freshly by `NatsEventBusClient.subscribe()` on every message
+    (P5b-S5 "processing batch size") - reads the admin-UI-editable
+    `OcrConfig` row live, without requiring a restart for a changed batch
+    size to take effect."""
     async with session_factory() as session:
         config = await repository.get_config(session)
         await session.commit()

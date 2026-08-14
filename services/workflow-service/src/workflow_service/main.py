@@ -54,27 +54,28 @@ _FEDERATION_CONFIG_ID = 1
 _FEDERATED_TASK_TYPES = ("federated", "federated_return")
 
 
-# Eigener, austauschbarer synchroner Client (statt der freien `httpx.post()`-
-# Funktion) - Tests ersetzen ihn per `monkeypatch` durch einen `httpx.Client` mit
-# `httpx.MockTransport`, gleiches Stub-Prinzip wie `federation-hub-service`s
-# Tests (dort `httpx.AsyncClient`/`ASGITransport`, hier synchron, siehe unten).
+# Own, swappable synchronous client (instead of the free `httpx.post()`
+# function) - tests replace it via `monkeypatch` with an `httpx.Client` using
+# `httpx.MockTransport`, the same stubbing principle as `federation-hub-service`'s
+# tests (there `httpx.AsyncClient`/`ASGITransport`, here synchronous, see below).
 _connector_http_client = httpx.Client()
 
 
 def _handle_connector_task(extensions: dict[str, str], data: dict) -> dict:
-    """Registriert bei `spiff_adapter.ConnectorServiceTask` (7.1 "Auslösen eines
-    Connector-Aufrufs", P12-S2) - bewusst der einzige Ort in diesem Service, der
-    `httpx` synchron aufruft: SpiffWorkflows `do_engine_steps()` ist durchgehend
-    synchron (kein `async`/`await` irgendwo in der Engine), ein Aufruf hier blockiert
-    also ohnehin schon den umgebenden `async def`-Request-Handler - konsistent mit
-    jeder anderen SpiffWorkflow-Interaktion dieses Service (siehe `spiff_adapter.py`-
-    Moduldocstring), keine neue async/sync-Brücke nötig. `serviceUrl` kennt dieser
-    Service selbst nicht - komplett generisch, kein Wissen über den aufrufenden
-    Service (Migration-Service ist der erste, aber nicht einzig denkbare Nutzer).
-    `serviceUrl` unterstützt `{platzhalter}`-Substitution aus den aktuellen
-    Prozessdaten (`str.format(**data)`) - so kann z. B. eine pro Instanz
-    unterschiedliche `transfer_id` in die URL einfließen, ohne dass die BPMN-
-    Datei selbst pro Instanz individuell erzeugt werden müsste."""
+    """Registered with `spiff_adapter.ConnectorServiceTask` (7.1 "triggering a
+    connector call", P12-S2) - deliberately the only place in this service
+    that calls `httpx` synchronously: SpiffWorkflow's `do_engine_steps()` is
+    entirely synchronous (no `async`/`await` anywhere in the engine), so a
+    call here already blocks the surrounding `async def` request handler
+    anyway - consistent with every other SpiffWorkflow interaction in this
+    service (see `spiff_adapter.py` module docstring), no new async/sync
+    bridge needed. This service itself has no knowledge of `serviceUrl` -
+    completely generic, no knowledge of the calling service (migration-
+    service is the first, but not the only conceivable user). `serviceUrl`
+    supports `{placeholder}` substitution from the current process data
+    (`str.format(**data)`) - this lets, for example, a per-instance
+    `transfer_id` flow into the URL, without the BPMN file itself needing
+    to be generated individually per instance."""
     service_url = extensions.get("serviceUrl")
     if not service_url:
         raise RuntimeError("connector_call Service Task ohne serviceUrl-Extension")
@@ -98,16 +99,16 @@ spiff_adapter.register_connector_task_handler(_handle_connector_task)
 async def _apply_approved_process_definition_import(
     name: str, bpmn_xml: str, process_id: str | None
 ) -> None:
-    """Wendet einen per Vier-Augen-Prinzip genehmigten BPMN-Import an
-    (Post-Roadmap Phase 21 Session 4, ADR 0087) - dieselbe `repository.
-    create_process_definition`, die auch der sofortige, ungegatete Pfad in
-    `create_process_definition` (Endpunkt) verwendet, hier nur mit einer
-    eigenen Session statt der Request-Session (kein HTTP-Request-Kontext im
-    Consumer, siehe `consumer.py`). BPMN-Validierung war bei der ursprünglichen
-    Anfrage bewusst zurückgestellt (wie `config_service._apply_config_document`
-    ihre Schema-Validierung auch erst hier vornimmt) - ein ungültiges BPMN
-    scheitert deshalb erst jetzt, nicht bereits beim Anlegen des
-    Freigabe-Requests."""
+    """Applies a BPMN import approved via the four-eyes principle
+    (Post-Roadmap Phase 21 Session 4, ADR 0087) - the same
+    `repository.create_process_definition` that the immediate, ungated
+    path in `create_process_definition` (endpoint) also uses, here just
+    with its own session instead of the request session (no HTTP request
+    context in the consumer, see `consumer.py`). BPMN validation was
+    deliberately deferred at the original request (like
+    `config_service._apply_config_document` also only performs its schema
+    validation here) - an invalid BPMN therefore only fails now, not
+    already when the approval request is created."""
     async with app.state.session_factory() as session:
         try:
             await repository.create_process_definition(
@@ -126,12 +127,13 @@ async def _apply_approved_process_definition_import(
 async def _sla_poll_loop(
     session_factory: async_sessionmaker[AsyncSession], permission_client: PermissionServiceClient
 ) -> None:
-    """SLA-Zeitüberwachung (P6-S2, ADR 0020): pollt statt push-basiert zu reagieren,
-    da weder SpiffWorkflow noch dieses Projekt einen Hintergrund-Scheduler mitbringen.
-    Ein Fehler in einem Tick bricht die Schleife nicht ab, damit ein einzelner defekter
-    Blob nicht die SLA-Überwachung aller anderen laufenden Instanzen stoppt.
-    Seit P6-S6 zusätzlich: überspringt den Tick während aktivem Wartungsmodus (4.8) -
-    "geplante/periodische Jobs werden angehalten"."""
+    """SLA time monitoring (P6-S2, ADR 0020): polls instead of reacting in a
+    push-based way, since neither SpiffWorkflow nor this project brings its
+    own background scheduler. An error in one tick does not abort the loop,
+    so a single broken blob doesn't stop SLA monitoring for all other
+    running instances. Since P6-S6, additionally: skips the tick while
+    maintenance mode is active (4.8) - "scheduled/periodic jobs are
+    paused"."""
     while True:
         try:
             if await permission_client.is_maintenance_active():
@@ -169,11 +171,11 @@ async def _sla_poll_loop(
 
 
 async def _get_or_seed_federation_config(session: AsyncSession) -> FederationConfig:
-    """7.4/P13-S3: die Versionskompatibilitäts-Erklärung lebt seit P13-S3 in
-    dieser DB-Zeile statt direkt in `Settings` - beim allerersten Zugriff aus
-    den (weiterhin gültigen) `Settings`-Defaults geseedet, rückwärtskompatibel
-    zu allen Installationen, die noch nie eine `PUT /federation/config`
-    ausgeführt haben."""
+    """7.4/P13-S3: the version compatibility declaration has lived in this
+    DB row since P13-S3 instead of directly in `Settings` - seeded from the
+    (still valid) `Settings` defaults on the very first access,
+    backward-compatible with all installations that have never executed a
+    `PUT /federation/config`."""
     config = await session.get(FederationConfig, _FEDERATION_CONFIG_ID)
     if config is None:
         config = FederationConfig(
@@ -190,15 +192,16 @@ async def _get_or_seed_federation_config(session: AsyncSession) -> FederationCon
 async def _ensure_federation_identity(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> FederationHubClient | None:
-    """Einmalige Selbstregistrierung am Federation Hub (7.4, P6-S9) - opt-in,
-    bleibt `None` ohne konfigurierten `settings.federation_hub_base_url`
-    (siehe `docs/services/workflow-service.md` "Federation"). Analog zu
-    `maybe_start_registration` aus `dms-registry-client`, aber bewusst kein
-    Wiederverwenden dieser Lib: der Hub ist kein interner
-    Service-Discovery-Eintrag dieser Installation, sondern ein externer,
-    installationsübergreifender Dienst mit eigenem Registrierungs-/
-    Auth-Protokoll (API-Key statt Heartbeat, RSA-Schlüsselpaar statt
-    Health-Endpoint, siehe `federation_client.py`/`federation_crypto.py`)."""
+    """One-time self-registration at the Federation Hub (7.4, P6-S9) -
+    opt-in, stays `None` without a configured
+    `settings.federation_hub_base_url` (see
+    `docs/services/workflow-service.md` "Federation"). Analogous to
+    `maybe_start_registration` from `dms-registry-client`, but deliberately
+    without reusing that lib: the Hub is not an internal service-discovery
+    entry of this installation but an external, cross-installation service
+    with its own registration/auth protocol (API key instead of heartbeat,
+    RSA key pair instead of health endpoint, see
+    `federation_client.py`/`federation_crypto.py`)."""
     if not settings.federation_hub_base_url:
         return None
     client = FederationHubClient(settings.federation_hub_base_url)
@@ -230,12 +233,12 @@ async def _ensure_federation_identity(
             session.add(identity)
             await session.commit()
         else:
-            # Re-Registrierung bei jedem Start (Upsert wie bei der internen
-            # Registry) - hält z. B. `callback_base_url`/`version` aktuell,
-            # falls sich Settings/`FederationConfig` zwischen Neustarts
-            # geändert haben. Ein Fehlschlag (Hub gerade nicht erreichbar)
-            # blockiert den eigenen Start nicht - Federation ist ein
-            # Zusatznutzen, kein Hard-Dependency dieser Installation.
+            # Re-registration on every start (upsert like with the internal
+            # registry) - keeps e.g. `callback_base_url`/`version` current
+            # if Settings/`FederationConfig` have changed between restarts.
+            # A failure (Hub currently unreachable) does not block our own
+            # start - Federation is a bonus feature, not a hard dependency
+            # of this installation.
             try:
                 await client.register(
                     installation_id=identity.installation_id,
@@ -258,15 +261,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
         await conn.run_sync(Base.metadata.create_all)
-        # Prozess-Versionierung (P6-S8): `name` war vorher global eindeutig,
-        # ist jetzt der Prozessfamilien-Schlüssel - Eindeutigkeit gilt seither
-        # für (name, version). `create_all` legt fehlende TABELLEN/Constraints
-        # nur für neue Deployments an, ändert aber keine bestehenden - daher
-        # ad-hoc für bereits existierende Datenbanken (kein Alembic in dieser
-        # frühen Phase, siehe CONTRIBUTING.md). Postgres kennt kein
-        # `ADD CONSTRAINT IF NOT EXISTS`, wohl aber `DROP CONSTRAINT IF EXISTS`
-        # und `CREATE UNIQUE INDEX IF NOT EXISTS` - ein Unique-Index ist
-        # äquivalent zur früheren Unique-Constraint-Durchsetzung.
+        # Process versioning (P6-S8): `name` was previously globally unique,
+        # is now the process family key - uniqueness has since applied to
+        # (name, version). `create_all` only creates missing TABLES/
+        # constraints for new deployments but doesn't alter existing ones -
+        # hence ad hoc for already-existing databases (no Alembic in this
+        # early phase, see CONTRIBUTING.md). Postgres has no
+        # `ADD CONSTRAINT IF NOT EXISTS`, but it does have
+        # `DROP CONSTRAINT IF EXISTS` and `CREATE UNIQUE INDEX IF NOT EXISTS`
+        # - a unique index is equivalent to the former unique constraint
+        # enforcement.
         await conn.execute(
             text(
                 "ALTER TABLE workflow.process_definition "
@@ -285,13 +289,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ON workflow.process_definition (name, version)"
             )
         )
-        # Federation Hub (P6-S9): `federation_task.handover_id` war zunächst
-        # allein eindeutig - im Selbst-Loopback-Smoke-Test (eine Installation
-        # übergibt an sich selbst) trägt aber sowohl die outbound- als auch die
-        # inbound-Zeile denselben `handover_id` in derselben Datenbank, siehe
-        # `models.FederationTask`. Eindeutigkeit gilt seither für
-        # `(handover_id, direction)` - gleiches idempotentes Migrationsmuster
-        # wie bei der Prozessdefinition-Versionierung oben.
+        # Federation Hub (P6-S9): `federation_task.handover_id` was initially
+        # unique on its own - but in the self-loopback smoke test (an
+        # installation hands over to itself), both the outbound and the
+        # inbound row carry the same `handover_id` in the same database, see
+        # `models.FederationTask`. Uniqueness has since applied to
+        # `(handover_id, direction)` - the same idempotent migration pattern
+        # as for the process definition versioning above.
         await conn.execute(
             text("DROP INDEX IF EXISTS workflow.ix_workflow_federation_task_handover_id")
         )
@@ -307,22 +311,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ON workflow.federation_task (handover_id, direction)"
             )
         )
-        # Signaturbasierte Hub-Authentisierung statt API-Key (P13-S4,
-        # ADR 0039) - `api_key` wird im selben Schritt entfernt statt bewusst
-        # zurückgestellt: das alte Modell wird hier vollständig ersetzt, kein
-        # Rolling-Update-Szenario zwischen alt/neu zu berücksichtigen, siehe
-        # gleiche Begründung in `federation_hub_service.main`.
+        # Signature-based Hub authentication instead of API key (P13-S4,
+        # ADR 0039) - `api_key` is removed in the same step instead of being
+        # deliberately deferred: the old model is fully replaced here, no
+        # rolling-update scenario between old/new to consider, see the same
+        # reasoning in `federation_hub_service.main`.
         await conn.execute(
             text("ALTER TABLE workflow.federation_identity DROP COLUMN IF EXISTS api_key")
         )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
-    # Geschäftskalender-Cache (P14-S5): `business_days()` liest ihn synchron
-    # aus `spiff_adapter.py` heraus (kein DB-Zugriff aus SpiffWorkflows
-    # synchroner `has_fired()`-Auswertung möglich) - beim Start einmalig
-    # geladen, danach hält `repository.py` ihn nach jedem Schreibzugriff
-    # aktuell. Muss vor dem SLA-Poll-Loop unten stehen, damit ein bereits
-    # laufender Timer nicht auf einen leeren Cache trifft.
+    # Business calendar cache (P14-S5): `business_days()` reads it
+    # synchronously from within `spiff_adapter.py` (no DB access possible
+    # from SpiffWorkflow's synchronous `has_fired()` evaluation) - loaded
+    # once at startup, after which `repository.py` keeps it current after
+    # every write access. Must come before the SLA poll loop below, so an
+    # already-running timer doesn't hit an empty cache.
     async with app.state.session_factory() as session:
         await repository.refresh_business_calendar_cache(session)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
@@ -334,19 +338,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.license_status_cache_ttl_seconds,
     )
 
-    # Reiner Producer (kein Consumer, siehe docs/services/workflow-service.md
-    # "Events") - eigener Stream, ein Producer muss ihn selbst anlegen (ADR 0001).
+    # Pure producer (no consumer, see docs/services/workflow-service.md
+    # "Events") - own stream, a producer must create it itself (ADR 0001).
     event_bus = NatsEventBusClient(settings.nats_url, stream="workflow")
     await event_bus.connect()
     app.state.event_bus = event_bus
 
-    # BPMN-Import-Review-Gate (4.3, Post-Roadmap Phase 21 Session 4, ADR 0087):
+    # BPMN import review gate (4.3, Post-Roadmap Phase 21 Session 4, ADR 0087):
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
-    # Reiner Konsument, kein eigener Stream (`ensure_stream=False`) - anders
-    # als `event_bus` oben (workflow-service's eigener `"workflow"`-Stream)
-    # reagiert dieser zweite, separate Client nur auf permission-services
-    # bereits bestehendes `permission.approval.approved`-Event, gleiches
-    # Muster wie `config_service.main.lifespan`.
+    # Pure consumer, no own stream (`ensure_stream=False`) - unlike
+    # `event_bus` above (workflow-service's own `"workflow"` stream), this
+    # second, separate client only reacts to permission-service's
+    # already-existing `permission.approval.approved` event, same pattern
+    # as `config_service.main.lifespan`.
     approval_consumer_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await approval_consumer_bus.connect()
     app.state.approval_consumer_bus = approval_consumer_bus
@@ -421,9 +425,9 @@ def healthz() -> dict:
 async def _dispatch_outbound_federated_task(
     session: AsyncSession, instance_id: str, task: spiff_adapter.TaskInfo
 ) -> None:
-    """Automatischer Handover (7.4): ein `taskType=federated`-Task wird nie
-    von einem Menschen abgeschlossen (siehe `_reject_manual_federated_completion`),
-    sondern sobald bereit sofort an den Federation Hub übergeben."""
+    """Automatic handover (7.4): a `taskType=federated` task is never
+    completed by a human (see `_reject_manual_federated_completion`), but
+    handed over to the Federation Hub immediately once ready."""
     identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
     target_installation_id = task.extensions.get("targetInstallationId")
     target_process_type = task.extensions.get("targetProcessType")
@@ -447,14 +451,14 @@ async def _dispatch_outbound_federated_task(
         target["public_key_pem"].encode("utf-8"), task.data
     )
 
-    # Der `handover_id` wird bewusst hier (nicht vom Hub) erzeugt und die
-    # eigene FederationTask-Zeile bereits VOR dem Hub-Aufruf committet: der
-    # Hub kann synchron bis zurück in diese Installation zustellen (z. B. ein
-    # Handover an die eigene installation_id, siehe ADR 0028
-    # "Selbst-Loopback") - ohne diesen Commit wäre die Zeile bei einem
-    # verschachtelten Rückruf (`/federation/inbound-result`) noch nicht
-    # sichtbar (Postgres-Transaktionsisolation), da die äußere Transaktion
-    # erst nach Rückkehr aus `create_handover()` committet.
+    # `handover_id` is deliberately generated here (not by the Hub), and our
+    # own FederationTask row is committed already BEFORE the Hub call: the
+    # Hub can deliver synchronously back into this very installation (e.g. a
+    # handover to our own installation_id, see ADR 0028 "self-loopback") -
+    # without this commit the row would not yet be visible on a nested
+    # callback (`/federation/inbound-result`) due to Postgres transaction
+    # isolation, since the outer transaction only commits after returning
+    # from `create_handover()`.
     handover_id = str(uuid.uuid4())
     await repository.create_federation_task(
         session,
@@ -493,9 +497,9 @@ async def _dispatch_outbound_federated_task(
 async def _dispatch_federated_return_task(
     session: AsyncSession, instance_id: str, task: spiff_adapter.TaskInfo
 ) -> None:
-    """Gegenstück auf der Empfängerseite (7.4): schickt das Ergebnis eines
-    `taskType=federated_return`-Task automatisch über den Federation Hub an
-    die ursprüngliche Installation zurück, sobald der Task bereit ist."""
+    """Counterpart on the receiving side (7.4): automatically sends the
+    result of a `taskType=federated_return` task back to the original
+    installation via the Federation Hub as soon as the task is ready."""
     identity = await session.get(FederationIdentity, _FEDERATION_IDENTITY_ID)
     inbound = await repository.get_inbound_federation_task_for_instance(session, instance_id)
     if identity is None or inbound is None or inbound.origin_installation_id is None:
@@ -536,11 +540,11 @@ async def _dispatch_federated_return_task(
         )
         return
 
-    # Der Hub selbst antwortet mit 200, auch wenn die Weiterleitung an die
-    # Ursprungsinstallation dahinter fehlschlägt (siehe
+    # The Hub itself responds with 200 even if the forwarding to the origin
+    # installation behind it fails (see
     # `federation_hub_service.main.submit_handover_result`) - `result["status"]`
-    # spiegelt den tatsächlichen Zustellungserfolg, nicht nur die eigene
-    # erfolgreiche Übergabe an den Hub.
+    # reflects the actual delivery success, not just our own successful
+    # handover to the Hub.
     status = "returned" if result.get("status") == "completed" else "return_delivery_failed"
     await repository.mark_inbound_federation_task_returned(
         session, inbound, task_id=task.id, status=status
@@ -548,11 +552,11 @@ async def _dispatch_federated_return_task(
 
 
 async def _dispatch_pending_federation_tasks(session: AsyncSession, instance_id: str) -> None:
-    """Wird nach jeder Operation aufgerufen, die neue bereite Tasks erzeugen
-    kann (Instanzstart, Task-Abschluss, SLA-Poll-Tick, Federation-Inbound) -
-    erkennt neu bereite `federated`/`federated_return`-Tasks und löst die
-    passende Aktion aus. Bereits dispatchte Tasks werden über
-    `FederationTask`-Zeilen übersprungen (keine doppelte Zustellung)."""
+    """Called after every operation that can create newly ready tasks
+    (instance start, task completion, SLA poll tick, federation inbound) -
+    detects newly ready `federated`/`federated_return` tasks and triggers
+    the matching action. Already-dispatched tasks are skipped via
+    `FederationTask` rows (no duplicate delivery)."""
     if app.state.federation_client is None:
         return
     try:
@@ -572,18 +576,18 @@ async def _dispatch_pending_federation_tasks(session: AsyncSession, instance_id:
 
 
 async def _require_object_config(x_dms_principal: str) -> None:
-    """Retrofit P6-S6: Prozessdefinitionen (inkl. Script-Task-Upload, laut
-    `docs/services/workflow-service.md` "ein reales Sicherheitsthema") sind
-    ab jetzt eine administrative Aktion, keine reguläre Fachnutzung -
-    verlangt die Domain-Admin-Capability `admin.object_config` (dieselbe
-    Rolle "Objekttyp-/Workflow-Konfiguration" aus P6-S5, jetzt zum ersten Mal
-    tatsächlich durchgesetzt inkl. echtem technischen Konto `config-admin`).
-    Instanzstart/Task-Abschluss brauchten dagegen ursprünglich (P6-S6-
-    Rückfrage-Entscheidung) keine Domain-Admin-Rolle - seit Post-Roadmap
-    Phase 19 Session 9 (ADR 0074) prüfen sie stattdessen `workflow.write`,
-    siehe `_require_workflow_permission` unten (RBAC statt Admin-Domäne,
-    kein Widerspruch zur ursprünglichen Entscheidung "keine Domain-Admin-
-    Rolle noetig")."""
+    """Retrofit P6-S6: process definitions (including script task upload,
+    per `docs/services/workflow-service.md` "a real security concern") are
+    from now on an administrative action, not regular functional use -
+    requires the domain admin capability `admin.object_config` (the same
+    "object type/workflow configuration" role from P6-S5, now actually
+    enforced for the first time, including a real technical account
+    `config-admin`). Instance start/task completion, on the other hand,
+    originally (P6-S6 clarification decision) did not need a domain admin
+    role - since Post-Roadmap Phase 19 Session 9 (ADR 0074) they instead
+    check `workflow.write`, see `_require_workflow_permission` below (RBAC
+    instead of the admin domain, no contradiction with the original
+    decision "no domain admin role needed")."""
     allowed = bool(x_dms_principal) and await app.state.permission_client.has_permission(
         x_dms_principal, "admin.object_config"
     )
@@ -595,15 +599,15 @@ async def _require_object_config(x_dms_principal: str) -> None:
 
 
 async def _require_workflow_permission(x_dms_principal: str, *, access_type: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 9, ADR 0074) - Instanzstart/
-    Task-Abschluss waren bislang bewusst für jeden authentifizierten
-    Principal offen (P6-S6-Rückfrage-Entscheidung, siehe `_require_object_
-    config` oben) - diese Session macht daraus eine echte, admin-editierbare
-    RBAC-Prüfung (`workflow.write`) statt eines hartkodiert offenen Pfads,
-    exakt das bereits in P19-S5/S7/S8 etablierte Muster. Die "everyone"-
-    Gruppe (ADR 0067) gewährt `workflow.write` standardmäßig - erhält das
-    bisherige De-facto-offene Verhalten ("normale Fachnutzung soll keine
-    Domain-Admin-Rolle brauchen"), macht es aber admin-editierbar."""
+    """RBAC (Post-Roadmap Phase 19 Session 9, ADR 0074) - instance start/
+    task completion were previously deliberately open to every
+    authenticated principal (P6-S6 clarification decision, see
+    `_require_object_config` above) - this session turns that into a real,
+    admin-editable RBAC check (`workflow.write`) instead of a hardcoded
+    open path, exactly the pattern already established in P19-S5/S7/S8.
+    The "everyone" group (ADR 0067) grants `workflow.write` by default -
+    preserves the previous de-facto-open behavior ("normal functional use
+    shouldn't need a domain admin role"), but makes it admin-editable."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     allowed = await app.state.permission_client.check(
@@ -617,9 +621,10 @@ async def _require_workflow_permission(x_dms_principal: str, *, access_type: str
 
 
 async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
-    """Not-Shutdown (4.8, P6-S6): "alle laufenden Workflow-Instanzen ...
-    angehalten" wird als "keine neuen Instanzen/keine Fortschritte während
-    der Sperre" umgesetzt (siehe ADR 0024 für die Begründung der Grenze)."""
+    """Emergency shutdown (4.8, P6-S6): "all running workflow instances ...
+    paused" is implemented as "no new instances/no progress while the
+    lock is active" (see ADR 0024 for the reasoning behind this
+    limitation)."""
     if x_dms_maintenance_active.lower() == "true":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -628,13 +633,14 @@ async def _reject_during_maintenance(x_dms_maintenance_active: str) -> None:
 
 
 def _license_gate(action: Literal["read", "write"]):
-    """Demo-Modus/Sperrverhalten (Konzept 9.3, P9-S2): workflow-service ist
-    die einzige heute real existierende licensierbare "Applikationskomponente"
-    (9.1). `"unlicensed"` sperrt vollstaendig (auch Lesen), `"demo"` erlaubt
-    nur Lesezugriff (Konzept-Beispiel woertlich). Als `Depends()` statt wie
-    beim Wartungsmodus manuell im Funktionskoerper, da hier ein async
-    Cross-Service-Aufruf noetig ist, kein simpler Header-Read. Federation-
-    Endpunkte bleiben bewusst aussen vor (eigenstaendiges Thema, Phase 13)."""
+    """Demo mode/lock behavior (Concept 9.3, P9-S2): workflow-service is
+    the only licensable "application component" (9.1) that actually
+    exists today. `"unlicensed"` locks completely (including reads),
+    `"demo"` allows only read access (concept example verbatim). As a
+    `Depends()` instead of manually in the function body like with
+    maintenance mode, since an async cross-service call is needed here,
+    not a simple header read. Federation endpoints are deliberately left
+    out (a self-contained topic, Phase 13)."""
 
     async def _check() -> None:
         license_status = await app.state.license_client.get_status()
@@ -665,20 +671,20 @@ async def create_process_definition(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessDefinitionOut | JSONResponse:
-    """Seit Post-Roadmap Phase 21 Session 4 (ADR 0087) optional per
-    generischem Vier-Augen-Mechanismus gegated (`workflow.process_definition.
-    import`) - ein hochgeladenes BPMN-Dokument kann Script-Tasks/Connector-
-    Aufrufe enthalten (siehe `docs/services/workflow-service.md` "ein reales
-    Sicherheitsthema"), ein zweiter Admin kann das vor Aktivierung prüfen.
-    Per Default (keine Konfiguration) bleibt das Verhalten UNVERÄNDERT: sofortige
-    Anlage, `201` + `ProcessDefinitionOut` wie bisher - bewusst NICHT wie
-    `config_service`s `POST /config/import` (ADR 0060) IMMER in eine
-    Status-Hülle verpackt, da dieser Endpunkt (anders als dort) als
-    Test-/Setup-Infrastruktur in sehr vielen bestehenden Aufrufern
-    (Prozessdesigner, dutzende Tests) fest auf die unveränderte Erfolgs-Form
-    angewiesen ist - nur der neue, bisher nicht existierende
-    `pending_approval`-Fall bekommt eine eigene Form (`202` +
-    `ProcessDefinitionImportResult`), erkennbar am HTTP-Status."""
+    """Since Post-Roadmap Phase 21 Session 4 (ADR 0087), optionally gated
+    via the generic four-eyes mechanism (`workflow.process_definition.
+    import`) - an uploaded BPMN document can contain script tasks/connector
+    calls (see `docs/services/workflow-service.md` "a real security
+    concern"), a second admin can review it before activation. By default
+    (no configuration), behavior stays UNCHANGED: immediate creation,
+    `201` + `ProcessDefinitionOut` as before - deliberately NOT always
+    wrapped in a status envelope like `config_service`'s
+    `POST /config/import` (ADR 0060), since this endpoint (unlike there)
+    is firmly relied upon, as test/setup infrastructure, by very many
+    existing callers (process designer, dozens of tests) for the unchanged
+    success form - only the new, previously non-existent
+    `pending_approval` case gets its own form (`202` +
+    `ProcessDefinitionImportResult`), recognizable by the HTTP status."""
     await _require_object_config(x_dms_principal)
     xml_bytes = await bpmn_xml.read()
     try:
@@ -717,8 +723,8 @@ async def create_process_definition(
 async def list_process_definitions(
     name: str | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[ProcessDefinitionOut]:
-    """Ohne `name`: neueste Version je Prozessfamilie (P6-S8). Mit `name`:
-    vollständige Versionshistorie dieser Familie, neueste zuerst."""
+    """Without `name`: newest version per process family (P6-S8). With
+    `name`: complete version history of that family, newest first."""
     return await repository.list_process_definitions(session, name=name)
 
 
@@ -767,38 +773,38 @@ async def restore_process_definition(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessDefinitionOut:
-    """Rollback (P25-S2): liest eine beliebige historische Version einer
-    Prozessfamilie (`process_definition_id` kann jede Version dieser Familie
-    sein, nicht nur die jeweils neueste) und legt daraus eine BRANDNEUE,
-    jetzt aktuelle Version mit exakt deren `bpmn_xml`/`bpmn_process_id` an -
-    append-only wie jedes andere Anlegen einer Version (ADR 0027), kein
-    In-Place-Edit/Überschreiben der Zielversion oder irgendeiner
-    Zwischenversion. Ruft dafür dieselbe (seit P25-S1, ADR 0096 racefeste)
-    `repository.create_process_definition` auf wie der reguläre Upload-Pfad
-    (`POST /process-definitions`) - erbt dadurch deren Advisory-Lock-Schutz
-    gegen gleichzeitige Versionsvergabe automatisch, ohne die
-    Versionsnummern-Logik hier zu duplizieren. `process_id` wird bewusst
-    explizit als die bereits zum Zeitpunkt der Ursprungsversion aufgelöste
-    `bpmn_process_id` übergeben (nicht `None`) - eine erneute automatische
-    Auflösung ist unnötig und könnte bei einer BPMN-Datei mit mehreren
-    Top-Level-Prozessen sogar scheitern, obwohl die Ursprungsversion selbst
-    beim Anlegen bereits eindeutig aufgelöst wurde.
+    """Rollback (P25-S2): reads an arbitrary historical version of a
+    process family (`process_definition_id` can be any version of this
+    family, not just the respective newest) and creates from it a BRAND
+    NEW, now-current version with exactly that version's
+    `bpmn_xml`/`bpmn_process_id` - append-only like any other version
+    creation (ADR 0027), no in-place edit/overwrite of the target version
+    or any intermediate version. Calls the same (race-safe since P25-S1,
+    ADR 0096) `repository.create_process_definition` as the regular upload
+    path (`POST /process-definitions`) for this - thereby automatically
+    inherits its advisory-lock protection against concurrent version
+    assignment, without duplicating the version-number logic here.
+    `process_id` is deliberately passed explicitly as the `bpmn_process_id`
+    already resolved at the time of the origin version (not `None`) - a
+    renewed automatic resolution is unnecessary and could even fail for a
+    BPMN file with multiple top-level processes, even though the origin
+    version itself was already uniquely resolved when it was created.
 
-    Gegated wie `POST /process-definitions` (`admin.object_config` +
-    Lizenz-Gate) - dieselbe administrative Aktion, nur mit bereits im System
-    bekanntem statt frisch hochgeladenem Inhalt. Bewusst NICHT zusätzlich
-    durch das optionale BPMN-Import-Review-Gate geführt (ADR 0087, `workflow.
-    process_definition.import`): dessen Vier-Augen-Prüfung adressiert extern
-    hochgeladenen, dem System bislang unbekannten Inhalt - die hier
-    wiederhergestellte Version war bereits zuvor eine ganz reguläre Version
-    dieser Familie (ggf. selbst schon einmal genehmigt, falls das Gate zum
-    damaligen Zeitpunkt aktiv war), kein neuer, ungeprüfter Inhalt.
+    Gated like `POST /process-definitions` (`admin.object_config` +
+    license gate) - the same administrative action, just with content
+    already known to the system instead of freshly uploaded content.
+    Deliberately NOT additionally routed through the optional BPMN import
+    review gate (ADR 0087, `workflow.process_definition.import`): its
+    four-eyes check addresses externally uploaded content previously
+    unknown to the system - the version restored here was already a
+    perfectly regular version of this family before (possibly itself
+    already approved once, if the gate was active at that time), not new,
+    unreviewed content.
 
-    Kein Sonderfall für "Restore der bereits aktuellsten Version" - legt
-    genau wie jeder andere Aufruf einfach eine weitere, inhaltlich
-    identische Version an, statt mit `409`/No-Op abzulehnen - konsistent mit
-    dem append-only-Versionierungsmodell, keine zusätzliche Sonderregel
-    nötig."""
+    No special case for "restoring the already-newest version" - just like
+    any other call, it simply creates another, content-identical version,
+    instead of rejecting with `409`/no-op - consistent with the
+    append-only versioning model, no additional special rule needed."""
     await _require_object_config(x_dms_principal)
     try:
         source = await repository.get_process_definition(session, process_definition_id)
@@ -827,8 +833,8 @@ async def create_dmn_definition(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DmnDefinitionOut:
-    """DMN-1.3-Entscheidungstabelle hochladen (7.1, P14-S4) - gleiches
-    Zugriffs-/Versionierungsmuster wie `create_process_definition`."""
+    """Upload a DMN 1.3 decision table (7.1, P14-S4) - same access/
+    versioning pattern as `create_process_definition`."""
     await _require_object_config(x_dms_principal)
     xml_bytes = await dmn_xml.read()
     try:
@@ -854,8 +860,8 @@ async def create_dmn_definition(
 async def list_dmn_definitions(
     name: str | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[DmnDefinitionOut]:
-    """Ohne `name`: neueste Version je DMN-Familie. Mit `name`: vollständige
-    Versionshistorie dieser Familie, neueste zuerst (siehe
+    """Without `name`: newest version per DMN family. With `name`: complete
+    version history of that family, newest first (see
     `repository.list_dmn_definitions`)."""
     return await repository.list_dmn_definitions(session, name=name)
 
@@ -903,10 +909,10 @@ async def create_business_calendar(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> BusinessCalendarOut:
-    """Regionaler Geschäftskalender für die SLA-Fristberechnung (7.1, P14-S5) -
-    gegated wie Prozess-/DMN-Definitionen (`admin.object_config`), aber KEIN
-    Versionierungsmuster: `name` bleibt dauerhaft eindeutig (`409` bei
-    Duplikat), Bearbeiten läuft über `PUT`, nicht über einen erneuten `POST`."""
+    """Regional business calendar for SLA deadline calculation (7.1, P14-S5)
+    - gated like process/DMN definitions (`admin.object_config`), but NO
+    versioning pattern: `name` remains permanently unique (`409` on
+    duplicate), editing runs via `PUT`, not via a repeat `POST`."""
     await _require_object_config(x_dms_principal)
     try:
         calendar = await repository.create_business_calendar(
@@ -1025,12 +1031,13 @@ async def start_instance(
     except repository.InvalidBpmnError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
-        # Ein automatischer Schritt (z. B. `connector_call`, P12-S2) kann fehlschlagen,
-        # NACHDEM `repository.start_instance()` die Instanz bereits mit dem aktuellen
-        # (ggf. `ERROR`-)Zwischenstand geflusht hat (siehe deren `try`/`finally`) - ohne
-        # dieses Commit hier würde `get_session()`s Context-Manager den Flush beim
-        # Schließen der Session zurückrollen (`AsyncSession.close()` ohne vorheriges
-        # `commit()`), und `POST /instances/{id}/retry` fände gar keine Instanz vor.
+        # An automatic step (e.g. `connector_call`, P12-S2) can fail AFTER
+        # `repository.start_instance()` has already flushed the instance
+        # with its current (possibly `ERROR`) intermediate state (see its
+        # `try`/`finally`) - without this commit here, `get_session()`'s
+        # context manager would roll back the flush when closing the
+        # session (`AsyncSession.close()` without a prior `commit()`), and
+        # `POST /instances/{id}/retry` would find no instance at all.
         await session.commit()
         raise
     await session.commit()
@@ -1093,16 +1100,16 @@ async def list_instances(
 async def list_ready_tasks(
     session: AsyncSession = Depends(get_session),
 ) -> list[ReadyTaskWithInstanceOut]:
-    """Cross-Instanz-Aufgabenliste (8, P14-S2 Reviewer/Approval-UI) - bislang
-    gab es nur `GET /instances/{id}/tasks` (verlangt eine bereits bekannte
-    Instanz-ID). Iteriert alle `running`-Instanzen (gleiches Muster wie der
-    SLA-Poll-Loop, `_sla_poll_loop`) und sammelt deren bereite Manual-/
-    Signature-Tasks ein. `federated`/`federated_return`-Tasks werden
-    herausgefiltert - die werden ausschließlich automatisch über den
-    Federation Hub abgeschlossen (`_reject_manual_federated_completion`),
-    ein Mensch könnte sie über diese Liste ohnehin nie erfolgreich
-    abschließen. Kein zusätzliches Rollen-Gate über die Lizenzprüfung
-    hinaus, wie bei Instanzstart/Task-Abschluss selbst."""
+    """Cross-instance task list (8, P14-S2 reviewer/approval UI) - until now
+    there was only `GET /instances/{id}/tasks` (requires an already-known
+    instance ID). Iterates all `running` instances (same pattern as the SLA
+    poll loop, `_sla_poll_loop`) and collects their ready Manual/Signature
+    tasks. `federated`/`federated_return` tasks are filtered out - those
+    are completed exclusively automatically via the Federation Hub
+    (`_reject_manual_federated_completion`), a human could never
+    successfully complete them via this list anyway. No additional role
+    gate beyond the license check, same as for instance start/task
+    completion itself."""
     instances = await repository.list_instances(session, status="running")
     tasks: list[ReadyTaskWithInstanceOut] = []
     for instance in instances:
@@ -1145,13 +1152,12 @@ async def get_ready_tasks(
 async def _require_valid_signature_if_needed(
     session: AsyncSession, instance_id: str, task_id: str, payload: TaskCompleteRequest
 ) -> None:
-    """Signature Task (3.10, P6-S7): eine als `taskType=signature` markierte
-    Task (siehe `spiff_adapter.py`s Camunda-Extensions) verlangt eine echte,
-    beim Signature Service erzeugte Signatur statt eines beliebigen
-    Abschlusses - `document_id` kommt aus der generischen Task-Prozessdaten
-    (`data`, kein eigenes Schema-Feld, da workflow-service kein
-    Dokument-Konzept kennt), `requiredLevel` aus den BPMN-Extensions
-    (Default `ses`, falls nicht gesetzt)."""
+    """Signature Task (3.10, P6-S7): a task marked as `taskType=signature`
+    (see `spiff_adapter.py`'s Camunda extensions) requires a real signature
+    created at the Signature Service instead of an arbitrary completion -
+    `document_id` comes from the generic task process data (`data`, no own
+    schema field, since workflow-service has no document concept),
+    `requiredLevel` from the BPMN extensions (default `ses` if not set)."""
     tasks = await repository.get_ready_tasks(session, instance_id)
     task = next((t for t in tasks if t.id == task_id), None)
     if task is None or task.extensions.get("taskType") != "signature":
@@ -1196,12 +1202,12 @@ async def _require_valid_signature_if_needed(
 async def _reject_manual_federated_completion(
     session: AsyncSession, instance_id: str, task_id: str
 ) -> None:
-    """Ein `federated`/`federated_return`-Task (7.4, P6-S9) wird ausschließlich
-    automatisch über den Federation Hub abgeschlossen (siehe
-    `_dispatch_pending_federation_tasks`) - ein direkter `.../complete`-Aufruf
-    (versehentlich oder durch einen Menschen) wird abgelehnt, sonst könnte ein
-    Handover-Ergebnis nie mehr zugestellt werden, weil der Task lokal bereits
-    fertig ist."""
+    """A `federated`/`federated_return` task (7.4, P6-S9) is completed
+    exclusively automatically via the Federation Hub (see
+    `_dispatch_pending_federation_tasks`) - a direct `.../complete` call
+    (accidental or by a human) is rejected, otherwise a handover result
+    could never be delivered again because the task is already finished
+    locally."""
     tasks = await repository.get_ready_tasks(session, instance_id)
     task = next((t for t in tasks if t.id == task_id), None)
     if task is not None and task.extensions.get("taskType") in _FEDERATED_TASK_TYPES:
@@ -1214,14 +1220,15 @@ async def _reject_manual_federated_completion(
 async def _require_delegation_if_on_behalf_of(
     session: AsyncSession, instance_id: str, payload: TaskCompleteRequest, x_dms_principal: str
 ) -> None:
-    """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - ``completed_by``
-    bleibt ein ungeprüftes Freitextfeld (bestehende, bewusste Lücke, siehe
-    docs/services/workflow-service.md), aber ein Abschluss "im Auftrag von"
-    verlangt eine ECHTE, gegen den Permission Service geprüfte Delegation:
-    die aufrufende Identität kommt dafür aus dem vom Gateway injizierten
-    ``X-DMS-Principal``-Header, NICHT aus dem frei wählbaren `completed_by` -
-    sonst könnte jeder Aufrufer eine beliebige Delegation behaupten, indem er
-    einfach einen anderen Namen ins Freitextfeld schreibt."""
+    """Deputizing during absence (4.4a, P14-S11) - ``completed_by`` remains
+    an unvalidated free-text field (an existing, deliberate gap, see
+    docs/services/workflow-service.md), but a completion "on behalf of"
+    requires a REAL delegation checked against the Permission Service: the
+    calling identity for this comes from the gateway-injected
+    ``X-DMS-Principal`` header, NOT from the freely choosable
+    `completed_by` - otherwise any caller could claim an arbitrary
+    delegation simply by writing a different name into the free-text
+    field."""
     if not payload.on_behalf_of_principal_id:
         return
     if not x_dms_principal:
@@ -1275,9 +1282,9 @@ async def complete_task(
     except repository.TaskNotReadyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
-        # Siehe `start_instance` - ein nachfolgender automatischer Schritt kann
-        # fehlschlagen, der bereits geflushte Zwischenstand muss trotzdem committet
-        # werden (P12-S2 Resumability).
+        # See `start_instance` - a subsequent automatic step can fail, the
+        # already-flushed intermediate state must still be committed
+        # (P12-S2 resumability).
         await session.commit()
         raise
     await session.commit()
@@ -1311,14 +1318,14 @@ async def retry_instance(
     x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
-    """Resumability für einen fehlgeschlagenen automatischen Schritt (7.1/7.2, P12-S2) -
-    generisches Primitiv, kein migrationsspezifischer Endpunkt: ein `connector_call`-
-    Service-Task, dessen `serviceUrl` beim ersten Versuch nicht erreichbar war, lässt
-    die Instanz `running` mit dem betroffenen Task in `ERROR` zurück (siehe
-    `spiff_adapter.retry_errored_tasks`) - dieser Endpunkt versucht den Schritt erneut,
-    ohne den gesamten Prozess neu zu starten. Kein zusätzliches Rollen-Gate über die
-    normale Lizenzprüfung hinaus - bereits `POST .../tasks/.../complete` ist für jeden
-    authentifizierten Principal offen."""
+    """Resumability for a failed automatic step (7.1/7.2, P12-S2) - a
+    generic primitive, not a migration-specific endpoint: a `connector_call`
+    service task whose `serviceUrl` was unreachable on the first attempt
+    leaves the instance `running` with the affected task in `ERROR` (see
+    `spiff_adapter.retry_errored_tasks`) - this endpoint retries the step
+    without restarting the entire process. No additional role gate beyond
+    the normal license check - `POST .../tasks/.../complete` is already
+    open to every authenticated principal."""
     await _reject_during_maintenance(x_dms_maintenance_active)
     try:
         instance = await repository.retry_instance(session, instance_id)
@@ -1327,9 +1334,10 @@ async def retry_instance(
     except repository.InstanceNotRunningError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
-        # Siehe `start_instance` - ein erneut fehlschlagender Versuch muss trotzdem
-        # committet werden, sonst bliebe die Instanz für einen dritten `retry`-Versuch
-        # am ursprünglichen statt am tatsächlich letzten Fehlerpunkt hängen.
+        # See `start_instance` - a repeated failing attempt must still be
+        # committed, otherwise the instance would stay stuck at the
+        # original failure point for a third `retry` attempt, instead of
+        # at the actually last one.
         await session.commit()
         raise
     await session.commit()
@@ -1346,10 +1354,10 @@ async def retry_instance(
 
 @app.get("/federation/installations")
 async def list_federation_installations() -> list[dict]:
-    """Proxy auf das Hub-Adressbuch (7.4) - ungegated wie andere `GET`s, siehe
-    `docs/services/process-designer.md`. Ohne konfigurierten Hub eine leere
-    Liste, damit der Process Designer föderierte Prozessschritte gar nicht
-    erst als Option anbietet (Konzept 7.1)."""
+    """Proxy to the Hub's address book (7.4) - ungated like other `GET`s,
+    see `docs/services/process-designer.md`. An empty list without a
+    configured Hub, so the Process Designer doesn't even offer federated
+    process steps as an option (Concept 7.1)."""
     if app.state.federation_client is None:
         return []
     return await app.state.federation_client.list_installations()
@@ -1357,9 +1365,9 @@ async def list_federation_installations() -> list[dict]:
 
 @app.get("/federation/config", response_model=FederationConfigOut)
 async def get_federation_config(session: AsyncSession = Depends(get_session)) -> FederationConfig:
-    """7.4/P13-S3: aktuell erklärte Versionskompatibilitätsspanne - ungegated
-    wie die übrigen Federation-Lese-Endpunkte, reine Metadaten (keine
-    Dokumentinhalte, kein Geheimnis)."""
+    """7.4/P13-S3: currently declared version compatibility range - ungated
+    like the other federation read endpoints, pure metadata (no document
+    content, no secret)."""
     config = await _get_or_seed_federation_config(session)
     await session.commit()
     return config
@@ -1371,14 +1379,14 @@ async def update_federation_config(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> FederationConfig:
-    """7.4/P13-S3: macht die Versionskompatibilitätsspanne über den regulären
-    Konfigurationsimport (7.3, `config-service`) änderbar, ohne einen
-    Container-Neustart zu benötigen - gegated hinter derselben
-    `admin.object_config`-Capability wie der BPMN-Upload (P6-S6-Retrofit),
-    da `config-service` sich diese Rolle bereits selbst zuweist. Stößt bei
-    aktiver Föderation sofort eine Re-Registrierung beim Hub mit den neuen
-    Werten an (Fehlschlag blockiert die Antwort nicht - Federation bleibt ein
-    Zusatznutzen, kein Hard-Dependency)."""
+    """7.4/P13-S3: makes the version compatibility range changeable via the
+    regular configuration import (7.3, `config-service`) without needing a
+    container restart - gated behind the same `admin.object_config`
+    capability as the BPMN upload (P6-S6 retrofit), since `config-service`
+    already assigns itself this role. Immediately triggers a
+    re-registration at the Hub with the new values if federation is
+    active (a failure does not block the response - federation remains a
+    bonus feature, not a hard dependency)."""
     await _require_object_config(x_dms_principal)
     config = await _get_or_seed_federation_config(session)
     config.version = payload.version
@@ -1410,14 +1418,14 @@ async def rotate_federation_key(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Schlüsselrotation (7.4, P13-S4, ADR 0039) - gegated hinter derselben
-    `admin.object_config`-Capability wie `PUT /federation/config`. Generiert
-    lokal ein frisches RSA-Schlüsselpaar, signiert die Rotationsanfrage mit
-    dem noch aktuellen (alten) privaten Schlüssel (Kontinuitätsnachweis
-    gegenüber dem Hub, siehe `federation_hub_service.repository.
-    rotate_installation_key`) und übernimmt das neue Schlüsselpaar erst nach
-    einer erfolgreichen Antwort des Hub - schlägt die Rotation fehl, bleibt
-    das alte, weiterhin gültige Schlüsselpaar unverändert im Einsatz."""
+    """Key rotation (7.4, P13-S4, ADR 0039) - gated behind the same
+    `admin.object_config` capability as `PUT /federation/config`. Generates
+    a fresh RSA key pair locally, signs the rotation request with the
+    still-current (old) private key (proof of continuity towards the Hub,
+    see `federation_hub_service.repository.rotate_installation_key`), and
+    only adopts the new key pair after a successful response from the Hub
+    - if the rotation fails, the old, still-valid key pair remains
+    unchanged in use."""
     await _require_object_config(x_dms_principal)
     if app.state.federation_client is None:
         raise HTTPException(status_code=503, detail="Federation Hub nicht konfiguriert")
@@ -1463,14 +1471,13 @@ async def federation_inbound(
     x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> ProcessInstanceOut:
-    """Empfängt eine neue, vom Federation Hub vermittelte Übergabe (7.4) -
-    startet lokal eine neue Instanz des über
-    `settings.federation_process_type_map` zugeordneten Prozesses. Bewusst
-    öffentlich (kein `X-DMS-Principal`, siehe `gateway-service`s
-    `public_routes`) - authentisiert wird stattdessen über die
-    `X-Federation-Hub-Signature`. Respektiert wie Instanzstart/Task-Abschluss
-    den Wartungsmodus (4.8) - ein föderierter Schritt ist Alltagsverarbeitung,
-    kein Admin-Vorgang."""
+    """Receives a new handover mediated by the Federation Hub (7.4) - starts
+    a new local instance of the process assigned via
+    `settings.federation_process_type_map`. Deliberately public (no
+    `X-DMS-Principal`, see `gateway-service`'s `public_routes`) -
+    authentication instead happens via the `X-Federation-Hub-Signature`.
+    Respects maintenance mode (4.8) like instance start/task completion -
+    a federated step is everyday processing, not an admin operation."""
     await _reject_during_maintenance(x_dms_maintenance_active)
     body = await request.body()
     identity = await _verify_hub_signature(
@@ -1495,7 +1502,7 @@ async def federation_inbound(
 
     instance = await repository.start_instance(
         session,
-        definitions[0].id,  # neueste Version zuerst, siehe list_process_definitions
+        definitions[0].id,  # newest version first, see list_process_definitions
         created_by="federation-hub",
         business_key=None,
         initial_data=decrypted_payload,
@@ -1545,11 +1552,12 @@ async def federation_inbound_result(
     x_dms_maintenance_active: str = Header(default="false"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Empfängt die Rückmeldung eines zuvor selbst initiierten Handover (7.4) -
-    schließt den ursprünglich wartenden `taskType=federated`-Task
-    programmatisch ab (nicht über den regulären `.../complete`-Endpunkt, der
-    genau diesen Task-Typ ablehnt, siehe `_reject_manual_federated_completion`).
-    Respektiert wie andere Fachverarbeitung den Wartungsmodus (4.8)."""
+    """Receives the response to a previously self-initiated handover (7.4) -
+    completes the originally waiting `taskType=federated` task
+    programmatically (not via the regular `.../complete` endpoint, which
+    rejects exactly this task type, see
+    `_reject_manual_federated_completion`). Respects maintenance mode (4.8)
+    like other functional processing."""
     await _reject_during_maintenance(x_dms_maintenance_active)
     body = await request.body()
     identity = await _verify_hub_signature(

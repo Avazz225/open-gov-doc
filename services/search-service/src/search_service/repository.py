@@ -15,9 +15,9 @@ class NotFoundError(Exception):
 
 @dataclass
 class AttrFilter:
-    """Ein Attributfilter aus der `attr.{name}[.gte|.lte]=`-Query-Param-
-    Konvention (siehe main.py), aufgelöst gegen das Objekttyp-Schema (Konzept
-    2.2/4.5: string/decimal/integer/boolean/date/reference)."""
+    """An attribute filter from the `attr.{name}[.gte|.lte]=` query-param
+    convention (see main.py), resolved against the object type schema
+    (concept 2.2/4.5: string/decimal/integer/boolean/date/reference)."""
 
     name: str
     op: Literal["eq", "gte", "lte"]
@@ -40,11 +40,12 @@ async def upsert_document(
     created_at: datetime,
     updated_at: datetime,
 ) -> SearchDocument:
-    """Legt einen Index-Eintrag an oder aktualisiert ihn (natürlicher
-    Primärschlüssel `document_id`, macht erneutes Indizieren idempotent).
-    `search_vector` wird bewusst per Roh-SQL-UPDATE nach dem Flush berechnet
-    (setweight: Titel > Volltext) statt als generierte Postgres-Spalte - hält
-    die Gewichtungslogik hier sichtbar/testbar statt in der DDL versteckt."""
+    """Creates or updates an index entry (natural primary key
+    `document_id`, makes re-indexing idempotent). `search_vector` is
+    deliberately computed via a raw SQL UPDATE after the flush (setweight:
+    title > full text) instead of as a generated Postgres column - keeps
+    the weighting logic visible/testable here instead of hidden in the
+    DDL."""
     doc = await session.get(SearchDocument, document_id)
     if doc is None:
         doc = SearchDocument(document_id=document_id, search_vector="")
@@ -138,16 +139,17 @@ async def search(
     offset: int,
     sort: Literal["relevance", "created_at", "updated_at"],
 ) -> list[tuple[SearchDocument, float | None]]:
-    """Liefert `(SearchDocument, rank)`-Paare, `rank` nur gesetzt wenn `query`
-    angegeben ist. Ergebnisse werden VOR jeglicher Berechtigungsprüfung
-    zurückgegeben - die Filterung nach `folder_id`-Zugriff passiert im
-    Routen-Handler (main.py), da sie einen Aufruf an den Permission Service
-    braucht (3.1: kein direkter Cross-Service-Datenbankzugriff).
+    """Returns `(SearchDocument, rank)` pairs, `rank` only set when `query`
+    is given. Results are returned BEFORE any permission check - filtering
+    by `folder_id` access happens in the route handler (main.py), since it
+    requires a call to the Permission Service (3.1: no direct cross-service
+    database access).
 
-    `query` wird über `query_language.parse_query` in einen AST übersetzt
-    (Boolesche Verknüpfung/Klammerung/Phrasen/Wildcards/Fuzzy-/Näherungssuche,
-    Konzept 3.7a, P14-S7) - kann `query_language.QuerySyntaxError` werfen,
-    von `main.py` in eine `400`-Antwort übersetzt."""
+    `query` is translated via `query_language.parse_query` into an AST
+    (boolean combination/parenthesization/phrases/wildcards/fuzzy/proximity
+    search, concept 3.7a, P14-S7) - may raise
+    `query_language.QuerySyntaxError`, translated by `main.py` into a `400`
+    response."""
     rank = None
     node = parse_query(query)
     if node is not None:
@@ -190,10 +192,10 @@ async def facet_counts(
     created_before: datetime | None,
     attr_filters: list[AttrFilter],
 ) -> dict:
-    """Gruppierte Trefferzahlen über dieselbe (vor-Berechtigungsfilterung)
-    Treffermenge wie `search()` - bewusst einfach: keine "Facette ohne
-    Selbstfilter"-Logik wie bei größeren Suchsystemen, das wäre Overengineering
-    für den hier verlangten Umfang ("Volltextindex + Facettensuche")."""
+    """Grouped hit counts over the same (pre-permission-filtering) result
+    set as `search()` - deliberately simple: no "facet without self-filter"
+    logic like larger search systems have, that would be overengineering
+    for the scope required here ("full-text index + facet search")."""
     node = parse_query(query)
     where = compile_query(node).where if node is not None else None
 

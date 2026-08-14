@@ -9,12 +9,12 @@ Base = make_declarative_base("search")
 
 
 class SearchDocument(Base):
-    """Ein Index-Eintrag je Dokument (nicht je Version, anders als `Rendition`/
-    `OcrResult`) - Suche bildet den aktuellen Stand ab, nicht die Historie.
-    `attributes` nutzt bewusst `postgresql.JSONB` statt des generischen `JSON`,
-    das document-service/ocr-service verwenden: dies ist ein eigenes, neues
-    Modell ohne Migrationsbindung, JSONB unterstützt die für Attributfilter
-    nötigen `->>`-Operationen sauber."""
+    """An index entry per document (not per version, unlike `Rendition`/
+    `OcrResult`) - search reflects the current state, not the history.
+    `attributes` deliberately uses `postgresql.JSONB` instead of the generic
+    `JSON` that document-service/ocr-service use: this is its own, new
+    model without migration ties, JSONB cleanly supports the `->>`
+    operations needed for attribute filters."""
 
     __tablename__ = "search_document"
 
@@ -25,16 +25,16 @@ class SearchDocument(Base):
     object_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict)
     current_version_number: Mapped[int] = mapped_column(Integer)
-    # Volltext aus OCR (bevorzugt) oder substitute_text-Rendition (Fallback) -
-    # leer, solange keines von beidem vorliegt (siehe consumer.py).
+    # Full text from OCR (preferred) or substitute_text rendition (fallback)
+    # - empty as long as neither is available (see consumer.py).
     full_text: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(128), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # In Python/SQL gepflegt (repository.upsert_document), keine generierte
-    # Spalte - hält die Gewichtungslogik (Titel > Volltext) sichtbar/testbar
-    # statt in der DDL versteckt.
+    # Maintained in Python/SQL (repository.upsert_document), not a generated
+    # column - keeps the weighting logic (title > full text) visible/testable
+    # instead of hidden in the DDL.
     search_vector: Mapped[str] = mapped_column(TSVECTOR)
 
     __table_args__ = (

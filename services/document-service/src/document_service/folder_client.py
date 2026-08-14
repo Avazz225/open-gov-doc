@@ -2,10 +2,10 @@ import httpx
 
 
 class FolderClient:
-    """HTTP-Client gegen den Folder Service (2.1) - Document Service prüft
-    darüber die Existenz eines angegebenen ``folder_id`` und liest dessen
-    ``object_type_id`` (2.2a, Platzierungs-Constraint), besitzt aber keine
-    eigene Kopie der Ordnerstruktur."""
+    """HTTP client for the Folder Service (2.1) - Document Service uses
+    this to check the existence of a given ``folder_id`` and read its
+    ``object_type_id`` (2.2a, placement constraint), but does not keep its
+    own copy of the folder structure."""
 
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)

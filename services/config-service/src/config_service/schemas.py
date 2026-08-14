@@ -3,10 +3,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-# Aktuelles Schema (7.3: "Versionierung des Konfigurationsschemas selbst,
-# damit Export aus einer älteren Version in eine neuere importiert werden
-# kann"). Es gibt bislang nur diese eine Version - siehe `migrations.py` für
-# den vorgesehenen Erweiterungspunkt, sobald sich das Schema künftig ändert.
+# Current schema (7.3: "Versioning the configuration schema itself,
+# so an export from an older version can be imported into a newer
+# one"). So far there is only this one version - see `migrations.py` for
+# the intended extension point once the schema changes in the future.
 SCHEMA_VERSION = "1.0"
 
 CATEGORIES = (
@@ -43,9 +43,9 @@ class ObjectTypeExport(BaseModel):
     deletion_reason_required_override: bool | None = None
     default_archive_after_days: int | None = None
     archive_encryption_enabled: bool = False
-    # Verschlusssachen-Einstufung (2.5, P15-S1, mehrstufig seit P17-S2, 14.2) -
-    # ohne dieses Feld würde ein Konfigurationsexport/-import die Einstufung
-    # stillschweigend fallen lassen.
+    # Classified documents classification level (2.5, P15-S1, multi-level since P17-S2, 14.2) -
+    # without this field, a configuration export/import would silently
+    # drop the classification.
     classification_level: str | None = None
     layouts: list[ObjectTypeLayoutExport] = []
 
@@ -56,20 +56,20 @@ class WorkflowExport(BaseModel):
 
 
 class DmnDefinitionExport(BaseModel):
-    """DMN-1.3-Entscheidungstabellen (7.1/7.3, P14-S4) - eigene Kategorie statt
-    Teil von `WorkflowExport`: eine DMN-Familie ist unabhängig von jeder
-    einzelnen Prozessdefinition versioniert (siehe `models.DmnDefinition`) und
-    kann von mehreren `businessRuleTask`s referenziert werden."""
+    """DMN 1.3 decision tables (7.1/7.3, P14-S4) - a separate category instead of
+    being part of `WorkflowExport`: a DMN family is versioned independently of
+    any individual process definition (see `models.DmnDefinition`) and
+    can be referenced by multiple `businessRuleTask`s."""
 
     name: str
     dmn_xml: str
 
 
 class BusinessCalendarExport(BaseModel):
-    """Regionaler Geschäftskalender für die SLA-Fristberechnung (7.1/7.3,
-    P14-S5) - anders als `workflows`/`dmn_definitions` KEIN
-    Versionierungsmuster (siehe `workflow_service.models.BusinessCalendar`):
-    Upsert per `name`, wie `roles`/`approval_config`."""
+    """Regional business calendar for SLA deadline calculation (7.1/7.3,
+    P14-S5) - unlike `workflows`/`dmn_definitions`, NO
+    versioning pattern (see `workflow_service.models.BusinessCalendar`):
+    upsert by `name`, like `roles`/`approval_config`."""
 
     name: str
     non_working_dates: list[str] = []
@@ -93,27 +93,27 @@ class SensorConfigExport(BaseModel):
 
 
 class FederationConfigExport(BaseModel):
-    """Versionskompatibilitätsspanne für föderierte Workflows (7.4, P13-S3) -
-    7.4 wörtlich: "Diese Kompatibilitätsspanne ist Teil des ohnehin schon
-    versionierten Konfigurationsschemas (7.3)". Vor P13-S3 lebte sie nur in
-    `workflow-service`s `Settings` (nur per Container-Neustart änderbar) -
-    jetzt reguläre 7.3-Kategorie wie jede andere."""
+    """Version compatibility range for federated workflows (7.4, P13-S3) -
+    7.4 verbatim: "This compatibility range is part of the already
+    versioned configuration schema (7.3)". Before P13-S3 it only lived in
+    `workflow-service`'s `Settings` (only changeable via container restart) -
+    now a regular 7.3 category like any other."""
 
     version: str
     min_compatible_peer_version: str
 
 
 class PackageManifest(BaseModel):
-    """Macht aus einem rohen `ConfigDocument` ein benanntes, versioniertes
-    **Konfigurationspaket** (14.1, P17-S1) - z. B. das eGov-Konfigurationspaket
-    (14.2). Rein beschreibend (Name/Version/Kompatibilitätsspanne/Beschreibung/
-    Herkunft/Lizenz), keine eigene Anwendungslogik - `compatibility_range` ist
-    bewusst ein freier String (z. B. `">=1.0,<2.0"`), analog zu
-    `FederationConfigExport.min_compatible_peer_version`: dieser Service prüft
-    sie nicht selbst, sie ist reine Information für die Person, die ein Paket
-    anwendet (siehe ADR zu P17-S1 für die Begründung, warum keine automatische
-    Durchsetzung eingebaut wurde). Optional auf `ConfigDocument` - ein
-    Dokument ohne `manifest` bleibt ein gewöhnlicher 7.3-Export/Import wie vor
+    """Turns a raw `ConfigDocument` into a named, versioned
+    **configuration package** (14.1, P17-S1) - e.g. the eGov configuration package
+    (14.2). Purely descriptive (name/version/compatibility range/description/
+    origin/license), no application logic of its own - `compatibility_range` is
+    deliberately a free-form string (e.g. `">=1.0,<2.0"`), analogous to
+    `FederationConfigExport.min_compatible_peer_version`: this service does not
+    check it itself, it is pure information for the person applying a package
+    (see the ADR for P17-S1 for the rationale why no automatic
+    enforcement was built in). Optional on `ConfigDocument` - a
+    document without `manifest` remains an ordinary 7.3 export/import as before
     P17-S1."""
 
     name: str
@@ -136,11 +136,11 @@ class ConfigDocument(BaseModel):
     approval_config: list[ApprovalConfigExport] | None = None
     sensor_config: SensorConfigExport | None = None
     federation_config: FederationConfigExport | None = None
-    # Keycloak-Realm-Rollen (14.1, P17-S0-Befund: `roles` oben deckt nur
-    # permission-services DB-basierte Rollen ab, nicht Keycloaks separates
-    # Realm-Rollen-System - z. B. `dms-poststelle`, 2.5). Reine Namensliste,
-    # kein `RoleExport`-artiges Objekt: eine Keycloak-Realm-Rolle hat in
-    # diesem Projekt bislang keine Beschreibung/Berechtigungsliste (siehe
+    # Keycloak realm roles (14.1, P17-S0 finding: `roles` above only covers
+    # permission-service's DB-based roles, not Keycloak's separate
+    # realm role system - e.g. `dms-poststelle`, 2.5). Plain name list,
+    # not a `RoleExport`-like object: a Keycloak realm role has no
+    # description/permission list in this project so far (see
     # `bootstrap._ensure_dms_admin_role`).
     realm_roles: list[str] | None = None
 
@@ -158,12 +158,12 @@ class ImportResult(BaseModel):
 
 
 class ImportActionResult(BaseModel):
-    """Wie `ForceReleaseResult` (document-service)/`RoleAssignmentActionResult`
-    (permission-service) - `POST /config/import` kann seit P17-S3 optional per
-    generischem Vier-Augen-Mechanismus gegated sein (`config.import`, 14.2
-    "Konfigurationsimport"). `POST /config/fleet-import` bleibt bewusst
-    ungegated (siehe dortiger Docstring in `main.py`) und liefert weiterhin
-    das einfache `ImportResult`."""
+    """Like `ForceReleaseResult` (document-service)/`RoleAssignmentActionResult`
+    (permission-service) - `POST /config/import` can, since P17-S3, optionally be
+    gated via the generic four-eyes mechanism (`config.import`, 14.2
+    "Configuration Import"). `POST /config/fleet-import` remains
+    deliberately ungated (see its docstring in `main.py`) and continues to
+    return the plain `ImportResult`."""
 
     status: Literal["applied", "pending_approval"]
     result: ImportResult | None = None
@@ -171,12 +171,12 @@ class ImportActionResult(BaseModel):
 
 
 class CategoryDelta(BaseModel):
-    """Ergebnis des Vergleichs einer einzelnen Kategorie (7.5, P14-S1) - die
-    vier Kategorisierungen, die 7.5 wörtlich verlangt: nur in der Basisinstanz,
-    nur in der Vergleichsinstanz, in beiden aber inhaltlich abweichend (mit
-    Detailanzeige je abweichendem Attribut), identisch. `differing` ist nach
-    Anzeigenamen (Basisinstanz-Rohwert, siehe `compare.py`) geschlüsselt,
-    darunter je abweichendem Feld `{"base": ..., "compare": ...}`."""
+    """Result of comparing a single category (7.5, P14-S1) - the
+    four classifications 7.5 explicitly requires: only in the base instance,
+    only in the compare instance, present in both but differing in content (with
+    a detail view per differing attribute), identical. `differing` is keyed
+    by display name (base instance raw value, see `compare.py`),
+    with `{"base": ..., "compare": ...}` under each differing field."""
 
     only_in_base: list[str] = []
     only_in_compare: list[str] = []
@@ -185,11 +185,11 @@ class CategoryDelta(BaseModel):
 
 
 class CompareRequest(BaseModel):
-    """`base` fehlt -> der eigene aktuelle Live-Export wird als Basisinstanz
-    verwendet (Anwendungsfall "was würde sich ändern, wenn ich dieses Dokument
-    importiere", 7.5). `ignore_regex` ist je Kategorie-Name ein Muster, `"*"`
-    setzt das globale Default-Muster (7.5: "sowohl global als auch je
-    Kategorie konfigurierbar")."""
+    """`base` missing -> its own current live export is used as the base instance
+    (use case "what would change if I import this document",
+    7.5). `ignore_regex` is one pattern per category name, `"*"`
+    sets the global default pattern (7.5: "configurable both globally and per
+    category")."""
 
     base: ConfigDocument | None = None
     compare: ConfigDocument

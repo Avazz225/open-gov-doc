@@ -12,7 +12,7 @@ def make_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession
 async def session_scope(
     factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncSession]:
-    """Ein Commit-oder-Rollback-Block für einen zusammenhängenden DB-Vorgang."""
+    """A commit-or-rollback block for a coherent DB operation."""
     async with factory() as session:
         try:
             yield session

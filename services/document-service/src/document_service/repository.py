@@ -33,25 +33,25 @@ class NotFoundError(Exception):
 
 
 class LockConflictError(Exception):
-    """Ein anderer Nutzer hält aktuell die Bearbeitungssperre (4.2)."""
+    """Another user currently holds the editing lock (4.2)."""
 
 
 class LockNotHeldError(Exception):
-    """Regulärer Unlock-Versuch durch jemanden, der die Sperre nicht hält."""
+    """A regular unlock attempt by someone who does not hold the lock."""
 
 
 class NotDeletedError(Exception):
-    """Wiederherstellungsversuch für ein Dokument, das gar nicht im
-    Papierkorb liegt (5.2, seit P7-S1)."""
+    """Restore attempt for a document that is not in the
+    trash at all (5.2, since P7-S1)."""
 
 
 class RestorePeriodExpiredError(Exception):
-    """Die konfigurierte Papierkorb-Wiederherstellungsfrist ist bereits
-    abgelaufen (5.2, seit P7-S1)."""
+    """The configured trash restore period has already
+    expired (5.2, since P7-S1)."""
 
 
 class AlreadyReleasedError(Exception):
-    """Ein Legal Hold wurde bereits zuvor aufgehoben (5.2, seit P7-S1)."""
+    """A legal hold was already released previously (5.2, since P7-S1)."""
 
 
 async def get_document(session: AsyncSession, document_id: str) -> Document:
@@ -62,10 +62,10 @@ async def get_document(session: AsyncSession, document_id: str) -> Document:
 
 
 async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> list[Document]:
-    """Grundlage für die Ordner-Navigation der User-UI (P4-S2). `folder_id` wird
-    hier wie überall in diesem Service als opake Fremdreferenz behandelt (keine
-    Existenzprüfung gegen den Folder Service) - ein unbekannter Ordner liefert
-    einfach eine leere Liste statt eines Fehlers."""
+    """Basis for the folder navigation of the user UI (P4-S2). `folder_id` is
+    treated here, as everywhere else in this service, as an opaque foreign
+    reference (no existence check against the Folder Service) - an unknown
+    folder simply returns an empty list instead of an error."""
     result = await session.execute(
         select(Document)
         .where(Document.folder_id == folder_id, Document.deleted_at.is_(None))
@@ -75,14 +75,14 @@ async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> lis
 
 
 async def list_documents_by_kennzeichen(session: AsyncSession, kennzeichen: str) -> list[Document]:
-    """Objekttyp-übergreifende Kennzeichen-Suche (2.5/3.3, P15-S3) - für den
-    neuen `mail-connector`, der eingehende Post anhand eines in Betreff/Text
-    gefundenen Kennzeichens einem bestehenden Dokument zuordnen will. Liefert
-    bewusst eine Liste statt eines Einzelobjekts: `Kennzeichen` ist nur je
-    Objekttyp+Jahr eindeutig (P5e-S1-Zählerschema), nicht global - zwei
-    unterschiedliche Objekttypen mit identischem Format können denselben
-    gerenderten String erzeugen. Der Aufrufer muss selbst auf Eindeutigkeit
-    prüfen (0/1/N Treffer)."""
+    """Cross-object-type reference number search (2.5/3.3, P15-S3) - for the
+    new `mail-connector`, which wants to match incoming mail to an existing
+    document based on a reference number found in the subject/body.
+    Deliberately returns a list instead of a single object: a `Kennzeichen`
+    (reference number) is only unique per object type + year (P5e-S1 counter
+    scheme), not globally - two different object types with an identical
+    format can produce the same rendered string. The caller must check
+    uniqueness itself (0/1/N matches)."""
     result = await session.execute(
         select(Document).where(
             Document.attributes["Kennzeichen"].as_string() == kennzeichen,
@@ -126,14 +126,14 @@ async def create_document(
         derived_from_document_id=derived_from_document_id,
         derived_from_version_number=derived_from_version_number,
         originating_case_id=originating_case_id,
-        # Aufbewahrung (5.2, seit P7-S1): einmalig aus
-        # `ObjectType.default_retention_days` übernommen, falls beim Anlegen
-        # kein manuelles Datum gesetzt wurde (siehe main.py create_document) -
-        # spätere Änderungen am Typ-Default wirken sich nicht rückwirkend aus.
+        # Retention (5.2, since P7-S1): copied once from
+        # `ObjectType.default_retention_days` if no manual date was set at
+        # creation time (see main.py create_document) - later changes to the
+        # type default do not apply retroactively.
         retention_until=retention_until,
-        # Aussonderung (5.6, seit P7-S3): analog aus
-        # `ObjectType.default_archive_after_days` übernommen, unabhängig von
-        # retention_until (siehe models.py Document.archive_after).
+        # Records disposal (5.6, since P7-S3): copied analogously from
+        # `ObjectType.default_archive_after_days`, independent of
+        # retention_until (see models.py Document.archive_after).
         archive_after=archive_after,
     )
     session.add(document)
@@ -164,13 +164,13 @@ async def update_document_metadata(
     attributes: dict | None,
     folder_id: str | None = None,
 ) -> Document:
-    """Metadaten-Update (P4-S4, Nutzer-Feedback: Attribute waren bisher nur bei
-    der Erstellung setzbar). Ändert bewusst nicht `object_type_id` - das wäre
-    eine Retypisierung mit eigenen Konsistenzfragen, kein reines
-    Metadaten-Update. `folder_id` (Verschieben, P12-S1) ist dagegen seit dem
-    WebDAV-Connector-Nutzerwunsch first-class - Existenz-/Platzierungs-
-    Constraint-Prüfung erfolgt bereits im Aufrufer (`main.py`), hier nur die
-    reine Zuweisung."""
+    """Metadata update (P4-S4, user feedback: attributes were previously only
+    settable at creation time). Deliberately does not change `object_type_id`
+    - that would be a retyping with its own consistency concerns, not a pure
+    metadata update. `folder_id` (moving, P12-S1), by contrast, has been
+    first-class since the WebDAV connector user request - existence/
+    placement constraint checking already happens in the caller (`main.py`),
+    here it is just the plain assignment."""
     document = await get_document(session, document_id)
     if title is not None:
         document.title = title
@@ -184,14 +184,14 @@ async def update_document_metadata(
 
 
 async def delete_document(session: AsyncSession, document_id: str, *, deleted_by: str) -> Document:
-    """Weiche Löschung (Sichtbarkeit aus, Metadaten bleiben) - manuell über
-    die API ausgelöst. Seit P7-S1 wandert ein weich gelöschtes Dokument in
-    den Papierkorb (`restore_document`/`list_deleted_documents`) und wird
-    nach Ablauf von `TrashConfig.restore_period_days` automatisch physisch
-    bereinigt (siehe `list_expired_trash`/main.py `_retention_poll_loop`).
-    `deleted_by` wurde bislang entgegengenommen, aber nie persistiert (echte,
-    bei P15-S0 gefundene Lücke) - jetzt Voraussetzung für den persönlichen
-    Papierkorb (2.5, P15-S1)."""
+    """Soft delete (visibility off, metadata remains) - triggered manually via
+    the API. Since P7-S1, a soft-deleted document moves into the
+    trash (`restore_document`/`list_deleted_documents`) and is
+    automatically physically purged once `TrashConfig.restore_period_days`
+    has elapsed (see `list_expired_trash`/main.py `_retention_poll_loop`).
+    `deleted_by` was previously accepted but never persisted (a real gap
+    found in P15-S0) - now a prerequisite for the personal
+    trash (2.5, P15-S1)."""
     document = await get_document(session, document_id)
     document.deleted_at = datetime.now(UTC)
     document.deleted_by = deleted_by
@@ -201,8 +201,8 @@ async def delete_document(session: AsyncSession, document_id: str, *, deleted_by
 
 
 async def restore_document(session: AsyncSession, document_id: str) -> Document:
-    """Papierkorb-Wiederherstellung (5.2, seit P7-S1) - nur innerhalb der
-    konfigurierten Frist möglich (`TrashConfig.restore_period_days`)."""
+    """Trash restore (5.2, since P7-S1) - only possible within the
+    configured period (`TrashConfig.restore_period_days`)."""
     document = await get_document(session, document_id)
     if document.deleted_at is None:
         raise NotDeletedError(f"Dokument {document_id!r} ist nicht gelöscht")
@@ -222,12 +222,12 @@ async def restore_document(session: AsyncSession, document_id: str) -> Document:
 async def cascade_trash_by_folder_ids(
     session: AsyncSession, folder_ids: list[str], *, via_folder_id: str, deleted_by: str
 ) -> list[str]:
-    """Kaskadierter Papierkorb-Weg für einen ganzen Ordner-Teilbaum (5.2, seit
-    P7-S1b) - vom `folder-service` synchron aufgerufen, wenn ein Ordner
-    (inkl. Unterordnern) in den Papierkorb verschoben wird. `deleted_via_
-    folder_id` markiert die Herkunft, damit `cascade_restore_by_via_folder_id`
-    beim Wiederherstellen NUR diese Dokumente zurückholt, keine unabhängig
-    einzeln gelöschten im selben Ordner."""
+    """Cascaded trash path for an entire folder subtree (5.2, since
+    P7-S1b) - called synchronously by the `folder-service` when a folder
+    (including subfolders) is moved to the trash. `deleted_via_
+    folder_id` marks the origin so that `cascade_restore_by_via_folder_id`
+    only retrieves these documents on restore, not ones independently
+    deleted individually in the same folder."""
     if not folder_ids:
         return []
     result = await session.execute(
@@ -245,8 +245,8 @@ async def cascade_trash_by_folder_ids(
 
 
 async def cascade_restore_by_via_folder_id(session: AsyncSession, via_folder_id: str) -> list[str]:
-    """Gegenstück zu `cascade_trash_by_folder_ids` - stellt nur Dokumente
-    wieder her, die genau über diesen Ordner kaskadiert gelöscht wurden."""
+    """Counterpart to `cascade_trash_by_folder_ids` - only restores documents
+    that were cascade-deleted via exactly this folder."""
     result = await session.execute(
         select(Document).where(Document.deleted_via_folder_id == via_folder_id)
     )
@@ -262,9 +262,9 @@ async def cascade_restore_by_via_folder_id(session: AsyncSession, via_folder_id:
 
 
 async def count_active_by_folder_ids(session: AsyncSession, folder_ids: list[str]) -> int:
-    """Nicht-leer-Prüfung vor Ordner-Zwangslöschung (5.2a, seit P7-S1b) -
-    `folder-service` fragt darüber ab, ob noch aktive (nicht gelöschte)
-    Dokumente im zu löschenden Teilbaum liegen."""
+    """Non-empty check before forced folder deletion (5.2a, since P7-S1b) -
+    the `folder-service` uses this to query whether there are still active
+    (non-deleted) documents in the subtree to be deleted."""
     if not folder_ids:
         return 0
     result = await session.execute(
@@ -276,13 +276,13 @@ async def count_active_by_folder_ids(session: AsyncSession, folder_ids: list[str
 
 
 async def count_active_total(session: AsyncSession) -> int:
-    """Installationsweite Dokumentenzahl (9.1, seit P9-S1) - fuer
-    `license-service`s Nutzungspruefung. Bewusst eine eigene Funktion statt
-    `count_active_by_folder_ids([])` zu missbrauchen: die leere Liste hat
-    dort die Sicherheitsbedeutung "keine Ordner geprueft, also 0", nicht
-    "kein Filter, also alle" - beide Semantiken in einer Funktion zu
-    vermischen waere fehleranfaellig fuer den bestehenden Aufrufer
-    (Ordner-Zwangslöschungspruefung, P7-S1b)."""
+    """Installation-wide document count (9.1, since P9-S1) - for the
+    `license-service`'s usage check. Deliberately a separate function
+    instead of misusing `count_active_by_folder_ids([])`: there, the empty
+    list has the safety meaning "no folders checked, hence 0", not
+    "no filter, hence all" - mixing both semantics in one function
+    would be error-prone for the existing caller
+    (forced folder deletion check, P7-S1b)."""
     result = await session.execute(
         select(func.count()).select_from(Document).where(Document.deleted_at.is_(None))
     )
@@ -297,12 +297,12 @@ async def list_deleted_documents(
     include_object_type_ids: set[int] | None = None,
     exclude_object_type_ids: set[int] | None = None,
 ) -> list[Document]:
-    """Papierkorb-Inhalt (5.2, seit P7-S1; um `deleted_by`/Klassifizierungs-
-    Filter erweitert seit P15-S1, siehe main.py `list_deleted_documents` für
-    die Sichtbarkeitsregeln, die diese Filter zusammensetzen). Ohne
-    `folder_id` liefert dies den installationsweiten Papierkorb (persönlicher
-    Papierkorb/Löschadministrations-Ansichten, 2.5) statt nur den eines
-    einzelnen Ordners - Gegenstück zu `list_documents_by_folder`."""
+    """Trash contents (5.2, since P7-S1; extended with `deleted_by`/
+    classification filters since P15-S1, see main.py `list_deleted_documents`
+    for the visibility rules that assemble these filters). Without
+    `folder_id`, this returns the installation-wide trash (personal
+    trash/deletion administration views, 2.5) instead of just that of a
+    single folder - counterpart to `list_documents_by_folder`."""
     query = select(Document).where(Document.deleted_at.isnot(None))
     if folder_id is not None:
         query = query.where(Document.folder_id == folder_id)
@@ -311,9 +311,9 @@ async def list_deleted_documents(
     if include_object_type_ids is not None:
         query = query.where(Document.object_type_id.in_(include_object_type_ids))
     if exclude_object_type_ids:
-        # NOT IN liefert NULL (nicht TRUE) fuer object_type_id IS NULL und
-        # wuerde solche Dokumente sonst faelschlich aus der regulaeren
-        # (nicht-klassifizierten) Ansicht verbannen - explizit mit einschliessen.
+        # NOT IN yields NULL (not TRUE) for object_type_id IS NULL and
+        # would otherwise wrongly exclude such documents from the regular
+        # (non-classified) view - explicitly include them.
         query = query.where(
             or_(
                 Document.object_type_id.is_(None),
@@ -325,13 +325,13 @@ async def list_deleted_documents(
 
 
 async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
-    """Vollständige, unwiederbringliche Entfernung (5.2a, seit P7-S1) - im
-    Unterschied zu `delete_document` (Soft-Delete) bleibt danach nichts mehr
-    in diesem Schema übrig außer einem separaten `DeletionRegisterEntry`
-    (siehe main.py._execute_forced_deletion/_purge_expired_trash), der
-    bewusst KEINEN FK auf `Document.id` hat. Entfernt zuerst alle
-    abhängigen Zeilen (Versionen, eine evtl. verwaiste Sperre, die
-    Legal-Hold-Historie), damit die FK-Constraints nicht verletzt werden."""
+    """Complete, irrecoverable removal (5.2a, since P7-S1) - unlike
+    `delete_document` (soft delete), nothing remains in this schema
+    afterwards except a separate `DeletionRegisterEntry`
+    (see main.py._execute_forced_deletion/_purge_expired_trash), which
+    deliberately has NO FK to `Document.id`. First removes all
+    dependent rows (versions, a possibly orphaned lock, the
+    legal hold history) so that FK constraints are not violated."""
     document = await get_document(session, document_id)
     for version in await list_versions(session, document_id):
         await session.delete(version)
@@ -340,11 +340,11 @@ async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
         await session.delete(lock)
     for hold in await list_holds(session, document_id):
         await session.delete(hold)
-    # Ohne expliziten Zwischen-Flush ordnet SQLAlchemys Unit-of-Work die
-    # anschließende DELETE-Anweisung für `document` nicht zuverlässig NACH
-    # den obigen (keine deklarierten `relationship()`s zwischen diesen
-    # Modellen, nur rohe FK-Spalten) - Postgres lehnt die Löschung des
-    # Elternobjekts sonst mit einer FK-Verletzung ab.
+    # Without an explicit intermediate flush, SQLAlchemy's unit of work does
+    # not reliably order the subsequent DELETE statement for `document` AFTER
+    # the ones above (no declared `relationship()`s between these
+    # models, only raw FK columns) - Postgres would otherwise reject
+    # deletion of the parent object with an FK violation.
     await session.flush()
     await session.delete(document)
     await session.flush()
@@ -419,7 +419,7 @@ async def acquire_lock(
 async def release_lock(session: AsyncSession, document_id: str, *, released_by: str) -> None:
     lock = await session.get(DocumentLock, document_id)
     if lock is None:
-        return  # bereits frei - idempotent, kein Fehler
+        return  # already free - idempotent, not an error
     if lock.locked_by != released_by:
         raise LockNotHeldError(
             f"Sperre an {document_id!r} wird von {lock.locked_by!r} gehalten, "
@@ -430,11 +430,11 @@ async def release_lock(session: AsyncSession, document_id: str, *, released_by: 
 
 
 async def force_release_lock(session: AsyncSession, document_id: str) -> DocumentLock:
-    """Administrativer Force-Unlock (4.2). Gibt die zuvor aktive Sperre
-    zurück, damit der Aufrufer den ursprünglichen Halter für Benachrichtigung/
-    Audit kennt. Die eigentliche Konfliktkopie-Absicherung entsteht nicht hier,
-    sondern optimistisch beim nächsten Check-in (siehe checkin_version) -
-    siehe ADR 0002 für die Begründung dieser Vereinfachung."""
+    """Administrative force unlock (4.2). Returns the previously active lock
+    so the caller knows the original holder for notification/
+    audit purposes. The actual conflict-copy safeguard does not happen here,
+    but optimistically at the next check-in (see checkin_version) -
+    see ADR 0002 for the rationale behind this simplification."""
     lock = await session.get(DocumentLock, document_id)
     if lock is None:
         raise NotFoundError(f"Dokument {document_id!r} ist nicht gesperrt")
@@ -464,15 +464,15 @@ async def checkin_version(
     created_by: str,
     comment: str | None = None,
 ) -> tuple[DocumentVersion, bool]:
-    """Optimistische Konflikterkennung (4.2, konkretisiert): stimmt die vom
-    Client angegebene Ausgangsversion nicht mit der aktuellen Hauptversion
-    überein (z. B. weil in der Zwischenzeit ein Force-Unlock + regulärer
-    Check-in eines anderen Nutzers stattfand), wird der Upload NICHT
-    überschreibend eingespielt, sondern als eigenständige, weiterhin
-    abrufbare Konfliktkopie neben der aktuellen Version abgelegt - der
-    Hauptversions-Zeiger bewegt sich in diesem Fall nicht.
+    """Optimistic conflict detection (4.2, elaborated): if the base version
+    specified by the client does not match the current main version
+    (e.g. because a force unlock + regular check-in by another user
+    happened in the meantime), the upload is NOT applied as an
+    overwrite, but stored as a standalone, still
+    retrievable conflict copy alongside the current version - the
+    main version pointer does not move in this case.
 
-    Gibt ``(version, is_conflict)`` zurück.
+    Returns ``(version, is_conflict)``.
     """
     document = await get_document(session, document_id)
     lock = await session.get(DocumentLock, document_id)
@@ -514,9 +514,9 @@ async def checkin_version(
         document.current_version_number = next_version_number
         document.updated_at = now
 
-    # Check-in beendet regulär die eigene Bearbeitung (4.2) - auch im
-    # Konfliktfall, da die Ausgangsbasis ohnehin veraltet war und ein
-    # erneuter Versuch ebenfalls über die Konflikterkennung liefe.
+    # Check-in regularly ends one's own editing session (4.2) - even in the
+    # conflict case, since the base version was outdated anyway and a
+    # renewed attempt would also go through conflict detection.
     if lock is not None and lock.locked_by == created_by:
         await session.delete(lock)
 
@@ -525,9 +525,9 @@ async def checkin_version(
 
 
 async def get_upload_config(session: AsyncSession) -> UploadConfig:
-    """Liest die (einzige) Format-Whitelist-Zeile, legt sie mit Defaults an,
-    falls sie noch nie gespeichert wurde - macht ein separates Migrations-/
-    Seed-Skript überflüssig (gleiches Muster wie `ocr_service.get_config`)."""
+    """Reads the (single) format whitelist row, creating it with defaults
+    if it was never saved before - makes a separate migration/
+    seed script unnecessary (same pattern as `ocr_service.get_config`)."""
     config = await session.get(UploadConfig, _UPLOAD_CONFIG_ID)
     if config is None:
         config = UploadConfig(
@@ -548,7 +548,7 @@ async def update_upload_config(
     return config
 
 
-# --- Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1) ---------
+# --- Retention/Legal Hold/Forced Deletion (5.2/5.2a, since P7-S1) ---------
 
 
 async def set_retention(
@@ -565,10 +565,10 @@ async def set_retention(
     document.full_deletion = full_deletion
     document.pending_deletion_reason = reason
     document.reminder_notify_email = notify_email
-    # Neu terminiert (oder Termin geändert) - eine bereits versendete
-    # Erinnerung für den alten Termin ist hinfällig, eine neue kann wieder
-    # fällig werden. Ein zuvor angelegter Freigabe-Request für den alten
-    # Termin gilt ebenfalls nicht mehr automatisch.
+    # Newly scheduled (or date changed) - a reminder already sent for the
+    # old date is moot, a new one can become due again. A previously
+    # created approval request for the old date also no longer applies
+    # automatically.
     document.deletion_reminder_sent_at = None
     document.force_delete_approval_requested_at = None
     document.updated_at = datetime.now(UTC)
@@ -699,9 +699,9 @@ async def update_trash_config(session: AsyncSession, *, restore_period_days: int
 
 
 async def list_due_for_reminder(session: AsyncSession, *, lead_days: int) -> list[Document]:
-    """Löscherinnerung (5.2a, optional): Dokumente, deren Frist innerhalb der
-    Vorlaufzeit liegt, noch nicht gelöscht sind, noch keine Erinnerung
-    bekamen und keinen aktiven Legal Hold haben."""
+    """Deletion reminder (5.2a, optional): documents whose deadline falls
+    within the lead time, are not yet deleted, have not yet received a
+    reminder, and have no active legal hold."""
     threshold = datetime.now(UTC) + timedelta(days=lead_days)
     result = await session.execute(
         select(Document).where(
@@ -716,9 +716,9 @@ async def list_due_for_reminder(session: AsyncSession, *, lead_days: int) -> lis
 
 
 async def list_due_for_retention_action(session: AsyncSession) -> list[Document]:
-    """Dokumente mit fälliger Aufbewahrungsfrist (5.2/5.2a) ohne aktiven
-    Legal Hold - `full_deletion` entscheidet im Aufrufer (main.py), ob
-    regulärer Soft-Delete oder physische Zwangslöschung folgt."""
+    """Documents with a due retention period (5.2/5.2a) without an active
+    legal hold - `full_deletion` decides in the caller (main.py) whether
+    a regular soft delete or physical forced deletion follows."""
     now = datetime.now(UTC)
     result = await session.execute(
         select(Document).where(
@@ -732,8 +732,8 @@ async def list_due_for_retention_action(session: AsyncSession) -> list[Document]
 
 
 async def list_expired_trash(session: AsyncSession, *, restore_period_days: int) -> list[Document]:
-    """Papierkorb-Einträge, deren Wiederherstellungsfrist abgelaufen ist
-    (5.2) - Legal Hold blockiert auch die routinemäßige Bereinigung."""
+    """Trash entries whose restore period has expired
+    (5.2) - a legal hold also blocks routine cleanup."""
     deadline = datetime.now(UTC) - timedelta(days=restore_period_days)
     result = await session.execute(
         select(Document).where(Document.deleted_at.isnot(None), Document.deleted_at <= deadline)
@@ -742,13 +742,13 @@ async def list_expired_trash(session: AsyncSession, *, restore_period_days: int)
     return [d for d in candidates if not await has_active_hold(session, d.id)]
 
 
-# --- Forensik-Trace: Audit-Tiefe (5.4b, seit P7-S2c) -----------------------
+# --- Forensic trace: audit depth (5.4b, since P7-S2c) -----------------------
 
 
 async def get_audit_trace_config(session: AsyncSession) -> AuditTraceConfig:
-    """Liest die (einzige) Basis-Protokollierungstiefe-Zeile, legt sie mit
-    Defaults an, falls sie noch nie gespeichert wurde (gleiches Muster wie
-    `get_upload_config`) - Default laut Nutzervorgabe: beide Kategorien an."""
+    """Reads the (single) base logging-depth row, creating it with
+    defaults if it was never saved before (same pattern as
+    `get_upload_config`) - default per user specification: both categories on."""
     config = await session.get(AuditTraceConfig, _AUDIT_TRACE_CONFIG_ID)
     if config is None:
         config = AuditTraceConfig(
@@ -808,11 +808,11 @@ def resolve_should_log(
     config: AuditTraceConfig,
     overrides: list[AuditTraceRoleOverride],
 ) -> bool:
-    """Löst auf, ob eine `document.viewed`/`document.downloaded`-Aktion für
-    einen Aufrufer mit `roles` protokolliert werden soll. `category` ist
-    `"viewed"` oder `"downloaded"`. Konfliktregel bei mehreren Rollen mit
-    widersprüchlichen Overrides: protokollieren gewinnt (Sicherheits-first) -
-    siehe Architekturentscheidung in PROGRESS.md/docs."""
+    """Resolves whether a `document.viewed`/`document.downloaded` action for
+    a caller with `roles` should be logged. `category` is
+    `"viewed"` or `"downloaded"`. Conflict rule for multiple roles with
+    contradictory overrides: logging wins (security-first) -
+    see architecture decision in PROGRESS.md/docs."""
     field = "log_viewed" if category == "viewed" else "log_downloaded"
     matching = [o for o in overrides if o.role in roles and getattr(o, field) is not None]
     if not matching:
@@ -823,14 +823,15 @@ def resolve_should_log(
     return False
 
 
-# --- Aussonderung (5.6, seit P7-S3) ----------------------------------------
+# --- Records disposal (5.6, since P7-S3) ----------------------------------------
 
 
 async def list_due_for_archival(session: AsyncSession) -> list[Document]:
-    """Dokumente mit fälliger Aussonderung (5.6) - unabhängig von
-    `retention_until`/`full_deletion` (5.2), da Aussonderung laut Konzept
-    ergänzend zur regulären Aufbewahrungsfrist ist. `archival-service` ruft
-    dies periodisch ab (interner Aufruf, `GET /documents/due-for-archival`)."""
+    """Documents with a due records disposal (5.6) - independent of
+    `retention_until`/`full_deletion` (5.2), since records disposal, per the
+    concept, is supplementary to the regular retention period. The
+    `archival-service` polls this periodically (internal call,
+    `GET /documents/due-for-archival`)."""
     now = datetime.now(UTC)
     result = await session.execute(
         select(Document).where(
@@ -844,10 +845,10 @@ async def list_due_for_archival(session: AsyncSession) -> list[Document]:
 
 
 async def request_archive(session: AsyncSession, document_id: str) -> Document:
-    """Manueller Aussonderungs-Trigger (5.6, `POST /documents/{id}/archive-
-    request`) - setzt `archive_after` auf jetzt, falls noch nicht gesetzt
-    oder noch nicht fällig. Ein bereits fälliges/vergangenes Datum bleibt
-    unverändert (kein Zurückdrehen einer bereits laufenden Aussonderung)."""
+    """Manual records-disposal trigger (5.6, `POST /documents/{id}/archive-
+    request`) - sets `archive_after` to now if not yet set
+    or not yet due. A date that is already due/in the past remains
+    unchanged (no turning back an already ongoing records disposal)."""
     document = await get_document(session, document_id)
     now = datetime.now(UTC)
     if document.archive_after is None or document.archive_after > now:
@@ -860,9 +861,9 @@ async def request_archive(session: AsyncSession, document_id: str) -> Document:
 async def mark_archived(
     session: AsyncSession, document_id: str, *, archive_format: str
 ) -> Document:
-    """Rückruf von `archival-service`, sobald die Archivkopie verifiziert
-    ist (`PUT /documents/{id}/archived`) - die `Document`-Zeile selbst
-    bleibt vollständig erhalten (wörtliche Konzeptvorgabe, s. models.py)."""
+    """Callback from `archival-service` once the archive copy has been
+    verified (`PUT /documents/{id}/archived`) - the `Document` row itself
+    remains fully intact (literal concept requirement, see models.py)."""
     document = await get_document(session, document_id)
     document.archived_at = datetime.now(UTC)
     document.archive_format = archive_format
@@ -872,8 +873,8 @@ async def mark_archived(
 
 
 async def mark_dehydrated(session: AsyncSession, document_id: str) -> Document:
-    """Rückruf von `archival-service`, nachdem die Live-Speicherkopie nach
-    Ablauf der Übergangsfrist entfernt wurde (`PUT /documents/{id}/
+    """Callback from `archival-service` after the live storage copy was
+    removed once the transition period elapsed (`PUT /documents/{id}/
     dehydrated`)."""
     document = await get_document(session, document_id)
     document.dehydrated_at = datetime.now(UTC)
@@ -883,8 +884,8 @@ async def mark_dehydrated(session: AsyncSession, document_id: str) -> Document:
 
 
 async def mark_rehydrated(session: AsyncSession, document_id: str) -> Document:
-    """Rückruf von `archival-service` nach erfolgreicher Rückholung (`PUT
-    /documents/{id}/rehydrated`) - die Live-Kopie ist wiederhergestellt."""
+    """Callback from `archival-service` after successful retrieval (`PUT
+    /documents/{id}/rehydrated`) - the live copy has been restored."""
     document = await get_document(session, document_id)
     document.dehydrated_at = None
     document.updated_at = datetime.now(UTC)
@@ -892,7 +893,7 @@ async def mark_rehydrated(session: AsyncSession, document_id: str) -> Document:
     return document
 
 
-# --- Öffentlicher Freigabelink (4.2a, P14-S10) ------------------------------
+# --- Public share link (4.2a, P14-S10) ------------------------------
 
 
 async def get_share_link_config(session: AsyncSession) -> ShareLinkConfig:
@@ -923,8 +924,8 @@ async def update_share_link_config(
 async def create_share_link(
     session: AsyncSession, *, document_id: str, created_by: str, expires_at: datetime
 ) -> ShareLink:
-    # `token_urlsafe(32)` ist zugleich der Primärschlüssel - kein separates,
-    # erratbares ID-Feld daneben mit derselben Zugriffskraft.
+    # `token_urlsafe(32)` is at the same time the primary key - no separate,
+    # guessable ID field alongside it with the same access power.
     link = ShareLink(
         token=secrets.token_urlsafe(32),
         document_id=document_id,
@@ -965,7 +966,7 @@ def is_share_link_active(link: ShareLink, now: datetime) -> bool:
     return link.revoked_at is None and link.expires_at > now
 
 
-# --- Office-Direktbearbeitung (Post-Roadmap-Feature, WebDAV-Edit-Token) -----
+# --- Direct Office editing (post-roadmap feature, WebDAV edit token) -----
 
 
 async def create_webdav_edit_token(

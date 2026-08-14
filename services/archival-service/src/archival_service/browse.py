@@ -25,15 +25,16 @@ async def build_released_items(
     dehydration_delay_days: int,
     query: str | None = None,
 ) -> list[dict]:
-    """Aussonderungs-Zugriffsbereich (2.5/5.6, P15-S5) - hydratisiert die
-    bereits bestehenden `released`-Transfers (kein neuer Datenspeicher, siehe
-    IMPLEMENTATION_PLAN.md) mit den zugehörigen Dokument-/Umlaufmappen-
-    Metadaten, damit ausgesonderte, aber noch innerhalb der Übergangsfrist
-    befindliche Elemente direkt durchsuch-/einsehbar sind statt nur indirekt
-    über Audit-Trail-Verweise (Konzept 5.6, wörtlich der Auftrag dieser
-    Session). Ein einzelner nicht mehr auflösbarer Verweis (z. B. inzwischen
-    hart gelöschtes Dokument) blockiert die übrigen Treffer nicht - gleiches
-    Fehlertoleranz-Prinzip wie `directory_federation.search_all_peers`."""
+    """Records disposal access area (2.5/5.6, P15-S5) - hydrates the already
+    existing `released` transfers (no new data store, see
+    IMPLEMENTATION_PLAN.md) with the associated document/circulation-folder
+    metadata, so that items that have been disposed of but are still within
+    the transition period can be searched/viewed directly instead of only
+    indirectly via audit-trail references (concept 5.6, literally this
+    session's mandate). A single reference that can no longer be resolved
+    (e.g. a document that has since been hard-deleted) does not block the
+    remaining results - the same fault-tolerance principle as
+    `directory_federation.search_all_peers`."""
     items: list[dict] = []
 
     for transfer in document_transfers:
@@ -87,11 +88,12 @@ async def build_released_items(
                 "title": title,
                 "identifier": identifier,
                 "released_at": transfer.released_at,
-                # Kein `dehydrated`-Zustand fuer Umlaufmappen (siehe models.py
-                # `CaseArchivalTransfer`-Docstring) - es gibt daher keinen
-                # automatischen Zeitpunkt, an dem ein Case aus diesem Bereich
-                # "verschwindet" (Konzept 5.6). Bewusst offener Punkt, siehe
-                # ADR 0055 statt eines hier erfundenen Ablaufdatums.
+                # No `dehydrated` state for circulation folders (see the
+                # `CaseArchivalTransfer` docstring in models.py) - so there
+                # is no automatic point in time at which a case
+                # "disappears" from this area (concept 5.6). Deliberately an
+                # Open Point, see ADR 0055, rather than an expiry date
+                # invented here.
                 "purge_at": None,
             }
         )

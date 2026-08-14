@@ -13,13 +13,14 @@ class Settings(BaseServiceSettings):
     ocr_service_base_url: str = "http://localhost:8012"
     rendering_service_base_url: str = "http://localhost:8011"
 
-    # Zwei getrennte Konsumenten-Abos (siehe consumer.py): Metadaten-Events
-    # vom Document Service und Volltext-Nachlieferungen von OCR/Rendering.
+    # Two separate consumer subscriptions (see consumer.py): metadata
+    # events from the Document Service and full-text follow-up deliveries
+    # from OCR/Rendering.
     document_subjects: list[str] = ["document.>"]
     ocr_subjects: list[str] = ["ocr.>"]
     rendering_subjects: list[str] = ["rendering.>"]
 
-    # Konfidenzschwelle für "nutzbares" OCR-Ergebnis - needs_review liefert
-    # trotzdem durchsuchbaren Text, nur failed nicht.
+    # Confidence threshold for a "usable" OCR result - needs_review still
+    # yields searchable text, only failed does not.
     search_result_overfetch_factor: int = 3
     search_result_hard_limit: int = 300

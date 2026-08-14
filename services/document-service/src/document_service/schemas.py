@@ -7,10 +7,11 @@ from pydantic import BaseModel, Field
 class DocumentUpdate(BaseModel):
     title: str | None = None
     attributes: dict | None = None
-    # Verschieben in einen anderen Ordner (P12-S1, Nutzerwunsch WebDAV-Connector:
-    # WebDAV MOVE ist eine Pflichtmethode - ohne dieses Feld gab es dafür bei
-    # Dokumenten kein serverseitiges Gegenstück, obwohl folder-service dasselbe
-    # für Ordner seit P3-S3 bereits über `parent_id` unterstützt).
+    # Moving to a different folder (P12-S1, user request for the
+    # WebDAV connector: WebDAV MOVE is a mandatory method - without this
+    # field there was no server-side counterpart for documents, even though
+    # folder-service has already supported the same thing for folders since
+    # P3-S3 via `parent_id`).
     folder_id: str | None = None
 
 
@@ -52,9 +53,9 @@ class DocumentVersionOut(BaseModel):
     comment: str | None
     created_by: str
     created_at: datetime
-    # Interner Storage-Schlüssel (5.6, seit P7-S3) - `archival-service` braucht
-    # ihn, um beim Dehydrieren/Zurückholen exakt dieselbe Live-Objekt-Identität
-    # anzusprechen wie der reguläre Upload-/Download-Pfad.
+    # Internal storage key (5.6, since P7-S3) - `archival-service`
+    # needs it to address exactly the same live object identity when
+    # dehydrating/retrieving as the regular upload/download path.
     storage_object_key: str
 
     model_config = {"from_attributes": True}
@@ -92,9 +93,9 @@ class LockForceReleaseRequest(BaseModel):
 
 
 class ForceReleaseResult(BaseModel):
-    """Zwei mögliche Ausgänge (4.3, P6-S4): sofort ausgeführt, oder per
-    Vier-Augen-Prinzip zurückgestellt (siehe `approval_client.py`) - gleiches
-    Wrapper-Muster wie `CheckinResult`."""
+    """Two possible outcomes (4.3, P6-S4): executed immediately, or
+    deferred under the four-eyes principle (see `approval_client.py`) - same
+    wrapper pattern as `CheckinResult`."""
 
     status: Literal["released", "pending_approval"]
     lock: LockOut | None = None
@@ -106,11 +107,11 @@ class TrashRequest(BaseModel):
 
 
 class TrashResult(BaseModel):
-    """Löschantrag-Workflow für reguläre Nutzer (5.2, seit P7-S1c) - gleiches
-    Zwei-Ausgänge-Wrapper-Muster wie `ForceReleaseResult`: sofort ausgeführt,
-    oder per Vier-Augen-Prinzip (Aktionstyp `document.delete`, unabhängig von
-    der bereits bestehenden retentionsgetriggerten `document.force_delete`)
-    zurückgestellt."""
+    """Deletion request workflow for regular users (5.2, since
+    P7-S1c) - same two-outcome wrapper pattern as `ForceReleaseResult`:
+    executed immediately, or deferred under the four-eyes principle (action
+    type `document.delete`, independent of the already existing
+    retention-triggered `document.force_delete`)."""
 
     status: Literal["trashed", "pending_approval"]
     document: DocumentOut | None = None
@@ -118,7 +119,7 @@ class TrashResult(BaseModel):
 
 
 class UploadConfigIn(BaseModel):
-    # Leer = keine Einschränkung (Default, siehe models.UploadConfig).
+    # Empty = no restriction (default, see models.UploadConfig).
     allowed_content_types: list[str] = Field(default_factory=list)
 
 
@@ -140,7 +141,7 @@ class AuditTraceConfigOut(AuditTraceConfigIn):
 
 
 class AuditTraceRoleOverrideIn(BaseModel):
-    # None = Basis gilt für diese Kategorie, sonst expliziter Override.
+    # None = base applies for this category, otherwise an explicit override.
     log_viewed: bool | None = None
     log_downloaded: bool | None = None
 
@@ -153,9 +154,9 @@ class AuditTraceRoleOverrideOut(AuditTraceRoleOverrideIn):
 
 
 class RetentionUpdate(BaseModel):
-    """Aufbewahrung/Zwangslöschung setzen (5.2/5.2a, seit P7-S1). `reason`
-    wird serverseitig gegen `RetentionConfig`/`ObjectType`-Override geprüft
-    (Pflicht/optional) - siehe main.py._resolve_deletion_reason_required."""
+    """Set retention/forced deletion (5.2/5.2a, since P7-S1). `reason`
+    is checked server-side against the `RetentionConfig`/`ObjectType`
+    override (required/optional) - see main.py._resolve_deletion_reason_required."""
 
     retention_until: datetime | None = None
     full_deletion: bool = False
@@ -197,10 +198,10 @@ class DeletionRegisterEntryOut(BaseModel):
 
 
 class ReconcileRestoreDeletionRequest(BaseModel):
-    """Löschabgleich nach Restore (10.4, P11-S4) - `original_entry_id`
-    verweist auf den Löschregister-Ledger-Eintrag (siehe audit-service),
-    dessen physische Zwangslöschung durch einen Restore rückgängig gemacht
-    wurde und jetzt erneut ausgeführt wird."""
+    """Deletion reconciliation after restore (10.4, P11-S4) -
+    `original_entry_id` refers to the deletion register ledger entry (see
+    audit-service) whose physical forced deletion was undone by a restore
+    and is now being executed again."""
 
     original_entry_id: str
     reason: str | None = None
@@ -228,8 +229,8 @@ class TrashConfigOut(TrashConfigIn):
 
 
 class CascadeTrashRequest(BaseModel):
-    """Interner Service-zu-Service-Aufruf von `folder-service` (5.2, seit
-    P7-S1b) - siehe main.py `POST /documents/cascade-trash`."""
+    """Internal service-to-service call from `folder-service` (5.2,
+    since P7-S1b) - see main.py `POST /documents/cascade-trash`."""
 
     folder_ids: list[str]
     via_folder_id: str
@@ -253,9 +254,9 @@ class CountActiveResult(BaseModel):
 
 
 class MarkArchivedRequest(BaseModel):
-    """Rückruf von `archival-service`, sobald die Archivkopie verifiziert
-    ist (5.6, seit P7-S3) - `archive_format` ist `"pdf_a"` (LibreOffice-
-    PDF/A-Export-Filter oder bestehende `pypdf`-Tagging-Logik)."""
+    """Callback from `archival-service` once the archive copy has
+    been verified (5.6, since P7-S3) - `archive_format` is `"pdf_a"`
+    (LibreOffice PDF/A export filter or existing `pypdf` tagging logic)."""
 
     archive_format: str
 
@@ -272,7 +273,7 @@ class HasActiveHoldOut(BaseModel):
     has_active_hold: bool
 
 
-# --- Öffentlicher Freigabelink (4.2a, P14-S10) ------------------------------
+# --- Public share link (4.2a, P14-S10) ------------------------------
 
 
 class ShareLinkConfigIn(BaseModel):
@@ -303,10 +304,10 @@ class ShareLinkOut(BaseModel):
 
 
 class PublicShareLinkOut(BaseModel):
-    """Bewusst NUR das für die Anzeige nötige Minimum (Konzept-Wortlaut) -
-    keine `attributes`/`folder_id`/`created_by` o. Ä., die über eine reine
-    Vorschau/den Download hinaus etwas über das Dokument oder seinen Kontext
-    preisgeben würden."""
+    """Deliberately ONLY the minimum needed for display (concept's
+    literal wording) - no `attributes`/`folder_id`/`created_by` or similar,
+    which would reveal something about the document or its context beyond a
+    plain preview/download."""
 
     title: str
     content_type: str | None
@@ -315,20 +316,21 @@ class PublicShareLinkOut(BaseModel):
 
 
 class WebdavEditTokenOut(BaseModel):
-    """Office-Direktbearbeitung (Post-Roadmap-Feature) - liefert bewusst
-    NICHT `principal_id` an den Client zurück (der Client kennt seine eigene
-    Identität bereits über `X-DMS-Principal`, das Token selbst ist die
-    einzige Information, die `webdav-connector` später braucht)."""
+    """Direct Office editing (post-roadmap feature) - deliberately
+    does NOT return `principal_id` to the client (the client already knows
+    its own identity via `X-DMS-Principal`, the token itself is the only
+    information `webdav-connector` needs later)."""
 
     token: str
     expires_at: datetime
 
 
 class WebdavEditTokenSummary(BaseModel):
-    """Für die Liste aktiver/vergangener Tokens (`GET .../webdav-edit-tokens`)
-    - anders als `WebdavEditTokenOut` hier das volle Bild inkl. `principal_id`,
-    da dieser Endpunkt bereits eine bestehende Schreibberechtigung voraussetzt
-    (kein öffentlicher/token-basierter Zugriff wie bei den Freigabelinks)."""
+    """For the list of active/past tokens (`GET
+    .../webdav-edit-tokens`) - unlike `WebdavEditTokenOut`, this includes
+    the full picture including `principal_id`, since this endpoint already
+    requires an existing write permission (no public/token-based access
+    like with share links)."""
 
     model_config = {"from_attributes": True}
 
@@ -342,8 +344,8 @@ class WebdavEditTokenSummary(BaseModel):
 
 
 class WebdavEditTokenResolveOut(BaseModel):
-    """Nur für den internen (Ost-West, kein Gateway) Aufruf von
-    `webdav-connector` gedacht - siehe `GET /internal/webdav-edit-tokens/
+    """Intended only for the internal (east-west, no gateway) call
+    from `webdav-connector` - see `GET /internal/webdav-edit-tokens/
     {token}`."""
 
     document_id: str

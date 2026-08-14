@@ -10,8 +10,8 @@ _THUMBNAIL_SIZE = (256, 256)
 
 
 class ThumbnailRenderer(Renderer):
-    """Vorschau-Thumbnail für Rasterbilder (3.7) - echte Bildverarbeitung über
-    Pillow, kein Platzhalter."""
+    """Preview thumbnail for raster images (3.7) - real image processing via
+    Pillow, not a placeholder."""
 
     rendition_type = "thumbnail"
 

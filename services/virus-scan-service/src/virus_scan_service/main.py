@@ -38,10 +38,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS virus_scan"))
         await conn.run_sync(Base.metadata.create_all)
-        # Quarantäne-Bereich (2.5, P15-S2): `create_all` legt neue Spalten auf
-        # einer bereits existierenden Tabelle nicht nachträglich an (kein
-        # Alembic in diesem Projekt, siehe document-service main.py für
-        # dasselbe Idiom) - idempotente ADD COLUMN IF NOT EXISTS-Migration.
+        # Quarantine area (2.5, P15-S2): `create_all` does not retroactively
+        # add new columns to an already existing table (no Alembic in this
+        # project, see document-service main.py for the same idiom) -
+        # idempotent ADD COLUMN IF NOT EXISTS migration.
         await conn.execute(
             text(
                 "ALTER TABLE virus_scan.scan_result "
@@ -121,10 +121,10 @@ async def scan_upload(
     created_by: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
 ) -> ScanResultOut:
-    """Verpflichtender Scan vor Freigabe eines Uploads (10.3, ADR 0010) - der
-    Document Service ruft dies synchron auf, *bevor* er Inhalt/Metadaten
-    persistiert. `document_id` ist beim initialen Upload noch unbekannt
-    (Dokument existiert erst nach einem sauberen Scan) und daher optional.
+    """Mandatory scan before an upload is released (10.3, ADR 0010) - the
+    Document Service calls this synchronously *before* persisting content/
+    metadata. `document_id` is not yet known at the initial upload (the
+    document only exists after a clean scan) and is therefore optional.
     """
     data = await file.read()
     verdict = await app.state.scan_engine.scan(data)
@@ -132,9 +132,9 @@ async def scan_upload(
     scan_id = str(uuid.uuid4())
     quarantine_key: str | None = None
     if not verdict.clean:
-        # Quarantäne statt automatischem Löschen (10.3): Nachvollziehbarkeit/
-        # Beweiswert bleibt erhalten, kein Zugriff über den regulären
-        # Dokument-Pfad, da nie ein Dokument dafür angelegt wird.
+        # Quarantine instead of automatic deletion (10.3): traceability/
+        # evidentiary value is preserved, no access via the regular document
+        # path, since no document is ever created for it.
         quarantine_key = f"quarantine/{scan_id}"
         await app.state.storage.upload(quarantine_key, data, file.content_type)
 
@@ -177,17 +177,17 @@ async def get_scan(scan_id: str, session: AsyncSession = Depends(get_session)) -
 
 
 async def _require_quarantine_permission(x_dms_principal: str) -> None:
-    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - ersetzt das
-    bisherige reine `X-DMS-Roles`-Gate (`_has_quarantine_role`,
-    `quarantine_admin_role`) durch eine echte permission-service-Prüfung.
-    "Eine eigene, eng begrenzte Rolle darf einen Quarantäne-Fall einsehen,
-    endgültig löschen oder ... freigeben" (Konzept 2.5, wörtlich) - eine
-    einzige Permission (`admin.quarantine`) für alle drei Aktionen, da das
-    Konzept sie nicht weiter auftrennt. Bewusst NICHT in der "everyone"-
-    Gruppe (anders als z. B. `case.read`) - Quarantäne-Zugriff war schon vor
-    dieser Session eine echte, auf eine dedizierte Rolle beschränkte
-    Berechtigung (Default `dms-admin`), keine bislang de-facto offene
-    Lücke, die es nur zu erhalten gälte."""
+    """RBAC (Post-Roadmap Phase 19 Session 8, ADR 0073) - replaces the
+    previous plain `X-DMS-Roles` gate (`_has_quarantine_role`,
+    `quarantine_admin_role`) with a real permission-service check.
+    "A dedicated, narrowly scoped role may view, permanently delete, or ...
+    release a quarantine case" (concept 2.5, verbatim) - a single permission
+    (`admin.quarantine`) for all three actions, since the concept does not
+    further subdivide them. Deliberately NOT part of the "everyone" group
+    (unlike e.g. `case.read`) - quarantine access was already, even before
+    this session, a real permission restricted to a dedicated role (default
+    `dms-admin`), not a previously de-facto open gap that merely needed to
+    be preserved."""
     if not await app.state.permission_client.has_permission(x_dms_principal, "admin.quarantine"):
         raise HTTPException(
             status_code=403,
@@ -202,12 +202,12 @@ async def list_scans(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[ScanResultOut]:
-    """Ohne `status` bzw. mit `status != "infected"` unverändertes Verhalten
-    (kein Auth-Check) - bestehende Aufrufer (z. B. eine Scan-Status-Anzeige
-    im Dokumentenkontext) bleiben unberührt. `status="infected"` ist die
-    Quarantäne-Einsicht (2.5, P15-S2, Konzept wörtlich: "eine eigene, eng
-    begrenzte Rolle darf einen Quarantäne-Fall einsehen") und daher
-    rollen-gegated, additiv wie die Papierkorb-Familie (P15-S1)."""
+    """Without `status`, or with `status != "infected"`, unchanged behavior
+    (no auth check) - existing callers (e.g. a scan status display in a
+    document context) remain unaffected. `status="infected"` is the
+    quarantine view (2.5, P15-S2, concept verbatim: "a dedicated, narrowly
+    scoped role may view a quarantine case") and is therefore role-gated,
+    additive like the trash family (P15-S1)."""
     if status == "infected":
         if not x_dms_principal:
             raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
@@ -223,15 +223,15 @@ async def release_scan(
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ScanResultOut:
-    """Freigabe nach Klärung eines Fehlalarms (2.5/10.3) - legt über den
-    internen Anlage-Pfad des Document Service (kein erneuter Scan, siehe
-    `document_client.py`) ein neues, echtes Dokument aus den quarantänierten
-    Bytes an. `folder_id`/`title`/`object_type_id`/`attributes` waren beim
-    ursprünglichen (gescheiterten) Upload nie bekannt - nie wurde ja ein
-    Dokument angelegt - und müssen daher hier nachgereicht werden. Ein
-    auditierter Vorgang (5.3): `virus_scan.released` wird unabhängig vom
-    Erfolg des Document-Service-Aufrufs NICHT publiziert, wenn die Anlage
-    scheitert - keine stille Wiederherstellung bei nur teilweisem Erfolg."""
+    """Release after clarifying a false positive (2.5/10.3) - creates a new,
+    real document from the quarantined bytes via the Document Service's
+    internal creation path (no re-scan, see `document_client.py`).
+    `folder_id`/`title`/`object_type_id`/`attributes` were never known at
+    the original (failed) upload - no document was ever created after all -
+    and must therefore be supplied here. An audited operation (5.3):
+    `virus_scan.released` is NOT published if the Document Service call
+    fails, regardless of the outcome - no silent partial recovery on only
+    partial success."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     await _require_quarantine_permission(x_dms_principal)
@@ -299,10 +299,10 @@ async def purge_scan(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Endgültige Löschung eines Quarantäne-Falls (2.5) - entfernt nur die
-    quarantänierten Bytes aus dem Storage Service, die `ScanResult`-Zeile
-    selbst bleibt (mit status="purged") als Nachweis erhalten, analog zum
-    `DeletionRegisterEntry`-Muster der Papierkorb-Familie (P15-S1)."""
+    """Permanent deletion of a quarantine case (2.5) - only removes the
+    quarantined bytes from the Storage Service; the `ScanResult` row itself
+    is retained (with status="purged") as evidence, analogous to the
+    `DeletionRegisterEntry` pattern of the trash family (P15-S1)."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     await _require_quarantine_permission(x_dms_principal)

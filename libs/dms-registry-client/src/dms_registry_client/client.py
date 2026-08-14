@@ -6,19 +6,19 @@ import uuid
 import httpx
 
 logger = logging.getLogger(__name__)
-# während der entwicklung auf WARN um logoutput zu reduzieren.
-# Später per xml oder json CM um logger detailgenau zu steuern.
+# Set to WARN during development to reduce log output.
+# Later, control logger granularity via XML or JSON config management.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class RegistryRegistration:
-    """Selbst-Registrierung eines Service bei der Registry (3.2a, seit P4-S1):
-    meldet sich beim Start an, schickt periodisch Heartbeats und meldet sich
-    beim Shutdown sauber ab.
+    """Self-registration of a service with the Registry (3.2a, since P4-S1):
+    registers on startup, sends periodic heartbeats, and cleanly deregisters
+    on shutdown.
 
-    Discovery ist ein Zusatznutzen (Grundlage für das Gateway-Routing, 3.5),
-    kein Hard-Dependency für den registrierenden Service selbst - Fehler beim
-    Erreichen der Registry werden geloggt, aber nicht weitergeworfen.
+    Discovery is an added benefit (the basis for gateway routing, 3.5), not a
+    hard dependency for the registering service itself - errors reaching the
+    Registry are logged but not re-raised.
     """
 
     def __init__(
@@ -41,10 +41,10 @@ class RegistryRegistration:
             "service_type": service_type,
             "version": version,
             "capabilities": capabilities or [],
-            # Sensor-Katalog (10.1, P11-S1): welche Sensoren bietet diese
-            # Instanz an - `monitoring-service` liest das ueber die bereits
-            # vorhandene `GET /instances`-Abfrage bei der Registry mit, kein
-            # zweiter Discovery-Kanal.
+            # Sensor catalog (10.1, P11-S1): which sensors this instance
+            # offers - `monitoring-service` reads this via the already
+            # existing `GET /instances` query against the Registry, no
+            # second discovery channel.
             "sensors": sensors or [],
             "health_endpoint": health_endpoint,
             "address": address,
@@ -67,11 +67,11 @@ class RegistryRegistration:
         self._task = asyncio.create_task(self._heartbeat_loop())
 
     async def _heartbeat_loop(self) -> None:
-        # Selbstheilend: schlägt der Heartbeat mit 404 fehl (Instanz unbekannt -
-        # z. B. weil die allererste Registrierung lief, bevor die Registry beim
-        # Container-Start schon erreichbar war), wird erneut vollständig
-        # registriert (Upsert) statt für immer gegen eine nie existierende
-        # Instanz zu heartbeaten.
+        # Self-healing: if the heartbeat fails with 404 (instance unknown -
+        # e.g. because the very first registration ran before the Registry
+        # was reachable at container startup), it re-registers fully
+        # (upsert) instead of heartbeating forever against an instance that
+        # never existed.
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             try:
@@ -108,10 +108,10 @@ async def maybe_start_registration(
     sensors: list[dict] | None = None,
     heartbeat_interval_seconds: float = 10.0,
 ) -> RegistryRegistration | None:
-    """Baut und startet eine `RegistryRegistration`, sofern sowohl die
-    Registry-URL als auch die eigene erreichbare Adresse konfiguriert sind
-    (siehe `BaseServiceSettings.registry_service_base_url`/`self_address`).
-    Sonst `None` - der Service läuft unverändert ohne Discovery.
+    """Builds and starts a `RegistryRegistration`, provided both the
+    Registry URL and the service's own reachable address are configured
+    (see `BaseServiceSettings.registry_service_base_url`/`self_address`).
+    Otherwise `None` - the service runs unchanged, without discovery.
     """
     if not registry_service_base_url or not self_address:
         return None
