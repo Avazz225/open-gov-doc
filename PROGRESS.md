@@ -2,9 +2,9 @@
 
 > ⚠️ **Vor jedem `uv run pytest` lesen**: Testläufe gegen den laufenden Docker-Compose-Stack löschen dessen echte Daten, wenn `TEST_POSTGRES_DSN` nicht explizit auf eine isolierte Wegwerf-Datenbank zeigt (jede Service-`conftest.py` truncatet ihre Tabellen, per Default gegen dieselbe Postgres-Instanz, die auch der Stack nutzt). Bei P5-S2 dadurch sämtliche zuvor vorhandenen Dokumente unwiederbringlich verloren gegangen. Seit **P5c-S1** erzwingt jede `conftest.py` zusätzlich `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, damit `TestClient(app)`-Tests nicht mehr unbemerkt an `TEST_POSTGRES_DSN` vorbei die Live-DB lesen/schreiben (das hatte bei P5b-S6 zu einem echten Vorfall geführt) — die Grundregel "ohne explizit gesetztes `TEST_POSTGRES_DSN` zeigt alles auf dieselbe DB wie der Stack" gilt aber unverändert weiter. Details/Regel: siehe "Tooling & Testing" unten.
 
-**Zuletzt abgeschlossen:** P20-S6 — storage-service: Full-Jitter-Backoff für die Replikations-Retry-Queue (Phase 20 Session 6, siehe [ADR 0082](docs/adr/0082-storage-service-replication-jitter-retrofit.md)): hatte als einziger der fünf Resilienz-Services dieser Phase bereits `attempts`/`max_replication_attempts`/`failed_permanent` (ADR 0004) — es fehlte nur Jitter selbst. Neues Feld `next_retry_at` auf `ObjectCopy`; `list_pending_copies` greift eine `failed`-Zeile erst wieder auf, sobald die Backoff-Zeit abgelaufen ist. Die eigentliche periodische Ausführung als k8s-CronJob bleibt wie geplant **P26-S4** vorbehalten (Helm-Chart existiert noch nicht) — ADR 0004s "expliziter Endpunkt statt Hintergrundtask" bleibt gültig, diese Session ändert nur, WANN eine Zeile innerhalb eines Laufs erneut aufgegriffen wird. Tests: 113 (vorher 109, +4). Live gegen den echten Stack verifiziert (Image-Neubau + Neustart): ein echter `KeyError`-Fehlschlag über einen absichtlich unkonfigurierten `backend_id` (kein Mocking) — erster Aufruf setzt `next_retry_at`, sofortiger zweiter Aufruf wird übersprungen, nach Zurückdatieren greift ein dritter Aufruf erneut zu.
+**Zuletzt abgeschlossen:** P20-S7 — Admin-UI: "Permanent fehlgeschlagen"-Sichtbarkeit + manueller Neustart (Phase 20 Session 7, letzte Session der Resilienz-Phase, siehe [ADR 0083](docs/adr/0083-admin-ui-processing-failures-visibility.md)): `ArchivalTransfersView` bekommt `failed_permanent`-Filter + "Erneut versuchen"-Button (beide Sektionen); neue gemeinsame Seite `/processing-failures/` (drei Sektionen: Benachrichtigungen/Ersatzdarstellungen/OCR-Ergebnisse) statt dreier eigener Seiten. `rendering-service`/`ocr-service`s Listen-Endpunkte bekommen `document_id` optional (vorher Pflicht) + neuen `status`-Filter — sonst wäre eine dokumentübergreifende Admin-Sicht nicht möglich gewesen. Bewusst ohne `federation-hub-service` (vom Plan an dieser Stelle nicht genannt). Tests: `rendering-service` 46 (+2), `ocr-service` 53 (+2), `admin-ui` 173 (+9). Live gegen den echten Stack verifiziert: beide neuen Endpunkte lieferten echte, aus früheren Live-Verifikationen dieser Phase stammende `failed_permanent`-Datensätze über mehrere Dokumente hinweg; kein interaktiver Browser-Test (projektweit etablierte Praxis, kein Browser in dieser Entwicklungsumgebung verfügbar). **Damit ist Phase 20 (Resilienz, P20-S1 bis S7) vollständig abgeschlossen.**
 
-**Nächste Session:** **P20-S7** (Admin-UI: "Permanent fehlgeschlagen"-Sichtbarkeit + manueller Neustart-Button für archival-/notification-/renditions-/OCR-/Handover-Fehler — erste Frontend-Arbeit der P20-Sequenz, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz, Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
+**Nächste Session:** **P21-S1** (Schlüssel-Rotation: `fleet-management-service`s `fleet_agent_api_key` und `license-service`s Signierschlüssel bekommen einen Rotationsmechanismus, Vorbild `workflow-service`s bereits bestehendes `POST /federation/rotate-key`, ADR 0039 — Start von **Phase 21, Sicherheitshärtung**, siehe `IMPLEMENTATION_PLAN.md`). Nach den 107 Roadmap-Sessions gab es zwei Ad-hoc-Post-Roadmap-Runden (graphify-Vollneuaufbau + User-UI-Bugfixes; Office-Direktbearbeitung + SSO/Kerberos-Login, siehe oben) und danach eine vollständige Nutzer-Triage einer aus 35 Servicedokus konsolidierten "Offene Punkte"-Liste — daraus entstand die neue Roadmap **Phase 18–26** in `IMPLEMENTATION_PLAN.md` (26 weitere Sessions: Auth-Entkopplung, Autorisierung & Identität, Resilienz [jetzt abgeschlossen], Sicherheitshärtung, Admin-UI-Ausbau, Frontend-UX, Feature-Vervollständigung, Workflow-/Gateway-Härtung, Helm-Charts für k8s/OCP).
 
 Nach dem MVP-Meilenstein hat der Nutzer die UIs erstmals selbst im Browser getestet und substantielles Feedback zu Layout/Funktionsumfang gegeben (Ordnerverwaltung, Metadaten, 3-Spalten-Explorer, Admin-Dashboard-Navigation, Multi-Installation, eigenständiger Process Designer, Theming). Der Plan wurde entsprechend um P4-S4/S5/S6 und P6-S6 ergänzt (siehe `IMPLEMENTATION_PLAN.md`) — alle drei liefen **vor** P5-S1, damit die UI-Grundlage stand, bevor weitere Phase-5-Funktionen (Verarbeitung: Scan, Rendering, OCR, Suche) draufgesetzt werden. Vor P5-S1 wurde Phase 5 zusätzlich gegen die Spec vertieft geplant (siehe `IMPLEMENTATION_PLAN.md`), um Konzept-Feinheiten vorab statt erst während der Umsetzung zu finden. P5-S1 (Virus-Scan), P5-S2 (Rendering/Ersatzdarstellungen), P5-S3 (OCR) und P5-S4 (Suche) sind jetzt umgesetzt — **Phase 5 vollständig abgeschlossen**. Direkt im Anschluss ein weiterer Nutzerwunsch nach demselben Muster wie bei P4-S4/S5/S6: sechs zusätzliche Sessions (**Phase 5b**, siehe `IMPLEMENTATION_PLAN.md`) wurden eingeschoben, bevor Phase 6 beginnt — betreffen Erweiterungen an bereits abgeschlossenen Services (object-type-service, folder-service, document-service, storage-service, ocr-service) sowie beiden Frontends. Nach Abschluss von Phase 5b wurden die in "Offene Entscheidungen" angesammelten Punkte einmal konsolidiert und dem Nutzer mit Entscheidungsvorschlägen vorgelegt — daraus entstand **Phase 5c** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`): P5c-S1 (Test-DB-Isolationslücke, sofort umgesetzt) und P5c-S2 (Storage-Rebalancing/Gerätewechsel-Korrektur, aus dem Phase-10-Backlog vorgezogen) — **Phase 5c vollständig abgeschlossen**. Direkt im Anschluss erneutes Nutzer-Feedback aus tatsächlicher Nutzung (gleiches Muster wie der Auslöser für Phase 5b): fehlende Vorschau für textbasierte Formate (`.txt`/`.json`), fehlende Konfigurierbarkeit von OCR-Auslösung/erlaubten Upload-Formaten, ungeprüfter Client-Content-Type, Upload-UX (kein Pop-up, kein Drag & Drop) — daraus entstand **Phase 5d** (zwei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`) — **Phase 5d vollständig abgeschlossen**. Während der P5d-S2-Planung ein weiterer, thematisch eigenständiger Nutzerwunsch: ein konfigurierbarer Kennzeichengenerator (Aktenzeichen) je Dokumentenart, mit vor der Planung per Rückfrage geklärten Details (jahresbasierter Zähler-Reset, globaler Anzeige-Schalter mit Objekttyp-Override, Änderung nur für privilegierte Nutzer) — daraus entstand **Phase 5e** (drei weitere Sessions, siehe `IMPLEMENTATION_PLAN.md`), noch offen. Zusätzlich wurde das Konzeptdokument (`Business__DMS-Konzept.md`, jetzt Version 0.18) um zwei bislang nicht abgedeckte Bereiche erweitert, ebenfalls Nutzerwunsch statt Implementierungs-Erfahrungswert: **2.5 Bereichsstruktur** (neben der konfigurierbaren Dokument-Root existieren eigene Sonderbereiche - Posteingang/-ausgang samt Poststelle-Rolle, Papierkorb/persönlicher Papierkorb/Verschlusssachen-Papierkorb samt neuer Löschadministrations-Rollen (4.6), Quarantäne, Kontakte, Aussonderungs-Zugriff während der Übergangsfrist, Vorlagen für Struktur-Rohbauten) sowie eine Erweiterung von **8 (UI-Schicht)** um einen dockbaren, VS-Code-artigen flexiblen Arbeitsbereich als Ergänzung zur bisherigen festen Drei-Spalten-Anordnung (die weiterhin Werksstandard bleibt). Beide Erweiterungen sind als **Phase 15** (sechs Sessions) und **Phase 16** (eine Session) ans Ende der Roadmap gesetzt (siehe `IMPLEMENTATION_PLAN.md` für die Begründung der Platzierung) - reine Konzept-/Plan-Erweiterung dieser Runde, keine Implementierung.
 
@@ -2242,6 +2242,63 @@ letzte Session von Phase 19:
 - Doku: neues [ADR 0082](docs/adr/0082-storage-service-replication-jitter-retrofit.md),
   `docs/services/storage-service.md` (Datenmodell, Replikations-Abschnitt, "Offene Punkte" präzisiert,
   Test-Übersicht) ergänzt.
+
+**P20-S7 — Admin-UI: "Permanent fehlgeschlagen"-Sichtbarkeit + manueller Neustart** (letzte Session der
+Resilienz-Phase, siehe [ADR 0083](docs/adr/0083-admin-ui-processing-failures-visibility.md)):
+
+- **`ArchivalTransfersView`** (bereits vorhanden) bekommt `failed_permanent` als neue Filter-Option in
+  beiden Sektionen (Dokument- und Umlaufmappen-Aussonderung) sowie einen "Erneut versuchen"-Button, der
+  nur bei diesem Status erscheint (`POST .../retry`, bereits seit ADR 0078 serverseitig vorhanden, bisher
+  nie ans Frontend angebunden). `ArchivalTransfer`/`CaseArchivalTransfer`-Frontend-Typen bekommen die
+  zuvor im Frontend fehlenden Felder `attempts`/`next_retry_at`. `statusLabel`/`caseStatusLabel` wurden
+  auf PascalCase-je-Wortteil umgestellt (`"failed_permanent"` → `statusFailedPermanent`-Key statt eines
+  unauffindbaren `statusFailed_permanent`).
+- **Neue, gemeinsame Seite `/processing-failures/`** (`ProcessingFailuresView`, drei eigenständige
+  Sektionen: Benachrichtigungen/Ersatzdarstellungen/OCR-Ergebnisse) statt dreier eigener Seiten — jede
+  Sektion lädt ausschließlich `status=failed_permanent`-Datensätze und bietet einen Neustart-Button je
+  Zeile. Bewusst DREI eigenständige Sektionen ohne gemeinsamen generischen Hook (gleiches
+  "leichtgewichtige Duplikation statt Abstraktion"-Prinzip wie bei den Poll-Loops der zugehörigen
+  Backend-Services).
+- **`rendering-service`/`ocr-service`: `GET /renditions`/`GET /ocr-results` bekommen `document_id`
+  optional** (vorher Pflichtparameter) plus einen neuen `status`-Query-Parameter — ohne das wäre eine
+  dokumentübergreifende "alle fehlgeschlagenen Renditions/OCR-Ergebnisse"-Ansicht technisch nicht möglich
+  gewesen. Beide bleiben über die bereits bestehenden `rendering.read`/`ocr.read`-Berechtigungen
+  (`permission-service`, ADR 0073) gegated — keine neue ungegatete Angriffsfläche. `notification-service`s
+  `GET /notifications` hatte den nötigen `status`-Filter bereits, keine Backend-Änderung nötig.
+- **Bewusst OHNE `federation-hub-service`**: der Plan nennt in der P20-S7-Zeile nur Archiv-/Notification-/
+  Rendition-/OCR-Fehler, nicht Handover — eine Admin-UI-Sichtbarkeit dafür wäre eine sinnvolle
+  eigenständige Folgesession.
+- **Warum kein neuer Badge-Farbton**: `admin-ui`s CSS kennt nur `ok`/`down` (konsistent über drei
+  Theme-Varianten gepflegt) — die Unterscheidung zu `failed` passiert über den übersetzten Status-Text
+  selbst ("Fehlgeschlagen" vs. "Dauerhaft fehlgeschlagen") und den nur bei `failed_permanent` sichtbaren
+  Button, eine dritte Farbvariante nur für diese Session wäre Scope-Creep gewesen.
+- **Tests**: `rendering-service` 46 (vorher 44, +2), `ocr-service` 53 (vorher 51, +2, weiterhin 8
+  `tesseract`-gegatete Skips), `admin-ui` 173 (vorher 164, +9: 3 neue in `archival-transfers.test.tsx`,
+  neue `processing-failures.test.tsx` mit 6 Tests). Bestehende Aufrufer von `list_renditions`/
+  `list_ocr_results` bleiben unverändert kompatibel (übergeben `document_id` bereits explizit als
+  Keyword-Argument) — rein additive Änderung.
+- **Vollständig live gegen den echten laufenden Stack verifiziert** (Image-Neubau + Neustart von
+  `rendering-service`, `ocr-service`, `admin-ui`): `GET /renditions?status=failed_permanent` und `GET
+  /ocr-results?status=failed_permanent` lieferten ohne `document_id` echte, aus früheren
+  Live-Verifikationen dieser Phase stammende `failed_permanent`-Datensätze über mehrere Dokumente hinweg
+  (kein Mocking, echte Altdaten aus dem Dev-Stack); `GET /notifications?status=failed_permanent` lieferte
+  korrekt eine leere Liste; die neue `/processing-failures/`-Route wird vom `admin-ui`-Container
+  ausgeliefert (`200`). **Kein interaktiver Browser-Klickdurchlauf** — dieses Projekt verifiziert
+  Frontend-Arbeit durchgängig über `tsc`/`eslint`/`vitest`/`next build` plus echte Backend-Live-Checks
+  (siehe `docs/services/admin-ui.md` "Kein Browser in dieser Entwicklungsumgebung verfügbar"), kein
+  Playwright/Browser-Automatisierungswerkzeug ist irgendwo im Monorepo vorhanden.
+- Doku: neues [ADR 0083](docs/adr/0083-admin-ui-processing-failures-visibility.md),
+  `docs/services/admin-ui.md` (neue Seite/Sektion, Backend-Anbindungstabelle, Test-Übersicht),
+  `docs/services/rendering-service.md`/`ocr-service.md` (API-Tabelle, Test-Übersicht),
+  `docs/services/notification-service.md` ("Offene Punkte" als vollständig behoben markiert) ergänzt.
+
+**Damit ist Phase 20 (Resilienz: Retry, Backoff, Permanent-Failed, P20-S1 bis P20-S7) vollständig
+abgeschlossen** — alle fünf betroffenen Services (archival-/notification-/rendering-/ocr-/
+federation-hub-service) haben jetzt Full-Jitter-Backoff, einen klaren terminalen Fehlerzustand und einen
+manuellen Neustart-Pfad; `storage-service` hatte das Muster größtenteils schon und bekam nur noch Jitter
+nachgerüstet; vier der fünf Services (alle außer federation-hub-service) sind jetzt auch in der Admin-UI
+sichtbar/bedienbar. Offen bleibt ausschließlich P20-S6s eigentlicher CronJob-Träger, der explizit auf
+**P26-S4** (Helm-Chart) verschoben ist, da Phase 26 noch nicht existiert.
 
 ### Roadmap-Vorausplanung nach P6-S2
 - **bpmn.io-Lizenz (Wasserzeichen) akzeptiert**: `bpmn-js` (Process Designer, P6-S8) steht unter der "bpmn.io License" — freie kommerzielle Nutzung, aber nicht entfernbares Wasserzeichen auf jedem gerenderten Diagramm. Entscheidung: akzeptieren (gleiches Muster wie ADR 0018), siehe [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). Bei künftigem White-Label-Bedarf zu revisitieren. **`bpmn-js-spiffworkflow` selbst wurde bei der tatsächlichen P6-S8-Umsetzung doch nicht verwendet** (seit 2022 nicht mehr auf npm veröffentlicht, Lizenz-Inkonsistenz npm vs. GitHub) — siehe [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), abweichend von der ursprünglichen ADR-0021-Annahme.

@@ -266,3 +266,41 @@ async def test_list_ocr_results_filters_by_version(session):
 
     both = await repository.list_ocr_results(session, document_id=document_id)
     assert len(both) == 2
+
+
+async def test_list_ocr_results_without_document_id_filters_by_status(session):
+    """Post-Roadmap Phase 20 Session 7: ``document_id`` ist jetzt optional -
+    Grundlage für die dokumentübergreifende Admin-UI-Sicht auf dauerhaft
+    fehlgeschlagene OCR-Ergebnisse."""
+    doc_a = f"doc-{uuid.uuid4().hex[:8]}"
+    doc_b = f"doc-{uuid.uuid4().hex[:8]}"
+    await repository.upsert_ocr_result(
+        session,
+        document_id=doc_a,
+        version_number=1,
+        status="failed_permanent",
+        engine="tesseract",
+        average_confidence=0.0,
+        full_text="",
+        pages=[],
+        page_image_storage_key=None,
+        error_message="x",
+    )
+    await repository.upsert_ocr_result(
+        session,
+        document_id=doc_b,
+        version_number=1,
+        status="ready",
+        engine="tesseract",
+        average_confidence=90.0,
+        full_text="Text",
+        pages=[],
+        page_image_storage_key=None,
+        error_message=None,
+    )
+    await session.commit()
+
+    failed = await repository.list_ocr_results(session, status="failed_permanent")
+    failed_ids = {r.document_id for r in failed}
+    assert doc_a in failed_ids
+    assert doc_b not in failed_ids

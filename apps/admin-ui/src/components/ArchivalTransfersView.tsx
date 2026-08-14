@@ -9,6 +9,8 @@ import {
   listArchivalTransfers,
   listCaseArchivalTransfers,
   retrieveArchivalTransfer,
+  retryArchivalTransfer,
+  retryCaseArchivalTransfer,
   updateCaseArchivalConfig,
   type ArchivalTransfer,
   type CaseArchivalTransfer,
@@ -34,6 +36,7 @@ const STATUS_OPTIONS = [
   "released",
   "dehydrated",
   "failed",
+  "failed_permanent",
 ] as const;
 
 // Nur Status, deren Archivkopie bereits geschrieben und verifiziert wurde,
@@ -41,16 +44,34 @@ const STATUS_OPTIONS = [
 // haben (noch) keine verlässliche Archivkopie.
 const RETRIEVABLE_STATUSES = new Set(["released", "dehydrated"]);
 
+// "failed_permanent" -> "FailedPermanent" - Statuswerte mit Unterstrich
+// (seit Post-Roadmap Phase 20 Session 2/7) brauchen PascalCase je Wortteil,
+// nicht nur eine Großschreibung des ersten Buchstabens.
+function toPascalCase(value: string): string {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
 function statusLabel(t: (key: string) => string, status: string): string {
-  const key = `archivalTransfers.status${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+  const key = `archivalTransfers.status${toPascalCase(status)}`;
   const label = t(key);
   return label === key ? status : label;
 }
 
-const CASE_STATUS_OPTIONS = ["pending", "locked", "packaged", "verified", "released", "failed"] as const;
+const CASE_STATUS_OPTIONS = [
+  "pending",
+  "locked",
+  "packaged",
+  "verified",
+  "released",
+  "failed",
+  "failed_permanent",
+] as const;
 
 function caseStatusLabel(t: (key: string) => string, status: string): string {
-  const key = `archivalTransfers.caseStatus${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+  const key = `archivalTransfers.caseStatus${toPascalCase(status)}`;
   const label = t(key);
   return label === key ? status : label;
 }
@@ -77,6 +98,7 @@ function DocumentArchivalSection() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [retrievingId, setRetrievingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -113,6 +135,20 @@ function DocumentArchivalSection() {
       setError(err instanceof ApiError ? err.message : t("archivalTransfers.retrieveError"));
     } finally {
       setRetrievingId(null);
+    }
+  }
+
+  async function handleRetry(transfer: ArchivalTransfer) {
+    if (!accessToken) return;
+    setError(null);
+    setRetryingId(transfer.id);
+    try {
+      await retryArchivalTransfer(accessToken, transfer.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("archivalTransfers.retryError"));
+    } finally {
+      setRetryingId(null);
     }
   }
 
@@ -161,14 +197,17 @@ function DocumentArchivalSection() {
               <tr key={transfer.id}>
                 <td>{transfer.document_id}</td>
                 <td>
-                  <span className={`badge ${transfer.status === "failed" ? "down" : "ok"}`}>
+                  <span
+                    className={`badge ${transfer.status === "failed" || transfer.status === "failed_permanent" ? "down" : "ok"}`}
+                  >
                     {statusLabel(t, transfer.status)}
                   </span>
-                  {transfer.status === "failed" && transfer.error_message && (
-                    <p className="hint">
-                      {t("archivalTransfers.errorMessage")}: {transfer.error_message}
-                    </p>
-                  )}
+                  {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
+                    transfer.error_message && (
+                      <p className="hint">
+                        {t("archivalTransfers.errorMessage")}: {transfer.error_message}
+                      </p>
+                    )}
                 </td>
                 <td>{transfer.archive_format ?? "—"}</td>
                 <td>{transfer.encrypted ? "✓" : "—"}</td>
@@ -186,6 +225,15 @@ function DocumentArchivalSection() {
                       {retrievingId === transfer.id
                         ? t("common.loading")
                         : t("archivalTransfers.retrieve")}
+                    </button>
+                  )}
+                  {transfer.status === "failed_permanent" && (
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(transfer)}
+                      disabled={retryingId !== null}
+                    >
+                      {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
                     </button>
                   )}
                 </td>
@@ -214,6 +262,7 @@ function CaseArchivalSection() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const [defaultDays, setDefaultDays] = useState("");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
@@ -284,6 +333,20 @@ function CaseArchivalSection() {
       setError(err instanceof ApiError ? err.message : t("archivalTransfers.downloadError"));
     } finally {
       setDownloadingId(null);
+    }
+  }
+
+  async function handleRetry(transfer: CaseArchivalTransfer) {
+    if (!accessToken) return;
+    setError(null);
+    setRetryingId(transfer.id);
+    try {
+      await retryCaseArchivalTransfer(accessToken, transfer.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("archivalTransfers.retryError"));
+    } finally {
+      setRetryingId(null);
     }
   }
 
@@ -365,14 +428,17 @@ function CaseArchivalSection() {
               <tr key={transfer.id}>
                 <td>{transfer.case_id}</td>
                 <td>
-                  <span className={`badge ${transfer.status === "failed" ? "down" : "ok"}`}>
+                  <span
+                    className={`badge ${transfer.status === "failed" || transfer.status === "failed_permanent" ? "down" : "ok"}`}
+                  >
                     {caseStatusLabel(t, transfer.status)}
                   </span>
-                  {transfer.status === "failed" && transfer.error_message && (
-                    <p className="hint">
-                      {t("archivalTransfers.errorMessage")}: {transfer.error_message}
-                    </p>
-                  )}
+                  {(transfer.status === "failed" || transfer.status === "failed_permanent") &&
+                    transfer.error_message && (
+                      <p className="hint">
+                        {t("archivalTransfers.errorMessage")}: {transfer.error_message}
+                      </p>
+                    )}
                 </td>
                 <td>{transfer.encrypted ? "✓" : "—"}</td>
                 <td>{transfer.released_at ? new Date(transfer.released_at).toLocaleString() : "—"}</td>
@@ -386,6 +452,15 @@ function CaseArchivalSection() {
                       {downloadingId === transfer.id
                         ? t("common.loading")
                         : t("archivalTransfers.caseDownload")}
+                    </button>
+                  )}
+                  {transfer.status === "failed_permanent" && (
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(transfer)}
+                      disabled={retryingId !== null}
+                    >
+                      {retryingId === transfer.id ? t("common.loading") : t("archivalTransfers.retry")}
                     </button>
                   )}
                 </td>

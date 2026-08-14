@@ -35,6 +35,14 @@ def test_list_ocr_results_empty_for_unknown_document():
     assert response.json() == []
 
 
+def test_list_ocr_results_without_document_id_is_accepted():
+    """Post-Roadmap Phase 20 Session 7: `document_id` ist jetzt optional -
+    zuvor lieferte ein Aufruf ohne ihn `422` (Pflichtparameter)."""
+    with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
+        response = client.get("/ocr-results", params={"status": "failed_permanent"})
+    assert response.status_code == 200
+
+
 def test_get_ocr_result_404():
     with TestClient(app, headers={"X-DMS-Principal": "ocr-service-tests"}) as client:
         response = client.get("/ocr-results/unbekannt:1")

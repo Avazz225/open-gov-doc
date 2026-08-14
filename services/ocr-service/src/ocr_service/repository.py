@@ -141,11 +141,23 @@ async def get_ocr_result(session: AsyncSession, ocr_result_key: str) -> OcrResul
 
 
 async def list_ocr_results(
-    session: AsyncSession, *, document_id: str, version_number: int | None = None
+    session: AsyncSession,
+    *,
+    document_id: str | None = None,
+    version_number: int | None = None,
+    status: str | None = None,
 ) -> list[OcrResult]:
-    query = select(OcrResult).where(OcrResult.document_id == document_id)
+    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
+    ohne ihn liefert dies eine dokumentübergreifende Liste (Admin-UI-Bedarf:
+    alle `failed_permanent`-Ergebnisse sehen, nicht nur die eines einzelnen
+    Dokuments)."""
+    query = select(OcrResult)
+    if document_id is not None:
+        query = query.where(OcrResult.document_id == document_id)
     if version_number is not None:
         query = query.where(OcrResult.version_number == version_number)
+    if status is not None:
+        query = query.where(OcrResult.status == status)
     result = await session.execute(query.order_by(OcrResult.version_number))
     return list(result.scalars().all())
 

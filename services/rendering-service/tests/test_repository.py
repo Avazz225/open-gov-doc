@@ -216,3 +216,45 @@ async def test_list_renditions_filters_by_version(session):
 
     both = await repository.list_renditions(session, document_id=document_id)
     assert len(both) == 2
+
+
+async def test_list_renditions_without_document_id_filters_by_status(session):
+    """Post-Roadmap Phase 20 Session 7: ``document_id`` ist jetzt optional -
+    Grundlage für die dokumentübergreifende Admin-UI-Sicht auf dauerhaft
+    fehlgeschlagene Renditions."""
+    doc_a = f"doc-{uuid.uuid4().hex[:8]}"
+    doc_b = f"doc-{uuid.uuid4().hex[:8]}"
+    await repository.upsert_rendition(
+        session,
+        document_id=doc_a,
+        version_number=1,
+        rendition_type="thumbnail",
+        source_filename="a.png",
+        source_content_type="image/png",
+        target_filename="a_thumbnail.png",
+        target_content_type="image/png",
+        size_bytes=1,
+        storage_object_key=f"renditions/{doc_a}/1/thumbnail",
+        status="failed_permanent",
+        error_message="x",
+    )
+    await repository.upsert_rendition(
+        session,
+        document_id=doc_b,
+        version_number=1,
+        rendition_type="thumbnail",
+        source_filename="b.png",
+        source_content_type="image/png",
+        target_filename="b_thumbnail.png",
+        target_content_type="image/png",
+        size_bytes=1,
+        storage_object_key=f"renditions/{doc_b}/1/thumbnail",
+        status="ready",
+        error_message=None,
+    )
+    await session.commit()
+
+    failed = await repository.list_renditions(session, status="failed_permanent")
+    failed_ids = {r.document_id for r in failed}
+    assert doc_a in failed_ids
+    assert doc_b not in failed_ids

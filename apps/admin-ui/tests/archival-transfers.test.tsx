@@ -13,7 +13,9 @@ function renderView() {
 
 const listArchivalTransfersMock = vi.fn();
 const retrieveArchivalTransferMock = vi.fn();
+const retryArchivalTransferMock = vi.fn();
 const listCaseArchivalTransfersMock = vi.fn();
+const retryCaseArchivalTransferMock = vi.fn();
 const getCaseArchivalConfigMock = vi.fn();
 const updateCaseArchivalConfigMock = vi.fn();
 const downloadCaseArchivalPackageMock = vi.fn();
@@ -21,7 +23,9 @@ const downloadCaseArchivalPackageMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   listArchivalTransfers: (...args: unknown[]) => listArchivalTransfersMock(...args),
   retrieveArchivalTransfer: (...args: unknown[]) => retrieveArchivalTransferMock(...args),
+  retryArchivalTransfer: (...args: unknown[]) => retryArchivalTransferMock(...args),
   listCaseArchivalTransfers: (...args: unknown[]) => listCaseArchivalTransfersMock(...args),
+  retryCaseArchivalTransfer: (...args: unknown[]) => retryCaseArchivalTransferMock(...args),
   getCaseArchivalConfig: (...args: unknown[]) => getCaseArchivalConfigMock(...args),
   updateCaseArchivalConfig: (...args: unknown[]) => updateCaseArchivalConfigMock(...args),
   downloadCaseArchivalPackage: (...args: unknown[]) => downloadCaseArchivalPackageMock(...args),
@@ -78,7 +82,9 @@ describe("ArchivalTransfersView", () => {
   beforeEach(() => {
     listArchivalTransfersMock.mockReset();
     retrieveArchivalTransferMock.mockReset();
+    retryArchivalTransferMock.mockReset();
     listCaseArchivalTransfersMock.mockReset().mockResolvedValue([]);
+    retryCaseArchivalTransferMock.mockReset();
     getCaseArchivalConfigMock.mockReset().mockResolvedValue(CASE_ARCHIVAL_CONFIG);
     updateCaseArchivalConfigMock.mockReset();
     downloadCaseArchivalPackageMock.mockReset();
@@ -235,6 +241,66 @@ describe("ArchivalTransfersView", () => {
     await vi.waitFor(() =>
       expect(downloadCaseArchivalPackageMock).toHaveBeenCalledWith("token-123", "ct1")
     );
+  });
+
+  it("does not offer a retry button for a merely failed (retry-able) transfer", async () => {
+    listArchivalTransfersMock.mockResolvedValue([{ ...RELEASED_TRANSFER, status: "failed" }]);
+
+    renderView();
+    await screen.findByText("doc-1");
+
+    expect(screen.queryByRole("button", { name: "Erneut versuchen" })).not.toBeInTheDocument();
+  });
+
+  it("retries a permanently failed transfer and reloads", async () => {
+    const FAILED_PERMANENT_TRANSFER = { ...RELEASED_TRANSFER, status: "failed_permanent" };
+    listArchivalTransfersMock
+      .mockResolvedValueOnce([FAILED_PERMANENT_TRANSFER])
+      .mockResolvedValueOnce([{ ...FAILED_PERMANENT_TRANSFER, status: "pending" }]);
+    retryArchivalTransferMock.mockResolvedValue({ ...FAILED_PERMANENT_TRANSFER, status: "pending" });
+
+    renderView();
+    await screen.findByText("doc-1");
+    const row = screen.getByText("doc-1").closest("tr")!;
+    expect(within(row).getByText("Dauerhaft fehlgeschlagen")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(retryArchivalTransferMock).toHaveBeenCalledWith("token-123", "t1");
+    await screen.findByText("doc-1");
+    expect(listArchivalTransfersMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a permanently failed case transfer and reloads", async () => {
+    listArchivalTransfersMock.mockResolvedValue([]);
+    const FAILED_PERMANENT_CASE = {
+      id: "ct1",
+      case_id: "case-1",
+      status: "failed_permanent",
+      encrypted: false,
+      storage_object_key: null,
+      checksum_sha256: null,
+      error_message: "boom",
+      locked_at: null,
+      packaged_at: null,
+      verified_at: null,
+      released_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    listCaseArchivalTransfersMock
+      .mockResolvedValueOnce([FAILED_PERMANENT_CASE])
+      .mockResolvedValueOnce([{ ...FAILED_PERMANENT_CASE, status: "pending" }]);
+    retryCaseArchivalTransferMock.mockResolvedValue({ ...FAILED_PERMANENT_CASE, status: "pending" });
+
+    renderView();
+    await screen.findByText("case-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(retryCaseArchivalTransferMock).toHaveBeenCalledWith("token-123", "ct1");
+    await screen.findByText("case-1");
+    expect(listCaseArchivalTransfersMock).toHaveBeenCalledTimes(2);
   });
 
   it("saves the case archival config", async () => {

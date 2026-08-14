@@ -156,10 +156,22 @@ async def get_rendition(session: AsyncSession, rendition_key: str) -> Rendition:
 
 
 async def list_renditions(
-    session: AsyncSession, *, document_id: str, version_number: int | None = None
+    session: AsyncSession,
+    *,
+    document_id: str | None = None,
+    version_number: int | None = None,
+    status: str | None = None,
 ) -> list[Rendition]:
-    query = select(Rendition).where(Rendition.document_id == document_id)
+    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
+    ohne ihn liefert dies eine dokumentübergreifende Liste (Admin-UI-Bedarf:
+    alle `failed_permanent`-Renditions sehen, nicht nur die eines einzelnen
+    Dokuments)."""
+    query = select(Rendition)
+    if document_id is not None:
+        query = query.where(Rendition.document_id == document_id)
     if version_number is not None:
         query = query.where(Rendition.version_number == version_number)
+    if status is not None:
+        query = query.where(Rendition.status == status)
     result = await session.execute(query.order_by(Rendition.rendition_type))
     return list(result.scalars().all())

@@ -208,14 +208,19 @@ async def _require_rendering_permission(x_dms_principal: str, *, access_type: st
 
 @app.get("/renditions", response_model=list[RenditionOut])
 async def list_renditions(
-    document_id: str,
+    document_id: str | None = None,
     version_number: int | None = None,
+    status: str | None = None,
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[RenditionOut]:
+    """``document_id`` ist seit Post-Roadmap Phase 20 Session 7 optional -
+    ohne ihn (typischerweise kombiniert mit ``status``) liefert dies eine
+    dokumentübergreifende Liste, Grundlage für die neue Admin-UI-Sicht auf
+    dauerhaft fehlgeschlagene Renditions."""
     await _require_rendering_permission(x_dms_principal, access_type="read")
     return await repository.list_renditions(
-        session, document_id=document_id, version_number=version_number
+        session, document_id=document_id, version_number=version_number, status=status
     )
 
 

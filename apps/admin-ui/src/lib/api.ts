@@ -1185,7 +1185,8 @@ export async function deleteAuditTraceRoleOverride(token: string, role: string):
 // Aussonderung & Langzeitarchivierung (5.6, seit P7-S3) - reine
 // Status-/Rückhol-Ansicht auf die vom archival-service geführte
 // Transfer-Zustandsmaschine (pending -> locked -> copied -> verified ->
-// released -> dehydrated, + failed).
+// released -> dehydrated, + failed -> failed_permanent seit Post-Roadmap
+// Phase 20 Session 2/7, ADR 0078).
 export interface ArchivalTransfer {
   id: string;
   document_id: string;
@@ -1195,6 +1196,8 @@ export interface ArchivalTransfer {
   storage_object_key: string | null;
   checksum_sha256: string | null;
   error_message: string | null;
+  attempts: number;
+  next_retry_at: string | null;
   locked_at: string | null;
   copied_at: string | null;
   verified_at: string | null;
@@ -1230,6 +1233,22 @@ export async function retrieveArchivalTransfer(
   return response.json();
 }
 
+// Manueller Neustart eines dauerhaft fehlgeschlagenen Transfers (Post-Roadmap
+// Phase 20 Session 2/7, ADR 0078) - nur für `failed_permanent` sinnvoll
+// (`409` sonst).
+export async function retryArchivalTransfer(
+  token: string,
+  transferId: string
+): Promise<ArchivalTransfer> {
+  const response = await request(
+    "archival-service",
+    `archival-transfers/${transferId}/retry`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
 // XDOMEA-Aussonderung für Umlaufmappen (5.6, seit P7-S3b) - erzeugt eine
 // Aussonderungsnachricht (XDOMEA 4.0.0) + packt die referenzierten
 // Dokumentinhalte in ein ZIP, kein "dehydrated"-Status (Case besitzt keinen
@@ -1242,6 +1261,8 @@ export interface CaseArchivalTransfer {
   storage_object_key: string | null;
   checksum_sha256: string | null;
   error_message: string | null;
+  attempts: number;
+  next_retry_at: string | null;
   locked_at: string | null;
   packaged_at: string | null;
   verified_at: string | null;
@@ -1277,6 +1298,19 @@ export async function downloadCaseArchivalPackage(
   return response.blob();
 }
 
+export async function retryCaseArchivalTransfer(
+  token: string,
+  transferId: string
+): Promise<CaseArchivalTransfer> {
+  const response = await request(
+    "archival-service",
+    `case-archival-transfers/${transferId}/retry`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
 export interface CaseArchivalConfig {
   default_archive_after_days_closed: number | null;
   archive_encryption_enabled: boolean;
@@ -1304,6 +1338,106 @@ export async function updateCaseArchivalConfig(
         archive_encryption_enabled: archiveEncryptionEnabled,
       }),
     },
+    token
+  );
+  return response.json();
+}
+
+// Verarbeitungsfehler-Sichtbarkeit (Post-Roadmap Phase 20 Session 7) - reine
+// Status-/Neustart-Ansicht auf `failed_permanent`-Datensätze in drei
+// unabhängigen Services (notification-/rendering-/ocr-service), analog zu
+// `ArchivalTransfersView` oben, hier aber als eine gemeinsame neue Seite
+// statt einer je-Service-Seite (gleiches "kleine Sektion statt eigener
+// Seite"-Prinzip, hier auf Seitenebene angewendet).
+export interface Notification {
+  id: string;
+  channel: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  status: string;
+  error: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export async function listNotifications(
+  token: string,
+  status?: string
+): Promise<Notification[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await request("notification-service", `notifications${query}`, {}, token);
+  return response.json();
+}
+
+// Notification-service hat (anders als die drei anderen Resilienz-Services
+// dieser Phase) KEINE permission-service-Integration (ADR 0079/0081) - der
+// Retry-Endpunkt ist deshalb ohne RBAC-Gate, diese Funktion braucht kein
+// zusätzliches Capability-Handling.
+export async function retryNotification(token: string, id: string): Promise<Notification> {
+  const response = await request(
+    "notification-service",
+    `notifications/${id}/retry`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export interface Rendition {
+  id: string;
+  document_id: string;
+  version_number: number;
+  rendition_type: string;
+  status: string;
+  error_message: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listRenditions(token: string, status?: string): Promise<Rendition[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await request("rendering-service", `renditions${query}`, {}, token);
+  return response.json();
+}
+
+export async function retryRendition(token: string, id: string): Promise<Rendition> {
+  const response = await request(
+    "rendering-service",
+    `renditions/${id}/retry`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export interface OcrResult {
+  id: string;
+  document_id: string;
+  version_number: number;
+  status: string;
+  error_message: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listOcrResults(token: string, status?: string): Promise<OcrResult[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await request("ocr-service", `ocr-results${query}`, {}, token);
+  return response.json();
+}
+
+export async function retryOcrResult(token: string, id: string): Promise<OcrResult> {
+  const response = await request(
+    "ocr-service",
+    `ocr-results/${id}/retry`,
+    { method: "POST" },
     token
   );
   return response.json();

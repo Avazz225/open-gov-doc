@@ -32,6 +32,14 @@ def test_list_renditions_empty_for_unknown_document():
     assert response.json() == []
 
 
+def test_list_renditions_without_document_id_is_accepted():
+    """Post-Roadmap Phase 20 Session 7: `document_id` ist jetzt optional -
+    zuvor lieferte ein Aufruf ohne ihn `422` (Pflichtparameter)."""
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.get("/renditions", params={"status": "failed_permanent"})
+    assert response.status_code == 200
+
+
 def test_get_rendition_404():
     with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.get("/renditions/unbekannt:1:thumbnail")
