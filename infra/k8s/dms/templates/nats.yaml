@@ -1,9 +1,9 @@
 {{/*
-Bundled NATS (P26-S3) — bundled-only, KEIN enabled/external-Umschalter
-(explizite Nutzerentscheidung, siehe ADR 0099/values.yaml-Kommentar), deshalb
-anders als postgresql.yaml/keycloak.yaml/minio.yaml ohne umschließendes
-{{- if }}. PVC für JetStream (-js -sd /data): Streams/Consumer-State sollen
-einen Pod-Neustart überleben (Event-Bus, Konzept 3.4).
+Bundled NATS (P26-S3) — bundled-only, NO enabled/external toggle
+(explicit user decision, see ADR 0099/values.yaml comment), hence
+unlike postgresql.yaml/keycloak.yaml/minio.yaml without a surrounding
+{{- if }}. PVC for JetStream (-js -sd /data): streams/consumer state should
+survive a pod restart (event bus, concept 3.4).
 */}}
 ---
 apiVersion: v1
@@ -29,7 +29,7 @@ metadata:
     {{- include "dms.serviceLabels" (dict "root" . "name" "nats") | nindent 4 }}
 spec:
   replicas: 1
-  # RWO-PVC + Einzelinstanz, gleiche Begründung wie templates/postgresql.yaml.
+  # RWO PVC + single instance, same rationale as templates/postgresql.yaml.
   strategy:
     type: Recreate
   selector:

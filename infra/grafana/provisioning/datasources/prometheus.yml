@@ -1,13 +1,13 @@
-# Deklarative Datasource-Provisionierung (Konzept 10.1, P11-S2) - kein
-# manuelles Einrichten in der Grafana-UI nötig. Zeigt auf denselben
-# `prometheus`-Service, der wiederum ausschließlich `monitoring-service`
-# scraped (siehe docs/operations/monitoring.md).
+# Declarative datasource provisioning (concept 10.1, P11-S2) - no
+# manual setup in the Grafana UI needed. Points to the same
+# `prometheus` service, which in turn exclusively scrapes `monitoring-service`
+# (see docs/operations/monitoring.md).
 apiVersion: 1
 
 datasources:
   - name: Prometheus
-    # Feste uid, damit die provisionierten Dashboard-JSONs sie ohne
-    # Template-Variablen-Mapping direkt referenzieren können.
+    # Fixed uid, so the provisioned dashboard JSONs can reference it
+    # directly without template variable mapping.
     uid: prometheus
     type: prometheus
     access: proxy

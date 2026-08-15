@@ -1,10 +1,10 @@
-# Statische Scrape-Konfiguration (10.1, P11-S1): Prometheus scraped
-# ausschließlich `monitoring-service` - dessen /metrics-Endpunkt fasst die
-# gescrapten Fach-Service-Sensoren (aktuell registry-service/document-service
-# als Piloten, siehe P11-S0-Befund) live zusammen. Eine automatische, aus der
-# Registry abgeleitete Zielliste (Konzept 10.1 nennt das als Option) ist
-# bewusste Folgearbeit - mit nur einem Ziel bringt sie in dieser Ausbaustufe
-# noch keinen Mehrwert.
+# Static scrape configuration (10.1, P11-S1): Prometheus scrapes
+# exclusively `monitoring-service` - its /metrics endpoint live-aggregates
+# the scraped domain-service sensors (currently registry-service/document-service
+# as pilots, see P11-S0 finding). An automatic target list derived from the
+# registry (concept 10.1 mentions this as an option) is
+# deliberate follow-up work - with only one target it doesn't provide any
+# added value at this stage of development yet.
 global:
   scrape_interval: 15s
 

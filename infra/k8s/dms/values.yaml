@@ -1,66 +1,66 @@
-# values.yaml — DMS Helm-Chart (Phase 26, P26-S1 + P26-S2 + P26-S3)
+# values.yaml — DMS Helm chart (Phase 26, P26-S1 + P26-S2 + P26-S3)
 #
-# EIN Chart für alle Container aus infra/docker-compose.yml. Statt eines
-# Templates pro Service (34+ fast identische Kopien) iterieren die
-# generischen Templates unter templates/ über die `services:`-Map unten
-# (siehe ADR — Dateiname siehe docs/adr/, "one chart, values-driven service
-# map"). Neue Services werden hinzugefügt, indem hier ein neuer Eintrag unter
-# `services:` erscheint — nie durch ein neues Template.
+# ONE chart for all containers from infra/docker-compose.yml. Instead of one
+# template per service (34+ nearly identical copies), the
+# generic templates under templates/ iterate over the `services:` map below
+# (see ADR — filename see docs/adr/, "one chart, values-driven service
+# map"). New services are added by adding a new entry here under
+# `services:` — never via a new template.
 #
-# P26-S1 baute das Grundgerüst + 4 reale Beispiel-Einträge (registry-service,
-# gateway-service, document-service, storage-service) zum Beweis, dass die
-# Templates echt rendern. P26-S2 ergänzte die übrigen ~28 zustandslosen
-# FastAPI-Services aus infra/docker-compose.yml nach demselben Muster — kein
-# neues Template, nur weitere `services.<name>:`-Blöcke. P26-S3 (diese
-# Session) baute postgresql/keycloak/minio/nats/redis (unten, ab
-# "Zustandsbehaftete Infrastruktur") als echte Deployments+Service(+PVC) in
-# eigenen Templates (templates/postgresql.yaml usw. — strukturell zu
-# verschieden für den generischen services:-Mechanismus) plus einen echten
-# Secret-Mechanismus für deren Admin-Passwörter (ADR 0100).
+# P26-S1 built the basic scaffolding + 4 real example entries (registry-service,
+# gateway-service, document-service, storage-service) to prove that the
+# templates actually render. P26-S2 added the remaining ~28 stateless
+# FastAPI services from infra/docker-compose.yml following the same pattern — no
+# new template, just further `services.<name>:` blocks. P26-S3 (this
+# session) built postgresql/keycloak/minio/nats/redis (below, starting at
+# "Stateful infrastructure") as real Deployments+Service(+PVC) in
+# their own templates (templates/postgresql.yaml etc. — structurally too
+# different for the generic services: mechanism) plus a real
+# secret mechanism for their admin passwords (ADR 0100).
 #
-# P26-S4 ergänzte das Storage-Replikations-CronJob-Äquivalent
-# (storageCronJob unten, templates/storage-cronjob.yaml, ADR 0101). P26-S5
-# (diese Session) ergänzte die 6 Next.js-Frontend-Apps (user-ui/admin-ui/
-# process-designer/reviewer-ui/migration-console/office-addin) als weitere
-# `services:`-Einträge — strukturell weiterhin "ein Container auf einem
-# Port", ABER mit einer wichtigen Abweichung: ihre NEXT_PUBLIC_*-Variablen
-# werden beim `docker build` fest eingebrannt, nicht zur Laufzeit gelesen
-# (siehe ADR 0102, sowie der Kommentarblock direkt vor den 6 Einträgen
-# unten). P26-S5 baute außerdem echte `Ingress`-Ressourcen (neues optionales
-# `ingress:`-Feld je Service, templates/ingress.yaml) für gateway-service
-# und die 6 Frontend-Apps — der in gateway-services Kommentar seit P26-S1
-# angekündigte, bis dahin fehlende öffentliche Zugriffsweg (siehe ADR 0102
-# für die Ingress- vs. OpenShift-Route-Entscheidung).
+# P26-S4 added the storage replication CronJob equivalent
+# (storageCronJob below, templates/storage-cronjob.yaml, ADR 0101). P26-S5
+# (this session) added the 6 Next.js frontend apps (user-ui/admin-ui/
+# process-designer/reviewer-ui/migration-console/office-addin) as further
+# `services:` entries — structurally still "one container on one
+# port", BUT with one important deviation: their NEXT_PUBLIC_* variables
+# are baked in at `docker build` time, not read at runtime
+# (see ADR 0102, as well as the comment block right before the 6 entries
+# below). P26-S5 also built real `Ingress` resources (new optional
+# `ingress:` field per service, templates/ingress.yaml) for gateway-service
+# and the 6 frontend apps — the public access path announced as
+# missing in the gateway-service comment since P26-S1 (see ADR 0102
+# for the Ingress vs. OpenShift Route decision).
 #
-# Weiterhin ausgenommen (kein Bestandteil von Phase 26, siehe
-# IMPLEMENTATION_PLAN.md): azurite/mailpit/prometheus/grafana (Dev-Emulator/
-# Test-SMTP/Observability-Stack, kein im Session-Briefing beauftragter
-# Bestandteil dieser Phase), postgres-wal-archive-init (Job, kein Deployment
-# — siehe offener Punkt im P26-S2-Report), sowie libreoffice-addin
-# (`apps/libreoffice-addin/` — eine UNO-`.oxt`-Erweiterung, kein
-# eigenständig deploybarer HTTP-Container, hat deshalb gar keinen
-# `infra/docker-compose.yml`-Eintrag und damit auch kein Helm-Pendant).
+# Still excluded (not part of Phase 26, see
+# IMPLEMENTATION_PLAN.md): azurite/mailpit/prometheus/grafana (dev emulator/
+# test SMTP/observability stack, not a component of this phase mandated in
+# the session briefing), postgres-wal-archive-init (a Job, not a Deployment
+# — see the open point in the P26-S2 report), as well as libreoffice-addin
+# (`apps/libreoffice-addin/` — a UNO `.oxt` extension, not an
+# independently deployable HTTP container, hence it has no
+# `infra/docker-compose.yml` entry at all and therefore no Helm counterpart either).
 
 global:
-  # Installationsweite Identität (Konzept 3a) — entspricht DMS_INSTALLATION_ID
-  # / DMS_INSTALLATION_DISPLAY_NAME in infra/docker-compose.yml, hier als
-  # Helm-Values statt Compose-.env.
+  # Installation-wide identity (concept 3a) — corresponds to DMS_INSTALLATION_ID
+  # / DMS_INSTALLATION_DISPLAY_NAME in infra/docker-compose.yml, here as
+  # Helm values instead of Compose .env.
   installationId: local-dev
   installationDisplayName: "DMS-Installation (Kubernetes)"
   image:
-    # Optionales Registry-Prefix, z. B. "registry.example.com/" (mit
-    # trailing slash) — leer = services.<name>.image.repository wird
-    # unverändert verwendet. Getrennt von den einzelnen Repository-Pfaden
-    # gehalten, damit ein Registry-Wechsel nicht 34 Einträge anfasst.
+    # Optional registry prefix, e.g. "registry.example.com/" (with
+    # trailing slash) — empty = services.<name>.image.repository is used
+    # unchanged. Kept separate from the individual repository paths
+    # so that a registry change doesn't touch 34 entries.
     registry: ""
     pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
-# resources.baseline — Default-Requests/-Limits (harte Nutzeranforderung).
-# Jeder services.<name> ohne eigenen `resources:`-Block fällt hierauf zurück;
-# ein Service, der `resources:` (auch nur teilweise) angibt, überschreibt nur
-# die angegebenen Felder (Deep-Merge via `mergeOverwrite` in
-# templates/_helpers.tpl, siehe dort `dms.mergedResources`).
+# resources.baseline — default requests/limits (a hard user requirement).
+# Every services.<name> without its own `resources:` block falls back to this;
+# a service that specifies `resources:` (even only partially) overrides only
+# the specified fields (deep-merge via `mergeOverwrite` in
+# templates/_helpers.tpl, see `dms.mergedResources` there).
 # ---------------------------------------------------------------------------
 resources:
   baseline:
@@ -72,60 +72,59 @@ resources:
       limits: 500m
 
 # ---------------------------------------------------------------------------
-# services — eine Map, ein Eintrag je Container. Shape ist für ALLE Services
-# identisch (auch die, die P26-S2 noch ergänzt) — das ist der ganze Punkt
-# dieser Architektur.
+# services — a map, one entry per container. Shape is identical for ALL
+# services (including the ones P26-S2 still adds) — that's the whole point
+# of this architecture.
 #
-# Erwartete Felder je Eintrag:
-#   enabled                    - bool, false = Deployment/Service werden nicht gerendert
-#   image.repository / .tag    - Container-Image
-#   port                       - Container-Port (siehe infra/docker-compose.yml,
-#                                 bei den FastAPI-Services intern immer 8000)
-#   replicas                   - Start-Replicas (bei autoscaling.enabled i.d.R. == minReplicas)
-#   resources                  - optional, selektiver Override von resources.baseline
-#                                 (Shape: {memory: {requests, limits}, cpu: {requests, limits}})
-#   autoscaling                - HPA-Konfiguration, siehe templates/hpa.yaml
-#   podDisruptionBudget        - PDB-Konfiguration, siehe templates/pdb.yaml
-#   dependsOnServices          - optional, Liste anderer services.<name>-Keys; für jeden
-#                                 Eintrag wird automatisch ein
-#                                 DMS_<NAME>_BASE_URL=http://<fullname>-<name>:8000 Env-Var
-#                                 gesetzt (Pendant zu den Compose DMS_*_SERVICE_BASE_URL-
-#                                 Zeilen) — spart es, jede Upstream-URL einzeln in `env:`
-#                                 zu tippen.
-#   usesKeycloak                - optional bool, injiziert DMS_KEYCLOAK_BASE_URL (siehe
-#                                 dms.keycloakBaseUrl-Helper, respektiert keycloak.enabled/
-#                                 external unten)
-#   storageTargetsEnv          - optional bool, NUR für storage-service: injiziert
-#                                 DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT aus dem
-#                                 storageService:-Block unten (siehe dort)
-#   env                        - Map zusätzlicher/überschreibender Env-Vars (roher Wert,
-#                                 kein Templating — für Werte, die keine berechnete
-#                                 Service-URL sind)
-#   healthCheckPath            - optional, Default "/healthz" (seit P26-S5) — Pfad für
-#                                 Liveness-/Readiness-Probe (templates/deployment.yaml).
-#                                 Die 6 Frontend-Apps setzen "/" (nginx statt FastAPI,
-#                                 siehe dort).
-#   staticFrontend             - optional bool (seit P26-S5), NUR bei den 6 Next.js-Apps
-#                                 gesetzt — aktiviert einen Helm-`fail`-Guard gegen
-#                                 versehentliche NEXT_PUBLIC_*-Einträge in `env:` (siehe
-#                                 ADR 0102, wirkungslos zur Laufzeit, da beim Build
-#                                 eingebrannt).
-#   ingress                    - optional (seit P26-S5), siehe templates/ingress.yaml.
+# Expected fields per entry:
+#   enabled                    - bool, false = Deployment/Service are not rendered
+#   image.repository / .tag    - container image
+#   port                       - container port (see infra/docker-compose.yml,
+#                                 always internally 8000 for the FastAPI services)
+#   replicas                   - starting replicas (usually == minReplicas when autoscaling.enabled)
+#   resources                  - optional, selective override of resources.baseline
+#                                 (shape: {memory: {requests, limits}, cpu: {requests, limits}})
+#   autoscaling                - HPA configuration, see templates/hpa.yaml
+#   podDisruptionBudget        - PDB configuration, see templates/pdb.yaml
+#   dependsOnServices          - optional, list of other services.<name> keys; for each
+#                                 entry a
+#                                 DMS_<NAME>_BASE_URL=http://<fullname>-<name>:8000 env var
+#                                 is set automatically (counterpart to the Compose DMS_*_SERVICE_BASE_URL
+#                                 lines) — saves having to type every upstream URL individually in `env:`.
+#   usesKeycloak                - optional bool, injects DMS_KEYCLOAK_BASE_URL (see
+#                                 the dms.keycloakBaseUrl helper, respects keycloak.enabled/
+#                                 external below)
+#   storageTargetsEnv          - optional bool, ONLY for storage-service: injects
+#                                 DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT from the
+#                                 storageService: block below (see there)
+#   env                        - map of additional/overriding env vars (raw value,
+#                                 no templating — for values that aren't a computed
+#                                 service URL)
+#   healthCheckPath            - optional, default "/healthz" (since P26-S5) — path for
+#                                 the liveness/readiness probe (templates/deployment.yaml).
+#                                 The 6 frontend apps set "/" (nginx instead of FastAPI,
+#                                 see there).
+#   staticFrontend             - optional bool (since P26-S5), set ONLY on the 6 Next.js
+#                                 apps — activates a Helm `fail` guard against
+#                                 accidental NEXT_PUBLIC_* entries in `env:` (see
+#                                 ADR 0102, has no effect at runtime since it's baked in
+#                                 at build time).
+#   ingress                    - optional (since P26-S5), see templates/ingress.yaml.
 #                                 Shape: {enabled, className, host, path, pathType,
 #                                 tls: {enabled, secretName}, annotations}. Vanilla
-#                                 k8s Ingress statt OpenShift Route, siehe ADR 0102.
+#                                 k8s Ingress instead of OpenShift Route, see ADR 0102.
 # ---------------------------------------------------------------------------
 services:
-  # --- Beispiel 1: einfacher Service, reiner resources.baseline-Fallback ---
+  # --- Example 1: simple service, pure resources.baseline fallback ---
   registry-service:
     enabled: true
     image:
       repository: dms/registry-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~276 (Container-Port, Host-Mapping ist 8001)
+    port: 8000 # see infra/docker-compose.yml line ~276 (container port, host mapping is 8001)
     replicas: 1
-    # kein eigener resources-Block -> komplett resources.baseline (Verifikationsfall
-    # "ein Service nutzt reinen Baseline-Fallback", siehe PROGRESS/Report)
+    # no own resources block -> entirely resources.baseline (verification case
+    # "a service uses a pure baseline fallback", see PROGRESS/report)
     autoscaling:
       enabled: false
       minReplicas: 1
@@ -136,19 +135,19 @@ services:
       minAvailable: 1
     env: {}
 
-  # --- Beispiel 2: "public route"-Charakter (vom Gateway nach außen erreichbar),
-  # mehrere Replicas -> PDB sinnvoll und hier aktiv geschaltet, um
-  # templates/pdb.yaml in dieser Session tatsächlich zu rendern. ---
+  # --- Example 2: "public route" character (reachable from outside via the gateway),
+  # multiple replicas -> PDB makes sense and is switched on here to
+  # actually render templates/pdb.yaml in this session. ---
   gateway-service:
     enabled: true
     image:
       repository: dms/gateway-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1437 (Host-Mapping 8009)
+    port: 8000 # see infra/docker-compose.yml line ~1437 (host mapping 8009)
     replicas: 2
     resources:
-      # selektiver Override: nur cpu, memory bleibt beim resources.baseline-Fallback
-      # (Verifikationsfall "ein Service überschreibt selektiv")
+      # selective override: only cpu, memory stays on the resources.baseline fallback
+      # (verification case "a service overrides selectively")
       cpu:
         requests: 200m
         limits: 750m
@@ -158,24 +157,24 @@ services:
       maxReplicas: 5
       targetCPUUtilizationPercentage: 70
     podDisruptionBudget:
-      enabled: true # aktiv in dieser Session, um templates/pdb.yaml zu exercisen
+      enabled: true # active in this session, to exercise templates/pdb.yaml
       minAvailable: 1
     usesKeycloak: true
-    # Seit P26-S3: geteilter Rate-Limit-Store (ADR 0097) - injiziert
-    # DMS_REDIS_URL via dms.redisUrl-Helper (bundled-only, siehe
-    # templates/redis.yaml). Einziger Service in diesem Chart mit
-    # usesRedis: true, siehe services/gateway-service/src/gateway_service/settings.py.
+    # Since P26-S3: shared rate-limit store (ADR 0097) - injects
+    # DMS_REDIS_URL via the dms.redisUrl helper (bundled-only, see
+    # templates/redis.yaml). The only service in this chart with
+    # usesRedis: true, see services/gateway-service/src/gateway_service/settings.py.
     usesRedis: true
-    # Öffentlicher Zugriffsweg (P26-S5, siehe ADR 0102) — seit P26-S1 als
-    # offener Punkt angekündigt ("folgt in P26-S2/S5 zusammen mit den
-    # Frontend-Apps, braucht deren finale Hostnamen"), jetzt gebaut. `host`
-    # ist ein Dev-/Demo-Platzhalter (analog global.installationId:
-    # "local-dev") — WICHTIG: dieser Wert MUSS mit dem
-    # NEXT_PUBLIC_GATEWAY_BASE_URL-Build-Arg übereinstimmen, mit dem die 6
-    # Frontend-Images gebaut wurden (siehe deren values.yaml-Kommentar
-    # unten) — kein Helm-Mechanismus kann das automatisch synchron halten,
-    # da NEXT_PUBLIC_GATEWAY_BASE_URL bereits vor `helm install` fest im
-    # Image steht.
+    # Public access path (P26-S5, see ADR 0102) — announced as an
+    # open point since P26-S1 ("follows in P26-S2/S5 together with the
+    # frontend apps, needs their final hostnames"), now built. `host`
+    # is a dev/demo placeholder (analogous to global.installationId:
+    # "local-dev") — IMPORTANT: this value MUST match the
+    # NEXT_PUBLIC_GATEWAY_BASE_URL build arg that the 6
+    # frontend images were built with (see their values.yaml comment
+    # below) — no Helm mechanism can keep this automatically in sync,
+    # since NEXT_PUBLIC_GATEWAY_BASE_URL is already baked into the
+    # image before `helm install`.
     ingress:
       enabled: true
       className: ""
@@ -188,27 +187,27 @@ services:
       annotations: {}
     env:
       DMS_KEYCLOAK_CLIENT_ID: "dms-api"
-      # Muss jeden Hostnamen enthalten, unter dem eine der 6 Frontend-Apps
-      # öffentlich erreichbar ist (siehe deren ingress.host unten) — sonst
-      # blockt der Browser die Cross-Origin-Fetches gegen den Gateway
-      # (unterschiedliche Hosts: jede Frontend-App und der Gateway haben
-      # eigene Ingress-Hostnamen, siehe ADR 0102 "host-basiertes Routing").
-      # "http://localhost:3000" bleibt für den unveränderten
-      # docker-compose-Dev-Fall (user-ui) erhalten.
+      # Must contain every hostname under which one of the 6 frontend apps
+      # is publicly reachable (see their ingress.host below) — otherwise
+      # the browser blocks the cross-origin fetches against the gateway
+      # (different hosts: each frontend app and the gateway have their
+      # own ingress hostnames, see ADR 0102 "host-based routing").
+      # "http://localhost:3000" is kept for the unchanged
+      # docker-compose dev case (user-ui).
       DMS_CORS_ALLOWED_ORIGINS: '["http://localhost:3000","https://user-ui.dms.local","https://admin-ui.dms.local","https://process-designer.dms.local","https://reviewer-ui.dms.local","https://migration-console.dms.local","https://office-addin.dms.local"]'
 
-  # --- Beispiel 3: mehrere Upstream-Abhängigkeiten (dependsOnServices),
-  # Autoscaling aktiv -> exercised templates/hpa.yaml in dieser Session, plus
-  # PDB aktiv (zweiter Beleg neben gateway-service). ---
+  # --- Example 3: multiple upstream dependencies (dependsOnServices),
+  # autoscaling active -> exercises templates/hpa.yaml in this session, plus
+  # PDB active (a second instance alongside gateway-service). ---
   document-service:
     enabled: true
     image:
       repository: dms/document-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~481 (Host-Mapping 8006)
+    port: 8000 # see infra/docker-compose.yml line ~481 (host mapping 8006)
     replicas: 2
     resources:
-      # vollständiger Override beider Achsen (dritter Verifikationsfall)
+      # full override of both axes (third verification case)
       memory:
         requests: 256Mi
         limits: 512Mi
@@ -216,7 +215,7 @@ services:
         requests: 150m
         limits: 600m
     autoscaling:
-      enabled: true # aktiv in dieser Session, um templates/hpa.yaml zu exercisen
+      enabled: true # active in this session, to exercise templates/hpa.yaml
       minReplicas: 2
       maxReplicas: 6
       targetCPUUtilizationPercentage: 75
@@ -230,16 +229,16 @@ services:
       - object-type-service
     env: {}
 
-  # --- Beispiel 4: storage-service — belegt storageService.targets (unten)
-  # via DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT, siehe
-  # storageTargetsEnv-Flag und dms.storageServiceTargetsEnv in _helpers.tpl.
-  # Zweiter reiner Baseline-Fallback-Fall (kein eigener resources-Block). ---
+  # --- Example 4: storage-service — populates storageService.targets (below)
+  # via DMS_TARGETS/DMS_WRITE_STRATEGY/DMS_QUORUM_COUNT, see
+  # the storageTargetsEnv flag and dms.storageServiceTargetsEnv in _helpers.tpl.
+  # Second pure baseline-fallback case (no own resources block). ---
   storage-service:
     enabled: true
     image:
       repository: dms/storage-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~433 (Host-Mapping 8005)
+    port: 8000 # see infra/docker-compose.yml line ~433 (host mapping 8005)
     replicas: 1
     autoscaling:
       enabled: false
@@ -254,36 +253,36 @@ services:
       DMS_GOVERNANCE_BYPASS_ROLE: "dms-admin"
 
   # ---------------------------------------------------------------------
-  # Ab hier: die ~28 Services aus P26-S2 (zustandslose FastAPI-Services,
-  # infra/docker-compose.yml Zeilen ~287-1409), in derselben Reihenfolge wie
-  # dort. Env-Var-Namen/Cross-Service-Abhängigkeiten sind 1:1 aus den
-  # jeweiligen `environment:`-Blöcken in infra/docker-compose.yml plus den
-  # zugehörigen services/<name>/src/*/settings.py-Defaults übernommen (nicht
-  # geraten) — wo ein settings.py-Default bereits mit dem
-  # infra/docker-compose.yml-Wert übereinstimmt, wird die Zeile hier bewusst
-  # NICHT dupliziert (schlankes values.yaml, gleiche Praxis wie
-  # registry-service oben). Autoscaling ist nur für die 4 Services aktiv, die
-  # den P26-S2-Session-Report als "busy/horizontal skalierbar" begründet
-  # (virus-scan-, rendering-, ocr-, search-service) — alle anderen bleiben
-  # beim P26-S1-Baseline-Muster (1 Replica, autoscaling/PDB aus).
+  # From here on: the ~28 services from P26-S2 (stateless FastAPI services,
+  # infra/docker-compose.yml lines ~287-1409), in the same order as
+  # there. Env var names/cross-service dependencies are taken 1:1 from the
+  # respective `environment:` blocks in infra/docker-compose.yml plus the
+  # corresponding services/<name>/src/*/settings.py defaults (not
+  # guessed) — where a settings.py default already matches the
+  # infra/docker-compose.yml value, the line here is deliberately
+  # NOT duplicated (lean values.yaml, same practice as
+  # registry-service above). Autoscaling is only active for the 4 services that
+  # the P26-S2 session report justified as "busy/horizontally scalable"
+  # (virus-scan-, rendering-, ocr-, search-service) — all others stay
+  # on the P26-S1 baseline pattern (1 replica, autoscaling/PDB off).
   # ---------------------------------------------------------------------
 
-  # Audit-Log/Löschregister-Ledger (Konzept 5.2a/10.4) - reiner Consumer +
-  # eigenes Postgres-Schema, keine Cross-Service-BASE_URL-Abhängigkeiten
-  # jenseits von dms.baseEnv (Registry/Self-Address/Postgres/NATS).
-  # OFFENER PUNKT: infra/docker-compose.yml mountet für diesen Service ein
-  # eigenes deletion-ledger-data-Volume (Löschregister-Ledger) - das
-  # generische deployment.yaml-Template unterstützt aktuell keine
-  # volumeMounts/PVCs (bewusst nicht in dieser Session nachgerüstet, siehe
-  # Session-Report) - ohne PVC verliert audit-service dieses Ledger bei
-  # jedem Pod-Neustart. Nachzuholen in P26-S3 zusammen mit den übrigen
-  # PVC-gestützten Komponenten.
+  # Audit log/deletion register ledger (concept 5.2a/10.4) - pure consumer +
+  # own Postgres schema, no cross-service BASE_URL dependencies
+  # beyond dms.baseEnv (registry/self-address/Postgres/NATS).
+  # OPEN POINT: infra/docker-compose.yml mounts a dedicated
+  # deletion-ledger-data volume for this service (deletion register ledger) - the
+  # generic deployment.yaml template currently doesn't support
+  # volumeMounts/PVCs (deliberately not retrofitted in this session, see
+  # the session report) - without a PVC, audit-service loses this ledger on
+  # every pod restart. To be caught up on in P26-S3 together with the other
+  # PVC-backed components.
   audit-service:
     enabled: true
     image:
       repository: dms/audit-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~287 (Host-Mapping 8002)
+    port: 8000 # see infra/docker-compose.yml line ~287 (host mapping 8002)
     replicas: 1
     autoscaling:
       enabled: false
@@ -295,22 +294,22 @@ services:
       minAvailable: 1
     env: {}
 
-  # SSO/Keycloak-Frontend + föderierte Kontaktsuche (Konzept 2.5/4.4/7.4).
-  # usesKeycloak für DMS_KEYCLOAK_BASE_URL; keycloak_client_secret/
-  # keycloak_admin_username/keycloak_admin_password-Defaults in settings.py
-  # decken sich bereits mit infra/docker-compose.yml (dms-api-dev-secret/
-  # admin/admin_dev_only) - hier bewusst nicht dupliziert.
-  # dependsOnServices nutzt für federation-hub-service/gateway-service die
-  # seit dieser Session (P26-S2) erweiterte dict-Form (siehe _helpers.tpl),
-  # weil deren infra/docker-compose.yml-Env-Var-Namen
-  # (DMS_FEDERATION_HUB_BASE_URL/DMS_INSTALLATION_GATEWAY_BASE_URL) vom
-  # Standardmuster DMS_<KEY>_BASE_URL abweichen.
+  # SSO/Keycloak frontend + federated contact search (concept 2.5/4.4/7.4).
+  # usesKeycloak for DMS_KEYCLOAK_BASE_URL; keycloak_client_secret/
+  # keycloak_admin_username/keycloak_admin_password defaults in settings.py
+  # already match infra/docker-compose.yml (dms-api-dev-secret/
+  # admin/admin_dev_only) - deliberately not duplicated here.
+  # dependsOnServices uses the dict form for federation-hub-service/gateway-service,
+  # extended since this session (P26-S2, see _helpers.tpl),
+  # because their infra/docker-compose.yml env var names
+  # (DMS_FEDERATION_HUB_BASE_URL/DMS_INSTALLATION_GATEWAY_BASE_URL) deviate from
+  # the standard pattern DMS_<KEY>_BASE_URL.
   auth-service:
     enabled: true
     image:
       repository: dms/auth-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~317 (Host-Mapping 8003)
+    port: 8000 # see infra/docker-compose.yml line ~317 (host mapping 8003)
     replicas: 1
     autoscaling:
       enabled: false
@@ -328,18 +327,18 @@ services:
       - name: gateway-service
         envVar: DMS_INSTALLATION_GATEWAY_BASE_URL
     env:
-      # settings.py-Default für keycloak_public_base_url ist None (SSO-
-      # Browser-Redirect-Flow aus) - infra/docker-compose.yml aktiviert ihn
-      # dev-typisch mit der extern gemappten Keycloak-Adresse. In diesem
-      # Chart existiert noch keine reale OCP-Route für Keycloak (P26-S3 baut
-      # das echte Keycloak-Deployment) - Platzhalter, gleiches offene
-      # Problem wie bei gateway-service (CORS/Route, siehe dessen Kommentar
-      # oben).
+      # settings.py default for keycloak_public_base_url is None (SSO
+      # browser redirect flow off) - infra/docker-compose.yml enables it
+      # dev-typically with the externally mapped Keycloak address. In this
+      # chart there is no real OCP route for Keycloak yet (P26-S3 builds
+      # the real Keycloak deployment) - a placeholder, the same open
+      # problem as with gateway-service (CORS/route, see its comment
+      # above).
       DMS_KEYCLOAK_PUBLIC_BASE_URL: "http://localhost:8080"
-      # settings.py-Default ist False (föderierte Kontaktsuche ist laut
-      # Konzept 2.5 wörtlich opt-in) - infra/docker-compose.yml schaltet sie
-      # dev-typisch für den Selbst-Loopback-Smoke-Test scharf, hier zur
-      # Parität ebenso.
+      # settings.py default is False (federated contact search is, per
+      # concept 2.5, literally opt-in) - infra/docker-compose.yml turns it
+      # on dev-typically for the self-loopback smoke test, likewise here for
+      # parity.
       DMS_FEDERATED_DIRECTORY_ENABLED: "true"
 
   permission-service:
@@ -347,7 +346,7 @@ services:
     image:
       repository: dms/permission-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~364 (Host-Mapping 8004)
+    port: 8000 # see infra/docker-compose.yml line ~364 (host mapping 8004)
     replicas: 1
     autoscaling:
       enabled: false
@@ -361,17 +360,17 @@ services:
       - auth-service
     env: {}
 
-  # Teil der Upload-Hotpath-Pipeline (document-service ruft synchron auf) -
-  # skaliert deshalb horizontal mit (eine der P26-S2-Autoscaling-Auswahlen,
-  # siehe Session-Report). scan_engine-Default in settings.py ist bereits
-  # "eicar" (deckungsgleich mit infra/docker-compose.yml) - keine explizite
-  # env-Zeile nötig.
+  # Part of the upload hot-path pipeline (document-service calls it synchronously) -
+  # therefore scales horizontally too (one of the P26-S2 autoscaling picks,
+  # see the session report). scan_engine default in settings.py is already
+  # "eicar" (matching infra/docker-compose.yml) - no explicit
+  # env line needed.
   virus-scan-service:
     enabled: true
     image:
       repository: dms/virus-scan-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~500 (Host-Mapping 8010)
+    port: 8000 # see infra/docker-compose.yml line ~500 (host mapping 8010)
     replicas: 2
     autoscaling:
       enabled: true
@@ -387,19 +386,19 @@ services:
       - permission-service
     env: {}
 
-  # LibreOffice-headless-Konvertierung (docs/services/rendering-service.md)
-  # ist CPU-/Speicher-lastiger als der Standard-FastAPI-Service (soffice
-  # läuft als eigener Subprozess je Konvertierung) - resources-Override statt
-  # reinem Baseline-Fallback. Horizontal skalierbar (keine lokale
-  # Zustandshaltung, jede Konvertierung bekommt ein isoliertes
-  # UserInstallation-Profil, siehe docs) - eine der P26-S2-Autoscaling-
-  # Auswahlen.
+  # LibreOffice headless conversion (docs/services/rendering-service.md)
+  # is more CPU/memory-intensive than the standard FastAPI service (soffice
+  # runs as its own subprocess per conversion) - resources override instead of
+  # a pure baseline fallback. Horizontally scalable (no local
+  # state, every conversion gets an isolated
+  # UserInstallation profile, see docs) - one of the P26-S2 autoscaling
+  # picks.
   rendering-service:
     enabled: true
     image:
       repository: dms/rendering-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~537 (Host-Mapping 8011)
+    port: 8000 # see infra/docker-compose.yml line ~537 (host mapping 8011)
     replicas: 2
     resources:
       memory:
@@ -423,21 +422,21 @@ services:
       - permission-service
     env: {}
 
-  # Tesseract-OCR (docs/services/ocr-service.md) ist CPU-lastig je
-  # Seite/Bild - resources-Override. Optionaler Dienst (Compose-Profil
-  # "ocr", laut .env.example standardmäßig aktiv) - hier wie jeder andere
-  # Service einfach über `enabled` gesteuert, kein eigenes Profil-Äquivalent
-  # in diesem Chart nötig. Horizontal skalierbar (jede Extraktion ist
-  # unabhängig), aber ohne HA-Anspruch im Leerlauf -> minReplicas 1 statt 2
-  # und PDB aus (ein Single-Replica-PDB mit minAvailable:1 würde
-  # Node-Drains blockieren, gleiches Prinzip wie registry-service/
-  # storage-service oben).
+  # Tesseract OCR (docs/services/ocr-service.md) is CPU-intensive per
+  # page/image - resources override. Optional service (Compose profile
+  # "ocr", active by default per .env.example) - here controlled simply via
+  # `enabled` like every other service, no dedicated profile equivalent
+  # needed in this chart. Horizontally scalable (each extraction is
+  # independent), but without HA requirements when idle -> minReplicas 1 instead of 2
+  # and PDB off (a single-replica PDB with minAvailable:1 would
+  # block node drains, same principle as registry-service/
+  # storage-service above).
   ocr-service:
     enabled: true
     image:
       repository: dms/ocr-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~578 (Host-Mapping 8012)
+    port: 8000 # see infra/docker-compose.yml line ~578 (host mapping 8012)
     replicas: 1
     resources:
       memory:
@@ -460,18 +459,18 @@ services:
       - permission-service
     env: {}
 
-  # Postgres-FTS/Trigram-Suche (docs/services/search-service.md) - die
-  # eigentliche Rechenlast liegt serverseitig im (gebündelten) Postgres,
-  # nicht in diesem Service selbst; trotzdem ein moderater Memory-Override
-  # für Connection-Pooling/Query-Aufbau bei paralleler Last. Klassischer
-  # horizontal skalierbarer Lesepfad (zustandslos, kein lokaler Cache lt.
-  # Konzept 2.4) - eine der P26-S2-Autoscaling-Auswahlen.
+  # Postgres FTS/trigram search (docs/services/search-service.md) - the
+  # actual compute load lies server-side in the (bundled) Postgres,
+  # not in this service itself; still a moderate memory override
+  # for connection pooling/query building under parallel load. A classic
+  # horizontally scalable read path (stateless, no local cache per
+  # concept 2.4) - one of the P26-S2 autoscaling picks.
   search-service:
     enabled: true
     image:
       repository: dms/search-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~610 (Host-Mapping 8013)
+    port: 8000 # see infra/docker-compose.yml line ~610 (host mapping 8013)
     replicas: 2
     resources:
       memory:
@@ -494,18 +493,18 @@ services:
       - rendering-service
     env: {}
 
-  # sla_poll_interval_seconds/federation_process_type_map-Defaults in
-  # settings.py decken sich bereits mit infra/docker-compose.yml (30 / "{}")
-  # - keine expliziten env-Zeilen nötig. dependsOnServices nutzt für
-  # federation-hub-service/gateway-service dieselbe dict-Form wie
-  # auth-service oben, gleicher Grund (Compose-Env-Var-Name weicht vom
-  # DMS_<KEY>_BASE_URL-Muster ab).
+  # sla_poll_interval_seconds/federation_process_type_map defaults in
+  # settings.py already match infra/docker-compose.yml (30 / "{}")
+  # - no explicit env lines needed. dependsOnServices uses the same dict
+  # form for federation-hub-service/gateway-service as
+  # auth-service above, same reason (the Compose env var name deviates from
+  # the DMS_<KEY>_BASE_URL pattern).
   workflow-service:
     enabled: true
     image:
       repository: dms/workflow-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~648 (Host-Mapping 8014)
+    port: 8000 # see infra/docker-compose.yml line ~648 (host mapping 8014)
     replicas: 1
     autoscaling:
       enabled: false
@@ -524,18 +523,18 @@ services:
         envVar: DMS_INSTALLATION_GATEWAY_BASE_URL
     env: {}
 
-  # smtp_host/smtp_port-Defaults in settings.py sind bereits "mailpit"/1025
-  # (deckungsgleich mit infra/docker-compose.yml) - keine expliziten
-  # env-Zeilen nötig. "mailpit" bleibt bis P26-S3 (baut das echte
-  # Mailpit-Deployment) ein reiner Compose-Hostname ohne k8s-Entsprechung in
-  # diesem Chart - offener Punkt, siehe Session-Report (gleiches Problem bei
-  # mail-connector unten).
+  # smtp_host/smtp_port defaults in settings.py are already "mailpit"/1025
+  # (matching infra/docker-compose.yml) - no explicit
+  # env lines needed. "mailpit" remains, until P26-S3 (builds the real
+  # Mailpit deployment), a pure Compose hostname without a k8s equivalent in
+  # this chart - an open point, see the session report (same issue for
+  # mail-connector below).
   notification-service:
     enabled: true
     image:
       repository: dms/notification-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~687 (Host-Mapping 8015)
+    port: 8000 # see infra/docker-compose.yml line ~687 (host mapping 8015)
     replicas: 1
     autoscaling:
       enabled: false
@@ -554,7 +553,7 @@ services:
     image:
       repository: dms/case-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~716 (Host-Mapping 8016)
+    port: 8000 # see infra/docker-compose.yml line ~716 (host mapping 8016)
     replicas: 1
     autoscaling:
       enabled: false
@@ -576,7 +575,7 @@ services:
     image:
       repository: dms/signature-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~750 (Host-Mapping 8017)
+    port: 8000 # see infra/docker-compose.yml line ~750 (host mapping 8017)
     replicas: 1
     autoscaling:
       enabled: false
@@ -592,23 +591,23 @@ services:
       - auth-service
     env: {}
 
-  # Bewusst KEIN interner Service dieser Installation (siehe
-  # docs/services/federation-hub-service.md, ADR 0028) - kein
-  # DMS_REGISTRY_SERVICE_BASE_URL/DMS_SELF_ADDRESS-Bedarf, kein
-  # dependsOnServices. Nur der lokalen Entwicklung halber trotzdem als
-  # Chart-Service mitgeliefert (Parität zu infra/docker-compose.yml). Die
-  # generischen dms.baseEnv-Felder (u. a. DMS_NATS_URL/
-  # DMS_REGISTRY_SERVICE_BASE_URL) werden trotzdem injiziert, da das
-  # generische Template dafür keinen Opt-out kennt - unschädlich, da
-  # BaseServiceSettings mit extra="ignore" unbekannte Felder klaglos
-  # verwirft (siehe libs/dms-common/src/dms_common/settings.py) und dieser
-  # Service sie schlicht nicht liest.
+  # Deliberately NOT an internal service of this installation (see
+  # docs/services/federation-hub-service.md, ADR 0028) - no
+  # DMS_REGISTRY_SERVICE_BASE_URL/DMS_SELF_ADDRESS need, no
+  # dependsOnServices. Still included as a chart service purely for the sake of
+  # local development (parity with infra/docker-compose.yml). The
+  # generic dms.baseEnv fields (among others DMS_NATS_URL/
+  # DMS_REGISTRY_SERVICE_BASE_URL) are still injected, since the
+  # generic template has no opt-out for that - harmless, since
+  # BaseServiceSettings with extra="ignore" drops unknown fields without
+  # complaint (see libs/dms-common/src/dms_common/settings.py) and this
+  # service simply doesn't read them.
   federation-hub-service:
     enabled: true
     image:
       repository: dms/federation-hub-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~788 (Host-Mapping 8018)
+    port: 8000 # see infra/docker-compose.yml line ~788 (host mapping 8018)
     replicas: 1
     autoscaling:
       enabled: false
@@ -625,7 +624,7 @@ services:
     image:
       repository: dms/favorite-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~805 (Host-Mapping 8019)
+    port: 8000 # see infra/docker-compose.yml line ~805 (host mapping 8019)
     replicas: 1
     autoscaling:
       enabled: false
@@ -637,21 +636,21 @@ services:
       minAvailable: 1
     env: {}
 
-  # DMS_GATEWAY_BASE_URL (settings.py-Default bereits "http://localhost:8009",
-  # deckungsgleich mit infra/docker-compose.yml) ist bewusst NICHT die
-  # interne Cluster-Adresse, sondern die von außen (z. B. aus einer
-  # Berichts-E-Mail heraus) erreichbare Gateway-Adresse - derselbe noch
-  # fehlende OCP-Route-Baustein wie bei gateway-service selbst (siehe dessen
-  # Kommentar oben). Deshalb hier bewusst NICHT über dependsOnServices (das
-  # würde die von außen nicht erreichbare interne Cluster-DNS-Adresse
-  # einsetzen) - der Compose-Paritäts-Default bleibt unverändert bestehen,
-  # bis eine echte Route existiert (offener Punkt, siehe Session-Report).
+  # DMS_GATEWAY_BASE_URL (settings.py default already "http://localhost:8009",
+  # matching infra/docker-compose.yml) is deliberately NOT the
+  # internal cluster address, but the gateway address reachable from
+  # outside (e.g. from within a report email) - the same still-
+  # missing OCP route piece as with gateway-service itself (see its
+  # comment above). Therefore deliberately NOT via dependsOnServices here (that
+  # would use the internal cluster DNS address, which is unreachable from
+  # outside) - the Compose parity default stays unchanged
+  # until a real route exists (an open point, see the session report).
   reporting-service:
     enabled: true
     image:
       repository: dms/reporting-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~827 (Host-Mapping 8020)
+    port: 8000 # see infra/docker-compose.yml line ~827 (host mapping 8020)
     replicas: 1
     autoscaling:
       enabled: false
@@ -674,7 +673,7 @@ services:
     image:
       repository: dms/archival-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~869 (Host-Mapping 8021)
+    port: 8000 # see infra/docker-compose.yml line ~869 (host mapping 8021)
     replicas: 1
     autoscaling:
       enabled: false
@@ -692,22 +691,22 @@ services:
       - case-service
       - permission-service
     env:
-      # settings.py-Default für archive_encryption_key ist None (AES-256-GCM
-      # ohne Schlüssel nicht funktionsfähig) - infra/docker-compose.yml setzt
-      # denselben Dev-/Test-Schlüssel wie hier (ADR 0029, NUR für lokale
-      # Entwicklung, siehe dortiger Kommentar zu KeyStore-Plugins).
+      # settings.py default for archive_encryption_key is None (AES-256-GCM
+      # doesn't work without a key) - infra/docker-compose.yml sets
+      # the same dev/test key as here (ADR 0029, ONLY for local
+      # development, see the comment there on KeyStore plugins).
       DMS_ARCHIVE_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
-  # dry_run_secret/query_parser_plugin_module-Defaults in settings.py decken
-  # sich bereits mit infra/docker-compose.yml - keine expliziten env-Zeilen
-  # nötig (ADR 0031: pglast-Parser-Plugin bewusst nicht mitgeliefert,
-  # GPL-Lizenz).
+  # dry_run_secret/query_parser_plugin_module defaults in settings.py already
+  # match infra/docker-compose.yml - no explicit env lines
+  # needed (ADR 0031: pglast parser plugin deliberately not bundled,
+  # GPL license).
   query-service:
     enabled: true
     image:
       repository: dms/query-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~914 (Host-Mapping 8022)
+    port: 8000 # see infra/docker-compose.yml line ~914 (host mapping 8022)
     replicas: 1
     autoscaling:
       enabled: false
@@ -730,7 +729,7 @@ services:
     image:
       repository: dms/license-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~960 (Host-Mapping 8023)
+    port: 8000 # see infra/docker-compose.yml line ~960 (host mapping 8023)
     replicas: 1
     autoscaling:
       enabled: false
@@ -746,11 +745,11 @@ services:
       - auth-service
       - permission-service
     env:
-      # BaseServiceSettings-Default für fleet_agent_api_key ist None (Fleet-
-      # Zugriff aus, 3a: "komplett optionaler, separater Baustein") -
-      # infra/docker-compose.yml aktiviert ihn dev-typisch mit demselben Wert
-      # wie config-service unten (ein fleet-management-service provisioniert
-      # beide Wege über dieselbe Installation).
+      # BaseServiceSettings default for fleet_agent_api_key is None (fleet
+      # access off, 3a: "fully optional, separate building block") -
+      # infra/docker-compose.yml enables it dev-typically with the same value
+      # as config-service below (a fleet-management-service provisions
+      # both paths via the same installation).
       DMS_FLEET_AGENT_API_KEY: "dev-fleet-agent-key"
 
   plugin-orchestration-service:
@@ -758,7 +757,7 @@ services:
     image:
       repository: dms/plugin-orchestration-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1010 (Host-Mapping 8024)
+    port: 8000 # see infra/docker-compose.yml line ~1010 (host mapping 8024)
     replicas: 1
     autoscaling:
       enabled: false
@@ -778,7 +777,7 @@ services:
     image:
       repository: dms/monitoring-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1040 (Host-Mapping 8026)
+    port: 8000 # see infra/docker-compose.yml line ~1040 (host mapping 8026)
     replicas: 1
     autoscaling:
       enabled: false
@@ -793,17 +792,17 @@ services:
       - permission-service
     env: {}
 
-  # Reiner Protokoll-Übersetzer ohne eigenes Postgres-/NATS-Schema (3.3,
-  # P12-S1) - die generischen dms.baseEnv-Felder DMS_POSTGRES_DSN/
-  # DMS_NATS_URL werden trotzdem injiziert (kein Opt-out im generischen
-  # Template, siehe federation-hub-service-Kommentar oben) und schlicht
-  # ignoriert (settings.py dieses Service kennt diese Felder gar nicht).
+  # Pure protocol translator with no own Postgres/NATS schema (3.3,
+  # P12-S1) - the generic dms.baseEnv fields DMS_POSTGRES_DSN/
+  # DMS_NATS_URL are still injected (no opt-out in the generic
+  # template, see the federation-hub-service comment above) and simply
+  # ignored (this service's settings.py doesn't know these fields at all).
   webdav-connector:
     enabled: true
     image:
       repository: dms/webdav-connector
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1073 (Host-Mapping 8027)
+    port: 8000 # see infra/docker-compose.yml line ~1073 (host mapping 8027)
     replicas: 1
     autoscaling:
       enabled: false
@@ -819,14 +818,14 @@ services:
       - auth-service
     env: {}
 
-  # Gleiches Muster wie webdav-connector oben (3.3, P12-S4): reiner
-  # Übersetzer, kein eigenes Postgres-/NATS-Schema.
+  # Same pattern as webdav-connector above (3.3, P12-S4): a pure
+  # translator, no own Postgres/NATS schema.
   cmis-connector:
     enabled: true
     image:
       repository: dms/cmis-connector
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1103 (Host-Mapping 8030)
+    port: 8000 # see infra/docker-compose.yml line ~1103 (host mapping 8030)
     replicas: 1
     autoscaling:
       enabled: false
@@ -847,7 +846,7 @@ services:
     image:
       repository: dms/mail-connector
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1134 (Host-Mapping 8033)
+    port: 8000 # see infra/docker-compose.yml line ~1134 (host mapping 8033)
     replicas: 1
     autoscaling:
       enabled: false
@@ -864,14 +863,14 @@ services:
       - case-service
       - object-type-service
     env:
-      # settings.py-Default für pop3_host ist "localhost" (funktioniert nur
-      # gegen einen Host-lokalen Mailserver) - infra/docker-compose.yml
-      # überschreibt auf den Compose-Hostnamen "mailpit". smtp_host/
-      # pop3_port/-_username/-_password/poststelle_role-Defaults in
-      # settings.py decken sich bereits mit infra/docker-compose.yml, keine
-      # weiteren Zeilen nötig. "mailpit" bleibt bis P26-S3 (baut das echte
-      # Mailpit-Deployment) ein reiner Compose-Hostname ohne k8s-Entsprechung
-      # in diesem Chart (offener Punkt, siehe Session-Report).
+      # settings.py default for pop3_host is "localhost" (only works
+      # against a host-local mail server) - infra/docker-compose.yml
+      # overrides it to the Compose hostname "mailpit". smtp_host/
+      # pop3_port/-_username/-_password/poststelle_role defaults in
+      # settings.py already match infra/docker-compose.yml, no
+      # further lines needed. "mailpit" remains, until P26-S3 (builds the real
+      # Mailpit deployment), a pure Compose hostname without a k8s equivalent
+      # in this chart (an open point, see the session report).
       DMS_POP3_HOST: "mailpit"
 
   migration-service:
@@ -879,7 +878,7 @@ services:
     image:
       repository: dms/migration-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1186 (Host-Mapping 8028)
+    port: 8000 # see infra/docker-compose.yml line ~1186 (host mapping 8028)
     replicas: 1
     autoscaling:
       enabled: false
@@ -901,7 +900,7 @@ services:
     image:
       repository: dms/config-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1222 (Host-Mapping 8029)
+    port: 8000 # see infra/docker-compose.yml line ~1222 (host mapping 8029)
     replicas: 1
     autoscaling:
       enabled: false
@@ -918,21 +917,21 @@ services:
       - monitoring-service
       - auth-service
     env:
-      # Siehe license-service oben, derselbe Wert/dieselbe Begründung.
+      # See license-service above, same value/same rationale.
       DMS_FLEET_AGENT_API_KEY: "dev-fleet-agent-key"
 
-  # Bewusst KEIN interner Service einer einzelnen Installation (3a, ADR 0028
-  # analog federation-hub-service) - kein DMS_INSTALLATION_ID/
-  # DMS_REGISTRY_SERVICE_BASE_URL-Bedarf, kein dependsOnServices, nur der
-  # lokalen Entwicklung halber mitgeliefert. Gleiches "generische
-  # dms.baseEnv-Felder werden dennoch injiziert und ignoriert"-Prinzip wie
-  # bei federation-hub-service oben.
+  # Deliberately NOT an internal service of a single installation (3a, ADR 0028
+  # analogous to federation-hub-service) - no DMS_INSTALLATION_ID/
+  # DMS_REGISTRY_SERVICE_BASE_URL need, no dependsOnServices, included purely
+  # for the sake of local development. Same "generic
+  # dms.baseEnv fields are still injected and ignored" principle as
+  # with federation-hub-service above.
   fleet-management-service:
     enabled: true
     image:
       repository: dms/fleet-management-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1269 (Host-Mapping 8031)
+    port: 8000 # see infra/docker-compose.yml line ~1269 (host mapping 8031)
     replicas: 1
     autoscaling:
       enabled: false
@@ -949,7 +948,7 @@ services:
     image:
       repository: dms/teamspace-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1289 (Host-Mapping 8032)
+    port: 8000 # see infra/docker-compose.yml line ~1289 (host mapping 8032)
     replicas: 1
     autoscaling:
       enabled: false
@@ -969,7 +968,7 @@ services:
     image:
       repository: dms/object-type-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1355 (Host-Mapping 8007)
+    port: 8000 # see infra/docker-compose.yml line ~1355 (host mapping 8007)
     replicas: 1
     autoscaling:
       enabled: false
@@ -986,7 +985,7 @@ services:
     image:
       repository: dms/folder-service
       tag: latest
-    port: 8000 # siehe infra/docker-compose.yml Zeile ~1374 (Host-Mapping 8008)
+    port: 8000 # see infra/docker-compose.yml line ~1374 (host mapping 8008)
     replicas: 1
     autoscaling:
       enabled: false
@@ -1002,91 +1001,90 @@ services:
     env: {}
 
   # ---------------------------------------------------------------------
-  # Ab hier: die 6 Next.js-Frontend-Apps aus infra/docker-compose.yml
-  # (P26-S5, Zeilen ~1448-1543, apps/<name>/) — struktureller Unterschied zu
-  # ALLEN 32 Services oben, siehe ADR 0102 für die volle Begründung:
+  # From here on: the 6 Next.js frontend apps from infra/docker-compose.yml
+  # (P26-S5, lines ~1448-1543, apps/<name>/) — a structural difference from
+  # ALL 32 services above, see ADR 0102 for the full rationale:
   #
-  # 1. Statisch exportierte SPA (ADR 0006, next.config.mjs `output:
-  #    "export"`), ausgeliefert über nginx (apps/<name>/Dockerfile, zweite
-  #    Stage `nginx:1.27-alpine`) — es gibt KEINEN Node-Prozess zur
-  #    Laufzeit, der eine Umgebungsvariable lesen könnte. `NEXT_PUBLIC_*`-
-  #    Variablen (Gateway-Adresse u. ä.) werden per Dockerfile-`ARG`/`ENV`
-  #    VOR `RUN npm run build` in den JS-Bundle eingebrannt — überschreibbar
-  #    ausschließlich als Docker-`--build-arg`, NIE als Container-Env zur
-  #    Laufzeit. `env:` bleibt deshalb bei allen 6 Einträgen unten bewusst
-  #    LEER: ein hier gesetzter `NEXT_PUBLIC_*`-Wert würde vom bereits
-  #    fertig gebauten Bundle schlicht ignoriert — ein Helm-`fail`-Guard
-  #    (`staticFrontend: true`, siehe templates/deployment.yaml) bricht
-  #    `helm template`/`lint` deshalb hart ab, statt das still wirkungslos
-  #    zu rendern.
-  #    KONSEQUENZ für den produktiven Betrieb dieses Charts: `image.tag`
-  #    unten ist bei diesen 6 Einträgen NICHT nur eine Versionsnummer wie
-  #    bei den FastAPI-Services, sondern faktisch auch ein
-  #    Ziel-Umgebungs-Bezeichner (z. B. "prod-eu-2026-08" statt "latest") —
-  #    jede Zielumgebung mit einer anderen öffentlichen Gateway-Adresse
-  #    braucht ein EIGENES, vorab mit dem passenden `--build-arg
-  #    NEXT_PUBLIC_GATEWAY_BASE_URL=...` gebautes Image, BEVOR dieses Chart
-  #    es referenziert. Dieses Chart selbst baut keine Images und kann
-  #    NEXT_PUBLIC_*-Werte nicht nachträglich beeinflussen (reale, keine
-  #    zufällige Limitation von Next.js Static Export — siehe ADR 0102).
-  # 2. `healthCheckPath: "/"` statt des generischen "/healthz"-Defaults:
-  #    nginx liefert hier nur statische Dateien aus (apps/<name>/
-  #    nginx.conf: `try_files $uri $uri.html $uri/ =404;`) — kein
-  #    FastAPI-Health-Endpunkt existiert. "/" liefert bereits vorhandenes
-  #    `index.html` mit 200 zurück (reiner Datei-Response, kein
-  #    Client-JS-Ausführungsbedarf) — ausreichend/passend für
-  #    Liveness/Readiness einer reinen statischen SPA.
-  # 3. `port: 80` statt 8000 (nginx `EXPOSE 80`, siehe Dockerfile) —
-  #    templates/service.yaml setzt den Kubernetes-Service-Port trotzdem
-  #    einheitlich auf 8000 für JEDEN Eintrag (targetPort verweist per Namen
-  #    auf den tatsächlichen Container-Port), das bleibt hier unverändert
-  #    korrekt.
-  # 4. `ingress:` (templates/ingress.yaml, ADR 0102) — ein eigener
-  #    Hostname je App (Platzhalter unten, je Installation zu
-  #    überschreiben), NICHT ein gemeinsamer Host mit Pfad-Präfix: keine der
-  #    6 next.config.mjs setzt `basePath`/`assetPrefix`, ihre
-  #    `/_next/...`-Assets sind root-relativ und würden sich unter
-  #    Pfad-Präfixen gegenseitig überschreiben.
-  # 5. Alle generischen `dms.baseEnv`-Felder (DMS_POSTGRES_DSN/DMS_NATS_URL/
-  #    DMS_REGISTRY_SERVICE_BASE_URL/...) werden trotzdem injiziert (kein
-  #    Opt-out im generischen Template, gleiches bereits etabliertes Prinzip
-  #    wie bei federation-hub-service/webdav-connector oben) — unschädlich,
-  #    nginx liest sie nicht.
+  # 1. Statically exported SPA (ADR 0006, next.config.mjs `output:
+  #    "export"`), served via nginx (apps/<name>/Dockerfile, second
+  #    stage `nginx:1.27-alpine`) — there is NO Node process at
+  #    runtime that could read an environment variable. `NEXT_PUBLIC_*`
+  #    variables (gateway address etc.) are baked into the JS bundle via
+  #    Dockerfile `ARG`/`ENV` BEFORE `RUN npm run build` — overridable
+  #    exclusively as a Docker `--build-arg`, NEVER as a container env at
+  #    runtime. `env:` therefore stays deliberately
+  #    EMPTY on all 6 entries below: a `NEXT_PUBLIC_*` value set here
+  #    would simply be ignored by the already-built bundle — a Helm `fail`
+  #    guard (`staticFrontend: true`, see templates/deployment.yaml) hard-
+  #    aborts `helm template`/`lint` because of this, instead of silently
+  #    rendering it without effect.
+  #    CONSEQUENCE for productive operation of this chart: `image.tag`
+  #    below is, for these 6 entries, NOT just a version number like
+  #    for the FastAPI services, but effectively also a
+  #    target-environment identifier (e.g. "prod-eu-2026-08" instead of "latest") —
+  #    every target environment with a different public gateway address
+  #    needs its OWN image, built beforehand with the matching `--build-arg
+  #    NEXT_PUBLIC_GATEWAY_BASE_URL=...`, BEFORE this chart
+  #    references it. This chart itself builds no images and cannot
+  #    influence NEXT_PUBLIC_* values after the fact (a real, not a
+  #    coincidental, limitation of Next.js Static Export — see ADR 0102).
+  # 2. `healthCheckPath: "/"` instead of the generic "/healthz" default:
+  #    nginx here only serves static files (apps/<name>/
+  #    nginx.conf: `try_files $uri $uri.html $uri/ =404;`) — no
+  #    FastAPI health endpoint exists. "/" returns the already-present
+  #    `index.html` with 200 (a pure file response, no
+  #    client-JS execution needed) — sufficient/appropriate for
+  #    liveness/readiness of a pure static SPA.
+  # 3. `port: 80` instead of 8000 (nginx `EXPOSE 80`, see the Dockerfile) —
+  #    templates/service.yaml still sets the Kubernetes service port
+  #    uniformly to 8000 for EVERY entry (targetPort refers by name
+  #    to the actual container port), which remains correct here unchanged.
+  # 4. `ingress:` (templates/ingress.yaml, ADR 0102) — a dedicated
+  #    hostname per app (a placeholder below, to be overridden per
+  #    installation), NOT a shared host with a path prefix: none of the
+  #    6 next.config.mjs set `basePath`/`assetPrefix`, their
+  #    `/_next/...` assets are root-relative and would overwrite each other
+  #    under path prefixes.
+  # 5. All generic `dms.baseEnv` fields (DMS_POSTGRES_DSN/DMS_NATS_URL/
+  #    DMS_REGISTRY_SERVICE_BASE_URL/...) are still injected (no
+  #    opt-out in the generic template, the same already-established principle
+  #    as with federation-hub-service/webdav-connector above) — harmless,
+  #    nginx doesn't read them.
   #
-  # office-addin ist eine Ausnahme unter den 6 Apps (siehe deren eigener
-  # Kommentar unten): docs/services/office-addin.md dokumentiert eine
-  # HTTPS-Pflicht (Office lädt Add-in-Webinhalte grundsätzlich nur über
-  # HTTPS) — `ingress.tls.enabled: true` ist deshalb dort (anders als bei
-  # den übrigen 5) der Default. Zusätzlich enthält `apps/office-addin/
-  # manifest.xml` selbst fest eingebrannte `https://localhost:3006`-URLs
-  # (IconUrl/SupportUrl/AppDomain) — eine noch tiefere Baustufe als die
-  # NEXT_PUBLIC_*-Build-Args (nicht mal ein Build-Arg, sondern eine im
-  # Quellcode/Image liegende XML-Datei) — dieses Chart kann sie ebenso
-  # wenig zur Deploy-Zeit umschreiben, siehe ADR 0102 "Konsequenzen".
+  # office-addin is an exception among the 6 apps (see its own
+  # comment below): docs/services/office-addin.md documents an
+  # HTTPS requirement (Office only ever loads add-in web content over
+  # HTTPS) — `ingress.tls.enabled: true` is therefore the default there (unlike
+  # the other 5). Additionally, `apps/office-addin/
+  # manifest.xml` itself contains hardcoded `https://localhost:3006` URLs
+  # (IconUrl/SupportUrl/AppDomain) — an even deeper baking stage than the
+  # NEXT_PUBLIC_* build args (not even a build arg, but an
+  # XML file living in the source code/image) — this chart can just as
+  # little rewrite it at deploy time, see ADR 0102 "Consequences".
   # ---------------------------------------------------------------------
   user-ui:
     enabled: true
     image:
       repository: dms/user-ui
-      tag: latest # siehe Blockkommentar oben — produktiv faktisch ein Umgebungs-Tag
-    port: 80 # nginx (apps/user-ui/Dockerfile EXPOSE 80), NICHT 8000 wie die FastAPI-Services
+      tag: latest # see the block comment above — effectively an environment tag in production
+    port: 80 # nginx (apps/user-ui/Dockerfile EXPOSE 80), NOT 8000 like the FastAPI services
     replicas: 2
     staticFrontend: true
     healthCheckPath: "/"
-    # kein eigener resources-Block -> resources.baseline-Fallback (ausreichend
-    # für eine reine statische Datei-Auslieferung über nginx).
+    # no own resources block -> resources.baseline fallback (sufficient
+    # for pure static file serving via nginx).
     autoscaling:
       enabled: false
       minReplicas: 2
       maxReplicas: 4
       targetCPUUtilizationPercentage: 75
     podDisruptionBudget:
-      enabled: true # primäre Endnutzer-App -> HA-Anspruch, analog gateway-service
+      enabled: true # primary end-user app -> HA requirement, analogous to gateway-service
       minAvailable: 1
     ingress:
       enabled: true
       className: ""
-      host: "user-ui.dms.local" # Platzhalter, je Installation überschreiben (siehe Blockkommentar oben)
+      host: "user-ui.dms.local" # placeholder, override per installation (see the block comment above)
       path: /
       pathType: Prefix
       tls:
@@ -1124,10 +1122,10 @@ services:
       annotations: {}
     env: {}
 
-  # Spezialisiertes Admin-/Fachwerkzeug (BPMN-Prozessdesigner), geringere
-  # erwartete Nutzerzahl/Parallellast als user-ui/admin-ui -> ein Replica
-  # ohne PDB, analog registry-service oben (Single-Replica-PDB mit
-  # minAvailable:1 würde Node-Drains blockieren).
+  # Specialized admin/business tool (BPMN process designer), lower
+  # expected user count/concurrent load than user-ui/admin-ui -> one replica
+  # without a PDB, analogous to registry-service above (a single-replica PDB with
+  # minAvailable:1 would block node drains).
   process-designer:
     enabled: true
     image:
@@ -1215,17 +1213,17 @@ services:
       annotations: {}
     env: {}
 
-  # Ausnahme unter den 6 Frontend-Apps, siehe Blockkommentar oben:
-  # HTTPS-Pflicht (docs/services/office-addin.md, Office lädt
-  # Add-in-Webinhalte nur über HTTPS) -> tls.enabled Default hier bewusst
-  # true (bei den übrigen 5 Apps false). `tls.secretName` bleibt trotzdem
-  # leer (Platzhalter) — ein echtes TLS-Secret für den gewählten
-  # ingress.host bereitzustellen (z. B. via cert-manager, über
-  # `annotations:` anzubinden) ist ein Vorbereitungsschritt je Installation,
-  # kein Bestandteil dieses Charts. `manifest.xml`/`assets/` sind kein
-  # Next.js-Build-Ausgang (siehe Dockerfile COPY-Zeilen) — trotzdem
-  # weiterhin über denselben nginx-Container ausgeliefert, kein separater
-  # Service/Port nötig.
+  # An exception among the 6 frontend apps, see the block comment above:
+  # HTTPS requirement (docs/services/office-addin.md, Office loads
+  # add-in web content only over HTTPS) -> tls.enabled default here deliberately
+  # true (false for the other 5 apps). `tls.secretName` still stays
+  # empty (a placeholder) — providing a real TLS secret for the chosen
+  # ingress.host (e.g. via cert-manager, wired in via
+  # `annotations:`) is a preparation step per installation,
+  # not part of this chart. `manifest.xml`/`assets/` aren't a
+  # Next.js build output (see the Dockerfile COPY lines) — still
+  # served via the same nginx container, no separate
+  # service/port needed.
   office-addin:
     enabled: true
     image:
@@ -1250,66 +1248,66 @@ services:
       path: /
       pathType: Prefix
       tls:
-        enabled: true # siehe Kommentar oben — HTTPS-Pflicht für Office-Add-ins
-        secretName: "office-addin-tls" # Platzhalter-Name, Secret muss vor `helm install` vorhanden sein
+        enabled: true # see the comment above — HTTPS requirement for Office add-ins
+        secretName: "office-addin-tls" # placeholder name, the secret must exist before `helm install`
       annotations: {}
     env: {}
 
 # ---------------------------------------------------------------------------
-# Zustandsbehaftete Infrastruktur (P26-S3): postgresql / keycloak / minio (NUR
-# diese drei, explizite Nutzervorgabe) bekommen einen enabled/external-
-# Umschalter, damit eine Installation wahlweise die im Chart gebündelte
-# Instanz nutzt ODER auf eine bereits vorhandene externe Instanz zeigt (z. B.
-# verwaltete RDS-Postgres, zentrales Keycloak, externes S3/MinIO). NATS und
-# Redis bleiben bewusst bundled-only OHNE diesen Umschalter (explizite
-# Nutzerentscheidung, siehe ADR 0099) — für sie unten nur Verbindungsdaten der
-# gebündelten Instanz.
+# Stateful infrastructure (P26-S3): postgresql / keycloak / minio (ONLY
+# these three, an explicit user requirement) get an enabled/external
+# toggle, so that an installation can either use the instance bundled with the
+# chart OR point to an already-existing external instance (e.g.
+# managed RDS Postgres, a central Keycloak, external S3/MinIO). NATS and
+# Redis deliberately stay bundled-only WITHOUT this toggle (an explicit
+# user decision, see ADR 0099) — below, only connection data for the
+# bundled instance for those.
 #
-# Reale Deployment+Service(+PVC)-Manifeste seit dieser Session in
+# Real Deployment+Service(+PVC) manifests since this session in
 # templates/postgresql.yaml / templates/keycloak.yaml / templates/minio.yaml /
-# templates/nats.yaml / templates/redis.yaml — eigene Templates statt des
-# generischen services:-Mechanismus oben, weil diese fünf strukturell zu
-# verschieden sind (Volumes, andere Image-Quellen/Healthchecks/Ports,
-# Secret-Verweise statt reiner Env-Werte). Ressourcennamen sind exakt
+# templates/nats.yaml / templates/redis.yaml — dedicated templates instead of the
+# generic services: mechanism above, because these five are structurally too
+# different (volumes, different image sources/healthchecks/ports,
+# secret references instead of plain env values). Resource names are exactly
 # "<fullname>-postgresql" / "<fullname>-keycloak" / "<fullname>-minio" /
-# "<fullname>-nats" / "<fullname>-redis" (via dms.serviceFullname, wie beim
-# generischen Mechanismus) — damit funktionieren die seit P26-S1 bestehenden
-# Helper (dms.postgresDsn/dms.keycloakBaseUrl/dms.natsUrl) sowie die in
-# dieser Session neuen (dms.minioEndpoint/dms.redisUrl) unverändert.
+# "<fullname>-nats" / "<fullname>-redis" (via dms.serviceFullname, like the
+# generic mechanism) — so the helpers that have existed since P26-S1
+# (dms.postgresDsn/dms.keycloakBaseUrl/dms.natsUrl) as well as the ones new in
+# this session (dms.minioEndpoint/dms.redisUrl) work unchanged.
 #
-# Secrets (P26-S3, siehe ADR 0100 "existingSecret-if-set-else-generate"):
-# jede Komponente mit einem Passwort bekommt ein `existingSecret`-Feld
-# (Standard-Helm-Konvention, siehe z. B. Bitnami-Charts). Leer (Default) =
-# templates/secrets.yaml generiert ein Secret aus dem Klartext-
-# `*.auth.password`/`*.admin.password`-Wert unten (Key-Namen siehe
-# templates/_helpers.tpl `dms.*SecretKey`) — reiner Dev-/Test-Komfort-Default
-# (Parität zum bestehenden Compose-Dev-Setup, wie schon seit P26-S1
-# dokumentiert), NICHT für Produktion gedacht. Gesetzt = dieses bereits
-# vorhandene Secret referenzieren, `*.auth.password` wird dann ignoriert —
-# produktiver Pfad: entweder `--set postgresql.existingSecret=...` (+ eigene,
-# separate values-Datei mit echten Passwörtern NICHT im Repo) oder ein vorab
-# per External-Secrets-Operator/Sealed-Secrets/manuell angelegtes Secret.
-# Die Deployments unten konsumieren das Passwort ausschließlich über
-# `valueFrom.secretKeyRef`, nie mehr als literalen Env-Wert.
+# Secrets (P26-S3, see ADR 0100 "existingSecret-if-set-else-generate"):
+# every component with a password gets an `existingSecret` field
+# (a standard Helm convention, see e.g. Bitnami charts). Empty (default) =
+# templates/secrets.yaml generates a secret from the plaintext
+# `*.auth.password`/`*.admin.password` value below (for key names see
+# templates/_helpers.tpl `dms.*SecretKey`) — a pure dev/test convenience default
+# (parity with the existing Compose dev setup, as already
+# documented since P26-S1), NOT intended for production. Set = reference this
+# already-existing secret, `*.auth.password` is then ignored —
+# the production path: either `--set postgresql.existingSecret=...` (+ your own,
+# separate values file with real passwords NOT in the repo) or a secret
+# created beforehand via External Secrets Operator/Sealed Secrets/manually.
+# The deployments below consume the password exclusively via
+# `valueFrom.secretKeyRef`, never as a literal env value.
 # ---------------------------------------------------------------------------
 postgresql:
   enabled: true
   image:
     repository: postgres
     tag: 16-alpine
-  # Siehe Secrets-Erklärung oben — leer = generiertes Secret aus
-  # auth.password, gesetzt = dieses bereits vorhandene Secret referenzieren
-  # (erwartet Key "postgres-password", siehe dms.postgresSecretKey).
+  # See the secrets explanation above — empty = a generated secret from
+  # auth.password, set = reference this already-existing secret
+  # (expects key "postgres-password", see dms.postgresSecretKey).
   existingSecret: ""
   auth:
-    # Dev-Default (Parität infra/docker-compose.yml POSTGRES_USER/_PASSWORD/_DB)
-    # - nur wirksam, solange existingSecret leer ist (siehe oben).
+    # Dev default (parity with infra/docker-compose.yml POSTGRES_USER/_PASSWORD/_DB)
+    # - only effective as long as existingSecret is empty (see above).
     username: dms
     password: dms_dev_only
     database: dms
   persistence:
     size: 5Gi
-    # leer = Cluster-Default-StorageClass
+    # empty = the cluster's default StorageClass
     storageClassName: ""
   resources:
     memory:
@@ -1323,9 +1321,9 @@ postgresql:
     port: 5432
     database: ""
     username: ""
-    # Pflichtfeld, sobald enabled=false — Name eines bereits vorhandenen
-    # Secrets mit Key "postgres-password" (siehe dms.postgresSecretName in
-    # templates/_helpers.tpl). Kein Klartext-Passwort-Feld hier (ADR 0100).
+    # Required field once enabled=false — name of an already-existing
+    # secret with key "postgres-password" (see dms.postgresSecretName in
+    # templates/_helpers.tpl). No plaintext password field here (ADR 0100).
     existingSecret: ""
 
 keycloak:
@@ -1335,8 +1333,8 @@ keycloak:
     tag: "25.0"
   existingSecret: ""
   admin:
-    # Dev-Default (Parität KEYCLOAK_ADMIN/_PASSWORD) - siehe Secrets-Erklärung
-    # oben.
+    # Dev default (parity with KEYCLOAK_ADMIN/_PASSWORD) - see the secrets
+    # explanation above.
     username: admin
     password: admin_dev_only
   resources:
@@ -1346,16 +1344,16 @@ keycloak:
     cpu:
       requests: 250m
       limits: 1000m
-  # KEIN eigener PersistentVolumeClaim (anders als Postgres/MinIO/NATS unten,
-  # bewusste P26-S3-Entscheidung): KC_DB=postgres (siehe
-  # infra/docker-compose.yml, Keycloak nutzt dieselbe Postgres-Instanz) - der
-  # gesamte fachliche Zustand (Realms/Clients/Users/Sessions) liegt im
-  # (bundled oder externen) Postgres, nicht in Keycloak selbst. Das in
-  # infra/docker-compose.yml gemountete keycloak-data-Volume
-  # (/opt/keycloak/data) enthält bei postgres-basiertem Betrieb nur
-  # Provider-/Theme-Erweiterungen und Transaktionslogs, keine fachlichen
-  # Daten - unschädlich verlierbar bei einem Pod-Neustart in dieser
-  # Single-Replica-v1-Bereitstellung.
+  # NO own PersistentVolumeClaim (unlike Postgres/MinIO/NATS below,
+  # a deliberate P26-S3 decision): KC_DB=postgres (see
+  # infra/docker-compose.yml, Keycloak uses the same Postgres instance) - the
+  # entire business state (realms/clients/users/sessions) lives in the
+  # (bundled or external) Postgres, not in Keycloak itself. The
+  # keycloak-data volume mounted in infra/docker-compose.yml
+  # (/opt/keycloak/data) contains, under Postgres-based operation, only
+  # provider/theme extensions and transaction logs, no business
+  # data - harmlessly losable on a pod restart in this
+  # single-replica v1 deployment.
   external:
     baseUrl: ""
     realm: "dms"
@@ -1367,8 +1365,8 @@ minio:
     tag: RELEASE.2024-06-13T22-53-53Z
   existingSecret: ""
   auth:
-    # Dev-Default (Parität MINIO_ROOT_USER/_PASSWORD) - siehe Secrets-Erklärung
-    # oben.
+    # Dev default (parity with MINIO_ROOT_USER/_PASSWORD) - see the secrets
+    # explanation above.
     rootUser: dms_minio
     rootPassword: dms_minio_dev_only
   persistence:
@@ -1384,14 +1382,14 @@ minio:
   external:
     endpoint: ""
     bucket: ""
-    # Pflichtfeld, sobald enabled=false — Name eines bereits vorhandenen
-    # Secrets mit Key "root-password" (siehe dms.minioSecretName). Kein
-    # Klartext-Passwort-Feld hier (ADR 0100).
+    # Required field once enabled=false — name of an already-existing
+    # secret with key "root-password" (see dms.minioSecretName). No
+    # plaintext password field here (ADR 0100).
     existingSecret: ""
 
-# Bundled-only, kein enabled/external-Umschalter (explizite Nutzerentscheidung,
-# siehe ADR 0099). Kein Passwort/Secret nötig — NATS läuft hier ohne Auth,
-# analog infra/docker-compose.yml.
+# Bundled-only, no enabled/external toggle (an explicit user decision,
+# see ADR 0099). No password/secret needed — NATS runs here without auth,
+# analogous to infra/docker-compose.yml.
 nats:
   image:
     repository: nats
@@ -1399,10 +1397,10 @@ nats:
   port: 4222
   monitorPort: 8222
   persistence:
-    # JetStream (-js -sd /data, siehe infra/docker-compose.yml) persistiert
-    # Streams/Consumer-State auf Platte - anders als Redis unten ist ein
-    # Neustart-Datenverlust hier fachlich relevant (Event-Bus, Konzept 3.4),
-    # deshalb PVC.
+    # JetStream (-js -sd /data, see infra/docker-compose.yml) persists
+    # streams/consumer state to disk - unlike Redis below, data loss on
+    # restart is functionally relevant here (event bus, concept 3.4),
+    # hence a PVC.
     size: 5Gi
     storageClassName: ""
   resources:
@@ -1413,22 +1411,22 @@ nats:
       requests: 100m
       limits: 500m
 
-# Bundled-only, kein enabled/external-Umschalter (explizite Nutzerentscheidung,
-# siehe ADR 0099). Kein Passwort/Secret nötig — Redis läuft hier ohne Auth,
-# analog infra/docker-compose.yml.
+# Bundled-only, no enabled/external toggle (an explicit user decision,
+# see ADR 0099). No password/secret needed — Redis runs here without auth,
+# analogous to infra/docker-compose.yml.
 redis:
   image:
     repository: redis
     tag: 7-alpine
   port: 6379
-  # KEIN PersistentVolumeClaim (anders als Postgres/MinIO/NATS oben): dient
-  # ausschließlich als Rate-Limit-Store für gateway-service (ADR 0097,
-  # Sorted-Set-Sliding-Window mit TTL je Client-Key) - rein transiente Daten,
-  # `--save ""`/kein AOF bereits in infra/docker-compose.yml bewusst
-  # abgeschaltet (siehe dortiger Kommentar/ADR 0097 "Kein
-  # Redis-Persistenz-Volume"). Ein Neustart setzt das Limit unschädlich
-  # zurück - kein fachlicher Grund für Festplatten-I/O, gleiche Begründung
-  # hier 1:1 übernommen.
+  # NO PersistentVolumeClaim (unlike Postgres/MinIO/NATS above): serves
+  # exclusively as the rate-limit store for gateway-service (ADR 0097,
+  # a sorted-set sliding window with TTL per client key) - purely transient data,
+  # `--save ""`/no AOF is already deliberately disabled in
+  # infra/docker-compose.yml (see the comment there/ADR 0097 "No
+  # Redis persistence volume"). A restart harmlessly resets the limit
+  # - no functional reason for disk I/O, the same rationale
+  # carried over 1:1 here.
   resources:
     memory:
       requests: 64Mi
@@ -1438,35 +1436,35 @@ redis:
       limits: 200m
 
 # ---------------------------------------------------------------------------
-# storageService.targets — natives YAML-Äquivalent zu STORAGE_SERVICE_TARGETS
-# (siehe services/storage-service/src/storage_service/settings.py,
-# BackendTargetConfig) statt eines einzelnen JSON-Freitext-Strings. Feldnamen
-# sind 1:1 aus BackendTargetConfig übernommen. Wird vom generischen
-# Deployment-Template (nur für Services mit `storageTargetsEnv: true`, siehe
-# storage-service oben) zur Laufzeit per `toJson` in die vom Service
-# tatsächlich gelesene Umgebungsvariable serialisiert.
+# storageService.targets — a native YAML equivalent of STORAGE_SERVICE_TARGETS
+# (see services/storage-service/src/storage_service/settings.py,
+# BackendTargetConfig) instead of a single JSON free-text string. Field names
+# are taken 1:1 from BackendTargetConfig. Serialized by the generic
+# deployment template (only for services with `storageTargetsEnv: true`, see
+# storage-service above) at render time via `toJson` into the environment
+# variable actually read by the service.
 #
-# WICHTIG (Abweichung vom Session-Briefing): die vom Service gelesene
-# Variable heißt `DMS_TARGETS`, NICHT `STORAGE_SERVICE_TARGETS` —
-# `STORAGE_SERVICE_TARGETS` ist nur der Name der HOST-seitigen
-# Compose-.env-Variable, die den Wert von DMS_TARGETS befüllt (siehe
+# IMPORTANT (a deviation from the session briefing): the variable read by
+# the service is called `DMS_TARGETS`, NOT `STORAGE_SERVICE_TARGETS` —
+# `STORAGE_SERVICE_TARGETS` is only the name of the HOST-side
+# Compose .env variable that populates the value of DMS_TARGETS (see
 # `DMS_TARGETS: ${STORAGE_SERVICE_TARGETS:-...}` in infra/docker-compose.yml).
-# `Settings` nutzt env_prefix "DMS_" + Feldname `targets` -> `DMS_TARGETS` ist
-# der einzige Name, den storage-service im Container tatsächlich liest.
+# `Settings` uses env_prefix "DMS_" + field name `targets` -> `DMS_TARGETS` is
+# the only name storage-service actually reads inside the container.
 #
-# endpoint_url des secondary-s3-Ziels (P26-S3): "__DMS_MINIO_ENDPOINT__" ist
-# ein Platzhalter, den dms.storageServiceTargetsEnv (templates/_helpers.tpl)
-# beim Rendern per Text-Replace durch dms.minioEndpoint ersetzt (respektiert
-# minio.enabled bundled/external) — VORHER (P26-S1/S2) stand hier der reine
-# Compose-Hostname "http://minio:9000" fest eingebrannt, der in diesem Chart
-# gar nicht existiert(e); erst der reale templates/minio.yaml-Service dieser
-# Session hat den Bug sichtbar gemacht. access_key/secret_key bleiben
-# bewusst weiterhin Klartext-Dev-Defaults (deckungsgleich mit
-# minio.auth.rootUser/-rootPassword oben) — eine Secret-Anbindung dieser
-# storage-service-spezifischen Ziel-Liste ist ein offener Punkt für eine
-# spätere Session (siehe P26-S3-Session-Report), diese Session hat nur den
-# Postgres-/Keycloak-/MinIO-Admin-Secret-Pfad selbst gebaut (siehe ADR 0100),
-# nicht jeden nachgelagerten Konsumenten von MinIO-Zugangsdaten.
+# endpoint_url of the secondary-s3 target (P26-S3): "__DMS_MINIO_ENDPOINT__" is
+# a placeholder that dms.storageServiceTargetsEnv (templates/_helpers.tpl)
+# replaces via text substitution with dms.minioEndpoint at render time (respects
+# minio.enabled bundled/external) — BEFORE (P26-S1/S2), this held the plain
+# Compose hostname "http://minio:9000" hardcoded, which didn't
+# even exist in this chart; only the real templates/minio.yaml service from this
+# session made the bug visible. access_key/secret_key deliberately remain
+# plaintext dev defaults for now (matching
+# minio.auth.rootUser/-rootPassword above) — connecting this
+# storage-service-specific target list to a secret is an open point for a
+# later session (see the P26-S3 session report); this session only built the
+# Postgres/Keycloak/MinIO admin secret path itself (see ADR 0100),
+# not every downstream consumer of MinIO credentials.
 # ---------------------------------------------------------------------------
 storageService:
   targets:
@@ -1484,46 +1482,46 @@ storageService:
   quorumCount: 1
 
 # ---------------------------------------------------------------------------
-# storageCronJob (P26-S4) — externer periodischer Auslöser für den
-# storage-service-Endpunkt, den der Service laut ADR 0004 bewusst NICHT
-# selbst per In-Prozess-Hintergrundtask ausführt (siehe PROGRESS.md P20-S6:
-# "storage-service als k8s CronJob statt extern zu triggern", explizit auf
-# diese Session verschoben). Siehe ADR 0101 für die vollständige
-# Begründung/Herleitung dieses gesamten Blocks.
+# storageCronJob (P26-S4) — an external periodic trigger for the
+# storage-service endpoint that the service, per ADR 0004, deliberately does NOT
+# run itself via an in-process background task (see PROGRESS.md P20-S6:
+# "storage-service as a k8s CronJob instead of triggering externally", explicitly
+# deferred to this session). See ADR 0101 for the full
+# rationale/derivation of this entire block.
 #
-# WICHTIG — Abweichung vom Session-Briefing: es gibt hier bewusst nur EINEN
-# funktionsfähigen CronJob (Replikation), nicht zwei. Der zweite im Briefing
-# angenommene Endpunkt (`GET /object-verify/{key:path}/all`,
-# services/storage-service/src/storage_service/main.py Zeile 523) verifiziert
-# laut echtem Code (und docs/services/storage-service.md) alle konfigurierten
-# ZIELE **eines einzelnen, per Pfad-Parameter übergebenen** Objekt-`key` —
-# NICHT "alle Objekte im Store". storage-service hat aktuell keinen Endpunkt,
-# der Objektschlüssel auflistet oder eine Charge noch nicht verifizierter
-# Objekte liefert (kein Fixity-Pendant zu `list_pending_copies`/
-# `POST /replication/process-pending`) — ein blind von außen aufgerufener
-# periodischer "verifiziere alles"-CronJob lässt sich damit gegen die
-# TATSÄCHLICHE API nicht bauen, ohne einen neuen storage-service-Endpunkt zu
-# erfinden (out of scope für eine reine Helm-Chart-Session). `verification`
-# unten bleibt deshalb ein bewusst UNVERDRAHTETER Platzhalter (kein Template
-# liest ihn) für eine künftige storage-service-Session, die einen echten
-# Bulk-Verify-Endpunkt baut (siehe ADR 0101 "Konsequenzen" für einen
-# Gestaltungsvorschlag, analog zur Full-Jitter-Backoff-Retry-Queue aus
+# IMPORTANT — a deviation from the session briefing: there is deliberately only ONE
+# functional CronJob here (replication), not two. The second endpoint
+# assumed in the briefing (`GET /object-verify/{key:path}/all`,
+# services/storage-service/src/storage_service/main.py line 523) verifies,
+# according to the real code (and docs/services/storage-service.md), all configured
+# TARGETS **of a single object `key` passed as a path parameter** —
+# NOT "all objects in the store". storage-service currently has no endpoint
+# that lists object keys or delivers a batch of not-yet-verified
+# objects (no fixity counterpart to `list_pending_copies`/
+# `POST /replication/process-pending`) — a periodic "verify everything"
+# CronJob called blindly from outside therefore can't be built against the
+# ACTUAL API without inventing a new storage-service endpoint
+# (out of scope for a pure Helm chart session). `verification`
+# below therefore deliberately remains an UNWIRED placeholder (no template
+# reads it) for a future storage-service session that builds a real
+# bulk-verify endpoint (see ADR 0101 "Consequences" for a
+# design proposal, analogous to the full-jitter backoff retry queue from
 # ADR 0082).
 # ---------------------------------------------------------------------------
 storageCronJob:
   enabled: true
   image:
-    # Leichtgewichtiges Utility-Image für zwei HTTP-Aufrufe statt des vollen
-    # storage-service-Images (siehe ADR 0101) — keine bestehende Projekt-
-    # Konvention für ein solches Utility-Image gefunden (infra/docker-
-    # compose.yml nutzt curl/wget nur innerhalb der Service-Images selbst für
-    # Healthchecks, kein eigener Utility-Container), daher das gängige,
-    # offizielle minimale curl-Image gewählt.
+    # A lightweight utility image for two HTTP calls instead of the full
+    # storage-service image (see ADR 0101) — no existing project
+    # convention found for such a utility image (infra/docker-
+    # compose.yml uses curl/wget only within the service images themselves for
+    # healthchecks, no dedicated utility container), hence the common,
+    # official minimal curl image was chosen.
     repository: curlimages/curl
     tag: "8.10.1"
-  # Utility-Container braucht deutlich weniger als resources.baseline (dafür
-  # gedacht für einen echten FastAPI-Prozess) — eigener, kleinerer Block statt
-  # Baseline-Fallback.
+  # A utility container needs significantly less than resources.baseline (that's
+  # meant for a real FastAPI process) — its own, smaller block instead of
+  # a baseline fallback.
   resources:
     memory:
       requests: 32Mi
@@ -1531,34 +1529,34 @@ storageCronJob:
     cpu:
       requests: 25m
       limits: 100m
-  # Service-zu-Service-Prinzip-Header, gleiches Muster wie archival-services
-  # `_SYSTEM_PRINCIPAL_HEADERS`/workflow-services X-DMS-Principal-Prüfung
+  # Service-to-service principal header, the same pattern as archival-service's
+  # `_SYSTEM_PRINCIPAL_HEADERS`/workflow-service's X-DMS-Principal check
   # (services/archival-service/src/archival_service/clients.py,
   # services/workflow-service/src/workflow_service/main.py) — storage-service
-  # verlangt ihn AKTUELL NICHT für `/replication/process-pending` (main.py
-  # Zeile 561-564 hat weder `Header(...)` noch `Depends(...)` für Auth, anders
-  # als z. B. `DELETE /objects/{key}`s optionaler X-DMS-Roles-Governance-
-  # Bypass) — wird trotzdem mitgesendet (kostet nichts, konsistent mit dem
-  # projektweiten Muster, zukunftssicher falls storage-service diesen
-  # Endpunkt später gated, siehe ADR 0101).
+  # does NOT CURRENTLY require it for `/replication/process-pending` (main.py
+  # lines 561-564 have neither `Header(...)` nor `Depends(...)` for auth, unlike
+  # e.g. `DELETE /objects/{key}`'s optional X-DMS-Roles governance
+  # bypass) — sent along anyway (costs nothing, consistent with the
+  # project-wide pattern, future-proof in case storage-service gates this
+  # endpoint later, see ADR 0101).
   principalHeader: "system:storage-replication-cronjob"
   replication:
-    # Alle 15 Minuten — die Retry-Queue selbst hat seit ADR 0082 bereits
-    # Full-Jitter-Backoff (next_retry_at), ein CronJob-Intervall muss also
-    # nicht besonders eng sein, um Thundering-Herd-Effekte zu vermeiden; 15
-    # Minuten hält "pending"-Kopien trotzdem in überschaubarer Zeit aktuell.
+    # Every 15 minutes — the retry queue itself has had
+    # full-jitter backoff since ADR 0082 (next_retry_at), so a CronJob interval doesn't
+    # need to be especially tight to avoid thundering-herd effects; 15
+    # minutes still keeps "pending" copies current within a reasonable time.
     schedule: "*/15 * * * *"
-    # Siehe POST /replication/process-pending?limit=100 (main.py Zeile 563) -
-    # identisch zum Endpunkt-eigenen Default, hier explizit statt implizit,
-    # damit values.yaml der alleinige Konfigurationsort bleibt.
+    # See POST /replication/process-pending?limit=100 (main.py line 563) -
+    # identical to the endpoint's own default, made explicit here instead of implicit
+    # so that values.yaml remains the single place of configuration.
     limit: 100
-    # Deutlich über dem erwarteten Laufzeitbedarf (ein Retry-Batch aus
-    # höchstens `limit` Kopien), verhindert aber einen unbegrenzt hängenden
-    # Job bei einem tot geglaubten Ziel-Backend.
+    # Well above the expected runtime requirement (a retry batch of at
+    # most `limit` copies), but prevents an indefinitely hanging
+    # job if a target backend is presumed dead.
     activeDeadlineSeconds: 180
     successfulJobsHistoryLimit: 3
     failedJobsHistoryLimit: 3
   verification:
-    # Siehe Erklärung im Blockkommentar oben — bewusst kein Template dahinter,
-    # reiner dokumentierter Platzhalter für eine spätere Session.
+    # See the explanation in the block comment above — deliberately no template behind it,
+    # a purely documented placeholder for a later session.
     enabled: false

@@ -33,18 +33,21 @@ CLAUDE.md
 Konzept.md
 .claude/
 
-# --- graphify (regenerierbar via `graphify dms/ --update`) ---
+# --- graphify (regenerable via `graphify dms/ --update`) ---
 graphify-out/
 
-# --- Docker / lokale Daten ---
+# --- Docker / local data ---
 infra/**/data/
 
-# --- Testlauf-Logs (scripts/run-tests.sh) ---
+# --- Test run logs (scripts/run-tests.sh) ---
 .test-results/
 
-# --- Backup-Artefakte (scripts/backup.sh, Konzept 10.4) - Basebackups/
-# Storage-Tarballs sind groß und enthalten echte Daten, gehören nicht ins Repo ---
+# --- Backup artifacts (scripts/backup.sh, Concept 10.4) - basebackups/
+# storage tarballs are large and contain real data, don't belong in the repo ---
 backups/
+
+# --- Load test results (loadtest/, generated) ---
+loadtest/results/
 
 # --- OS / Editor ---
 .DS_Store

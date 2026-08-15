@@ -1,9 +1,9 @@
-# Deklarative Dashboard-Provisionierung (Konzept 10.1, P11-S2) - lädt jede
-# JSON-Datei aus infra/grafana/dashboards/ automatisch beim Start. Die JSON-
-# Dateien selbst sind die vom Konzept geforderten "exportierbaren
-# Dashboard-Vorlagen" - ein Betreiber kann sie unverändert übernehmen,
-# anpassen oder in eine eigene Grafana-Instanz importieren (Startpunkt,
-# keine Pflichtnutzung).
+# Declarative dashboard provisioning (concept 10.1, P11-S2) - loads every
+# JSON file from infra/grafana/dashboards/ automatically at startup. The JSON
+# files themselves are the "exportable dashboard templates" required by the
+# concept - an operator can adopt them unchanged,
+# customize them, or import them into their own Grafana instance (a starting point,
+# not mandatory to use).
 apiVersion: 1
 
 providers:

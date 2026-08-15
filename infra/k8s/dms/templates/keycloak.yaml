@@ -1,15 +1,15 @@
 {{/*
-Bundled Keycloak (P26-S3) — nur gerendert, wenn keycloak.enabled=true (sonst
-zeigt jeder Konsument über dms.keycloakBaseUrl auf keycloak.external.baseUrl,
-siehe templates/_helpers.tpl). Nutzt dieselbe Postgres-Instanz wie die
-zustandslosen Services (dms.postgresHost/-Port/-Database/-Username/
-dms.postgresSecretName respektieren dabei automatisch postgresql.enabled
-bundled vs. external, genau wie DMS_POSTGRES_DSN oben) — 1:1 dieselbe
-Architektur wie infra/docker-compose.yml ("Keycloak nutzt dieselbe
-Postgres-Instanz, eigenes Schema, kein separater DB-Server").
+Bundled Keycloak (P26-S3) — only rendered when keycloak.enabled=true (otherwise
+every consumer points via dms.keycloakBaseUrl to keycloak.external.baseUrl,
+see templates/_helpers.tpl). Uses the same Postgres instance as the
+stateless services (dms.postgresHost/-Port/-Database/-Username/
+dms.postgresSecretName automatically respect postgresql.enabled
+bundled vs. external, just like DMS_POSTGRES_DSN above) — the exact same
+architecture as infra/docker-compose.yml ("Keycloak uses the same
+Postgres instance, its own schema, no separate DB server").
 
-Kein PersistentVolumeClaim für Keycloak selbst — siehe values.yaml-Kommentar
-am keycloak-Block (fachlicher Zustand liegt vollständig in Postgres).
+No PersistentVolumeClaim for Keycloak itself — see the values.yaml comment
+on the keycloak block (business state lives entirely in Postgres).
 */}}
 {{- if .Values.keycloak.enabled }}
 ---
@@ -33,8 +33,8 @@ spec:
         - name: keycloak
           image: {{ printf "%s%s:%s" .Values.global.image.registry .Values.keycloak.image.repository .Values.keycloak.image.tag | quote }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
-          # Dev-Modus, 1:1 wie infra/docker-compose.yml (`command: start-dev`)
-          # - siehe dortiger Kommentar zum Realm-Import/Produktionsmodus.
+          # Dev mode, exactly like infra/docker-compose.yml (`command: start-dev`)
+          # - see the comment there on realm import/production mode.
           args: ["start-dev"]
           ports:
             - name: http
@@ -59,13 +59,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "dms.postgresSecretName" . }}
                   key: {{ include "dms.postgresSecretKey" . }}
-          # Kein curl/wget im Keycloak-Image (siehe infra/docker-compose.yml-
-          # Kommentar, dort per rohem /dev/tcp-Bash-Trick gelöst) - ein
-          # einfacher tcpSocket-Probe auf den HTTP-Port ist hier ausreichend
-          # (Probe-Mechanismus ist keine versions-/konfigrelevante Angabe wie
-          # Image/Port/Env, sondern reine k8s-Infrastruktur). Großzügige
-          # initialDelaySeconds/failureThreshold: Keycloaks JVM-Start dauert
-          # spürbar länger als bei den schlanken FastAPI-Services.
+          # No curl/wget in the Keycloak image (see the infra/docker-compose.yml
+          # comment, solved there via a raw /dev/tcp bash trick) - a
+          # simple tcpSocket probe on the HTTP port is sufficient here
+          # (the probe mechanism isn't a version-/config-relevant setting like
+          # image/port/env, but pure k8s infrastructure). Generous
+          # initialDelaySeconds/failureThreshold: Keycloak's JVM startup takes
+          # noticeably longer than the lean FastAPI services.
           readinessProbe:
             tcpSocket:
               port: http

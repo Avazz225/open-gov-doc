@@ -1,7 +1,7 @@
-# Lokale Dev-Basisinfrastruktur (Konzept 3.1/3.4/3.6/4.4) + fachliche Services,
-# die gemäß Roadmap (../IMPLEMENTATION_PLAN.md) schrittweise ergänzt werden.
+# Local dev base infrastructure (concept 3.1/3.4/3.6/4.4) + domain services,
+# added incrementally per the roadmap (../IMPLEMENTATION_PLAN.md).
 #
-# Nutzung:
+# Usage:
 #   cp .env.example .env
 #   docker compose up -d
 
@@ -13,39 +13,39 @@ networks:
 
 volumes:
   postgres-data:
-  # WAL-Archivierung für Point-in-Time-Recovery (10.4, P11-S3) - separates
-  # Volume statt Unterordner in postgres-data, damit ein Restore-Skript das
-  # Archiv unabhängig vom (ggf. verworfenen) Live-Datenverzeichnis mounten
-  # kann.
+  # WAL archiving for point-in-time recovery (10.4, P11-S3) - separate
+  # volume instead of a subfolder in postgres-data, so a restore script can
+  # mount the archive independently of the (possibly discarded) live data
+  # directory.
   postgres-wal-archive:
   nats-data:
   keycloak-data:
   minio-data:
-  # Azure-Blob-Emulator (Azurite) für storage-service (Post-Roadmap Phase 24
-  # Session 1) - analog zu minio-data, eigenes Volume je emuliertem Provider.
+  # Azure Blob emulator (Azurite) for storage-service (post-roadmap phase 24
+  # session 1) - analogous to minio-data, its own volume per emulated provider.
   azurite-data:
-  # Steht für den PVC-Mountpunkt in einer echten Installation (Konzept 3.6) -
-  # ob dahinter NFS oder ein Block-Volume liegt, ist für storage-service unsichtbar.
+  # Stands in for the PVC mount point in a real installation (concept 3.6) -
+  # whether NFS or a block volume is behind it is invisible to storage-service.
   storage-local-data:
-  # Separates Archiv-Ziel (5.6, seit P7-S3) - eigenes Volume, da ein
-  # `role="archive"`-Ziel laut Konzept typischerweise ein anderes/günstigeres
-  # Backend als die Live-Ziele ist, hier als zweites lokales Verzeichnis
-  # stellvertretend simuliert.
+  # Separate archive target (5.6, since P7-S3) - own volume, since a
+  # `role="archive"` target is typically a different/cheaper backend than
+  # the live targets per the concept, simulated here as a stand-in second
+  # local directory.
   storage-archive-data:
-  # Grafana-eigene SQLite-DB (Sitzungen, Nutzer) - Dashboards/Datasource selbst
-  # kommen deklarativ aus infra/grafana/ (Provisioning), dieses Volume sichert
-  # nur den sonstigen Grafana-internen Zustand über Neustarts hinweg.
+  # Grafana's own SQLite DB (sessions, users) - dashboards/datasource
+  # themselves come declaratively from infra/grafana/ (provisioning), this
+  # volume only persists other Grafana-internal state across restarts.
   grafana-data:
-  # Löschregister-Ledger (10.4, P11-S4) - siehe audit-service-Kommentar oben.
+  # Deletion register ledger (10.4, P11-S4) - see audit-service comment above.
   deletion-ledger-data:
 
 services:
-  # Ein frisch angelegtes Docker-Volume gehört zunächst root - der
-  # postgres-Prozess (Nutzer `postgres`) kann dann nicht in /wal-archive
-  # schreiben (echter, live entdeckter Fehlschlag beim ersten Start: "cp:
-  # can't create '/wal-archive/...': Permission denied"). Dieser einmalige
-  # Init-Dienst behebt das reproduzierbar bei jedem `docker compose up`,
-  # statt einen manuellen `chown`-Schritt vorauszusetzen.
+  # A freshly created Docker volume initially belongs to root - the
+  # postgres process (user `postgres`) can then not write to /wal-archive
+  # (a real failure discovered live on first start: "cp: can't create
+  # '/wal-archive/...': Permission denied"). This one-off init service fixes
+  # that reproducibly on every `docker compose up`, instead of requiring a
+  # manual `chown` step.
   postgres-wal-archive-init:
     image: postgres:16-alpine
     user: root
@@ -58,12 +58,12 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    # WAL-Archivierung (10.4, P11-S3) - einfachstes offiziell dokumentiertes
-    # Muster (`cp`-Archive-Command, kein pgBackRest/Barman nötig): jedes
-    # fertige WAL-Segment landet zusätzlich zum laufenden pg_wal/ dauerhaft
-    # unter /wal-archive (eigenes Volume) - Grundlage für Point-in-Time-
-    # Recovery in scripts/backup.sh/restore.sh. `test ! -f ...` macht den
-    # Befehl idempotent (Postgres wiederholt archive_command bei Fehlern).
+    # WAL archiving (10.4, P11-S3) - simplest officially documented pattern
+    # (`cp` archive command, no pgBackRest/Barman needed): every completed WAL
+    # segment additionally lands permanently under /wal-archive (its own
+    # volume) alongside the live pg_wal/ - the basis for point-in-time
+    # recovery in scripts/backup.sh/restore.sh. `test ! -f ...` makes the
+    # command idempotent (Postgres retries archive_command on failures).
     command:
       - postgres
       - -c
@@ -95,7 +95,7 @@ services:
     networks:
       - dms-net
 
-  # Keycloak nutzt dieselbe Postgres-Instanz (Konzept 10.4) — eigenes Schema, kein separater DB-Server.
+  # Keycloak uses the same Postgres instance (concept 10.4) — its own schema, no separate DB server.
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
     restart: unless-stopped
@@ -115,8 +115,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # Kein curl/wget im Keycloak-Image - roher HTTP-Check über bash /dev/tcp
-      # gegen den öffentlichen Realm-Endpoint (kein Health-Extension nötig).
+      # No curl/wget in the Keycloak image - raw HTTP check via bash /dev/tcp
+      # against the public realm endpoint (no health extension needed).
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/master HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && head -1 <&3 | grep -q 200"]
       interval: 5s
       timeout: 5s
@@ -162,23 +162,22 @@ services:
     networks:
       - dms-net
 
-  # Azure-Blob-Emulator für storage-service (Post-Roadmap Phase 24 Session 1,
-  # Konzept 1a) - Azurite steht analog zu MinIO oben für den echten Provider
-  # (echtes Azure Blob Storage), `AzureBlobBackend` funktioniert identisch
-  # gegen beide. Fester, öffentlich dokumentierter Azurite-Dev-Account
-  # ("devstoreaccount1"), kein echtes Geheimnis - siehe
-  # docs/services/storage-service.md. Nur der Blob-Port (10000) wird
-  # exponiert, Queue/Table (10001/10002) werden von storage-service nicht
-  # gebraucht.
+  # Azure Blob emulator for storage-service (post-roadmap phase 24 session 1,
+  # concept 1a) - Azurite stands in analogously to MinIO above for the real
+  # provider (real Azure Blob Storage), `AzureBlobBackend` works identically
+  # against both. Fixed, publicly documented Azurite dev account
+  # ("devstoreaccount1"), not a real secret - see
+  # docs/services/storage-service.md. Only the blob port (10000) is exposed,
+  # queue/table (10001/10002) are not needed by storage-service.
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.30.0
     restart: unless-stopped
-    # --skipApiVersionCheck: das fest gepinnte Azurite-Image kennt die
-    # jeweils neueste, vom `azure-storage-blob`-SDK gesendete API-Version
-    # (`x-ms-version`) u. U. noch nicht - Azurite lehnt unbekannte, aber
-    # tatsächlich abwärtskompatible Versionen sonst hart mit 400
-    # "InvalidHeaderValue" ab. Offizielles Azurite-CLI-Flag genau für diesen
-    # Fall, kein Sicherheitsrisiko in dieser reinen Dev/Test-Emulation.
+    # --skipApiVersionCheck: the pinned Azurite image may not yet know the
+    # latest API version (`x-ms-version`) sent by the `azure-storage-blob`
+    # SDK - otherwise Azurite hard-rejects unknown but actually
+    # backward-compatible versions with 400 "InvalidHeaderValue". Official
+    # Azurite CLI flag for exactly this case, no security risk in this
+    # pure dev/test emulation.
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --skipApiVersionCheck
     ports:
       - "${AZURITE_BLOB_PORT:-10000}:10000"
@@ -192,22 +191,22 @@ services:
     networks:
       - dms-net
 
-  # Dev-SMTP-Testserver für notification-service (P6-S2, Konzept 7.1) - fängt jede
-  # Mail ab, kein echter Versand, Web-UI zum Prüfen unter MAILPIT_UI_PORT. Kein
-  # Healthcheck nötig, da kein anderer Service beim Start hart auf ihn wartet -
-  # ein einzelner fehlgeschlagener E-Mail-Zustellversuch bleibt als "failed" stehen
-  # (siehe docs/services/notification-service.md), kein Blocker für den Service-Start.
+  # Dev SMTP test server for notification-service (P6-S2, concept 7.1) - catches every
+  # mail, no real sending, web UI for checking under MAILPIT_UI_PORT. No
+  # healthcheck needed, since no other service hard-waits on it at startup -
+  # a single failed email delivery attempt just stays "failed"
+  # (see docs/services/notification-service.md), not a blocker for service startup.
   mailpit:
     image: axllent/mailpit:v1.30.6
     restart: unless-stopped
-    # POP3-Server (seit mailpit v1.15, standardmäßig deaktiviert - erst
-    # `--pop3-auth-file` schaltet ihn frei) dient `mail-connector` (2.5/3.3,
-    # P15-S3) als Selbst-Loopback-Quelle: dieselbe eingelieferte Mail lässt
-    # sich über ein echtes Standardprotokoll wieder abholen, ohne einen
-    # externen Mailserver zu brauchen - gleiches Prinzip wie der Federation-
-    # Hub-Selbst-Loopback (P6-S9). Zugangsdaten (dev-only, Klartext-Datei wie
-    # überall sonst in diesem Repo) müssen zu `mail-connector`s
-    # `DMS_POP3_USERNAME`/`DMS_POP3_PASSWORD` passen.
+    # POP3 server (since mailpit v1.15, disabled by default - only
+    # `--pop3-auth-file` enables it) serves `mail-connector` (2.5/3.3,
+    # P15-S3) as a self-loopback source: the same delivered mail can be
+    # picked up again via a real standard protocol, without needing an
+    # external mail server - same principle as the federation hub
+    # self-loopback (P6-S9). Credentials (dev-only, plaintext file as
+    # everywhere else in this repo) must match `mail-connector`'s
+    # `DMS_POP3_USERNAME`/`DMS_POP3_PASSWORD`.
     command: ["--pop3", "[::]:1110", "--pop3-auth-file", "/data/pop3-auth"]
     volumes:
       - ./mailpit-pop3-auth:/data/pop3-auth:ro
@@ -218,15 +217,15 @@ services:
     networks:
       - dms-net
 
-  # Geteilter Store fürs Gateway-Rate-Limiting (3.5, seit P25-S3, ADR 0097) -
-  # einziger Konsument aktuell `gateway-service`. Ermöglicht horizontale
-  # Skalierung des Gateways: alle Instanzen sehen denselben Sliding-Window-
-  # Zähler je Client, statt (wie zuvor, ADR 0005) jeweils ihr eigenes,
-  # unabhängiges In-Prozess-Limit zu führen. Kein Volume und Persistenz
-  # bewusst abgeschaltet (`--save ""`, kein AOF) - die Rate-Limit-Daten sind
-  # rein transient (TTL je Client-Key, siehe `RateLimiter`), ein Neustart von
-  # Redis selbst setzt das Limit unschädlich zurück, anders als z. B. NATS
-  # JetStream oder Postgres.
+  # Shared store for gateway rate limiting (3.5, since P25-S3, ADR 0097) -
+  # sole consumer currently `gateway-service`. Enables horizontal scaling
+  # of the gateway: all instances see the same sliding-window counter per
+  # client, instead of each maintaining (as before, ADR 0005) its own,
+  # independent in-process limit. No volume, and persistence deliberately
+  # disabled (`--save ""`, no AOF) - the rate-limit data is purely
+  # transient (TTL per client key, see `RateLimiter`), a restart of Redis
+  # itself harmlessly resets the limit, unlike e.g. NATS JetStream or
+  # Postgres.
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -251,26 +250,26 @@ services:
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
-      # Registriert sich seit P4-S3 bei sich selbst, damit das Gateway auch
-      # "registry-service" als service_type auflösen kann (z. B. Admin-UI).
+      # Registers itself since P4-S3 with itself, so the gateway can also
+      # resolve "registry-service" as a service_type (e.g. admin UI).
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://registry-service:8000
-      # Lizenzvermittlung (Konzept 3.2b/9.3, P9-S2) - license-service
-      # hängt selbst NICHT von registry-service ab (nur env-var, kein
-      # depends_on), ein Zyklus entsteht hier also nicht.
+      # License brokering (concept 3.2b/9.3, P9-S2) - license-service
+      # itself does NOT depend on registry-service (only env var, no
+      # depends_on), so no cycle results here.
       DMS_LICENSE_SERVICE_BASE_URL: http://license-service:8000
-      # Bewusst leer in diesem gebündelten Dev-/Test-Stack (Code-Default ist
-      # {"workflow-service": "demo"}): ohne Lizenzausstellungswerkzeug (ADR
-      # 0032) ist in dieser Umgebung nie eine gültige Lizenz installiert -
-      # der Produktions-Default würde workflow-service dauerhaft in den
-      # Demo-Modus versetzen und andere Services' Integrationstests brechen,
-      # die real gegen den laufenden workflow-service-Container schreiben
-      # (siehe case-service). Eine echte Installation überschreibt diese
-      # Variable nicht (nutzt den Code-Default).
+      # Deliberately empty in this bundled dev/test stack (the code default
+      # is {"workflow-service": "demo"}): without a license issuance tool
+      # (ADR 0032), a valid license is never installed in this environment -
+      # the production default would permanently put workflow-service into
+      # demo mode and break other services' integration tests that write
+      # for real against the running workflow-service container (see
+      # case-service). A real installation does not override this variable
+      # (uses the code default).
       DMS_LICENSABLE_COMPONENTS: ${REGISTRY_SERVICE_LICENSABLE_COMPONENTS:-{}}
-      # Sensor-Konzept (10.1, P11-S1) - monitoring-service haengt selbst NICHT
-      # von registry-service ab (kein depends_on hier), ein Zyklus entsteht
-      # also nicht, gleiches Muster wie beim license-service oben.
+      # Sensor concept (10.1, P11-S1) - monitoring-service itself does NOT
+      # depend on registry-service (no depends_on here), so no cycle
+      # results, same pattern as with license-service above.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${REGISTRY_SERVICE_PORT:-8001}:8000"
@@ -294,15 +293,15 @@ services:
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
-      # Selbst-Registrierung bei der Registry (3.2a, seit P4-S1) - Grundlage
-      # für das Gateway-Routing (3.5). Adresse ist die interne Compose-DNS,
-      # unter der andere Container diesen Service erreichen.
+      # Self-registration with the registry (3.2a, since P4-S1) - basis for
+      # gateway routing (3.5). Address is the internal Compose DNS name
+      # under which other containers reach this service.
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://audit-service:8000
     volumes:
-      # Löschregister-Ledger (10.4, P11-S4) - eigenes Volume, bewusst
-      # getrennt von der gemeinsamen Postgres-Instanz, damit ein DB-Restore
-      # (scripts/restore.sh) es nicht mit zurückrollt.
+      # Deletion register ledger (10.4, P11-S4) - own volume, deliberately
+      # separated from the shared Postgres instance, so a DB restore
+      # (scripts/restore.sh) does not roll it back too.
       - deletion-ledger-data:/deletion-ledger
     ports:
       - "${AUDIT_SERVICE_PORT:-8002}:8000"
@@ -323,10 +322,10 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
-      # SSO/automatischer Login (Post-Roadmap-Feature): `GET /oidc/authorize`
-      # liefert eine URL, zu der der BROWSER navigiert - der interne
-      # Compose-Hostname `keycloak` ist dafuer nicht aufloesbar, der Browser
-      # braucht den extern gemappten Port (siehe `KEYCLOAK_PORT` oben).
+      # SSO/automatic login (post-roadmap feature): `GET /oidc/authorize`
+      # returns a URL that the BROWSER navigates to - the internal
+      # Compose hostname `keycloak` is not resolvable for that, the browser
+      # needs the externally mapped port (see `KEYCLOAK_PORT` above).
       DMS_KEYCLOAK_PUBLIC_BASE_URL: http://localhost:${KEYCLOAK_PORT:-8080}
       DMS_KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       DMS_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_only}
@@ -335,15 +334,15 @@ services:
       DMS_SELF_ADDRESS: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_NATS_URL: nats://nats:4222
-      # Verzeichnis/Kontakte (2.5/4.4, P15-S4) - erstes eigenes Postgres-
-      # Schema dieses Service (Federation-Identität für die optionale
-      # föderierte Kontaktsuche, siehe unten).
+      # Directory/contacts (2.5/4.4, P15-S4) - first own Postgres schema
+      # of this service (federation identity for the optional federated
+      # contact search, see below).
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
-      # Föderierte Kontaktsuche (7.4) - eigene, von workflow-services
-      # Federation-Hub-Teilnahme unabhängige Registrierung (ADR 0054). Kein
-      # `depends_on: federation-hub-service` (Registrierung ist best-effort,
-      # kein Hard-Dependency dieser Installation, gleiches Prinzip wie
-      # workflow-service's eigene Registrierung).
+      # Federated contact search (7.4) - own registration, independent of
+      # workflow-service's federation hub participation (ADR 0054). No
+      # `depends_on: federation-hub-service` (registration is best-effort,
+      # not a hard dependency of this installation, same principle as
+      # workflow-service's own registration).
       DMS_FEDERATION_HUB_BASE_URL: ${AUTH_SERVICE_FEDERATION_HUB_BASE_URL:-http://federation-hub-service:8000}
       DMS_FEDERATED_DIRECTORY_ENABLED: ${AUTH_SERVICE_FEDERATED_DIRECTORY_ENABLED:-true}
       DMS_INSTALLATION_GATEWAY_BASE_URL: ${INSTALLATION_GATEWAY_BASE_URL:-http://gateway-service:8000}
@@ -373,10 +372,10 @@ services:
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://permission-service:8000
-      # Kein `depends_on: auth-service` hier (würde einen Zyklus mit
-      # auth-services `depends_on: permission-service` aus P6-S5 bilden,
-      # Docker Compose verbietet das). Unkritisch: der Aufruf passiert nur bei
-      # `POST /maintenance-mode/lift` zur Laufzeit, nicht beim eigenen Start.
+      # No `depends_on: auth-service` here (would form a cycle with
+      # auth-service's `depends_on: permission-service` from P6-S5, Docker
+      # Compose forbids that). Uncritical: the call only happens on
+      # `POST /maintenance-mode/lift` at runtime, not during its own startup.
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
     ports:
       - "${PERMISSION_SERVICE_PORT:-8004}:8000"
@@ -397,30 +396,30 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
-      # Ziel-Set (3.6, seit P5b-S6 eine echte Liste statt fester backend/
-      # secondary_backend-Slots - siehe ADR 0004/0017): Default ein einzelnes
-      # lokales Ziel (steht für NFS/PVC-Mount). Beliebig viele, auch
-      # gleichartige Ziele möglich, z. B. zum Testen von Redundanz/Quorum:
+      # Target set (3.6, since P5b-S6 a real list instead of fixed backend/
+      # secondary_backend slots - see ADR 0004/0017): default a single
+      # local target (stands in for NFS/PVC mount). Any number of targets,
+      # even of the same type, is possible, e.g. to test redundancy/quorum:
       #   STORAGE_SERVICE_TARGETS='[{"id":"local","type":"local","base_path":"/data/storage"},
       #     {"id":"s3-minio","type":"s3","endpoint_url":"http://minio:9000",
       #      "access_key":"dms_minio","secret_key":"dms_minio_dev_only",
       #      "bucket":"dms-storage","region":"us-east-1"}]'
       #   STORAGE_SERVICE_WRITE_STRATEGY=quorum STORAGE_SERVICE_QUORUM_COUNT=2
-      # Azure-Ziel gegen den Azurite-Emulator (Post-Roadmap Phase 24 Session 1)
-      # - fester, öffentlich dokumentierter Azurite-Dev-Verbindungsstring
-      # ("devstoreaccount1"), kein echtes Geheimnis, siehe
+      # Azure target against the Azurite emulator (post-roadmap phase 24 session 1)
+      # - fixed, publicly documented Azurite dev connection string
+      # ("devstoreaccount1"), not a real secret, see
       # docs/services/storage-service.md:
       #   STORAGE_SERVICE_TARGETS='[{"id":"local","type":"local","base_path":"/data/storage"},
       #     {"id":"azure-azurite","type":"azure","container":"dms-storage",
       #      "connection_string":"DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;
       #      AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/
       #      K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"}]'
-      # Env-Var-Werte werden nicht weiter expandiert - MinIO-Zugangsdaten in
-      # einer eigenen STORAGE_SERVICE_TARGETS-Überschreibung müssen deshalb
-      # wörtlich eingetragen werden, nicht als ${MINIO_ROOT_USER}-Referenz.
-      # Zweites Ziel mit `role: archive` (5.6, seit P7-S3) - nicht Teil der
-      # regulären Upload-Replikation (`resolve_targets` filtert es heraus),
-      # nur über die dedizierten `.../archive-copy`-Endpunkte erreichbar.
+      # Env var values are not expanded further - MinIO credentials in a
+      # custom STORAGE_SERVICE_TARGETS override must therefore be entered
+      # literally, not as a ${MINIO_ROOT_USER} reference.
+      # Second target with `role: archive` (5.6, since P7-S3) - not part of
+      # the regular upload replication (`resolve_targets` filters it out),
+      # only reachable via the dedicated `.../archive-copy` endpoints.
       DMS_TARGETS: >-
         ${STORAGE_SERVICE_TARGETS:-[{"id":"local","type":"local","base_path":"/data/storage"},
         {"id":"archive","type":"local","base_path":"/data/archive","role":"archive"}]}
@@ -428,9 +427,9 @@ services:
       DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-1}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://storage-service:8000
-      # Rolle für den Governance-Mode-Bypass bei Zwangslöschung (5.2a, seit
-      # P7-S1) - muss mit document-services `DOCUMENT_SERVICE_GOVERNANCE_
-      # BYPASS_ROLE` übereinstimmen, siehe ADR 0030.
+      # Role for the governance-mode bypass on forced deletion (5.2a, since
+      # P7-S1) - must match document-service's `DOCUMENT_SERVICE_GOVERNANCE_
+      # BYPASS_ROLE`, see ADR 0030.
       DMS_GOVERNANCE_BYPASS_ROLE: ${STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE:-dms-admin}
     volumes:
       - storage-local-data:/data/storage
@@ -462,20 +461,20 @@ services:
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://document-service:8000
-      # Lizenz-Limit-Blockade bei Neuanlagen (Konzept 9.3, P9-S2). Bewusst
-      # ohne depends_on: license-service haengt selbst von document-service
-      # ab (Dokumentenzaehler, P9-S1) - ein umgekehrtes depends_on waere ein
-      # Zyklus. Der Check ist ohnehin fail-open (TTL-Cache), kein Hard-
-      # Dependency beim Start.
+      # License limit block on new creations (concept 9.3, P9-S2). Deliberately
+      # without depends_on: license-service itself depends on document-service
+      # (document counter, P9-S1) - a reverse depends_on would be a
+      # cycle. The check is fail-open anyway (TTL cache), not a hard
+      # dependency at startup.
       DMS_LICENSE_SERVICE_BASE_URL: http://license-service:8000
-      # Aufbewahrung/Legal Hold/Zwangslöschung (5.2/5.2a, seit P7-S1): wie oft
-      # der Poll-Loop fällige Fristen prüft, sowie die Rolle für den
-      # Governance-Bypass bei Zwangslöschung (muss zu storage-services
-      # `STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE` passen, siehe ADR 0030).
+      # Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1): how
+      # often the poll loop checks due deadlines, plus the role for the
+      # governance bypass on forced deletion (must match storage-service's
+      # `STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE`, see ADR 0030).
       DMS_RETENTION_POLL_INTERVAL_SECONDS: ${DOCUMENT_SERVICE_RETENTION_POLL_INTERVAL_SECONDS:-3600}
       DMS_GOVERNANCE_BYPASS_ROLE: ${DOCUMENT_SERVICE_GOVERNANCE_BYPASS_ROLE:-dms-admin}
-      # Sensor-Konzept (10.1, P11-S1) - kein depends_on, gleiches fail-open
-      # Muster wie beim Lizenz-Client oben.
+      # Sensor concept (10.1, P11-S1) - no depends_on, same fail-open
+      # pattern as the license client above.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${DOCUMENT_SERVICE_PORT:-8006}:8000"
@@ -511,13 +510,13 @@ services:
       DMS_SCAN_ENGINE: ${VIRUS_SCAN_ENGINE:-eicar}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://virus-scan-service:8000
-      # Quarantäne-Freigabe (2.5/10.3, P15-S2) ruft den internen Anlage-Pfad
-      # des Document Service auf. Bewusst OHNE depends_on: document-service
-      # haengt bereits selbst von virus-scan-service ab (Upload-Scan,
-      # `condition: service_started` oben in diesem File) - ein umgekehrtes
-      # depends_on waere ein Zyklus, den docker compose ablehnt (gleiches
-      # bewusst-kein-depends_on-Muster wie beim license-/monitoring-service-
-      # Client von document-service selbst, siehe dessen Kommentar oben).
+      # Quarantine release (2.5/10.3, P15-S2) calls the internal creation
+      # path of the document service. Deliberately WITHOUT depends_on:
+      # document-service already itself depends on virus-scan-service
+      # (upload scan, `condition: service_started` above in this file) - a
+      # reverse depends_on would be a cycle that docker compose rejects
+      # (same deliberate-no-depends_on pattern as the license/monitoring-
+      # service client of document-service itself, see its comment above).
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
@@ -566,15 +565,15 @@ services:
     networks:
       - dms-net
 
-  # Optional (3.9, P5b-S5, ADR 0016): ocrEnabled=false bedeutet, dieser
-  # Container wird gar nicht erst deployt (Compose-Profil-Opt-out) statt
-  # laufend "aus" zu sein - konsistent mit dem "Dazustellen"-Prinzip. Aktiv,
-  # sobald das Profil "ocr" eingeschaltet ist (siehe COMPOSE_PROFILES in
-  # .env.example, standardmäßig aktiv). rendering-service/search-service
-  # hängen deshalb bewusst NICHT per depends_on an diesem Service - beide
-  # tolerieren seine Abwesenheit bereits über ihre HTTP-Clients
-  # (search-service: schon vorhandenes try/except; rendering-service: neu in
-  # dieser Session ergänzt, siehe consumer.py).
+  # Optional (3.9, P5b-S5, ADR 0016): ocrEnabled=false means this
+  # container is not deployed at all (Compose profile opt-out) instead of
+  # running but "off" - consistent with the "add on" principle. Active as
+  # soon as the "ocr" profile is enabled (see COMPOSE_PROFILES in
+  # .env.example, active by default). rendering-service/search-service
+  # therefore deliberately do NOT depend on this service via depends_on -
+  # both already tolerate its absence via their HTTP clients
+  # (search-service: pre-existing try/except; rendering-service: newly
+  # added in this session, see consumer.py).
   ocr-service:
     build:
       context: ..
@@ -660,11 +659,11 @@ services:
       DMS_SLA_POLL_INTERVAL_SECONDS: ${WORKFLOW_SLA_POLL_INTERVAL_SECONDS:-30}
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_SIGNATURE_SERVICE_BASE_URL: http://signature-service:8000
-      # Federation Hub (7.4, P6-S9) - in diesem gebündelten Dev-Stack per
-      # Default aktiv (der mitgelieferte `federation-hub-service` läuft
-      # sowieso), damit der Selbst-Loopback-Smoke-Test ohne manuellen Schritt
-      # funktioniert. Eine echte Installation würde diese Variable schlicht
-      # leer lassen (opt-in, siehe docs/services/workflow-service.md).
+      # Federation hub (7.4, P6-S9) - active by default in this bundled dev
+      # stack (the bundled `federation-hub-service` runs anyway), so the
+      # self-loopback smoke test works without a manual step. A real
+      # installation would simply leave this variable empty (opt-in, see
+      # docs/services/workflow-service.md).
       DMS_FEDERATION_HUB_BASE_URL: ${WORKFLOW_SERVICE_FEDERATION_HUB_BASE_URL:-http://federation-hub-service:8000}
       DMS_INSTALLATION_GATEWAY_BASE_URL: http://gateway-service:8000
       DMS_FEDERATION_PROCESS_TYPE_MAP: ${WORKFLOW_SERVICE_FEDERATION_PROCESS_TYPE_MAP:-{}}
@@ -778,13 +777,13 @@ services:
     networks:
       - dms-net
 
-  # Federation Hub (Konzept 7.4, P6-S9): bewusst KEIN interner Service dieser
-  # Installation (siehe docs/services/federation-hub-service.md) - kein
-  # `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, kein `depends_on` von
-  # `gateway-service`. Wird hier nur der lokalen Entwicklung/dem
-  # Selbst-Loopback-Smoke-Test halber mitgeliefert (ADR 0028) - ein Betreiber
-  # würde ihn in Produktion vollständig separat betreiben, ggf. sogar für
-  # mehrere fremde Installationen gemeinsam.
+  # Federation hub (concept 7.4, P6-S9): deliberately NOT an internal
+  # service of this installation (see docs/services/federation-hub-service.md)
+  # - no `DMS_REGISTRY_SERVICE_BASE_URL`/`DMS_SELF_ADDRESS`, no
+  # `depends_on` from `gateway-service`. Bundled here only for local
+  # development/the self-loopback smoke test (ADR 0028) - an operator
+  # would run it fully separately in production, possibly even shared
+  # across several unrelated installations.
   federation-hub-service:
     build:
       context: ..
@@ -841,9 +840,9 @@ services:
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_NOTIFICATION_SERVICE_BASE_URL: http://notification-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
-      # Extern erreichbare Gateway-Adresse fuer Downloadlinks in geplanten
-      # Berichts-E-Mails (5.4a, seit P7-S2b) - bewusst nicht die interne
-      # Docker-DNS-Adresse, siehe settings.py.
+      # Externally reachable gateway address for download links in scheduled
+      # report emails (5.4a, since P7-S2b) - deliberately not the internal
+      # Docker DNS address, see settings.py.
       DMS_GATEWAY_BASE_URL: ${REPORTING_SERVICE_GATEWAY_BASE_URL:-http://localhost:8009}
       DMS_REPORT_POLL_INTERVAL_SECONDS: ${REPORTING_SERVICE_POLL_INTERVAL_SECONDS:-3600}
     ports:
@@ -881,15 +880,15 @@ services:
       DMS_RENDERING_SERVICE_BASE_URL: http://rendering-service:8000
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
-      # XDOMEA-Aussonderung fuer Umlaufmappen (5.6, seit P7-S3b)
+      # XDOMEA disposal for circulation folders (5.6, since P7-S3b)
       DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_ARCHIVAL_POLL_INTERVAL_SECONDS: ${ARCHIVAL_SERVICE_POLL_INTERVAL_SECONDS:-3600}
       DMS_DEHYDRATION_DELAY_DAYS: ${ARCHIVAL_SERVICE_DEHYDRATION_DELAY_DAYS:-30}
       DMS_ARCHIVE_RETRIEVAL_ROLE: ${ARCHIVAL_SERVICE_RETRIEVAL_ROLE:-dms-admin}
-      # Dev-/Testschluessel fuer `EnvKeyStore` (ADR 0029) - base64-kodierte
-      # 32 Byte, NUR fuer lokale Entwicklung. Eine echte Installation setzt
-      # dies über ein Secret oder betreibt ein eigenes `KeyStore`-Plugin.
+      # Dev/test key for `EnvKeyStore` (ADR 0029) - base64-encoded
+      # 32 bytes, ONLY for local development. A real installation sets
+      # this via a secret or runs its own `KeyStore` plugin.
       DMS_ARCHIVE_ENCRYPTION_KEY: ${ARCHIVAL_SERVICE_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
     ports:
       - "${ARCHIVAL_SERVICE_PORT:-8021}:8000"
@@ -928,13 +927,13 @@ services:
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
-      # ADR 0031: `pglast` (GPL-3.0-or-later) wird nicht mitgeliefert - leer
-      # gelassen liefert `POST /query` 501, `GET /query/events` bleibt
-      # unberuehrt nutzbar. Ein Betreiber traegt hier den Modulpfad seines
-      # eigenen, separat installierten Plugins ein.
+      # ADR 0031: `pglast` (GPL-3.0-or-later) is not bundled - left
+      # empty, `POST /query` returns 501, `GET /query/events` remains
+      # unaffected and usable. An operator enters the module path of their
+      # own, separately installed plugin here.
       DMS_QUERY_PARSER_PLUGIN_MODULE: ${QUERY_SERVICE_PARSER_PLUGIN_MODULE:-}
-      # HMAC-Schluessel fuer Dry-Run-Tokens (6.1, seit P8-S2) - NUR fuer
-      # lokale Entwicklung, gleiches Muster wie archival-service's
+      # HMAC key for dry-run tokens (6.1, since P8-S2) - ONLY for
+      # local development, same pattern as archival-service's
       # DMS_ARCHIVE_ENCRYPTION_KEY.
       DMS_DRY_RUN_SECRET: ${QUERY_SERVICE_DRY_RUN_SECRET:-dev-only-dry-run-secret-do-not-use-in-production}
     ports:
@@ -973,22 +972,21 @@ services:
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
-      # Fleet-Agent-Schluessel (3a, P13-S2) - erlaubt dem unabhaengig
-      # betriebenen fleet-management-service, eine Lizenz zu installieren,
-      # ohne einen Keycloak-Principal dieser Installation zu besitzen. Fixer
-      # Dev-/Test-Wert in diesem gebuendelten Stack (siehe config-service
-      # unten, denselben Wert), eine echte Installation setzt ein eigenes
-      # Geheimnis oder laesst die Variable leer (deaktiviert den Fleet-Zugriff
-      # vollstaendig, 3a: "optional, separater Baustein").
+      # Fleet agent key (3a, P13-S2) - allows the independently operated
+      # fleet-management-service to install a license without owning a
+      # Keycloak principal of this installation. Fixed dev/test value in
+      # this bundled stack (see config-service below, same value), a real
+      # installation sets its own secret or leaves the variable empty
+      # (disables fleet access completely, 3a: "optional, separate
+      # building block").
       DMS_FLEET_AGENT_API_KEY: ${DMS_FLEET_AGENT_API_KEY:-dev-fleet-agent-key}
-      # ADR 0032: statisch eingebetteter oeffentlicher RS256-Schluessel, kein
-      # JWKS. Der Python-Default in settings.py ist bereits derselbe
-      # Entwicklungsschluessel (kein separater Eintrag hier noetig, anders
-      # als einzeilige Secrets wie DMS_DRY_RUN_SECRET) - eine echte
-      # Installation ueberschreibt DMS_LICENSE_PUBLIC_KEY_PEM als mehrzeiligen
-      # YAML-Block-Skalar in einer eigenen compose-Override-Datei, da die
-      # kompakte "${VAR:-default}"-Syntax kein mehrzeiliges PEM als Default
-      # transportieren kann.
+      # ADR 0032: statically embedded public RS256 key, no JWKS. The
+      # Python default in settings.py is already the same development
+      # key (no separate entry needed here, unlike single-line secrets
+      # such as DMS_DRY_RUN_SECRET) - a real installation overrides
+      # DMS_LICENSE_PUBLIC_KEY_PEM as a multi-line YAML block scalar in its
+      # own compose override file, since the compact "${VAR:-default}"
+      # syntax cannot carry a multi-line PEM as a default.
     ports:
       - "${LICENSE_SERVICE_PORT:-8023}:8000"
     depends_on:
@@ -1047,9 +1045,9 @@ services:
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
-      # Scrape-Proxy (10.1, P11-S1): fragt registry-service nach allen
-      # aktuell aktiven Instanzen und ruft deren eigene /metrics-Endpunkte
-      # selbst ab - Prometheus scraped ausschliesslich diesen Service.
+      # Scrape proxy (10.1, P11-S1): asks registry-service for all
+      # currently active instances and itself calls their own /metrics
+      # endpoints - Prometheus scrapes exclusively this service.
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://monitoring-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
@@ -1078,9 +1076,9 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      # Kein eigenes Postgres-/NATS-Schema (3.3, P12-S1): reiner Übersetzer
-      # zwischen WebDAV und den bestehenden folder-service/document-service-
-      # HTTP-APIs, kein eigener Zustand.
+      # No own Postgres/NATS schema (3.3, P12-S1): pure translator
+      # between WebDAV and the existing folder-service/document-service
+      # HTTP APIs, no own state.
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
@@ -1108,10 +1106,10 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      # Kein eigenes Postgres-/NATS-Schema (3.3, P12-S4), gleiches Muster
-      # wie webdav-connector: reiner Übersetzer zwischen der selbst gebauten
-      # CMIS-1.1-Browser-Binding und den bestehenden folder-service/
-      # document-service-HTTP-APIs.
+      # No own Postgres/NATS schema (3.3, P12-S4), same pattern as
+      # webdav-connector: pure translator between the self-built
+      # CMIS 1.1 browser binding and the existing folder-service/
+      # document-service HTTP APIs.
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_FOLDER_SERVICE_BASE_URL: http://folder-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
@@ -1145,13 +1143,14 @@ services:
       DMS_VIRUS_SCAN_SERVICE_BASE_URL: http://virus-scan-service:8000
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_CASE_SERVICE_BASE_URL: http://case-service:8000
-      # Formatabgeleitetes Kandidaten-Muster (Post-Roadmap Phase 19 Session 11,
-      # siehe ADR 0076) - ohne diese Variable fällt der Client im Container auf
-      # den Lokal-Dev-Default (`localhost:8007`) zurück, der dort ins Leere zeigt.
+      # Format-derived candidate pattern (post-roadmap phase 19 session 11,
+      # see ADR 0076) - without this variable the client in the container
+      # falls back to the local dev default (`localhost:8007`), which points
+      # nowhere there.
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
-      # Posteingang/Postausgang (2.5/3.3, P15-S3): mailpits eigener POP3-
-      # Server dient als Selbst-Loopback-Quelle (siehe dortiger Kommentar) -
-      # Zugangsdaten müssen zu `infra/mailpit-pop3-auth` passen.
+      # Inbox/outbox (2.5/3.3, P15-S3): mailpit's own POP3 server serves
+      # as the self-loopback source (see comment there) - credentials
+      # must match `infra/mailpit-pop3-auth`.
       DMS_POP3_HOST: mailpit
       DMS_POP3_PORT: "1110"
       DMS_POP3_USERNAME: ${MAIL_CONNECTOR_POP3_USERNAME:-mailconnector}
@@ -1227,24 +1226,24 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
-      # Kein eigenes Postgres-/NATS-Schema (7.3, P12-S3): reiner Übersetzer,
-      # liest/schreibt ausschließlich bei den jeweiligen Owner-Services.
+      # No own Postgres/NATS schema (7.3, P12-S3): pure translator,
+      # reads/writes exclusively at the respective owner services.
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://config-service:8000
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_WORKFLOW_SERVICE_BASE_URL: http://workflow-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
-      # Realm-Rollen-Kategorie (14.1, P17-S1).
+      # Realm role category (14.1, P17-S1).
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
-      # Fleet-Agent-Schluessel (3a, P13-S2) - siehe license-service oben,
-      # derselbe Wert (ein fleet-management-service provisioniert beide Wege
-      # ueber dieselbe Installation).
+      # Fleet agent key (3a, P13-S2) - see license-service above,
+      # same value (a fleet-management-service provisions both paths
+      # via the same installation).
       DMS_FLEET_AGENT_API_KEY: ${DMS_FLEET_AGENT_API_KEY:-dev-fleet-agent-key}
-      # Reiner NATS-Konsument seit P17-S3 (4.3/14.2, `permission.approval.approved`
-      # fuer zurueckgestellten `config.import`) - ohne diese Variable faellt
-      # `BaseServiceSettings` auf `nats://localhost:4222` zurueck, was im
-      # Container nicht den `nats`-Service erreicht (P17-S3-Fund).
+      # Pure NATS consumer since P17-S3 (4.3/14.2, `permission.approval.approved`
+      # for deferred `config.import`) - without this variable
+      # `BaseServiceSettings` falls back to `nats://localhost:4222`, which
+      # does not reach the `nats` service in the container (P17-S3 finding).
       DMS_NATS_URL: nats://nats:4222
     ports:
       - "${CONFIG_SERVICE_PORT:-8029}:8000"
@@ -1272,11 +1271,12 @@ services:
       dockerfile: services/fleet-management-service/Dockerfile
     restart: unless-stopped
     environment:
-      # Bewusst KEIN DMS_INSTALLATION_ID/DMS_REGISTRY_SERVICE_BASE_URL (3a,
-      # P13-S2) - dieser Service gehoert zu keiner einzelnen Installation,
-      # siehe settings.py. Nur der lokalen Entwicklung/dem Testen halber
-      # trotzdem in diesem Stack mitgeliefert (analog federation-hub-service,
-      # ADR 0028) - ein Betreiber wuerde ihn separat betreiben.
+      # Deliberately NO DMS_INSTALLATION_ID/DMS_REGISTRY_SERVICE_BASE_URL
+      # (3a, P13-S2) - this service does not belong to any single
+      # installation, see settings.py. Bundled in this stack nonetheless
+      # only for local development/testing (analogous to
+      # federation-hub-service, ADR 0028) - an operator would run it
+      # separately.
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
     ports:
       - "${FLEET_MANAGEMENT_SERVICE_PORT:-8031}:8000"
@@ -1317,6 +1317,15 @@ services:
   prometheus:
     image: prom/prometheus:v2.55.1
     restart: unless-stopped
+    # Explicit command re-states the image defaults (a custom command replaces
+    # them entirely) plus --web.enable-remote-write-receiver, needed so k6's
+    # experimental-prometheus-rw output (loadtest/) can push samples directly.
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.enable-remote-write-receiver
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -1331,14 +1340,14 @@ services:
     image: grafana/grafana:11.3.1
     restart: unless-stopped
     environment:
-      # Reine Dev-Bequemlichkeit (Default-Login) - kein Produktions-Ziel dieses
-      # Stacks, gleiche Vertrauensstellung wie POSTGRES_PASSWORD/dms_dev_only.
+      # Pure dev convenience (default login) - not a production target of
+      # this stack, same trust level as POSTGRES_PASSWORD/dms_dev_only.
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      # Konzept 10.1: "liefert sinnvolle Default-Dashboard-Definitionen als
-      # exportierbare JSON-Vorlagen" - Datasource + Dashboard werden deklarativ
-      # provisioniert (siehe infra/grafana/provisioning/), kein manuelles
-      # Klicken in der UI nötig.
+      # Concept 10.1: "provides sensible default dashboard definitions as
+      # exportable JSON templates" - datasource + dashboard are provisioned
+      # declaratively (see infra/grafana/provisioning/), no manual
+      # clicking in the UI needed.
       GF_INSTALL_PLUGINS: ""
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -1384,13 +1393,14 @@ services:
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://folder-service:8000
-      # Aufbewahrung/Legal Hold/Zwangslöschung für Ordner (5.2/5.2a, seit
-      # P7-S1b): Kaskaden-Aufrufe an document-service (kein depends_on hier
-      # möglich - document-service hängt selbst bereits von folder-service
-      # ab, ein zyklisches depends_on ist in docker-compose nicht zulässig;
-      # der HTTP-Client toleriert das, da nur zur Aufrufzeit gebraucht),
-      # Vier-Augen-Prinzip über permission-service, Poll-Intervall wie
-      # document-service's `retention_poll_interval_seconds` (P7-S1).
+      # Retention/legal hold/forced deletion for folders (5.2/5.2a, since
+      # P7-S1b): cascading calls to document-service (no depends_on
+      # possible here - document-service already itself depends on
+      # folder-service, a cyclic depends_on is not allowed in
+      # docker-compose; the HTTP client tolerates this since it's only
+      # needed at call time), four-eyes principle via permission-service,
+      # poll interval like document-service's
+      # `retention_poll_interval_seconds` (P7-S1).
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_RETENTION_POLL_INTERVAL_SECONDS: ${FOLDER_SERVICE_RETENTION_POLL_INTERVAL_SECONDS:-3600}
@@ -1419,19 +1429,19 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       DMS_KEYCLOAK_CLIENT_ID: dms-api
-      # Auth-Entkopplung von Keycloak (Phase 18, ADR 0063) - JWKS lokaler
-      # technischer Konten (Superuser/Domain-Admins), siehe
+      # Auth decoupling from Keycloak (phase 18, ADR 0063) - JWKS of local
+      # technical accounts (superusers/domain admins), see
       # `_build_token_validator` in main.py.
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_RATE_LIMIT_MAX_REQUESTS: ${GATEWAY_SERVICE_RATE_LIMIT_MAX_REQUESTS:-600}
       DMS_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_SERVICE_RATE_LIMIT_WINDOW_SECONDS:-60}
-      # Geteilter Rate-Limit-Store (seit P25-S3, ADR 0097) - interne Compose-DNS,
-      # siehe redis-Service oben.
+      # Shared rate-limit store (since P25-S3, ADR 0097) - internal Compose DNS,
+      # see redis service above.
       DMS_REDIS_URL: redis://redis:6379/0
-      # Vom Browser aus erreichbare Frontend-Origins (CORS) - bei geänderten
-      # <APP>_PORT-Werten entsprechend mit anpassen. Enthielt vor P14-S2
-      # PROCESS_DESIGNER_PORT (3002) nicht (real gefundene, mit aufgeräumte
-      # Lücke) - jetzt alle fünf Frontend-Apps vollständig gelistet.
+      # Frontend origins reachable from the browser (CORS) - adjust
+      # accordingly when <APP>_PORT values change. Did not include
+      # PROCESS_DESIGNER_PORT (3002) before P14-S2 (a real gap found and
+      # cleaned up) - now all five frontend apps are fully listed.
       DMS_CORS_ALLOWED_ORIGINS: ${GATEWAY_SERVICE_CORS_ALLOWED_ORIGINS:-["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://localhost:3004","http://localhost:3005"]}
     ports:
       - "${GATEWAY_SERVICE_PORT:-8009}:8000"
@@ -1450,12 +1460,12 @@ services:
       context: ..
       dockerfile: apps/user-ui/Dockerfile
       args:
-        # Vom Browser aus erreichbare Adresse des Gateways (nicht die interne
-        # Compose-DNS) - der Build brennt sie fest ein, siehe apps/user-ui/README.md.
+        # Address of the gateway reachable from the browser (not the internal
+        # Compose DNS) - the build bakes it in permanently, see apps/user-ui/README.md.
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${USER_UI_GATEWAY_BASE_URL:-http://localhost:8009}
-        # Office-Direktbearbeitung (Post-Roadmap-Feature): vom Browser aus
-        # erreichbare Adresse von webdav-connector - der Browser spricht
-        # diesen Dienst für die Office-URI-Schema-Start-URL direkt an.
+        # Direct Office editing (post-roadmap feature): address of
+        # webdav-connector reachable from the browser - the browser talks
+        # to this service directly for the Office URI scheme start URL.
         NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL: ${USER_UI_WEBDAV_CONNECTOR_BASE_URL:-http://localhost:8027}
     restart: unless-stopped
     ports:

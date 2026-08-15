@@ -1,22 +1,22 @@
 {{/*
-Bundled Postgres (P26-S3) — nur gerendert, wenn postgresql.enabled=true
-(sonst zeigt jeder Konsument über dms.postgresDsn/dms.postgresHost auf
-postgresql.external.*, siehe templates/_helpers.tpl). Bewusst ein einfaches
-Deployment+PVC statt eines StatefulSet (explizite, bereits getroffene v1-
-Entscheidung, siehe IMPLEMENTATION_PLAN.md Phase 26 und Session-Report) —
-eigenes Template statt des generischen services:-Mechanismus, weil Volumes/
-Secret-Verweise/ein abweichender Health-Check-Mechanismus strukturell nicht
-in das generische Schema passen.
+Bundled Postgres (P26-S3) — only rendered when postgresql.enabled=true
+(otherwise every consumer points via dms.postgresDsn/dms.postgresHost to
+postgresql.external.*, see templates/_helpers.tpl). Deliberately a simple
+Deployment+PVC instead of a StatefulSet (an explicit, already-made v1
+decision, see IMPLEMENTATION_PLAN.md Phase 26 and the session report) —
+its own template instead of the generic services: mechanism, because volumes/
+secret references/a differing health-check mechanism don't structurally fit
+into the generic schema.
 
-KEINE WAL-Archivierung/kein zweites Wal-Archive-PVC/kein Chown-Init-Container
-(anders als infra/docker-compose.yml, siehe dortiger postgres-Kommentar) -
-bewusster Scope-Cut dieser Session: Point-in-Time-Recovery über ein lokales
-zweites Volume ist für ein Single-Replica-"kein echtes Cluster-Deployment in
-Phase 26 gefordert"-v1-Chart (siehe ADR 0099 Konsequenzen) von begrenztem
-Nutzen, und der Compose-Chown-Trick (fester "postgres:postgres"-User) ist auf
-OpenShift mit zufällig zugewiesener, nicht-root UID (restricted SCC) ohnehin
-nicht 1:1 übertragbar. Offener Punkt für eine spätere Session, falls eine
-reale Cluster-Bereitstellung tatsächlich ansteht (siehe Session-Report).
+NO WAL archiving/no second WAL archive PVC/no chown init container
+(unlike infra/docker-compose.yml, see the postgres comment there) -
+a deliberate scope cut for this session: point-in-time recovery via a local
+second volume is of limited use for a single-replica "no real cluster
+deployment required in Phase 26" v1 chart (see ADR 0099 consequences), and
+the Compose chown trick (fixed "postgres:postgres" user) isn't 1:1
+transferable to OpenShift with a randomly assigned, non-root UID (restricted
+SCC) anyway. An open point for a later session, should a
+real cluster deployment actually become relevant (see the session report).
 */}}
 {{- if .Values.postgresql.enabled }}
 ---
@@ -52,8 +52,8 @@ metadata:
     {{- include "dms.serviceLabels" (dict "root" . "name" "postgresql") | nindent 4 }}
 spec:
   replicas: 1
-  # RWO-PVC + Einzelinstanz: bei einem Rollout darf niemals ein zweiter Pod
-  # gleichzeitig dasselbe Volume mounten wollen (kein RollingUpdate-Overlap).
+  # RWO PVC + single instance: during a rollout a second pod must never
+  # try to mount the same volume simultaneously (no RollingUpdate overlap).
   strategy:
     type: Recreate
   selector:

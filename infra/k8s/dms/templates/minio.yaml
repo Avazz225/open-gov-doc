@@ -1,7 +1,7 @@
 {{/*
-Bundled MinIO (P26-S3) — nur gerendert, wenn minio.enabled=true (sonst zeigt
-storage-service über dms.minioEndpoint auf minio.external.endpoint, siehe
-templates/_helpers.tpl und storageService.targets in values.yaml).
+Bundled MinIO (P26-S3) — only rendered when minio.enabled=true (otherwise
+storage-service points via dms.minioEndpoint to minio.external.endpoint, see
+templates/_helpers.tpl and storageService.targets in values.yaml).
 */}}
 {{- if .Values.minio.enabled }}
 ---
@@ -28,7 +28,7 @@ metadata:
     {{- include "dms.serviceLabels" (dict "root" . "name" "minio") | nindent 4 }}
 spec:
   replicas: 1
-  # RWO-PVC + Einzelinstanz, gleiche Begründung wie templates/postgresql.yaml.
+  # RWO PVC + single instance, same rationale as templates/postgresql.yaml.
   strategy:
     type: Recreate
   selector:
@@ -62,10 +62,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-          # infra/docker-compose.yml prüft über `mc ready local` (MinIO-CLI im
-          # Image) - hier stattdessen die offiziell dokumentierten HTTP-
-          # Health-Endpunkte des MinIO-Servers selbst, gleiche Semantik ohne
-          # den CLI-Exec-Umweg.
+          # infra/docker-compose.yml checks via `mc ready local` (MinIO CLI in the
+          # image) - here instead the officially documented HTTP
+          # health endpoints of the MinIO server itself are used, same semantics without
+          # the CLI-exec detour.
           readinessProbe:
             httpGet:
               path: /minio/health/ready

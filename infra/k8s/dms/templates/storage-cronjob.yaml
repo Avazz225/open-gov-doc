@@ -1,22 +1,22 @@
 {{/*
-CronJob, der storage-service's echten Replikations-Retry-Endpunkt
-(`POST /replication/process-pending`, services/storage-service/src/
-storage_service/main.py Zeile 561) periodisch von außen auslöst (P26-S4).
-storage-service läuft bewusst OHNE eigenen In-Prozess-Scheduler dafür (ADR
-0004: expliziter Endpunkt statt In-Prozess-Hintergrundtask) — dieser CronJob
-ist der seit Post-Roadmap Phase 20 Session 6 (siehe PROGRESS.md P20-S6)
-angekündigte externe Träger.
+CronJob that periodically triggers storage-service's real replication retry
+endpoint (`POST /replication/process-pending`, services/storage-service/src/
+storage_service/main.py line 561) from outside (P26-S4).
+storage-service deliberately runs WITHOUT its own in-process scheduler for this (ADR
+0004: explicit endpoint instead of in-process background task) — this CronJob
+is the external carrier announced since post-roadmap Phase 20 Session 6
+(see PROGRESS.md P20-S6).
 
-Nur EIN CronJob, kein zweiter für Objekt-Fixity-Verifikation — siehe
-values.yaml storageCronJob-Blockkommentar sowie ADR 0101: der reale
-Verifikations-Endpunkt `GET /object-verify/{key:path}/all` braucht einen
-konkreten Objekt-`key` (verifiziert alle ZIELE eines Objekts, nicht alle
-Objekte des Stores) und lässt sich deshalb nicht blind periodisch aufrufen,
-ohne einen neuen storage-service-Endpunkt zu erfinden.
+Only ONE CronJob, no second one for object fixity verification — see
+the values.yaml storageCronJob block comment as well as ADR 0101: the real
+verification endpoint `GET /object-verify/{key:path}/all` needs a
+concrete object `key` (verifies all TARGETS of one object, not all
+objects in the store) and therefore can't be called blindly on a periodic basis,
+without inventing a new storage-service endpoint.
 
-Lightweight curl-Image statt des vollen storage-service-Images (siehe
-values.yaml storageCronJob.image-Kommentar) — der Container macht nichts
-weiter als einen einzelnen authentifizierten HTTP-POST.
+Lightweight curl image instead of the full storage-service image (see
+the values.yaml storageCronJob.image comment) — the container does nothing
+more than a single authenticated HTTP POST.
 */}}
 {{- if .Values.storageCronJob.enabled }}
 apiVersion: batch/v1
@@ -28,16 +28,16 @@ metadata:
     app.kubernetes.io/component: storage-replication-cronjob
 spec:
   schedule: {{ .Values.storageCronJob.replication.schedule | quote }}
-  # Verhindert überlappende Läufe gegen dieselbe storage-service-Instanz
-  # (die Retry-Queue selbst ist zwar idempotent, aber zwei gleichzeitige
-  # Batches würden sich unnötig um dieselben "pending"-Zeilen bewerben).
+  # Prevents overlapping runs against the same storage-service instance
+  # (the retry queue itself is idempotent, but two concurrent
+  # batches would unnecessarily compete for the same "pending" rows).
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: {{ .Values.storageCronJob.replication.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.storageCronJob.replication.failedJobsHistoryLimit }}
   jobTemplate:
     spec:
-      # Bricht einen hängenden Lauf (z. B. storage-service oder ein
-      # Redundanz-Ziel nicht erreichbar) hart ab, statt unbegrenzt zu warten.
+      # Hard-aborts a hung run (e.g. storage-service or a
+      # redundancy target unreachable) instead of waiting indefinitely.
       activeDeadlineSeconds: {{ .Values.storageCronJob.replication.activeDeadlineSeconds }}
       backoffLimit: 2
       template:
