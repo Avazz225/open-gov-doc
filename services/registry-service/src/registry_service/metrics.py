@@ -1,14 +1,17 @@
 from collections.abc import Awaitable, Callable
 
-from dms_metrics_client import GuardedGauge, SensorConfigClient, SensorRegistry, SensorSpec
+from dms_metrics_client import GuardedGauge, SensorRegistry, SensorSpec, http_sensor_declarations
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from registry_service import repository
 
-# registry-service is one of the two sensor pilots (10.1, P11-S1, see
-# P11-S0 finding: no full retrofit of all services). Both sensor names are
+# registry-service was one of the two original sensor pilots (10.1,
+# P11-S1, see P11-S0 finding) - both bespoke sensor names below are
 # deliberately taken verbatim from concept 10.1's own example list, where
-# available ("registry.service.heartbeat.miss").
+# available ("registry.service.heartbeat.miss"). Now additionally covered
+# by the generic http.* sensors from the full rollout (see `main.py`'s
+# module-level `bootstrap_http_sensors` call, which builds the
+# `SensorRegistry` this module's sensors are added to).
 ACTIVE_INSTANCES = SensorSpec(
     name="registry.instances.active_total",
     group="capacity",
@@ -27,16 +30,13 @@ HEARTBEAT_MISS = SensorSpec(
 
 
 def sensor_declarations() -> list[dict]:
-    return [ACTIVE_INSTANCES.as_dict(), HEARTBEAT_MISS.as_dict()]
+    return [ACTIVE_INSTANCES.as_dict(), HEARTBEAT_MISS.as_dict(), *http_sensor_declarations()]
 
 
-def build_sensor_registry(
-    config_client: SensorConfigClient,
-) -> tuple[SensorRegistry, GuardedGauge, GuardedGauge]:
-    registry = SensorRegistry("registry-service", is_active=config_client.is_active)
+def build_sensor_registry(registry: SensorRegistry) -> tuple[GuardedGauge, GuardedGauge]:
     active_gauge = registry.gauge(ACTIVE_INSTANCES)
     heartbeat_miss_gauge = registry.gauge(HEARTBEAT_MISS)
-    return registry, active_gauge, heartbeat_miss_gauge
+    return active_gauge, heartbeat_miss_gauge
 
 
 def build_samplers(

@@ -291,6 +291,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       # Self-registration with the registry (3.2a, since P4-S1) - basis for
@@ -321,6 +322,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       # SSO/automatic login (post-roadmap feature): `GET /oidc/authorize`
       # returns a URL that the BROWSER navigates to - the internal
@@ -368,6 +370,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -427,6 +430,9 @@ services:
       DMS_QUORUM_COUNT: ${STORAGE_SERVICE_QUORUM_COUNT:-1}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://storage-service:8000
+      # Sensor concept (10.1, full rollout) - same fail-open pattern as
+      # document-service/registry-service.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       # Role for the governance-mode bypass on forced deletion (5.2a, since
       # P7-S1) - must match document-service's `DOCUMENT_SERVICE_GOVERNANCE_
       # BYPASS_ROLE`, see ADR 0030.
@@ -504,6 +510,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
@@ -541,6 +548,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
@@ -590,6 +598,9 @@ services:
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://ocr-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
+      # Sensor concept (10.1, full rollout) - same fail-open pattern as
+      # document-service/registry-service.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${OCR_SERVICE_PORT:-8012}:8000"
     depends_on:
@@ -614,6 +625,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -652,6 +664,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -691,6 +704,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -728,6 +742,9 @@ services:
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://case-service:8000
+      # Sensor concept (10.1, full rollout) - same fail-open pattern as
+      # document-service/registry-service.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${CASE_SERVICE_PORT:-8016}:8000"
     depends_on:
@@ -754,6 +771,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
@@ -809,6 +827,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -831,6 +850,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -873,6 +893,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://archival-service:8000
@@ -918,6 +939,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -964,6 +986,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -1013,6 +1036,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -1076,6 +1100,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       # No own Postgres/NATS schema (3.3, P12-S1): pure translator
       # between WebDAV and the existing folder-service/document-service
       # HTTP APIs, no own state.
@@ -1115,6 +1140,10 @@ services:
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://cmis-connector:8000
+      # Sensor concept (10.1, full rollout) - monitoring-service itself does
+      # NOT depend on cmis-connector (no depends_on here), same pattern as
+      # registry-service above.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${CMIS_CONNECTOR_PORT:-8030}:8000"
     depends_on:
@@ -1160,6 +1189,9 @@ services:
       DMS_POSTSTELLE_ROLE: ${MAIL_CONNECTOR_POSTSTELLE_ROLE:-dms-poststelle}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://mail-connector:8000
+      # Sensor concept (10.1, full rollout) - same fail-open pattern as
+      # document-service/registry-service.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${MAIL_CONNECTOR_PORT:-8033}:8000"
     depends_on:
@@ -1190,6 +1222,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -1294,6 +1327,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
@@ -1392,6 +1426,9 @@ services:
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://object-type-service:8000
+      # Sensor concept (10.1, full rollout) - same fail-open pattern as
+      # document-service/registry-service.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
     ports:
       - "${OBJECT_TYPE_SERVICE_PORT:-8007}:8000"
     depends_on:
@@ -1408,6 +1445,7 @@ services:
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_POSTGRES_DSN: postgresql+asyncpg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_dev_only}@postgres:5432/${POSTGRES_DB:-dms}
       DMS_NATS_URL: nats://nats:4222
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
@@ -1447,6 +1485,15 @@ services:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
+      # Self-registration (10.1, full rollout), new for gateway-service:
+      # unlike every other service, nothing needs to *discover* the gateway
+      # itself - this exists purely so monitoring-service's scrape-proxy can
+      # find and scrape this instance's new /metrics endpoint.
+      DMS_SELF_ADDRESS: http://gateway-service:8000
+      # Sensor concept (10.1, full rollout) - monitoring-service itself does
+      # NOT depend on gateway-service (no depends_on here), same pattern as
+      # registry-service above.
+      DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
       DMS_KEYCLOAK_BASE_URL: http://keycloak:8080
       DMS_KEYCLOAK_CLIENT_ID: dms-api
       # Auth decoupling from Keycloak (phase 18, ADR 0063) - JWKS of local

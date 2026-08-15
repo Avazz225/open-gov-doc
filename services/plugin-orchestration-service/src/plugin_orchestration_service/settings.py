@@ -6,6 +6,8 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     permission_service_base_url: str = "http://localhost:8004"
     auth_service_base_url: str = "http://localhost:8003"
 

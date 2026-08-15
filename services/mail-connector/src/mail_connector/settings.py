@@ -22,6 +22,7 @@ class Settings(BaseServiceSettings):
     # the actually configured `kennzeichen_format` values (matching.py),
     # instead of being hard-coded.
     object_type_service_base_url: str = "http://localhost:8007"
+    monitoring_service_base_url: str = "http://localhost:8026"
 
     # Interchangeable retrieval protocol following the same plugin principle
     # as the storage backends/virus-scan engines (3.3/3.6/10.3) - "pop3"

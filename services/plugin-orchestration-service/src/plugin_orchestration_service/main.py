@@ -8,8 +8,14 @@ from datetime import UTC, datetime
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_metrics_client import (
+    SensorConfigClient,
+    bootstrap_http_sensors,
+    http_sensor_declarations,
+    metrics_payload,
+)
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,6 +107,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
+    sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+    await sensor_config_client.start()
+    sensor_config_proxy.bind(sensor_config_client)
+    app.state.sensor_config_client = sensor_config_client
+    app.state.sensor_registry = sensor_registry
+
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.registry_client = RegistryClient(
@@ -138,6 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
+        sensors=http_sensor_declarations(),
     )
 
     startup_end = time.time()
@@ -146,6 +159,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    sensor_config_proxy.unbind()
+    await app.state.sensor_config_client.stop()
     if registration:
         await registration.stop()
     sampler_task.cancel()
@@ -160,6 +175,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
 
+# Sensor concept (10.1, full rollout): must run at module level, right
+# after `app` is constructed - see bootstrap_http_sensors's docstring
+# for why this can't move into `lifespan` (FastAPI forbids adding
+# middleware once the app has started).
+sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
+    bootstrap_http_sensors(app, settings.service_name)
+)
+
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with app.state.session_factory() as session:
@@ -169,6 +192,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def get_metrics() -> Response:
+    body, content_type = metrics_payload(app.state.sensor_registry)
+    return Response(content=body, media_type=content_type)
 
 
 @app.post(

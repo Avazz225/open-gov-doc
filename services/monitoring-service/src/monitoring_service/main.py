@@ -160,7 +160,8 @@ async def get_metrics() -> Response:
         timeout_seconds=settings.scrape_timeout_seconds,
         on_failure=app.state.scrape_failures_counter.inc,
     )
-    merged = scraper.merge_metric_families(bodies)
+    service_types = {instance.instance_id: instance.service_type for instance in instances}
+    merged = scraper.merge_metric_families(bodies, service_types)
 
     combined_registry = CollectorRegistry()
     combined_registry.register(_StaticMetricsCollector(merged))

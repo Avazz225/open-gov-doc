@@ -10,7 +10,12 @@ from datetime import UTC, datetime, timedelta
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
-from dms_metrics_client import SensorConfigClient, metrics_payload, run_gauge_sampler_loop
+from dms_metrics_client import (
+    SensorConfigClient,
+    bootstrap_http_sensors,
+    metrics_payload,
+    run_gauge_sampler_loop,
+)
 from dms_registry_client import maybe_start_registration
 from fastapi import (
     Depends,
@@ -420,15 +425,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
     )
 
-    # Sensor concept (10.1, P11-S1): document-service is one of the two
-    # pilots (see P11-S0 finding). Activation status comes from
-    # `monitoring-service`, TTL poll instead of NATS invalidation (deliberate
-    # scope decision, same pattern as `registry-service`).
-    app.state.sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
-    await app.state.sensor_config_client.start()
-    sensor_registry, upload_duration_sensor, active_documents_gauge = metrics.build_sensor_registry(
-        app.state.sensor_config_client
-    )
+    # Sensor concept (10.1): document-service was one of the original two
+    # pilots (P11-S1), now covered by the full rollout's generic http.*
+    # sensors too (`sensor_registry`/`upload_duration_sensor`/
+    # `active_documents_gauge`/`sensor_config_proxy` are module-level names,
+    # built by `bootstrap_http_sensors` right after `app = FastAPI(...)`).
+    # A fresh `SensorConfigClient` per startup, bound into the module-level
+    # proxy, not a module-level client itself (`SensorConfigProxy`'s
+    # docstring: its httpx client can't outlive the event loop it was first
+    # used on - fatal across independent lifespans, e.g. `TestClient` runs).
+    sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+    await sensor_config_client.start()
+    sensor_config_proxy.bind(sensor_config_client)
+    app.state.sensor_config_client = sensor_config_client
     app.state.sensor_registry = sensor_registry
     app.state.upload_duration_sensor = upload_duration_sensor
     samplers = metrics.build_samplers(active_documents_gauge, app.state.session_factory)
@@ -480,6 +489,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sensor_sampler_task.cancel()
     with suppress(asyncio.CancelledError):
         await sensor_sampler_task
+    sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     if registration:
         await registration.stop()
@@ -496,6 +506,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+# Sensor concept (10.1): must run at module level, right after `app` is
+# constructed - see `bootstrap_http_sensors`'s docstring for why this can't
+# move into `lifespan` (FastAPI forbids adding middleware once the app has
+# started). Returns a `SensorConfigProxy`, not a connected client - the
+# actual `SensorConfigClient` is still constructed fresh inside `lifespan`
+# on every startup (`SensorConfigProxy`'s docstring: its httpx client can't
+# outlive the event loop it was first used on). `sensor_registry` is shared
+# with document-service's own pre-existing pilot sensors below (one
+# registry per service).
+sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
+    bootstrap_http_sensors(app, settings.service_name)
+)
+upload_duration_sensor, active_documents_gauge = metrics.build_sensor_registry(sensor_registry)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

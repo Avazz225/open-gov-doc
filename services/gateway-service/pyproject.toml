@@ -10,11 +10,15 @@ dependencies = [
     "redis>=5.0",
     "dms-common",
     "dms-auth-client",
+    "dms-metrics-client",
+    "dms-registry-client",
 ]
 
 [tool.uv.sources]
 dms-common = { workspace = true }
 dms-auth-client = { workspace = true }
+dms-metrics-client = { workspace = true }
+dms-registry-client = { workspace = true }
 
 [dependency-groups]
 dev = ["cryptography>=42.0", "python-jose[cryptography]>=3.3"]

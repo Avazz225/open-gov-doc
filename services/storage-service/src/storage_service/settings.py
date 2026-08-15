@@ -68,6 +68,8 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Target set (3.6) - since P5b-S6 a real list of backend instances
     # instead of the previous fixed two-slot structure (backend/
     # secondary_backend, see ADR 0004/0017). The primary target is always

@@ -10,6 +10,7 @@ dependencies = [
     "dms-common",
     "dms-db-base",
     "dms-eventbus-client",
+    "dms-metrics-client",
     "dms-registry-client",
 ]
 
@@ -17,6 +18,7 @@ dependencies = [
 dms-common = { workspace = true }
 dms-db-base = { workspace = true }
 dms-eventbus-client = { workspace = true }
+dms-metrics-client = { workspace = true }
 dms-registry-client = { workspace = true }
 
 [dependency-groups]

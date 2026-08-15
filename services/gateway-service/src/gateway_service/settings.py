@@ -6,6 +6,7 @@ class Settings(BaseServiceSettings):
 
     registry_service_base_url: str = "http://localhost:8001"
     instance_cache_ttl_seconds: float = 5.0
+    monitoring_service_base_url: str = "http://localhost:8026"
 
     keycloak_base_url: str = "http://localhost:8080"
     keycloak_realm: str = "dms"

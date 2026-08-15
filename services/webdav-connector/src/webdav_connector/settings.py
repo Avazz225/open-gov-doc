@@ -7,6 +7,7 @@ class Settings(BaseServiceSettings):
     document_service_base_url: str = "http://localhost:8006"
     folder_service_base_url: str = "http://localhost:8008"
     auth_service_base_url: str = "http://localhost:8003"
+    monitoring_service_base_url: str = "http://localhost:8026"
 
     # Concept 3.2a license mediation (P9-S2 pattern): poll interval of the
     # license status cache against registry-service.

@@ -48,3 +48,5 @@ class Settings(BaseServiceSettings):
     # interface is shipped, no real KDBX key management). 32 bytes,
     # base64-encoded - AES-256-GCM expects exactly this length.
     archive_encryption_key: str | None = None
+
+    monitoring_service_base_url: str = "http://localhost:8026"

@@ -12,11 +12,17 @@ this is actually implemented in the project (`libs/dms-metrics-client`, `registr
 ```
 Prometheus ──scrape──▶ monitoring-service ──scrape──▶ registry-service /metrics
                               │                    └──▶ document-service /metrics
-                              │                    └──▶ (further pilots in the future)
+                              │                    └──▶ (every other self-registering service)
                               │
                               └──query──▶ registry-service GET /instances
                                           (addresses + declared sensor catalogs)
 ```
+
+Every scraped sample also gets an `instance` (opaque instance ID) and `service`
+(`RegistryInstance.service_type`, e.g. `"document-service"`) label injected by
+`monitoring_service.scraper.merge_metric_families` - `service` is what Grafana
+dashboards actually group/filter by, `instance` disambiguates when multiple
+replicas of the same service type are running.
 
 **Architecture decision at session start** (open question): Prometheus does not scrape each
 domain service directly, but exclusively `monitoring-service` (pull/proxy model). The
@@ -52,14 +58,52 @@ sensor = registry.histogram(SPEC)  # or .counter()/.gauge()
 
 ## Connecting a service as a sensor source
 
+Every self-registering service gets two generic sensors "for free" -
+`http.requests` (2xx/4xx/5xx-labeled request counter) and
+`http.request.duration_seconds` (response-time histogram) - covering request
+count, avg/p95/p99 response time, and error/success count via PromQL, without
+any bespoke instrumentation:
+
 1. Add `dms-metrics-client` as a dependency (`pyproject.toml` + `[tool.uv.sources]`).
-2. Create a `metrics.py` module with the service's `SensorSpec`s (see `registry_service/metrics.py`/`document_service/metrics.py` as a template).
-3. In the lifespan: start `SensorConfigClient`, build `SensorRegistry`, call sensors at the appropriate points, expose `GET /metrics` via `dms_metrics_client.metrics_payload()`.
-4. On self-registration (`maybe_start_registration(..., sensors=metrics.sensor_declarations())`), include the sensor declarations — `monitoring-service` automatically reads them via `registry-service`'s `GET /instances`, no further step needed.
+2. Add `monitoring_service_base_url: str = "http://localhost:8026"` to `Settings`.
+3. **At module level**, immediately after `app = FastAPI(...)` (NOT inside
+   `lifespan` - `bootstrap_http_sensors` registers ASGI middleware, and FastAPI
+   raises `RuntimeError: Cannot add middleware after an application has
+   started` if that happens from inside `lifespan`):
+   ```python
+   sensor_config_proxy, sensor_registry, _requests, _duration = bootstrap_http_sensors(
+       app, settings.service_name
+   )
+   ```
+4. Inside `lifespan`, construct a **fresh** `SensorConfigClient` on every
+   startup and bind it into the proxy (its `httpx.AsyncClient` can't outlive
+   the event loop it was first used on - see `SensorConfigProxy`'s docstring
+   in `dms_metrics_client.config_client`):
+   ```python
+   sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+   await sensor_config_client.start()
+   sensor_config_proxy.bind(sensor_config_client)
+   app.state.sensor_config_client = sensor_config_client
+   app.state.sensor_registry = sensor_registry
+   # ... teardown, after yield: sensor_config_proxy.unbind(); await sensor_config_client.stop()
+   ```
+5. Expose `GET /metrics` via `dms_metrics_client.metrics_payload(app.state.sensor_registry)`.
+6. On self-registration, include `sensors=http_sensor_declarations()` (merge
+   with any bespoke sensor declarations the service also has, see
+   `registry_service/metrics.py`'s `sensor_declarations()` for the pattern) -
+   `monitoring-service` automatically reads them via `registry-service`'s
+   `GET /instances`, no further step needed.
+
+For a service's own **bespoke** sensors beyond the generic HTTP pair (e.g.
+`document.upload.duration`): create a `metrics.py` module with the
+`SensorSpec`s and register them on the SAME `sensor_registry` returned by
+`bootstrap_http_sensors` (one `SensorRegistry`/`CollectorRegistry` per
+service - see `registry_service/metrics.py`/`document_service/metrics.py`).
 
 ## Deliberate simplifications of this build-out stage
 
-- **No full retrofit of all 25 services** (P11-S0 finding) — only `registry-service` and `document-service` are pilots today. Other services get their sensors when actually needed in later sessions, not silently claimed as "done".
+- **`federation-hub-service`/`fleet-management-service` are deliberately excluded** from the full HTTP-sensor rollout - both are independently-operated, explicitly **not** internal services of a single installation (ADR 0028, see their own `Settings` docstrings), and neither self-registers with `registry-service` at all. Instrumenting them the same way as installation-internal services would blur that architectural boundary.
+- **`monitoring-service` itself is not instrumented with the generic HTTP sensors** - it already self-registers and runs its own scrape-proxy `/metrics`; adding itself to its own scrape target list risks a self-referential scrape. Low value anyway (low-volume admin-API traffic).
 - **TTL poll instead of NATS invalidation** for `SensorConfigClient` (default 15s) — simpler than the `ComponentLicenseCache` template (P9-S2), a deliberate scope decision given the overall size of this session.
 - **Static Prometheus target** (`infra/prometheus.yml`, a single entry `monitoring-service:8000`) instead of scrape configuration automatically derived from the registry — Concept 10.1 names the latter as an option, not a requirement; with only one scrape target, automation does not yet add value.
 - **No integration with 7.3** (configuration import/export) — the service only exists from P12-S3 on (the same backward-dependency pattern as the P10-S0 finding on 10.1). Until then, sensor configuration is persisted and audited independently in `monitoring-service`.
@@ -80,14 +124,22 @@ point, not mandatory use)." Implemented as:
   `prometheus` instance with a fixed `uid: prometheus`; `infra/grafana/provisioning/dashboards/dashboards.yml`
   automatically loads every JSON file from `infra/grafana/dashboards/` on startup.
 - **`infra/grafana/dashboards/dms-sensor-overview.json`** — the exportable template
-  required by the concept: a dashboard with the four current pilot sensors
+  required by the concept: a dashboard with the original pilot sensors
   (`registry.instances.active_total`, `registry.service.heartbeat.miss`,
   `document.upload.duration`, `document.count.active_total`) plus the always-active
   `monitoring_scrape_failures_total` counter and the `up{job="monitoring-service"}` target status.
-  Further sensors from future services (no full retrofit, see above) only appear
-  here once they are scraped via `monitoring-service` — the file itself remains
-  exportable/importable unchanged into any other Grafana instance, independent of this
-  compose stack.
+- **`infra/grafana/dashboards/dms-service-http-overview.json`** — full-rollout
+  dashboard for the generic `http.requests`/`http.request.duration_seconds`
+  sensors: a `$service` template variable (populated from
+  `label_values(http_requests_total, service)`) drives per-service detail
+  panels (request rate by route, avg/p95/p99 response time, error/success
+  rate), plus an all-services overview table for spotting which service needs
+  attention first without switching the dropdown.
+- **`infra/grafana/dashboards/dms-resource-usage.json`** — per-container
+  CPU/memory/network from cadvisor (`loadtest/`, service-sizing analysis) -
+  a different data source (cadvisor, not the sensor concept) but complements
+  the two dashboards above: correlate a service's request volume with its
+  actual resource cost.
 
 ## CheckMK — deliberately not part of this build-out stage (P11-S2)
 

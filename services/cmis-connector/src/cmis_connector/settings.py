@@ -7,6 +7,7 @@ class Settings(BaseServiceSettings):
     document_service_base_url: str = "http://localhost:8006"
     folder_service_base_url: str = "http://localhost:8008"
     auth_service_base_url: str = "http://localhost:8003"
+    monitoring_service_base_url: str = "http://localhost:8026"
 
     # Konzept-3.2a-Lizenzvermittlung (P9-S2-Muster), gleiches Verhalten wie
     # `webdav-connector`: Poll-Intervall des Lizenzstatus-Caches gegen

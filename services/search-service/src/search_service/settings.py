@@ -12,6 +12,7 @@ class Settings(BaseServiceSettings):
     permission_service_base_url: str = "http://localhost:8004"
     ocr_service_base_url: str = "http://localhost:8012"
     rendering_service_base_url: str = "http://localhost:8011"
+    monitoring_service_base_url: str = "http://localhost:8026"
 
     # Two separate consumer subscriptions (see consumer.py): metadata
     # events from the Document Service and full-text follow-up deliveries

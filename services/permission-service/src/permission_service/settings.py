@@ -25,6 +25,8 @@ class Settings(BaseServiceSettings):
     # auth-service.
     auth_service_base_url: str = "http://localhost:8003"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Delegation (4.4a, P14-S11): who may revoke a delegation early without
     # being the delegating person themself - same independently configurable
     # role-setting pattern as document-service's

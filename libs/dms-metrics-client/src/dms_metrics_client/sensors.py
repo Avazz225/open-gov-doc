@@ -37,7 +37,9 @@ class GuardedCounter:
     """Wrapper around a `prometheus_client.Counter` - `inc()` does NOT touch
     the underlying metric object when the sensor is deactivated (10.1: "no
     generation, no buffering" when deactivated, not just hiding it from the
-    export)."""
+    export). Optional `**labels` (e.g. for `http.requests`'s
+    method/route/status dimensions) are applied via the wrapped metric's own
+    `.labels(...)` - unlabeled sensors simply pass none."""
 
     def __init__(self, name: str, metric: Counter, is_active: IsActiveFn) -> None:
         self._name = name
@@ -47,9 +49,10 @@ class GuardedCounter:
     def is_active(self) -> bool:
         return self._is_active(self._name)
 
-    def inc(self, amount: float = 1.0) -> None:
+    def inc(self, amount: float = 1.0, **labels: str) -> None:
         if self.is_active():
-            self._metric.inc(amount)
+            target = self._metric.labels(**labels) if labels else self._metric
+            target.inc(amount)
 
 
 class GuardedGauge:
@@ -81,9 +84,10 @@ class GuardedHistogram:
         this minimal overhead is then also avoided."""
         return self._is_active(self._name)
 
-    def observe(self, value: float) -> None:
+    def observe(self, value: float, **labels: str) -> None:
         if self.is_active():
-            self._metric.observe(value)
+            target = self._metric.labels(**labels) if labels else self._metric
+            target.observe(value)
 
 
 class SensorRegistry:
@@ -112,10 +116,13 @@ class SensorRegistry:
     def _prom_name(name: str) -> str:
         return name.replace(".", "_").replace("-", "_")
 
-    def counter(self, spec: SensorSpec) -> GuardedCounter:
+    def counter(self, spec: SensorSpec, *, labelnames: tuple[str, ...] = ()) -> GuardedCounter:
         self._register_spec(spec)
         metric = Counter(
-            self._prom_name(spec.name), spec.description, registry=self.collector_registry
+            self._prom_name(spec.name),
+            spec.description,
+            labelnames=labelnames,
+            registry=self.collector_registry,
         )
         return GuardedCounter(spec.name, metric, self._is_active)
 
@@ -126,9 +133,20 @@ class SensorRegistry:
         )
         return GuardedGauge(spec.name, metric, self._is_active)
 
-    def histogram(self, spec: SensorSpec) -> GuardedHistogram:
+    def histogram(
+        self,
+        spec: SensorSpec,
+        *,
+        labelnames: tuple[str, ...] = (),
+        buckets: tuple[float, ...] | None = None,
+    ) -> GuardedHistogram:
         self._register_spec(spec)
+        kwargs = {} if buckets is None else {"buckets": buckets}
         metric = Histogram(
-            self._prom_name(spec.name), spec.description, registry=self.collector_registry
+            self._prom_name(spec.name),
+            spec.description,
+            labelnames=labelnames,
+            registry=self.collector_registry,
+            **kwargs,
         )
         return GuardedHistogram(spec.name, metric, self._is_active)

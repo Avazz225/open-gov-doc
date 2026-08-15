@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -7,6 +8,15 @@ import pytest
 from dms_eventbus_client import Event
 from document_service.main import app
 from fastapi.testclient import TestClient
+
+
+def _extract_metric_value(exposition_text: str, metric_name: str) -> float:
+    """Reads an unlabeled metric's value out of Prometheus exposition text -
+    `metric_name value` on its own line, no `{...}` label suffix."""
+    match = re.search(rf"^{re.escape(metric_name)} (\S+)$", exposition_text, re.MULTILINE)
+    assert match is not None, f"{metric_name!r} not found in exposition text"
+    return float(match.group(1))
+
 
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
@@ -156,13 +166,23 @@ def test_upload_sensor_records_duration_when_active(client, monkeypatch):
 def test_upload_sensor_skips_recording_when_inactive(client, monkeypatch):
     """Keine Erfassung bei Deaktivierung (10.1) - nicht nur unsichtbar: der
     Timer wird nie gestartet, `observe()` nie aufgerufen, der Zähler bleibt
-    bei 0 statt auf 1 zu steigen (das Histogramm selbst bleibt im Export
-    sichtbar, das ist normales `prometheus_client`-Verhalten für einmal
-    registrierte Metriken - entscheidend ist der unveränderte Wert)."""
+    unveränderte (das Histogramm selbst bleibt im Export sichtbar, das ist
+    normales `prometheus_client`-Verhalten für einmal registrierte Metriken
+    - entscheidend ist der unveränderte Wert). Compares before/after rather
+    than asserting an absolute `0.0`: the sensor registry now lives at
+    module level (10.1 full rollout, shared across a process's whole
+    lifetime, same as in production) instead of being rebuilt fresh on
+    every `TestClient(app)` cycle, so its counters can carry state from
+    other tests in the same session."""
     monkeypatch.setattr(app.state.upload_duration_sensor, "_is_active", lambda name: False)
+    count_before = _extract_metric_value(
+        client.get("/metrics").text, "document_upload_duration_count"
+    )
     upload(client)
-    response = client.get("/metrics")
-    assert "document_upload_duration_count 0.0" in response.text
+    count_after = _extract_metric_value(
+        client.get("/metrics").text, "document_upload_duration_count"
+    )
+    assert count_after == count_before
 
 
 def test_create_and_get_document(client):

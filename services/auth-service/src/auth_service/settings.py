@@ -24,6 +24,7 @@ class Settings(BaseServiceSettings):
     keycloak_admin_password: str = "admin_dev_only"
 
     permission_service_base_url: str = "http://localhost:8004"
+    monitoring_service_base_url: str = "http://localhost:8026"
     # First consumer of this service (P6-S5, superuser break-glass, 4.6).
     subjects: list[str] = ["permission.approval.approved"]
 

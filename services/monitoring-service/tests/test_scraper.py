@@ -16,12 +16,23 @@ def test_merge_metric_families_adds_instance_label_and_groups_by_name():
             "registry_instances_active_total 5.0\n"
         ),
     }
-    families = merge_metric_families(bodies)
+    service_types = {
+        "registry-service-1": "registry-service",
+        "registry-service-2": "registry-service",
+    }
+    families = merge_metric_families(bodies, service_types)
     assert len(families) == 1
     family = families[0]
     assert family.name == "registry_instances_active_total"
     values_by_instance = {s.labels["instance"]: s.value for s in family.samples}
     assert values_by_instance == {"registry-service-1": 3.0, "registry-service-2": 5.0}
+    assert all(s.labels["service"] == "registry-service" for s in family.samples)
+
+
+def test_merge_metric_families_defaults_service_label_to_unknown_when_not_registered():
+    bodies = {"orphan-instance": "# TYPE a_total counter\na_total 1.0\n"}
+    families = merge_metric_families(bodies, service_types={})
+    assert families[0].samples[0].labels["service"] == "unknown"
 
 
 def test_merge_metric_families_keeps_distinct_metric_names_separate():
@@ -29,7 +40,7 @@ def test_merge_metric_families_keeps_distinct_metric_names_separate():
         "a": "# HELP a_total help\n# TYPE a_total counter\na_total 1.0\n",
         "b": "# HELP b_total help\n# TYPE b_total counter\nb_total 2.0\n",
     }
-    families = merge_metric_families(bodies)
+    families = merge_metric_families(bodies, service_types={})
     # Der Parser normalisiert Counter-Familiennamen ohne "_total"-Suffix.
     assert {f.name for f in families} == {"a", "b"}
 

@@ -11,6 +11,8 @@ class Settings(BaseServiceSettings):
     permission_service_base_url: str = "http://localhost:8004"
     workflow_service_base_url: str = "http://localhost:8014"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Four-eyes principle (4.3, P6-S4 pattern): checks before starting a transfer
     # whether "migration.transfer.start" currently requires approval.
     approval_action_type: str = "migration.transfer.start"

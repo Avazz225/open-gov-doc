@@ -8,3 +8,5 @@ class Settings(BaseServiceSettings):
 
     folder_service_base_url: str = "http://localhost:8008"
     permission_service_base_url: str = "http://localhost:8004"
+
+    monitoring_service_base_url: str = "http://localhost:8026"

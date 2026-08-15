@@ -16,6 +16,8 @@ class Settings(BaseServiceSettings):
     # no permission check at all until now.
     permission_service_base_url: str = "http://localhost:8004"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Which subjects case-service consumes (2.3): only the completion of a
     # process instance triggers the completion snapshot of a circulation
     # folder - `workflow.instance.started`/`workflow.task.completed` are

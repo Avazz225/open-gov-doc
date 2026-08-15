@@ -21,6 +21,10 @@ class Settings(BaseServiceSettings):
     # Same principle as `NEXT_PUBLIC_GATEWAY_BASE_URL` in the frontend apps.
     gateway_base_url: str = "http://localhost:8009"
 
+    # Monitoring-service base URL for sensor config polling (10.1, generic
+    # per-request HTTP metrics sensor rollout).
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Which subjects are consumed (only document.created is relevant for the
     # document volume read model, see consumer.py).
     subjects: list[str] = ["document.>"]

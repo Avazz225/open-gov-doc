@@ -87,3 +87,5 @@ class Settings(BaseServiceSettings):
     # does not roll this register back too, see
     # docs/operations/backup-restore.md.
     deletion_ledger_path: str = "/deletion-ledger/deletion-register.jsonl"
+
+    monitoring_service_base_url: str = "http://localhost:8026"

@@ -10,13 +10,16 @@ from prometheus_client.parser import text_string_to_metric_families
 from prometheus_client.samples import Sample
 
 
-def merge_metric_families(bodies: dict[str, str]) -> list[Metric]:
+def merge_metric_families(bodies: dict[str, str], service_types: dict[str, str]) -> list[Metric]:
     """Merges the raw scraped exposition texts of multiple instances into a
     list of metric families - a real proxy/federation pattern instead of
     text concatenation: mere concatenation would violate the exposition
     format's grouping rule for same-named metrics across multiple
-    instances (HELP/TYPE must be contiguous). Each sample instead gets an
-    additional `instance` label for disambiguation."""
+    instances (HELP/TYPE must be contiguous). Each sample gets an
+    additional `instance` label for disambiguation, plus a `service` label
+    (from `service_types[instance_id]`, i.e. `RegistryInstance.service_type`)
+    - `instance` alone is an opaque UUID, `service` is what per-service
+    dashboards (10.1 full rollout) actually group/filter by."""
     merged: dict[str, Metric] = {}
     for instance_id, body in bodies.items():
         for family in text_string_to_metric_families(body):
@@ -25,7 +28,11 @@ def merge_metric_families(bodies: dict[str, str]) -> list[Metric]:
                 target = Metric(family.name, family.documentation, family.type)
                 merged[family.name] = target
             for sample in family.samples:
-                labels = {**sample.labels, "instance": instance_id}
+                labels = {
+                    **sample.labels,
+                    "instance": instance_id,
+                    "service": service_types.get(instance_id, "unknown"),
+                }
                 target.samples.append(
                     Sample(sample.name, labels, sample.value, sample.timestamp, sample.exemplar)
                 )

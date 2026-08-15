@@ -13,6 +13,7 @@ dependencies = [
     "dms-eventbus-client",
     "dms-registry-client",
     "dms-permission-client",
+    "dms-metrics-client",
 ]
 
 [tool.uv.sources]
@@ -21,6 +22,7 @@ dms-db-base = { workspace = true }
 dms-eventbus-client = { workspace = true }
 dms-registry-client = { workspace = true }
 dms-permission-client = { workspace = true }
+dms-metrics-client = { workspace = true }
 
 [dependency-groups]
 dev = ["httpx>=0.27"]

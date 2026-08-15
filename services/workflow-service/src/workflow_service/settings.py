@@ -21,6 +21,10 @@ class Settings(BaseServiceSettings):
     # see `signature_client.py`.
     signature_service_base_url: str = "http://localhost:8017"
 
+    # Sensor concept (10.1, full rollout): base URL of `monitoring-service`,
+    # polled by `SensorConfigClient` for the current sensor activation state.
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Federation Hub (7.4, P6-S9): opt-in - stays `None` if this
     # installation does not register with the Hub, in which case the
     # Process Designer does not even offer federated process steps

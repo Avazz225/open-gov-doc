@@ -16,8 +16,14 @@ from dms_auth_client import (
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
+from dms_metrics_client import (
+    SensorConfigClient,
+    bootstrap_http_sensors,
+    http_sensor_declarations,
+    metrics_payload,
+)
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -250,11 +256,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         publish_event=publish_event,
     )
 
+    # Sensor concept (10.1, full rollout): a fresh `SensorConfigClient` per
+    # startup, bound into the module-level `sensor_config_proxy` - not a
+    # module-level client itself (see `SensorConfigProxy`'s docstring: its
+    # httpx client can't outlive the event loop it was first used on).
+    sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
+    await sensor_config_client.start()
+    sensor_config_proxy.bind(sensor_config_client)
+    app.state.sensor_config_client = sensor_config_client
+    app.state.sensor_registry = sensor_registry
+
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
         service_type=settings.service_name,
         version="0.1.0",
+        sensors=http_sensor_declarations(),
     )
 
     superuser_poll_task = asyncio.create_task(_superuser_poll_loop())
@@ -265,6 +282,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    sensor_config_proxy.unbind()
+    await app.state.sensor_config_client.stop()
     superuser_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await superuser_poll_task
@@ -279,6 +298,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+# Sensor concept (10.1, full rollout): must run at module level, right
+# after `app` is constructed - see bootstrap_http_sensors's docstring
+# for why this can't move into `lifespan` (FastAPI forbids adding
+# middleware once the app has started).
+sensor_config_proxy, sensor_registry, _http_requests_sensor, _http_duration_sensor = (
+    bootstrap_http_sensors(app, settings.service_name)
+)
 
 _issuer = f"{settings.keycloak_base_url}/realms/{settings.keycloak_realm}"
 _keycloak_validator = TokenValidator(
@@ -318,6 +345,12 @@ async def publish_event(event_type: str, payload: dict, actor: str | None = None
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def get_metrics() -> Response:
+    body, content_type = metrics_payload(app.state.sensor_registry)
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/.well-known/jwks.json")

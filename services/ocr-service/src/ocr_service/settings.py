@@ -20,6 +20,8 @@ class Settings(BaseServiceSettings):
     # permission check at all until now.
     permission_service_base_url: str = "http://localhost:8004"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Same pattern as rendering-service: one broad document.> subscription
     # instead of two separate ones, dispatch by event_type in the consumer.
     document_subjects: list[str] = ["document.>"]

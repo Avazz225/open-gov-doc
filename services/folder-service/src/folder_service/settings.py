@@ -36,6 +36,11 @@ class Settings(BaseServiceSettings):
     # `folder.force_delete`.
     permission_service_base_url: str = "http://localhost:8004"
 
+    # Sensor concept (10.1, full rollout): monitoring-service's
+    # `/sensor-config`, queried by `SensorConfigClient` to decide whether the
+    # generic http.* sensors record with zero overhead when deactivated.
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # Which subjects folder-service consumes (since P7-S1b) - first
     # consumer of this service at all, previously a pure producer.
     subjects: list[str] = ["permission.approval.approved"]

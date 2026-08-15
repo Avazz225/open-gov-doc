@@ -30,3 +30,8 @@ class Settings(BaseServiceSettings):
     # real permission-service check (`admin.quarantine`, role
     # "domain-admin-virus-scan").
     permission_service_base_url: str = "http://localhost:8004"
+
+    # Sensor concept (10.1, full rollout): the Monitoring Service resolves
+    # per-sensor sampling/threshold config for the generic HTTP sensors
+    # registered via `bootstrap_http_sensors`.
+    monitoring_service_base_url: str = "http://localhost:8026"

@@ -29,6 +29,8 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
+    monitoring_service_base_url: str = "http://localhost:8026"
+
     # ADR 0032: RS256, statisch eingebetteter oeffentlicher Schluessel, kein
     # JWKS in dieser Ausbaustufe.
     license_public_key_pem: str = _DEV_PUBLIC_KEY_PEM

@@ -59,3 +59,5 @@ class Settings(BaseServiceSettings):
     auth_service_base_url: str = "http://localhost:8003"
     auth_service_admin_username: str = "users-admin"
     auth_service_admin_password: str = "users-admin"
+
+    monitoring_service_base_url: str = "http://localhost:8026"

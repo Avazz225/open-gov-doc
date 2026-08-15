@@ -65,3 +65,38 @@ class SensorConfigClient:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
         await self._client.aclose()
+
+
+class SensorConfigProxy:
+    """Indirection between a module-level `SensorRegistry` (built once, at
+    import time - required for `bootstrap_http_sensors`, since FastAPI
+    forbids adding middleware once the app has started, see its docstring)
+    and a `SensorConfigClient` that must be constructed fresh inside
+    `lifespan` on every startup, not reused across restarts.
+
+    A `SensorConfigClient` owns an `httpx.AsyncClient`, whose connection
+    pool binds to whichever asyncio event loop first uses it and breaks
+    ("Cannot send a request, as the client has been closed") once that loop
+    is gone - normal in production (one loop, one process lifetime) but
+    fatal for tests, where each `TestClient(app)` `with` block runs its own
+    fresh event loop through the same, module-cached `app`. Binding the
+    registry directly to one `SensorConfigClient` instance's `is_active`
+    would tie every sensor permanently to that instance's first event loop.
+    The registry instead binds to `proxy.is_active` once; `lifespan`
+    `bind()`s a fresh client on each startup and `unbind()`s it on
+    shutdown - fail-open (`True`) while unbound, same as
+    `SensorConfigClient` before its first successful poll."""
+
+    def __init__(self) -> None:
+        self._client: SensorConfigClient | None = None
+
+    def bind(self, client: SensorConfigClient) -> None:
+        self._client = client
+
+    def unbind(self) -> None:
+        self._client = None
+
+    def is_active(self, name: str) -> bool:
+        if self._client is None:
+            return True
+        return self._client.is_active(name)
