@@ -1,10 +1,15 @@
 # Static scrape configuration (10.1, P11-S1): Prometheus scrapes
-# exclusively `monitoring-service` - its /metrics endpoint live-aggregates
-# the scraped domain-service sensors (currently registry-service/document-service
-# as pilots, see P11-S0 finding). An automatic target list derived from the
-# registry (concept 10.1 mentions this as an option) is
-# deliberate follow-up work - with only one target it doesn't provide any
-# added value at this stage of development yet.
+# `monitoring-service` - its /metrics endpoint live-aggregates the scraped
+# domain-service sensors (currently registry-service/document-service as
+# pilots, see P11-S0 finding). An automatic target list derived from the
+# registry (concept 10.1 mentions this as an option) is deliberate
+# follow-up work - with only two targets it doesn't provide any added
+# value at this stage of development yet.
+#
+# Also scrapes cadvisor (loadtest/) for per-container CPU/memory/network,
+# labeled by `container_label_com_docker_compose_service` (matches each
+# service's docker-compose name) - lets a load test's resource consumption
+# be correlated with its request volume for service-sizing analysis.
 global:
   scrape_interval: 15s
 
@@ -12,3 +17,15 @@ scrape_configs:
   - job_name: monitoring-service
     static_configs:
       - targets: ["monitoring-service:8000"]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metric_relabel_configs:
+      # cAdvisor emits ~50 container_label_* labels per series (one per
+      # possible OCI/Docker image label), almost all empty for these
+      # images - keep only what's actually used (Prometheus's RE2 engine
+      # has no negative lookahead, so this is a keep-list, not a
+      # drop-the-rest pattern).
+      - regex: "__name__|job|instance|id|name|image|device|interface|cpu|container_label_com_docker_compose_service"
+        action: labelkeep

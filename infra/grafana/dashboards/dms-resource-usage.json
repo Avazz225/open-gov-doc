@@ -1,0 +1,111 @@
+{
+  "uid": "dms-resource-usage",
+  "title": "DMS Service Resource Usage",
+  "description": "Per-container CPU/memory/network from cadvisor, labeled by docker-compose service name - use alongside the load test dashboard to size services from real usage under load.",
+  "tags": ["dms", "resources", "sizing"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "CPU usage by service",
+      "type": "timeseries",
+      "description": "rate(container_cpu_usage_seconds_total[1m]) - 1.0 = one full CPU core.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "last"], "sortBy": "Max", "sortDesc": true }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service!=\"\"}[1m])) by (container_label_com_docker_compose_service)",
+          "legendFormat": "{{container_label_com_docker_compose_service}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Memory usage by service",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "last"], "sortBy": "Max", "sortDesc": true }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(container_memory_usage_bytes{container_label_com_docker_compose_service!=\"\"}) by (container_label_com_docker_compose_service)",
+          "legendFormat": "{{container_label_com_docker_compose_service}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Top 10 CPU consumers (current)",
+      "type": "bargauge",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "topk(10, sum(rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service!=\"\"}[1m])) by (container_label_com_docker_compose_service))",
+          "legendFormat": "{{container_label_com_docker_compose_service}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Top 10 memory consumers (current)",
+      "type": "bargauge",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "topk(10, sum(container_memory_usage_bytes{container_label_com_docker_compose_service!=\"\"}) by (container_label_com_docker_compose_service))",
+          "legendFormat": "{{container_label_com_docker_compose_service}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Network I/O by service",
+      "type": "timeseries",
+      "description": "Received (positive) and transmitted (negative) bytes/s per service.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 29 },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"], "sortBy": "Max", "sortDesc": true }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(container_network_receive_bytes_total{container_label_com_docker_compose_service!=\"\"}[1m])) by (container_label_com_docker_compose_service)",
+          "legendFormat": "{{container_label_com_docker_compose_service}} rx"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "-sum(rate(container_network_transmit_bytes_total{container_label_com_docker_compose_service!=\"\"}[1m])) by (container_label_com_docker_compose_service)",
+          "legendFormat": "{{container_label_com_docker_compose_service}} tx"
+        }
+      ]
+    }
+  ]
+}

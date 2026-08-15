@@ -1,0 +1,110 @@
+{
+  "uid": "dms-loadtest-k6",
+  "title": "DMS Load Test (k6)",
+  "description": "Live view of the k6 mixed-usage gateway load test (loadtest/k6/scenario.js), fed via k6's experimental-prometheus-rw output while a run is active.",
+  "tags": ["dms", "loadtest", "k6"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Virtual users (ramp profile)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "k6_vus",
+          "legendFormat": "active VUs"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Requests per second",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(k6_http_reqs_total[1m]))",
+          "legendFormat": "requests/s"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Response time p99 by action",
+      "type": "timeseries",
+      "description": "k6_action_duration_p99, tagged per weighted-workload action (login/list_folder/search/download/upload).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "k6_action_duration_p99",
+          "legendFormat": "{{action}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Goodput vs. error rate",
+      "type": "timeseries",
+      "description": "Goodput: successful (2xx) responses under the SLA threshold (SLA_MS). http_req_failed: non-2xx or connection-level failures.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "k6_goodput_rate",
+          "legendFormat": "goodput"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "k6_http_req_failed_rate",
+          "legendFormat": "http_req_failed"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Overall http_req_duration p99",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "k6_http_req_duration_p99",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Iterations completed",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "k6_iterations_total",
+          "legendFormat": "iterations"
+        }
+      ]
+    }
+  ]
+}

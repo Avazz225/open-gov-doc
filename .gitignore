@@ -46,8 +46,10 @@ infra/**/data/
 # storage tarballs are large and contain real data, don't belong in the repo ---
 backups/
 
-# --- Load test results (loadtest/, generated) ---
+# --- Load test tooling (loadtest/, generated/downloaded) ---
 loadtest/results/
+loadtest/.tools/
+loadtest/notebook/.ipynb_checkpoints/
 
 # --- OS / Editor ---
 .DS_Store
