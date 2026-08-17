@@ -324,6 +324,31 @@ body {
   min-width: 0;
   overflow-y: auto;
   padding: 1rem;
+  /* Scrollbar stays persistently visible instead of the browser/OS-default
+     "overlay scrollbar" (macOS/GTK: invisible except while actively
+     scrolling) - without this, a field with clipped content looks
+     "not scrollable" even though `overflow-y: auto` is already technically
+     working (user feedback: metadata panel). `scrollbar-gutter: stable`
+     always reserves the space so content doesn't shift sideways when the
+     scrollbar appears/disappears. */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dms-border) transparent;
+}
+
+.explorer-pane::-webkit-scrollbar,
+.metadata-panel::-webkit-scrollbar,
+.preview-pane::-webkit-scrollbar,
+.search-pane::-webkit-scrollbar {
+  width: 10px;
+}
+
+.explorer-pane::-webkit-scrollbar-thumb,
+.metadata-panel::-webkit-scrollbar-thumb,
+.preview-pane::-webkit-scrollbar-thumb,
+.search-pane::-webkit-scrollbar-thumb {
+  background-color: var(--dms-border);
+  border-radius: 5px;
 }
 
 /* Suche (P5-S4, Nutzerwunsch): ersetzt ExplorerPane/MetadataPanel im

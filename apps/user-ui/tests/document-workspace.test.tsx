@@ -470,18 +470,16 @@ describe("DocumentWorkspace", () => {
 
     await user.click(await screen.findByText(/Rechnung.pdf/));
     const previewPane = await screen.findByLabelText("Vorschau: Rechnung.pdf");
-    // Only one version so far - version selector not yet visible.
-    expect(within(previewPane).queryByLabelText("Version auswählen")).not.toBeInTheDocument();
+    // Version selector is always visible, even with only one version so far.
+    expect(within(previewPane).getByLabelText("Version auswählen")).toBeInTheDocument();
+    expect(within(previewPane).queryByText("Version 2")).not.toBeInTheDocument();
 
     await user.click(await screen.findByText("Jetzt signieren"));
 
     await waitFor(() => expect(createSignatureMock).toHaveBeenCalled());
     // PreviewPane has reloaded (without the document being reopened)
     // and now shows both versions for selection.
-    await waitFor(() =>
-      expect(within(previewPane).getByLabelText("Version auswählen")).toBeInTheDocument()
-    );
-    expect(within(previewPane).getByText("Version 2")).toBeInTheDocument();
+    await waitFor(() => expect(within(previewPane).getByText("Version 2")).toBeInTheDocument());
   });
 
   it("opens the same right-click context menu (delete/favorite) for a folder in the tree view (P23-S8)", async () => {

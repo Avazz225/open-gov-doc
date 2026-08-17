@@ -513,7 +513,7 @@ export function PreviewPane({
     >
       <h2 className="pane-heading">{activeDocument.title}</h2>
 
-      {versions.length > 1 && (
+      {versions.length > 0 && (
         <>
           <label className="version-select">
             {t("preview.versionSelectLabel")}
