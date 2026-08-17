@@ -1073,6 +1073,77 @@ export async function downloadDocumentVersion(
   return response.blob();
 }
 
+// PDF export with export history (post-roadmap phase 28, ADR 0107) - the
+// document's current version plus its export history, merged server-side
+// by rendering-service. `historyPosition` overrides the installation-wide
+// `ExportConfig` default (document-service `GET/PUT /export-config`) for
+// this call only, left `undefined` to use that default.
+export async function exportDocument(
+  token: string,
+  documentId: string,
+  historyPosition?: "before" | "after"
+): Promise<Blob> {
+  const query = historyPosition ? `?history_position=${historyPosition}` : "";
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/export${query}`,
+    { method: "POST" },
+    token
+  );
+  return response.blob();
+}
+
+// Combined folder export (post-roadmap phase 28, ADR 0107) - runs as a
+// background job (document-service), polled via getFolderExport until
+// status is "completed"/"failed_permanent".
+export interface FolderExportJob {
+  id: string;
+  folder_id: string;
+  history_position: "before" | "after";
+  status: "pending" | "processing" | "completed" | "failed_permanent";
+  error_message: string | null;
+  attempts: number;
+  next_retry_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function exportFolder(
+  token: string,
+  folderId: string,
+  historyPosition?: "before" | "after"
+): Promise<FolderExportJob> {
+  const query = historyPosition ? `?history_position=${historyPosition}` : "";
+  const response = await request(
+    "document-service",
+    `folders/${encodeURIComponent(folderId)}/export${query}`,
+    { method: "POST" },
+    token
+  );
+  return response.json();
+}
+
+export async function getFolderExport(token: string, jobId: string): Promise<FolderExportJob> {
+  const response = await request(
+    "document-service",
+    `folder-exports/${encodeURIComponent(jobId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function downloadFolderExportContent(token: string, jobId: string): Promise<Blob> {
+  const response = await request(
+    "document-service",
+    `folder-exports/${encodeURIComponent(jobId)}/content`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
 export interface RenditionSummary {
   id: string;
   document_id: string;

@@ -102,3 +102,16 @@ class Settings(BaseServiceSettings):
     # (`quarantine_admin_role`), independently configurable like every other
     # role-setting pair in this project.
     quarantine_release_admin_role: str = "dms-admin"
+
+    # PDF export with export history & combined folder export (post-roadmap
+    # phase 28, ADR 0107): rendering-service builds the actual PDFs
+    # (conversion/merge/TOC/bookmarks), audit-service is queried for a
+    # document's `document.exported` history.
+    rendering_service_base_url: str = "http://localhost:8011"
+    audit_service_base_url: str = "http://localhost:8002"
+
+    # Same numeric value/rationale as archival-service's
+    # `max_archival_attempts` (ADR 0078) - full-jitter backoff between
+    # attempts, `failed_permanent` once exhausted.
+    max_folder_export_attempts: int = 5
+    folder_export_poll_interval_seconds: float = 30.0

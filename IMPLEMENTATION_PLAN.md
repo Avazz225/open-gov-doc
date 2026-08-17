@@ -495,14 +495,14 @@ configuration: installation-wide `ExportConfig` singleton default (`history_posi
 
 | Session | Deliverable |
 |---|---|
-| P28-S1 | Single-document export, backend: `POST /documents/{id}/export` (document-service), new on-demand `POST /render/convert-to-pdf` in rendering-service, `ExportConfig` model + `GET`/`PUT /export-config`. |
-| P28-S2 | `document.exported` event, consumed by audit-service exactly like `document.downloaded`. |
-| P28-S3 | Single-document export, frontend: "Export" button next to `handleDownload` in `PreviewPane.tsx`. |
-| P28-S4 | Combined folder export, backend: async `FolderExportJob` (same resilience field set as Phase 20 — `attempts`, `failed_permanent`), `POST /folders/{id}/export` + `GET /folder-exports/{id}`/`.../content`. Document order in the TOC by `kennzeichen`, not title. |
-| P28-S5 | TOC/bookmarks/sub-numbering: the Pass-A/Pass-B mechanism in a new `rendering_service/export_pdf.py`. |
-| P28-S6 | Combined folder export, frontend: "Export folder" context menu entry in `ExplorerPane.tsx`, status polling. |
+| P28-S1 | ✅ Single-document export, backend: `POST /documents/{id}/export` (document-service), new on-demand `POST /render/convert-to-pdf` in rendering-service, `ExportConfig` model + `GET`/`PUT /export-config`. |
+| P28-S2 | ✅ `document.exported` event, consumed by audit-service via the already-consumed `document.>` wildcard (no audit-service change needed). |
+| P28-S3 | ✅ Single-document export, frontend: "Exportieren" button + order-override select next to `handleDownload` in `PreviewPane.tsx`. |
+| P28-S4 | ✅ Combined folder export, backend: async `FolderExportJob` (same resilience field set as Phase 20 — `attempts`, `failed_permanent`), `POST /folders/{id}/export` + `GET /folder-exports/{id}`/`.../content`. Document order in the TOC by `kennzeichen`, not title. |
+| P28-S5 | ✅ TOC/bookmarks/sub-numbering: the Pass-A/Pass-B mechanism in a new `rendering_service/export_pdf.py`. |
+| P28-S6 | ✅ Combined folder export, frontend: "Ordner exportieren" context menu entry in `ExplorerPane.tsx`, 3s status polling + automatic download. |
 
-**Definition of Done**: tests green (document-service/rendering-service/audit-service/user-ui). New ADR 0107 (two-pass merge/bookmark/sub-numbering, `ExportConfig` default+override) and ADR 0108 (export history as an audit-service query, no new storage). Docs + `PROGRESS.md` updated; full regression.
+**Definition of Done**: tests green (rendering-service 59, document-service 258, user-ui 197). [ADR 0107](docs/adr/0107-pdf-export-two-pass-merge-subnumbering.md) (two-pass merge/bookmark/sub-numbering, `ExportConfig` default+override) and [ADR 0108](docs/adr/0108-export-history-as-audit-service-query.md) (export history as an audit-service query, no new storage). Docs + `PROGRESS.md` updated; full regression green; verified live via Playwright. **Phase 28 thus fully complete.**
 
 ### Phase 29 — Authenticated Direct Links (Document, Akte, Folder, Vorgang)
 

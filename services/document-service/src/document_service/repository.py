@@ -2,6 +2,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from dms_retry import compute_backoff_seconds
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,8 @@ from document_service.models import (
     Document,
     DocumentLock,
     DocumentVersion,
+    ExportConfig,
+    FolderExportJob,
     LegalHold,
     RetentionConfig,
     ShareLink,
@@ -26,6 +29,7 @@ _RETENTION_CONFIG_ID = 1
 _TRASH_CONFIG_ID = 1
 _AUDIT_TRACE_CONFIG_ID = 1
 _SHARE_LINK_CONFIG_ID = 1
+_EXPORT_CONFIG_ID = 1
 
 
 class NotFoundError(Exception):
@@ -1014,3 +1018,121 @@ async def revoke_webdav_edit_token(
 
 def is_webdav_edit_token_active(token: WebdavEditToken, now: datetime) -> bool:
     return token.revoked_at is None and token.expires_at > now
+
+
+async def get_export_config(session: AsyncSession) -> ExportConfig:
+    config = await session.get(ExportConfig, _EXPORT_CONFIG_ID)
+    if config is None:
+        config = ExportConfig(
+            id=_EXPORT_CONFIG_ID, history_position="after", updated_at=datetime.now(UTC)
+        )
+        session.add(config)
+        await session.flush()
+    return config
+
+
+async def update_export_config(session: AsyncSession, *, history_position: str) -> ExportConfig:
+    config = await get_export_config(session)
+    config.history_position = history_position
+    config.updated_at = datetime.now(UTC)
+    await session.flush()
+    return config
+
+
+async def list_documents_for_folder_export(session: AsyncSession, folder_id: str) -> list[Document]:
+    """Document order for the combined folder export's table of contents
+    (post-roadmap phase 28, ADR 0107) - by `Kennzeichen` (reference number)
+    when set, this project's existing natural per-document ordering key
+    (`object-type-service`'s `kennzeichen_format`), falling back to title
+    for documents without one. `list_documents_by_folder`'s plain
+    alphabetical-by-title order isn't a meaningful TOC order on its own."""
+    documents = await list_documents_by_folder(session, folder_id)
+    return sorted(documents, key=lambda d: (d.attributes.get("Kennzeichen") or "", d.title))
+
+
+async def create_folder_export_job(
+    session: AsyncSession, *, folder_id: str, history_position: str, created_by: str
+) -> FolderExportJob:
+    job = FolderExportJob(
+        folder_id=folder_id,
+        history_position=history_position,
+        status="pending",
+        created_by=created_by,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.add(job)
+    await session.flush()
+    return job
+
+
+async def get_folder_export_job(session: AsyncSession, job_id: str) -> FolderExportJob:
+    job = await session.get(FolderExportJob, job_id)
+    if job is None:
+        raise NotFoundError(f"Ordner-Export {job_id!r} unbekannt")
+    return job
+
+
+_ACTIVE_FOLDER_EXPORT_STATUSES = ("pending", "processing")
+
+
+async def list_due_folder_export_jobs(session: AsyncSession) -> list[FolderExportJob]:
+    """Jobs a poll tick should attempt (post-roadmap phase 28, ADR 0107) -
+    same `next_retry_at` gating as `archival_service.repository.
+    list_active_transfers` (post-roadmap phase 20 session 2, ADR 0078): a
+    job that just received a backoff delay after a failed attempt is
+    skipped until it elapses, instead of failing again on every tick."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(FolderExportJob).where(
+            FolderExportJob.status.in_(_ACTIVE_FOLDER_EXPORT_STATUSES),
+            or_(FolderExportJob.next_retry_at.is_(None), FolderExportJob.next_retry_at <= now),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def mark_folder_export_processing(session: AsyncSession, job: FolderExportJob) -> None:
+    job.status = "processing"
+    job.updated_at = datetime.now(UTC)
+    await session.flush()
+
+
+async def mark_folder_export_completed(
+    session: AsyncSession, job: FolderExportJob, *, storage_object_key: str
+) -> None:
+    job.status = "completed"
+    job.storage_object_key = storage_object_key
+    job.error_message = None
+    job.next_retry_at = None
+    job.updated_at = datetime.now(UTC)
+    await session.flush()
+
+
+async def mark_folder_export_failed(
+    session: AsyncSession, job: FolderExportJob, *, error_message: str, max_attempts: int
+) -> None:
+    """Same escalation shape as `archival_service.repository.mark_failed`
+    (ADR 0078): stays in an active status with a backoff-delayed retry
+    until `max_attempts` is exhausted, only then moves to the real terminal
+    `failed_permanent`."""
+    job.attempts += 1
+    job.error_message = error_message
+    job.updated_at = datetime.now(UTC)
+    if job.attempts >= max_attempts:
+        job.status = "failed_permanent"
+        job.next_retry_at = None
+    else:
+        job.status = "pending"
+        delay = compute_backoff_seconds(job.attempts - 1)
+        job.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+    await session.flush()
+
+
+async def reset_folder_export_for_retry(session: AsyncSession, job: FolderExportJob) -> None:
+    job.status = "pending"
+    job.attempts = 0
+    job.next_retry_at = None
+    job.error_message = None
+    job.updated_at = datetime.now(UTC)
+    await session.flush()

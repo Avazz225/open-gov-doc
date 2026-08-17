@@ -120,7 +120,10 @@
     "addFavorite": "\"{name}\" zu Favoriten hinzufügen",
     "removeFavorite": "\"{name}\" aus Favoriten entfernen",
     "favoriteError": "Favorit konnte nicht geändert werden",
-    "shareLink": "Freigabelink für \"{name}\""
+    "shareLink": "Freigabelink für \"{name}\"",
+    "exportFolder": "\"{name}\" exportieren",
+    "exportFolderInProgress": "Ordner \"{name}\" wird exportiert...",
+    "exportFolderFailed": "Export von \"{name}\" fehlgeschlagen: {error}"
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -434,7 +437,14 @@
     "ocrTextExtractLabel": "Erkannter Text (OCR)",
     "openInOffice": "In {app} öffnen",
     "downloadErrorDehydrated": "Dieser Inhalt wurde archiviert und ausgesondert. Bitte zuerst über die Rückholung (Archiv) anfordern.",
-    "downloadErrorGeneric": "Download fehlgeschlagen. Bitte später erneut versuchen."
+    "downloadErrorGeneric": "Download fehlgeschlagen. Bitte später erneut versuchen.",
+    "export": "Exportieren",
+    "exporting": "Exportiere...",
+    "exportErrorGeneric": "Export fehlgeschlagen. Bitte später erneut versuchen.",
+    "exportHistoryPositionLabel": "Exporthistorie",
+    "exportHistoryPositionDefault": "Standard",
+    "exportHistoryPositionAfter": "nach dem Dokument",
+    "exportHistoryPositionBefore": "vor dem Dokument"
   },
   "search": {
     "paneLabel": "Suche",

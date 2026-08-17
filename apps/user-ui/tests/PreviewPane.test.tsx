@@ -12,12 +12,14 @@ const downloadRenditionContentMock = vi.fn();
 const downloadDocumentVersionMock = vi.fn();
 const listOcrResultsMock = vi.fn();
 const downloadOcrPageImageMock = vi.fn();
+const exportDocumentMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listDocumentVersions: (...args: unknown[]) => listDocumentVersionsMock(...args),
   listRenditions: (...args: unknown[]) => listRenditionsMock(...args),
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
+  exportDocument: (...args: unknown[]) => exportDocumentMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
   downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
   officeLaunchInfo: vi.fn().mockReturnValue(null),
@@ -116,6 +118,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     listRenditionsMock.mockResolvedValue([]);
     downloadRenditionContentMock.mockReset();
     downloadDocumentVersionMock.mockReset();
+    exportDocumentMock.mockReset();
     listOcrResultsMock.mockReset();
     listOcrResultsMock.mockResolvedValue([]);
     downloadOcrPageImageMock.mockReset();
@@ -349,6 +352,63 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     expect(
       await within(previewPane).findByText("Download fehlgeschlagen. Bitte später erneut versuchen.")
+    ).toBeInTheDocument();
+  });
+
+  it("exportiert die aktuelle Version ohne Reihenfolge-Override, wenn kein Wert gewählt wurde (Phase 28)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentMock.mockResolvedValue(new Blob(["%PDF-1.4 export"], { type: "application/pdf" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Exportieren"));
+
+    expect(exportDocumentMock).toHaveBeenCalledWith("token-123", "d1", undefined);
+  });
+
+  it("exportiert mit der gewählten Reihenfolge, wenn eine explizit ausgewählt wurde (Phase 28)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentMock.mockResolvedValue(new Blob(["%PDF-1.4 export"], { type: "application/pdf" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.selectOptions(
+      within(previewPane).getByLabelText("Exporthistorie"),
+      "before"
+    );
+    await user.click(within(previewPane).getByText("Exportieren"));
+
+    expect(exportDocumentMock).toHaveBeenCalledWith("token-123", "d1", "before");
+  });
+
+  it("zeigt bei einem fehlgeschlagenen Export eine Fehlermeldung (Phase 28)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentMock.mockRejectedValue(new Error("Serverfehler"));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Exportieren"));
+
+    expect(
+      await within(previewPane).findByText("Export fehlgeschlagen. Bitte später erneut versuchen.")
     ).toBeInTheDocument();
   });
 

@@ -15,6 +15,7 @@ dependencies = [
     "dms-eventbus-client",
     "dms-registry-client",
     "dms-metrics-client",
+    "dms-retry",
 ]
 
 [tool.uv.sources]
@@ -23,6 +24,7 @@ dms-db-base = { workspace = true }
 dms-eventbus-client = { workspace = true }
 dms-registry-client = { workspace = true }
 dms-metrics-client = { workspace = true }
+dms-retry = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

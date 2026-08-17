@@ -12,6 +12,7 @@ import {
   downloadDocumentVersion,
   downloadOcrPageImage,
   downloadRenditionContent,
+  exportDocument,
   listDocumentVersions,
   listOcrResults,
   listRenditions,
@@ -121,6 +122,13 @@ export function PreviewPane({
   const [renditions, setRenditions] = useState<RenditionSummary[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // PDF export with export history (post-roadmap phase 28, ADR 0107) -
+  // `null` means "use the installation default" (document-service
+  // `GET /export-config`), an explicit choice overrides it for this export
+  // only, same relationship as the backend's own default+override layering.
+  const [exportHistoryPosition, setExportHistoryPosition] = useState<"before" | "after" | "">("");
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgRenderedHeight, setImgRenderedHeight] = useState(0);
 
@@ -470,6 +478,28 @@ export function PreviewPane({
     }
   }
 
+  // PDF export with export history (post-roadmap phase 28, ADR 0107) -
+  // unlike handleDownload, always exports the CURRENT version (the export
+  // endpoint doesn't take a version number - export history is a
+  // document-level concept, not tied to a single version).
+  async function handleExport() {
+    if (!accessToken || !activeDocument) return;
+    setExportError(null);
+    setExporting(true);
+    try {
+      const blob = await exportDocument(
+        accessToken,
+        activeDocument.id,
+        exportHistoryPosition || undefined
+      );
+      triggerBrowserDownload(blob, `${activeDocument.title}-export.pdf`);
+    } catch {
+      setExportError(t("preview.exportErrorGeneric"));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   // Direct Office editing (post-roadmap feature): open Word/Excel/PowerPoint
   // for editing directly from the browser, via the Office URI scheme
   // against webdav-connector - no password dialog, since a short-lived,
@@ -649,6 +679,27 @@ export function PreviewPane({
       <button type="button" onClick={handleDownload}>
         {t("folderBrowser.download")}
       </button>
+      <label className="export-history-position">
+        {t("preview.exportHistoryPositionLabel")}
+        <select
+          value={exportHistoryPosition}
+          onChange={(event) =>
+            setExportHistoryPosition(event.target.value as "before" | "after" | "")
+          }
+        >
+          <option value="">{t("preview.exportHistoryPositionDefault")}</option>
+          <option value="after">{t("preview.exportHistoryPositionAfter")}</option>
+          <option value="before">{t("preview.exportHistoryPositionBefore")}</option>
+        </select>
+      </label>
+      <button type="button" onClick={handleExport} disabled={exporting}>
+        {exporting ? t("preview.exporting") : t("preview.export")}
+      </button>
+      {exportError && (
+        <p className="error-text" role="alert">
+          {exportError}
+        </p>
+      )}
       {officeLaunchInfo(currentContentType) && (
         <button type="button" onClick={handleOfficeLaunch}>
           {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}

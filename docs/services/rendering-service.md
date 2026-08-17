@@ -13,6 +13,9 @@
 | `GET` | `/renditions/{id}/content` | Bytes of the rendition (proxy to the Storage Service) — 404 on unknown `id`, 409 on status `failed`/`failed_permanent`; since **P19-S8** `rendering.read`-gated |
 | `POST` | `/renditions/{id}/retry` | Manual restart of a `failed_permanent` rendition (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate retry for ONLY the affected renderer; `rendering.write`-gated |
 | `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → on-demand watermarking, returns the stamped PDF directly, **without** persisting it; since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gated |
+| `POST` | `/render/convert-to-pdf` | Multipart (`file`: any `PdfArchiveRenderer`-supported format) → on-demand PDF conversion, same dispatch as the automatic pipeline but without persisting a `Rendition` row; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
+| `POST` | `/render/export/document` | Multipart (`file`, `title`, `history_position`, `history`: JSON array) → Pass A of the PDF export feature — converts + merges with the (already document-service-resolved) export history, stamps a local page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
+| `POST` | `/render/export/folder` | Multipart (`titles`: repeated form field, `files`: repeated, each already the output of `/render/export/document`) → Pass B — table of contents, bookmarks, global page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
 | `GET` | `/healthz` | Health check |
 
 The `id` of a rendition is a natural key `{document_id}:{version_number}:{rendition_type}` (see Data Model) — not a random UUID.
@@ -91,6 +94,15 @@ This closes the gap deliberately left open in P5-S2: scanned/image-based documen
 
 Unlike renditions, `POST /render/watermark` is deliberately **not** an automatic pipeline step and is **not** persisted: a watermark (e.g. "CONFIDENTIAL", a recipient name on an export) is typically a deliberate one-off action for a specific occasion, not a default step for every uploaded PDF. The implementation (`watermark.py`, reportlab + pypdf) is deliberately kept simple: a single diagonal, semi-transparent text stamp on every page, no position/color/repetition configuration.
 
+## PDF Export: Two-Pass Merge/Bookmark/Sub-Numbering (Post-Roadmap Phase 28, [ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md))
+
+`export_pdf.py` owns the PDF export feature's actual mechanics, reusing `watermark.py`'s overlay-merge idiom for footer stamping (a small corner label instead of a diagonal stamp):
+
+- **Pass A** (`build_document_export`, per document): the converted document PDF + a reportlab-rendered export-history table (`render_history_pdf`, fed by document-service from an `audit-service` query, see [ADR 0108](../adr/0108-export-history-as-audit-service-query.md)) are concatenated in the caller-specified order, then stamped with a **local** "i/N" footer, N = this document's own page count — final and stable regardless of whether/how the document is later embedded in a folder export.
+- **Pass B** (`build_folder_export`, folder export only): a table-of-contents section is rendered first (a throwaway probe determines its own page count before the real offsets are known), cumulative page offsets are computed from each document's already-known Pass-A page count, then a **second, independent** global "j/total" footer (different vertical position than the local one) plus a `pypdf.PdfWriter.add_outline_item()` bookmark per document are added.
+
+`POST /render/convert-to-pdf` (on-demand, no persisted `Rendition`) reuses `PdfArchiveRenderer`'s format dispatch directly rather than duplicating it — the same conversion logic the automatic pipeline uses for the `pdf_archive` rendition type. `POST /render/export/document`/`POST /render/export/folder` compose `export_pdf.py`'s functions with that same conversion step.
+
 ## Backend Integration
 
 - **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key.
@@ -117,7 +129,7 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests` (**46 tests**, previously 44, +2 since **Post-Roadmap Phase
+- `uv run pytest services/rendering-service/tests` (**59 tests**, +13 since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)): `test_export_pdf.py` (6, `build_document_export`/`build_folder_export`/`render_history_pdf` — local vs. global footer stability, TOC offsets, bookmark page indices) and `test_api.py` (7, `/render/convert-to-pdf`/`/render/export/document`/`/render/export/folder` incl. format-rejection and mismatched-titles/files cases); before that 46, previously 44, +2 since **Post-Roadmap Phase
   20 Session 7** ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)): `document_id`
   optional in `GET /renditions` — a repository test and an API test confirm the cross-document
   call with the `status` filter, without a `422` being returned; before that 44, +11 since **Post-Roadmap Phase 20 Session 4** — backoff behavior, `list_due_for_retry` filtering, `reset_for_retry` regression test, `process_version`'s `failed_permanent` path, new `/retry` endpoint, new `test_main.py` for `_run_retry_tick`, see [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): renderer behavior against real, in-memory generated files (real PNG/`.docx`/`.pptx`/PDF, no fixture files, no mocks), repository (upsert/overwrite/filter), pipeline (`process_version` directly against the real running Document/Storage Service, incl. error isolation on a corrupted PDF; since P5-S3 additionally `process_ocr_text` for the follow-up effect), API (`/renditions` endpoints, watermarking incl. rejection on an invalid PDF), consumer integration (a real NATS event `document.created`/`document.version.created` triggers real rendering; since P5-S3 additionally `test_ocr_consumer.py` for the `ocr.completed` dispatch incl. duplicate check, with a fake `OcrServiceClient` instead of a real OCR service call; since P5b-S5 additionally a regression test with an `OcrServiceClient` that simulates a connection error — the handler must not crash in that case).

@@ -495,6 +495,17 @@ body {
   font-size: 0.9rem;
 }
 
+/* PDF export order override next to the Export button (post-roadmap
+   phase 28, ADR 0107) - inline label+select, same compact style as
+   .version-select. */
+.export-history-position {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0.5rem;
+  font-size: 0.9rem;
+}
+
 /* Sichtbarkeit von is_conflict/comment je Version (P23-S1, Konzept-Feld war
    im DocumentVersion-Typ bereits vorhanden, aber im UI unsichtbar) - bewusst
    kein Diff-Viewer, nur ein Badge/Tooltip für die bereits geladenen Felder. */

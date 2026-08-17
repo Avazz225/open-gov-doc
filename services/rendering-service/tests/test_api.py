@@ -1,3 +1,4 @@
+import json
 import uuid
 from io import BytesIO
 
@@ -140,3 +141,103 @@ def test_render_watermark_rejects_garbage():
             files={"file": ("kaputt.pdf", b"kein pdf", "application/pdf")},
         )
     assert response.status_code == 400
+
+
+def test_render_convert_to_pdf_passes_through_an_already_pdf_file():
+    """Post-Roadmap Phase 28 (ADR 0107): the export feature's on-demand
+    conversion endpoint, reusing PdfArchiveRenderer's dispatch."""
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/convert-to-pdf",
+            files={"file": ("akte.pdf", _real_pdf(pages=2), "application/pdf")},
+        )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    reader = PdfReader(BytesIO(response.content))
+    assert len(reader.pages) == 2
+
+
+def test_render_convert_to_pdf_converts_a_text_file():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/convert-to-pdf",
+            files={"file": ("notiz.txt", b"Hello world", "text/plain")},
+        )
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+
+
+def test_render_convert_to_pdf_rejects_unsupported_format():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/convert-to-pdf",
+            files={"file": ("archiv.zip", b"PK\x03\x04", "application/zip")},
+        )
+    assert response.status_code == 422
+
+
+def test_render_export_document_merges_document_and_history():
+    """Post-Roadmap Phase 28 (ADR 0107)."""
+    history = json.dumps(
+        [{"happened_at": "2026-01-02T00:00:00Z", "actor": "alice", "action": "exported"}]
+    )
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/export/document",
+            data={"title": "Contract.pdf", "history_position": "after", "history": history},
+            files={"file": ("contract.pdf", _real_pdf(pages=2), "application/pdf")},
+        )
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert len(reader.pages) == 3  # 2 document pages + 1 history page
+    assert "alice" in reader.pages[2].extract_text()
+    assert "Page 1/3" in reader.pages[0].extract_text()
+
+
+def test_render_export_document_rejects_invalid_history_position():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/export/document",
+            data={"title": "Contract.pdf", "history_position": "sideways", "history": "[]"},
+            files={"file": ("contract.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 422
+
+
+def test_render_export_folder_combines_documents_with_toc_and_bookmarks():
+    """Post-Roadmap Phase 28 (ADR 0107)."""
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        doc_a = client.post(
+            "/render/export/document",
+            data={"title": "A.pdf", "history_position": "after", "history": "[]"},
+            files={"file": ("a.pdf", _real_pdf(pages=1), "application/pdf")},
+        ).content
+        doc_b = client.post(
+            "/render/export/document",
+            data={"title": "B.pdf", "history_position": "after", "history": "[]"},
+            files={"file": ("b.pdf", _real_pdf(pages=1), "application/pdf")},
+        ).content
+
+        response = client.post(
+            "/render/export/folder",
+            data={"titles": ["A.pdf", "B.pdf"]},
+            files=[
+                ("files", ("a.pdf", doc_a, "application/pdf")),
+                ("files", ("b.pdf", doc_b, "application/pdf")),
+            ],
+        )
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    # 1 TOC page + (1 doc + 1 history) for A + (1 doc + 1 history) for B.
+    assert len(reader.pages) == 5
+    assert len(reader.outline) == 2
+
+
+def test_render_export_folder_rejects_mismatched_titles_and_files():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/export/folder",
+            data={"titles": ["A.pdf", "B.pdf"]},
+            files=[("files", ("a.pdf", _real_pdf(pages=1), "application/pdf"))],
+        )
+    assert response.status_code == 422

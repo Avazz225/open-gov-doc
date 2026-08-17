@@ -482,6 +482,13 @@ services:
       # Sensor concept (10.1, P11-S1) - no depends_on, same fail-open
       # pattern as the license client above.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # PDF export with export history & combined folder export (post-roadmap
+      # phase 28, ADR 0107) - rendering-service builds the actual PDFs,
+      # audit-service is queried for a document's export history. No
+      # depends_on: both calls are only made on-demand (export endpoints),
+      # not during startup.
+      DMS_RENDERING_SERVICE_BASE_URL: http://rendering-service:8000
+      DMS_AUDIT_SERVICE_BASE_URL: http://audit-service:8000
     ports:
       - "${DOCUMENT_SERVICE_PORT:-8006}:8000"
     depends_on:

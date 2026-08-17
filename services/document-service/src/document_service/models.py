@@ -339,3 +339,44 @@ class WebdavEditToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class ExportConfig(Base):
+    """Installation-wide default for the PDF export feature (post-roadmap
+    phase 28, ADR 0107) - same single-row pattern as `ShareLinkConfig`/
+    `UploadConfig`. `history_position` controls whether a document's export
+    history section is appended after or prepended before the document
+    content itself; an optional `?history_position=` query param on
+    `POST /documents/{id}/export` overrides this default per call without
+    changing it."""
+
+    __tablename__ = "export_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    history_position: Mapped[str] = mapped_column(String(16), default="after")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FolderExportJob(Base):
+    """Combined-folder PDF export (post-roadmap phase 28, ADR 0107) - runs
+    as a background job instead of a synchronous request, since converting
+    every contained document via LibreOffice and merging the results can
+    take long for a folder with many documents. Same resilience shape as
+    `ArchivalTransfer` (post-roadmap phase 20 session 2, ADR 0078):
+    `attempts`/`next_retry_at` drive full-jitter backoff between attempts,
+    `failed_permanent` is the real terminal failure state (not a bare
+    `failed`) once `max_folder_export_attempts` is exhausted."""
+
+    __tablename__ = "folder_export_job"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    folder_id: Mapped[str] = mapped_column(String(128), index=True)
+    history_position: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    storage_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

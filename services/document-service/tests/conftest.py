@@ -109,7 +109,8 @@ async def _clean_tables():
                 "document.legal_hold, document.deletion_register_entry, "
                 "document.document, document.upload_config, document.retention_config, "
                 "document.trash_config, document.audit_trace_config, "
-                "document.audit_trace_role_override CASCADE"
+                "document.audit_trace_role_override, document.export_config, "
+                "document.folder_export_job CASCADE"
             )
         )
     await eng.dispose()
@@ -124,6 +125,11 @@ async def engine():
         await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
+
+
+@pytest.fixture
+def session_factory(engine):
+    return make_session_factory(engine)
 
 
 @pytest.fixture

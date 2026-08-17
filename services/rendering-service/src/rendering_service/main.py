@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -23,10 +24,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rendering_service import repository
 from rendering_service.consumer import start_consuming, start_consuming_ocr
 from rendering_service.document_client import DocumentServiceClient
+from rendering_service.export_pdf import (
+    ExportHistoryEntry,
+    FolderExportEntry,
+    build_document_export,
+    build_folder_export,
+    render_history_pdf,
+)
 from rendering_service.models import Base, Rendition
 from rendering_service.ocr_client import OcrServiceClient
 from rendering_service.pipeline import retry_rendition
-from rendering_service.schemas import RenditionOut
+from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
+from rendering_service.schemas import ExportHistoryEntryIn, RenditionOut
 from rendering_service.settings import Settings
 from rendering_service.storage_client import StorageClient
 from rendering_service.watermark import add_text_watermark
@@ -351,3 +360,116 @@ async def render_watermark(
             status_code=400, detail=f"Wasserzeichen konnte nicht angewendet werden: {exc}"
         ) from exc
     return Response(content=watermarked, media_type="application/pdf")
+
+
+@app.post("/render/convert-to-pdf")
+async def render_convert_to_pdf(
+    file: UploadFile = File(...),
+    x_dms_principal: str = Header(default=""),
+) -> Response:
+    """On-demand PDF conversion (post-roadmap phase 28, ADR 0107) - reuses
+    `PdfArchiveRenderer`'s format dispatch (already-PDF passthrough/tagging,
+    image-to-PDF, LibreOffice for Office/text formats) without going through
+    the automatic per-version rendition pipeline (pipeline.py): the caller
+    (document-service's export endpoint) needs the resulting bytes
+    synchronously to merge them into an export PDF, not a persisted
+    `Rendition` row."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    filename = file.filename or "document"
+    renderer = PdfArchiveRenderer()
+    if not renderer.supports(content_type=file.content_type, filename=filename):
+        raise HTTPException(
+            status_code=422, detail=f"Format nicht konvertierbar: {file.content_type!r}"
+        )
+    data = await file.read()
+    try:
+        output = await renderer.render(data, filename=filename, content_type=file.content_type)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail=f"PDF-Konvertierung fehlgeschlagen: {exc}"
+        ) from exc
+    return Response(content=output.data, media_type="application/pdf")
+
+
+@app.post("/render/export/document")
+async def render_export_document(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    history_position: str = Form(...),
+    history: str = Form("[]"),
+    x_dms_principal: str = Header(default=""),
+) -> Response:
+    """Pass A of the PDF export feature (post-roadmap phase 28, ADR 0107) -
+    called by document-service's `POST /documents/{id}/export`. Converts the
+    document to PDF (same dispatch as `/render/convert-to-pdf`), renders the
+    already-resolved export history (`history`, a JSON array of
+    `ExportHistoryEntryIn`), and merges both per `history_position` with a
+    stable local page-number footer (`export_pdf.build_document_export`)."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    if history_position not in ("before", "after"):
+        raise HTTPException(
+            status_code=422, detail="history_position muss 'before' oder 'after' sein"
+        )
+    try:
+        entries_in = [ExportHistoryEntryIn.model_validate(item) for item in json.loads(history)]
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"history ungültig: {exc}") from exc
+
+    filename = file.filename or title
+    renderer = PdfArchiveRenderer()
+    if not renderer.supports(content_type=file.content_type, filename=filename):
+        raise HTTPException(
+            status_code=422, detail=f"Format nicht konvertierbar: {file.content_type!r}"
+        )
+    data = await file.read()
+    try:
+        converted = await renderer.render(data, filename=filename, content_type=file.content_type)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail=f"PDF-Konvertierung fehlgeschlagen: {exc}"
+        ) from exc
+
+    history_pdf = render_history_pdf(
+        title,
+        [
+            ExportHistoryEntry(happened_at=e.happened_at, actor=e.actor, action=e.action)
+            for e in entries_in
+        ],
+    )
+    export_pdf = build_document_export(
+        document_pdf=converted.data, history_pdf=history_pdf, history_position=history_position
+    )
+    return Response(content=export_pdf, media_type="application/pdf")
+
+
+@app.post("/render/export/folder")
+async def render_export_folder(
+    titles: list[str] = Form(...),
+    files: list[UploadFile] = File(...),
+    x_dms_principal: str = Header(default=""),
+) -> Response:
+    """Pass B of the PDF export feature (post-roadmap phase 28, ADR 0107) -
+    called by document-service's folder-export job processor once per
+    contained document. Each `files[i]` is expected to already be the
+    output of `/render/export/document` (Pass A applied) for `titles[i]`;
+    this endpoint only combines them (table of contents, bookmarks, global
+    page numbering, `export_pdf.build_folder_export`) - document order is
+    the caller's responsibility."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    if len(titles) != len(files):
+        raise HTTPException(
+            status_code=422, detail="titles und files müssen gleich viele Einträge haben"
+        )
+    if not titles:
+        raise HTTPException(status_code=422, detail="Mindestens ein Dokument ist erforderlich")
+    entries = [
+        FolderExportEntry(title=title, export_pdf=await file.read())
+        for title, file in zip(titles, files, strict=True)
+    ]
+    try:
+        combined = build_folder_export(entries)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Ordner-Export konnte nicht zusammengeführt werden: {exc}"
+        ) from exc
+    return Response(content=combined, media_type="application/pdf")

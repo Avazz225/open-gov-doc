@@ -50,9 +50,14 @@ def _create_object_type(*, is_classified: bool = False) -> int:
     return response.json()["id"]
 
 
-def _grant_root_permission(principal_id: str, permission: str, role_prefix: str) -> None:
+def _grant_root_permission(
+    principal_id: str, permission: str, role_prefix: str, *, resource_id: str = "root"
+) -> None:
     """Gemeinsamer Kern von `_grant_document_read`/`_grant_document_write` -
-    vergibt `permission` auf `root` für `principal_id` (4.2a). `POST
+    vergibt `permission` auf `resource_id` (Default `root`) für
+    `principal_id` (4.2a). `resource_id` optional seit Post-Roadmap Phase 28
+    (ADR 0107): der Ordner-Export prüft `document.read` gegen den
+    Ziel-Ordner selbst, nicht `root`. `POST
     /role-assignments` liefert seit P17-S3 einen Status-Envelope
     (`RoleAssignmentActionResult`) statt der Zuweisung direkt, IMMER mit
     `201` (auch bei `status="pending_approval"`) - `raise_for_status()`
@@ -91,7 +96,7 @@ def _grant_root_permission(principal_id: str, permission: str, role_prefix: str)
                 "principal_type": "user",
                 "principal_id": principal_id,
                 "role_id": role.json()["id"],
-                "resource_id": "root",
+                "resource_id": resource_id,
             },
             timeout=30.0,
         )

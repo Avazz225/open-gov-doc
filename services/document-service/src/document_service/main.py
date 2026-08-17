@@ -33,14 +33,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service import metrics, repository, retention_actions
 from document_service.approval_client import ApprovalClient
+from document_service.audit_client import AuditServiceClient
 from document_service.consumer import start_consuming
 from document_service.content_type_sniffer import sniff_content_type
 from document_service.folder_client import FolderClient
 from document_service.html_preview_guard import rewrite_external_references
 from document_service.license_client import LicenseLimitClient
-from document_service.models import Base, Document
+from document_service.models import Base, Document, DocumentVersion, FolderExportJob
 from document_service.object_type_client import MissingKennzeichenAttributeError, ObjectTypeClient
 from document_service.permission_client import PermissionServiceClient
+from document_service.rendering_client import RenderingClient, RenderingUnavailableError
 from document_service.schemas import (
     ArchiveStatusOut,
     AuditTraceConfigIn,
@@ -57,6 +59,9 @@ from document_service.schemas import (
     DocumentOut,
     DocumentUpdate,
     DocumentVersionOut,
+    ExportConfigIn,
+    ExportConfigOut,
+    FolderExportJobOut,
     ForceReleaseResult,
     HasActiveHoldOut,
     LegalHoldCreate,
@@ -272,6 +277,135 @@ async def _retention_poll_loop(session_factory) -> None:
         await asyncio.sleep(settings.retention_poll_interval_seconds)
 
 
+async def _build_document_export_pdf(
+    document: Document,
+    version: DocumentVersion,
+    *,
+    x_dms_principal: str,
+    history_position: str,
+    storage: StorageClient,
+    rendering_client: RenderingClient,
+    audit_client: AuditServiceClient,
+) -> bytes:
+    """Pass A for one document (post-roadmap phase 28, ADR 0107) - shared by
+    the synchronous single-document export endpoint and the folder-export
+    job processor below. Fetches the current content + export history
+    (audit-service query, no dedicated storage of its own) and hands both to
+    rendering-service, which owns the actual PDF conversion/merge/stamping
+    logic (see `rendering_service/export_pdf.py`). Clients are passed in
+    explicitly rather than read from `app.state` (unlike most poll loops in
+    this service) - same dependency-injection shape as archival-service's
+    `pipeline.run_active_transfers_tick`, needed here because httpx clients
+    constructed on one asyncio event loop cannot be reused from another
+    (relevant for tests that drive a tick directly, outside `TestClient`'s
+    own loop)."""
+    data = await storage.download(version.storage_object_key)
+    history = await audit_client.list_export_history(document.id)
+    return await rendering_client.export_document(
+        data=data,
+        filename=document.title,
+        content_type=version.content_type,
+        title=document.title,
+        history_position=history_position,
+        history=history,
+        x_dms_principal=x_dms_principal,
+    )
+
+
+async def _run_folder_export_tick(
+    session_factory,
+    *,
+    storage: StorageClient,
+    rendering_client: RenderingClient,
+    audit_client: AuditServiceClient,
+) -> None:
+    """A single pass over due `FolderExportJob`s (post-roadmap phase 28,
+    ADR 0107) - factored out of `_folder_export_poll_loop` so a tick is
+    independently testable, same shape as rendering-service's
+    `_run_retry_tick`."""
+    async with session_factory() as session:
+        due = await repository.list_due_folder_export_jobs(session)
+    for stale in due:
+        async with session_factory() as session:
+            job = await session.get(FolderExportJob, stale.id)
+            if job is None or job.status not in ("pending", "processing"):
+                continue  # completed/reset differently in the meantime
+            await repository.mark_folder_export_processing(session, job)
+            await session.commit()
+            folder_id = job.folder_id
+            history_position = job.history_position
+            created_by = job.created_by
+            job_id = job.id
+
+        try:
+            async with session_factory() as session:
+                documents = await repository.list_documents_for_folder_export(session, folder_id)
+                if not documents:
+                    raise ValueError(f"Ordner {folder_id!r} enthält keine Dokumente")
+                entries: list[tuple[str, bytes]] = []
+                for document in documents:
+                    version = await repository.get_current_version(session, document.id)
+                    export_pdf = await _build_document_export_pdf(
+                        document,
+                        version,
+                        x_dms_principal=created_by,
+                        history_position=history_position,
+                        storage=storage,
+                        rendering_client=rendering_client,
+                        audit_client=audit_client,
+                    )
+                    entries.append((document.title, export_pdf))
+
+            combined = await rendering_client.export_folder(
+                entries=entries, x_dms_principal=created_by
+            )
+            storage_object_key = f"folder-exports/{job_id}.pdf"
+            await storage.upload(storage_object_key, combined, "application/pdf")
+
+            async with session_factory() as session:
+                job = await repository.get_folder_export_job(session, job_id)
+                await repository.mark_folder_export_completed(
+                    session, job, storage_object_key=storage_object_key
+                )
+                await session.commit()
+            for document in documents:
+                await publish_event(
+                    "document.exported",
+                    document.id,
+                    {"via": "folder_export", "folder_export_job_id": job_id},
+                    actor=created_by,
+                )
+        except Exception as exc:
+            async with session_factory() as session:
+                job = await repository.get_folder_export_job(session, job_id)
+                await repository.mark_folder_export_failed(
+                    session,
+                    job,
+                    error_message=str(exc),
+                    max_attempts=settings.max_folder_export_attempts,
+                )
+                await session.commit()
+
+
+async def _folder_export_poll_loop(session_factory) -> None:
+    """Combined folder export (post-roadmap phase 28, ADR 0107) - same
+    active-transfer poll loop idiom as archival-service's
+    `_archival_poll_loop`/rendering-service's `_rendition_retry_poll_loop`."""
+    while True:
+        try:
+            await _run_folder_export_tick(
+                session_factory,
+                storage=app.state.storage,
+                rendering_client=app.state.rendering_client,
+                audit_client=app.state.audit_client,
+            )
+        except Exception:
+            logger.exception(
+                "Ordner-Export-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.folder_export_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -424,6 +558,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.license_limit_client = LicenseLimitClient(
         settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
     )
+    app.state.rendering_client = RenderingClient(settings.rendering_service_base_url)
+    app.state.audit_client = AuditServiceClient(settings.audit_service_base_url)
 
     # Sensor concept (10.1): document-service was one of the original two
     # pilots (P11-S1), now covered by the full rollout's generic http.*
@@ -476,6 +612,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - same
     # poll loop idiom as workflow-service's SLA time monitoring (ADR 0020).
     retention_poll_task = asyncio.create_task(_retention_poll_loop(app.state.session_factory))
+    # Combined folder export (post-roadmap phase 28, ADR 0107) - same
+    # active-transfer poll loop idiom as archival-service's
+    # `_archival_poll_loop` (ADR 0078).
+    folder_export_poll_task = asyncio.create_task(
+        _folder_export_poll_loop(app.state.session_factory)
+    )
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -486,6 +628,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     retention_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await retention_poll_task
+    folder_export_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await folder_export_poll_task
     sensor_sampler_task.cancel()
     with suppress(asyncio.CancelledError):
         await sensor_sampler_task
@@ -502,6 +647,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.approval_client.close()
     await app.state.permission_client.close()
     await app.state.license_limit_client.close()
+    await app.state.rendering_client.close()
+    await app.state.audit_client.close()
     await engine.dispose()
 
 
@@ -2203,3 +2350,155 @@ async def force_release_lock(
         actor=payload.released_by,
     )
     return ForceReleaseResult(status="released", lock=original_lock)
+
+
+# --- PDF export with export history & combined folder export
+# (post-roadmap phase 28, ADR 0107) ----------------------------------
+
+
+@app.get("/export-config", response_model=ExportConfigOut)
+async def get_export_config(session: AsyncSession = Depends(get_session)) -> ExportConfigOut:
+    return await repository.get_export_config(session)
+
+
+@app.put("/export-config", response_model=ExportConfigOut)
+async def update_export_config(
+    body: ExportConfigIn, session: AsyncSession = Depends(get_session)
+) -> ExportConfigOut:
+    config = await repository.update_export_config(session, history_position=body.history_position)
+    await session.commit()
+    return config
+
+
+@app.post("/documents/{document_id}/export")
+async def export_document(
+    document_id: str,
+    history_position: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    x_dms_username: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Single-document PDF export (post-roadmap phase 28, ADR 0107) -
+    "Export" next to "Download" (`GET .../content`): the document's current
+    version plus its export history in a configurable order. `history_position`
+    overrides `ExportConfig`'s installation-wide default for this call only."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if history_position is not None and history_position not in ("before", "after"):
+        raise HTTPException(
+            status_code=422, detail="history_position muss 'before' oder 'after' sein"
+        )
+    try:
+        document = await repository.get_document(session, document_id)
+        version = await repository.get_current_version(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if document.dehydrated_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
+        )
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+
+    effective_position = history_position
+    if effective_position is None:
+        config = await repository.get_export_config(session)
+        effective_position = config.history_position
+
+    try:
+        export_pdf = await _build_document_export_pdf(
+            document,
+            version,
+            x_dms_principal=x_dms_principal,
+            history_position=effective_position,
+            storage=app.state.storage,
+            rendering_client=app.state.rendering_client,
+            audit_client=app.state.audit_client,
+        )
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
+        ) from exc
+    except RenderingUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=f"PDF-Export nicht erzeugbar: {exc}") from exc
+
+    await publish_event(
+        "document.exported",
+        document_id,
+        {"version_number": version.version_number, "history_position": effective_position},
+        actor=x_dms_username or x_dms_principal,
+    )
+    await session.commit()
+    return Response(content=export_pdf, media_type="application/pdf")
+
+
+@app.post("/folders/{folder_id}/export", response_model=FolderExportJobOut, status_code=202)
+async def start_folder_export(
+    folder_id: str,
+    history_position: str | None = None,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FolderExportJobOut:
+    """Combined folder export (post-roadmap phase 28, ADR 0107) - creates a
+    background job instead of blocking the request (LibreOffice conversion
+    per contained document plus the merge can take long for many
+    documents); poll `GET /folder-exports/{id}` for completion, then
+    `GET /folder-exports/{id}/content`."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if history_position is not None and history_position not in ("before", "after"):
+        raise HTTPException(
+            status_code=422, detail="history_position muss 'before' oder 'after' sein"
+        )
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=folder_id
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf diesen Ordner")
+
+    effective_position = history_position
+    if effective_position is None:
+        config = await repository.get_export_config(session)
+        effective_position = config.history_position
+
+    job = await repository.create_folder_export_job(
+        session,
+        folder_id=folder_id,
+        history_position=effective_position,
+        created_by=x_dms_principal,
+    )
+    await session.commit()
+    return job
+
+
+@app.get("/folder-exports/{job_id}", response_model=FolderExportJobOut)
+async def get_folder_export(
+    job_id: str, session: AsyncSession = Depends(get_session)
+) -> FolderExportJobOut:
+    try:
+        return await repository.get_folder_export_job(session, job_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/folder-exports/{job_id}/content")
+async def get_folder_export_content(
+    job_id: str, session: AsyncSession = Depends(get_session)
+) -> Response:
+    try:
+        job = await repository.get_folder_export_job(session, job_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if job.status != "completed" or job.storage_object_key is None:
+        raise HTTPException(status_code=409, detail=f"Ordner-Export hat Status {job.status!r}")
+    try:
+        data = await app.state.storage.download(job.storage_object_key)
+    except ObjectNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Inhalt im Storage Service nicht (mehr) vorhanden"
+        ) from exc
+    return Response(content=data, media_type="application/pdf")

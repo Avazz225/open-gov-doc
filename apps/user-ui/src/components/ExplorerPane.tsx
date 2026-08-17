@@ -11,7 +11,10 @@ import {
 import { useI18n } from "@/i18n";
 import {
   addFavorite,
+  downloadFolderExportContent,
+  exportFolder,
   getApprovalConfig,
+  getFolderExport,
   getKennzeichenConfig,
   getShareLinkConfig,
   listDeletedDocuments,
@@ -23,6 +26,7 @@ import {
   restoreFolder,
   type DocumentSummary,
   type Folder,
+  type FolderExportJob,
   type ObjectType,
 } from "@/lib/api";
 import { folderIcon } from "@/lib/icons";
@@ -41,6 +45,22 @@ export interface BreadcrumbEntry {
 
 const VIEW_MODE_KEY = "dms.explorer.viewMode";
 type ExplorerViewMode = "list" | "tree";
+
+// Combined folder export (post-roadmap phase 28, ADR 0107) - polled until
+// terminal, same interval order of magnitude as the folder-export-job
+// backoff base (document-service `folder_export_poll_interval_seconds`).
+const FOLDER_EXPORT_POLL_MS = 3000;
+
+function triggerBrowserDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 function loadViewMode(): ExplorerViewMode {
   if (typeof window === "undefined") return "list";
@@ -138,10 +158,39 @@ export function ExplorerPane({
   // visual feedback for which row currently counts as the target.
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  // Combined folder export (post-roadmap phase 28, ADR 0107) - `folderName`
+  // kept alongside the job purely for the status text/downloaded filename
+  // (the job itself only carries `folder_id`).
+  const [folderExportJob, setFolderExportJob] = useState<FolderExportJob | null>(null);
+  const [folderExportName, setFolderExportName] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedKeys(new Set());
   }, [currentFolderId, showTrash]);
+
+  useEffect(() => {
+    if (!folderExportJob || folderExportJob.status === "completed") return;
+    if (folderExportJob.status === "failed_permanent") return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await getFolderExport(token, folderExportJob.id);
+        if (cancelled) return;
+        setFolderExportJob(fresh);
+        if (fresh.status === "completed") {
+          const blob = await downloadFolderExportContent(token, fresh.id);
+          if (!cancelled) triggerBrowserDownload(blob, `${folderExportName ?? "Ordner"}-export.pdf`);
+        }
+      } catch {
+        // A single missed poll shouldn't abort the whole flow - the next
+        // interval tick simply tries again.
+      }
+    }, FOLDER_EXPORT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [folderExportJob, folderExportName, token]);
 
   function handleFolderDragStart(folderId: string) {
     setDraggedFolderId(folderId);
@@ -392,6 +441,12 @@ export function ExplorerPane({
     if (result === "pending_approval") setDeleteMessage(t("explorer.deleteRequestPending"));
   }
 
+  async function handleExportFolder(folder: Folder) {
+    setFolderExportName(folder.name);
+    const job = await exportFolder(token, folder.id);
+    setFolderExportJob(job);
+  }
+
   function openFolderContextMenu(event: ReactMouseEvent, folder: Folder) {
     event.preventDefault();
     const isFavorite = favoriteKeys.has(`folder:${folder.id}`);
@@ -410,6 +465,10 @@ export function ExplorerPane({
             ? t("explorer.removeFavorite", { name: folder.name })
             : t("explorer.addFavorite", { name: folder.name }),
           onSelect: () => toggleFavorite("folder", folder.id),
+        },
+        {
+          label: t("explorer.exportFolder", { name: folder.name }),
+          onSelect: () => handleExportFolder(folder),
         },
       ],
     });
@@ -545,6 +604,17 @@ export function ExplorerPane({
       )}
 
       {deleteMessage && <p className="hint">{deleteMessage}</p>}
+
+      {folderExportJob && folderExportJob.status !== "completed" && (
+        <p className="hint" role="status">
+          {folderExportJob.status === "failed_permanent"
+            ? t("explorer.exportFolderFailed", {
+                name: folderExportName ?? "",
+                error: folderExportJob.error_message ?? "",
+              })
+            : t("explorer.exportFolderInProgress", { name: folderExportName ?? "" })}
+        </p>
+      )}
 
       {selectedKeys.size > 0 && (
         <div className="explorer-toolbar">

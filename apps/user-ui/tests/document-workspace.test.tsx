@@ -31,6 +31,9 @@ function getPaneSectionByLabel(name: string): HTMLElement {
 const listChildFoldersMock = vi.fn();
 const listDocumentsInFolderMock = vi.fn();
 const downloadDocumentMock = vi.fn();
+const exportFolderMock = vi.fn();
+const getFolderExportMock = vi.fn();
+const downloadFolderExportContentMock = vi.fn();
 const uploadDocumentMock = vi.fn();
 const createFolderMock = vi.fn();
 const renameFolderMock = vi.fn();
@@ -86,6 +89,9 @@ vi.mock("@/lib/api", () => ({
   listChildFolders: (...args: unknown[]) => listChildFoldersMock(...args),
   listDocumentsInFolder: (...args: unknown[]) => listDocumentsInFolderMock(...args),
   downloadDocument: (...args: unknown[]) => downloadDocumentMock(...args),
+  exportFolder: (...args: unknown[]) => exportFolderMock(...args),
+  getFolderExport: (...args: unknown[]) => getFolderExportMock(...args),
+  downloadFolderExportContent: (...args: unknown[]) => downloadFolderExportContentMock(...args),
   uploadDocument: (...args: unknown[]) => uploadDocumentMock(...args),
   createFolder: (...args: unknown[]) => createFolderMock(...args),
   renameFolder: (...args: unknown[]) => renameFolderMock(...args),
@@ -188,6 +194,9 @@ describe("DocumentWorkspace", () => {
     listChildFoldersMock.mockReset();
     listDocumentsInFolderMock.mockReset();
     downloadDocumentMock.mockReset();
+    exportFolderMock.mockReset();
+    getFolderExportMock.mockReset();
+    downloadFolderExportContentMock.mockReset();
     uploadDocumentMock.mockReset();
     createFolderMock.mockReset();
     renameFolderMock.mockReset();
@@ -1072,6 +1081,75 @@ describe("DocumentWorkspace", () => {
     await user.click(await screen.findByText("Alt löschen"));
 
     await waitFor(() => expect(trashFolderMock).toHaveBeenCalledWith("token-123", "f1", "alice"));
+  });
+
+  it("starts a folder export via the context menu and shows an in-progress message (Phase 28, ADR 0107)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    exportFolderMock.mockResolvedValue({
+      id: "job-1",
+      folder_id: "f1",
+      history_position: "after",
+      status: "pending",
+      error_message: null,
+      attempts: 0,
+      next_retry_at: null,
+      created_by: "alice",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const folderNameButton = await screen.findByText(/Alt/);
+    fireEvent.contextMenu(folderNameButton.closest("li")!);
+    await user.click(await screen.findByText('"Alt" exportieren'));
+
+    await waitFor(() => expect(exportFolderMock).toHaveBeenCalledWith("token-123", "f1"));
+    expect(await screen.findByText('Ordner "Alt" wird exportiert...')).toBeInTheDocument();
+  });
+
+  it("downloads the combined PDF once a folder-export job completes (Phase 28, ADR 0107)", async () => {
+    listChildFoldersMock.mockResolvedValue([
+      { id: "f1", name: "Alt", parent_id: "root", object_type_id: null, attributes: {} },
+    ]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    const pendingJob = {
+      id: "job-1",
+      folder_id: "f1",
+      history_position: "after",
+      status: "pending",
+      error_message: null,
+      attempts: 0,
+      next_retry_at: null,
+      created_by: "alice",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    exportFolderMock.mockResolvedValue(pendingJob);
+    getFolderExportMock.mockResolvedValue({ ...pendingJob, status: "completed" });
+    downloadFolderExportContentMock.mockResolvedValue(
+      new Blob(["%PDF-1.4"], { type: "application/pdf" })
+    );
+    URL.createObjectURL = vi.fn(() => "blob:mock-url");
+    URL.revokeObjectURL = vi.fn();
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const folderNameButton = await screen.findByText(/Alt/);
+    fireEvent.contextMenu(folderNameButton.closest("li")!);
+    await user.click(await screen.findByText('"Alt" exportieren'));
+    await waitFor(() => expect(exportFolderMock).toHaveBeenCalled());
+
+    await waitFor(() => expect(getFolderExportMock).toHaveBeenCalledWith("token-123", "job-1"), {
+      timeout: 5000,
+      interval: 200,
+    });
+    await waitFor(() => expect(downloadFolderExportContentMock).toHaveBeenCalledWith("token-123", "job-1"));
   });
 
   it("shows a pending-approval message instead of deleting when folder.delete requires approval (5.2, seit P7-S1c)", async () => {

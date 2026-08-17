@@ -350,3 +350,32 @@ class WebdavEditTokenResolveOut(BaseModel):
 
     document_id: str
     principal_id: str
+
+
+# --- PDF export with export history & combined folder export
+# (post-roadmap phase 28, ADR 0107) ----------------------------------
+
+
+class ExportConfigIn(BaseModel):
+    history_position: Literal["before", "after"] = "after"
+
+
+class ExportConfigOut(ExportConfigIn):
+    model_config = {"from_attributes": True}
+
+    updated_at: datetime
+
+
+class FolderExportJobOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    folder_id: str
+    history_position: str
+    status: Literal["pending", "processing", "completed", "failed_permanent"]
+    error_message: str | None
+    attempts: int
+    next_retry_at: datetime | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
