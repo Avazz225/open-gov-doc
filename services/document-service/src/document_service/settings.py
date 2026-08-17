@@ -27,6 +27,17 @@ class Settings(BaseServiceSettings):
     # see repository.py.
     default_lock_timeout_seconds: float = 1800.0
 
+    # Locked-document reminder (4.2, post-roadmap phase 30 session 4, ADR
+    # 0111) - the first background sweep this lock feature has ever had
+    # (see the comment above: expiry itself is still checked lazily, not
+    # swept). `lock_reminder_threshold_seconds` deliberately sits far above
+    # `default_lock_timeout_seconds`: a normal edit session renews the lock
+    # well within its timeout, so only a lock nobody has touched for hours
+    # is worth flagging as plausibly forgotten. Poll interval follows the
+    # same coarse-is-fine idiom as `retention_poll_interval_seconds`.
+    lock_reminder_threshold_seconds: float = 14400.0
+    lock_reminder_poll_interval_seconds: float = 900.0
+
     # First genuine role check in the entire system (P5e-S2): only
     # principals whose `X-DMS-Roles` header injected by the gateway contains
     # this role may subsequently change an already assigned reference number

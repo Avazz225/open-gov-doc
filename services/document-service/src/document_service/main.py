@@ -277,6 +277,35 @@ async def _retention_poll_loop(session_factory) -> None:
         await asyncio.sleep(settings.retention_poll_interval_seconds)
 
 
+async def _lock_reminder_poll_loop(session_factory) -> None:
+    """Locked-document reminder (4.2, post-roadmap phase 30 session 4, ADR
+    0111) - the first notification hook this lock feature has ever had
+    (ADR 0002 deliberately kept it otherwise minimal). Same
+    error-isolation idiom as `_retention_poll_loop`: a single broken lock
+    row doesn't stop the loop for all others."""
+    while True:
+        try:
+            async with session_factory() as session:
+                for lock in await repository.list_locks_due_for_reminder(
+                    session, threshold_seconds=settings.lock_reminder_threshold_seconds
+                ):
+                    document = await repository.get_document(session, lock.document_id)
+                    lock.reminder_sent_at = datetime.now(UTC)
+                    await session.flush()
+                    await session.commit()
+                    await publish_event(
+                        "document.lock.reminder",
+                        lock.document_id,
+                        {"title": document.title, "locked_by": lock.locked_by},
+                        actor="system:lock-reminder-poll",
+                    )
+        except Exception:
+            logger.exception(
+                "Lock-Reminder-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
+            )
+        await asyncio.sleep(settings.lock_reminder_poll_interval_seconds)
+
+
 async def _build_document_export_pdf(
     document: Document,
     version: DocumentVersion,
@@ -509,6 +538,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE document.document ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(128)")
         )
+        # Locked-document reminder (post-roadmap phase 30 session 4, ADR
+        # 0111) - same ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document_lock "
+                "ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ"
+            )
+        )
         # Schema drift correction (P15-S1, found live): in long-running
         # installations (including this dev environment), `object_type_id`
         # from a very early project phase still carries the VARCHAR type from
@@ -618,6 +655,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     folder_export_poll_task = asyncio.create_task(
         _folder_export_poll_loop(app.state.session_factory)
     )
+    # Locked-document reminder (4.2, post-roadmap phase 30 session 4, ADR
+    # 0111) - same poll loop idiom as `_retention_poll_loop` above.
+    lock_reminder_poll_task = asyncio.create_task(
+        _lock_reminder_poll_loop(app.state.session_factory)
+    )
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -631,6 +673,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     folder_export_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await folder_export_poll_task
+    lock_reminder_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await lock_reminder_poll_task
     sensor_sampler_task.cancel()
     with suppress(asyncio.CancelledError):
         await sensor_sampler_task

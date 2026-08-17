@@ -7,6 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from notification_service import repository
 from notification_service.links import build_resource_link
 from notification_service.settings import Settings
+from notification_service.templates import (
+    UnknownPlaceholderError,
+    render_template,
+    resolve_template,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +23,7 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     "license.limit_exceeded": "notification-service-license-limit-exceeded",
     "license.expiring_soon": "notification-service-license-expiring-soon",
     "license.invalid": "notification-service-license-invalid",
+    "document.lock.reminder": "notification-service-lock-reminder",
 }
 
 
@@ -53,6 +59,9 @@ def make_handler(
         if event.event_type == "folder.deletion.reminder":
             await _handle_folder_deletion_reminder(session_factory, settings, publish_event, event)
             return
+        if event.event_type == "document.lock.reminder":
+            await _handle_lock_reminder(session_factory, settings, publish_event, event)
+            return
         if event.event_type == "license.limit_exceeded":
             await _handle_license_limit_exceeded(session_factory, settings, publish_event, event)
             return
@@ -67,6 +76,38 @@ def make_handler(
     return handle
 
 
+async def _render_or_fallback(
+    session: AsyncSession,
+    *,
+    use_case: str,
+    recipient: str,
+    fallback_subject: str,
+    fallback_body: str,
+    **placeholders,
+) -> tuple[str, str]:
+    """Applies an admin-configured `EmailTemplate` (post-roadmap phase 30,
+    ADR 0111) for `(use_case, recipient)` when one resolves - falls back to
+    the caller's existing hardcoded subject/body verbatim otherwise (no row
+    configured, or a configured template referencing an unknown
+    placeholder), so an installation that has never configured Phase 30
+    sees zero change in behavior."""
+    template = await resolve_template(session, use_case=use_case, recipient=recipient)
+    if template is None:
+        return fallback_subject, fallback_body
+    try:
+        return (
+            render_template(template.subject_template, **placeholders),
+            render_template(template.body_template, **placeholders),
+        )
+    except UnknownPlaceholderError:
+        logger.warning(
+            "Konfigurierte E-Mail-Vorlage fuer use_case=%r verwendet einen "
+            "unbekannten Platzhalter - falle auf Standardtext zurueck.",
+            use_case,
+        )
+        return fallback_subject, fallback_body
+
+
 async def _handle_task_escalated(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
@@ -76,8 +117,8 @@ async def _handle_task_escalated(
     data = event.payload
     task_name = data.get("task_name", "?")
     business_key = data.get("business_key")
-    subject = f"SLA überschritten: {task_name}"
-    body = (
+    fallback_subject = f"SLA überschritten: {task_name}"
+    fallback_body = (
         f"Prozessinstanz {event.subject} (business_key={business_key!r}) hat den "
         f"Task {task_name!r} nicht rechtzeitig abgeschlossen."
     )
@@ -87,10 +128,24 @@ async def _handle_task_escalated(
     # installation has configured `reviewer_ui_public_base_url` (ADR 0105).
     link = build_resource_link(settings.reviewer_ui_public_base_url, "instance", event.subject)
     if link:
-        body += f"\n\nVorgang öffnen: {link}"
+        fallback_body += f"\n\nVorgang öffnen: {link}"
+    placeholders = {
+        "task_name": task_name,
+        "business_key": business_key,
+        "instance_id": event.subject,
+        "link": link or "",
+    }
 
     async with session_factory() as session:
         recipient = data.get("lane") or "unassigned"
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="workflow.task.escalated",
+            recipient=recipient,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            **placeholders,
+        )
         in_app = await repository.create_and_send(
             session, settings, channel="in_app", recipient=recipient, subject=subject, body=body
         )
@@ -99,6 +154,14 @@ async def _handle_task_escalated(
 
         escalation_email = data.get("escalation_email")
         if escalation_email:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="workflow.task.escalated",
+                recipient=escalation_email,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                **placeholders,
+            )
             email_notification = await repository.create_and_send(
                 session,
                 settings,
@@ -127,13 +190,26 @@ async def _handle_federation_inbound_received(
     data = event.payload
     from_installation_id = data.get("from_installation_id", "?")
     process_type = data.get("process_type", "?")
-    subject = f"Neue föderierte Übergabe: {process_type}"
-    body = (
+    fallback_subject = f"Neue föderierte Übergabe: {process_type}"
+    fallback_body = (
         f"Installation {from_installation_id!r} hat einen Prozessschritt "
         f"({process_type!r}) übergeben - neue lokale Instanz {event.subject!r} gestartet."
     )
+    placeholders = {
+        "from_installation_id": from_installation_id,
+        "process_type": process_type,
+        "instance_id": event.subject,
+    }
 
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="workflow.federation.inbound_received",
+            recipient="unassigned",
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            **placeholders,
+        )
         in_app = await repository.create_and_send(
             session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
         )
@@ -142,6 +218,14 @@ async def _handle_federation_inbound_received(
 
         notify_email = data.get("notify_email")
         if notify_email:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="workflow.federation.inbound_received",
+                recipient=notify_email,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                **placeholders,
+            )
             email_notification = await repository.create_and_send(
                 session,
                 settings,
@@ -169,17 +253,33 @@ async def _handle_deletion_reminder(
     title = data.get("title", "?")
     full_deletion = data.get("full_deletion", False)
     action = "physisch zwangsgelöscht" if full_deletion else "in den Papierkorb verschoben"
-    subject = f"Löschfrist erreicht bald: {title}"
-    body = (
+    fallback_subject = f"Löschfrist erreicht bald: {title}"
+    retention_until = data.get("retention_until", "?")
+    fallback_body = (
         f"Dokument {title!r} (id={event.subject}) wird am "
-        f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
+        f"{retention_until} {action}, sofern kein Legal Hold gesetzt wird."
     )
     # Authenticated direct links (post-roadmap phase 29, ADR 0109).
     link = build_resource_link(settings.user_ui_public_base_url, "document", event.subject)
     if link:
-        body += f"\n\nDokument öffnen: {link}"
+        fallback_body += f"\n\nDokument öffnen: {link}"
+    placeholders = {
+        "title": title,
+        "document_id": event.subject,
+        "retention_until": retention_until,
+        "action": action,
+        "link": link or "",
+    }
 
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="document.deletion.reminder",
+            recipient="unassigned",
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            **placeholders,
+        )
         in_app = await repository.create_and_send(
             session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
         )
@@ -188,6 +288,14 @@ async def _handle_deletion_reminder(
 
         notify_email = data.get("notify_email")
         if notify_email:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="document.deletion.reminder",
+                recipient=notify_email,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                **placeholders,
+            )
             email_notification = await repository.create_and_send(
                 session,
                 settings,
@@ -213,17 +321,33 @@ async def _handle_folder_deletion_reminder(
     name = data.get("name", "?")
     full_deletion = data.get("full_deletion", False)
     action = "physisch zwangsgelöscht" if full_deletion else "in den Papierkorb verschoben"
-    subject = f"Löschfrist erreicht bald: {name}"
-    body = (
+    fallback_subject = f"Löschfrist erreicht bald: {name}"
+    retention_until = data.get("retention_until", "?")
+    fallback_body = (
         f"Ordner {name!r} (id={event.subject}) wird am "
-        f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
+        f"{retention_until} {action}, sofern kein Legal Hold gesetzt wird."
     )
     # Authenticated direct links (post-roadmap phase 29, ADR 0109).
     link = build_resource_link(settings.user_ui_public_base_url, "folder", event.subject)
     if link:
-        body += f"\n\nOrdner öffnen: {link}"
+        fallback_body += f"\n\nOrdner öffnen: {link}"
+    placeholders = {
+        "name": name,
+        "folder_id": event.subject,
+        "retention_until": retention_until,
+        "action": action,
+        "link": link or "",
+    }
 
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="folder.deletion.reminder",
+            recipient="unassigned",
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            **placeholders,
+        )
         in_app = await repository.create_and_send(
             session, settings, channel="in_app", recipient="unassigned", subject=subject, body=body
         )
@@ -232,6 +356,14 @@ async def _handle_folder_deletion_reminder(
 
         notify_email = data.get("notify_email")
         if notify_email:
+            subject, body = await _render_or_fallback(
+                session,
+                use_case="folder.deletion.reminder",
+                recipient=notify_email,
+                fallback_subject=fallback_subject,
+                fallback_body=fallback_body,
+                **placeholders,
+            )
             email_notification = await repository.create_and_send(
                 session,
                 settings,
@@ -242,6 +374,51 @@ async def _handle_folder_deletion_reminder(
             )
             await session.commit()
             await publish_notification_result(publish_event, email_notification)
+
+
+async def _handle_lock_reminder(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Reminder for a document locked for a while (4.2, post-roadmap phase
+    30 session 4, ADR 0111) - the first notification hook this lock
+    feature has ever had (see ADR 0002, which deliberately kept the lock
+    feature itself minimal). Unlike the deletion reminders, there is no
+    separately configured notify-email address here - the lock's own
+    `locked_by` (the person who most plausibly forgot about it) is both the
+    in-app recipient and, when it resolves to a real email account, the
+    channel a configured `EmailTemplate` targets."""
+    data = event.payload
+    title = data.get("title", "?")
+    locked_by = data.get("locked_by", "?")
+    fallback_subject = f"Dokument seit längerem gesperrt: {title}"
+    fallback_body = (
+        f"Dokument {title!r} (id={event.subject}) ist seit längerem von {locked_by!r} gesperrt."
+    )
+    # Authenticated direct links (post-roadmap phase 29, ADR 0109).
+    link = build_resource_link(settings.user_ui_public_base_url, "document", event.subject)
+    if link:
+        fallback_body += f"\n\nDokument öffnen: {link}"
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="document.lock.reminder",
+            recipient=locked_by,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            title=title,
+            document_id=event.subject,
+            locked_by=locked_by,
+            link=link or "",
+        )
+        notification = await repository.create_and_send(
+            session, settings, channel="in_app", recipient=locked_by, subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
 
 
 async def _handle_superuser_activated(
@@ -256,13 +433,21 @@ async def _handle_superuser_activated(
     `escalation_email`, which comes from the event itself)."""
     expires_at = event.payload.get("expires_at", "?")
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="auth.superuser.activated",
+            recipient=settings.security_officer_email,
+            fallback_subject="Superuser Break-Glass aktiviert",
+            fallback_body=f"Der Superuser-Zugang wurde aktiviert und läuft ab: {expires_at}.",
+            expires_at=expires_at,
+        )
         notification = await repository.create_and_send(
             session,
             settings,
             channel="email",
             recipient=settings.security_officer_email,
-            subject="Superuser Break-Glass aktiviert",
-            body=f"Der Superuser-Zugang wurde aktiviert und läuft ab: {expires_at}.",
+            subject=subject,
+            body=body,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -278,14 +463,24 @@ async def _handle_maintenance_mode_activated(
     same pattern as `_handle_superuser_activated` (P6-S5)."""
     triggered_by = event.payload.get("triggered_by", "?")
     reason = event.payload.get("reason") or "kein Grund angegeben"
+    fallback_body = f"Der Wartungsmodus wurde von {triggered_by!r} ausgelöst. Grund: {reason}."
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="permission.maintenance_mode.activated",
+            recipient=settings.security_officer_email,
+            fallback_subject="Systemweite Notfallsperre ausgelöst",
+            fallback_body=fallback_body,
+            triggered_by=triggered_by,
+            reason=reason,
+        )
         notification = await repository.create_and_send(
             session,
             settings,
             channel="email",
             recipient=settings.security_officer_email,
-            subject="Systemweite Notfallsperre ausgelöst",
-            body=f"Der Wartungsmodus wurde von {triggered_by!r} ausgelöst. Grund: {reason}.",
+            subject=subject,
+            body=body,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -304,13 +499,23 @@ async def _handle_license_limit_exceeded(
     current = event.payload.get("current")
     limit = event.payload.get("limit")
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="license.limit_exceeded",
+            recipient=settings.license_admin_email,
+            fallback_subject="Lizenz-Nutzungsgrenze überschritten",
+            fallback_body=f"Dimension {dimension!r} liegt bei {current}, Lizenzgrenze ist {limit}.",
+            dimension=dimension,
+            current=current,
+            limit=limit,
+        )
         notification = await repository.create_and_send(
             session,
             settings,
             channel="email",
             recipient=settings.license_admin_email,
-            subject="Lizenz-Nutzungsgrenze überschritten",
-            body=f"Dimension {dimension!r} liegt bei {current}, Lizenzgrenze ist {limit}.",
+            subject=subject,
+            body=body,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -324,13 +529,21 @@ async def _handle_license_expiring_soon(
 ) -> None:
     days_remaining = event.payload.get("days_remaining", "?")
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="license.expiring_soon",
+            recipient=settings.license_admin_email,
+            fallback_subject="Lizenz läuft bald ab",
+            fallback_body=f"Die installierte Lizenz läuft in {days_remaining} Tagen ab.",
+            days_remaining=days_remaining,
+        )
         notification = await repository.create_and_send(
             session,
             settings,
             channel="email",
             recipient=settings.license_admin_email,
-            subject="Lizenz läuft bald ab",
-            body=f"Die installierte Lizenz läuft in {days_remaining} Tagen ab.",
+            subject=subject,
+            body=body,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)
@@ -344,13 +557,21 @@ async def _handle_license_invalid(
 ) -> None:
     reason = event.payload.get("reason") or "kein Grund angegeben"
     async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="license.invalid",
+            recipient=settings.license_admin_email,
+            fallback_subject="Lizenz ungültig",
+            fallback_body=f"Die installierte Lizenz ist ungültig: {reason}.",
+            reason=reason,
+        )
         notification = await repository.create_and_send(
             session,
             settings,
             channel="email",
             recipient=settings.license_admin_email,
-            subject="Lizenz ungültig",
-            body=f"Die installierte Lizenz ist ungültig: {reason}.",
+            subject=subject,
+            body=body,
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)

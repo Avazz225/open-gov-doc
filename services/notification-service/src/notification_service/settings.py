@@ -45,6 +45,11 @@ class Settings(BaseServiceSettings):
         # Deletion reminder (5.2a, P7-S1) - a dedicated "document" stream
         # subject not previously consumed by this service, see consumer.py.
         "document.deletion.reminder",
+        # Locked-document reminder (4.2, post-roadmap phase 30 session 4,
+        # ADR 0111) - second subject on the "document" stream, hence its own
+        # durable name (see `_SHARED_STREAM_DURABLE_OVERRIDES`), same
+        # reasoning as `workflow.federation.inbound_received` above.
+        "document.lock.reminder",
         # Deletion reminder for folders (5.2a, P7-S1b) - a dedicated "folder"
         # stream subject not previously consumed by this service. The first
         # subject of this service on the "folder" stream, so no second durable

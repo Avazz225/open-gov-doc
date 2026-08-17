@@ -85,6 +85,7 @@ const GROUPS: NavGroup[] = [
       { href: "/share-link-settings/", labelKey: "nav.shareLinkSettings" },
       { href: "/delegations/", labelKey: "nav.delegations" },
       { href: "/approval-settings/", labelKey: "nav.approvalSettings" },
+      { href: "/email-templates/", labelKey: "nav.emailTemplates" },
     ],
   },
   {

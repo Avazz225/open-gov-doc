@@ -5,7 +5,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from notification_service import delivery
-from notification_service.models import Notification
+from notification_service.models import EmailTemplate, Notification
 from notification_service.settings import Settings
 
 
@@ -138,3 +138,74 @@ async def list_notifications(
         query = query.where(Notification.status == status)
     result = await session.execute(query.order_by(Notification.created_at.desc()))
     return list(result.scalars().all())
+
+
+# --- Configurable email templates (post-roadmap phase 30, ADR 0111) -------
+# Same keyed-discriminator + "no row = fallback" shape as permission-
+# service's ApprovalActionConfig - see models.py's EmailTemplate docstring.
+
+
+async def list_email_templates(
+    session: AsyncSession, *, use_case: str | None = None
+) -> list[EmailTemplate]:
+    """Deliberately returns ONLY explicitly configured rows (same convention
+    as `ApprovalActionConfig`, ADR 0089) - not a fixed catalog of every
+    `use_case` that could theoretically exist (see `main.py`'s separate
+    `GET /email-template-use-cases` for that catalog)."""
+    query = select(EmailTemplate)
+    if use_case is not None:
+        query = query.where(EmailTemplate.use_case == use_case)
+    result = await session.execute(
+        query.order_by(EmailTemplate.use_case, EmailTemplate.recipient_domain_pattern)
+    )
+    return list(result.scalars().all())
+
+
+async def get_email_template(session: AsyncSession, template_id: int) -> EmailTemplate:
+    template = await session.get(EmailTemplate, template_id)
+    if template is None:
+        raise NotFoundError(f"email_template_id {template_id!r} unbekannt")
+    return template
+
+
+async def upsert_email_template(
+    session: AsyncSession,
+    *,
+    use_case: str,
+    recipient_domain_pattern: str | None,
+    subject_template: str,
+    body_template: str,
+) -> EmailTemplate:
+    result = await session.execute(
+        select(EmailTemplate).where(
+            EmailTemplate.use_case == use_case,
+            EmailTemplate.recipient_domain_pattern == recipient_domain_pattern
+            if recipient_domain_pattern is not None
+            else EmailTemplate.recipient_domain_pattern.is_(None),
+        )
+    )
+    existing = result.scalar_one_or_none()
+    now = datetime.now(UTC)
+    if existing is not None:
+        existing.subject_template = subject_template
+        existing.body_template = body_template
+        existing.updated_at = now
+        await session.flush()
+        return existing
+
+    template = EmailTemplate(
+        use_case=use_case,
+        recipient_domain_pattern=recipient_domain_pattern,
+        subject_template=subject_template,
+        body_template=body_template,
+        updated_at=now,
+    )
+    session.add(template)
+    await session.flush()
+    return template
+
+
+async def delete_email_template(session: AsyncSession, template_id: int) -> None:
+    template = await get_email_template(session, template_id)
+    await session.delete(template)
+    await session.flush()

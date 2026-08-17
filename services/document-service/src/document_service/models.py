@@ -160,6 +160,14 @@ class DocumentLock(Base):
     based_on_version_number: Mapped[int] = mapped_column(Integer)
     locked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Locked-document reminder (post-roadmap phase 30 session 4, ADR 0111) -
+    # same "sent once per current deadline, reset on change" dedup idiom as
+    # `Document.deletion_reminder_sent_at`: reset to `None` on every
+    # `acquire_lock` call (fresh lock AND renewal by the same holder both
+    # restart `locked_at`, so the reminder clock restarts with it).
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class LegalHold(Base):

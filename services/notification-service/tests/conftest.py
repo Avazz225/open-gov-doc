@@ -30,7 +30,9 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS notification"))
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("TRUNCATE notification.notification CASCADE"))
+        await conn.execute(
+            text("TRUNCATE notification.notification, notification.email_template CASCADE")
+        )
     await eng.dispose()
     yield
 

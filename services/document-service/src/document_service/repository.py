@@ -416,6 +416,11 @@ async def acquire_lock(
     lock.based_on_version_number = document.current_version_number
     lock.locked_at = now
     lock.expires_at = now + timedelta(seconds=timeout_seconds)
+    # A fresh acquisition and a renewal by the same holder both restart the
+    # "how long has this been locked" clock, so any previously sent
+    # reminder is no longer relevant to the new locked_at (post-roadmap
+    # phase 30 session 4, ADR 0111).
+    lock.reminder_sent_at = None
     await session.flush()
     return lock
 
@@ -717,6 +722,24 @@ async def list_due_for_reminder(session: AsyncSession, *, lead_days: int) -> lis
     )
     candidates = list(result.scalars().all())
     return [d for d in candidates if not await has_active_hold(session, d.id)]
+
+
+async def list_locks_due_for_reminder(
+    session: AsyncSession, *, threshold_seconds: float
+) -> list[DocumentLock]:
+    """Locked-document reminder (4.2, post-roadmap phase 30 session 4,
+    ADR 0111) - same "sent once per current deadline" dedup shape as
+    `list_due_for_reminder` above, just keyed on `locked_at` (which
+    `acquire_lock` restarts on every fresh lock AND every renewal by the
+    same holder) instead of a fixed retention deadline."""
+    threshold = datetime.now(UTC) - timedelta(seconds=threshold_seconds)
+    result = await session.execute(
+        select(DocumentLock).where(
+            DocumentLock.locked_at <= threshold,
+            DocumentLock.reminder_sent_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def list_due_for_retention_action(session: AsyncSession) -> list[Document]:

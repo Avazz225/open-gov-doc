@@ -535,11 +535,13 @@ configuration).
 
 | Session | Deliverable |
 |---|---|
-| P30-S1 | `EmailTemplate` model + `templates.py` (`render_template()`/`resolve_template()`). |
-| P30-S2 | Endpoints mirroring permission-service's `/approval-config` block. |
-| P30-S3 | Migrate all 9 existing hardcoded handlers in `consumer.py` to call `resolve_template()` first, unchanged fallback if no row. |
-| P30-S4 | New use case "locked document reminder" (genuinely new, no prior notification hook on document-service's lock feature), with template support from day one. |
-| P30-S5 | Admin UI: new `apps/admin-ui/src/app/email-templates/page.tsx`, mirroring `ApprovalSettings.tsx`. |
+| P30-S1 | ✅ `EmailTemplate` model + `templates.py` (`render_template()`/`resolve_template()`, fixed `EMAIL_TEMPLATE_USE_CASES` catalog of 10 entries incl. the not-yet-hooked-up `document.lock.reminder`). |
+| P30-S2 | ✅ Five endpoints mirroring permission-service's `/approval-config` block (`GET /email-template-use-cases`, `GET /email-templates`, `PUT /email-templates/{use_case}[/by-domain/{domain}]`, `DELETE /email-templates/{id}`), deliberately ungated like that precedent. |
+| P30-S3 | ✅ All 9 existing hardcoded handlers in `consumer.py` migrated to a new `_render_or_fallback()` helper, resolved per-notification (not per-event) so a domain override can affect email wording without changing the in-app wording. Unchanged fallback verified by the full pre-existing test suite staying green. |
+| P30-S4 | ✅ New use case `document.lock.reminder` — the first notification hook `document-service`'s lock feature has ever had. New `DocumentLock.reminder_sent_at` (reset on every `acquire_lock`), new `_lock_reminder_poll_loop` (mirrors `_retention_poll_loop`), tenth `consumer.py` branch sends in-app directly to `locked_by`. |
+| P30-S5 | ✅ Admin UI: new `apps/admin-ui/src/app/email-templates/page.tsx` + `EmailTemplates.tsx`, mirroring `ApprovalSettings.tsx`; verified live via a real Playwright create/edit/delete round trip. |
+
+**Phase 30 (and thereby all of Phase 27+) is thus fully complete** — see [ADR 0111](docs/adr/0111-configurable-email-templates.md) and `PROGRESS.md` "Post-Roadmap: Phase 30".
 
 **Definition of Done**: tests green (template resolution/rendering + regression for all 9 migrated handlers with AND without a configured row; new admin-ui component). New ADR 0111 (`EmailTemplate` model, combining `ApprovalActionConfig`/`kennzeichen_format` patterns). `PROGRESS.md` updated; `graphify update .` at phase end.
 

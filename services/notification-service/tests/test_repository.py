@@ -177,3 +177,95 @@ async def test_list_notifications_filters_by_recipient_and_channel(session, sett
 
     by_channel = await repository.list_notifications(session, channel="in_app")
     assert len(by_channel) == 2
+
+
+# --- Configurable email templates (post-roadmap phase 30, ADR 0111) -------
+
+
+async def test_upsert_email_template_creates_then_updates_in_place(session):
+    created = await repository.upsert_email_template(
+        session,
+        use_case="document.deletion.reminder",
+        recipient_domain_pattern=None,
+        subject_template="S1",
+        body_template="B1",
+    )
+    assert created.id is not None
+
+    updated = await repository.upsert_email_template(
+        session,
+        use_case="document.deletion.reminder",
+        recipient_domain_pattern=None,
+        subject_template="S2",
+        body_template="B2",
+    )
+
+    assert updated.id == created.id
+    assert updated.subject_template == "S2"
+    all_rows = await repository.list_email_templates(session)
+    assert len(all_rows) == 1
+
+
+async def test_upsert_email_template_domain_specific_is_a_separate_row_from_catchall(session):
+    await repository.upsert_email_template(
+        session,
+        use_case="document.deletion.reminder",
+        recipient_domain_pattern=None,
+        subject_template="Catchall",
+        body_template="B",
+    )
+    await repository.upsert_email_template(
+        session,
+        use_case="document.deletion.reminder",
+        recipient_domain_pattern="example.com",
+        subject_template="Domain",
+        body_template="B",
+    )
+
+    rows = await repository.list_email_templates(session, use_case="document.deletion.reminder")
+    assert len(rows) == 2
+
+
+async def test_list_email_templates_filters_by_use_case(session):
+    await repository.upsert_email_template(
+        session,
+        use_case="document.deletion.reminder",
+        recipient_domain_pattern=None,
+        subject_template="S",
+        body_template="B",
+    )
+    await repository.upsert_email_template(
+        session,
+        use_case="folder.deletion.reminder",
+        recipient_domain_pattern=None,
+        subject_template="S",
+        body_template="B",
+    )
+
+    rows = await repository.list_email_templates(session, use_case="folder.deletion.reminder")
+    assert len(rows) == 1
+    assert rows[0].use_case == "folder.deletion.reminder"
+
+
+async def test_delete_email_template_removes_the_row(session):
+    template = await repository.upsert_email_template(
+        session,
+        use_case="document.deletion.reminder",
+        recipient_domain_pattern=None,
+        subject_template="S",
+        body_template="B",
+    )
+
+    await repository.delete_email_template(session, template.id)
+
+    assert await repository.list_email_templates(session) == []
+
+
+async def test_delete_email_template_unknown_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.delete_email_template(session, 999999)
+
+
+async def test_get_email_template_unknown_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_email_template(session, 999999)

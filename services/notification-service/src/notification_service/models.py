@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("notification")
@@ -36,3 +36,30 @@ class Notification(Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EmailTemplate(Base):
+    """Configurable email content per use case (post-roadmap phase 30,
+    ADR 0111) - mirrors permission-service's `ApprovalActionConfig` keyed-
+    discriminator + "no row = fallback" shape (`models.py:78-94` there): no
+    matching row for `(use_case, recipient_domain_pattern)` means the
+    existing hardcoded f-string in `consumer.py` applies implicitly (see
+    `resolve_template` in `templates.py`). `use_case` is the event's
+    `event_type` (already the dispatch key in `consumer.py`), a fixed,
+    closed catalog - unlike `ApprovalActionConfig`'s open free-text
+    `action_type`, since `consumer.py`'s handlers are a fixed set of
+    branches, not an open-ended list of callers. `recipient_domain_pattern
+    IS NULL` is the catch-all row for a use case (any domain); a non-NULL
+    value narrows to exactly that domain. `subject_template`/`body_template`
+    use the same `{placeholder}` syntax as `object-type-service`'s
+    `kennzeichen_format` (`str.format()`-rendered, see `templates.py`)."""
+
+    __tablename__ = "email_template"
+    __table_args__ = (UniqueConstraint("use_case", "recipient_domain_pattern"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    use_case: Mapped[str] = mapped_column(String(128))
+    recipient_domain_pattern: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subject_template: Mapped[str] = mapped_column(String(512))
+    body_template: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

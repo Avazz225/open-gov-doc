@@ -27,3 +27,28 @@ class NotificationOut(BaseModel):
     sent_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+# --- Configurable email templates (post-roadmap phase 30, ADR 0111) -------
+
+
+class EmailTemplateIn(BaseModel):
+    subject_template: str
+    body_template: str
+
+
+class EmailTemplateOut(BaseModel):
+    id: int
+    use_case: str
+    recipient_domain_pattern: str | None
+    subject_template: str
+    body_template: str
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EmailTemplateUseCaseOut(BaseModel):
+    use_case: str
+    description: str
+    placeholders: list[str]

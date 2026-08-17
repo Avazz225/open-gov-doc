@@ -734,6 +734,64 @@ async def test_list_due_for_reminder_skips_already_notified(session):
     assert document.id not in {d.id for d in due}
 
 
+async def test_list_locks_due_for_reminder_respects_threshold(session):
+    """Post-Roadmap Phase 30 Session 4 (ADR 0111) - 1:1 dasselbe Muster wie
+    `list_due_for_reminder`, nur auf `DocumentLock.locked_at` statt
+    `Document.retention_until`."""
+    long_held = await _make_document(session)
+    await repository.acquire_lock(
+        session, long_held.id, locked_by="alice", session_id="s1", timeout_seconds=999999
+    )
+    lock = await repository.get_lock(session, long_held.id)
+    lock.locked_at = datetime.now(UTC) - timedelta(hours=5)
+    await session.flush()
+
+    recently_locked = await _make_document(session)
+    await repository.acquire_lock(
+        session, recently_locked.id, locked_by="bob", session_id="s2", timeout_seconds=999999
+    )
+
+    due = await repository.list_locks_due_for_reminder(session, threshold_seconds=14400)
+
+    ids = {lock.document_id for lock in due}
+    assert long_held.id in ids
+    assert recently_locked.id not in ids
+
+
+async def test_list_locks_due_for_reminder_skips_already_notified(session):
+    document = await _make_document(session)
+    await repository.acquire_lock(
+        session, document.id, locked_by="alice", session_id="s1", timeout_seconds=999999
+    )
+    lock = await repository.get_lock(session, document.id)
+    lock.locked_at = datetime.now(UTC) - timedelta(hours=5)
+    lock.reminder_sent_at = datetime.now(UTC)
+    await session.flush()
+
+    due = await repository.list_locks_due_for_reminder(session, threshold_seconds=14400)
+
+    assert document.id not in {lock.document_id for lock in due}
+
+
+async def test_acquire_lock_resets_reminder_sent_at_on_renewal(session):
+    """A renewal by the same holder restarts `locked_at`, so a
+    previously sent reminder must not keep suppressing the next one
+    (post-roadmap phase 30 session 4, ADR 0111)."""
+    document = await _make_document(session)
+    await repository.acquire_lock(
+        session, document.id, locked_by="alice", session_id="s1", timeout_seconds=60
+    )
+    lock = await repository.get_lock(session, document.id)
+    lock.reminder_sent_at = datetime.now(UTC)
+    await session.flush()
+
+    renewed = await repository.acquire_lock(
+        session, document.id, locked_by="alice", session_id="s1", timeout_seconds=60
+    )
+
+    assert renewed.reminder_sent_at is None
+
+
 async def test_list_due_for_retention_action_excludes_hold_and_future(session):
     due = await _make_document(session)
     due.retention_until = datetime.now(UTC) - timedelta(days=1)

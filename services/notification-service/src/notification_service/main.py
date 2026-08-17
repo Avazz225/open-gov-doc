@@ -22,8 +22,15 @@ from notification_service import repository
 from notification_service.auth_client import AuthServiceClient
 from notification_service.consumer import publish_notification_result, start_consuming
 from notification_service.models import Base, Notification
-from notification_service.schemas import NotificationCreate, NotificationOut
+from notification_service.schemas import (
+    EmailTemplateIn,
+    EmailTemplateOut,
+    EmailTemplateUseCaseOut,
+    NotificationCreate,
+    NotificationOut,
+)
 from notification_service.settings import Settings
+from notification_service.templates import EMAIL_TEMPLATE_USE_CASES
 
 settings = Settings()
 configure_logging(settings)
@@ -263,3 +270,75 @@ async def retry_notification(
     await session.commit()
     await publish_notification_result(publish_event, notification)
     return notification
+
+
+# --- Configurable email templates (post-roadmap phase 30, ADR 0111) -------
+# Endpoint shape mirrors permission-service's `/approval-config` block
+# (`main.py:522-543` there) - deliberately still ungated, same rationale as
+# that block (ADR 0089): a new admin-only capability gate for this single
+# new endpoint set would be inconsistent with every other still-ungated
+# write endpoint in this project and is better addressed as a system-wide
+# retrofit, not per-feature.
+
+
+@app.get("/email-template-use-cases", response_model=list[EmailTemplateUseCaseOut])
+def list_email_template_use_cases() -> list[EmailTemplateUseCaseOut]:
+    return [EmailTemplateUseCaseOut(**entry) for entry in EMAIL_TEMPLATE_USE_CASES]
+
+
+@app.get("/email-templates", response_model=list[EmailTemplateOut])
+async def list_email_templates(
+    use_case: str | None = None, session: AsyncSession = Depends(get_session)
+) -> list[EmailTemplateOut]:
+    return await repository.list_email_templates(session, use_case=use_case)
+
+
+@app.put("/email-templates/{use_case}", response_model=EmailTemplateOut)
+async def put_email_template_default(
+    use_case: str, payload: EmailTemplateIn, session: AsyncSession = Depends(get_session)
+) -> EmailTemplateOut:
+    """Upserts the catch-all row (`recipient_domain_pattern IS NULL`) for
+    `use_case` - applies to a recipient of any domain not more specifically
+    matched by `PUT .../by-domain/{domain}`."""
+    template = await repository.upsert_email_template(
+        session,
+        use_case=use_case,
+        recipient_domain_pattern=None,
+        subject_template=payload.subject_template,
+        body_template=payload.body_template,
+    )
+    await session.commit()
+    return template
+
+
+@app.put("/email-templates/{use_case}/by-domain/{domain}", response_model=EmailTemplateOut)
+async def put_email_template_for_domain(
+    use_case: str,
+    domain: str,
+    payload: EmailTemplateIn,
+    session: AsyncSession = Depends(get_session),
+) -> EmailTemplateOut:
+    template = await repository.upsert_email_template(
+        session,
+        use_case=use_case,
+        recipient_domain_pattern=domain.lower(),
+        subject_template=payload.subject_template,
+        body_template=payload.body_template,
+    )
+    await session.commit()
+    return template
+
+
+@app.delete("/email-templates/{template_id}", status_code=204)
+async def delete_email_template(
+    template_id: int, session: AsyncSession = Depends(get_session)
+) -> None:
+    """Removes a configured row - the affected `(use_case, domain)`
+    combination falls back to the existing hardcoded default in
+    `consumer.py` again (see `resolve_template`), same "no row = fallback"
+    principle as `ApprovalActionConfig`."""
+    try:
+        await repository.delete_email_template(session, template_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()

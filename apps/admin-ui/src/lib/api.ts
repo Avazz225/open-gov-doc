@@ -1617,6 +1617,68 @@ export async function retryNotification(token: string, id: string): Promise<Noti
   return response.json();
 }
 
+// Configurable email templates (post-roadmap phase 30, ADR 0111) - same
+// "fixed catalog, no row = fallback to hardcoded default" shape as
+// `ApprovalActionConfig` above, except the set of `use_case`s IS a fixed,
+// known catalog here (`listEmailTemplateUseCases`), since `consumer.py`'s
+// handlers are a closed set of branches, not an open-ended list of callers.
+export interface EmailTemplate {
+  id: number;
+  use_case: string;
+  recipient_domain_pattern: string | null;
+  subject_template: string;
+  body_template: string;
+  updated_at: string;
+}
+
+export interface EmailTemplateUseCase {
+  use_case: string;
+  description: string;
+  placeholders: string[];
+}
+
+export async function listEmailTemplateUseCases(token: string): Promise<EmailTemplateUseCase[]> {
+  const response = await request("notification-service", "email-template-use-cases", {}, token);
+  return response.json();
+}
+
+export async function listEmailTemplates(
+  token: string,
+  useCase?: string
+): Promise<EmailTemplate[]> {
+  const query = useCase ? `?use_case=${encodeURIComponent(useCase)}` : "";
+  const response = await request("notification-service", `email-templates${query}`, {}, token);
+  return response.json();
+}
+
+export async function putEmailTemplate(
+  token: string,
+  useCase: string,
+  params: { recipientDomain: string | null; subjectTemplate: string; bodyTemplate: string }
+): Promise<EmailTemplate> {
+  const path = params.recipientDomain
+    ? `email-templates/${encodeURIComponent(useCase)}/by-domain/${encodeURIComponent(params.recipientDomain)}`
+    : `email-templates/${encodeURIComponent(useCase)}`;
+  const response = await request(
+    "notification-service",
+    path,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_template: params.subjectTemplate,
+        body_template: params.bodyTemplate,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function deleteEmailTemplate(token: string, id: number): Promise<void> {
+  await request("notification-service", `email-templates/${id}`, { method: "DELETE" }, token);
+}
+
 export interface Rendition {
   id: string;
   document_id: string;
