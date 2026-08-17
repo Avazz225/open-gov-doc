@@ -70,6 +70,19 @@ New, thin `auth_client.py`: `recipient_exists(recipient, channel)` — for `chan
 
 `notification-service` is **deliberately not** in the gateway allow-list for maintenance mode, but is also not affected by it: the gateway lock only blocks *proxied* requests to backends from outside; `notification-service` itself receives its emergency shutdown alert via NATS (see above), not via a proxied HTTP call. `POST /notifications` called directly on the gateway would be blocked like any other endpoint during an active lock — only the internal event consumption remains functional in every case. See [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md) for the full rationale.
 
+## Public frontend base URLs & direct links (Post-Roadmap Phase 27, ADR 0105)
+
+Three new nullable settings — `user_ui_public_base_url`, `reviewer_ui_public_base_url`,
+`admin_ui_public_base_url` (`DMS_USER_UI_PUBLIC_BASE_URL` etc.) — hold the
+browser-reachable base URL of each frontend app, mirroring auth-service's
+`keycloak_public_base_url` (ADR 0062). `notification_service/links.py`'s
+`build_resource_link(base_url, resource_type, resource_id)` builds a direct
+link into a resource per Phase 29's URL scheme (`?document=`/`?folder=`/
+`?instance=`), returning `None` (link-building skipped) when the relevant
+base URL isn't configured. Not yet wired into any `consumer.py` handler as
+of this session — that's Phase 29 Session 5, once handlers have a concrete
+resource ID to link to, and Phase 30's `{link}` email template placeholder.
+
 ## Events
 
 **Published** (stream `notification`, `ensure_stream=True`):
@@ -100,7 +113,8 @@ None yet - follows in Phase 11.
 - Since **P6-S6** additionally: `test_api.py` uses a new `real_recipient` fixture (creates a real user via the live running `auth-service`, `users-admin` login) for the success cases, plus own tests for `400` on an unknown recipient (`email`/`in_app`) — no mocking of `auth-service`.
 - Since **P7-S1** additionally: `test_consumer.py` simulated `document.deletion.reminder` event with/without `notify_email` (in-app+email or in-app only).
 - Since **P7-S1b** additionally: `test_consumer.py` simulated `folder.deletion.reminder` event with `notify_email` (in-app+email).
-- **27 tests** (previously 26, 1 new: see above).
+- Since **Post-Roadmap Phase 27 Session 1** additionally: `test_links.py` (new, 6 tests) - `build_resource_link` per resource type, trailing-slash normalization, `None` base URL, resource-ID URL-encoding (see ADR 0105).
+- **46 tests** (previously 40).
 - Pure backend session, no browser test needed.
 
 ## Open Points

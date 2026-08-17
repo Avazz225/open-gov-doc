@@ -12,6 +12,23 @@ import { getSsoConfig, oidcAuthorize } from "@/lib/api";
 // instead of `localStorage`, since the value is only needed for the
 // duration of the redirect round trip, not across tabs/restarts.
 const SSO_STATE_KEY = "dms.sso.state";
+// Direct links (post-roadmap feature, Phase 27, ADR 0106): the SSO round
+// trip through Keycloak can't carry `returnTo` as a query param (the
+// `redirect_uri` is checked against a fixed origin allow-list, ADR 0062) -
+// stashed in `sessionStorage` alongside SSO_STATE_KEY instead, read back by
+// login/callback/page.tsx once the round trip completes.
+const SSO_RETURN_TO_KEY = "dms.sso.returnTo";
+
+// Direct links (post-roadmap feature, Phase 27, ADR 0106): only same-origin
+// relative paths starting with exactly one "/" are honored - "//" or "/\"
+// are browser-recognized protocol-relative URLs, the classic open-redirect
+// vector for a "returnTo" parameter.
+function sanitizeReturnTo(value: string | null): string {
+  if (value && /^\/(?!\/|\\)/.test(value)) {
+    return value;
+  }
+  return "/";
+}
 
 export default function LoginPage() {
   const { login, user, isLoading } = useAuth();
@@ -25,7 +42,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && user) {
-      router.replace("/");
+      router.replace(sanitizeReturnTo(new URLSearchParams(window.location.search).get("returnTo")));
     }
   }, [isLoading, user, router]);
 
@@ -56,6 +73,10 @@ export default function LoginPage() {
         setSsoRedirecting(true);
         const state = crypto.randomUUID();
         window.sessionStorage.setItem(SSO_STATE_KEY, state);
+        window.sessionStorage.setItem(
+          SSO_RETURN_TO_KEY,
+          sanitizeReturnTo(new URLSearchParams(window.location.search).get("returnTo"))
+        );
         const redirectUri = `${window.location.origin}/login/callback/`;
         const authorizationUrl = await oidcAuthorize(redirectUri, state);
         window.location.href = authorizationUrl;
@@ -76,7 +97,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(username, password);
-      router.replace("/");
+      router.replace(sanitizeReturnTo(new URLSearchParams(window.location.search).get("returnTo")));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("login.error"));
     } finally {

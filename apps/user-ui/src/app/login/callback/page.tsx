@@ -14,6 +14,19 @@ import { useAuth } from "@/lib/auth-context";
 // client page instead of middleware/SSR (static export, no server that
 // could process a redirect callback server-side, concept 8).
 const SSO_STATE_KEY = "dms.sso.state";
+// Direct links (post-roadmap feature, Phase 27, ADR 0106): counterpart to
+// login/page.tsx's stash before the Keycloak redirect - same
+// same-origin-relative-path validation as sanitizeReturnTo there (duplicated
+// rather than shared, consistent with this project's small-duplication
+// idiom for per-app client code).
+const SSO_RETURN_TO_KEY = "dms.sso.returnTo";
+
+function sanitizeReturnTo(value: string | null): string {
+  if (value && /^\/(?!\/|\\)/.test(value)) {
+    return value;
+  }
+  return "/";
+}
 
 export default function LoginCallbackPage() {
   const router = useRouter();
@@ -26,6 +39,8 @@ export default function LoginCallbackPage() {
     const state = params.get("state");
     const expectedState = window.sessionStorage.getItem(SSO_STATE_KEY);
     window.sessionStorage.removeItem(SSO_STATE_KEY);
+    const returnTo = sanitizeReturnTo(window.sessionStorage.getItem(SSO_RETURN_TO_KEY));
+    window.sessionStorage.removeItem(SSO_RETURN_TO_KEY);
 
     if (!code || !state || !expectedState || state !== expectedState) {
       router.replace("/login?ssoError=1");
@@ -35,7 +50,7 @@ export default function LoginCallbackPage() {
     const redirectUri = `${window.location.origin}/login/callback/`;
     oidcCallback(code, redirectUri)
       .then((response) => applySession(response))
-      .then(() => router.replace("/"))
+      .then(() => router.replace(returnTo))
       .catch(() => router.replace("/login?ssoError=1"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

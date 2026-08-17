@@ -712,6 +712,12 @@ services:
       DMS_SMTP_HOST: mailpit
       DMS_SMTP_PORT: "1025"
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      # Direct links (post-roadmap feature, Phase 27, ADR 0105): browser-reachable
+      # frontend URLs for notification email deep links, same rationale as
+      # auth-service's DMS_KEYCLOAK_PUBLIC_BASE_URL (line ~331).
+      DMS_USER_UI_PUBLIC_BASE_URL: ${USER_UI_PUBLIC_BASE_URL:-http://localhost:3000}
+      DMS_REVIEWER_UI_PUBLIC_BASE_URL: ${REVIEWER_UI_PUBLIC_BASE_URL:-http://localhost:3005}
+      DMS_ADMIN_UI_PUBLIC_BASE_URL: ${ADMIN_UI_PUBLIC_BASE_URL:-http://localhost:3001}
     ports:
       - "${NOTIFICATION_SERVICE_PORT:-8015}:8000"
     depends_on:

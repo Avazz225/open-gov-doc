@@ -20,7 +20,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.replace("/login/");
+      // Direct links (post-roadmap feature, Phase 27, ADR 0106): preserve
+      // the page the user was trying to reach so login/page.tsx can send
+      // them back there instead of always landing on "/" - relevant once
+      // ?document=/?folder= deep links exist (Phase 29).
+      const target = `${window.location.pathname}${window.location.search}`;
+      router.replace(`/login/?returnTo=${encodeURIComponent(target)}`);
     }
   }, [isLoading, user, router]);
 

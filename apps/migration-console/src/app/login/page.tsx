@@ -5,6 +5,17 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import { ApiError, useAuth } from "@/lib/auth-context";
 
+// Direct links (post-roadmap feature, Phase 27, ADR 0106): only same-origin
+// relative paths starting with exactly one "/" are honored - "//" or "/\\"
+// are browser-recognized protocol-relative URLs, the classic open-redirect
+// vector for a "returnTo" parameter.
+function sanitizeReturnTo(value: string | null): string {
+  if (value && /^\/(?!\/|\\)/.test(value)) {
+    return value;
+  }
+  return "/";
+}
+
 export default function LoginPage() {
   const { login, user, isLoading } = useAuth();
   const router = useRouter();
@@ -16,7 +27,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && user) {
-      router.replace("/");
+      router.replace(sanitizeReturnTo(new URLSearchParams(window.location.search).get("returnTo")));
     }
   }, [isLoading, user, router]);
 
@@ -26,7 +37,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(username, password);
-      router.replace("/");
+      router.replace(sanitizeReturnTo(new URLSearchParams(window.location.search).get("returnTo")));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("login.error"));
     } finally {

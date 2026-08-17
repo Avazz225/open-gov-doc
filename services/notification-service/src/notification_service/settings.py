@@ -78,3 +78,15 @@ class Settings(BaseServiceSettings):
     auth_service_admin_password: str = "users-admin"
 
     monitoring_service_base_url: str = "http://localhost:8026"
+
+    # Direct links (post-roadmap feature, Phase 27, ADR 0105): base URLs of
+    # the frontend apps reachable from the BROWSER, so notification emails
+    # can embed a clickable link straight to a resource. Same rationale as
+    # auth-service's `keycloak_public_base_url` - this service only ever
+    # talks to other services over the internal Compose network, which
+    # knows nothing about the host-mapped ports a user's browser needs.
+    # `None` until an installation explicitly sets one; unresolvable
+    # link-building is skipped rather than emitting a broken URL.
+    user_ui_public_base_url: str | None = None
+    reviewer_ui_public_base_url: str | None = None
+    admin_ui_public_base_url: str | None = None

@@ -449,6 +449,100 @@ Four large, independent individual features.
 
 **New sessions since P17-S3**: +26 (phases 18–26) — after a complete triage of the "Open Points" list consolidated from 35 service docs by the user, plus a new standalone goal (Helm charts for k8s/OCP). Not in this roadmap (explicitly not prioritized by the user): SAML 2.0, i18n language switching, rate limiting specifically for share-link/edit tokens, deep-paging stability under permission filtering.
 
+## Phases 27–30 — PDF Export, Direct Links, Configurable Email Templates
+
+Three new, mostly independent features requested by the user after Phase 26 completed: (1) an
+"Export" option alongside "Download" that produces a PDF of a document plus its export history in a
+configurable order, plus a combined folder export (one PDF, table of contents, bookmarks, per-document
+sub-numbering stable against later export-history changes); (2) authenticated direct links to
+documents, case files ("Akten"), running processes ("Vorgänge"), and folders, primarily for
+email-notification deep-linking; (3) a configurable email template system, selectable by use case
+and/or recipient domain. Grounded via three Explore agents plus a Plan agent against the real codebase
+(`watermark.py`'s overlay-merge idiom, the 9 hardcoded email handlers in `consumer.py`,
+`ApprovalActionConfig`, the existing share-link feature, the SSO `state`-in-sessionStorage pattern).
+Full session breakdown, rationale, and citations: see the plan file this was designed in (Phase
+27+ section). Two corrections made during design: "Akte" is a document object type (ADR 0059), not a
+separate resource — a direct link to it is identical to a document link; "Vorgang" maps to
+`workflow-service`'s `ProcessInstance` (a running process users work on), not case-service's `Case` —
+confirmed with the user after an initial mis-mapping.
+
+Dependency order: Phase 27 (shared prerequisite: public frontend base URLs in `notification-service` +
+login `returnTo`) → Phase 28 (PDF export, fully independent) → Phase 29 (direct links, needs Phase 27)
+→ Phase 30 (email templates, needs Phase 27 **and** 29 so a `{link}` placeholder resolves to something
+real).
+
+### Phase 27 — Prerequisite: Public Frontend Base URLs & Login `returnTo`
+
+| Session | Deliverable |
+|---|---|
+| P27-S1 | Public base URL settings in `notification-service` (`user_ui_public_base_url`, `reviewer_ui_public_base_url`, `admin_ui_public_base_url`), mirroring `DMS_KEYCLOAK_PUBLIC_BASE_URL` (ADR 0062). New `notification_service/links.py` with a placeholder `build_resource_link()`, finally wired in P29-S5 once the URL scheme is settled. |
+| P27-S2 | `returnTo`/`next` query param through manual login, all 6 apps: `login/page.tsx` redirects there after login instead of hardcoding `/`; `RequireAuth.tsx` (6 copies) redirects to `/login/?returnTo=...` instead of bare `/login/`. Deliberately no new shared lib (matches the project's existing duplicate-poll-loop precedent). |
+| P27-S3 | `returnTo` through the SSO `state` roundtrip, `user-ui` only (the only app with an SSO callback): new `sessionStorage` key alongside the existing `SSO_STATE_KEY`. |
+
+**Definition of Done**: existing login/SSO tests stay green; new `returnTo` roundtrip tests. New ADR 0105 (public frontend base URLs) and ADR 0106 (`returnTo` in the login flow). Docs + `PROGRESS.md` updated.
+
+### Phase 28 — PDF Export with Export History, Combined Folder Export & Stable Sub-Numbering
+
+Two-pass pipeline built on `rendering-service`'s existing `watermark.py` overlay-merge idiom. Pass A
+(per document, independent of single vs. folder export): document PDF + export-history PDF (queried
+from `audit-service`'s existing event log via a new `document.exported` event type — no new history
+storage) concatenated in the configured order, then a **local** footer stamp "i/N" (N = this document's
+own page count) — final and stable regardless of later folder-export composition. Pass B (folder export
+only): table-of-contents section rendered first, cumulative offsets computed, then a **second**,
+independent global footer "j/total" plus `pypdf` outline items (bookmarks) per document. Order
+configuration: installation-wide `ExportConfig` singleton default (`history_position: "before"|"after"
+= "after"`) with an optional per-request override.
+
+| Session | Deliverable |
+|---|---|
+| P28-S1 | Single-document export, backend: `POST /documents/{id}/export` (document-service), new on-demand `POST /render/convert-to-pdf` in rendering-service, `ExportConfig` model + `GET`/`PUT /export-config`. |
+| P28-S2 | `document.exported` event, consumed by audit-service exactly like `document.downloaded`. |
+| P28-S3 | Single-document export, frontend: "Export" button next to `handleDownload` in `PreviewPane.tsx`. |
+| P28-S4 | Combined folder export, backend: async `FolderExportJob` (same resilience field set as Phase 20 — `attempts`, `failed_permanent`), `POST /folders/{id}/export` + `GET /folder-exports/{id}`/`.../content`. Document order in the TOC by `kennzeichen`, not title. |
+| P28-S5 | TOC/bookmarks/sub-numbering: the Pass-A/Pass-B mechanism in a new `rendering_service/export_pdf.py`. |
+| P28-S6 | Combined folder export, frontend: "Export folder" context menu entry in `ExplorerPane.tsx`, status polling. |
+
+**Definition of Done**: tests green (document-service/rendering-service/audit-service/user-ui). New ADR 0107 (two-pass merge/bookmark/sub-numbering, `ExportConfig` default+override) and ADR 0108 (export history as an audit-service query, no new storage). Docs + `PROGRESS.md` updated; full regression.
+
+### Phase 29 — Authenticated Direct Links (Document, Akte, Folder, Vorgang)
+
+URL scheme: `user-ui` gets `/?document=<id>` and `/?folder=<id>` (query params on the existing single
+route, resolved via already-existing navigation functions in `DocumentWorkspace.tsx`). "Vorgang" gets
+its first-ever per-instance detail view, in `reviewer-ui` (not admin-ui — it's the app regular users
+already work tasks in) via `/?instance=<id>`, showing `GET /instances/{id}` status plus
+`GET /instances/{id}/tasks` open tasks — honestly no task history, since `workflow-service` doesn't
+persist one (ADR 0019).
+
+| Session | Deliverable |
+|---|---|
+| P29-S1 | URL scheme + resolver for document/folder in user-ui, reusing existing navigation functions. Visible 403/404 instead of a silent fallback to root. |
+| P29-S2 | "Copy link" UI in `ExplorerPane.tsx` context menus and `PreviewPane.tsx`. |
+| P29-S3 | Vorgang: new `InstanceDetail.tsx` in reviewer-ui, `/?instance=<id>`. |
+| P29-S4 | `TaskList.tsx` surfaces the previously-hidden `instance_id` as a link to the new detail view. |
+| P29-S5 | Wire direct links into notification emails via the P27-S1 `build_resource_link()`, applied to handlers that already have a resource reference. |
+
+**Definition of Done**: new user-ui tests for `?document=`/`?folder=` links (incl. 403/404, `returnTo` roundtrip); new reviewer-ui tests for `?instance=` and the new TaskList link. New ADR 0109 (direct-link URL scheme, deliberately different from the anonymous share-link of ADR 0047) and ADR 0110 (first instance detail view, placement in reviewer-ui). `PROGRESS.md` updated.
+
+### Phase 30 — Configurable Email Templates
+
+New `email_template` table in notification-service, mirroring `ApprovalActionConfig`
+(`permission-service/models.py:78-94`): `use_case` (fixed catalog = the existing `event_type` dispatch
+key), `recipient_domain_pattern` (nullable = catch-all), `subject_template`/`body_template`
+(`{placeholder}` syntax, same mechanism as `object-type-service`'s `kennzeichen_format` rendering, plus
+universal `{link}`/`{recipient}`). Resolution: exact `(use_case, domain)` row → `(use_case, None)`
+catch-all → unchanged existing hardcoded f-string fallback (no behavior change without explicit admin
+configuration).
+
+| Session | Deliverable |
+|---|---|
+| P30-S1 | `EmailTemplate` model + `templates.py` (`render_template()`/`resolve_template()`). |
+| P30-S2 | Endpoints mirroring permission-service's `/approval-config` block. |
+| P30-S3 | Migrate all 9 existing hardcoded handlers in `consumer.py` to call `resolve_template()` first, unchanged fallback if no row. |
+| P30-S4 | New use case "locked document reminder" (genuinely new, no prior notification hook on document-service's lock feature), with template support from day one. |
+| P30-S5 | Admin UI: new `apps/admin-ui/src/app/email-templates/page.tsx`, mirroring `ApprovalSettings.tsx`. |
+
+**Definition of Done**: tests green (template resolution/rendering + regression for all 9 migrated handlers with AND without a configured row; new admin-ui component). New ADR 0111 (`EmailTemplate` model, combining `ApprovalActionConfig`/`kennzeichen_format` patterns). `PROGRESS.md` updated; `graphify update .` at phase end.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:
