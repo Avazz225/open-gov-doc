@@ -153,6 +153,52 @@ export async function listReadyTasks(token: string): Promise<ReadyTaskWithInstan
   return response.json();
 }
 
+// Authenticated direct links / "Vorgang" detail view (post-roadmap phase
+// 29, ADR 0109/0110) - the first UI anywhere that shows a single process
+// instance by ID. Deliberately no task history (workflow-service persists
+// none, see ADR 0019/0107) - only current status and currently-open tasks.
+export interface ProcessInstance {
+  id: string;
+  process_definition_id: number;
+  business_key: string | null;
+  status: "running" | "completed";
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export async function getInstance(token: string, instanceId: string): Promise<ProcessInstance> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export interface ReadyTask {
+  id: string;
+  name: string;
+  lane: string | null;
+  data: Record<string, unknown>;
+  extensions: Record<string, string>;
+}
+
+export async function listInstanceTasks(
+  token: string,
+  instanceId: string
+): Promise<ReadyTask[]> {
+  const response = await request(
+    "workflow-service",
+    `instances/${encodeURIComponent(instanceId)}/tasks`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 export async function completeTask(
   token: string,
   params: {

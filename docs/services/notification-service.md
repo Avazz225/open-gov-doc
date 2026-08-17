@@ -79,9 +79,9 @@ browser-reachable base URL of each frontend app, mirroring auth-service's
 `build_resource_link(base_url, resource_type, resource_id)` builds a direct
 link into a resource per Phase 29's URL scheme (`?document=`/`?folder=`/
 `?instance=`), returning `None` (link-building skipped) when the relevant
-base URL isn't configured. Not yet wired into any `consumer.py` handler as
-of this session — that's Phase 29 Session 5, once handlers have a concrete
-resource ID to link to, and Phase 30's `{link}` email template placeholder.
+base URL isn't configured.
+
+**Wired into three handlers (Post-Roadmap Phase 29 Session 5, [ADR 0109](../adr/0109-direct-link-url-scheme.md))** — the ones that already had a concrete, addressable resource reference at hand: `_handle_task_escalated` (`event.subject` = instance ID → `reviewer_ui_public_base_url`), `_handle_deletion_reminder` (`event.subject` = document ID → `user_ui_public_base_url`), `_handle_folder_deletion_reminder` (`event.subject` = folder ID → `user_ui_public_base_url`). Each appends `\n\n<Label>: <link>` to the email body only when the relevant base URL is configured — unconfigured installations see the exact same body as before this session. The remaining handlers (break-glass, license, maintenance mode) have no single addressable DMS resource to link to and were left unchanged. Phase 30's `{link}` email template placeholder still reuses `build_resource_link()` directly.
 
 ## Events
 
@@ -114,7 +114,8 @@ None yet - follows in Phase 11.
 - Since **P7-S1** additionally: `test_consumer.py` simulated `document.deletion.reminder` event with/without `notify_email` (in-app+email or in-app only).
 - Since **P7-S1b** additionally: `test_consumer.py` simulated `folder.deletion.reminder` event with `notify_email` (in-app+email).
 - Since **Post-Roadmap Phase 27 Session 1** additionally: `test_links.py` (new, 6 tests) - `build_resource_link` per resource type, trailing-slash normalization, `None` base URL, resource-ID URL-encoding (see ADR 0105).
-- **46 tests** (previously 40).
+- Since **Post-Roadmap Phase 29 Session 5** additionally: `test_consumer.py` - direct-link presence/absence in the email body for `workflow.task.escalated`/`document.deletion.reminder`/`folder.deletion.reminder`, with and without the relevant public base URL configured (ADR 0109).
+- **50 tests** (previously 46).
 - Pure backend session, no browser test needed.
 
 ## Open Points

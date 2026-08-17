@@ -155,6 +155,24 @@ body {
   font-style: italic;
 }
 
+/* Vorgang detail view (post-roadmap phase 29, ADR 0109/0110) - a compact
+   label/value grid for instance metadata. */
+.detail-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.detail-fields dt {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.detail-fields dd {
+  margin: 0;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

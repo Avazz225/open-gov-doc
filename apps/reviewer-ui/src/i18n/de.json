@@ -53,7 +53,22 @@
     "dataInvalid": "Kein gültiges JSON",
     "submit": "Abschließen",
     "submitting": "Schließe ab...",
-    "success": "Aufgabe abgeschlossen."
+    "success": "Aufgabe abgeschlossen.",
+    "instanceLink": "Vorgang öffnen"
+  },
+  "instanceDetail": {
+    "paneLabel": "Vorgang",
+    "heading": "Vorgang {id}",
+    "back": "Zurück zu den Aufgaben",
+    "statusLabel": "Status",
+    "statusRunning": "Läuft",
+    "statusCompleted": "Abgeschlossen",
+    "businessKeyLabel": "Bezugsobjekt",
+    "createdByLabel": "Gestartet von",
+    "createdAtLabel": "Gestartet am",
+    "tasksHeading": "Offene Aufgaben",
+    "tasksHint": "Zeigt nur aktuell offene Aufgaben - workflow-service speichert keine Aufgaben-Historie.",
+    "loadError": "Vorgang konnte nicht geladen werden."
   },
   "approvalList": {
     "heading": "Vier-Augen-Freigaben (4.3)",

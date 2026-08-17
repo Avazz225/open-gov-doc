@@ -515,13 +515,13 @@ persist one (ADR 0019).
 
 | Session | Deliverable |
 |---|---|
-| P29-S1 | URL scheme + resolver for document/folder in user-ui, reusing existing navigation functions. Visible 403/404 instead of a silent fallback to root. |
-| P29-S2 | "Copy link" UI in `ExplorerPane.tsx` context menus and `PreviewPane.tsx`. |
-| P29-S3 | Vorgang: new `InstanceDetail.tsx` in reviewer-ui, `/?instance=<id>`. |
-| P29-S4 | `TaskList.tsx` surfaces the previously-hidden `instance_id` as a link to the new detail view. |
-| P29-S5 | Wire direct links into notification emails via the P27-S1 `build_resource_link()`, applied to handlers that already have a resource reference. |
+| P29-S1 | ✅ URL scheme + resolver for document/folder in user-ui, reusing existing navigation functions. Visible 403/404 instead of a silent fallback to root. |
+| P29-S2 | ✅ "Copy link" UI in `ExplorerPane.tsx` context menus and `PreviewPane.tsx` via `navigator.clipboard.writeText()`. |
+| P29-S3 | ✅ Vorgang: new `InstanceDetail.tsx` in reviewer-ui, `/?instance=<id>` — corrected mid-session from case-service's `Case` to workflow-service's `ProcessInstance` (see ADR 0110). |
+| P29-S4 | ✅ `TaskList.tsx` surfaces the previously-hidden `instance_id` as a "Vorgang öffnen" link to the new detail view. |
+| P29-S5 | ✅ Wired direct links into notification emails via the P27-S1 `build_resource_link()`, applied to `_handle_task_escalated`/`_handle_deletion_reminder`/`_handle_folder_deletion_reminder`. |
 
-**Definition of Done**: new user-ui tests for `?document=`/`?folder=` links (incl. 403/404, `returnTo` roundtrip); new reviewer-ui tests for `?instance=` and the new TaskList link. New ADR 0109 (direct-link URL scheme, deliberately different from the anonymous share-link of ADR 0047) and ADR 0110 (first instance detail view, placement in reviewer-ui). `PROGRESS.md` updated.
+**Definition of Done**: tests green (notification-service 50, user-ui 201, reviewer-ui 31). [ADR 0109](docs/adr/0109-direct-link-url-scheme.md) (direct-link URL scheme, deliberately different from the anonymous share-link of ADR 0047) and [ADR 0110](docs/adr/0110-vorgang-instance-detail-reviewer-ui.md) (first instance detail view, placement in reviewer-ui). Docs + `PROGRESS.md` updated; full regression green; verified live via Playwright. **Phase 29 thus fully complete.**
 
 ### Phase 30 — Configurable Email Templates
 

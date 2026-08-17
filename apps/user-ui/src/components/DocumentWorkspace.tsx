@@ -7,6 +7,7 @@ import {
   type DocumentSummary,
   type Folder,
   createFolder as apiCreateFolder,
+  getDocument as apiGetDocument,
   getFolder as apiGetFolder,
   listChildFolders,
   listDocumentsInFolder,
@@ -261,6 +262,40 @@ export function DocumentWorkspace() {
   async function handleOpenFavoriteFolder(folder: Folder) {
     await openFolderPath(folder);
   }
+
+  // Authenticated direct links (post-roadmap phase 29, ADR 0109) - reads
+  // `?document=<id>`/`?folder=<id>` directly from `window.location.search`
+  // once on mount (not `useSearchParams()`, same reasoning as
+  // RequireAuth.tsx: avoids a `<Suspense>` boundary requirement under
+  // `output: "export"`), resolves via the already-existing `GET
+  // /documents/{id}`/`GET /folders/{id}` and reuses the already-existing
+  // `openDocumentTab`/`openFolderPath` navigation functions - no new
+  // backend endpoint needed. A 403/404 surfaces via the normal `error`
+  // state instead of silently falling back to the root folder.
+  useEffect(() => {
+    if (!accessToken) return;
+    const params = new URLSearchParams(window.location.search);
+    const documentId = params.get("document");
+    const folderId = params.get("folder");
+    if (!documentId && !folderId) return;
+    (async () => {
+      try {
+        if (documentId) {
+          const doc = await apiGetDocument(accessToken, documentId);
+          openDocumentTab(doc);
+        } else if (folderId) {
+          const folder = await apiGetFolder(accessToken, folderId);
+          await openFolderPath(folder);
+        }
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : t("folderBrowser.deepLinkError"));
+      }
+    })();
+    // Deliberately only once per mount (accessToken identity is stable
+    // after login) - re-running on every accessToken reference change would
+    // re-trigger this on unrelated re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
 
   // "Open folder" from a teamspace (2.5, P14-S6) - the teamspace itself only
   // knows the `root_folder_id` (opaque reference), not the full `Folder`

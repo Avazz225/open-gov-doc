@@ -5,53 +5,57 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   completeTask,
-  listActiveDelegationsForDeputy,
-  listReadyTasks,
-  type Delegation,
-  type ReadyTaskWithInstance,
+  getInstance,
+  listInstanceTasks,
+  type ProcessInstance,
+  type ReadyTask,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-// Approval task inbox (8, P14-S2) - consumes `GET /tasks` (workflow-service,
-// new since this session), the first cross-instance task list in the entire
-// system (previously only retrievable per instance individually via the
-// Process Designer/curl, see docs/services/reviewer-ui.md).
-export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: string) => void }) {
+// "Vorgang" direct-link detail view (post-roadmap phase 29, ADR 0109/0110) -
+// the first UI anywhere addressing a single process instance by ID
+// (`?instance=<id>`, see page.tsx). Deliberately shows only status and
+// currently-open tasks, no task history - workflow-service persists none
+// (opaque `workflow_state`, ADR 0019), so a history section would have to
+// be invented rather than genuinely sourced.
+export function InstanceDetail({
+  instanceId,
+  onBack,
+}: {
+  instanceId: string;
+  onBack: () => void;
+}) {
   const { accessToken, user } = useAuth();
   const { t } = useI18n();
 
-  const [tasks, setTasks] = useState<ReadyTaskWithInstance[]>([]);
+  const [instance, setInstance] = useState<ProcessInstance | null>(null);
+  const [tasks, setTasks] = useState<ReadyTask[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [completedBy, setCompletedBy] = useState("");
   const [signatureId, setSignatureId] = useState("");
   const [dataJson, setDataJson] = useState("");
-  const [onBehalfOf, setOnBehalfOf] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  // Absence deputization (4.4a, P14-S11) - who the logged-in person is
-  // currently actively registered as a deputy for, populates the "On behalf
-  // of" selector below.
-  const [delegations, setDelegations] = useState<Delegation[]>([]);
 
   const reload = () => {
     if (!accessToken) return;
-    listReadyTasks(accessToken)
-      .then(setTasks)
-      .catch(() => setError(t("common.loadError")));
+    setError(null);
+    Promise.all([getInstance(accessToken, instanceId), listInstanceTasks(accessToken, instanceId)])
+      .then(([loadedInstance, loadedTasks]) => {
+        setInstance(loadedInstance);
+        setTasks(loadedTasks);
+      })
+      .catch((err) =>
+        setError(err instanceof ApiError ? err.message : t("instanceDetail.loadError"))
+      );
   };
 
-  useEffect(reload, [accessToken, t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(reload, [accessToken, instanceId]);
 
-  useEffect(() => {
-    if (!accessToken || !user) return;
-    listActiveDelegationsForDeputy(accessToken, user.sub)
-      .then(setDelegations)
-      .catch(() => setDelegations([]));
-  }, [accessToken, user]);
-
-  function toggleExpand(task: ReadyTaskWithInstance) {
+  function toggleExpand(task: ReadyTask) {
     if (expandedTaskId === task.id) {
       setExpandedTaskId(null);
       return;
@@ -60,12 +64,11 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
     setCompletedBy(user?.username ?? "");
     setSignatureId("");
     setDataJson("");
-    setOnBehalfOf("");
     setFormError(null);
     setSuccessMessage(null);
   }
 
-  async function handleComplete(task: ReadyTaskWithInstance, event: React.FormEvent) {
+  async function handleComplete(task: ReadyTask, event: React.FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
     setFormError(null);
@@ -81,12 +84,11 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
     setSubmitting(true);
     try {
       await completeTask(accessToken, {
-        instanceId: task.instance_id,
+        instanceId,
         taskId: task.id,
         completedBy,
         data,
         signatureId: signatureId || undefined,
-        onBehalfOfPrincipalId: onBehalfOf || undefined,
       });
       setSuccessMessage(t("taskList.success"));
       setExpandedTaskId(null);
@@ -99,14 +101,37 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
   }
 
   return (
-    <section>
-      <h1>{t("taskList.heading")}</h1>
-      <p className="hint">{t("taskList.hint")}</p>
+    <section aria-label={t("instanceDetail.paneLabel")}>
+      <button type="button" onClick={onBack}>
+        {t("instanceDetail.back")}
+      </button>
+      <h1>{t("instanceDetail.heading", { id: instanceId })}</h1>
+
       {error && (
         <p className="error-text" role="alert">
           {error}
         </p>
       )}
+
+      {instance && (
+        <dl className="detail-fields">
+          <dt>{t("instanceDetail.statusLabel")}</dt>
+          <dd>
+            {instance.status === "running"
+              ? t("instanceDetail.statusRunning")
+              : t("instanceDetail.statusCompleted")}
+          </dd>
+          <dt>{t("instanceDetail.businessKeyLabel")}</dt>
+          <dd>{instance.business_key ?? "-"}</dd>
+          <dt>{t("instanceDetail.createdByLabel")}</dt>
+          <dd>{instance.created_by}</dd>
+          <dt>{t("instanceDetail.createdAtLabel")}</dt>
+          <dd>{new Date(instance.created_at).toLocaleString()}</dd>
+        </dl>
+      )}
+
+      <h2>{t("instanceDetail.tasksHeading")}</h2>
+      <p className="hint">{t("instanceDetail.tasksHint")}</p>
       {successMessage && <p className="success-text">{successMessage}</p>}
 
       {tasks.length === 0 ? (
@@ -116,10 +141,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
           <thead>
             <tr>
               <th>{t("taskList.nameColumn")}</th>
-              <th>{t("taskList.processColumn")}</th>
-              <th>{t("taskList.businessKeyColumn")}</th>
               <th>{t("taskList.laneColumn")}</th>
-              <th></th>
               <th>{t("taskList.actionsColumn")}</th>
             </tr>
           </thead>
@@ -140,18 +162,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                         </>
                       )}
                     </td>
-                    <td>#{task.process_definition_id}</td>
-                    <td>{task.business_key ?? "-"}</td>
                     <td>{task.lane ?? "-"}</td>
-                    <td>
-                      {/* Authenticated direct links (post-roadmap phase 29,
-                          ADR 0109) - `instance_id` was already fetched for
-                          `completeTask` above, but never shown/linked until
-                          now. */}
-                      <button type="button" onClick={() => onOpenInstance(task.instance_id)}>
-                        {t("taskList.instanceLink")}
-                      </button>
-                    </td>
                     <td>
                       <button type="button" onClick={() => toggleExpand(task)}>
                         {t("taskList.completeButton")}
@@ -160,7 +171,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                   </tr>
                   {expandedTaskId === task.id && (
                     <tr className="detail-row">
-                      <td colSpan={6}>
+                      <td colSpan={3}>
                         <form
                           className="inline-form"
                           onSubmit={(event) => handleComplete(task, event)}
@@ -175,28 +186,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                             onChange={(e) => setCompletedBy(e.target.value)}
                             required
                           />
-                          {delegations.length > 0 && (
-                            <>
-                              <label htmlFor={`on-behalf-of-${task.id}`}>
-                                {t("taskList.onBehalfOfLabel")}
-                              </label>
-                              <select
-                                id={`on-behalf-of-${task.id}`}
-                                value={onBehalfOf}
-                                onChange={(e) => setOnBehalfOf(e.target.value)}
-                              >
-                                <option value="">{t("taskList.onBehalfOfSelf")}</option>
-                                {delegations.map((delegation) => (
-                                  <option
-                                    key={delegation.id}
-                                    value={delegation.delegator_principal_id}
-                                  >
-                                    {delegation.delegator_principal_id}
-                                  </option>
-                                ))}
-                              </select>
-                            </>
-                          )}
                           {isSignature && (
                             <>
                               <label htmlFor={`signature-id-${task.id}`}>
@@ -208,7 +197,6 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                                 onChange={(e) => setSignatureId(e.target.value)}
                                 required
                               />
-                              <p className="hint">{t("taskList.signatureIdHint")}</p>
                             </>
                           )}
                           <label htmlFor={`data-${task.id}`}>{t("taskList.dataLabel")}</label>

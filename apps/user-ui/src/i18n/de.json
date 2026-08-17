@@ -41,7 +41,8 @@
     "emptyFolder": "Dieser Ordner ist leer.",
     "download": "Herunterladen",
     "loadError": "Laden fehlgeschlagen",
-    "downloadError": "Download fehlgeschlagen"
+    "downloadError": "Download fehlgeschlagen",
+    "deepLinkError": "Die verlinkte Ressource konnte nicht geöffnet werden - möglicherweise fehlt die Berechtigung oder sie existiert nicht (mehr)."
   },
   "upload": {
     "formLabel": "Dokument hochladen",
@@ -123,7 +124,10 @@
     "shareLink": "Freigabelink für \"{name}\"",
     "exportFolder": "\"{name}\" exportieren",
     "exportFolderInProgress": "Ordner \"{name}\" wird exportiert...",
-    "exportFolderFailed": "Export von \"{name}\" fehlgeschlagen: {error}"
+    "exportFolderFailed": "Export von \"{name}\" fehlgeschlagen: {error}",
+    "copyLink": "Link zu \"{name}\" kopieren",
+    "linkCopied": "Link in die Zwischenablage kopiert.",
+    "linkCopyError": "Link konnte nicht kopiert werden."
   },
   "metadata": {
     "paneLabel": "Metadaten",
@@ -444,7 +448,10 @@
     "exportHistoryPositionLabel": "Exporthistorie",
     "exportHistoryPositionDefault": "Standard",
     "exportHistoryPositionAfter": "nach dem Dokument",
-    "exportHistoryPositionBefore": "vor dem Dokument"
+    "exportHistoryPositionBefore": "vor dem Dokument",
+    "copyLink": "Link kopieren",
+    "linkCopied": "Link in die Zwischenablage kopiert.",
+    "linkCopyError": "Link konnte nicht kopiert werden."
   },
   "search": {
     "paneLabel": "Suche",

@@ -163,6 +163,7 @@ export function ExplorerPane({
   // (the job itself only carries `folder_id`).
   const [folderExportJob, setFolderExportJob] = useState<FolderExportJob | null>(null);
   const [folderExportName, setFolderExportName] = useState<string | null>(null);
+  const [linkCopyMessage, setLinkCopyMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedKeys(new Set());
@@ -447,6 +448,20 @@ export function ExplorerPane({
     setFolderExportJob(job);
   }
 
+  // Authenticated direct links (post-roadmap phase 29, ADR 0109) - a stable
+  // resource ID in the URL plus the normal session/permission-check path
+  // (unlike the anonymous, single-document share link, ADR 0047), resolved
+  // client-side by DocumentWorkspace.tsx on mount.
+  async function handleCopyLink(kind: "document" | "folder", id: string) {
+    const url = `${window.location.origin}/?${kind}=${encodeURIComponent(id)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopyMessage(t("explorer.linkCopied"));
+    } catch {
+      setLinkCopyMessage(t("explorer.linkCopyError"));
+    }
+  }
+
   function openFolderContextMenu(event: ReactMouseEvent, folder: Folder) {
     event.preventDefault();
     const isFavorite = favoriteKeys.has(`folder:${folder.id}`);
@@ -470,6 +485,10 @@ export function ExplorerPane({
           label: t("explorer.exportFolder", { name: folder.name }),
           onSelect: () => handleExportFolder(folder),
         },
+        {
+          label: t("explorer.copyLink", { name: folder.name }),
+          onSelect: () => handleCopyLink("folder", folder.id),
+        },
       ],
     });
   }
@@ -491,6 +510,10 @@ export function ExplorerPane({
         {
           label: isFavorite ? t("explorer.removeFavorite", { name }) : t("explorer.addFavorite", { name }),
           onSelect: () => toggleFavorite("document", doc.id),
+        },
+        {
+          label: t("explorer.copyLink", { name }),
+          onSelect: () => handleCopyLink("document", doc.id),
         },
         ...(shareLinkEnabled
           ? [
@@ -604,6 +627,8 @@ export function ExplorerPane({
       )}
 
       {deleteMessage && <p className="hint">{deleteMessage}</p>}
+
+      {linkCopyMessage && <p className="hint">{linkCopyMessage}</p>}
 
       {folderExportJob && folderExportJob.status !== "completed" && (
         <p className="hint" role="status">

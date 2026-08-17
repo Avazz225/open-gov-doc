@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentWorkspace } from "@/components/DocumentWorkspace";
 import { I18nProvider } from "@/i18n";
-import type { Folder } from "@/lib/api";
+import { ApiError, type Folder } from "@/lib/api";
 
 function renderWorkspace() {
   return render(
@@ -191,6 +191,12 @@ const document1 = {
 
 describe("DocumentWorkspace", () => {
   beforeEach(() => {
+    // Authenticated direct links (post-roadmap phase 29, ADR 0109) - reset
+    // to a clean, query-string-free URL before every test, since a handful
+    // of tests below deliberately set `?document=`/`?folder=` via
+    // `window.history.pushState` and jsdom's `window.location` otherwise
+    // persists across tests within this file.
+    window.history.pushState({}, "", "/");
     listChildFoldersMock.mockReset();
     listDocumentsInFolderMock.mockReset();
     downloadDocumentMock.mockReset();
@@ -1150,6 +1156,75 @@ describe("DocumentWorkspace", () => {
       interval: 200,
     });
     await waitFor(() => expect(downloadFolderExportContentMock).toHaveBeenCalledWith("token-123", "job-1"));
+  });
+
+  it("opens a document directly via a ?document= deep link (Phase 29, ADR 0109)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    getDocumentMock.mockResolvedValue({
+      id: "d-linked",
+      title: "Linked.pdf",
+      folder_id: "root",
+      object_type_id: null,
+      attributes: {},
+      current_version_number: 1,
+      deleted_at: null,
+      deleted_by: null,
+      created_by: "alice",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    listRenditionsMock.mockResolvedValue([]);
+    listOcrResultsMock.mockResolvedValue([]);
+    listDocumentVersionsMock.mockResolvedValue([
+      {
+        version_number: 1,
+        content_type: "application/pdf",
+        is_conflict: false,
+        comment: null,
+        created_by: "alice",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    window.history.pushState({}, "", "/?document=d-linked");
+
+    renderWorkspace();
+
+    await waitFor(() => expect(getDocumentMock).toHaveBeenCalledWith("token-123", "d-linked"));
+    expect(await screen.findByLabelText("Vorschau: Linked.pdf")).toBeInTheDocument();
+  });
+
+  it("opens a folder directly via a ?folder= deep link and rebuilds the breadcrumb (Phase 29, ADR 0109)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    getFolderMock.mockImplementation(async (_token: string, folderId: string) => {
+      if (folderId === "b") {
+        return { id: "b", name: "B", parent_id: "a", object_type_id: null, attributes: {} };
+      }
+      if (folderId === "a") {
+        return { id: "a", name: "A", parent_id: "root", object_type_id: null, attributes: {} };
+      }
+      throw new Error(`unexpected folder id ${folderId}`);
+    });
+    window.history.pushState({}, "", "/?folder=b");
+
+    renderWorkspace();
+
+    const breadcrumbs = await screen.findByLabelText("Ordnerpfad");
+    await waitFor(() => expect(within(breadcrumbs).getByText("B")).toBeInTheDocument());
+    expect(within(breadcrumbs).getByText("A")).toBeInTheDocument();
+  });
+
+  it("shows a visible error for a ?document= deep link without access (Phase 29, ADR 0109)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    getDocumentMock.mockRejectedValue(new ApiError(403, "Kein Leserecht auf dieses Dokument"));
+    window.history.pushState({}, "", "/?document=d-forbidden");
+
+    renderWorkspace();
+
+    expect(await screen.findByText("Kein Leserecht auf dieses Dokument")).toBeInTheDocument();
   });
 
   it("shows a pending-approval message instead of deleting when folder.delete requires approval (5.2, seit P7-S1c)", async () => {

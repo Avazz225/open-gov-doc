@@ -129,6 +129,8 @@ export function PreviewPane({
   const [exportHistoryPosition, setExportHistoryPosition] = useState<"before" | "after" | "">("");
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Authenticated direct links (post-roadmap phase 29, ADR 0109).
+  const [linkCopyMessage, setLinkCopyMessage] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgRenderedHeight, setImgRenderedHeight] = useState(0);
 
@@ -500,6 +502,20 @@ export function PreviewPane({
     }
   }
 
+  // Authenticated direct links (post-roadmap phase 29, ADR 0109) - a stable
+  // resource ID in the URL plus the normal session/permission-check path,
+  // resolved client-side by DocumentWorkspace.tsx on mount.
+  async function handleCopyLink() {
+    if (!activeDocument) return;
+    const url = `${window.location.origin}/?document=${encodeURIComponent(activeDocument.id)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopyMessage(t("preview.linkCopied"));
+    } catch {
+      setLinkCopyMessage(t("preview.linkCopyError"));
+    }
+  }
+
   // Direct Office editing (post-roadmap feature): open Word/Excel/PowerPoint
   // for editing directly from the browser, via the Office URI scheme
   // against webdav-connector - no password dialog, since a short-lived,
@@ -700,6 +716,10 @@ export function PreviewPane({
           {exportError}
         </p>
       )}
+      <button type="button" onClick={handleCopyLink}>
+        {t("preview.copyLink")}
+      </button>
+      {linkCopyMessage && <span className="hint">{linkCopyMessage}</span>}
       {officeLaunchInfo(currentContentType) && (
         <button type="button" onClick={handleOfficeLaunch}>
           {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}

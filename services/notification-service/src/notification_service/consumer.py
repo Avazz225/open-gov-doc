@@ -5,6 +5,7 @@ from dms_eventbus_client import Event, NatsEventBusClient, SubjectNotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from notification_service import repository
+from notification_service.links import build_resource_link
 from notification_service.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,13 @@ async def _handle_task_escalated(
         f"Prozessinstanz {event.subject} (business_key={business_key!r}) hat den "
         f"Task {task_name!r} nicht rechtzeitig abgeschlossen."
     )
+    # Authenticated direct links (post-roadmap phase 29, ADR 0109): the
+    # instance ID (`event.subject`) is already at hand here - appends a
+    # clickable link to the reviewer-ui "Vorgang" detail view when an
+    # installation has configured `reviewer_ui_public_base_url` (ADR 0105).
+    link = build_resource_link(settings.reviewer_ui_public_base_url, "instance", event.subject)
+    if link:
+        body += f"\n\nVorgang öffnen: {link}"
 
     async with session_factory() as session:
         recipient = data.get("lane") or "unassigned"
@@ -166,6 +174,10 @@ async def _handle_deletion_reminder(
         f"Dokument {title!r} (id={event.subject}) wird am "
         f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
     )
+    # Authenticated direct links (post-roadmap phase 29, ADR 0109).
+    link = build_resource_link(settings.user_ui_public_base_url, "document", event.subject)
+    if link:
+        body += f"\n\nDokument öffnen: {link}"
 
     async with session_factory() as session:
         in_app = await repository.create_and_send(
@@ -206,6 +218,10 @@ async def _handle_folder_deletion_reminder(
         f"Ordner {name!r} (id={event.subject}) wird am "
         f"{data.get('retention_until', '?')} {action}, sofern kein Legal Hold gesetzt wird."
     )
+    # Authenticated direct links (post-roadmap phase 29, ADR 0109).
+    link = build_resource_link(settings.user_ui_public_base_url, "folder", event.subject)
+    if link:
+        body += f"\n\nOrdner öffnen: {link}"
 
     async with session_factory() as session:
         in_app = await repository.create_and_send(

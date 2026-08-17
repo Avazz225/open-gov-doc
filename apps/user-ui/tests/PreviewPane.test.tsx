@@ -13,6 +13,11 @@ const downloadDocumentVersionMock = vi.fn();
 const listOcrResultsMock = vi.fn();
 const downloadOcrPageImageMock = vi.fn();
 const exportDocumentMock = vi.fn();
+// Test-only, spied fresh onto the real `navigator.clipboard.writeText`
+// each test (see beforeEach) - typed loosely since the exact spy generic
+// isn't worth spelling out here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let clipboardWriteTextMock: any;
 
 vi.mock("@/lib/api", () => ({
   listDocumentVersions: (...args: unknown[]) => listDocumentVersionsMock(...args),
@@ -124,6 +129,22 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     downloadOcrPageImageMock.mockReset();
     URL.createObjectURL = vi.fn(() => "blob:mock-url");
     URL.revokeObjectURL = vi.fn();
+    // Authenticated direct links (post-roadmap phase 29, ADR 0109) - whether
+    // jsdom already provides a real `navigator.clipboard` (a getter-only
+    // accessor, so it must be spied on in place rather than replaced) or
+    // not (`undefined`, needs a fresh own property) varies with test
+    // isolation/run order, so both cases are handled explicitly.
+    if (navigator.clipboard) {
+      clipboardWriteTextMock = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockResolvedValue(undefined);
+    } else {
+      clipboardWriteTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: clipboardWriteTextMock },
+        configurable: true,
+      });
+    }
   });
 
   it("rendert text/html gesandboxt statt im Plain-Text-Zweig", async () => {
@@ -410,6 +431,25 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(
       await within(previewPane).findByText("Export fehlgeschlagen. Bitte später erneut versuchen.")
     ).toBeInTheDocument();
+  });
+
+  it("kopiert einen Direktlink auf das Dokument in die Zwischenablage (Phase 29, ADR 0109)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Link kopieren"));
+
+    expect(
+      await within(previewPane).findByText("Link in die Zwischenablage kopiert.")
+    ).toBeInTheDocument();
+    expect(clipboardWriteTextMock).toHaveBeenCalledWith(`${window.location.origin}/?document=d1`);
   });
 
   it("zeigt für eine Konfliktversion ein Badge und für einen Kommentar Text mit Tooltip (P23-S1)", async () => {

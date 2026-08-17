@@ -32,10 +32,12 @@ vi.mock("@/lib/auth-context", () => ({
   }),
 }));
 
+const onOpenInstanceMock = vi.fn();
+
 function renderList() {
   return render(
     <I18nProvider>
-      <TaskList />
+      <TaskList onOpenInstance={onOpenInstanceMock} />
     </I18nProvider>
   );
 }
@@ -68,6 +70,7 @@ describe("TaskList", () => {
     completeTaskMock.mockReset();
     listActiveDelegationsForDeputyMock.mockReset();
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
+    onOpenInstanceMock.mockReset();
   });
 
   it("shows an empty state when there are no ready tasks", async () => {
@@ -84,6 +87,16 @@ describe("TaskList", () => {
     await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
     expect(screen.getByText("case-42")).toBeInTheDocument();
     expect(screen.getByText("Sachbearbeitung")).toBeInTheDocument();
+  });
+
+  it("opens the Vorgang detail view for a task's instance (Phase 29, ADR 0109)", async () => {
+    listReadyTasksMock.mockResolvedValue([MANUAL_TASK]);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Vorgang öffnen" }));
+
+    expect(onOpenInstanceMock).toHaveBeenCalledWith("instance-1");
   });
 
   it("marks a signature task and requires a signature ID to complete it", async () => {
