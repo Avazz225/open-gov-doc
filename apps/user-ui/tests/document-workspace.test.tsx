@@ -41,6 +41,7 @@ const moveFolderMock = vi.fn();
 const deleteFolderMock = vi.fn();
 const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
+const registerDocumentMock = vi.fn();
 const listRenditionsMock = vi.fn();
 const downloadRenditionContentMock = vi.fn();
 const listOcrResultsMock = vi.fn();
@@ -56,6 +57,8 @@ const listSignaturesMock = vi.fn();
 const createSignatureMock = vi.fn();
 const verifySignatureMock = vi.fn();
 const putDocumentRetentionMock = vi.fn();
+const getRetentionConfigMock = vi.fn();
+const getFolderRetentionConfigMock = vi.fn();
 const restoreDocumentMock = vi.fn();
 const listDeletedDocumentsMock = vi.fn();
 const listLegalHoldsMock = vi.fn();
@@ -125,6 +128,7 @@ vi.mock("@/lib/api", () => ({
   getObjectTypeLayout: (...args: unknown[]) => getObjectTypeLayoutMock(...args),
   getKennzeichenConfig: (...args: unknown[]) => getKennzeichenConfigMock(...args),
   updateDocumentMetadata: (...args: unknown[]) => updateDocumentMetadataMock(...args),
+  registerDocument: (...args: unknown[]) => registerDocumentMock(...args),
   listRenditions: (...args: unknown[]) => listRenditionsMock(...args),
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
@@ -140,6 +144,8 @@ vi.mock("@/lib/api", () => ({
   createSignature: (...args: unknown[]) => createSignatureMock(...args),
   verifySignature: (...args: unknown[]) => verifySignatureMock(...args),
   putDocumentRetention: (...args: unknown[]) => putDocumentRetentionMock(...args),
+  getRetentionConfig: (...args: unknown[]) => getRetentionConfigMock(...args),
+  getFolderRetentionConfig: (...args: unknown[]) => getFolderRetentionConfigMock(...args),
   restoreDocument: (...args: unknown[]) => restoreDocumentMock(...args),
   listDeletedDocuments: (...args: unknown[]) => listDeletedDocumentsMock(...args),
   listLegalHolds: (...args: unknown[]) => listLegalHoldsMock(...args),
@@ -187,6 +193,7 @@ const document1 = {
   created_by: "alice",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  registered_at: "2026-01-01T00:00:00Z",
 };
 
 describe("DocumentWorkspace", () => {
@@ -210,6 +217,7 @@ describe("DocumentWorkspace", () => {
     deleteFolderMock.mockReset();
     getObjectTypeMock.mockReset();
     updateDocumentMetadataMock.mockReset();
+    registerDocumentMock.mockReset();
     listRenditionsMock.mockReset();
     listRenditionsMock.mockResolvedValue([]);
     downloadRenditionContentMock.mockReset();
@@ -221,6 +229,20 @@ describe("DocumentWorkspace", () => {
     createSignatureMock.mockReset();
     verifySignatureMock.mockReset();
     putDocumentRetentionMock.mockReset();
+    getRetentionConfigMock.mockReset();
+    getRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: [],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getFolderRetentionConfigMock.mockReset();
+    getFolderRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: [],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
     restoreDocumentMock.mockReset();
     listDeletedDocumentsMock.mockReset();
     listDeletedDocumentsMock.mockResolvedValue([]);
@@ -1509,6 +1531,57 @@ describe("DocumentWorkspace", () => {
 
     await waitFor(() => expect(uploadDocumentMock).toHaveBeenCalled());
     await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("uploads as a draft when the draft checkbox is checked (post-roadmap phase 31 session 2)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([]);
+    uploadDocumentMock.mockResolvedValue({});
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByText("Hochladen"));
+
+    const file = new File(["hello"], "entwurf.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Datei"), file);
+    await user.click(
+      screen.getByText("Als Entwurf anlegen (Kennzeichen erst bei Registrierung vergeben)")
+    );
+    fireEvent.submit(screen.getByRole("form", { name: "Dokument hochladen" }));
+
+    await waitFor(() =>
+      expect(uploadDocumentMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({ draft: true })
+      )
+    );
+  });
+
+  it("shows a draft badge and registers a still-unregistered document", async () => {
+    const draftDocument = { ...document1, id: "d-draft", registered_at: null };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([draftDocument]);
+    registerDocumentMock.mockResolvedValue({ ...draftDocument, registered_at: "2026-02-01T00:00:00Z" });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
+    expect(within(metadataPanel).getByText("Entwurf")).toBeInTheDocument();
+
+    await user.click(metadataPanel);
+    await user.click(within(metadataPanel).getByText("Registrieren"));
+
+    await waitFor(() =>
+      expect(registerDocumentMock).toHaveBeenCalledWith("token-123", "d-draft", "alice")
+    );
+    await waitFor(() =>
+      expect(within(metadataPanel).queryByText("Entwurf")).not.toBeInTheDocument()
+    );
   });
 
   it("accepts a dropped file via drag-and-drop in the upload modal", async () => {

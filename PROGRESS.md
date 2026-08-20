@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** Phase 30 (configurable email templates by use case/recipient domain — all five sessions, see below under "Post-Roadmap: Phase 30"). **Phase 27+ is thereby fully complete** — all four phases (27–30) done. Since then: a round of user-reported bugfixes (see "Post-Roadmap: bugfix round after Phase 30" below) and the Phase 31 planning pass (feature-gap analysis against a government-sector reference system, see `docs/egov-feature-gap-analysis.md`).
+**Last completed:** P31-S2 (draft / pre-registration object lifecycle — see below under "Post-Roadmap: Phase 31"), the second session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** Phase 31 (eGov feature gap closure) — see `IMPLEMENTATION_PLAN.md` "Phase 31", start with P31-S1 (deletion reason codes, smallest/lowest-risk item) or any other session in that phase; only P31-S10/S11 have a hard dependency (on P31-S9).
+**Next session:** any other Phase 31 session (P31-S3 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -3526,6 +3526,99 @@ dynamic access-grant and supervisor-oversight-view sessions that depend on it, a
 mail-inbox model, and general xdomea/XJustiz exchange. Pure planning — no code changed, no ADR written
 yet (each session writes its own once actually implemented). Per explicit user instruction, no git
 commit was made for this round; the user will commit it themselves.
+
+### Post-Roadmap: Phase 31 Session 1 — deletion reason codes (2026-08-20)
+
+First implementation session of Phase 31. Both `document-service` and `folder-service` already had a
+free-text `reason` field on `PUT .../retention` for forced deletion (P7-S1/P7-S1b), optionally required
+via `RetentionConfig.deletion_reason_required` — this session adds a `deletion_reason_catalog: list[str]`
+to each service's own `RetentionConfig` (admin-editable via the existing `GET`/`PUT /retention-config`),
+powering a `<select>` of curated suggestions plus an always-available "Sonstiges" free-text fallback in
+`RetentionPanel.tsx`/`FolderRetentionModal.tsx`. Deliberately **not** a backend-enforced enum — the
+submitted `reason` stays exactly the single, optional string it always was, validated only for
+non-emptiness when required; the catalog is a pure UX curation layer. See
+[ADR 0112](docs/adr/0112-deletion-reason-catalog-ux-not-enum.md) for the full rationale, including why
+research before this session found no existing "fixed enum + admin-extensible list + other fallback"
+pattern anywhere in the codebase to reuse, and why the catalog is duplicated per service (documents vs.
+folders) rather than centralized, matching the already-existing, deliberate duplication of the entire
+retention-config shape between the two services since P7-S1b.
+
+**Frontend**: `RetentionSettings.tsx` (admin-ui) gained a simple add/remove list editor for the catalog
+in both the documents and folders sections (already one shared component instantiated twice). User-UI's
+two retention forms default to the dropdown (not free text) whenever a non-empty catalog is configured,
+falling back to exactly the previous plain `<input>` when it isn't — invisible to any installation that
+hasn't opted in. New `getRetentionConfig`/`getFolderRetentionConfig` client functions in `user-ui` (it
+had none before this session; the reason-required/-optional distinction was previously enforced purely
+server-side with no client-side config fetch at all).
+
+Deliberately **not** done this session: seeding a default German-language reason catalog into
+`packages/egov/config.json` — the config-service export/import format has no `retention_config` category
+today, and adding one would be a materially larger change (a new import/export category type) than this
+session's stated scope; an admin can configure the catalog by hand via the new admin-ui editor instead.
+
+Tests: document-service 261 (unchanged count — existing `retention-config` tests extended in place with
+catalog assertions, no net-new test needed at that layer), folder-service 120 (same). user-ui 203
+(previously 201, +2: one catalog-dropdown regression test each for `RetentionPanel`/`FolderRetentionModal`).
+admin-ui 220 (previously 219, +1: add/remove/save round trip for the catalog editor). All four touched
+apps/services: typecheck/lint/build clean. Verified live against the rebuilt stack: `GET`/`PUT
+/retention-config` round-trips the new field correctly on both services (confirmed via direct curl), and
+a full Playwright session against the real admin-ui add→save→reload-persists→remove→save→reload-gone
+flow passed end to end.
+
+### Post-Roadmap: Phase 31 Session 2 — draft / pre-registration object lifecycle (2026-08-20)
+
+Second Phase 31 session. `document-service`'s `POST /documents` and `case-service`'s `POST /cases` both
+gained an optional `draft: bool = False` field — when set, the reference-number generator call
+(`ObjectTypeClient.next_kennzeichen()` / `repository.next_vorgangsnummer()`) is skipped entirely at
+creation time, and a new nullable `registered_at` timestamp on each model stays `NULL`. A new
+`POST /documents/{id}/register` / `POST /cases/{id}/register` endpoint performs the deferred assignment
+later — one-way, `409` on a second call. See [ADR 0113](docs/adr/0113-draft-registration-lifecycle.md)
+for the full rationale, in particular why `case-service` needed a genuinely new `registered_at` column
+rather than reusing `Case.vorgangsnummer`'s pre-existing nullability: that field was already nullable
+before this session for an unrelated reason (P15-S3 never backfilled it onto older rows), so
+`vorgangsnummer IS NULL` alone can't distinguish "predates the numbering scheme" from "a genuine new-style
+draft" — a dedicated column can. Both services' ad-hoc migrations follow the established
+"check-before-backfill" pattern (see the `object_type_id` drift-correction precedent, P15-S1): the
+one-time `registered_at = created_at` backfill for pre-existing rows runs only exactly once, at the
+moment the column is first added, never again on a later restart — otherwise a real, still-unregistered
+draft's `NULL` would be silently overwritten every time the container restarts.
+
+Neither register endpoint reinvents authorization: `document-service`'s has no permission check, matching
+its own `POST /documents`/`PATCH /documents/{id}` (a pre-existing, documented gap this session doesn't
+newly introduce); `case-service`'s keeps the existing `case.write` check (`_require_case_permission`,
+ADR 0070). `document-service`'s register endpoint can `422` exactly like creation-time assignment does
+(`MissingKennzeichenAttributeError`, a placeholder attribute the draft never got a value for) —
+`case-service`'s cannot, since its Vorgangsnummer generator is a single, always-configured,
+installation-wide counter with no per-object-type "not configured" state.
+
+**Frontend (`user-ui` only)**: `case-service` has no dedicated case-creation UI anywhere in the project —
+cases are created via direct API calls with a `process_definition_id`, so this session's frontend work is
+`document-service`/`user-ui` only, exactly as scoped in ADR 0113. `UploadForm` gained a "create as draft"
+checkbox (unchecked by default, so existing upload behavior is unchanged unless a user opts in);
+`MetadataPanel` shows a `.badge.draft` ("Entwurf") banner plus a "Registrieren" button whenever the open
+document's `registered_at` is `null`, wired through the existing `onSaved` callback so a successful
+registration refreshes the panel exactly like a metadata save does. New `registerDocument()` API client
+function. Deliberately not built: any list-row-level draft indicator in `ExplorerPane`/`FolderTree` (the
+detail-view badge already satisfies "visibly distinct" per the session's own wording) or a
+`registered`/drafts query filter on `GET /documents`/`GET /cases` (nothing in the codebase currently needs
+to list-and-exclude drafts as a distinct query — the existing Kennzeichen/Vorgangsnummer-based consumers,
+`list_documents_by_kennzeichen`/`list_cases_by_vorgangsnummer`/mail-connector matching, already naturally
+exclude drafts for free, verified rather than assumed).
+
+Tests: document-service 273 (previously 261, +12: 6 repository-level + 6 API-level, covering
+draft-creation, register-assigns-kennzeichen, register-without-object-type, already-registered → 409,
+unknown → 404, missing-placeholder → 422 inherited from the existing creation-time test); case-service 61
+(previously 51, +10: same shape, plus a `case.write`-permission-gate regression test for the new
+endpoint). user-ui 205 (previously 203, +2: draft-checkbox-sends-draft-flag, badge-appears-and-registers).
+All three `ruff`/`tsc`/`eslint`/`next build` gates clean (two pre-existing-pattern `ruff format` line-length
+violations introduced by this session's own new code were caught and fixed in the same pass, not deferred).
+**Fully verified live against the rebuilt stack**: `document-service`/`case-service`/`user-ui` containers
+rebuilt and restarted; curl round-trips confirmed a draft document has `registered_at: null` and no
+`Kennzeichen`, `register` assigns both correctly, a second `register` call returns `409`, an unknown id
+returns `404` — identically confirmed for `case-service`'s `vorgangsnummer`. A temporary Playwright spec
+(deleted afterward) drove the real `user-ui` end to end: upload with the draft checkbox checked → "Entwurf"
+badge visible on open → click "Registrieren" → badge disappears. Test data (two document-service documents,
+one case-service case) deleted afterward.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

@@ -382,6 +382,14 @@ export async function putFolderRetention(
   return response.json();
 }
 
+// Deletion-reason catalog (post-roadmap phase 31 session 1, ADR 0112) -
+// folder-service's own independently configurable copy, same shape as
+// document-service's `RetentionConfig`/`getRetentionConfig`.
+export async function getFolderRetentionConfig(token: string): Promise<RetentionConfig> {
+  const response = await request("folder-service", "retention-config", {}, token);
+  return response.json();
+}
+
 export interface FolderLegalHold {
   id: string;
   folder_id: string;
@@ -554,6 +562,10 @@ export interface DocumentSummary {
   retention_until: string | null;
   full_deletion: boolean;
   pending_deletion_reason: string | null;
+  // Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+  // ADR 0113) - `null` while a draft, set once at creation (non-draft) or
+  // via `registerDocument()` below.
+  registered_at: string | null;
 }
 
 export async function listDocumentsInFolder(
@@ -578,6 +590,9 @@ export async function uploadDocument(
     folderId: string;
     objectTypeId?: number;
     attributes?: Record<string, string>;
+    // Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+    // ADR 0113) - defaults to false, matching the server-side default.
+    draft?: boolean;
   }
 ): Promise<DocumentSummary> {
   const formData = new FormData();
@@ -588,6 +603,9 @@ export async function uploadDocument(
   if (params.objectTypeId !== undefined) {
     formData.append("object_type_id", String(params.objectTypeId));
     formData.append("attributes", JSON.stringify(params.attributes ?? {}));
+  }
+  if (params.draft) {
+    formData.append("draft", "true");
   }
 
   const response = await request(
@@ -611,6 +629,27 @@ export async function updateDocumentMetadata(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
+    },
+    token
+  );
+  return response.json();
+}
+
+// Draft / pre-registration lifecycle (post-roadmap phase 31 session 2, ADR
+// 0113) - assigns the reference number for a document created with
+// `draft: true` (see uploadDocument above).
+export async function registerDocument(
+  token: string,
+  documentId: string,
+  registeredBy: string
+): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/register`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ registered_by: registeredBy }),
     },
     token
   );
@@ -643,6 +682,22 @@ export async function putDocumentRetention(
     },
     token
   );
+  return response.json();
+}
+
+// Deletion-reason catalog (post-roadmap phase 31 session 1, ADR 0112) - the
+// catalog is a UX convenience only (curated `<select>` options plus an
+// always-available "other" free-text fallback), never an enum enforced by
+// the backend, which still just requires a non-empty string.
+export interface RetentionConfig {
+  deletion_reason_required: boolean;
+  reminder_lead_days: number | null;
+  deletion_reason_catalog: string[];
+  updated_at: string;
+}
+
+export async function getRetentionConfig(token: string): Promise<RetentionConfig> {
+  const response = await request("document-service", "retention-config", {}, token);
   return response.json();
 }
 

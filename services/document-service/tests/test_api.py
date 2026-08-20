@@ -701,6 +701,90 @@ def test_removing_existing_kennzeichen_via_attribute_replace_needs_admin_role(cl
     assert response.status_code == 403
 
 
+# --- Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+# ADR 0113) -----------------------------------------------------------
+
+
+def test_create_document_without_draft_is_registered_immediately(client):
+    response = upload(client)
+    assert response.status_code == 201
+    assert response.json()["registered_at"] is not None
+
+
+def test_create_document_as_draft_has_no_registered_at_or_kennzeichen(client):
+    object_type_id = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"draft-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string", "required": True}],
+            "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
+        },
+        timeout=30.0,
+    ).json()["id"]
+
+    response = upload(
+        client,
+        object_type_id=str(object_type_id),
+        attributes='{"Federführung": "IT"}',
+        draft="true",
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["registered_at"] is None
+    assert "Kennzeichen" not in body["attributes"]
+
+
+def test_register_draft_document_assigns_kennzeichen(client):
+    object_type_id = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={
+            "name": f"draft-register-test-type-{uuid.uuid4().hex[:8]}",
+            "applies_to": "document",
+            "attributes": [{"name": "Federführung", "type": "string", "required": True}],
+            "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
+        },
+        timeout=30.0,
+    ).json()["id"]
+    document_id = upload(
+        client,
+        object_type_id=str(object_type_id),
+        attributes='{"Federführung": "IT"}',
+        draft="true",
+    ).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/register", json={"registered_by": "alice"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["registered_at"] is not None
+    assert body["attributes"]["Kennzeichen"].startswith("IT-")
+
+
+def test_register_draft_document_without_object_type_just_sets_registered_at(client):
+    document_id = upload(client, draft="true").json()["id"]
+
+    response = client.post(f"/documents/{document_id}/register", json={"registered_by": "alice"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["registered_at"] is not None
+    assert "Kennzeichen" not in body["attributes"]
+
+
+def test_register_already_registered_document_returns_409(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/register", json={"registered_by": "alice"})
+
+    assert response.status_code == 409
+
+
+def test_register_unknown_document_returns_404(client):
+    response = client.post("/documents/does-not-exist/register", json={"registered_by": "alice"})
+    assert response.status_code == 404
+
+
 def test_upload_content_type_is_sniffed_not_trusted(client):
     """P5d-S1: der vom Browser gesendete Header wird nicht mehr übernommen -
     hier klar sichtbar, da `upload()` Klartext-Inhalt als "application/pdf"
@@ -1469,15 +1553,23 @@ def test_retention_config_get_and_put(client):
     get_response = client.get("/retention-config")
     assert get_response.status_code == 200
     assert get_response.json()["deletion_reason_required"] is False
+    assert get_response.json()["deletion_reason_catalog"] == []
 
     put_response = client.put(
-        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": 5}
+        "/retention-config",
+        json={
+            "deletion_reason_required": True,
+            "reminder_lead_days": 5,
+            "deletion_reason_catalog": ["Aufbewahrungsfrist abgelaufen"],
+        },
     )
     assert put_response.status_code == 200
     assert put_response.json()["reminder_lead_days"] == 5
+    assert put_response.json()["deletion_reason_catalog"] == ["Aufbewahrungsfrist abgelaufen"]
     # Aufräumen.
     client.put(
-        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": False, "reminder_lead_days": None},
     )
 
 

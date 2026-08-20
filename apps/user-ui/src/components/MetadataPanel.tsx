@@ -9,6 +9,7 @@ import {
   type ObjectType,
   getObjectType,
   getObjectTypeLayout,
+  registerDocument,
   updateDocumentMetadata,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -55,6 +56,7 @@ export function MetadataPanel({
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -111,9 +113,40 @@ export function MetadataPanel({
     );
   }
 
+  const isDraft = activeDocument.registered_at === null;
+
+  async function handleRegister() {
+    if (!accessToken || !activeDocument) return;
+    setError(null);
+    setIsRegistering(true);
+    try {
+      const registered = await registerDocument(
+        accessToken,
+        activeDocument.id,
+        user?.username ?? ""
+      );
+      onSaved(registered);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("metadata.registerError"));
+    } finally {
+      setIsRegistering(false);
+    }
+  }
+
   return (
     <section className="metadata-panel" aria-label={t("metadata.paneLabel")}>
       <h2 className="pane-heading">{t("metadata.heading")}</h2>
+
+      {isDraft && (
+        <div className="draft-banner">
+          <span className="badge draft">{t("metadata.draftBadge")}</span>
+          <p className="hint">{t("metadata.draftHint")}</p>
+          <button type="button" onClick={handleRegister} disabled={isRegistering}>
+            {isRegistering ? t("metadata.registering") : t("metadata.registerAction")}
+          </button>
+        </div>
+      )}
+
       <form aria-label={t("metadata.formLabel")} onSubmit={handleSubmit}>
         <label>
           {t("metadata.titleLabel")}

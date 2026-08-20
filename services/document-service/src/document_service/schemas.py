@@ -38,6 +38,7 @@ class DocumentOut(BaseModel):
     archived_at: datetime | None
     archive_format: str | None
     dehydrated_at: datetime | None
+    registered_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -186,6 +187,16 @@ class LegalHoldOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentRegisterRequest(BaseModel):
+    """Draft -> registered transition (post-roadmap phase 31 session 2,
+    ADR 0113): `registered_by` is opaque, same pattern as `deleted_by`/
+    `released_by` elsewhere in this service - no `X-DMS-Principal`
+    enforcement for this endpoint, consistent with `create_document`/
+    `update_document`."""
+
+    registered_by: str
+
+
 class DeletionRegisterEntryOut(BaseModel):
     id: str
     document_id: str
@@ -210,6 +221,7 @@ class ReconcileRestoreDeletionRequest(BaseModel):
 class RetentionConfigIn(BaseModel):
     deletion_reason_required: bool = False
     reminder_lead_days: int | None = None
+    deletion_reason_catalog: list[str] = []
 
 
 class RetentionConfigOut(RetentionConfigIn):

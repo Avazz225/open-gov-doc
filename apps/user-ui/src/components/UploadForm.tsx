@@ -54,6 +54,10 @@ export function UploadForm({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  // Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+  // ADR 0113) - opt-in, defaults to off so the reference number is still
+  // assigned immediately unless a user deliberately chooses otherwise.
+  const [draft, setDraft] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -92,11 +96,13 @@ export function UploadForm({
         folderId,
         objectTypeId: selectedObjectType?.id,
         attributes: selectedObjectType ? values : undefined,
+        draft,
       });
       setFile(null);
       setTitle("");
       setObjectTypeId("");
       setValues({});
+      setDraft(false);
       onUploaded();
       onClose();
     } catch (err) {
@@ -170,6 +176,16 @@ export function UploadForm({
               ))}
             </select>
           </label>
+
+          <label className="upload-draft-toggle">
+            <input
+              type="checkbox"
+              checked={draft}
+              onChange={(e) => setDraft(e.target.checked)}
+            />
+            {t("upload.draftLabel")}
+          </label>
+          {draft && <p className="empty-state">{t("upload.draftHint")}</p>}
 
           {selectedObjectType && layout && (
             <LayoutFormFields

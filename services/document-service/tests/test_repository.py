@@ -93,6 +93,50 @@ async def test_update_document_metadata_keeps_folder_when_not_given(session):
     assert updated.folder_id == "root"
 
 
+async def test_create_document_without_draft_is_registered_immediately(session):
+    document = await _make_document(session)
+    assert document.registered_at is not None
+
+
+async def test_create_document_as_draft_has_no_registered_at(session):
+    document = await _make_document(session, draft=True)
+    assert document.registered_at is None
+
+
+async def test_register_document_sets_registered_at_and_kennzeichen(session):
+    document = await _make_document(session, draft=True, attributes={"foo": "bar"})
+    assert document.registered_at is None
+
+    registered = await repository.register_document(session, document.id, kennzeichen="2026-001")
+
+    assert registered.registered_at is not None
+    assert registered.attributes == {"foo": "bar", "Kennzeichen": "2026-001"}
+
+
+async def test_register_document_without_kennzeichen_still_sets_registered_at(session):
+    """No generator configured for the document's object type (post-roadmap
+    phase 31 session 2) - same "204/no kennzeichen at all" outcome as an
+    unregistered document ever getting one at creation time."""
+    document = await _make_document(session, draft=True)
+
+    registered = await repository.register_document(session, document.id, kennzeichen=None)
+
+    assert registered.registered_at is not None
+    assert "Kennzeichen" not in registered.attributes
+
+
+async def test_register_already_registered_document_raises(session):
+    document = await _make_document(session)  # not a draft - already registered
+
+    with pytest.raises(repository.AlreadyRegisteredError):
+        await repository.register_document(session, document.id, kennzeichen="2026-002")
+
+
+async def test_register_unknown_document_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.register_document(session, "does-not-exist", kennzeichen=None)
+
+
 async def test_checkin_normal_advances_current_version(session):
     document = await _make_document(session)
 
@@ -579,12 +623,17 @@ async def test_retention_config_defaults_and_update(session):
     default = await repository.get_retention_config(session)
     assert default.deletion_reason_required is False
     assert default.reminder_lead_days is None
+    assert default.deletion_reason_catalog == []
 
     updated = await repository.update_retention_config(
-        session, deletion_reason_required=True, reminder_lead_days=7
+        session,
+        deletion_reason_required=True,
+        reminder_lead_days=7,
+        deletion_reason_catalog=["Aufbewahrungsfrist abgelaufen", "Dublette"],
     )
     assert updated.deletion_reason_required is True
     assert updated.reminder_lead_days == 7
+    assert updated.deletion_reason_catalog == ["Aufbewahrungsfrist abgelaufen", "Dublette"]
 
 
 async def test_trash_config_defaults_and_update(session):

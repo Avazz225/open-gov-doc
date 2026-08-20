@@ -10,6 +10,11 @@ class CaseCreate(BaseModel):
     process_definition_id: int
     created_by: str
     initial_data: dict = {}
+    # Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+    # ADR 0113) - see `Case.registered_at`. Default `False` keeps today's
+    # behavior unchanged: every case gets a Vorgangsnummer at creation
+    # unless the caller opts into `draft=True`.
+    draft: bool = False
 
 
 class CaseOut(BaseModel):
@@ -26,8 +31,13 @@ class CaseOut(BaseModel):
     archive_after: datetime | None
     archived_at: datetime | None
     vorgangsnummer: str | None
+    registered_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class CaseRegisterRequest(BaseModel):
+    registered_by: str
 
 
 class CaseNumberConfigIn(BaseModel):

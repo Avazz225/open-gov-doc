@@ -37,6 +37,12 @@ class CaseNotClosedError(Exception):
     closed circulation folders."""
 
 
+class AlreadyRegisteredError(Exception):
+    """Register attempt for a case that already has a `registered_at`
+    (post-roadmap phase 31 session 2, ADR 0113) - registration is a one-way
+    transition, there is no "un-register"."""
+
+
 async def create_case(
     session: AsyncSession,
     *,
@@ -48,7 +54,9 @@ async def create_case(
     process_instance_id: str | None,
     created_by: str,
     vorgangsnummer: str | None = None,
+    draft: bool = False,
 ) -> Case:
+    now = datetime.now(UTC)
     case = Case(
         id=case_id,
         name=name,
@@ -58,10 +66,31 @@ async def create_case(
         process_definition_id=process_definition_id,
         process_instance_id=process_instance_id,
         created_by=created_by,
-        created_at=datetime.now(UTC),
+        created_at=now,
         vorgangsnummer=vorgangsnummer,
+        # Draft / pre-registration lifecycle (post-roadmap phase 31 session
+        # 2, ADR 0113): mirrors document-service's `create_document`.
+        registered_at=None if draft else now,
     )
     session.add(case)
+    await session.flush()
+    return case
+
+
+async def register_case(session: AsyncSession, case_id: str, *, vorgangsnummer: str) -> Case:
+    """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
+    0113) - the counterpart to the at-creation-time assignment in
+    `create_case` above, for a case created with `draft=True`. Unlike
+    `document_service.register_document`, `vorgangsnummer` is never `None`
+    here - the case-number generator (`next_vorgangsnummer`) is
+    installation-wide and always configured (`CaseNumberConfig` has a
+    default format, see models.py), it has no per-object-type "not
+    configured" state like the document reference-number generator."""
+    case = await get_case(session, case_id)
+    if case.registered_at is not None:
+        raise AlreadyRegisteredError(f"case_id {case_id!r} ist bereits registriert")
+    case.vorgangsnummer = vorgangsnummer
+    case.registered_at = datetime.now(UTC)
     await session.flush()
     return case
 

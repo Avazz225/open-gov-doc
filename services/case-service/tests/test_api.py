@@ -268,6 +268,115 @@ def test_create_case_assigns_unique_vorgangsnummer(client, process_definition_id
     assert first["vorgangsnummer"] != second["vorgangsnummer"]
 
 
+# --- Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+# ADR 0113) -----------------------------------------------------------
+
+
+def test_create_case_as_draft_has_no_vorgangsnummer_or_registered_at(
+    client, process_definition_id, case_headers
+):
+    response = client.post(
+        "/cases",
+        json={
+            "name": "Bauantrag Mustermann",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+            "draft": True,
+        },
+        headers=case_headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["vorgangsnummer"] is None
+    assert body["registered_at"] is None
+
+
+def test_create_case_without_draft_is_registered_immediately(
+    client, process_definition_id, case_headers
+):
+    response = client.post(
+        "/cases",
+        json={
+            "name": "Bauantrag Mustermann",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    )
+    assert response.status_code == 201
+    assert response.json()["registered_at"] is not None
+
+
+def test_register_draft_case_assigns_vorgangsnummer(client, process_definition_id, case_headers):
+    case_id = client.post(
+        "/cases",
+        json={
+            "name": "Bauantrag Mustermann",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+            "draft": True,
+        },
+        headers=case_headers,
+    ).json()["id"]
+
+    response = client.post(
+        f"/cases/{case_id}/register", json={"registered_by": "alice"}, headers=case_headers
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["vorgangsnummer"] is not None
+    assert body["registered_at"] is not None
+
+
+def test_register_already_registered_case_returns_409(client, process_definition_id, case_headers):
+    case_id = client.post(
+        "/cases",
+        json={
+            "name": "Bauantrag Mustermann",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()["id"]
+
+    response = client.post(
+        f"/cases/{case_id}/register", json={"registered_by": "alice"}, headers=case_headers
+    )
+
+    assert response.status_code == 409
+
+
+def test_register_unknown_case_returns_404(client, case_headers):
+    response = client.post(
+        "/cases/does-not-exist/register", json={"registered_by": "alice"}, headers=case_headers
+    )
+    assert response.status_code == 404
+
+
+def test_register_case_requires_case_write_permission(
+    client, process_definition_id, case_headers, everyone_role_without
+):
+    case_id = client.post(
+        "/cases",
+        json={
+            "name": "Bauantrag Mustermann",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+            "draft": True,
+        },
+        headers=case_headers,
+    ).json()["id"]
+
+    everyone_role_without("case.write")
+    response = client.post(
+        f"/cases/{case_id}/register",
+        json={"registered_by": "alice"},
+        headers={"X-DMS-Principal": "case-service-tests-no-write"},
+    )
+    assert response.status_code == 403
+
+
 def test_lookup_by_vorgangsnummer_finds_matching_case(client, process_definition_id, case_headers):
     created = client.post(
         "/cases",

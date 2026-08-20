@@ -11,7 +11,8 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/cases` | Create (`name`, optional `object_type_id`/`attributes`, `process_definition_id`, `created_by`, optional `initial_data`) — validates `object_type_id` (if set) against the Object-Type Service (always as a root object, no folder parentage), then starts a process instance in workflow-service with `business_key = case_id`. `400` for an unknown `process_definition_id`. Since **P15-S3**, also automatically assigns a `vorgangsnummer` (case reference number, 2.3/2.5), see below |
+| `POST` | `/cases` | Create (`name`, optional `object_type_id`/`attributes`, `process_definition_id`, `created_by`, optional `initial_data`) — validates `object_type_id` (if set) against the Object-Type Service (always as a root object, no folder parentage), then starts a process instance in workflow-service with `business_key = case_id`. `400` for an unknown `process_definition_id`. Since **P15-S3**, also automatically assigns a `vorgangsnummer` (case reference number, 2.3/2.5), see below. Since **Post-Roadmap Phase 31 Session 2**: optional `draft` field skips that assignment, see "Draft / Pre-Registration Lifecycle" below |
+| `POST` | `/cases/{id}/register` | Draft → registered transition (Post-Roadmap Phase 31 Session 2, ADR 0113) — assigns the Vorgangsnummer deferred by `draft=true` above. `409` if already registered, see below |
 | `GET` | `/cases` | List, filter by `status`/`object_type_id` |
 | `GET` | `/cases/by-vorgangsnummer?value=...` | Case reference number lookup (2.5/3.3, since P15-S3) — registered before `/cases/{id}`. Returns a list (consistent with document-service's file reference number lookup), even though `vorgangsnummer` is globally unique by construction. For the new `mail-connector` |
 | `GET` | `/cases/due-for-archival` | Internal call from `archival-service` (5.6, since P7-S3b) — registered before `/cases/{id}` so that `"due-for-archival"` is not interpreted as `{case_id}` |
@@ -28,7 +29,7 @@
 
 ## Data Model
 
-- `cases`: `id` (UUID), `name`, `object_type_id` (opaque reference, optional), `attributes` (JSON), `status` (`"open"`|`"closed"`), `process_definition_id`/`process_instance_id` (opaque references to workflow-service), `created_by`/`created_at`, `closed_at` (nullable), `archive_after`/`archived_at` (both nullable, 5.6, since P7-S3b), `vorgangsnummer` (nullable — only assigned for cases newly created from P15-S3 onward, 2.3/2.5).
+- `cases`: `id` (UUID), `name`, `object_type_id` (opaque reference, optional), `attributes` (JSON), `status` (`"open"`|`"closed"`), `process_definition_id`/`process_instance_id` (opaque references to workflow-service), `created_by`/`created_at`, `closed_at` (nullable), `archive_after`/`archived_at` (both nullable, 5.6, since P7-S3b), `vorgangsnummer` (nullable — only assigned for cases newly created from P15-S3 onward, 2.3/2.5), `registered_at` (nullable, since Post-Roadmap Phase 31 Session 2, ADR 0113 — `NULL` while a draft, see "Draft / Pre-Registration Lifecycle" below).
 - `case_document_reference`: `id`, `case_id` (FK), `document_id` (opaque reference to document-service), `added_by`/`added_at`, `removed_by`/`removed_at` (both nullable — soft deletion instead of hard delete), `snapshot_version_number` (nullable, only set after closure).
 - `case_archival_config` (5.6, since P7-S3b): single row (`id=1`, same singleton pattern as document-service's `RetentionConfig`) — `default_archive_after_days_closed` (integer, nullable), `archive_encryption_enabled` (boolean), `updated_at`.
 - `case_number_config`/`case_sequence` (2.5, since P15-S3): see "Case Reference Number" below.
@@ -68,6 +69,22 @@ Every new case automatically gets a server-generated, **installation-wide unique
 - **Not changeable via PATCH** (unlike `Kennzeichen`, the file reference number) — a stable, purely system-assigned reference is a prerequisite for reliable matching, no use case for a subsequent admin change in this session.
 - **`GET /cases/by-vorgangsnummer?value=...`** returns a list (consistent with the analogous document endpoint), even though the case reference number is globally unique by construction.
 - Complete architecture rationale: [ADR 0053](../adr/0053-posteingang-postausgang-pop3-loopback-connector-and-cross-service-matching.md).
+
+## Draft / Pre-Registration Lifecycle (Post-Roadmap Phase 31 Session 2, [ADR 0113](../adr/0113-draft-registration-lifecycle.md))
+
+`POST /cases` accepts an optional `draft` field (`bool`, default `false`). When `true`, the Vorgangsnummer
+assignment above is skipped entirely — `Case.vorgangsnummer` and the new `Case.registered_at` (nullable
+timestamp) both stay `NULL`, everything else (workflow instance start, object-type validation) proceeds
+unchanged. A new `POST /cases/{id}/register` endpoint (same `case.write` permission as create) performs
+the deferred assignment and sets `registered_at`; `409` if the case is already registered. Unlike
+document-service's equivalent, this can never fail with a "no generator configured" `422` —
+`next_vorgangsnummer()` is a single, always-configured, installation-wide generator, not a per-object-type
+one.
+
+`registered_at` is a deliberately separate field from `vorgangsnummer`'s existing nullability (which
+predates this session, for the unrelated reason that P15-S3 never backfilled it onto older rows) — see
+ADR 0113 for why the two can't be conflated. A regular (non-draft) case is registered immediately;
+existing rows were backfilled the same way, once, the moment the column was added.
 
 ## Events
 

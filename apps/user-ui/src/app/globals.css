@@ -513,6 +513,31 @@ body {
   color: var(--dms-danger);
 }
 
+/* Draft / pre-registration lifecycle (post-roadmap phase 31 session 2, ADR
+   0113) - same `.badge` base class as the version-conflict badge above. */
+.badge.draft {
+  background: var(--dms-accent-bg);
+  color: var(--dms-accent);
+}
+
+.upload-draft-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: normal;
+}
+
+.draft-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--dms-border);
+  border-radius: 0.4rem;
+}
+
 .version-conflict-badge {
   display: inline-block;
   margin-bottom: 0.5rem;

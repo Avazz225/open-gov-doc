@@ -5,13 +5,20 @@ import { useI18n } from "@/i18n";
 import {
   ApiError,
   createLegalHold,
+  getRetentionConfig,
   listLegalHolds,
   putDocumentRetention,
   releaseLegalHold,
   type DocumentSummary,
   type LegalHold,
+  type RetentionConfig,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+
+// Sentinel select value for "reason not in the admin-curated catalog" -
+// never sent to the server, only used to switch the UI to the free-text
+// input (post-roadmap phase 31 session 1, ADR 0112).
+const OTHER_REASON = "__other__";
 
 function toDateInputValue(iso: string | null): string {
   if (!iso) return "";
@@ -40,6 +47,8 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [retentionConfig, setRetentionConfig] = useState<RetentionConfig | null>(null);
+  const [reasonMode, setReasonMode] = useState<"catalog" | "other">("other");
 
   const [holds, setHolds] = useState<LegalHold[]>([]);
   const [holdReason, setHoldReason] = useState("");
@@ -59,6 +68,25 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
       .then(setHolds)
       .catch(() => setHolds([]));
   }, [accessToken, activeDocument.id]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    getRetentionConfig(accessToken)
+      .then(setRetentionConfig)
+      .catch(() => setRetentionConfig(null));
+  }, [accessToken]);
+
+  useEffect(() => {
+    const currentReason = activeDocument.pending_deletion_reason ?? "";
+    // Empty (no reason chosen yet) defaults to the dropdown, not the free-
+    // text fallback - otherwise both would show at once on first load.
+    setReasonMode(
+      !currentReason || retentionConfig?.deletion_reason_catalog.includes(currentReason)
+        ? "catalog"
+        : "other"
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDocument.id, retentionConfig]);
 
   const activeHold = holds.find((h) => h.released_at === null) ?? null;
 
@@ -170,12 +198,44 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
         />
         {t("retention.fullDeletionLabel")}
       </label>
-      {fullDeletion && (
+      {fullDeletion && retentionConfig && retentionConfig.deletion_reason_catalog.length > 0 && (
         <label>
           {t("retention.reasonLabel")}
-          <input value={reason} onChange={(e) => setReason(e.target.value)} />
+          <select
+            value={reasonMode === "catalog" ? reason : OTHER_REASON}
+            onChange={(e) => {
+              if (e.target.value === OTHER_REASON) {
+                setReasonMode("other");
+                setReason("");
+              } else {
+                setReasonMode("catalog");
+                setReason(e.target.value);
+              }
+            }}
+          >
+            <option value="" disabled>
+              {t("retention.reasonSelectPlaceholder")}
+            </option>
+            {retentionConfig.deletion_reason_catalog.map((entry) => (
+              <option key={entry} value={entry}>
+                {entry}
+              </option>
+            ))}
+            <option value={OTHER_REASON}>{t("retention.reasonOther")}</option>
+          </select>
         </label>
       )}
+      {fullDeletion &&
+        (reasonMode === "other" ||
+          !retentionConfig ||
+          retentionConfig.deletion_reason_catalog.length === 0) && (
+          <label>
+            {retentionConfig && retentionConfig.deletion_reason_catalog.length > 0
+              ? t("retention.reasonOtherLabel")
+              : t("retention.reasonLabel")}
+            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </label>
+        )}
       <button type="button" onClick={handleSubmit} disabled={isSaving}>
         {isSaving ? t("retention.saving") : t("retention.save")}
       </button>

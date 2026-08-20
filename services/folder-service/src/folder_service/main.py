@@ -249,6 +249,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE folder.folder ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(128)")
         )
+        # Deletion-reason catalog (post-roadmap phase 31 session 1, ADR
+        # 0112) - same ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE folder.retention_config "
+                "ADD COLUMN IF NOT EXISTS deletion_reason_catalog JSON DEFAULT '[]'::json NOT NULL"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -907,6 +915,7 @@ async def put_retention_config(
         session,
         deletion_reason_required=body.deletion_reason_required,
         reminder_lead_days=body.reminder_lead_days,
+        deletion_reason_catalog=body.deletion_reason_catalog,
     )
     await session.commit()
     return config

@@ -24,7 +24,7 @@
 | `GET` | `/legal-holds?folder_id=&active_only=` | Legal holds of a folder |
 | `GET` | `/deletion-register?folder_id=` | Deletion register (5.2a, since P7-S1b) |
 | `POST` | `/folders/{id}/reconcile-restore-deletion` | Deletion reconciliation after restore (10.4, since P11-S4) — `X-DMS-Roles: dms-admin`, 1:1 the same pattern as `document-service` |
-| `GET`/`PUT` | `/retention-config` | Installation-wide default retention settings for folders (standalone, not the same config as `document-service`) |
+| `GET`/`PUT` | `/retention-config` | Installation-wide default retention settings for folders (standalone, not the same config as `document-service`), incl. its own `deletion_reason_catalog` since Post-Roadmap Phase 31 Session 1 ([ADR 0112](../adr/0112-deletion-reason-catalog-ux-not-enum.md)) |
 | `GET`/`PUT` | `/trash-config` | Trash restoration period for folders (standalone) |
 | `POST` | `/folder-templates` | Capture a structure template from a subtree (2.5/7.3, since **P15-S6**) — `404` for unknown `source_folder_id`, see "Structure Templates" below |
 | `GET` | `/folder-templates` | All templates (without structure, metadata only) |

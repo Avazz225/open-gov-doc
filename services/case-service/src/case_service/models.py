@@ -52,6 +52,16 @@ class Case(Base):
     # a stable, purely system-assigned reference is a prerequisite for
     # reliable matching.
     vorgangsnummer: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+    # ADR 0113): a deliberately SEPARATE marker from `vorgangsnummer` above,
+    # even though the two are correlated for every case created from this
+    # session onward - `vorgangsnummer IS NULL` on its own is ambiguous
+    # (either "created before P15-S3, never got one" or "still a draft"),
+    # `registered_at IS NULL` is not. `None` while a case is a draft -
+    # created with `draft=True`, no Vorgangsnummer assigned yet. Set once,
+    # at creation time for a regular (non-draft) case or via `POST
+    # .../register` for a former draft - never reset afterwards.
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CaseDocumentReference(Base):

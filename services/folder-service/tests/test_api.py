@@ -529,13 +529,20 @@ def test_reconcile_restore_deletion_unknown_folder_returns_404(client):
 
 def test_retention_config_get_and_put(client):
     response = client.put(
-        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": 5}
+        "/retention-config",
+        json={
+            "deletion_reason_required": True,
+            "reminder_lead_days": 5,
+            "deletion_reason_catalog": ["Vorgang abgeschlossen"],
+        },
     )
     assert response.status_code == 200
     assert response.json()["reminder_lead_days"] == 5
+    assert response.json()["deletion_reason_catalog"] == ["Vorgang abgeschlossen"]
 
     get_response = client.get("/retention-config")
     assert get_response.json()["deletion_reason_required"] is True
+    assert get_response.json()["deletion_reason_catalog"] == ["Vorgang abgeschlossen"]
     client.put(
         "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
     )

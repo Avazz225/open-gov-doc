@@ -8,6 +8,7 @@ const listFolderLegalHoldsMock = vi.fn();
 const createFolderLegalHoldMock = vi.fn();
 const releaseFolderLegalHoldMock = vi.fn();
 const putFolderRetentionMock = vi.fn();
+const getFolderRetentionConfigMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -17,6 +18,7 @@ vi.mock("@/lib/api", async () => {
     createFolderLegalHold: (...args: unknown[]) => createFolderLegalHoldMock(...args),
     releaseFolderLegalHold: (...args: unknown[]) => releaseFolderLegalHoldMock(...args),
     putFolderRetention: (...args: unknown[]) => putFolderRetentionMock(...args),
+    getFolderRetentionConfig: (...args: unknown[]) => getFolderRetentionConfigMock(...args),
   };
 });
 
@@ -65,6 +67,13 @@ describe("FolderRetentionModal", () => {
     createFolderLegalHoldMock.mockReset();
     releaseFolderLegalHoldMock.mockReset();
     putFolderRetentionMock.mockReset();
+    getFolderRetentionConfigMock.mockReset();
+    getFolderRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: [],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
   });
 
   it("saves a retention date and full-deletion flag with a reason", async () => {
@@ -92,6 +101,36 @@ describe("FolderRetentionModal", () => {
       })
     );
     expect(await screen.findByText("Gespeichert.")).toBeInTheDocument();
+  });
+
+  it("offers a curated reason dropdown plus 'Sonstiges' free text when a catalog is configured (Phase 31)", async () => {
+    getFolderRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: ["Vorgang abgeschlossen"],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    putFolderRetentionMock.mockResolvedValue({ ...FOLDER, full_deletion: true });
+
+    renderModal();
+    await waitFor(() => expect(getFolderRetentionConfigMock).toHaveBeenCalledWith("token-123"));
+
+    fireEvent.click(screen.getByLabelText(/vollständig löschen/));
+    expect(screen.queryByLabelText("Löschgrund (sonstiges)")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Löschgrund"), { target: { value: "__other__" } });
+    fireEvent.change(screen.getByLabelText("Löschgrund (sonstiges)"), {
+      target: { value: "Individueller Grund" },
+    });
+    fireEvent.click(screen.getByText("Speichern"));
+
+    await waitFor(() =>
+      expect(putFolderRetentionMock).toHaveBeenCalledWith("token-123", "folder-1", {
+        retentionUntil: null,
+        fullDeletion: true,
+        reason: "Individueller Grund",
+      })
+    );
   });
 
   it("sets a legal hold and then offers to release it", async () => {

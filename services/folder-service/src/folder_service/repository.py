@@ -422,6 +422,7 @@ async def get_retention_config(session: AsyncSession) -> RetentionConfig:
             id=_RETENTION_CONFIG_ID,
             deletion_reason_required=False,
             reminder_lead_days=None,
+            deletion_reason_catalog=[],
             updated_at=datetime.now(UTC),
         )
         session.add(config)
@@ -430,11 +431,16 @@ async def get_retention_config(session: AsyncSession) -> RetentionConfig:
 
 
 async def update_retention_config(
-    session: AsyncSession, *, deletion_reason_required: bool, reminder_lead_days: int | None
+    session: AsyncSession,
+    *,
+    deletion_reason_required: bool,
+    reminder_lead_days: int | None,
+    deletion_reason_catalog: list[str],
 ) -> RetentionConfig:
     config = await get_retention_config(session)
     config.deletion_reason_required = deletion_reason_required
     config.reminder_lead_days = reminder_lead_days
+    config.deletion_reason_catalog = deletion_reason_catalog
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config

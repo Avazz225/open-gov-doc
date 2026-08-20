@@ -236,12 +236,17 @@ async def test_deletion_register_entry_roundtrip(session):
 async def test_retention_config_defaults_and_update(session):
     config = await repository.get_retention_config(session)
     assert config.deletion_reason_required is False
+    assert config.deletion_reason_catalog == []
 
     updated = await repository.update_retention_config(
-        session, deletion_reason_required=True, reminder_lead_days=7
+        session,
+        deletion_reason_required=True,
+        reminder_lead_days=7,
+        deletion_reason_catalog=["Dublette"],
     )
     assert updated.deletion_reason_required is True
     assert updated.reminder_lead_days == 7
+    assert updated.deletion_reason_catalog == ["Dublette"]
 
 
 async def test_trash_config_defaults_and_update(session):

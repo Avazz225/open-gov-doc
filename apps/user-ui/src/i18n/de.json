@@ -54,7 +54,9 @@
     "submitting": "Lade hoch...",
     "error": "Upload fehlgeschlagen",
     "close": "Schließen",
-    "dropHint": "Datei hierher ziehen oder über das Feld unten auswählen"
+    "dropHint": "Datei hierher ziehen oder über das Feld unten auswählen",
+    "draftLabel": "Als Entwurf anlegen (Kennzeichen erst bei Registrierung vergeben)",
+    "draftHint": "Das Dokument erhält beim Anlegen noch kein Kennzeichen - es kann später über \"Registrieren\" nachgeholt werden."
   },
   "iconRail": {
     "label": "Cross-Cutting-Navigation",
@@ -140,7 +142,12 @@
     "noObjectType": "Kein Objekttyp zugewiesen - keine weiteren Attribute.",
     "loadObjectTypeError": "Objekttyp konnte nicht geladen werden",
     "saveError": "Speichern fehlgeschlagen",
-    "saving": "Speichere..."
+    "saving": "Speichere...",
+    "draftBadge": "Entwurf",
+    "draftHint": "Dieses Dokument ist noch nicht registriert - es hat noch kein Kennzeichen.",
+    "registerAction": "Registrieren",
+    "registering": "Registriere...",
+    "registerError": "Registrierung fehlgeschlagen"
   },
   "signatures": {
     "heading": "Signaturen",
@@ -166,6 +173,9 @@
     "retentionUntilLabel": "Aufbewahren bis",
     "fullDeletionLabel": "Nach Ablauf vollständig löschen (Zwangslöschung)",
     "reasonLabel": "Löschgrund",
+    "reasonSelectPlaceholder": "Bitte auswählen...",
+    "reasonOther": "Sonstiges",
+    "reasonOtherLabel": "Löschgrund (sonstiges)",
     "save": "Speichern",
     "saving": "Speichere...",
     "saved": "Gespeichert.",

@@ -58,6 +58,12 @@ class AlreadyReleasedError(Exception):
     """A legal hold was already released previously (5.2, since P7-S1)."""
 
 
+class AlreadyRegisteredError(Exception):
+    """Register attempt for a document that already has a `registered_at`
+    (post-roadmap phase 31 session 2, ADR 0113) - registration is a one-way
+    transition, there is no "un-register"."""
+
+
 async def get_document(session: AsyncSession, document_id: str) -> Document:
     document = await session.get(Document, document_id)
     if document is None:
@@ -115,6 +121,7 @@ async def create_document(
     originating_case_id: str | None = None,
     retention_until: datetime | None = None,
     archive_after: datetime | None = None,
+    draft: bool = False,
 ) -> Document:
     now = datetime.now(UTC)
     document = Document(
@@ -139,6 +146,11 @@ async def create_document(
         # `ObjectType.default_archive_after_days`, independent of
         # retention_until (see models.py Document.archive_after).
         archive_after=archive_after,
+        # Draft / pre-registration lifecycle (post-roadmap phase 31 session
+        # 2, ADR 0113): a regular document is "registered" the moment it is
+        # created (no `Kennzeichen` was withheld), a draft stays `None`
+        # until `register_document` below is called explicitly.
+        registered_at=None if draft else now,
     )
     session.add(document)
     session.add(
@@ -183,6 +195,29 @@ async def update_document_metadata(
     if folder_id is not None:
         document.folder_id = folder_id
     document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return document
+
+
+async def register_document(
+    session: AsyncSession, document_id: str, *, kennzeichen: str | None
+) -> Document:
+    """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
+    0113) - the counterpart to the at-creation-time assignment in
+    `create_document` above, for a document created with `draft=True`.
+    `kennzeichen` is resolved by the caller (`main.py`, via
+    `ObjectTypeClient.next_kennzeichen`) since that is an HTTP call to
+    Object-Type Service, not a repository concern; `None` here simply means
+    no generator is configured for the document's object type, exactly like
+    at creation time. One-way: once registered, a document cannot be
+    un-registered again."""
+    document = await get_document(session, document_id)
+    if document.registered_at is not None:
+        raise AlreadyRegisteredError(f"document_id {document_id!r} ist bereits registriert")
+    if kennzeichen is not None:
+        document.attributes = {**document.attributes, "Kennzeichen": kennzeichen}
+    document.registered_at = datetime.now(UTC)
+    document.updated_at = document.registered_at
     await session.flush()
     return document
 
@@ -670,6 +705,7 @@ async def get_retention_config(session: AsyncSession) -> RetentionConfig:
             id=_RETENTION_CONFIG_ID,
             deletion_reason_required=False,
             reminder_lead_days=None,
+            deletion_reason_catalog=[],
             updated_at=datetime.now(UTC),
         )
         session.add(config)
@@ -678,11 +714,16 @@ async def get_retention_config(session: AsyncSession) -> RetentionConfig:
 
 
 async def update_retention_config(
-    session: AsyncSession, *, deletion_reason_required: bool, reminder_lead_days: int | None
+    session: AsyncSession,
+    *,
+    deletion_reason_required: bool,
+    reminder_lead_days: int | None,
+    deletion_reason_catalog: list[str],
 ) -> RetentionConfig:
     config = await get_retention_config(session)
     config.deletion_reason_required = deletion_reason_required
     config.reminder_lead_days = reminder_lead_days
+    config.deletion_reason_catalog = deletion_reason_catalog
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config

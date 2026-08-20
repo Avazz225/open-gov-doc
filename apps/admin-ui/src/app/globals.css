@@ -260,6 +260,45 @@ body {
   gap: 0.25rem;
 }
 
+/* Deletion-reason catalog editor (post-roadmap phase 31 session 1, ADR
+   0112) - spans the full form-grid width instead of becoming a single
+   narrow grid cell, since it holds a list plus an add-row, not one field. */
+.deletion-reason-catalog {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.deletion-reason-catalog ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.deletion-reason-catalog li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--dms-border);
+  border-radius: 4px;
+}
+
+.deletion-reason-catalog-add {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.deletion-reason-catalog-add input {
+  flex: 1;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

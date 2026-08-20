@@ -99,6 +99,16 @@ class Document(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archive_format: Mapped[str | None] = mapped_column(String(16), nullable=True)
     dehydrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Draft / pre-registration lifecycle (post-roadmap phase 31 session 2,
+    # ADR 0113): `None` while a document is a draft - created with
+    # `draft=True`, no `Kennzeichen` assigned yet, excluded from anything
+    # that assumes a real reference number (mail-connector matching,
+    # `list_documents_by_kennzeichen`, both naturally, since the attribute
+    # key is simply absent). Set once, at creation time for a regular
+    # (non-draft) document or via `POST .../register` for a former draft -
+    # never reset afterwards (mirrors real-world reference-number issuance,
+    # which is likewise never revoked once handed out).
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -230,6 +240,13 @@ class RetentionConfig(Base):
     # None = no deletion reminder (factory setting, "used rather
     # rarely" according to the concept).
     reminder_lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Admin-curated suggestions for the free-text `reason` field on
+    # `PUT .../retention` (post-roadmap phase 31 session 1, ADR 0112) - a
+    # UX convenience, not an enum constraint: the API still accepts any
+    # non-empty string, this list only powers the frontend's dropdown (plus
+    # an always-available "Sonstiges" choice that opens free text, never
+    # stored in this list itself).
+    deletion_reason_catalog: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

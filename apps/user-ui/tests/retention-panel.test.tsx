@@ -8,6 +8,7 @@ const listLegalHoldsMock = vi.fn();
 const createLegalHoldMock = vi.fn();
 const releaseLegalHoldMock = vi.fn();
 const putDocumentRetentionMock = vi.fn();
+const getRetentionConfigMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -17,6 +18,7 @@ vi.mock("@/lib/api", async () => {
     createLegalHold: (...args: unknown[]) => createLegalHoldMock(...args),
     releaseLegalHold: (...args: unknown[]) => releaseLegalHoldMock(...args),
     putDocumentRetention: (...args: unknown[]) => putDocumentRetentionMock(...args),
+    getRetentionConfig: (...args: unknown[]) => getRetentionConfigMock(...args),
   };
 });
 
@@ -52,6 +54,7 @@ const DOCUMENT: DocumentSummary = {
   retention_until: null,
   full_deletion: false,
   pending_deletion_reason: null,
+  registered_at: "2026-01-01T00:00:00Z",
 };
 
 function renderPanel(document: DocumentSummary = DOCUMENT) {
@@ -69,6 +72,13 @@ describe("RetentionPanel", () => {
     createLegalHoldMock.mockReset();
     releaseLegalHoldMock.mockReset();
     putDocumentRetentionMock.mockReset();
+    getRetentionConfigMock.mockReset();
+    getRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: [],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
   });
 
   it("saves a retention date and full-deletion flag with a reason", async () => {
@@ -94,6 +104,45 @@ describe("RetentionPanel", () => {
       })
     );
     expect(await screen.findByText("Gespeichert.")).toBeInTheDocument();
+  });
+
+  it("offers a curated reason dropdown plus 'Sonstiges' free text when a catalog is configured (Phase 31)", async () => {
+    getRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: ["Aufbewahrungsfrist abgelaufen", "Dublette"],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    putDocumentRetentionMock.mockResolvedValue({ ...DOCUMENT, full_deletion: true });
+
+    renderPanel();
+    await waitFor(() => expect(getRetentionConfigMock).toHaveBeenCalledWith("token-123"));
+
+    fireEvent.click(screen.getByLabelText(/vollständig löschen/));
+    // No free-text input yet - the catalog dropdown is the default view.
+    expect(screen.queryByLabelText("Löschgrund (sonstiges)")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Löschgrund"), { target: { value: "Dublette" } });
+    fireEvent.click(screen.getByText("Speichern"));
+    await waitFor(() =>
+      expect(putDocumentRetentionMock).toHaveBeenCalledWith("token-123", "doc-1", {
+        retentionUntil: null,
+        fullDeletion: true,
+        reason: "Dublette",
+      })
+    );
+
+    fireEvent.change(screen.getByLabelText("Löschgrund"), { target: { value: "__other__" } });
+    const freeTextInput = screen.getByLabelText("Löschgrund (sonstiges)");
+    fireEvent.change(freeTextInput, { target: { value: "Individueller Grund" } });
+    fireEvent.click(screen.getByText("Speichern"));
+    await waitFor(() =>
+      expect(putDocumentRetentionMock).toHaveBeenCalledWith("token-123", "doc-1", {
+        retentionUntil: null,
+        fullDeletion: true,
+        reason: "Individueller Grund",
+      })
+    );
   });
 
   it("sets a legal hold and then offers to release it", async () => {

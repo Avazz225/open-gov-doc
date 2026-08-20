@@ -57,6 +57,7 @@ from document_service.schemas import (
     CountActiveResult,
     DeletionRegisterEntryOut,
     DocumentOut,
+    DocumentRegisterRequest,
     DocumentUpdate,
     DocumentVersionOut,
     ExportConfigIn,
@@ -546,6 +547,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ"
             )
         )
+        # Deletion-reason catalog (post-roadmap phase 31 session 1, ADR
+        # 0112) - same ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE document.retention_config "
+                "ADD COLUMN IF NOT EXISTS deletion_reason_catalog JSON DEFAULT '[]'::json NOT NULL"
+            )
+        )
+        # Draft / pre-registration lifecycle (post-roadmap phase 31 session
+        # 2, ADR 0113): backfill only runs the very first time the column is
+        # added - on every later startup `registered_at IS NULL` for a real
+        # (still unregistered) draft must be left untouched, so this can't
+        # be a plain unconditional "backfill nulls" statement like the
+        # simpler ad-hoc migrations above.
+        registered_at_exists = await conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = 'document' AND table_name = 'document' "
+                "AND column_name = 'registered_at'"
+            )
+        )
+        if registered_at_exists.scalar() is None:
+            await conn.execute(
+                text("ALTER TABLE document.document ADD COLUMN registered_at TIMESTAMPTZ")
+            )
+            await conn.execute(text("UPDATE document.document SET registered_at = created_at"))
         # Schema drift correction (P15-S1, found live): in long-running
         # installations (including this dev environment), `object_type_id`
         # from a very early project phase still carries the VARCHAR type from
@@ -957,11 +984,14 @@ async def _prepare_document_fields(
     attributes: str | None,
     derived_from_document_id: str | None,
     derived_from_version_number: int | None,
+    draft: bool = False,
 ) -> tuple[dict, datetime | None, datetime | None]:
     """Shared validation/derivation for every document creation path -
     identical for `POST /documents` and `POST /documents/
     from-quarantine-release` (2.5, P15-S2), which differ only in the scan
-    step."""
+    step. `draft` (post-roadmap phase 31 session 2, ADR 0113) skips the
+    reference-number assignment below entirely - the document instead
+    stays unregistered until `POST /documents/{id}/register` is called."""
     try:
         parsed_attributes = json.loads(attributes) if attributes else {}
     except json.JSONDecodeError as exc:
@@ -1001,14 +1031,15 @@ async def _prepare_document_fields(
         if errors:
             raise HTTPException(status_code=400, detail={"errors": errors})
 
-        try:
-            kennzeichen = await app.state.object_type_client.next_kennzeichen(
-                object_type_id, parsed_attributes
-            )
-        except MissingKennzeichenAttributeError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if kennzeichen is not None:
-            parsed_attributes[KENNZEICHEN_ATTRIBUTE] = kennzeichen
+        if not draft:
+            try:
+                kennzeichen = await app.state.object_type_client.next_kennzeichen(
+                    object_type_id, parsed_attributes
+                )
+            except MissingKennzeichenAttributeError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if kennzeichen is not None:
+                parsed_attributes[KENNZEICHEN_ATTRIBUTE] = kennzeichen
 
         # Retention (5.2, since P7-S1): type default translated once into a
         # concrete date, no manual entry needed at creation time (can be
@@ -1046,6 +1077,7 @@ async def _persist_new_document(
     archive_after: datetime | None,
     event_type: str = "document.created",
     extra_event_payload: dict | None = None,
+    draft: bool = False,
 ) -> Document:
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
@@ -1070,9 +1102,15 @@ async def _persist_new_document(
         originating_case_id=originating_case_id,
         retention_until=retention_until,
         archive_after=archive_after,
+        draft=draft,
     )
     await session.commit()
-    event_payload = {"title": title, "created_by": created_by, "folder_id": folder_id}
+    event_payload = {
+        "title": title,
+        "created_by": created_by,
+        "folder_id": folder_id,
+        "draft": draft,
+    }
     if derived_from_document_id is not None:
         event_payload["derived_from_document_id"] = derived_from_document_id
     if extra_event_payload:
@@ -1092,6 +1130,7 @@ async def create_document(
     derived_from_document_id: str | None = Form(None),
     derived_from_version_number: int | None = Form(None),
     originating_case_id: str | None = Form(None),
+    draft: bool = Form(False),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
@@ -1114,6 +1153,7 @@ async def create_document(
         attributes=attributes,
         derived_from_document_id=derived_from_document_id,
         derived_from_version_number=derived_from_version_number,
+        draft=draft,
     )
 
     data = await file.read()
@@ -1151,6 +1191,7 @@ async def create_document(
         originating_case_id=originating_case_id,
         retention_until=retention_until,
         archive_after=archive_after,
+        draft=draft,
     )
     if upload_started_at is not None:
         upload_sensor.observe(time.monotonic() - upload_started_at)
@@ -1529,6 +1570,49 @@ async def update_document(
     return updated
 
 
+@app.post("/documents/{document_id}/register", response_model=DocumentOut)
+async def register_document(
+    document_id: str,
+    payload: DocumentRegisterRequest,
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
+    0113) - assigns the reference number, if the object type has a
+    generator configured, at this point instead of at creation time (see
+    `draft` on `POST /documents`). No `kennzeichen_admin_role` gate here
+    (unlike the PATCH check above): registering a still-unregistered
+    document once is the intended lifecycle transition, not an override of
+    an already-assigned value."""
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    kennzeichen: str | None = None
+    if document.object_type_id is not None:
+        try:
+            kennzeichen = await app.state.object_type_client.next_kennzeichen(
+                document.object_type_id, document.attributes
+            )
+        except MissingKennzeichenAttributeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        registered = await repository.register_document(
+            session, document_id, kennzeichen=kennzeichen
+        )
+    except repository.AlreadyRegisteredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.registered",
+        subject=document_id,
+        payload={"kennzeichen": kennzeichen},
+        actor=payload.registered_by,
+    )
+    return registered
+
+
 @app.delete("/documents/{document_id}", response_model=DocumentOut)
 async def delete_document(
     document_id: str, deleted_by: str, session: AsyncSession = Depends(get_session)
@@ -1806,6 +1890,7 @@ async def put_retention_config(
         session,
         deletion_reason_required=body.deletion_reason_required,
         reminder_lead_days=body.reminder_lead_days,
+        deletion_reason_catalog=body.deletion_reason_catalog,
     )
     await session.commit()
     return config

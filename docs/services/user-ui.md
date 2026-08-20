@@ -170,6 +170,11 @@ Last session of Phase 5e — closes off the backend chain built in P5e-S1/S2 (Ob
 - **`FolderTree`** receives the same two values (`documentTypeById`/`kennzeichenShowByDefault`) as props passed through from `ExplorerPane` and applies the same helper to its document leaves — no own, second fetch in the tree view.
 - **`MetadataPanel`**: a dedicated `Kennzeichen` field outside the layout-driven attribute grid (the key is not a regular object type attribute, so it never appears in a generated/saved layout), visible as soon as `attributes["Kennzeichen"]` is present in the loaded document. **First UI-side role check in the entire system**: the field is `readOnly`/`disabled` unless `user.realm_roles` (from `GET /api/auth-service/me`) contains `dms-admin` — a purely client-side UX anticipation of the already server-side enforced `403` rule in the Document Service (P5e-S2), no standalone protection. An unchanged, disabled value is submitted unchanged on save and therefore also passes the server-side old/new comparison without the role.
 
+## Draft / pre-registration lifecycle (Post-Roadmap Phase 31 Session 2, [ADR 0113](../adr/0113-draft-registration-lifecycle.md))
+
+- **`UploadForm`**: a "create as draft" checkbox, unchecked by default — checked, `uploadDocument()` sends `draft: true`, which the backend translates into `registered_at: null` and no `Kennzeichen` assignment.
+- **`MetadataPanel`**: whenever the open document's `registered_at` is `null`, a banner is shown above the metadata form — a `.badge.draft` ("Entwurf") plus a "Registrieren" button that calls the new `registerDocument()` API function and feeds its result through the existing `onSaved` callback (same tab/state refresh path as a metadata save). No dedicated list-row indicator was added — the plan calls for the object's state to be visibly distinct, which the detail-view badge already satisfies; a drafts filter in `ExplorerPane` was not built, see ADR 0113 "Consequences".
+
 ## Signatures (3.10, since P6-S7)
 
 New `components/SignaturesPanel.tsx`, rendered below the form in `MetadataPanel` — an add-on pattern like the OCR/renditions display in `PreviewPane` (own `list*` call, own load effect, non-blocking fallback UI), but as a separate section rather than within the preview itself, since it is document-bound, non-editable supplementary information.

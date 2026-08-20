@@ -28,6 +28,8 @@ interface SectionState {
   deletionReasonRequired: boolean;
   reminderLeadDaysInput: string;
   restorePeriodDaysInput: string;
+  deletionReasonCatalog: string[];
+  newReasonInput: string;
 }
 
 const initialSectionState: SectionState = {
@@ -41,6 +43,8 @@ const initialSectionState: SectionState = {
   deletionReasonRequired: false,
   reminderLeadDaysInput: "",
   restorePeriodDaysInput: "30",
+  deletionReasonCatalog: [],
+  newReasonInput: "",
 };
 
 // Retention/legal hold/forced deletion (5.2/5.2a, since P7-S1) - same
@@ -64,6 +68,7 @@ function RetentionSection({
     deletionReasonRequired: boolean;
     reminderLeadDays: number | null;
     restorePeriodDays: number;
+    deletionReasonCatalog: string[];
   }) => Promise<{ retention: RetentionConfig; trash: TrashConfig }>;
 }) {
   const { t } = useI18n();
@@ -81,6 +86,7 @@ function RetentionSection({
         reminderLeadDaysInput:
           retention.reminder_lead_days === null ? "" : String(retention.reminder_lead_days),
         restorePeriodDaysInput: String(trash.restore_period_days),
+        deletionReasonCatalog: retention.deletion_reason_catalog,
         isLoading: false,
       }));
     } catch (err) {
@@ -108,6 +114,7 @@ function RetentionSection({
         deletionReasonRequired: state.deletionReasonRequired,
         reminderLeadDays,
         restorePeriodDays: Number(state.restorePeriodDaysInput),
+        deletionReasonCatalog: state.deletionReasonCatalog,
       });
       setState((prev) => ({
         ...prev,
@@ -146,6 +153,58 @@ function RetentionSection({
             />
             {t("retentionSettings.deletionReasonRequired")}
           </label>
+
+          <div className="deletion-reason-catalog">
+            <span className="hint">{t("retentionSettings.deletionReasonCatalogHint")}</span>
+            {state.deletionReasonCatalog.length === 0 ? (
+              <p className="empty-state">{t("retentionSettings.deletionReasonCatalogEmpty")}</p>
+            ) : (
+              <ul>
+                {state.deletionReasonCatalog.map((entry, index) => (
+                  <li key={entry}>
+                    {entry}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setState((prev) => ({
+                          ...prev,
+                          deletionReasonCatalog: prev.deletionReasonCatalog.filter(
+                            (_, i) => i !== index
+                          ),
+                        }))
+                      }
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="deletion-reason-catalog-add">
+              <input
+                value={state.newReasonInput}
+                onChange={(e) => setState((prev) => ({ ...prev, newReasonInput: e.target.value }))}
+                placeholder={t("retentionSettings.deletionReasonCatalogAddPlaceholder")}
+              />
+              <button
+                type="button"
+                disabled={
+                  !state.newReasonInput.trim() ||
+                  state.deletionReasonCatalog.includes(state.newReasonInput.trim())
+                }
+                onClick={() =>
+                  setState((prev) => ({
+                    ...prev,
+                    deletionReasonCatalog: [...prev.deletionReasonCatalog, prev.newReasonInput.trim()],
+                    newReasonInput: "",
+                  }))
+                }
+              >
+                {t("retentionSettings.deletionReasonCatalogAdd")}
+              </button>
+            </div>
+          </div>
+
           <label>
             {t("retentionSettings.reminderLeadDays")}
             <input
@@ -220,6 +279,7 @@ export function RetentionSettings() {
             updateRetentionConfig(accessToken, {
               deletionReasonRequired: payload.deletionReasonRequired,
               reminderLeadDays: payload.reminderLeadDays,
+              deletionReasonCatalog: payload.deletionReasonCatalog,
             }),
             updateTrashConfig(accessToken, { restorePeriodDays: payload.restorePeriodDays }),
           ]);
@@ -242,6 +302,7 @@ export function RetentionSettings() {
             updateFolderRetentionConfig(accessToken, {
               deletionReasonRequired: payload.deletionReasonRequired,
               reminderLeadDays: payload.reminderLeadDays,
+              deletionReasonCatalog: payload.deletionReasonCatalog,
             }),
             updateFolderTrashConfig(accessToken, { restorePeriodDays: payload.restorePeriodDays }),
           ]);

@@ -35,6 +35,7 @@ from case_service.schemas import (
     CaseNumberConfigIn,
     CaseNumberConfigOut,
     CaseOut,
+    CaseRegisterRequest,
 )
 from case_service.settings import Settings
 from case_service.workflow_client import ProcessDefinitionUnknownError, WorkflowClient
@@ -68,6 +69,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text('ALTER TABLE "case".cases ADD COLUMN IF NOT EXISTS vorgangsnummer VARCHAR(64)')
         )
+        # Draft / pre-registration lifecycle (post-roadmap phase 31 session
+        # 2, ADR 0113): backfill only runs the very first time the column is
+        # added - unlike `vorgangsnummer` above (deliberately never
+        # backfilled), every already-existing case IS considered already
+        # registered (it already has a real Vorgangsnummer or predates the
+        # numbering scheme entirely, either way it's not a genuine new-style
+        # draft) - but only at that one first-add moment, never again, or a
+        # real still-unregistered draft's `NULL` would be overwritten on
+        # every later restart.
+        registered_at_exists = await conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = 'case' AND table_name = 'cases' "
+                "AND column_name = 'registered_at'"
+            )
+        )
+        if registered_at_exists.scalar() is None:
+            await conn.execute(
+                text('ALTER TABLE "case".cases ADD COLUMN registered_at TIMESTAMPTZ')
+            )
+            await conn.execute(text('UPDATE "case".cases SET registered_at = created_at'))
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -245,8 +267,10 @@ async def create_case(
     # Case number (2.3/2.5, P15-S3): starting with this session, every new
     # circulation folder gets a server-generated, installation-wide unique
     # reference (basis for automatically matching incoming mail via the new
-    # mail-connector).
-    vorgangsnummer = await repository.next_vorgangsnummer(session)
+    # mail-connector). Draft / pre-registration lifecycle (post-roadmap
+    # phase 31 session 2, ADR 0113): skipped entirely when `draft=True` -
+    # the case instead stays unregistered until `POST .../register`.
+    vorgangsnummer = None if payload.draft else await repository.next_vorgangsnummer(session)
 
     case = await repository.create_case(
         session,
@@ -258,6 +282,7 @@ async def create_case(
         process_instance_id=instance["id"],
         created_by=payload.created_by,
         vorgangsnummer=vorgangsnummer,
+        draft=payload.draft,
     )
     await session.commit()
     await publish_event(
@@ -265,6 +290,34 @@ async def create_case(
         subject=case_id,
         payload={"name": payload.name, "created_by": payload.created_by},
         actor=payload.created_by,
+    )
+    return case
+
+
+@app.post("/cases/{case_id}/register", response_model=CaseOut)
+async def register_case(
+    case_id: str,
+    payload: CaseRegisterRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> CaseOut:
+    """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
+    0113) - assigns the Vorgangsnummer at this point instead of at creation
+    time (see `draft` on `POST /cases`)."""
+    await _require_case_permission(x_dms_principal, access_type="write")
+    vorgangsnummer = await repository.next_vorgangsnummer(session)
+    try:
+        case = await repository.register_case(session, case_id, vorgangsnummer=vorgangsnummer)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.AlreadyRegisteredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "case.registered",
+        subject=case_id,
+        payload={"vorgangsnummer": vorgangsnummer},
+        actor=payload.registered_by,
     )
     return case
 

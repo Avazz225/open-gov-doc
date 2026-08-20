@@ -656,6 +656,10 @@ export async function updateUploadConfig(
 export interface RetentionConfig {
   deletion_reason_required: boolean;
   reminder_lead_days: number | null;
+  // Admin-curated suggestions for the free-text `reason` field on
+  // `PUT .../retention` (post-roadmap phase 31 session 1, ADR 0112) - a UX
+  // convenience only, the backend still accepts any non-empty string.
+  deletion_reason_catalog: string[];
   updated_at: string;
 }
 
@@ -666,7 +670,11 @@ export async function getRetentionConfig(token: string): Promise<RetentionConfig
 
 export async function updateRetentionConfig(
   token: string,
-  payload: { deletionReasonRequired: boolean; reminderLeadDays: number | null }
+  payload: {
+    deletionReasonRequired: boolean;
+    reminderLeadDays: number | null;
+    deletionReasonCatalog: string[];
+  }
 ): Promise<RetentionConfig> {
   const response = await request(
     "document-service",
@@ -677,6 +685,7 @@ export async function updateRetentionConfig(
       body: JSON.stringify({
         deletion_reason_required: payload.deletionReasonRequired,
         reminder_lead_days: payload.reminderLeadDays,
+        deletion_reason_catalog: payload.deletionReasonCatalog,
       }),
     },
     token
@@ -735,7 +744,11 @@ export async function getFolderRetentionConfig(token: string): Promise<Retention
 
 export async function updateFolderRetentionConfig(
   token: string,
-  payload: { deletionReasonRequired: boolean; reminderLeadDays: number | null }
+  payload: {
+    deletionReasonRequired: boolean;
+    reminderLeadDays: number | null;
+    deletionReasonCatalog: string[];
+  }
 ): Promise<RetentionConfig> {
   const response = await request(
     "folder-service",
@@ -746,6 +759,7 @@ export async function updateFolderRetentionConfig(
       body: JSON.stringify({
         deletion_reason_required: payload.deletionReasonRequired,
         reminder_lead_days: payload.reminderLeadDays,
+        deletion_reason_catalog: payload.deletionReasonCatalog,
       }),
     },
     token

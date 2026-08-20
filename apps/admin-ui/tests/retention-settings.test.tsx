@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RetentionSettings } from "@/components/RetentionSettings";
 import { I18nProvider } from "@/i18n";
@@ -75,6 +75,7 @@ describe("RetentionSettings", () => {
     getFolderRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: false,
       reminder_lead_days: null,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-01T00:00:00Z",
     });
     getFolderTrashConfigMock.mockResolvedValue({
@@ -87,6 +88,7 @@ describe("RetentionSettings", () => {
     getRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: true,
       reminder_lead_days: 14,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-01T00:00:00Z",
     });
     getTrashConfigMock.mockResolvedValue({
@@ -96,6 +98,7 @@ describe("RetentionSettings", () => {
     getFolderRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: false,
       reminder_lead_days: 7,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-01T00:00:00Z",
     });
     getFolderTrashConfigMock.mockResolvedValue({
@@ -134,6 +137,7 @@ describe("RetentionSettings", () => {
     getRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: false,
       reminder_lead_days: null,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-01T00:00:00Z",
     });
     getTrashConfigMock.mockResolvedValue({
@@ -143,6 +147,7 @@ describe("RetentionSettings", () => {
     updateRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: true,
       reminder_lead_days: 7,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-02T00:00:00Z",
     });
     updateTrashConfigMock.mockResolvedValue({
@@ -170,6 +175,7 @@ describe("RetentionSettings", () => {
     expect(updateRetentionConfigMock).toHaveBeenCalledWith("token-123", {
       deletionReasonRequired: true,
       reminderLeadDays: 7,
+      deletionReasonCatalog: [],
     });
     expect(updateTrashConfigMock).toHaveBeenCalledWith("token-123", {
       restorePeriodDays: 60,
@@ -180,6 +186,7 @@ describe("RetentionSettings", () => {
     getRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: false,
       reminder_lead_days: null,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-01T00:00:00Z",
     });
     getTrashConfigMock.mockResolvedValue({
@@ -189,6 +196,7 @@ describe("RetentionSettings", () => {
     updateFolderRetentionConfigMock.mockResolvedValue({
       deletion_reason_required: true,
       reminder_lead_days: 5,
+      deletion_reason_catalog: [],
       updated_at: "2026-01-02T00:00:00Z",
     });
     updateFolderTrashConfigMock.mockResolvedValue({
@@ -215,10 +223,59 @@ describe("RetentionSettings", () => {
     expect(updateFolderRetentionConfigMock).toHaveBeenCalledWith("token-123", {
       deletionReasonRequired: true,
       reminderLeadDays: 5,
+      deletionReasonCatalog: [],
     });
     expect(updateFolderTrashConfigMock).toHaveBeenCalledWith("token-123", {
       restorePeriodDays: 90,
     });
     expect(updateRetentionConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("adds and removes deletion-reason catalog entries, then saves them (Phase 31)", async () => {
+    getRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: ["Dublette"],
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    getTrashConfigMock.mockResolvedValue({
+      restore_period_days: 30,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    updateRetentionConfigMock.mockResolvedValue({
+      deletion_reason_required: false,
+      reminder_lead_days: null,
+      deletion_reason_catalog: ["Aufbewahrungsfrist abgelaufen"],
+      updated_at: "2026-01-02T00:00:00Z",
+    });
+    updateTrashConfigMock.mockResolvedValue({
+      restore_period_days: 30,
+      updated_at: "2026-01-02T00:00:00Z",
+    });
+
+    renderRetentionSettings();
+    await within(documentsCard()).findByText("Dublette");
+
+    // Remove the pre-existing entry.
+    fireEvent.click(within(documentsCard()).getByRole("button", { name: "Löschen" }));
+    expect(within(documentsCard()).queryByText("Dublette")).not.toBeInTheDocument();
+
+    // Add a new one.
+    fireEvent.change(
+      within(documentsCard()).getByPlaceholderText("Neuer Löschgrund"),
+      { target: { value: "Aufbewahrungsfrist abgelaufen" } }
+    );
+    fireEvent.click(within(documentsCard()).getByRole("button", { name: "Hinzufügen" }));
+    expect(within(documentsCard()).getByText("Aufbewahrungsfrist abgelaufen")).toBeInTheDocument();
+
+    fireEvent.click(within(documentsCard()).getByRole("button", { name: "Speichern" }));
+
+    await waitFor(() =>
+      expect(updateRetentionConfigMock).toHaveBeenCalledWith("token-123", {
+        deletionReasonRequired: false,
+        reminderLeadDays: null,
+        deletionReasonCatalog: ["Aufbewahrungsfrist abgelaufen"],
+      })
+    );
   });
 });

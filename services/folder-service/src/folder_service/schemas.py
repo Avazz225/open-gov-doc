@@ -109,6 +109,7 @@ class ReconcileRestoreDeletionRequest(BaseModel):
 class RetentionConfigIn(BaseModel):
     deletion_reason_required: bool = False
     reminder_lead_days: int | None = None
+    deletion_reason_catalog: list[str] = []
 
 
 class RetentionConfigOut(RetentionConfigIn):

@@ -117,6 +117,10 @@ class RetentionConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     deletion_reason_required: Mapped[bool] = mapped_column(Boolean, default=False)
     reminder_lead_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Admin-curated suggestions for the free-text `reason` field on
+    # `PUT .../retention` (post-roadmap phase 31 session 1, ADR 0112) - same
+    # UX-only mechanism as document-service's own copy of this field.
+    deletion_reason_catalog: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

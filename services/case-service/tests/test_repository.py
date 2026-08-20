@@ -33,6 +33,38 @@ async def test_get_case_or_none_returns_none_for_unknown_case(session):
     assert await repository.get_case_or_none(session, "does-not-exist") is None
 
 
+async def test_create_case_without_draft_is_registered_immediately(session):
+    case = await _make_case(session, vorgangsnummer="2026-001")
+    assert case.registered_at is not None
+
+
+async def test_create_case_as_draft_has_no_registered_at(session):
+    case = await _make_case(session, case_id="case-draft", draft=True)
+    assert case.registered_at is None
+    assert case.vorgangsnummer is None
+
+
+async def test_register_case_sets_registered_at_and_vorgangsnummer(session):
+    case = await _make_case(session, case_id="case-draft", draft=True)
+
+    registered = await repository.register_case(session, case.id, vorgangsnummer="2026-005")
+
+    assert registered.registered_at is not None
+    assert registered.vorgangsnummer == "2026-005"
+
+
+async def test_register_already_registered_case_raises(session):
+    case = await _make_case(session, vorgangsnummer="2026-002")  # not a draft
+
+    with pytest.raises(repository.AlreadyRegisteredError):
+        await repository.register_case(session, case.id, vorgangsnummer="2026-003")
+
+
+async def test_register_unknown_case_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.register_case(session, "does-not-exist", vorgangsnummer="2026-004")
+
+
 async def test_list_cases_filters_by_status_and_object_type(session):
     await _make_case(session, case_id="case-1", object_type_id=1)
     open_case_2 = await _make_case(session, case_id="case-2", object_type_id=2)
