@@ -81,11 +81,27 @@ class NatsEventBusClient(EventBusClient):
                     subject,
                 )
             else:
-                await msg.ack()
+                await _ack(msg)
             finally:
                 async with slot_free:
                     in_flight -= 1
                     slot_free.notify_all()
+
+        async def _ack(msg) -> None:
+            # `msg.ack()` itself can raise (e.g. `MsgAlreadyAckdError` on a
+            # redelivery race) - unguarded, that exception would surface
+            # only as an orphaned "Task exception was never retrieved" from
+            # `_run`'s fire-and-forget task (never logged with the subject,
+            # never affecting redelivery either way, since the message is
+            # already acked by definition of this error).
+            try:
+                await msg.ack()
+            except Exception:
+                logger.exception(
+                    "Bestätigung fehlgeschlagen (Subject %r) - Nachricht vermutlich "
+                    "bereits anderweitig bestätigt, keine weitere Aktion nötig",
+                    subject,
+                )
 
         async def _callback(msg) -> None:
             nonlocal in_flight
@@ -94,7 +110,7 @@ class NatsEventBusClient(EventBusClient):
                 # Exactly the previous behavior (no concurrency) - unchanged
                 # for any caller that doesn't set max_concurrency.
                 await handler(msg.data)
-                await msg.ack()
+                await _ack(msg)
                 return
             async with slot_free:
                 while in_flight >= limit:

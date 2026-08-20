@@ -81,6 +81,7 @@
 }
 
 :root[data-theme="light"] {
+  color-scheme: light;
   --dms-bg: #ffffff;
   --dms-fg: #1a1a1a;
   --dms-border: rgba(128, 128, 128, 0.25);
@@ -92,6 +93,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --dms-bg: #16181c;
   --dms-fg: #e8e8e8;
   --dms-border: rgba(200, 200, 200, 0.2);
@@ -105,6 +107,7 @@
 /* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
    keine transparenten Akzentflächen (schlecht lesbar bei hohem Kontrast). */
 :root[data-theme="high-contrast"] {
+  color-scheme: dark;
   --dms-bg: #000000;
   --dms-fg: #ffffff;
   --dms-border: #ffffff;
@@ -492,17 +495,6 @@ body {
 .version-select {
   display: block;
   margin-bottom: 0.5rem;
-  font-size: 0.9rem;
-}
-
-/* PDF export order override next to the Export button (post-roadmap
-   phase 28, ADR 0107) - inline label+select, same compact style as
-   .version-select. */
-.export-history-position {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0 0.5rem;
   font-size: 0.9rem;
 }
 

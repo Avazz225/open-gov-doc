@@ -545,6 +545,42 @@ configuration).
 
 **Definition of Done**: tests green (template resolution/rendering + regression for all 9 migrated handlers with AND without a configured row; new admin-ui component). New ADR 0111 (`EmailTemplate` model, combining `ApprovalActionConfig`/`kennzeichen_format` patterns). `PROGRESS.md` updated; `graphify update .` at phase end.
 
+## Phase 31 — eGov Feature Gap Closure
+
+The user provided the release-notes documentation of a mature, long-established commercial German
+government-sector (eGov) document management add-on — referred to throughout this phase and its ADRs
+only as **"the reference system,"** never by name — as a way to sharpen this project's own stated focus
+on government use ("OG Doc" as a government-focused product). Five parallel research passes read that
+document (roughly seven years of release history) cover to cover and extracted a ~300-entry feature
+inventory; a follow-up verification pass checked each candidate gap against this codebase's actual
+current state before it was allowed onto the list. Full inventory, current-state citations, and the
+explicit triage of what was deliberately **not** carried forward: see
+[`docs/egov-feature-gap-analysis.md`](docs/egov-feature-gap-analysis.md).
+
+Twelve sessions, grouped by dependency rather than by a fixed sub-phase split — P31-S9 (org-hierarchy
+foundation) blocks P31-S10/S11, otherwise sessions are independent and may run in any order.
+
+| Session | Deliverable |
+|---|---|
+| P31-S1 | Deletion reason codes: a `deletion_reason` field (fixed enum + "other: free text" fallback, admin-extensible catalog) added to the existing four-eyes force-delete flow (P6-S4/ADR 0060) — no new approval mechanism, purely a captured justification on an already-gated action. |
+| P31-S2 | Draft / pre-registration object lifecycle: documents and cases can be created without triggering the reference-number generator (P5e-S2), then explicitly "registered" via a new action that assigns the `Kennzeichen` at that point instead of at creation. Unregistered objects are visibly distinct (e.g. a `registered_at IS NULL` marker) and excluded from anything that assumes a real reference number. |
+| P31-S3 | Per-document classification level: `ClassificationLevel` (already modeled as a `Literal` on `ObjectType`, `object_type_service/models.py:79`) becomes a genuine per-document, per-version attribute rather than a fixed object-type default; a new dedicated role gates who may set or raise it, separate from the general `admin.object_config` capability that governs everything else about object types today. |
+| P31-S4 | Document redaction workflow: apply redaction regions to a document, burn them into a new PDF rendition (extends `rendering-service`), link the redacted copy back to the original via a typed cross-reference (extends the existing but never-wired provenance fields from P6-S3, `document_service/models.py:33-40`), and exclude the redacted copy's full-text index entry from exposing the removed content. |
+| P31-S5 | Records quarantine / retention-hold: a document/case can be moved into an administered holding area with restricted visibility and a configurable auto-delete condition, as a destruction-scheduling mechanism distinct from Legal Hold (ADR 0075) and from the existing, unrelated virus-scan quarantine (ADR 0052) — reuses Legal Hold's RBAC pattern rather than inventing new roles. |
+| P31-S6 | Output stamping: extend `rendering-service`'s `watermark.py` (currently a fixed diagonal text-only overlay, `POST /render/watermark`) with barcode/QR support and configurable position; wire it as an optional automatic step into the Phase 28 export pipeline. |
+| P31-S7 | Hand folders (reference compilations spanning multiple cases, not copies) and work trays (informal, permission-securable pre-record collaboration areas, promotable to a real record) — check for conceptual overlap with P31-S2's draft-object lifecycle before modeling a work tray as a fully separate concept, since the two are closely related. |
+| P31-S8 | Accessibility (Barrierefrei) compliance pass: an audit-and-fix session across all six frontend apps' iconography/contrast for classification-related UI, gender-neutral system messaging, and an explicit warning in the Phase 28 export flow when the source document isn't tagged/accessible-PDF. Directly relevant to BITV/EU accessibility-directive obligations for public-sector software. |
+| P31-S9 | Org-hierarchy foundation: `auth-service`/`permission-service` currently model only flat group membership — this session adds a real reporting-line concept (a principal's direct supervisor, and the supervisor chain derived from it) as a prerequisite for P31-S10 and P31-S11. Higher-risk/larger-scope session — validate the data model against real org-chart shapes (single vs. multiple supervisors) before committing. |
+| P31-S10 | Dynamic organizational-hierarchy-based temporary access grants: a workflow task can grant its assignee's supervisor, the full supervisor chain, or the assignee's/creator's org unit temporary access to the case for the task's duration, resolved at runtime from P31-S9's org-hierarchy data — distinct from and additional to the existing self-service delegation mechanism (ADR 0048). Depends on P31-S9. |
+| P31-S11 | Supervisor/team task oversight view: a new view (`reviewer-ui`) lets a manager see every open workflow task across their direct reports, using P31-S9's "who reports to me" data — the existing `TaskList` (ADR 0041) stays a flat, instance-agnostic list for the current user; this is a separate, org-hierarchy-aware view alongside it. Depends on P31-S9. |
+| P31-S12 | Central + decentralized inbox model with a cross-inbox routing registry ("Postbuch"): extends `mail-connector` from its current single-mailbox model (`docs/services/mail-connector.md`) to multiple named inboxes (one central, N per-department) plus a searchable log of every item's routing history between them. Sized as a substantial `mail-connector` extension in its own right — expect this session to run long or split further once scoped in detail. |
+| P31-S13 | General xdomea/XJustiz exchange: extend ADR 0029's `xdomea.py` (currently export-only, XDOMEA 4.0.0-only, scoped exclusively to `archival-service`'s disposal pipeline for `Case` objects) with an import direction, generalize beyond the disposal pipeline to general document/case export for inter-agency handoff, and add XJustiz support for judiciary exchange (zero references in the repo today). The largest and most complex item in this phase — sequenced last deliberately, after the foundation sessions above have proven out the patterns this will need to reuse (typed references, classification, redaction). |
+
+**Definition of Done**: tests green per session per `CONTRIBUTING.md`; a new ADR for each session with a
+non-trivial design decision (expect at least P31-S2, S3, S4, S5, S9, S10, S12, S13 to warrant one); docs
+updated (`docs/services/*.md` for every touched service, `packages/egov/README.md` if a session extends
+that package's scope); `PROGRESS.md` updated per session; `graphify update .` at phase end.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:

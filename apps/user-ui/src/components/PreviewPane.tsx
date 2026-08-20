@@ -122,11 +122,6 @@ export function PreviewPane({
   const [renditions, setRenditions] = useState<RenditionSummary[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  // PDF export with export history (post-roadmap phase 28, ADR 0107) -
-  // `null` means "use the installation default" (document-service
-  // `GET /export-config`), an explicit choice overrides it for this export
-  // only, same relationship as the backend's own default+override layering.
-  const [exportHistoryPosition, setExportHistoryPosition] = useState<"before" | "after" | "">("");
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   // Authenticated direct links (post-roadmap phase 29, ADR 0109).
@@ -255,7 +250,10 @@ export function PreviewPane({
         pdfArchive = expectsOfficeRendition
           ? findReadyRendition(fetchedRenditions, "pdf_archive")
           : undefined;
-        substitute = pdfArchive ? undefined : findReadyRendition(fetchedRenditions, "substitute_text");
+        substitute =
+          expectsOfficeRendition && !pdfArchive
+            ? findReadyRendition(fetchedRenditions, "substitute_text")
+            : undefined;
 
         if (pdfArchive || substitute || !expectsOfficeRendition) break;
         if (attempt === RENDITION_POLL_MAX_ATTEMPTS) break;
@@ -489,11 +487,7 @@ export function PreviewPane({
     setExportError(null);
     setExporting(true);
     try {
-      const blob = await exportDocument(
-        accessToken,
-        activeDocument.id,
-        exportHistoryPosition || undefined
-      );
+      const blob = await exportDocument(accessToken, activeDocument.id);
       triggerBrowserDownload(blob, `${activeDocument.title}-export.pdf`);
     } catch {
       setExportError(t("preview.exportErrorGeneric"));
@@ -695,19 +689,6 @@ export function PreviewPane({
       <button type="button" onClick={handleDownload}>
         {t("folderBrowser.download")}
       </button>
-      <label className="export-history-position">
-        {t("preview.exportHistoryPositionLabel")}
-        <select
-          value={exportHistoryPosition}
-          onChange={(event) =>
-            setExportHistoryPosition(event.target.value as "before" | "after" | "")
-          }
-        >
-          <option value="">{t("preview.exportHistoryPositionDefault")}</option>
-          <option value="after">{t("preview.exportHistoryPositionAfter")}</option>
-          <option value="before">{t("preview.exportHistoryPositionBefore")}</option>
-        </select>
-      </label>
       <button type="button" onClick={handleExport} disabled={exporting}>
         {exporting ? t("preview.exporting") : t("preview.export")}
       </button>

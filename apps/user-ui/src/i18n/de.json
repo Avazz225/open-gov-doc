@@ -445,10 +445,6 @@
     "export": "Exportieren",
     "exporting": "Exportiere...",
     "exportErrorGeneric": "Export fehlgeschlagen. Bitte später erneut versuchen.",
-    "exportHistoryPositionLabel": "Exporthistorie",
-    "exportHistoryPositionDefault": "Standard",
-    "exportHistoryPositionAfter": "nach dem Dokument",
-    "exportHistoryPositionBefore": "vor dem Dokument",
     "copyLink": "Link kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
     "linkCopyError": "Link konnte nicht kopiert werden."

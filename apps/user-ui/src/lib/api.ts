@@ -1075,18 +1075,12 @@ export async function downloadDocumentVersion(
 
 // PDF export with export history (post-roadmap phase 28, ADR 0107) - the
 // document's current version plus its export history, merged server-side
-// by rendering-service. `historyPosition` overrides the installation-wide
-// `ExportConfig` default (document-service `GET/PUT /export-config`) for
-// this call only, left `undefined` to use that default.
-export async function exportDocument(
-  token: string,
-  documentId: string,
-  historyPosition?: "before" | "after"
-): Promise<Blob> {
-  const query = historyPosition ? `?history_position=${historyPosition}` : "";
+// by rendering-service. The history position is a server-side setting
+// (document-service `GET/PUT /export-config`), not a per-request choice.
+export async function exportDocument(token: string, documentId: string): Promise<Blob> {
   const response = await request(
     "document-service",
-    `documents/${encodeURIComponent(documentId)}/export${query}`,
+    `documents/${encodeURIComponent(documentId)}/export`,
     { method: "POST" },
     token
   );

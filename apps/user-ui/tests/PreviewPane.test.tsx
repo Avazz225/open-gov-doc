@@ -180,6 +180,27 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(downloadDocumentVersionMock).toHaveBeenCalledWith("token-123", "d1", 1);
   });
 
+  it("zeigt bei einem später erneut geöffneten PDF weiterhin das native Embed, selbst wenn inzwischen eine substitute_text-Rendition existiert", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    // rendering-service erzeugt als Nebeneffekt der OCR-Textextraktion
+    // (rendering_service/pipeline.py, process_ocr_text) eine substitute_text-
+    // Rendition auch für PDFs mit echtem Textlayer - beim zweiten Öffnen ist
+    // sie typischerweise schon fertig, beim ersten Öffnen direkt nach dem
+    // Upload meist noch nicht (siehe Bugreport).
+    listRenditionsMock.mockResolvedValue([
+      makeRendition({ id: "substitute-1", rendition_type: "substitute_text" }),
+    ]);
+
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    const embed = await within(previewPane).findByTitle("vertrag.pdf");
+    expect(embed.tagName).toBe("EMBED");
+    expect(previewPane.querySelector("pre.preview-text")).not.toBeInTheDocument();
+  });
+
   it("zeigt das OCR-Seitenbild mit Wort-Overlay nur noch als Fallback für echte Scans (engine tesseract)", async () => {
     const doc = makeDocument({ title: "scan.pdf" });
     listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
@@ -376,7 +397,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     ).toBeInTheDocument();
   });
 
-  it("exportiert die aktuelle Version ohne Reihenfolge-Override, wenn kein Wert gewählt wurde (Phase 28)", async () => {
+  it("exportiert die aktuelle Version - die Reihenfolge ist eine Server-Einstellung, keine UI-Wahl (Phase 28)", async () => {
     const doc = makeDocument({ title: "vertrag.pdf" });
     listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
     downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
@@ -388,30 +409,11 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
     await within(previewPane).findByTitle("vertrag.pdf");
 
+    expect(within(previewPane).queryByLabelText("Exporthistorie")).not.toBeInTheDocument();
+
     await user.click(within(previewPane).getByText("Exportieren"));
 
-    expect(exportDocumentMock).toHaveBeenCalledWith("token-123", "d1", undefined);
-  });
-
-  it("exportiert mit der gewählten Reihenfolge, wenn eine explizit ausgewählt wurde (Phase 28)", async () => {
-    const doc = makeDocument({ title: "vertrag.pdf" });
-    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
-    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
-    exportDocumentMock.mockResolvedValue(new Blob(["%PDF-1.4 export"], { type: "application/pdf" }));
-
-    const user = userEvent.setup();
-    renderPreview(doc);
-
-    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
-    await within(previewPane).findByTitle("vertrag.pdf");
-
-    await user.selectOptions(
-      within(previewPane).getByLabelText("Exporthistorie"),
-      "before"
-    );
-    await user.click(within(previewPane).getByText("Exportieren"));
-
-    expect(exportDocumentMock).toHaveBeenCalledWith("token-123", "d1", "before");
+    expect(exportDocumentMock).toHaveBeenCalledWith("token-123", "d1");
   });
 
   it("zeigt bei einem fehlgeschlagenen Export eine Fehlermeldung (Phase 28)", async () => {

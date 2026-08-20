@@ -1,9 +1,12 @@
 import asyncio
 import os
 import uuid
+from unittest.mock import patch
 
+import nats.aio.msg
 import pytest
 from dms_eventbus_client import NatsEventBusClient, SubjectNotFoundError
+from nats.errors import MsgAlreadyAckdError
 
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 
@@ -151,6 +154,35 @@ async def test_max_concurrency_failed_handler_does_not_block_capacity(client):
     found = await _wait_until(lambda: len(processed) == 3)
     assert found
     assert set(processed) == {b"0", b"1", b"2"}
+
+
+async def test_ack_failure_after_successful_handler_is_logged_not_crashed(client):
+    """A real `msg.ack()` failure (e.g. `MsgAlreadyAckdError` on a
+    redelivery race) previously escaped `_run`'s fire-and-forget task
+    unguarded, surfacing only as an orphaned "Task exception was never
+    retrieved" - the handler itself already succeeded, so this must not
+    crash the subscription or the event loop, just get logged."""
+    bus, stream = client
+    processed = []
+    loop_exceptions = []
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(lambda loop, context: loop_exceptions.append(context))
+
+    async def handler(payload: bytes) -> None:
+        processed.append(payload)
+
+    with patch.object(nats.aio.msg.Msg, "ack", side_effect=MsgAlreadyAckdError()):
+        await bus.subscribe(f"{stream}.ping", handler, durable="test-consumer", max_concurrency=2)
+        await asyncio.sleep(0.2)
+        await bus.publish(f"{stream}.ping", b"hello")
+
+        found = await _wait_until(lambda: len(processed) == 1)
+        assert found
+        # The orphaned-task path (if still broken) would only surface via
+        # the loop's exception handler on the next event-loop tick.
+        await asyncio.sleep(0.1)
+
+    assert loop_exceptions == []
 
 
 async def _wait_until(predicate, timeout_seconds: float = 5.0, interval: float = 0.05) -> bool:
