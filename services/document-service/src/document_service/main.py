@@ -53,6 +53,7 @@ from document_service.schemas import (
     CascadeResult,
     CascadeTrashRequest,
     CheckinResult,
+    ClassificationLevelUpdate,
     CountActiveRequest,
     CountActiveResult,
     DeletionRegisterEntryOut,
@@ -573,6 +574,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 text("ALTER TABLE document.document ADD COLUMN registered_at TIMESTAMPTZ")
             )
             await conn.execute(text("UPDATE document.document SET registered_at = created_at"))
+        # Classification level (14.2, post-roadmap phase 31 session 3, ADR
+        # 0114) - purely additive, nullable columns on both tables, no
+        # backfill needed (`NULL` correctly means "unclassified" for every
+        # pre-existing row, unlike `registered_at` above).
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document "
+                "ADD COLUMN IF NOT EXISTS classification_level VARCHAR(32)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document_version "
+                "ADD COLUMN IF NOT EXISTS classification_level VARCHAR(32)"
+            )
+        )
         # Schema drift correction (P15-S1, found live): in long-running
         # installations (including this dev environment), `object_type_id`
         # from a very early project phase still carries the VARCHAR type from
@@ -985,7 +1002,7 @@ async def _prepare_document_fields(
     derived_from_document_id: str | None,
     derived_from_version_number: int | None,
     draft: bool = False,
-) -> tuple[dict, datetime | None, datetime | None]:
+) -> tuple[dict, datetime | None, datetime | None, str | None]:
     """Shared validation/derivation for every document creation path -
     identical for `POST /documents` and `POST /documents/
     from-quarantine-release` (2.5, P15-S2), which differ only in the scan
@@ -1020,6 +1037,7 @@ async def _prepare_document_fields(
 
     retention_until: datetime | None = None
     archive_after: datetime | None = None
+    classification_level: str | None = None
     if object_type_id is not None:
         errors = await app.state.object_type_client.validate(
             object_type_id,
@@ -1055,8 +1073,14 @@ async def _prepare_document_fields(
             archive_after = datetime.now(UTC) + timedelta(
                 days=object_type["default_archive_after_days"]
             )
+        # Classification level (14.2, post-roadmap phase 31 session 3, ADR
+        # 0114): a seed/default copied once, exactly like retention/archive
+        # above - not an ongoing constraint. The object type's own field
+        # (and its `applies_to=="document"`-only validation) is unchanged.
+        if object_type:
+            classification_level = object_type.get("classification_level")
 
-    return parsed_attributes, retention_until, archive_after
+    return parsed_attributes, retention_until, archive_after, classification_level
 
 
 async def _persist_new_document(
@@ -1078,6 +1102,7 @@ async def _persist_new_document(
     event_type: str = "document.created",
     extra_event_payload: dict | None = None,
     draft: bool = False,
+    classification_level: str | None = None,
 ) -> Document:
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
@@ -1103,6 +1128,7 @@ async def _persist_new_document(
         retention_until=retention_until,
         archive_after=archive_after,
         draft=draft,
+        classification_level=classification_level,
     )
     await session.commit()
     event_payload = {
@@ -1145,7 +1171,12 @@ async def create_document(
     if await app.state.license_limit_client.is_exceeded("documents"):
         raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
 
-    parsed_attributes, retention_until, archive_after = await _prepare_document_fields(
+    (
+        parsed_attributes,
+        retention_until,
+        archive_after,
+        classification_level,
+    ) = await _prepare_document_fields(
         session,
         title=title,
         folder_id=folder_id,
@@ -1192,6 +1223,7 @@ async def create_document(
         retention_until=retention_until,
         archive_after=archive_after,
         draft=draft,
+        classification_level=classification_level,
     )
     if upload_started_at is not None:
         upload_sensor.observe(time.monotonic() - upload_started_at)
@@ -1238,7 +1270,12 @@ async def create_document_from_quarantine_release(
     if await app.state.license_limit_client.is_exceeded("documents"):
         raise HTTPException(status_code=403, detail="Dokumentenlimit der Lizenz überschritten")
 
-    parsed_attributes, retention_until, archive_after = await _prepare_document_fields(
+    (
+        parsed_attributes,
+        retention_until,
+        archive_after,
+        classification_level,
+    ) = await _prepare_document_fields(
         session,
         title=title,
         folder_id=folder_id,
@@ -1268,6 +1305,7 @@ async def create_document_from_quarantine_release(
         archive_after=archive_after,
         event_type="document.created_from_quarantine_release",
         extra_event_payload={"source_scan_id": source_scan_id},
+        classification_level=classification_level,
     )
 
 
@@ -1334,9 +1372,8 @@ async def list_deleted_documents(
                 detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf den "
                 "vollständigen Papierkorb einsehen",
             )
-        classified_ids = await app.state.object_type_client.list_classified_document_type_ids()
         return await repository.list_deleted_documents(
-            session, folder_id=folder_id, exclude_object_type_ids=classified_ids
+            session, folder_id=folder_id, classified=False
         )
 
     if scope == "admin_classified":
@@ -1346,9 +1383,8 @@ async def list_deleted_documents(
                 detail=f"Nur die Rolle {settings.classified_trash_hard_delete_admin_role!r} darf "
                 "den Verschlusssachen-Papierkorb einsehen",
             )
-        classified_ids = await app.state.object_type_client.list_classified_document_type_ids()
         return await repository.list_deleted_documents(
-            session, folder_id=folder_id, include_object_type_ids=classified_ids
+            session, folder_id=folder_id, classified=True
         )
 
     raise HTTPException(status_code=422, detail=f"Unbekannter scope {scope!r}")
@@ -1363,7 +1399,9 @@ async def purge_document(
 ) -> None:
     """Manual, immediate permanent deletion from trash (2.5, P15-S1) -
     requires deletion administration (regular or classified documents,
-    depending on `ObjectType.classification_level`), independent of the
+    depending on `Document.classification_level`, post-roadmap phase 31
+    session 3 - previously derived from `ObjectType.classification_level`
+    via a live object-type-service call, see ADR 0114), independent of the
     automatic `_retention_poll_loop` (which calls the same
     `retention_actions.purge_expired_trash_entry` with
     `trigger="trash_expiry"` once `TrashConfig.restore_period_days` has
@@ -1378,13 +1416,9 @@ async def purge_document(
     if document.deleted_at is None:
         raise HTTPException(status_code=409, detail="Dokument befindet sich nicht im Papierkorb")
 
-    is_classified = False
-    if document.object_type_id is not None:
-        object_type = await app.state.object_type_client.get(document.object_type_id)
-        # Any level being set (regardless of which one) triggers the same
-        # gate as the purely binary `is_classified` used up to P17-S1
-        # (P17-S2, 14.2).
-        is_classified = bool(object_type and object_type.get("classification_level"))
+    # Any level being set (regardless of which one) triggers the same gate
+    # as the purely binary `is_classified` used up to P17-S1 (P17-S2, 14.2).
+    is_classified = document.classification_level is not None
     required_role = (
         settings.classified_trash_hard_delete_admin_role
         if is_classified
@@ -1611,6 +1645,57 @@ async def register_document(
         actor=payload.registered_by,
     )
     return registered
+
+
+async def _require_classification_permission(x_dms_principal: str) -> None:
+    """RBAC (post-roadmap phase 31 session 3, ADR 0114) - deliberately a
+    NEW domain-admin capability (`admin.classification`, role
+    "domain-admin-classification"), separate from `admin.object_config`
+    (which still governs the object type's own classification_level
+    default/seed value): setting or raising a specific document's actual
+    classification is a materially different, more sensitive action than
+    editing object-type schemas in general - same rationale as
+    `_require_legal_hold_permission` above, which this mirrors."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.classification"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Einstufungsverwaltung'"
+        )
+
+
+@app.put("/documents/{document_id}/classification-level", response_model=DocumentOut)
+async def set_document_classification_level(
+    document_id: str,
+    payload: ClassificationLevelUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    """Set or raise a document's classification level (14.2, post-roadmap
+    phase 31 session 3, ADR 0114) - see `repository.set_classification_level`
+    for the rank-ordering rule (only ever raises, `409` on an attempted
+    downgrade). Deliberately no way to clear/lower via this endpoint at
+    all - declassification is a separate, heavier process this session does
+    not build."""
+    await _require_classification_permission(x_dms_principal)
+    try:
+        updated = await repository.set_classification_level(
+            session, document_id, classification_level=payload.classification_level
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.ClassificationDowngradeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.classification.changed",
+        subject=document_id,
+        payload={"classification_level": payload.classification_level},
+        actor=payload.changed_by,
+    )
+    return updated
 
 
 @app.delete("/documents/{document_id}", response_model=DocumentOut)

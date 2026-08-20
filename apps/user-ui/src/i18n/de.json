@@ -168,6 +168,15 @@
     "statusInvalid": "Ungültig",
     "notSignable": "Für dieses Dateiformat ist keine elektronische Signatur möglich (nur PDF)."
   },
+  "classification": {
+    "paneLabel": "Einstufung",
+    "heading": "Einstufung",
+    "unclassified": "Nicht eingestuft",
+    "raiseToLabel": "Anheben auf",
+    "raiseAction": "Anheben",
+    "saving": "Speichere...",
+    "saveError": "Einstufung konnte nicht geändert werden"
+  },
   "retention": {
     "heading": "Aufbewahrung & Löschung",
     "retentionUntilLabel": "Aufbewahren bis",
@@ -444,6 +453,7 @@
     "versionConflictMarker": "⚠",
     "versionConflictBadge": "Konflikt",
     "versionConflictTooltip": "Diese Version ist als Konfliktversion markiert (paralleler Bearbeitungskonflikt beim Check-in).",
+    "versionClassificationTooltip": "Einstufung dieser Version zum Zeitpunkt des Check-ins - spätere Anhebungen der aktuellen Einstufung wirken sich nicht rückwirkend aus.",
     "versionCommentLabel": "Kommentar: {comment}",
     "pageSelectLabel": "Seite auswählen",
     "pageOption": "Seite {number}",

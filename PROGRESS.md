@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S2 (draft / pre-registration object lifecycle — see below under "Post-Roadmap: Phase 31"), the second session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S3 (per-document classification level — see below under "Post-Roadmap: Phase 31"), the third session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S3 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** any other Phase 31 session (P31-S4 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -3619,6 +3619,87 @@ returns `404` — identically confirmed for `case-service`'s `vorgangsnummer`. A
 (deleted afterward) drove the real `user-ui` end to end: upload with the draft checkbox checked → "Entwurf"
 badge visible on open → click "Registrieren" → badge disappears. Test data (two document-service documents,
 one case-service case) deleted afterward.
+
+### Post-Roadmap: Phase 31 Session 3 — per-document classification level (2026-08-20)
+
+Third Phase 31 session. `classification_level` (14.2) previously lived only on `ObjectType`
+(object-type-service) — a fixed, class-wide default, never a property of an actual document. This session
+adds `Document.classification_level` (nullable) and `DocumentVersion.classification_level` (a snapshot
+taken at check-in time) to document-service. At creation, the object type's own `classification_level` is
+copied once as a seed — the exact same copy-once pattern already used for `retention_until`/
+`archive_after` from `ObjectType.default_retention_days`/`default_archive_after_days`. From then on the
+document's own field is authoritative and independently raisable via a new `PUT
+/documents/{id}/classification-level`, gated by a brand-new `admin.classification` capability (role
+`domain-admin-classification`, permission-service) — deliberately separate from `admin.object_config`,
+which continues to govern only the object type's own default/seed value. See
+[ADR 0114](docs/adr/0114-per-document-classification-level.md) for the full rationale, in particular: (1)
+why the new role follows the newer `has_permission()`/permission-service-capability pattern
+(`admin.legal_hold`/`admin.quarantine` precedent since Phase 19) rather than the legacy `X-DMS-Roles`
+string-match pattern still used by the pre-existing, untouched `trash_hard_delete_admin_role`/
+`classified_trash_hard_delete_admin_role` settings; (2) why the endpoint only ever sets or raises (rank
+order `None` < VS-NfD < VS-VERTRAULICH < GEHEIM < STRENG GEHEIM, `409` on a strictly lower target, same
+level again is an idempotent no-op) with no way at all to clear/lower a document's classification —
+declassification is treated as a separate, heavier process this session deliberately does not build; (3)
+why `DocumentVersion.classification_level` is a snapshot at check-in time from the document's *current*
+value, never retroactively rewritten by a later raise, mirroring case-service's closure-snapshot
+principle from the two-stage reference model (2.3).
+
+A genuine architectural simplification fell out of making classification per-document: the classified-
+documents-trash listing (`GET /documents/deleted?scope=admin|admin_classified`) and the manual purge
+endpoint both used to resolve "is this document classified" via a live HTTP round trip to
+object-type-service on every call (`object_type_client.list_classified_document_type_ids()`, a
+`GET /object-types?applies_to=document&is_classified=true` bulk lookup translated into an
+`object_type_id IN/NOT IN (...)` filter). Both now read `Document.classification_level` directly — a
+plain `IS (NOT) NULL` column check, no cross-service call, no per-request object-type-service dependency
+for this path anymore. `list_classified_document_type_ids()` itself was deleted as dead code once both
+call sites were migrated; existing classified-trash/purge tests (which create a classified object type
+and upload a document under it) continue to pass unchanged, since the document now correctly inherits the
+classification at creation time — confirming the refactor is behavior-preserving from the outside.
+
+**Frontend (`user-ui`)**: new `lib/classification.ts` (pure `classificationRank()`/
+`raisableClassificationLevels()` functions, same testable-standalone-function style as `lib/kennzeichen.ts`
+from P5e-S3) and a new `ClassificationPanel` component attached below the metadata form (same
+standalone-panel pattern as `RetentionPanel`/`SignaturesPanel`) — shows the current level to every viewer,
+and for principals with `admin.classification` (`permissions.includes(...)`, the same RBAC UX pattern
+`RetentionPanel` already established for legal hold) a `<select>` restricted to same-or-higher levels plus
+a raise button. **A real bug caught before it shipped**: the raise button's "already at this level, disable
+it" check initially compared the selected value against `activeDocument.classification_level ??
+raisable[0]` — for an unclassified document this made the button wrongly start disabled (the fallback
+value equals the select's own default), even though going from unclassified to the first named level is a
+completely valid action. Fixed by comparing directly against `activeDocument.classification_level` with no
+fallback (a `null` document level never equals any named level string, so the comparison correctly reads
+"not a no-op" for that case) — caught by reasoning through the component logic before writing the
+Playwright verification, not found via a failing test. `PreviewPane`'s version selector also gained a
+small `.badge.classified` showing each version's own classification snapshot — the first genuinely new
+per-version-only display in this codebase (previously only intrinsic, immutable version metadata was ever
+shown per version, P23-S1).
+
+Tests: document-service 291 (previously 273, +18: 9 repository-level covering seed-on-create, raise from
+unclassified, raise between levels, idempotent same-level, downgrade rejection including that the document
+is left unchanged, unknown-document, check-in snapshot behavior, classified-trash-filter; 9 API-level
+covering upload seeding, 401/403/200/409/404 on the new endpoint, and a check-in-snapshots-current-level
+regression test); permission-service 137 (unchanged count — the new `DOMAIN_ADMIN_ROLES` row is covered
+automatically by the existing generic role-seeding-idempotency/role-count tests, which iterate the list
+itself rather than hardcoding an expected count). user-ui 215 (previously 205, +10: 4 pure
+`classification.ts` function tests via a new `classification.test.ts`, 6 `DocumentWorkspace` integration
+tests covering read-only display without the capability, the raise flow with it, and the disabled-at-
+current-level case). All `ruff`/`tsc`/`eslint`/`next build` gates clean. **A real deployment-ordering gotcha
+hit and resolved during this session**: the first `document-service` test run after adding the new
+`conftest.py` fixture (which grants `domain-admin-classification` to a test principal) failed with 290
+cascading errors, because `permission-service`'s own container hadn't been rebuilt yet — the role the
+fixture looked up by name didn't exist in the live database until `permission-service` was rebuilt and
+restarted first, running its own `ensure_domain_admin_roles` startup seed. Resolved by rebuilding/restarting
+`permission-service` before re-running `document-service`'s tests — documented here since the same ordering
+requirement will recur for any future session that adds a new domain-admin role and expects its own
+conftest fixture to find it immediately. **Fully verified live against the rebuilt stack**: curl round-trips
+confirmed a document uploaded under a classified object type correctly seeds `classification_level`;
+401/403/409/200 all confirmed exactly as designed for the new endpoint (including the idempotent-same-level
+200 case, initially mistaken for a downgrade during manual testing until re-checked against the actual rank
+comparison); a version checked in after a raise correctly snapshots the *new* current level, not the
+original seed. A temporary Playwright spec (deleted afterward) drove the real `user-ui` end to end: upload
+an unclassified document → "Nicht eingestuft" shown → click "Anheben" → "VS-NfD" badge shown — using a
+temporarily-granted role assignment on the bootstrapped `users-admin` technical account, revoked again
+after the run. All test data (test object type, test document, test role assignments) removed afterward.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

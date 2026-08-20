@@ -67,16 +67,5 @@ class ObjectTypeClient:
         response.raise_for_status()
         return response.json()["kennzeichen"]
 
-    async def list_classified_document_type_ids(self) -> set[int]:
-        """Classified documents trash (2.5, P15-S1) - returns the IDs of
-        all document object types classified as classified documents, so
-        that document-service can structurally separate the trash without
-        making an individual `get()` call per deleted document."""
-        response = await self._client.get(
-            "/object-types", params={"applies_to": "document", "is_classified": "true"}
-        )
-        response.raise_for_status()
-        return {row["id"] for row in response.json()}
-
     async def close(self) -> None:
         await self._client.aclose()

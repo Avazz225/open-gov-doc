@@ -586,6 +586,14 @@ export function PreviewPane({
               {t("preview.versionCommentLabel", { comment: currentVersionMeta.comment })}
             </span>
           )}
+          {currentVersionMeta?.classification_level && (
+            <span
+              className="badge classified version-classification-badge"
+              title={t("preview.versionClassificationTooltip")}
+            >
+              {currentVersionMeta.classification_level}
+            </span>
+          )}
         </>
       )}
 

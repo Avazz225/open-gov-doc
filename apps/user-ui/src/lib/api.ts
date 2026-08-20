@@ -566,6 +566,9 @@ export interface DocumentSummary {
   // ADR 0113) - `null` while a draft, set once at creation (non-draft) or
   // via `registerDocument()` below.
   registered_at: string | null;
+  // Classification level (14.2, post-roadmap phase 31 session 3, ADR 0114)
+  // - `null` = unclassified. See `setDocumentClassificationLevel()` below.
+  classification_level: string | null;
 }
 
 export async function listDocumentsInFolder(
@@ -650,6 +653,30 @@ export async function registerDocument(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ registered_by: registeredBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+// Classification level (14.2, post-roadmap phase 31 session 3, ADR 0114) -
+// set/raise only, gated server-side by `admin.classification`.
+export async function setDocumentClassificationLevel(
+  token: string,
+  documentId: string,
+  classificationLevel: string,
+  changedBy: string
+): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/classification-level`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        classification_level: classificationLevel,
+        changed_by: changedBy,
+      }),
     },
     token
   );
@@ -1096,6 +1123,10 @@ export interface DocumentVersion {
   comment: string | null;
   created_by: string;
   created_at: string;
+  // Classification-level snapshot at check-in time (post-roadmap phase 31
+  // session 3, ADR 0114) - never retroactively updated by a later raise on
+  // the owning document, see `Document.classification_level` below.
+  classification_level: string | null;
 }
 
 // Version history (P5-S3, user request) - the backend has existed since

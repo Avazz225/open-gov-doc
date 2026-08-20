@@ -137,6 +137,112 @@ async def test_register_unknown_document_raises(session):
         await repository.register_document(session, "does-not-exist", kennzeichen=None)
 
 
+# --- Classification level (post-roadmap phase 31 session 3, ADR 0114) -----
+
+
+async def test_create_document_with_classification_level_seeds_first_version(session):
+    document = await _make_document(session, classification_level="VS-NfD")
+    assert document.classification_level == "VS-NfD"
+
+    versions = await repository.list_versions(session, document.id)
+    assert versions[0].classification_level == "VS-NfD"
+
+
+async def test_create_document_without_classification_level_is_unclassified(session):
+    document = await _make_document(session)
+    assert document.classification_level is None
+
+
+async def test_set_classification_level_raises_from_unclassified(session):
+    document = await _make_document(session)
+
+    updated = await repository.set_classification_level(
+        session, document.id, classification_level="VS-NfD"
+    )
+
+    assert updated.classification_level == "VS-NfD"
+
+
+async def test_set_classification_level_raises_between_levels(session):
+    document = await _make_document(session, classification_level="VS-NfD")
+
+    updated = await repository.set_classification_level(
+        session, document.id, classification_level="GEHEIM"
+    )
+
+    assert updated.classification_level == "GEHEIM"
+
+
+async def test_set_classification_level_same_level_is_idempotent(session):
+    document = await _make_document(session, classification_level="GEHEIM")
+
+    updated = await repository.set_classification_level(
+        session, document.id, classification_level="GEHEIM"
+    )
+
+    assert updated.classification_level == "GEHEIM"
+
+
+async def test_set_classification_level_rejects_downgrade(session):
+    document = await _make_document(session, classification_level="GEHEIM")
+
+    with pytest.raises(repository.ClassificationDowngradeError):
+        await repository.set_classification_level(
+            session, document.id, classification_level="VS-NfD"
+        )
+
+    refreshed = await repository.get_document(session, document.id)
+    assert refreshed.classification_level == "GEHEIM"
+
+
+async def test_set_classification_level_unknown_document_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.set_classification_level(
+            session, "does-not-exist", classification_level="VS-NfD"
+        )
+
+
+async def test_checkin_version_snapshots_current_classification_level(session):
+    """A raise applied AFTER creation is reflected in the next check-in's
+    snapshot - the version does not just copy the object-type seed again."""
+    document = await _make_document(session, classification_level="VS-NfD")
+    await repository.set_classification_level(session, document.id, classification_level="GEHEIM")
+
+    version, _ = await repository.checkin_version(
+        session,
+        document.id,
+        expected_base_version_number=1,
+        storage_object_key="documents/x/cccc",
+        filename="vertrag.pdf",
+        content_type="application/pdf",
+        size_bytes=20,
+        checksum_sha256="c" * 64,
+        created_by="alice",
+    )
+
+    assert version.classification_level == "GEHEIM"
+
+    versions = await repository.list_versions(session, document.id)
+    # Version 1's already-recorded snapshot is untouched by the later raise.
+    assert versions[0].classification_level == "VS-NfD"
+    assert versions[1].classification_level == "GEHEIM"
+
+
+async def test_list_deleted_documents_classified_filter(session):
+    classified = await _make_document(
+        session, document_id="classified-doc", classification_level="VS-NfD"
+    )
+    unclassified = await _make_document(session, document_id="unclassified-doc")
+    await repository.delete_document(session, classified.id, deleted_by="alice")
+    await repository.delete_document(session, unclassified.id, deleted_by="alice")
+
+    classified_only = await repository.list_deleted_documents(session, classified=True)
+    unclassified_only = await repository.list_deleted_documents(session, classified=False)
+
+    assert [d.id for d in classified_only] == ["classified-doc"]
+    assert [d.id for d in unclassified_only] == ["unclassified-doc"]
+
+
 async def test_checkin_normal_advances_current_version(session):
     document = await _make_document(session)
 

@@ -42,6 +42,7 @@ const deleteFolderMock = vi.fn();
 const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
 const registerDocumentMock = vi.fn();
+const setDocumentClassificationLevelMock = vi.fn();
 const listRenditionsMock = vi.fn();
 const downloadRenditionContentMock = vi.fn();
 const listOcrResultsMock = vi.fn();
@@ -129,6 +130,8 @@ vi.mock("@/lib/api", () => ({
   getKennzeichenConfig: (...args: unknown[]) => getKennzeichenConfigMock(...args),
   updateDocumentMetadata: (...args: unknown[]) => updateDocumentMetadataMock(...args),
   registerDocument: (...args: unknown[]) => registerDocumentMock(...args),
+  setDocumentClassificationLevel: (...args: unknown[]) =>
+    setDocumentClassificationLevelMock(...args),
   listRenditions: (...args: unknown[]) => listRenditionsMock(...args),
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
@@ -164,7 +167,9 @@ vi.mock("@/lib/api", () => ({
 // role checking (P5e-S3) can set `realm_roles` explicitly - `vi.hoisted`
 // is needed since the `vi.mock` factory below runs earlier than normal
 // `const`/`let` declarations in the module.
-const { authState } = vi.hoisted(() => ({ authState: { realmRoles: [] as string[] } }));
+const { authState } = vi.hoisted(() => ({
+  authState: { realmRoles: [] as string[], permissions: [] as string[] },
+}));
 
 vi.mock("@/lib/auth-context", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth-context")>("@/lib/auth-context");
@@ -172,7 +177,7 @@ vi.mock("@/lib/auth-context", async () => {
     ...actual,
     useAuth: () => ({
       user: { sub: "u1", username: "alice", email: null, realm_roles: authState.realmRoles },
-      permissions: [],
+      permissions: authState.permissions,
       accessToken: "token-123",
       isLoading: false,
       login: vi.fn(),
@@ -194,6 +199,7 @@ const document1 = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   registered_at: "2026-01-01T00:00:00Z",
+  classification_level: null,
 };
 
 describe("DocumentWorkspace", () => {
@@ -218,6 +224,7 @@ describe("DocumentWorkspace", () => {
     getObjectTypeMock.mockReset();
     updateDocumentMetadataMock.mockReset();
     registerDocumentMock.mockReset();
+    setDocumentClassificationLevelMock.mockReset();
     listRenditionsMock.mockReset();
     listRenditionsMock.mockResolvedValue([]);
     downloadRenditionContentMock.mockReset();
@@ -328,6 +335,7 @@ describe("DocumentWorkspace", () => {
       updated_at: "2026-01-01T00:00:00Z",
     });
     authState.realmRoles = [];
+    authState.permissions = [];
     window.localStorage.clear();
   });
 
@@ -1582,6 +1590,68 @@ describe("DocumentWorkspace", () => {
     await waitFor(() =>
       expect(within(metadataPanel).queryByText("Entwurf")).not.toBeInTheDocument()
     );
+  });
+
+  it("shows the classification level read-only without admin.classification", async () => {
+    const classified = { ...document1, classification_level: "VS-NfD" };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([classified]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const classificationPanel = getPaneSectionByLabel("Einstufung");
+    expect(within(classificationPanel).getByText("VS-NfD")).toBeInTheDocument();
+    expect(within(classificationPanel).queryByText("Anheben")).not.toBeInTheDocument();
+  });
+
+  it("raises the classification level for a principal with admin.classification", async () => {
+    authState.permissions = ["admin.classification"];
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    setDocumentClassificationLevelMock.mockResolvedValue({
+      ...document1,
+      classification_level: "VS-NfD",
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const classificationPanel = getPaneSectionByLabel("Einstufung");
+    expect(within(classificationPanel).getByText("Nicht eingestuft")).toBeInTheDocument();
+
+    await user.click(classificationPanel);
+    await user.click(within(classificationPanel).getByText("Anheben"));
+
+    await waitFor(() =>
+      expect(setDocumentClassificationLevelMock).toHaveBeenCalledWith(
+        "token-123",
+        "d1",
+        "VS-NfD",
+        "alice"
+      )
+    );
+    await waitFor(() =>
+      expect(within(classificationPanel).getByText("VS-NfD", { selector: "p" })).toBeInTheDocument()
+    );
+  });
+
+  it("disables the raise button once the selected level equals the current one", async () => {
+    authState.permissions = ["admin.classification"];
+    const classified = { ...document1, classification_level: "VS-NfD" };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([classified]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const classificationPanel = getPaneSectionByLabel("Einstufung");
+    // The select defaults to the lowest still-raisable level, which for an
+    // already-VS-NfD document is VS-NfD itself - a no-op raise.
+    expect(within(classificationPanel).getByText("Anheben")).toBeDisabled();
   });
 
   it("accepts a dropped file via drag-and-drop in the upload modal", async () => {

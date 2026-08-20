@@ -175,6 +175,12 @@ Last session of Phase 5e — closes off the backend chain built in P5e-S1/S2 (Ob
 - **`UploadForm`**: a "create as draft" checkbox, unchecked by default — checked, `uploadDocument()` sends `draft: true`, which the backend translates into `registered_at: null` and no `Kennzeichen` assignment.
 - **`MetadataPanel`**: whenever the open document's `registered_at` is `null`, a banner is shown above the metadata form — a `.badge.draft` ("Entwurf") plus a "Registrieren" button that calls the new `registerDocument()` API function and feeds its result through the existing `onSaved` callback (same tab/state refresh path as a metadata save). No dedicated list-row indicator was added — the plan calls for the object's state to be visibly distinct, which the detail-view badge already satisfies; a drafts filter in `ExplorerPane` was not built, see ADR 0113 "Consequences".
 
+## Classification level (14.2, Post-Roadmap Phase 31 Session 3, [ADR 0114](../adr/0114-per-document-classification-level.md))
+
+- **`lib/classification.ts`**: pure helper functions `classificationRank()`/`raisableClassificationLevels()` — mirror `document_service.repository.CLASSIFICATION_RANK`, computing which levels a principal may raise TO from the current one (same testable, standalone-function pattern as `lib/kennzeichen.ts`).
+- **`ClassificationPanel`**: attached below the metadata form, same standalone-panel pattern as `RetentionPanel`/`SignaturesPanel`. Shows the current level (or "Nicht eingestuft") to every viewer; principals with `admin.classification` (`permissions.includes(...)`, same RBAC UX pattern as `RetentionPanel`'s legal-hold gating) additionally see a `<select>` restricted to same-or-higher levels plus a raise button, calling the new `setDocumentClassificationLevel()` API function and feeding the result through `MetadataPanel`'s existing `onSaved` callback.
+- **`PreviewPane`**'s version selector shows each version's own classification-level snapshot as a small badge (`.badge.classified`) — the first genuinely new per-version-only display in this codebase (previously only intrinsic, immutable version metadata like `is_conflict`/`comment` was ever shown per version, P23-S1).
+
 ## Signatures (3.10, since P6-S7)
 
 New `components/SignaturesPanel.tsx`, rendered below the form in `MetadataPanel` — an add-on pattern like the OCR/renditions display in `PreviewPane` (own `list*` call, own load effect, non-blocking fallback UI), but as a separate section rather than within the preview itself, since it is document-bound, non-editable supplementary information.

@@ -28,6 +28,8 @@ OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http:/
 ROLE_ADMIN_PRINCIPAL_ID = "document-service-test-role-admin"
 LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "document-service-test-legal-hold-admin"
 LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": LEGAL_HOLD_ADMIN_PRINCIPAL_ID}
+CLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-classification-admin"
+CLASSIFICATION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFICATION_ADMIN_PRINCIPAL_ID}
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
@@ -1382,6 +1384,110 @@ def test_purge_classified_document_requires_classified_role(client):
         },
     )
     assert response.status_code == 204
+
+
+# --- Classification level (post-roadmap phase 31 session 3, ADR 0114) ----
+
+
+def test_upload_seeds_classification_level_from_object_type(client):
+    classified_type_id = _create_object_type(is_classified=True)
+    response = upload(client, object_type_id=str(classified_type_id))
+    assert response.status_code == 201
+    assert response.json()["classification_level"] == "VS-NfD"
+
+
+def test_upload_without_classified_type_has_no_classification_level(client):
+    response = upload(client)
+    assert response.json()["classification_level"] is None
+
+
+def test_set_classification_level_without_principal_returns_401(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "VS-NfD", "changed_by": "alice"},
+    )
+    assert response.status_code == 401
+
+
+def test_set_classification_level_without_capability_returns_403(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "VS-NfD", "changed_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 403
+
+
+def test_set_classification_level_with_capability_succeeds(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "VS-NfD", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.json()["classification_level"] == "VS-NfD"
+
+
+def test_set_classification_level_can_raise(client):
+    document_id = upload(client).json()["id"]
+    client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "VS-NfD", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+
+    response = client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "GEHEIM", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 200
+    assert response.json()["classification_level"] == "GEHEIM"
+
+
+def test_set_classification_level_rejects_downgrade(client):
+    document_id = upload(client).json()["id"]
+    client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "GEHEIM", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+
+    response = client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "VS-NfD", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 409
+
+
+def test_set_classification_level_unknown_document_returns_404(client):
+    response = client.put(
+        "/documents/does-not-exist/classification-level",
+        json={"classification_level": "VS-NfD", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+def test_checkin_snapshots_classification_level_on_new_version(client):
+    document_id = upload(client).json()["id"]
+    client.put(
+        f"/documents/{document_id}/classification-level",
+        json={"classification_level": "VS-VERTRAULICH", "changed_by": "alice"},
+        headers=CLASSIFICATION_ADMIN_HEADERS,
+    )
+
+    response = client.post(
+        f"/documents/{document_id}/versions",
+        data={"expected_base_version_number": "1", "created_by": "alice"},
+        files={"file": ("vertrag-v2.pdf", b"Neuer Inhalt", "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert response.json()["version"]["classification_level"] == "VS-VERTRAULICH"
 
 
 def test_cascade_trash_and_restore_roundtrip(client):

@@ -520,11 +520,27 @@ body {
   color: var(--dms-accent);
 }
 
+/* Classification level (post-roadmap phase 31 session 3, ADR 0114) - same
+   `.badge` base class, `--dms-danger` tone since a classified version
+   warrants more visual weight than a plain informational badge. */
+.badge.classified {
+  background: var(--dms-danger-bg);
+  color: var(--dms-danger);
+}
+
 .upload-draft-toggle {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   font-weight: normal;
+}
+
+/* Classification level (14.2, post-roadmap phase 31 session 3, ADR 0114). */
+.classification-raise {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
 }
 
 .draft-banner {

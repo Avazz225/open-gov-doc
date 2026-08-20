@@ -64,6 +64,24 @@ class AlreadyRegisteredError(Exception):
     transition, there is no "un-register"."""
 
 
+class ClassificationDowngradeError(Exception):
+    """A classification-level change attempt that would lower the rank
+    (post-roadmap phase 31 session 3, ADR 0114) - `PUT
+    .../classification-level` only ever sets or raises, see
+    `set_classification_level` below."""
+
+
+# Rank order for the four levels from `ClassificationLevelUpdate`
+# (post-roadmap phase 31 session 3, ADR 0114) - `None` (unclassified) is
+# implicitly rank 0, lower than every named level.
+CLASSIFICATION_RANK = {
+    "VS-NfD": 1,
+    "VS-VERTRAULICH": 2,
+    "GEHEIM": 3,
+    "STRENG GEHEIM": 4,
+}
+
+
 async def get_document(session: AsyncSession, document_id: str) -> Document:
     document = await session.get(Document, document_id)
     if document is None:
@@ -122,6 +140,7 @@ async def create_document(
     retention_until: datetime | None = None,
     archive_after: datetime | None = None,
     draft: bool = False,
+    classification_level: str | None = None,
 ) -> Document:
     now = datetime.now(UTC)
     document = Document(
@@ -151,6 +170,11 @@ async def create_document(
         # created (no `Kennzeichen` was withheld), a draft stays `None`
         # until `register_document` below is called explicitly.
         registered_at=None if draft else now,
+        # Classification level (post-roadmap phase 31 session 3, ADR 0114):
+        # copied once from `ObjectType.classification_level` (see main.py) -
+        # a seed/default, not an ongoing constraint, same pattern as
+        # `retention_until`/`archive_after` above.
+        classification_level=classification_level,
     )
     session.add(document)
     session.add(
@@ -164,6 +188,9 @@ async def create_document(
             checksum_sha256=checksum_sha256,
             is_conflict=False,
             based_on_version_number=None,
+            # Version-1's snapshot equals the document's initial value -
+            # there is no earlier state to diverge from yet.
+            classification_level=classification_level,
             created_by=created_by,
             created_at=now,
         )
@@ -218,6 +245,29 @@ async def register_document(
         document.attributes = {**document.attributes, "Kennzeichen": kennzeichen}
     document.registered_at = datetime.now(UTC)
     document.updated_at = document.registered_at
+    await session.flush()
+    return document
+
+
+async def set_classification_level(
+    session: AsyncSession, document_id: str, *, classification_level: str
+) -> Document:
+    """Set or raise a document's classification level (post-roadmap phase
+    31 session 3, ADR 0114). `classification_level` is always one of the
+    four named levels (never `None` - a request to CLEAR/downgrade to
+    unclassified is not offered by this action at all, see ADR 0114).
+    Setting the same level again is treated as a no-op (idempotent, not an
+    error) - only a strictly lower rank is rejected."""
+    document = await get_document(session, document_id)
+    current_rank = CLASSIFICATION_RANK.get(document.classification_level or "", 0)
+    new_rank = CLASSIFICATION_RANK[classification_level]
+    if new_rank < current_rank:
+        raise ClassificationDowngradeError(
+            f"Einstufung kann nur angehoben werden ({document.classification_level!r} -> "
+            f"{classification_level!r} ist eine Herabstufung)"
+        )
+    document.classification_level = classification_level
+    document.updated_at = datetime.now(UTC)
     await session.flush()
     return document
 
@@ -333,32 +383,32 @@ async def list_deleted_documents(
     *,
     folder_id: str | None = None,
     deleted_by: str | None = None,
-    include_object_type_ids: set[int] | None = None,
-    exclude_object_type_ids: set[int] | None = None,
+    classified: bool | None = None,
 ) -> list[Document]:
     """Trash contents (5.2, since P7-S1; extended with `deleted_by`/
     classification filters since P15-S1, see main.py `list_deleted_documents`
     for the visibility rules that assemble these filters). Without
     `folder_id`, this returns the installation-wide trash (personal
     trash/deletion administration views, 2.5) instead of just that of a
-    single folder - counterpart to `list_documents_by_folder`."""
+    single folder - counterpart to `list_documents_by_folder`.
+
+    `classified` (post-roadmap phase 31 session 3, ADR 0114): filters
+    directly on the document's OWN `classification_level` - `True` = the
+    classified-documents trash (`IS NOT NULL`), `False` = the regular trash
+    (`IS NULL`), `None` = no filter. Before this session this was instead an
+    indirect `object_type_id IN/NOT IN (...)` lookup requiring a live HTTP
+    round trip to object-type-service on every call (see `main.py`'s
+    `list_deleted_documents`) - now a plain column check, since
+    classification is no longer purely an object-type-level property."""
     query = select(Document).where(Document.deleted_at.isnot(None))
     if folder_id is not None:
         query = query.where(Document.folder_id == folder_id)
     if deleted_by is not None:
         query = query.where(Document.deleted_by == deleted_by)
-    if include_object_type_ids is not None:
-        query = query.where(Document.object_type_id.in_(include_object_type_ids))
-    if exclude_object_type_ids:
-        # NOT IN yields NULL (not TRUE) for object_type_id IS NULL and
-        # would otherwise wrongly exclude such documents from the regular
-        # (non-classified) view - explicitly include them.
-        query = query.where(
-            or_(
-                Document.object_type_id.is_(None),
-                Document.object_type_id.notin_(exclude_object_type_ids),
-            )
-        )
+    if classified is True:
+        query = query.where(Document.classification_level.isnot(None))
+    elif classified is False:
+        query = query.where(Document.classification_level.is_(None))
     result = await session.execute(query.order_by(Document.title))
     return list(result.scalars().all())
 
@@ -549,6 +599,12 @@ async def checkin_version(
         is_conflict=is_conflict,
         based_on_version_number=expected_base_version_number,
         comment=comment,
+        # Classification-level snapshot (post-roadmap phase 31 session 3,
+        # ADR 0114): the document's CURRENT level at check-in time, not its
+        # value at document-creation time - reflects any raise applied since
+        # then, but (like every other version row) is never retroactively
+        # rewritten by a later raise.
+        classification_level=document.classification_level,
         created_by=created_by,
         created_at=now,
     )

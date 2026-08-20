@@ -39,6 +39,7 @@ class DocumentOut(BaseModel):
     archive_format: str | None
     dehydrated_at: datetime | None
     registered_at: datetime | None
+    classification_level: str | None
 
     model_config = {"from_attributes": True}
 
@@ -58,6 +59,8 @@ class DocumentVersionOut(BaseModel):
     # needs it to address exactly the same live object identity when
     # dehydrating/retrieving as the regular upload/download path.
     storage_object_key: str
+    # Snapshot at check-in time (post-roadmap phase 31 session 3, ADR 0114).
+    classification_level: str | None
 
     model_config = {"from_attributes": True}
 
@@ -185,6 +188,16 @@ class LegalHoldOut(BaseModel):
     released_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class ClassificationLevelUpdate(BaseModel):
+    """Set/raise a document's classification level (post-roadmap phase 31
+    session 3, ADR 0114) - `changed_by` mirrors `DocumentRegisterRequest.
+    registered_by` below (opaque, attribution/audit only, independent of the
+    `X-DMS-Principal`-based `admin.classification` permission check)."""
+
+    classification_level: Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
+    changed_by: str
 
 
 class DocumentRegisterRequest(BaseModel):

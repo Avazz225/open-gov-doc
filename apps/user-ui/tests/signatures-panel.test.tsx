@@ -50,6 +50,7 @@ const DOCUMENT: DocumentSummary = {
   full_deletion: false,
   pending_deletion_reason: null,
   registered_at: "2026-01-01T00:00:00Z",
+  classification_level: null,
 };
 
 function pdfVersion(versionNumber = 1) {

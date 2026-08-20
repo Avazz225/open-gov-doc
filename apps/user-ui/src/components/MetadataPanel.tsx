@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { KENNZEICHEN_ATTRIBUTE } from "@/lib/kennzeichen";
+import { ClassificationPanel } from "./ClassificationPanel";
 import { LayoutFormFields } from "./LayoutFormFields";
 import { RetentionPanel } from "./RetentionPanel";
 import { SignaturesPanel } from "./SignaturesPanel";
@@ -208,6 +209,7 @@ export function MetadataPanel({
 
       <SignaturesPanel document={activeDocument} onSigned={onSigned} />
       <RetentionPanel document={activeDocument} />
+      <ClassificationPanel document={activeDocument} onChanged={onSaved} />
     </section>
   );
 }

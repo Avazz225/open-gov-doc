@@ -109,6 +109,18 @@ class Document(Base):
     # never reset afterwards (mirrors real-world reference-number issuance,
     # which is likewise never revoked once handed out).
     registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Classification level (14.2, post-roadmap phase 31 session 3, ADR
+    # 0114): previously only a fixed default on `ObjectType` (object-type-
+    # service) - now a genuine per-document attribute of its own. `None` =
+    # unclassified. One of `object_type_service.schemas.ClassificationLevel`
+    # ("VS-NfD"/"VS-VERTRAULICH"/"GEHEIM"/"STRENG GEHEIM") when set. Seeded
+    # once from the object type's own `classification_level` at creation
+    # time (same copy-once-as-a-default pattern as `retention_until`/
+    # `archive_after` above) - afterwards independently settable/raisable via
+    # `PUT .../classification-level`, gated by the new `admin.classification`
+    # capability (see main.py). Never automatically lowered; a downgrade is
+    # deliberately not offered by that endpoint at all (see ADR 0114).
+    classification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -134,6 +146,15 @@ class DocumentVersion(Base):
     is_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
     based_on_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     comment: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Classification-level snapshot (post-roadmap phase 31 session 3, ADR
+    # 0114): the owning `Document.classification_level` AT THE TIME this
+    # version was checked in - deliberately never retroactively updated when
+    # the document's current level is later raised, so a historical version
+    # keeps showing the level it actually carried when it was created (same
+    # rationale as the two-stage reference model's closure snapshot in
+    # case-service: a later change to current state must not silently rewrite
+    # already-recorded history).
+    classification_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

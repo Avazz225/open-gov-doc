@@ -161,6 +161,21 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # real permission check - teamspaces themselves remain self-managed
     # (2.5, no capability gate for creation/joining).
     ("domain-admin-teamspaces", "Teamspace-Aufsicht", ["admin.teamspace_management"]),
+    # Post-Roadmap Phase 31 Session 3 (ADR 0114): classification level
+    # becomes a genuine per-document/per-version attribute instead of a
+    # fixed object-type default - deliberately a NEW domain, separate from
+    # "domain-admin-config" (`admin.object_config`, which still governs the
+    # object type's own classification_level default/seed value): setting or
+    # raising a specific document's actual classification is a materially
+    # different, more sensitive action than editing object-type schemas in
+    # general, matching the "domain-admin-legal-hold" precedent (a dedicated
+    # domain rather than folding a security-sensitive per-document action
+    # into a broader existing one).
+    (
+        "domain-admin-classification",
+        "Einstufungsverwaltung (Verschlusssachen)",
+        ["admin.classification"],
+    ),
 ]
 
 
