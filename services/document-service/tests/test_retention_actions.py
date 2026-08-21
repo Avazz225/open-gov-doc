@@ -97,6 +97,47 @@ async def test_purge_expired_trash_entry_removes_storage_content_and_document(se
         await storage.close()
 
 
+async def test_execute_quarantine_auto_delete_removes_storage_content_and_document(session):
+    """Post-Roadmap Phase 31 Session 5 (ADR 0116)."""
+    storage = StorageClient(STORAGE_SERVICE_URL)
+    try:
+        document_id = await _upload_and_create_document(session, storage, content=b"schriftgut")
+        version = await repository.get_current_version(session, document_id)
+        key = version.storage_object_key
+        quarantine = await repository.create_records_quarantine(
+            session, document_id, set_by="alice", reason="Aussonderung geprüft", auto_delete_at=None
+        )
+        await session.commit()
+
+        deleted = await retention_actions.execute_quarantine_auto_delete(
+            session,
+            storage,
+            document_id,
+            reason=quarantine.reason,
+            triggered_by="system:retention-poll",
+        )
+        await session.commit()
+
+        assert deleted is True
+        try:
+            await repository.get_document(session, document_id)
+            raise AssertionError("Dokument hätte entfernt sein müssen")
+        except repository.NotFoundError:
+            pass
+        try:
+            await storage.download(key)
+            raise AssertionError("Storage-Inhalt hätte entfernt sein müssen")
+        except Exception:
+            pass
+
+        entries = await repository.list_deletion_register(session, document_id=document_id)
+        assert len(entries) == 1
+        assert entries[0].trigger == "quarantine_expiry"
+        assert entries[0].reason == "Aussonderung geprüft"
+    finally:
+        await storage.close()
+
+
 async def test_force_delete_approval_requested_only_once_across_poll_ticks(engine):
     """Regressionstest für einen echten Bug, gefunden beim P7-S1-Live-Smoke-
     Test: `_execute_or_defer_forced_deletion` flushte `force_delete_approval_

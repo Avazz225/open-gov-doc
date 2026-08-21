@@ -1176,6 +1176,76 @@ export async function releaseLegalHold(
   return response.json();
 }
 
+// Records quarantine (14.2, post-roadmap phase 31 session 5, ADR 0116) - a
+// fourth, independent lifecycle axis alongside legal hold: restricted
+// visibility (quarantined documents disappear from folder listings, see
+// document-service.md) plus an optional auto-delete schedule. `list`/
+// `create`/`release` are all gated server-side by `admin.records_quarantine`.
+export interface RecordsQuarantine {
+  id: string;
+  document_id: string;
+  reason: string | null;
+  auto_delete_at: string | null;
+  set_by: string;
+  set_at: string;
+  released_by: string | null;
+  released_at: string | null;
+}
+
+export async function listRecordsQuarantine(
+  token: string,
+  documentId: string,
+  activeOnly = false
+): Promise<RecordsQuarantine[]> {
+  const response = await request(
+    "document-service",
+    `records-quarantine?document_id=${encodeURIComponent(documentId)}&active_only=${activeOnly}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function createRecordsQuarantine(
+  token: string,
+  params: { documentId: string; setBy: string; reason?: string | null; autoDeleteAt?: string | null }
+): Promise<RecordsQuarantine> {
+  const response = await request(
+    "document-service",
+    "records-quarantine",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document_id: params.documentId,
+        set_by: params.setBy,
+        reason: params.reason ?? null,
+        auto_delete_at: params.autoDeleteAt ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function releaseRecordsQuarantine(
+  token: string,
+  quarantineId: string,
+  releasedBy: string
+): Promise<RecordsQuarantine> {
+  const response = await request(
+    "document-service",
+    `records-quarantine/${encodeURIComponent(quarantineId)}/release`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ released_by: releasedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export async function downloadDocument(token: string, documentId: string): Promise<Blob> {
   const response = await request(
     "document-service",

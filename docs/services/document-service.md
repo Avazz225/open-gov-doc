@@ -2,8 +2,8 @@
 
 **Purpose:** Documents as the core entity (Concept 2.1) — CRUD, permanent versioning (2.1a, no overwriting/discarding), an editing lock for external editing including force-unlock and conflict copy (4.2). Never holds file content itself — every byte access goes through the Storage Service's HTTP API (3.6).
 
-**Concept reference:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (retention/legal hold/forced deletion, since P7-S1)/5.4b (audit depth for forensic trace, since P7-S2c)/5.6 (records disposal lifecycle fields, since P7-S3)/4.2a (public share link, since P14-S10)
-**Own Postgres schema:** `document` (tables `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`, `share_link_config`, `share_link`)
+**Concept reference:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (retention/legal hold/forced deletion, since P7-S1)/5.4b (audit depth for forensic trace, since P7-S2c)/5.6 (records disposal lifecycle fields, since P7-S3)/4.2a (public share link, since P14-S10)/14.2 (classification level, redaction, records quarantine, Post-Roadmap Phase 31 Sessions 3–5)
+**Own Postgres schema:** `document` (tables `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `records_quarantine`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`, `share_link_config`, `share_link`)
 
 ## API
 
@@ -30,6 +30,9 @@
 | `POST` | `/legal-holds` | Set a legal hold (`document_id`, `set_by`, optional `reason`, 5.2, since P7-S1) — overrides any due action until it is released. Since **Post-Roadmap Phase 19 Session 10** ([ADR 0075](../adr/0075-legal-hold-rbac.md)) gated by `admin.legal_hold` (`401`/`403`) |
 | `POST` | `/legal-holds/{id}/release` | Release a legal hold (`released_by`) — since **P19-S10** likewise gated by `admin.legal_hold` |
 | `GET` | `/legal-holds?document_id=...&active_only=...` | Legal holds of a document |
+| `POST` | `/records-quarantine` | Move a document into records quarantine (`document_id`, `set_by`, optional `reason`/`auto_delete_at`, 14.2, Post-Roadmap Phase 31 Session 5, ADR 0116) — requires `admin.records_quarantine`. `404` unknown document, `409` already quarantined, see "Records Quarantine" below |
+| `POST` | `/records-quarantine/{id}/release` | Release a quarantine (`released_by`) — likewise gated by `admin.records_quarantine`. `404` unknown entry, `409` already released |
+| `GET` | `/records-quarantine?document_id=...&active_only=...` | List quarantine entries — **gated** by `admin.records_quarantine` (unlike `GET /legal-holds`, deliberately, see below) |
 | `GET` | `/deletion-register?...` | Read the deletion register (5.2a, since P7-S1) — its own, immediately queryable API, see below |
 | `POST` | `/documents/{id}/reconcile-restore-deletion` | Deletion reconciliation after restore (10.4, since P11-S4) — `X-DMS-Roles: dms-admin`, see below |
 | `GET`/`PUT` | `/retention-config` | Installation-wide retention configuration (`deletion_reason_required`, `reminder_lead_days`, `deletion_reason_catalog`, since P7-S1, catalog since Post-Roadmap Phase 31 Session 1) |
@@ -56,6 +59,7 @@
 | `POST` | `/documents/{id}/archive-request` | Manual records-disposal trigger (5.6, since P7-S3) — sets `archive_after` to now if not already due |
 | `GET` | `/documents/{id}/archive-status` | Read records-disposal status (`archive_after`/`archived_at`/`archive_format`/`dehydrated_at`, since P7-S3) |
 | `GET` | `/documents/{id}/has-active-hold` | Internal call from `archival-service` (5.6, since P7-S3) — an active legal hold blocks dehydration, not archiving itself |
+| `GET` | `/documents/{id}/has-active-quarantine` | Ungated (14.2, Post-Roadmap Phase 31 Session 5, ADR 0116) — same shape as `has-active-hold` above |
 | `PUT` | `/documents/{id}/archived` | Internal callback from `archival-service` once the archive copy is verified (`archive_format`, since P7-S3) — publishes `document.archived` |
 | `PUT` | `/documents/{id}/dehydrated` | Internal callback from `archival-service` after the live storage copy has been removed (since P7-S3) — publishes `document.dehydrated` |
 | `PUT` | `/documents/{id}/rehydrated` | Internal callback from `archival-service` after a successful retrieval (since P7-S3) — publishes `document.rehydrated` |
@@ -75,7 +79,8 @@
 - `document_lock`: exactly one active row per locked document (`document_id` as PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 - `upload_config`: single row (`id=1`, since P5d-S1) — `allowed_content_types` (JSON list, empty = no restriction), `updated_at`.
 - `legal_hold` (5.2, since P7-S1): `id` (UUID PK), `document_id` (FK to `document.id`), `reason` (nullable), `set_by`, `set_at`, `released_by` (nullable), `released_at` (nullable) — active as long as `released_at IS NULL`.
-- `deletion_register_entry` (5.2a, since P7-S1): `id` (UUID PK), `document_id` (**deliberately no FK** — the referenced `document` row has already been physically removed by the time of the entry), `trigger` (`"forced_deletion"`\|`"trash_expiry"`), `reason` (nullable), `triggered_by` (nullable), `occurred_at`.
+- `records_quarantine` (14.2, Post-Roadmap Phase 31 Session 5, [ADR 0116](../adr/0116-records-quarantine-destruction-scheduling.md)): `id` (UUID PK), `document_id` (FK to `document.id`), `reason` (nullable), `auto_delete_at` (nullable timestamp), `set_by`, `set_at`, `released_by` (nullable), `released_at` (nullable) — same row-not-field shape as `legal_hold`, active as long as `released_at IS NULL`, see "Records Quarantine" below.
+- `deletion_register_entry` (5.2a, since P7-S1): `id` (UUID PK), `document_id` (**deliberately no FK** — the referenced `document` row has already been physically removed by the time of the entry), `trigger` (`"forced_deletion"`\|`"trash_expiry"`\|`"manual_purge"`\|`"quarantine_expiry"`), `reason` (nullable), `triggered_by` (nullable), `occurred_at`.
 - `retention_config` (5.2/5.2a, since P7-S1): single row (`id=1`, same pattern as `UploadConfig`) — `deletion_reason_required` (boolean), `reminder_lead_days` (integer, nullable), `deletion_reason_catalog` (JSON list of strings, admin-curated `<select>` suggestions for the `reason` field, since Post-Roadmap Phase 31 Session 1 — a UX convenience only, [ADR 0112](../adr/0112-deletion-reason-catalog-ux-not-enum.md), never enforced as an enum).
 - `trash_config` (5.2, since P7-S1): single row (`id=1`) — `restore_period_days` (integer, default 30).
 
@@ -166,6 +171,54 @@ why this matters for search indexing). Orchestration:
 first actual reader of that field anywhere in the codebase, not filtered to redactions specifically.
 `GET .../redaction-preview/page-count`/`.../page-image` proxy to rendering-service's new page-rasterization
 endpoints so the browser never talks to rendering-service or storage-service directly.
+
+## Records Quarantine (14.2, Post-Roadmap Phase 31 Session 5, [ADR 0116](../adr/0116-records-quarantine-destruction-scheduling.md))
+
+A fourth, independent document-lifecycle axis alongside legal hold, the regular retention schedule, and
+records disposal/archiving — an administered holding area with **restricted visibility** and an optional,
+configurable **auto-delete** condition. Structurally distinct from all three: legal hold *prevents*
+deletion but does not hide the document; archiving relocates content while deliberately keeping the
+metadata row visible; records quarantine hides the document from normal browsing and, unlike legal hold,
+can itself *trigger* destruction. See ADR 0116 for the full comparison against legal hold, the
+virus-scan-service quarantine (a different, unrelated mechanism — deliberately always called "records
+quarantine" in full to avoid confusion with it), and the archival pipeline.
+
+- **`POST /records-quarantine`** (`document_id`, `set_by`, optional `reason`/`auto_delete_at`) creates a
+  new `records_quarantine` row — gated by the new `admin.records_quarantine` capability (role
+  `domain-admin-records-quarantine`, see `docs/services/permission-service.md`), following the same
+  `_require_<x>_permission` pattern as legal hold/classification rather than reusing `admin.legal_hold`
+  (opposing responsibilities: legal hold protects records, quarantine schedules their destruction — see
+  ADR 0116). `404` for an unknown document, `409` if already actively quarantined (`released_at IS NULL`).
+- **`POST /records-quarantine/{id}/release`** (`released_by`) ends the quarantine — same permission gate,
+  `404` unknown entry, `409` already released.
+- **`GET /records-quarantine`** — **gated** by `admin.records_quarantine`, unlike `GET /legal-holds`
+  (deliberately ungated): listing what is currently quarantined is exactly the restricted content the
+  feature exists to hide, so it needs the same gate as setting/releasing it.
+- **Restricted visibility**: while a quarantine is active, the document is excluded from
+  `repository.list_documents_by_folder` via a `NOT EXISTS` subquery (chosen over the N+1
+  `has_active_hold`-per-candidate pattern used elsewhere in this file, since this is a hot path hit on
+  every folder navigation, not a low-frequency poll-loop candidate list) — and therefore also from
+  folder export (`list_documents_for_folder_export` calls the same function). **Not** extended to
+  `search-service` in this session — a quarantined document remains findable via search, a known,
+  deliberate gap (see ADR 0116 "Consequences" for why closing it safely needs its own session).
+- **Auto-delete**: `_retention_poll_loop` gained a fourth phase — `repository.list_expired_quarantine`
+  (due `auto_delete_at`, filtered by the *document's* `has_active_hold`, same "legal hold blocks
+  everything" precedent as every other destruction path in this service) feeds
+  `retention_actions.execute_quarantine_auto_delete` (same shape as `purge_expired_trash_entry`, no
+  governance bypass, `trigger="quarantine_expiry"` in the deletion register). `hard_delete_document` also
+  removes the now-terminal `records_quarantine` row itself as part of its existing dependent-row cleanup
+  (mirroring how it already removes `legal_hold` history) — no separate release step is needed before or
+  during auto-delete.
+- **Composable, not exclusive**: a document can be quarantined, legally held, and/or sitting in the
+  regular trash all at once — no mutual-exclusion validation, matching legal hold's own precedent of
+  having no `deleted_at` check either.
+- Publishes `document.records_quarantine.set`/`.released`/`.auto_deleted` — new event types, not
+  consumed by anything yet (deliberately not reusing `document.deleted` for the auto-delete case, which
+  would make `audit-service`'s verbatim event log incorrectly show a quarantine action as an actual
+  deletion, see ADR 0116).
+- **`case-service` untouched**: no destruction-scheduling primitive exists there to hook a quarantine gate
+  onto (only `status` open/closed and the archival-only `archive_after`/`archived_at`) — same scoping
+  conclusion this project already reached for redaction (ADR 0115).
 
 ## Editing Copies (2.3, since P6-S3)
 

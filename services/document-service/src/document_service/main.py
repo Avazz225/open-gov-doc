@@ -66,6 +66,7 @@ from document_service.schemas import (
     FolderExportJobOut,
     ForceReleaseResult,
     HasActiveHoldOut,
+    HasActiveQuarantineOut,
     LegalHoldCreate,
     LegalHoldOut,
     LegalHoldReleaseRequest,
@@ -76,6 +77,9 @@ from document_service.schemas import (
     MarkArchivedRequest,
     PublicShareLinkOut,
     ReconcileRestoreDeletionRequest,
+    RecordsQuarantineCreate,
+    RecordsQuarantineOut,
+    RecordsQuarantineReleaseRequest,
     RedactionRequest,
     RetentionConfigIn,
     RetentionConfigOut,
@@ -209,9 +213,15 @@ async def _retention_poll_loop(session_factory) -> None:
     with timer/boundary events, see ADR 0030) - same idiom as
     workflow-service's `_sla_poll_loop` (ADR 0020, P6-S2). An error in one
     tick doesn't abort the loop, so a single broken document doesn't stop
-    retention monitoring for all others. Three independent phases per pass:
+    retention monitoring for all others. Four independent phases per pass:
     deletion reminder, due retention period (soft delete or forced
-    deletion), expired trash deadlines."""
+    deletion), expired trash deadlines, and - since post-roadmap phase 31
+    session 5 (ADR 0116) - due records-quarantine auto-delete schedules.
+    The new phase deliberately reuses this SAME loop rather than starting a
+    second one: exactly the same "poll instead of a real BPMN process"
+    rationale applies, and legal hold's own gating (`has_active_hold`)
+    already lives as a filter inside the query helpers, not as a separate
+    loop, which the new phase mirrors (`list_expired_quarantine`)."""
     while True:
         try:
             async with session_factory() as session:
@@ -269,6 +279,27 @@ async def _retention_poll_loop(session_factory) -> None:
                             "document.trash_purged",
                             document_id,
                             {"trigger": "trash_expiry"},
+                            actor="system:retention-poll",
+                        )
+                    else:
+                        await session.rollback()
+
+            async with session_factory() as session:
+                for quarantine in await repository.list_expired_quarantine(session):
+                    document_id = quarantine.document_id
+                    deleted = await retention_actions.execute_quarantine_auto_delete(
+                        session,
+                        app.state.storage,
+                        document_id,
+                        reason=quarantine.reason,
+                        triggered_by="system:retention-poll",
+                    )
+                    if deleted:
+                        await session.commit()
+                        await publish_event(
+                            "document.records_quarantine.auto_deleted",
+                            document_id,
+                            {"quarantine_id": quarantine.id},
                             actor="system:retention-poll",
                         )
                     else:
@@ -947,6 +978,20 @@ async def get_document_has_active_hold(
     (5.2) blocks the dehydration step, not the creation of the archive copy
     itself."""
     return HasActiveHoldOut(has_active_hold=await repository.has_active_hold(session, document_id))
+
+
+@app.get("/documents/{document_id}/has-active-quarantine", response_model=HasActiveQuarantineOut)
+async def get_document_has_active_quarantine(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> HasActiveQuarantineOut:
+    """Records quarantine (14.2, post-roadmap phase 31 session 5, ADR 0116) -
+    deliberately ungated, same rationale as `has-active-hold` above: a
+    document's own quarantine status is not itself restricted-visibility
+    content, only the ABILITY TO SEE/LIST quarantined documents in bulk is
+    (see `GET /records-quarantine`)."""
+    return HasActiveQuarantineOut(
+        has_active_quarantine=await repository.has_active_quarantine(session, document_id)
+    )
 
 
 @app.put("/documents/{document_id}/archived", response_model=DocumentOut)
@@ -2108,6 +2153,115 @@ async def list_legal_holds(
     session: AsyncSession = Depends(get_session),
 ) -> list[LegalHoldOut]:
     return await repository.list_holds(session, document_id, active_only=active_only)
+
+
+async def _require_records_quarantine_permission(x_dms_principal: str) -> None:
+    """RBAC (post-roadmap phase 31 session 5, ADR 0116) - reuses the
+    `_require_legal_hold_permission` PATTERN (a dedicated domain-admin
+    capability via `has_permission`, deliberately not in the "everyone"
+    group), with a NEW capability `admin.records_quarantine` (role
+    "domain-admin-records-quarantine") rather than literally reusing
+    `admin.legal_hold` - setting/releasing a records quarantine is a
+    materially different, separately-grantable administrative action from
+    legal hold (one schedules destruction, the other prevents it), same
+    separation-of-duties rationale ADR 0075 itself gives for why legal hold
+    got its own domain instead of reusing `domain-admin-deletion`.
+    Unlike legal hold's `GET /legal-holds` (deliberately ungated, a hold's
+    status is not itself hidden content), `GET /records-quarantine` below
+    IS gated by this same capability - it reveals which documents are
+    currently hidden by quarantine, which is exactly the restricted-
+    visibility content quarantine exists to protect."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.records_quarantine"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Schriftgutquarantäne-Verwaltung'"
+        )
+
+
+@app.post(
+    "/records-quarantine", response_model=RecordsQuarantineOut, status_code=status.HTTP_201_CREATED
+)
+async def create_records_quarantine(
+    payload: RecordsQuarantineCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RecordsQuarantineOut:
+    """Move a document into records quarantine (14.2, post-roadmap phase 31
+    session 5, ADR 0116) - hides it from `GET /documents?folder_id=...`
+    (`repository.list_documents_by_folder`) and, if `auto_delete_at` is
+    set, schedules its permanent deletion (see `_retention_poll_loop`'s new
+    phase below) unless an active legal hold blocks it."""
+    await _require_records_quarantine_permission(x_dms_principal)
+    try:
+        quarantine = await repository.create_records_quarantine(
+            session,
+            payload.document_id,
+            set_by=payload.set_by,
+            reason=payload.reason,
+            auto_delete_at=payload.auto_delete_at,
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.AlreadyQuarantinedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.records_quarantine.set",
+        subject=payload.document_id,
+        payload={
+            "set_by": payload.set_by,
+            "reason": payload.reason,
+            "auto_delete_at": payload.auto_delete_at.isoformat()
+            if payload.auto_delete_at
+            else None,
+        },
+        actor=payload.set_by,
+    )
+    return quarantine
+
+
+@app.post("/records-quarantine/{quarantine_id}/release", response_model=RecordsQuarantineOut)
+async def release_records_quarantine(
+    quarantine_id: str,
+    payload: RecordsQuarantineReleaseRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RecordsQuarantineOut:
+    await _require_records_quarantine_permission(x_dms_principal)
+    try:
+        quarantine = await repository.release_records_quarantine(
+            session, quarantine_id, released_by=payload.released_by
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.AlreadyReleasedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.records_quarantine.released",
+        subject=quarantine.document_id,
+        payload={"released_by": payload.released_by},
+        actor=payload.released_by,
+    )
+    return quarantine
+
+
+@app.get("/records-quarantine", response_model=list[RecordsQuarantineOut])
+async def list_records_quarantine(
+    document_id: str | None = None,
+    active_only: bool = False,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[RecordsQuarantineOut]:
+    """Gated (unlike `GET /legal-holds`) - see `_require_records_quarantine_
+    permission`'s docstring for why."""
+    await _require_records_quarantine_permission(x_dms_principal)
+    return await repository.list_records_quarantine(
+        session, document_id=document_id, active_only=active_only
+    )
 
 
 @app.get("/deletion-register", response_model=list[DeletionRegisterEntryOut])

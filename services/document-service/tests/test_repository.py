@@ -711,6 +711,146 @@ async def test_list_holds_active_only_filters_released(session):
     assert {h.id for h in active_only} == {active_hold.id}
 
 
+# --- Records quarantine (post-roadmap phase 31 session 5, ADR 0116) -------
+
+
+async def test_hard_delete_document_removes_records_quarantine_history(session):
+    document = await _make_document(session)
+    quarantine = await repository.create_records_quarantine(
+        session, document.id, set_by="alice", reason=None, auto_delete_at=None
+    )
+    await repository.release_records_quarantine(session, quarantine.id, released_by="alice")
+
+    await repository.hard_delete_document(session, document.id)
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_document(session, document.id)
+
+
+async def test_create_and_release_records_quarantine(session):
+    document = await _make_document(session)
+
+    quarantine = await repository.create_records_quarantine(
+        session, document.id, set_by="alice", reason="Prüfung Aussonderung", auto_delete_at=None
+    )
+    assert await repository.has_active_quarantine(session, document.id) is True
+
+    released = await repository.release_records_quarantine(
+        session, quarantine.id, released_by="bob"
+    )
+    assert released.released_by == "bob"
+    assert await repository.has_active_quarantine(session, document.id) is False
+
+
+async def test_release_already_released_quarantine_raises(session):
+    document = await _make_document(session)
+    quarantine = await repository.create_records_quarantine(
+        session, document.id, set_by="alice", reason=None, auto_delete_at=None
+    )
+    await repository.release_records_quarantine(session, quarantine.id, released_by="alice")
+
+    with pytest.raises(repository.AlreadyReleasedError):
+        await repository.release_records_quarantine(session, quarantine.id, released_by="alice")
+
+
+async def test_create_records_quarantine_for_unknown_document_raises(session):
+    with pytest.raises(repository.NotFoundError):
+        await repository.create_records_quarantine(
+            session, "does-not-exist", set_by="alice", reason=None, auto_delete_at=None
+        )
+
+
+async def test_create_records_quarantine_while_already_active_raises(session):
+    document = await _make_document(session)
+    await repository.create_records_quarantine(
+        session, document.id, set_by="alice", reason=None, auto_delete_at=None
+    )
+
+    with pytest.raises(repository.AlreadyQuarantinedError):
+        await repository.create_records_quarantine(
+            session, document.id, set_by="bob", reason=None, auto_delete_at=None
+        )
+
+
+async def test_list_records_quarantine_active_only_filters_released(session):
+    document = await _make_document(session)
+    released = await repository.create_records_quarantine(
+        session, document.id, set_by="a", reason=None, auto_delete_at=None
+    )
+    await repository.release_records_quarantine(session, released.id, released_by="a")
+    active = await repository.create_records_quarantine(
+        session, document.id, set_by="b", reason=None, auto_delete_at=None
+    )
+
+    all_entries = await repository.list_records_quarantine(session, document_id=document.id)
+    active_only = await repository.list_records_quarantine(
+        session, document_id=document.id, active_only=True
+    )
+
+    assert {q.id for q in all_entries} == {released.id, active.id}
+    assert {q.id for q in active_only} == {active.id}
+
+
+async def test_list_documents_by_folder_excludes_quarantined_documents(session):
+    kept = await _make_document(session, folder_id="root", title="Sichtbar")
+    quarantined = await _make_document(session, folder_id="root", title="Quarantäne")
+    await repository.create_records_quarantine(
+        session, quarantined.id, set_by="alice", reason=None, auto_delete_at=None
+    )
+
+    result = await repository.list_documents_by_folder(session, "root")
+
+    ids = [d.id for d in result]
+    assert kept.id in ids
+    assert quarantined.id not in ids
+
+
+async def test_list_expired_quarantine_only_returns_due_entries(session):
+    due = await _make_document(session)
+    not_yet_due = await _make_document(session)
+    never_scheduled = await _make_document(session)
+    await repository.create_records_quarantine(
+        session,
+        due.id,
+        set_by="alice",
+        reason=None,
+        auto_delete_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    await repository.create_records_quarantine(
+        session,
+        not_yet_due.id,
+        set_by="alice",
+        reason=None,
+        auto_delete_at=datetime.now(UTC) + timedelta(days=30),
+    )
+    await repository.create_records_quarantine(
+        session, never_scheduled.id, set_by="alice", reason=None, auto_delete_at=None
+    )
+
+    expired = await repository.list_expired_quarantine(session)
+
+    assert [q.document_id for q in expired] == [due.id]
+
+
+async def test_list_expired_quarantine_excludes_documents_under_legal_hold(session):
+    """A legal hold still blocks quarantine's auto-delete, exactly like it
+    blocks the regular retention poll loop's forced-deletion/trash-purge
+    phases (ADR 0116)."""
+    document = await _make_document(session)
+    await repository.create_records_quarantine(
+        session,
+        document.id,
+        set_by="alice",
+        reason=None,
+        auto_delete_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    await repository.create_legal_hold(session, document.id, set_by="alice", reason="Rechtsstreit")
+
+    expired = await repository.list_expired_quarantine(session)
+
+    assert expired == []
+
+
 async def test_deletion_register_entry_roundtrip(session):
     entry = await repository.create_deletion_register_entry(
         session, "doc-1", trigger="forced_deletion", reason="Frist abgelaufen", triggered_by="alice"

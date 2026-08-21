@@ -17,6 +17,7 @@ import { KENNZEICHEN_ATTRIBUTE } from "@/lib/kennzeichen";
 import { ClassificationPanel } from "./ClassificationPanel";
 import { DerivedDocumentsPanel } from "./DerivedDocumentsPanel";
 import { LayoutFormFields } from "./LayoutFormFields";
+import { RecordsQuarantinePanel } from "./RecordsQuarantinePanel";
 import { RetentionPanel } from "./RetentionPanel";
 import { SignaturesPanel } from "./SignaturesPanel";
 
@@ -211,6 +212,7 @@ export function MetadataPanel({
       <SignaturesPanel document={activeDocument} onSigned={onSigned} />
       <RetentionPanel document={activeDocument} />
       <ClassificationPanel document={activeDocument} onChanged={onSaved} />
+      <RecordsQuarantinePanel document={activeDocument} />
       <DerivedDocumentsPanel document={activeDocument} />
     </section>
   );

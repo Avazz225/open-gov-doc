@@ -111,6 +111,36 @@ async def _grant_classification_permission():
         response.raise_for_status()
 
 
+RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantine-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_records_quarantine_permission():
+    """Post-Roadmap Phase 31 Session 5 (ADR 0116): `POST /records-quarantine`/
+    `.../release`/`GET /records-quarantine` require `admin.records_quarantine`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-records-quarantine")
+        existing = (
+            await pc.get(
+                "/role-assignments",
+                params={"principal_id": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID},
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture(autouse=True)
 def _default_no_license_limit_exceeded(monkeypatch):
     """Lizenz-Limit-Blockade (Konzept 9.3, P9-S2) greift real gegen den

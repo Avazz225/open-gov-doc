@@ -235,6 +235,41 @@ class LegalHold(Base):
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class RecordsQuarantine(Base):
+    """Records quarantine (14.2, post-roadmap phase 31 session 5, ADR 0116)
+    - an administered holding area with restricted visibility and a
+    configurable auto-delete condition. Deliberately a separate mechanism
+    from `LegalHold` above (which BLOCKS deletion indefinitely and does NOT
+    hide the document from normal listings) and from `virus-scan-service`'s
+    unrelated malware-isolation quarantine (ADR 0052, holds bytes that
+    never became a document at all). While active (`released_at IS NULL`):
+    the document is excluded from `list_documents_by_folder` (restricted
+    visibility); if `auto_delete_at` is set and reached, the document is
+    permanently deleted (see `retention_actions.execute_quarantine_auto_
+    delete`) unless an active `LegalHold` on the same document blocks it -
+    legal hold's "prevent deletion no matter what" purpose still applies on
+    top of quarantine. Same row-not-field shape as `LegalHold` (audit
+    history of who/when quarantined/released), and the two mechanisms are
+    independent/composable - a document can be quarantined, legally held,
+    and/or in the regular trash all at once, exactly like legal hold today
+    already coexists with the regular trash."""
+
+    __tablename__ = "records_quarantine"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("document.document.id"), index=True
+    )
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # `None` = no scheduled auto-deletion, quarantine stays purely a
+    # visibility restriction until manually released.
+    auto_delete_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    set_by: Mapped[str] = mapped_column(String(128))
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    released_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DeletionRegisterEntry(Base):
     """Deletion register (5.2a, since P7-S1): one entry per physical
     deletion actually carried out - both the planned forced deletion

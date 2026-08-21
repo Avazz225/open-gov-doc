@@ -217,6 +217,17 @@
   "folderRetention": {
     "heading": "Aufbewahrung & Löschung: {name}"
   },
+  "recordsQuarantine": {
+    "paneLabel": "Schriftgutquarantäne",
+    "heading": "Schriftgutquarantäne",
+    "active": "In Quarantäne (gesetzt von {setBy})",
+    "autoDeleteAt": "automatische Löschung am {date}",
+    "release": "Quarantäne aufheben",
+    "reasonLabel": "Grund",
+    "autoDeleteAtLabel": "Automatische Löschung am",
+    "set": "In Quarantäne verschieben",
+    "error": "Quarantäne konnte nicht geändert werden"
+  },
   "shareLinkModal": {
     "heading": "Freigabelink: {name}",
     "expiresAtLabel": "Gültig bis",

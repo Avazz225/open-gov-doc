@@ -177,6 +177,20 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Einstufungsverwaltung (Verschlusssachen)",
         ["admin.classification"],
     ),
+    # Post-Roadmap Phase 31 Session 5 (ADR 0116): records quarantine (an
+    # administered holding area with restricted visibility and a
+    # configurable auto-delete condition) reuses the "domain-admin-legal-
+    # hold" PATTERN (a dedicated domain-admin capability via
+    # `has_permission`), but with its OWN capability - not literally
+    # `admin.legal_hold` - since setting/releasing a records quarantine is a
+    # materially different, separately-grantable action from legal hold
+    # (one schedules destruction, the other prevents it indefinitely; an
+    # installation may want different people responsible for each).
+    (
+        "domain-admin-records-quarantine",
+        "Schriftgutquarantäne-Verwaltung",
+        ["admin.records_quarantine"],
+    ),
 ]
 
 

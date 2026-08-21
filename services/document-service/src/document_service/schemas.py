@@ -191,6 +191,32 @@ class LegalHoldOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RecordsQuarantineCreate(BaseModel):
+    document_id: str
+    reason: str | None = None
+    # `None` = purely a visibility restriction, no scheduled destruction
+    # (post-roadmap phase 31 session 5, ADR 0116).
+    auto_delete_at: datetime | None = None
+    set_by: str
+
+
+class RecordsQuarantineReleaseRequest(BaseModel):
+    released_by: str
+
+
+class RecordsQuarantineOut(BaseModel):
+    id: str
+    document_id: str
+    reason: str | None
+    auto_delete_at: datetime | None
+    set_by: str
+    set_at: datetime
+    released_by: str | None
+    released_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
 class ClassificationLevelUpdate(BaseModel):
     """Set/raise a document's classification level (post-roadmap phase 31
     session 3, ADR 0114) - `changed_by` mirrors `DocumentRegisterRequest.
@@ -234,7 +260,7 @@ class DocumentRegisterRequest(BaseModel):
 class DeletionRegisterEntryOut(BaseModel):
     id: str
     document_id: str
-    trigger: Literal["forced_deletion", "trash_expiry", "manual_purge"]
+    trigger: Literal["forced_deletion", "trash_expiry", "manual_purge", "quarantine_expiry"]
     reason: str | None
     triggered_by: str | None
     occurred_at: datetime
@@ -317,6 +343,10 @@ class ArchiveStatusOut(BaseModel):
 
 class HasActiveHoldOut(BaseModel):
     has_active_hold: bool
+
+
+class HasActiveQuarantineOut(BaseModel):
+    has_active_quarantine: bool
 
 
 # --- Public share link (4.2a, P14-S10) ------------------------------

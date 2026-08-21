@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S4 (document redaction workflow — see below under "Post-Roadmap: Phase 31"), the fourth session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S5 (records quarantine — see below under "Post-Roadmap: Phase 31"), the fifth session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S5 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** any other Phase 31 session (P31-S6 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -3829,6 +3829,120 @@ visible bottom edge, onto the backdrop, closing the modal via its `onClick={onCl
 was ever added) which was a test-authoring mistake, not a product bug, and was fixed by keeping the drag
 comfortably inside the image bounds. All test data (object type, both documents, role assignments, the
 temporary Playwright spec file itself) removed afterward.
+
+### Post-Roadmap: Phase 31 Session 5 — records quarantine (2026-08-21)
+
+Fifth Phase 31 session. A new, fourth independent document-lifecycle axis alongside legal hold, the
+regular retention schedule, and records disposal/archiving: an administered holding area with
+**restricted visibility** and an optional, configurable **auto-delete** condition. New `document-service`
+table `records_quarantine` (id, `document_id`, `reason`, `auto_delete_at`, `set_by`/`set_at`,
+`released_by`/`released_at` — same row-not-field shape as `legal_hold`, active while `released_at IS
+NULL`). Three new endpoints: `POST /records-quarantine` (create, `404` unknown document, `409` already
+quarantined), `POST /records-quarantine/{id}/release` (`404`/`409`), `GET /records-quarantine`
+(**gated**, deliberately unlike `GET /legal-holds`). See
+[ADR 0116](docs/adr/0116-records-quarantine-destruction-scheduling.md) for the full design rationale.
+
+**Structurally distinct from every existing mechanism**, verified against each before building: legal
+hold (ADR 0075) *prevents* deletion but never hides anything — the opposite pairing from what quarantine
+needs; the virus-scan quarantine (ADR 0052) holds bytes that never became a document, a different service
+entirely (deliberately always spelled out in full as "records quarantine" in code/docs/UI to avoid
+confusion); the archival pipeline (P7-S3) relocates content while deliberately keeping the metadata row
+visible — the opposite of restricted visibility.
+
+**RBAC reuses the *pattern*, not the literal capability**: a new, dedicated `admin.records_quarantine`
+capability and `domain-admin-records-quarantine` role (permission-service `DOMAIN_ADMIN_ROLES`), checked
+via the same `_require_<x>_permission` → `permission_client.has_permission(...)` shape as legal hold and
+classification — not a reuse of `admin.legal_hold`. This reading is grounded in the codebase itself: ADR
+0075 explains why legal hold got its own domain instead of reusing `domain-admin-deletion` ("a legal hold
+PREVENTS deletion, a deletion administrator PERFORMS it — opposing responsibilities"), and the identical
+reasoning applies even more directly here (legal hold protects records, quarantine schedules their
+destruction).
+
+**Restricted visibility**: `repository.list_documents_by_folder` (and therefore
+`list_documents_for_folder_export`, which reuses it) excludes actively-quarantined documents via a `NOT
+EXISTS` subquery — chosen over the N+1 `has_active_hold`-per-candidate pattern used by the low-volume poll
+loop elsewhere in this file, since folder listing is a hot path hit on every navigation. `GET
+/documents/{id}` itself is deliberately unaffected — only the folder listing hides it, so an already-open
+document tab keeps working for both quarantining and releasing (the practical answer to "how do you ever
+reach the release button on a document the explorer no longer shows": you reach it via the still-open tab
+from the moment before it was hidden, or via a direct link/ID).
+
+**Auto-delete reuses the existing `_retention_poll_loop`** as a new, fourth phase (was three: forced
+deletion, trash expiry, deletion reminder) rather than a new separate asyncio loop —
+`repository.list_expired_quarantine` (due `auto_delete_at`, filtered by the *document's* `has_active_hold`,
+same "legal hold blocks everything" precedent every other destruction path in this service already
+follows) feeds `retention_actions.execute_quarantine_auto_delete` (same shape as
+`purge_expired_trash_entry`, no governance bypass, `trigger="quarantine_expiry"` in the deletion register).
+`hard_delete_document` now also removes the (now-terminal) `records_quarantine` row itself as part of its
+existing dependent-row cleanup, mirroring how it already removes `legal_hold` history — no separate release
+step needed before or during auto-delete. Publishes new event types
+`document.records_quarantine.set`/`.released`/`.auto_deleted`, not consumed by anything yet — deliberately
+NOT reusing `document.deleted` for the auto-delete case, which would make `audit-service`'s verbatim event
+log incorrectly show a quarantine action as an actual deletion (a real audit-trail-correctness risk, not
+an acceptable shortcut).
+
+**Deliberately out of scope, both honestly documented in ADR 0116 rather than silently left undone**:
+(1) `search-service` is NOT made quarantine-aware — a quarantined document remains fully findable via
+search, a real visibility gap relative to folder browsing. Closing it safely needs its own session: reusing
+`document.deleted` corrupts the audit trail (see above), and a genuinely new event type risks the exact
+"silent no-op" pitfall found live during P31-S4 (ADR 0115) — event-type dispatchers elsewhere in this
+system match specific strings exactly. (2) `case-service` is untouched — same scoping conclusion already
+reached for redaction (ADR 0115): no destruction-scheduling primitive exists there to hook a quarantine
+gate onto (only `status` open/closed and the archival-only `archive_after`/`archived_at`).
+
+**Frontend (`user-ui`)**: new `RecordsQuarantinePanel` (same standalone-panel, its-own-`list*`-call shape
+as `RetentionPanel`'s legal-hold section — quarantine state doesn't live on `DocumentSummary` itself,
+unlike classification), wired into `MetadataPanel` next to `ClassificationPanel`/`RetentionPanel`. Ungated
+viewers see nothing at all (`return null` without `admin.records_quarantine`) rather than a read-only
+status display — unlike legal hold's always-visible status, listing/showing quarantine state is itself the
+restricted content this feature exists to protect (mirrors the backend's gated `GET /records-quarantine`).
+New `lib/api.ts` functions (`listRecordsQuarantine`/`createRecordsQuarantine`/`releaseRecordsQuarantine`,
+`RecordsQuarantine` interface), new `recordsQuarantine.*` i18n keys.
+
+Tests: document-service 322 (previously 304, +18: 9 repository tests — lifecycle, double-quarantine/
+double-release rejection, unknown-document rejection, folder-listing exclusion, expired-candidate
+filtering including the legal-hold-blocks-it case, hard-delete cleanup — plus 8 API tests covering the full
+403/404/409/lifecycle/visibility/has-active-quarantine matrix, plus 1 retention_actions test for the
+auto-delete action itself); permission-service 138 (unchanged count — confirms its role-seeding tests
+iterate `DOMAIN_ADMIN_ROLES` dynamically rather than hardcoding an expected total). user-ui 220 (previously
+217, +3: renders nothing without the permission, set-then-release round trip, initial-load display
+including the auto-delete date). All `ruff`/`tsc`/`eslint`/`vitest`/`next build` gates clean — this
+session's backend implementation needed **zero fix-and-rerun cycles** (unlike P31-S3/S4, each of which
+needed at least one), since the design deliberately anticipated both previously-discovered pitfalls
+up front: `permission-service` was rebuilt and restarted **before** running document-service's tests
+(the P31-S3-discovered ordering requirement), and the new `document.records_quarantine.*` event types are
+correctly NOT expected to be recognized by `rendering-service`'s exact-match dispatcher, since nothing
+downstream needs to process a quarantine action as a rendering trigger (a deliberate choice, not a repeat
+of the P31-S4 near-miss).
+
+**Fully verified live against the real running stack** (curl via the gateway, real login as
+`config-admin`, `document-service`/`user-ui` freshly rebuilt beforehand): a temporary role assignment
+(`domain-admin-records-quarantine` → `config-admin`, revoked afterward, same discipline as every prior
+test-only role grant in this project) confirmed the full matrix — `401` without a token, `404` for an
+unknown document, `409` on double-quarantine and double-release, `403` for a principal without the
+capability on both `POST` and the now-gated `GET /records-quarantine`. The restricted-visibility claim was
+confirmed both directions: a document present in `GET /documents?folder_id=...` disappeared immediately
+after quarantining and reappeared immediately after release, while `GET /documents/{id}` itself returned
+`200` throughout. The auto-delete poll-loop phase was confirmed genuinely live, not just unit-tested:
+`document-service` was restarted with `DOCUMENT_SERVICE_RETENTION_POLL_INTERVAL_SECONDS=5` (reset to the
+default 3600 afterward, same technique used for `archival-service` at P7-S3b), a document was quarantined
+with a past `auto_delete_at`, and within one poll tick it was gone (`404`) with a `deletion_register_entry`
+row showing `trigger="quarantine_expiry"`, the correct carried-through `reason`, and
+`triggered_by="system:retention-poll"`. **The legal-hold-blocks-quarantine-auto-delete interaction was
+not additionally reproduced live** (a same-run attempt failed to set up its precondition — the test
+principal lacked `admin.legal_hold`, so the intended block never actually engaged — not worth a second
+temporary role grant purely for cleanup-free live confirmation of a case already covered by
+`test_list_expired_quarantine_excludes_documents_under_legal_hold`); this remains verified only at the
+automated-test level, an honest, explicitly acknowledged limitation rather than an implied full
+reproduction. **A real Playwright browser session** drove `user-ui` end to end: uploaded a document into
+an isolated folder, opened it, filled the quarantine panel's reason field, clicked "In Quarantäne
+verschieben", confirmed the active-quarantine status text appeared, clicked "Quarantäne aufheben", and
+confirmed the form reappeared — the temporary `users-admin` role grant, its role-assignment, and the
+throwaway spec file were all removed afterward. All backend test artifacts (test documents, the test
+folder) cleaned up via soft-delete + folder trash; the two documents left in the personal trash could not
+be hard-purged without a `dms-admin` legacy-role grant (a heavier, Keycloak-side change not worth making
+purely for cleanup of already-invisible trashed test data) — left in the trash, not in normal view,
+consistent with how this project has occasionally handled equivalent minor cleanup gaps before.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

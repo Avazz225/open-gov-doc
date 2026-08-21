@@ -30,6 +30,8 @@ LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "document-service-test-legal-hold-admin"
 LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": LEGAL_HOLD_ADMIN_PRINCIPAL_ID}
 CLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-classification-admin"
 CLASSIFICATION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFICATION_ADMIN_PRINCIPAL_ID}
+RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantine-admin"
+RECORDS_QUARANTINE_ADMIN_HEADERS = {"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
@@ -1607,6 +1609,147 @@ def test_create_legal_hold_unknown_document_returns_404(client):
         headers=LEGAL_HOLD_ADMIN_HEADERS,
     )
     assert response.status_code == 404
+
+
+# --- Records quarantine (post-roadmap phase 31 session 5, ADR 0116) -------
+
+
+def test_create_records_quarantine_without_permission_is_403(client):
+    document_id = upload(client).json()["id"]
+    response = client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": "Prüfung"},
+        headers={"X-DMS-Principal": "no-records-quarantine-permission-user"},
+    )
+    assert response.status_code == 403
+
+
+def test_records_quarantine_lifecycle(client):
+    document_id = upload(client).json()["id"]
+
+    create_response = client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": "Prüfung Aussonderung"},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+    assert create_response.status_code == 201
+    quarantine = create_response.json()
+    assert quarantine["released_at"] is None
+    assert quarantine["auto_delete_at"] is None
+
+    list_response = client.get(
+        "/records-quarantine",
+        params={"document_id": document_id, "active_only": True},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+    assert len(list_response.json()) == 1
+
+    release_response = client.post(
+        f"/records-quarantine/{quarantine['id']}/release",
+        json={"released_by": "bob"},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+    assert release_response.status_code == 200
+    assert release_response.json()["released_by"] == "bob"
+
+    list_after_release = client.get(
+        "/records-quarantine",
+        params={"document_id": document_id, "active_only": True},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+    assert list_after_release.json() == []
+
+
+def test_list_records_quarantine_without_permission_is_403(client):
+    response = client.get("/records-quarantine", headers={"X-DMS-Principal": "unpriv"})
+    assert response.status_code == 403
+
+
+def test_create_records_quarantine_twice_returns_409(client):
+    document_id = upload(client).json()["id"]
+    client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": None},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+
+    response = client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "bob", "reason": None},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 409
+
+
+def test_release_records_quarantine_twice_returns_409(client):
+    document_id = upload(client).json()["id"]
+    quarantine = client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": None},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    ).json()
+    client.post(
+        f"/records-quarantine/{quarantine['id']}/release",
+        json={"released_by": "alice"},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+
+    response = client.post(
+        f"/records-quarantine/{quarantine['id']}/release",
+        json={"released_by": "alice"},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 409
+
+
+def test_create_records_quarantine_unknown_document_returns_404(client):
+    response = client.post(
+        "/records-quarantine",
+        json={"document_id": "does-not-exist", "set_by": "alice", "reason": None},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+def test_quarantined_document_is_hidden_from_folder_listing(client):
+    document_id = upload(client, folder_id="root").json()["id"]
+    assert document_id in [d["id"] for d in client.get("/documents?folder_id=root").json()]
+
+    client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": None},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+
+    response = client.get("/documents?folder_id=root")
+    assert document_id not in [d["id"] for d in response.json()]
+
+
+def test_has_active_quarantine_reflects_quarantine_state(client):
+    document_id = upload(client).json()["id"]
+    assert client.get(f"/documents/{document_id}/has-active-quarantine").json() == {
+        "has_active_quarantine": False
+    }
+
+    quarantine = client.post(
+        "/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": None},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    ).json()
+    assert client.get(f"/documents/{document_id}/has-active-quarantine").json() == {
+        "has_active_quarantine": True
+    }
+
+    client.post(
+        f"/records-quarantine/{quarantine['id']}/release",
+        json={"released_by": "alice"},
+        headers=RECORDS_QUARANTINE_ADMIN_HEADERS,
+    )
+    assert client.get(f"/documents/{document_id}/has-active-quarantine").json() == {
+        "has_active_quarantine": False
+    }
 
 
 def test_deletion_register_empty_by_default(client):

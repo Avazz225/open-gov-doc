@@ -87,3 +87,36 @@ async def purge_expired_trash_entry(
     )
     await repository.hard_delete_document(session, document_id)
     return True
+
+
+async def execute_quarantine_auto_delete(
+    session: AsyncSession,
+    storage: StorageClient,
+    document_id: str,
+    *,
+    reason: str | None,
+    triggered_by: str,
+) -> bool:
+    """Records-quarantine auto-delete (post-roadmap phase 31 session 5, ADR
+    0116) - structurally identical to `purge_expired_trash_entry` above
+    (no automatic governance bypass, retried next tick if blocked by an
+    active object lock), only the deletion-register `trigger` differs.
+    `hard_delete_document` also removes the now-terminal `RecordsQuarantine`
+    row itself as part of its normal dependent-row cleanup - no separate
+    "release" step is needed here."""
+    try:
+        await _delete_all_versions_from_storage(
+            session, storage, document_id, bypass_governance=False, x_dms_roles=""
+        )
+    except DeletionBlockedError:
+        logger.warning(
+            "Quarantäne-Auto-Löschung für document_id=%r durch aktive Governance-Mode-Sperre "
+            "blockiert - wird beim nächsten Durchlauf erneut versucht",
+            document_id,
+        )
+        return False
+    await repository.create_deletion_register_entry(
+        session, document_id, trigger="quarantine_expiry", reason=reason, triggered_by=triggered_by
+    )
+    await repository.hard_delete_document(session, document_id)
+    return True

@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from dms_retry import compute_backoff_seconds
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from document_service.models import (
@@ -16,6 +16,7 @@ from document_service.models import (
     ExportConfig,
     FolderExportJob,
     LegalHold,
+    RecordsQuarantine,
     RetentionConfig,
     ShareLink,
     ShareLinkConfig,
@@ -55,7 +56,17 @@ class RestorePeriodExpiredError(Exception):
 
 
 class AlreadyReleasedError(Exception):
-    """A legal hold was already released previously (5.2, since P7-S1)."""
+    """A legal hold - or, since post-roadmap phase 31 session 5 (ADR 0116),
+    a records-quarantine entry - was already released previously."""
+
+
+class AlreadyQuarantinedError(Exception):
+    """A document already has an active records-quarantine entry
+    (post-roadmap phase 31 session 5, ADR 0116) - release the existing one
+    first rather than stacking a second, since (unlike legal hold, where
+    multiple simultaneous holds are a meaningful, independently trackable
+    audit history) a document only ever needs one active auto-delete
+    schedule at a time."""
 
 
 class AlreadyRegisteredError(Exception):
@@ -93,10 +104,25 @@ async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> lis
     """Basis for the folder navigation of the user UI (P4-S2). `folder_id` is
     treated here, as everywhere else in this service, as an opaque foreign
     reference (no existence check against the Folder Service) - an unknown
-    folder simply returns an empty list instead of an error."""
+    folder simply returns an empty list instead of an error.
+
+    Since post-roadmap phase 31 session 5 (ADR 0116): also excludes
+    actively-quarantined documents - records quarantine's "restricted
+    visibility" requirement, implemented as a `NOT EXISTS` subquery (not the
+    N+1 `has_active_hold`-per-candidate pattern used by the low-volume
+    retention poll loop) since this is a hot path hit on every folder
+    navigation. `list_documents_for_folder_export` (P28) reuses this
+    function directly and therefore inherits the same exclusion."""
+    quarantine_subquery = select(RecordsQuarantine.id).where(
+        RecordsQuarantine.document_id == Document.id, RecordsQuarantine.released_at.is_(None)
+    )
     result = await session.execute(
         select(Document)
-        .where(Document.folder_id == folder_id, Document.deleted_at.is_(None))
+        .where(
+            Document.folder_id == folder_id,
+            Document.deleted_at.is_(None),
+            ~exists(quarantine_subquery),
+        )
         .order_by(Document.title)
     )
     return list(result.scalars().all())
@@ -438,8 +464,9 @@ async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
     afterwards except a separate `DeletionRegisterEntry`
     (see main.py._execute_forced_deletion/_purge_expired_trash), which
     deliberately has NO FK to `Document.id`. First removes all
-    dependent rows (versions, a possibly orphaned lock, the
-    legal hold history) so that FK constraints are not violated."""
+    dependent rows (versions, a possibly orphaned lock, the legal hold
+    history, the records-quarantine history since post-roadmap phase 31
+    session 5) so that FK constraints are not violated."""
     document = await get_document(session, document_id)
     for version in await list_versions(session, document_id):
         await session.delete(version)
@@ -448,6 +475,8 @@ async def hard_delete_document(session: AsyncSession, document_id: str) -> None:
         await session.delete(lock)
     for hold in await list_holds(session, document_id):
         await session.delete(hold)
+    for quarantine in await list_records_quarantine(session, document_id=document_id):
+        await session.delete(quarantine)
     # Without an explicit intermediate flush, SQLAlchemy's unit of work does
     # not reliably order the subsequent DELETE statement for `document` AFTER
     # the ones above (no declared `relationship()`s between these
@@ -740,6 +769,87 @@ async def has_active_hold(session: AsyncSession, document_id: str) -> bool:
         .limit(1)
     )
     return result.scalar_one_or_none() is not None
+
+
+# --- Records quarantine (14.2, post-roadmap phase 31 session 5, ADR 0116) --
+
+
+async def create_records_quarantine(
+    session: AsyncSession,
+    document_id: str,
+    *,
+    set_by: str,
+    reason: str | None,
+    auto_delete_at: datetime | None,
+) -> RecordsQuarantine:
+    await get_document(session, document_id)
+    if await has_active_quarantine(session, document_id):
+        raise AlreadyQuarantinedError(f"document_id {document_id!r} ist bereits in Quarantäne")
+    quarantine = RecordsQuarantine(
+        id=str(uuid.uuid4()),
+        document_id=document_id,
+        reason=reason,
+        auto_delete_at=auto_delete_at,
+        set_by=set_by,
+        set_at=datetime.now(UTC),
+    )
+    session.add(quarantine)
+    await session.flush()
+    return quarantine
+
+
+async def release_records_quarantine(
+    session: AsyncSession, quarantine_id: str, *, released_by: str
+) -> RecordsQuarantine:
+    quarantine = await session.get(RecordsQuarantine, quarantine_id)
+    if quarantine is None:
+        raise NotFoundError(f"Quarantäne-Eintrag {quarantine_id!r} unbekannt")
+    if quarantine.released_at is not None:
+        raise AlreadyReleasedError(f"Quarantäne-Eintrag {quarantine_id!r} wurde bereits aufgehoben")
+    quarantine.released_by = released_by
+    quarantine.released_at = datetime.now(UTC)
+    await session.flush()
+    return quarantine
+
+
+async def list_records_quarantine(
+    session: AsyncSession, *, document_id: str | None = None, active_only: bool = False
+) -> list[RecordsQuarantine]:
+    query = select(RecordsQuarantine)
+    if document_id is not None:
+        query = query.where(RecordsQuarantine.document_id == document_id)
+    if active_only:
+        query = query.where(RecordsQuarantine.released_at.is_(None))
+    result = await session.execute(query.order_by(RecordsQuarantine.set_at.desc()))
+    return list(result.scalars().all())
+
+
+async def has_active_quarantine(session: AsyncSession, document_id: str) -> bool:
+    result = await session.execute(
+        select(RecordsQuarantine.id)
+        .where(
+            RecordsQuarantine.document_id == document_id, RecordsQuarantine.released_at.is_(None)
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def list_expired_quarantine(session: AsyncSession) -> list[RecordsQuarantine]:
+    """Active quarantine entries with a due auto-delete schedule - a legal
+    hold on the same document still blocks this, exactly like it blocks the
+    regular retention poll loop's forced-deletion/trash-purge phases (same
+    "prevent deletion no matter what" precedence)."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(RecordsQuarantine).where(
+            RecordsQuarantine.released_at.is_(None),
+            RecordsQuarantine.auto_delete_at.isnot(None),
+            RecordsQuarantine.auto_delete_at <= now,
+        )
+    )
+    candidates = list(result.scalars().all())
+    return [q for q in candidates if not await has_active_hold(session, q.document_id)]
 
 
 async def create_deletion_register_entry(
