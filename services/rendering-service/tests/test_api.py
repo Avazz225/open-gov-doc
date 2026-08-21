@@ -176,6 +176,90 @@ def test_render_convert_to_pdf_rejects_unsupported_format():
     assert response.status_code == 422
 
 
+# --- Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) --
+
+
+def test_render_pdf_page_count():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/pdf-page-count",
+            files={"file": ("akte.pdf", _real_pdf(pages=3), "application/pdf")},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"page_count": 3}
+
+
+def test_render_pdf_page_image_returns_png():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/pdf-page-image",
+            data={"page_number": "1"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+
+
+def test_render_pdf_page_image_rejects_out_of_range_page():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/pdf-page-image",
+            data={"page_number": "99"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 422
+
+
+def test_render_redact_returns_pdf_with_content_removed():
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=(200, 200))
+    c.drawString(10, 10, "GEHEIM")
+    c.showPage()
+    c.save()
+    source = buf.getvalue()
+
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/redact",
+            data={
+                "regions": json.dumps(
+                    [{"page_number": 1, "x": 0.0, "y": 0.8, "width": 1.0, "height": 0.2}]
+                )
+            },
+            files={"file": ("akte.pdf", source, "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    reader = PdfReader(BytesIO(response.content))
+    assert "GEHEIM" not in reader.pages[0].extract_text()
+
+
+def test_render_redact_rejects_empty_regions():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/redact",
+            data={"regions": "[]"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 400
+
+
+def test_render_redact_rejects_out_of_range_page():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/redact",
+            data={
+                "regions": json.dumps(
+                    [{"page_number": 5, "x": 0.0, "y": 0.0, "width": 1.0, "height": 0.2}]
+                )
+            },
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 422
+
+
 def test_render_export_document_merges_document_and_history():
     """Post-Roadmap Phase 28 (ADR 0107)."""
     history = json.dumps(

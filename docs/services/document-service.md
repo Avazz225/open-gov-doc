@@ -12,6 +12,10 @@
 | `POST` | `/documents` | Create (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` as a JSON string, optional `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` for editing copies, see below) — creates a document + version 1. Since P5-S1: `422` on a virus finding, `503` if the virus scan service is unreachable (see below). Since **P5e-S2**: with a reference number generator configured, `attributes["Kennzeichen"]` is assigned server-side; a value sent by the client for this key is discarded (see "Reference Number Generator" below). Since **Post-Roadmap Phase 31 Session 2**: optional `draft` form field skips that assignment, see "Draft / Pre-Registration Lifecycle" below |
 | `POST` | `/documents/{id}/register` | Draft → registered transition (Post-Roadmap Phase 31 Session 2, ADR 0113) — assigns the reference number deferred by `draft=true` above. `409` if already registered, `422` on a missing placeholder attribute (same as at creation time), see below |
 | `PUT` | `/documents/{id}/classification-level` | Set/raise a document's classification level (14.2, Post-Roadmap Phase 31 Session 3, ADR 0114) — requires `admin.classification`. `409` on an attempted downgrade, see "Classification Level" below |
+| `POST` | `/documents/{id}/redact` | Burns the given regions into a new, independent redacted copy (14.2, Post-Roadmap Phase 31 Session 4, ADR 0115) — requires `document.read` on the original, `422` for a non-PDF source, see "Document Redaction" below |
+| `GET` | `/documents/{id}/derived` | Documents derived from this one (currently only redacted copies) — the first actual reader of the P6-S3 `derived_from_document_id` field, see below |
+| `GET` | `/documents/{id}/redaction-preview/page-count` | Proxies to rendering-service's `/render/pdf-page-count` — requires `document.read` |
+| `GET` | `/documents/{id}/redaction-preview/page-image?page_number=...` | Proxies to rendering-service's `/render/pdf-page-image` — requires `document.read` |
 | `POST` | `/documents/from-quarantine-release` | Internal creation path exclusively for `virus-scan-service` (2.5/10.3, since P15-S2) — identical fields to `POST /documents` plus `source_scan_id`, but deliberately triggers NO virus scan. `401`/`403` without `X-DMS-Principal`/`quarantine_release_admin_role` (default `dms-admin`). See "Quarantine Area" below and [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) |
 | `GET` | `/documents?folder_id=...` | Non-deleted documents of a folder (since P4-S2, basis for user UI navigation) — an unknown `folder_id` returns `[]`, no 404 |
 | `GET` | `/documents/{id}` | Metadata. Since **P7-S2c**: optionally publishes `document.viewed` on success (forensic trace, 5.4b) — depending on the audit depth configuration, see below |
@@ -66,7 +70,7 @@
 
 ## Data Model
 
-- `document`: `id`, `title`, `folder_id`/`object_type_id` (opaque references, see below), `attributes` (JSON, custom fields per object type), `current_version_number` (pointer to the main version), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (since P6-S3, editing copies, see below), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, since P7-S1, see below), `deleted_via_folder_id` (5.2, since P7-S1b) — set when this document was deleted not individually but through a cascade via `POST /documents/cascade-trash` (because its folder was moved to the trash); `POST /documents/cascade-restore` uses this to specifically restore only the documents deleted through that cascade, not any independently, individually deleted one. `archive_after`/`archived_at`/`archive_format`/`dehydrated_at` (5.6, since P7-S3, see below). `registered_at` (nullable, since Post-Roadmap Phase 31 Session 2, ADR 0113) — `NULL` while a draft, set at creation time for a regular document or via `POST .../register` for a former draft, see "Draft / Pre-Registration Lifecycle" below. `classification_level` (nullable, since Post-Roadmap Phase 31 Session 3, ADR 0114) — `NULL` = unclassified, see "Classification Level" below.
+- `document`: `id`, `title`, `folder_id`/`object_type_id` (opaque references, see below), `attributes` (JSON, custom fields per object type), `current_version_number` (pointer to the main version), `deleted_at`, `created_by/at/updated_at`, `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` (since P6-S3, editing copies, see below), `retention_until`/`full_deletion`/`pending_deletion_reason`/`deletion_reminder_sent_at`/`reminder_notify_email`/`force_delete_approval_requested_at` (5.2/5.2a, since P7-S1, see below), `deleted_via_folder_id` (5.2, since P7-S1b) — set when this document was deleted not individually but through a cascade via `POST /documents/cascade-trash` (because its folder was moved to the trash); `POST /documents/cascade-restore` uses this to specifically restore only the documents deleted through that cascade, not any independently, individually deleted one. `archive_after`/`archived_at`/`archive_format`/`dehydrated_at` (5.6, since P7-S3, see below). `registered_at` (nullable, since Post-Roadmap Phase 31 Session 2, ADR 0113) — `NULL` while a draft, set at creation time for a regular document or via `POST .../register` for a former draft, see "Draft / Pre-Registration Lifecycle" below. `classification_level` (nullable, since Post-Roadmap Phase 31 Session 3, ADR 0114) — `NULL` = unclassified, see "Classification Level" below. `derivation_type` (nullable, since Post-Roadmap Phase 31 Session 4, ADR 0115) — `NULL` for every document that isn't a redacted copy, `"redaction"` otherwise, see "Document Redaction" below.
 - `document_version`: `document_id`, `version_number`, `storage_object_key`, `filename`, `content_type`, `size_bytes`, `checksum_sha256`, `is_conflict`, `based_on_version_number`, `comment`, `created_by/at`. Every row remains retrievable forever (2.1a). `storage_object_key` has since P7-S3 also been exposed externally via `GET .../versions/{n}` (`DocumentVersionOut`) — `archival-service` needs the exact live key for dehydration/retrieval. `classification_level` (nullable, since Post-Roadmap Phase 31 Session 3, ADR 0114) — a snapshot of the owning document's level at check-in time, never retroactively updated by a later raise, see "Classification Level" below.
 - `document_lock`: exactly one active row per locked document (`document_id` as PK) — `locked_by`, `session_id`, `based_on_version_number`, `locked_at`, `expires_at`.
 - `upload_config`: single row (`id=1`, since P5d-S1) — `allowed_content_types` (JSON list, empty = no restriction), `updated_at`.
@@ -132,13 +136,49 @@ check-in time) make it a genuine per-document/per-version attribute:
 - Publishes `document.classification.changed` on a successful raise (picked up by `audit-service`'s
   existing `document.>` wildcard subscription, no extension needed there).
 
+## Document Redaction (14.2, Post-Roadmap Phase 31 Session 4, [ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md))
+
+`POST /documents/{id}/redact` (`regions`: list of `{page_number, x, y, width, height}` fractions,
+`created_by`) burns the given regions into a **new, independent PDF document** — genuine content
+removal via rendering-service's `POST /render/redact` (PyMuPDF), not a visual overlay (see ADR 0115 for
+why this matters for search indexing). Orchestration:
+
+1. `422` if the original's current version isn't `application/pdf`.
+2. Downloads the current version's bytes from storage-service, hands them plus `regions` to
+   `rendering_client.redact()`.
+3. Creates the result through the exact same pipeline as any other upload
+   (`_prepare_document_fields`/`_persist_new_document`) — same folder, same object type and attributes as
+   the original (minus `Kennzeichen`, freshly regenerated), title suffixed `" (geschwärzt)"`. No virus
+   re-scan (same reasoning as `POST /documents/from-quarantine-release`, ADR 0052: server-derived from an
+   already-scanned source).
+4. Links back via the P6-S3 provenance fields (`derived_from_document_id`/`derived_from_version_number`,
+   previously write-only) plus a new `derivation_type = "redaction"` discriminator column.
+   `classification_level` is seeded from the **original's current level**, overriding what
+   `_prepare_document_fields` would otherwise compute from the object type's default — redaction must
+   never silently declassify.
+5. Publishes the **default** `document.created` event (deliberately NOT a custom `document.redacted` type)
+   with `derivation_type`/`source_document_id`/`region_count` in the payload — rendering-service's consumer
+   dispatches on an exact match against `document.created`/`document.version.created` only, so a custom
+   event type would silently skip the redacted copy for rendering/OCR/search-indexing entirely (found live
+   during this session's verification before shipping).
+
+`GET /documents/{id}/derived` (no gate) lists documents with `derived_from_document_id == id` — the
+first actual reader of that field anywhere in the codebase, not filtered to redactions specifically.
+`GET .../redaction-preview/page-count`/`.../page-image` proxy to rendering-service's new page-rasterization
+endpoints so the browser never talks to rendering-service or storage-service directly.
+
 ## Editing Copies (2.3, since P6-S3)
 
 A process-specific editing copy (classic example: a redaction for file inspection) is, per the concept, **not a new version of the original document**, but a standalone, separately stored document referencing the original document (including a specific source version) and the triggering process/case — and is meant to be "fully audited and versioned just like any other document action".
 
 This session deliberately introduced **no new route** for this, but instead extended `POST /documents` with three optional, nullable form fields: `derived_from_document_id` (references `document.id`, a real FK within the same schema), `derived_from_version_number` (required as soon as `derived_from_document_id` is set — `400` if missing or if the referenced version does not exist per `repository.get_version()`), `originating_case_id` (an opaque reference to a case in the new `case-service`, no existence check — analogous to `folder_id`/`object_type_id`). An editing copy created this way is then a **completely standalone document**: its own `id`, its own version history, running through the same virus-scan/storage-upload/reference-number mechanism as any other document — the three fields are purely provenance metadata with no special handling anywhere else in the service.
 
-`case-service` (P6-S3) is the intended caller (redacting a document referenced in a case), but does not itself call this endpoint yet — creating an editing copy is a manual/process-driven action outside this session's scope; the data model/API extension is the necessary foundation for it.
+`case-service` (P6-S3) was the originally intended caller, but has still never called this endpoint. The
+actual first real consumer turned out to be `POST /documents/{id}/redact` itself (Post-Roadmap Phase 31
+Session 4, see "Document Redaction" above) — document-service calling its own creation pipeline
+internally, not case-service — plus a new `derivation_type` discriminator column and, for the first
+time, an actual reader of `derived_from_document_id` (`GET /documents/{id}/derived`); previously both
+fields were write-only, round-tripped in `DocumentOut` but never queried by anything.
 
 ## Content Storage (3.6 Integration)
 

@@ -40,6 +40,7 @@ class DocumentOut(BaseModel):
     dehydrated_at: datetime | None
     registered_at: datetime | None
     classification_level: str | None
+    derivation_type: str | None
 
     model_config = {"from_attributes": True}
 
@@ -198,6 +199,26 @@ class ClassificationLevelUpdate(BaseModel):
 
     classification_level: Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
     changed_by: str
+
+
+class RedactionRegion(BaseModel):
+    """One rectangle to burn out (post-roadmap phase 31 session 4, ADR
+    0115). `page_number` is 1-indexed, matching every other per-page API in
+    this project (see `ocr_service.OcrResult.pages`). `x`/`y`/`width`/
+    `height` are fractions (0..1) of that page's own dimensions -
+    resolution-independent, same convention already used by the frontend's
+    OCR-word-overlay positioning."""
+
+    page_number: int = Field(ge=1)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+
+class RedactionRequest(BaseModel):
+    regions: list[RedactionRegion] = Field(min_length=1)
+    created_by: str
 
 
 class DocumentRegisterRequest(BaseModel):

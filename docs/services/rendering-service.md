@@ -1,6 +1,6 @@
 # rendering-service
 
-**Responsibility:** Rendering/preview + renditions (Concept 3.7/2.4) — automatically generates permanently persisted previews/renditions for new document versions and provides on-demand rendering functions (watermarking).
+**Responsibility:** Rendering/preview + renditions (Concept 3.7/2.4) — automatically generates permanently persisted previews/renditions for new document versions and provides on-demand rendering functions (watermarking, PDF export, document redaction).
 **Concept Reference:** 3.7, 2.4
 **Own Postgres schema:** `rendering` (`rendition`).
 
@@ -16,6 +16,9 @@
 | `POST` | `/render/convert-to-pdf` | Multipart (`file`: any `PdfArchiveRenderer`-supported format) → on-demand PDF conversion, same dispatch as the automatic pipeline but without persisting a `Rendition` row; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
 | `POST` | `/render/export/document` | Multipart (`file`, `title`, `history_position`, `history`: JSON array) → Pass A of the PDF export feature — converts + merges with the (already document-service-resolved) export history, stamps a local page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
 | `POST` | `/render/export/folder` | Multipart (`titles`: repeated form field, `files`: repeated, each already the output of `/render/export/document`) → Pass B — table of contents, bookmarks, global page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
+| `POST` | `/render/pdf-page-count` | Multipart (`file`: PDF) → `{page_count}`, since **Post-Roadmap Phase 31 Session 4** ([ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md)) — for the redaction UI's page navigation; `rendering.write`-gated |
+| `POST` | `/render/pdf-page-image` | Multipart (`file`: PDF, `page_number`) → PNG raster of that page (any PDF, not just scans — see "Document Redaction" below); `rendering.write`-gated |
+| `POST` | `/render/redact` | Multipart (`file`: PDF, `regions`: JSON array of `{page_number, x, y, width, height}` fractions) → the PDF with those regions' content genuinely removed (not just covered), returned directly, **without** persisting it; `rendering.write`-gated |
 | `GET` | `/healthz` | Health check |
 
 The `id` of a rendition is a natural key `{document_id}:{version_number}:{rendition_type}` (see Data Model) — not a random UUID.
@@ -93,6 +96,29 @@ This closes the gap deliberately left open in P5-S2: scanned/image-based documen
 ## Watermarking as an On-Demand Function, Not an Automatic Rule (3.7)
 
 Unlike renditions, `POST /render/watermark` is deliberately **not** an automatic pipeline step and is **not** persisted: a watermark (e.g. "CONFIDENTIAL", a recipient name on an export) is typically a deliberate one-off action for a specific occasion, not a default step for every uploaded PDF. The implementation (`watermark.py`, reportlab + pypdf) is deliberately kept simple: a single diagonal, semi-transparent text stamp on every page, no position/color/repetition configuration.
+
+## Document Redaction: Genuine Content Removal (14.2, Post-Roadmap Phase 31 Session 4, [ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md))
+
+`redaction.py` is a deliberately different PDF-mutation technique from `watermark.py`: it uses **PyMuPDF**
+(`fitz`), not pypdf/reportlab, because only PyMuPDF's redaction API (`page.add_redact_annot()` +
+`page.apply_redactions()`) actually **removes** the covered text/graphics from the content stream —
+`watermark.py`'s `page.merge_page()` only overlays a stamp on top of unchanged content. This distinction
+is why redaction needs its own module rather than extending the watermark one. `pymupdf` was already a
+proven dependency in this project (`ocr-service`, since early phases) — this session adds the identical
+version constraint here.
+
+- **`get_page_count()`/`render_page_image()`**: any PDF page can be rasterized this way (`page.get_pixmap()`),
+  regardless of whether it has a native text layer or is a scan — unlike `ocr-service`'s page images
+  (`OcrResult.page_image_storage_key`), which only exist for the Tesseract-processed subset. Used by
+  `document-service`'s redaction-preview proxy endpoints to feed the redaction UI.
+- **`apply_redactions()`**: `x`/`y`/`width`/`height` are fractions (0..1) of each page's own dimensions —
+  resolution-independent, converted to PDF-point rectangles per page. PyMuPDF's coordinate system is
+  top-left-origin, y-grows-downward (verified empirically, matching `ocr_service.text_layer`'s existing
+  assumption for the same reason) — no axis mirroring needed against the frontend's percentage-based
+  region coordinates.
+- Consequence for downstream services: since content is genuinely gone, a redacted copy's later OCR
+  pass (native-text-layer extraction or Tesseract) naturally omits the removed text — no separate
+  "exclude from search index" mechanism was needed anywhere (see ADR 0115).
 
 ## PDF Export: Two-Pass Merge/Bookmark/Sub-Numbering (Post-Roadmap Phase 28, [ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md))
 

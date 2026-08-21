@@ -41,6 +41,18 @@ class Document(Base):
     )
     derived_from_version_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     originating_case_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Typed cross-reference (14.2, post-roadmap phase 31 session 4, ADR
+    # 0115): the P6-S3 fields above were "opaque" by design - no discriminator
+    # for WHY a document was derived. This session's redaction workflow is
+    # the first real consumer of `derived_from_document_id`/
+    # `derived_from_version_number` (previously write-only, never read back
+    # anywhere), and needs to distinguish "this copy is a redaction" from any
+    # other future derivation reason (e.g. office-addin's unrelated template
+    # flow, which sets the same two opaque fields for a completely different
+    # purpose and does NOT set this one). `None` = no specific derivation
+    # type recorded (covers every document created before this session, and
+    # office-addin's template copies).
+    derivation_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Who set the deletion marker (2.5, P15-S1) - prerequisite for
     # the personal trash ("only the items I marked myself"). Until now

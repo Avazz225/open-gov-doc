@@ -177,6 +177,24 @@
     "saving": "Speichere...",
     "saveError": "Einstufung konnte nicht geändert werden"
   },
+  "derivedDocuments": {
+    "heading": "Abgeleitete Dokumente",
+    "redactionBadge": "Schwärzung"
+  },
+  "redaction": {
+    "openAction": "Schwärzen",
+    "title": "Dokument schwärzen",
+    "hint": "Ziehe mit der Maus Rechtecke über die Bereiche, die entfernt werden sollen. Es entsteht eine neue, unabhängige Kopie - das Original bleibt unverändert.",
+    "loadError": "Seite konnte nicht geladen werden",
+    "previousPage": "Vorherige Seite",
+    "nextPage": "Nächste Seite",
+    "pageIndicator": "Seite {current} von {total}",
+    "pageAlt": "Seite {page}",
+    "regionEntry": "Seite {page}",
+    "submitAction": "Schwärzung anwenden",
+    "submitting": "Wende Schwärzung an...",
+    "submitError": "Schwärzung fehlgeschlagen"
+  },
   "retention": {
     "heading": "Aufbewahrung & Löschung",
     "retentionUntilLabel": "Aufbewahren bis",

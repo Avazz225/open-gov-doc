@@ -43,6 +43,10 @@ const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
 const registerDocumentMock = vi.fn();
 const setDocumentClassificationLevelMock = vi.fn();
+const getRedactionPreviewPageCountMock = vi.fn();
+const getRedactionPreviewPageImageMock = vi.fn();
+const redactDocumentMock = vi.fn();
+const listDerivedDocumentsMock = vi.fn();
 const listRenditionsMock = vi.fn();
 const downloadRenditionContentMock = vi.fn();
 const listOcrResultsMock = vi.fn();
@@ -132,6 +136,10 @@ vi.mock("@/lib/api", () => ({
   registerDocument: (...args: unknown[]) => registerDocumentMock(...args),
   setDocumentClassificationLevel: (...args: unknown[]) =>
     setDocumentClassificationLevelMock(...args),
+  getRedactionPreviewPageCount: (...args: unknown[]) => getRedactionPreviewPageCountMock(...args),
+  getRedactionPreviewPageImage: (...args: unknown[]) => getRedactionPreviewPageImageMock(...args),
+  redactDocument: (...args: unknown[]) => redactDocumentMock(...args),
+  listDerivedDocuments: (...args: unknown[]) => listDerivedDocumentsMock(...args),
   listRenditions: (...args: unknown[]) => listRenditionsMock(...args),
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
@@ -200,6 +208,7 @@ const document1 = {
   updated_at: "2026-01-01T00:00:00Z",
   registered_at: "2026-01-01T00:00:00Z",
   classification_level: null,
+  derivation_type: null,
 };
 
 describe("DocumentWorkspace", () => {
@@ -225,6 +234,11 @@ describe("DocumentWorkspace", () => {
     updateDocumentMetadataMock.mockReset();
     registerDocumentMock.mockReset();
     setDocumentClassificationLevelMock.mockReset();
+    getRedactionPreviewPageCountMock.mockReset();
+    getRedactionPreviewPageImageMock.mockReset();
+    redactDocumentMock.mockReset();
+    listDerivedDocumentsMock.mockReset();
+    listDerivedDocumentsMock.mockResolvedValue([]);
     listRenditionsMock.mockReset();
     listRenditionsMock.mockResolvedValue([]);
     downloadRenditionContentMock.mockReset();
@@ -1652,6 +1666,84 @@ describe("DocumentWorkspace", () => {
     // The select defaults to the lowest still-raisable level, which for an
     // already-VS-NfD document is VS-NfD itself - a no-op raise.
     expect(within(classificationPanel).getByText("Anheben")).toBeDisabled();
+  });
+
+  it("draws a redaction region and submits it (P31-S4, ADR 0115)", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    getRedactionPreviewPageCountMock.mockResolvedValue(1);
+    getRedactionPreviewPageImageMock.mockResolvedValue(
+      new Blob(["fake-png"], { type: "image/png" })
+    );
+    redactDocumentMock.mockResolvedValue({
+      ...document1,
+      id: "d-redacted",
+      derivation_type: "redaction",
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    await user.click(screen.getByText("Schwärzen"));
+    await screen.findByAltText("Seite 1");
+    await waitFor(() =>
+      expect(getRedactionPreviewPageCountMock).toHaveBeenCalledWith("token-123", "d1")
+    );
+
+    const canvas = document.querySelector(".redaction-page-canvas");
+    expect(canvas).not.toBeNull();
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 200,
+        top: 0,
+        left: 0,
+        right: 200,
+        bottom: 200,
+        toJSON: () => {},
+      } as DOMRect);
+    try {
+      fireEvent.mouseDown(canvas as Element, { clientX: 20, clientY: 20 });
+      fireEvent.mouseMove(canvas as Element, { clientX: 100, clientY: 100 });
+      fireEvent.mouseUp(canvas as Element);
+    } finally {
+      rectSpy.mockRestore();
+    }
+
+    await user.click(screen.getByText("Schwärzung anwenden"));
+
+    await waitFor(() =>
+      expect(redactDocumentMock).toHaveBeenCalledWith(
+        "token-123",
+        "d1",
+        [{ page_number: 1, x: 0.1, y: 0.1, width: 0.4, height: 0.4 }],
+        "alice"
+      )
+    );
+    await waitFor(() => expect(listDocumentsInFolderMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows derived documents (redacted copies) in the metadata panel", async () => {
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([document1]);
+    listDerivedDocumentsMock.mockResolvedValue([
+      { ...document1, id: "d-redacted", title: "Rechnung.pdf (geschwärzt)", derivation_type: "redaction" },
+    ]);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
+    expect(
+      await within(metadataPanel).findByText("Rechnung.pdf (geschwärzt)")
+    ).toBeInTheDocument();
+    expect(within(metadataPanel).getByText("Schwärzung")).toBeInTheDocument();
   });
 
   it("accepts a dropped file via drag-and-drop in the upload modal", async () => {

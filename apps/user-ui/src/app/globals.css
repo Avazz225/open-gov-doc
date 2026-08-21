@@ -528,6 +528,56 @@ body {
   color: var(--dms-danger);
 }
 
+/* Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
+   click-drag region drawing over a server-rasterized page image, same
+   percentage-of-image positioning technique as `.ocr-text-layer`. */
+.redaction-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.redaction-page-canvas {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.redaction-page-canvas img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.redaction-region {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid var(--dms-danger);
+  pointer-events: none;
+}
+
+.redaction-region-preview {
+  background: rgba(185, 28, 28, 0.25);
+}
+
+.redaction-region-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.redaction-region-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .upload-draft-toggle {
   display: flex;
   align-items: center;

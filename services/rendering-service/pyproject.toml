@@ -14,6 +14,7 @@ dependencies = [
     "odfpy>=1.4",
     "pypdf>=4.3",
     "reportlab>=4.2",
+    "pymupdf>=1.24",
     "dms-common",
     "dms-db-base",
     "dms-eventbus-client",

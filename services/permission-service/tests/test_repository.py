@@ -1,6 +1,8 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from dms_db_base import make_session_factory
 from permission_service import repository
 from permission_service.models import ResourceNode
 from permission_service.settings import ROOT_RESOURCE_ID
@@ -39,6 +41,43 @@ async def test_update_role_invalidates_cache(session):
 
     after = await repository.get_effective_permissions(session, "alice", ROOT_RESOURCE_ID)
     assert after.permissions == []
+
+
+async def test_get_effective_permissions_concurrent_cache_miss_does_not_raise(engine):
+    """Found live during post-roadmap phase 31 session 4's browser
+    verification (ADR 0115) - two of the new redaction-preview endpoints
+    checking `document.read` on the same resource in quick succession hit a
+    real, previously unexercised race: `session.merge()` (the old
+    implementation) is not atomic, so two concurrent cache-miss requests for
+    the same `(principal_id, resource_id)` could both compute a fresh entry
+    and both attempt an INSERT, the second raising `IntegrityError` on the
+    composite primary key and surfacing as a real `500` in the browser. Same
+    `asyncio.gather` reproduction style as object-type-service's
+    `test_generate_next_kennzeichen_concurrent_calls_are_serialized`
+    (P5e-S1)."""
+    factory = make_session_factory(engine)
+    async with factory() as setup_session:
+        await repository.ensure_root_resource(setup_session)
+        role = await repository.create_role(setup_session, "Viewer", "", ["read"])
+        await repository.create_role_assignment(
+            setup_session,
+            principal_type="user",
+            principal_id="alice",
+            role_id=role.id,
+            resource_id=ROOT_RESOURCE_ID,
+        )
+        await setup_session.commit()
+
+    async def _check_once():
+        async with factory() as task_session:
+            result = await repository.get_effective_permissions(
+                task_session, "alice", ROOT_RESOURCE_ID
+            )
+            await task_session.commit()
+            return result
+
+    results = await asyncio.gather(*[_check_once() for _ in range(5)])
+    assert all(r.permissions == ["read"] for r in results)
 
 
 async def test_role_assignment_at_root_is_inherited_everywhere(session):

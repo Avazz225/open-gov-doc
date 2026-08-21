@@ -20,6 +20,7 @@ import {
   officeLaunchUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { RedactionModal } from "./RedactionModal";
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -100,6 +101,7 @@ async function loadOcrOrThumbnailImage(
 export function PreviewPane({
   document: activeDocument,
   versionBump = 0,
+  onDocumentCreated,
 }: {
   document: DocumentSummary | null;
   // Increments when another component (currently only `SignaturesPanel`,
@@ -108,6 +110,13 @@ export function PreviewPane({
   // below. Defaults to 0 for all call sites without their own bump state
   // (e.g. `PreviewEmptyContent`).
   versionBump?: number;
+  // Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
+  // a redacted copy is a genuinely NEW document (not a new version of the
+  // current one), so the explorer's document list needs refreshing, same as
+  // after a regular upload - reuses `DockableDocumentArea`'s existing
+  // `onUploaded` workspace-context callback rather than inventing a second
+  // refresh mechanism.
+  onDocumentCreated?: () => void;
 }) {
   const { accessToken } = useAuth();
   const { t } = useI18n();
@@ -122,6 +131,7 @@ export function PreviewPane({
   const [renditions, setRenditions] = useState<RenditionSummary[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [showRedactionModal, setShowRedactionModal] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   // Authenticated direct links (post-roadmap phase 29, ADR 0109).
@@ -713,6 +723,18 @@ export function PreviewPane({
         <button type="button" onClick={handleOfficeLaunch}>
           {t("preview.openInOffice", { app: officeLaunchInfo(currentContentType)!.label })}
         </button>
+      )}
+      {currentContentType === "application/pdf" && (
+        <button type="button" onClick={() => setShowRedactionModal(true)}>
+          {t("redaction.openAction")}
+        </button>
+      )}
+      {showRedactionModal && activeDocument && (
+        <RedactionModal
+          document={activeDocument}
+          onClose={() => setShowRedactionModal(false)}
+          onRedacted={() => onDocumentCreated?.()}
+        />
       )}
     </section>
   );

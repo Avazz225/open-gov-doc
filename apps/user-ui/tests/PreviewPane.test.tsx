@@ -79,6 +79,7 @@ function makeDocument(overrides: Partial<DocumentSummary> = {}): DocumentSummary
     pending_deletion_reason: null,
     registered_at: "2026-01-01T00:00:00Z",
     classification_level: null,
+    derivation_type: null,
     ...overrides,
   };
 }

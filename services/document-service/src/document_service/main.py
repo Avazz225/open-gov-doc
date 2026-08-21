@@ -76,6 +76,7 @@ from document_service.schemas import (
     MarkArchivedRequest,
     PublicShareLinkOut,
     ReconcileRestoreDeletionRequest,
+    RedactionRequest,
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
@@ -588,6 +589,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE document.document_version "
                 "ADD COLUMN IF NOT EXISTS classification_level VARCHAR(32)"
+            )
+        )
+        # Typed cross-reference (14.2, post-roadmap phase 31 session 4, ADR
+        # 0115) - same ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE document.document ADD COLUMN IF NOT EXISTS derivation_type VARCHAR(32)"
             )
         )
         # Schema drift correction (P15-S1, found live): in long-running
@@ -1103,6 +1111,7 @@ async def _persist_new_document(
     extra_event_payload: dict | None = None,
     draft: bool = False,
     classification_level: str | None = None,
+    derivation_type: str | None = None,
 ) -> Document:
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
@@ -1129,6 +1138,7 @@ async def _persist_new_document(
         archive_after=archive_after,
         draft=draft,
         classification_level=classification_level,
+        derivation_type=derivation_type,
     )
     await session.commit()
     event_payload = {
@@ -1696,6 +1706,209 @@ async def set_document_classification_level(
         actor=payload.changed_by,
     )
     return updated
+
+
+@app.get("/documents/{document_id}/derived", response_model=list[DocumentOut])
+async def list_derived_documents(
+    document_id: str, session: AsyncSession = Depends(get_session)
+) -> list[DocumentOut]:
+    """First actual reader of `derived_from_document_id` (post-roadmap phase
+    31 session 4, ADR 0115) - see `repository.list_derived_documents`."""
+    return await repository.list_derived_documents(session, document_id)
+
+
+@app.get("/documents/{document_id}/redaction-preview/page-count")
+async def get_redaction_preview_page_count(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
+    proxies to rendering-service so the browser never talks to
+    rendering-service/storage-service directly (consistent with this
+    project's architecture). `document.read` gate mirrors the PDF export
+    feature's endpoint (P28, ADR 0107) - both read the document's actual
+    content."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        document = await repository.get_document(session, document_id)
+        version = await repository.get_version(
+            session, document_id, document.current_version_number
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+    if version.content_type != "application/pdf":
+        raise HTTPException(status_code=422, detail="Nur PDF-Dokumente haben Seiten zum Schwärzen")
+    data = await app.state.storage.download(version.storage_object_key)
+    try:
+        page_count = await app.state.rendering_client.pdf_page_count(
+            data=data, x_dms_principal="system:redaction-preview"
+        )
+    except RenderingUnavailableError as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Rendering-Dienst nicht erreichbar: {exc}"
+        ) from exc
+    return {"page_count": page_count}
+
+
+@app.get("/documents/{document_id}/redaction-preview/page-image")
+async def get_redaction_preview_page_image(
+    document_id: str,
+    page_number: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        document = await repository.get_document(session, document_id)
+        version = await repository.get_version(
+            session, document_id, document.current_version_number
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+    if version.content_type != "application/pdf":
+        raise HTTPException(status_code=422, detail="Nur PDF-Dokumente haben Seiten zum Schwärzen")
+    data = await app.state.storage.download(version.storage_object_key)
+    try:
+        image = await app.state.rendering_client.pdf_page_image(
+            data=data, page_number=page_number, x_dms_principal="system:redaction-preview"
+        )
+    except RenderingUnavailableError as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Rendering-Dienst nicht erreichbar: {exc}"
+        ) from exc
+    return Response(content=image, media_type="image/png")
+
+
+@app.post(
+    "/documents/{document_id}/redact",
+    response_model=DocumentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def redact_document(
+    document_id: str,
+    payload: RedactionRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    """Document redaction workflow (14.2, post-roadmap phase 31 session 4,
+    ADR 0115). Burns `payload.regions` into a genuinely new, independent PDF
+    document, linked back via the P6-S3 provenance fields
+    (`derived_from_document_id`/`derived_from_version_number`) plus the new
+    `derivation_type="redaction"` discriminator (see models.py) - the "typed
+    cross-reference" the plan calls for. Deliberately reuses the normal
+    document-creation pipeline (`_prepare_document_fields`/
+    `_persist_new_document`) rather than a bespoke creation path: the
+    redacted copy gets its own freshly-assigned Kennzeichen (if the object
+    type has a generator), goes through the same virus-scan-free path as
+    `POST /documents/from-quarantine-release` (the bytes are server-derived
+    from an already-scanned source, not newly uploaded by an external
+    client), and is picked up by the exact same downstream OCR/rendering/
+    search-indexing pipeline as any other document - which is precisely what
+    lets the redacted content structurally disappear from the full-text
+    index with no separate exclusion mechanism (see ADR 0115: PyMuPDF's
+    `apply_redactions()` genuinely removes the covered content, not just
+    covers it visually). `document.read` gate on the original mirrors the
+    PDF export feature's endpoint (P28, ADR 0107) - creating the redacted
+    copy itself is deliberately left as ungated as `POST /documents` already
+    is (a pre-existing, documented gap this session doesn't newly introduce)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        document = await repository.get_document(session, document_id)
+        version = await repository.get_version(
+            session, document_id, document.current_version_number
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+    if version.content_type != "application/pdf":
+        raise HTTPException(status_code=422, detail="Schwärzung ist nur für PDF-Dokumente möglich")
+
+    source_data = await app.state.storage.download(version.storage_object_key)
+    try:
+        redacted_data = await app.state.rendering_client.redact(
+            data=source_data,
+            regions=[region.model_dump() for region in payload.regions],
+            x_dms_principal=payload.created_by,
+        )
+    except RenderingUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Rendering-Dienst nicht erreichbar - Schwärzung abgebrochen: {exc}",
+        ) from exc
+
+    title = f"{document.title} (geschwärzt)"
+    parsed_attributes, retention_until, archive_after, _ = await _prepare_document_fields(
+        session,
+        title=title,
+        folder_id=document.folder_id,
+        object_type_id=document.object_type_id,
+        attributes=json.dumps(document.attributes),
+        derived_from_document_id=None,
+        derived_from_version_number=None,
+    )
+
+    redacted_document = await _persist_new_document(
+        session,
+        data=redacted_data,
+        filename=f"{document.title}-geschwaerzt.pdf",
+        content_type="application/pdf",
+        title=title,
+        created_by=payload.created_by,
+        folder_id=document.folder_id,
+        object_type_id=document.object_type_id,
+        attributes=parsed_attributes,
+        derived_from_document_id=document.id,
+        derived_from_version_number=document.current_version_number,
+        originating_case_id=None,
+        retention_until=retention_until,
+        archive_after=archive_after,
+        # Deliberately the DEFAULT event_type ("document.created"), NOT a
+        # custom "document.redacted" - rendering-service's consumer
+        # (`consumer.py`) dispatches on an EXACT match against
+        # "document.created"/"document.version.created" only, everything
+        # else is silently ignored (`else: return`). A custom event type
+        # here would mean the redacted copy never gets a rendition, is
+        # never picked up by OCR, and therefore never reaches search-
+        # service's index at all - found live during this session's
+        # verification (the redacted copy simply never appeared in search,
+        # not even for its still-present, non-redacted text). The
+        # redaction-specific context instead travels in the payload below,
+        # which audit-service records regardless of event_type via its
+        # existing `document.>` wildcard subscription.
+        extra_event_payload={
+            "derivation_type": "redaction",
+            "source_document_id": document.id,
+            "region_count": len(payload.regions),
+        },
+        # The redacted copy inherits the ORIGINAL's CURRENT classification
+        # level (not just the object type's static default computed by
+        # `_prepare_document_fields` above, discarded here) - redaction must
+        # never silently declassify a document. Since classification can
+        # only ever be raised (ADR 0114), the original's current level is
+        # always at least as high as what the object type would seed for a
+        # brand-new document of the same type.
+        classification_level=document.classification_level,
+        derivation_type="redaction",
+    )
+    return redacted_document
 
 
 @app.delete("/documents/{document_id}", response_model=DocumentOut)

@@ -569,6 +569,10 @@ export interface DocumentSummary {
   // Classification level (14.2, post-roadmap phase 31 session 3, ADR 0114)
   // - `null` = unclassified. See `setDocumentClassificationLevel()` below.
   classification_level: string | null;
+  // Typed cross-reference (14.2, post-roadmap phase 31 session 4, ADR 0115)
+  // - `"redaction"` for a redacted copy, `null` otherwise. See
+  // `redactDocument()`/`listDerivedDocuments()` below.
+  derivation_type: string | null;
 }
 
 export async function listDocumentsInFolder(
@@ -678,6 +682,76 @@ export async function setDocumentClassificationLevel(
         changed_by: changedBy,
       }),
     },
+    token
+  );
+  return response.json();
+}
+
+// Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115).
+export interface RedactionRegion {
+  page_number: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export async function getRedactionPreviewPageCount(
+  token: string,
+  documentId: string
+): Promise<number> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/redaction-preview/page-count`,
+    {},
+    token
+  );
+  const body = await response.json();
+  return body.page_count;
+}
+
+export async function getRedactionPreviewPageImage(
+  token: string,
+  documentId: string,
+  pageNumber: number
+): Promise<Blob> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/redaction-preview/page-image` +
+      `?page_number=${pageNumber}`,
+    {},
+    token
+  );
+  return response.blob();
+}
+
+export async function redactDocument(
+  token: string,
+  documentId: string,
+  regions: RedactionRegion[],
+  createdBy: string
+): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/redact`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regions, created_by: createdBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function listDerivedDocuments(
+  token: string,
+  documentId: string
+): Promise<DocumentSummary[]> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/derived`,
+    {},
     token
   );
   return response.json();

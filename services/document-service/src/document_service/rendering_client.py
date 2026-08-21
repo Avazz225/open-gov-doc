@@ -74,5 +74,47 @@ class RenderingClient:
             raise RenderingUnavailableError(str(exc)) from exc
         return response.content
 
+    async def pdf_page_count(self, *, data: bytes, x_dms_principal: str) -> int:
+        """Document redaction (14.2, post-roadmap phase 31 session 4, ADR
+        0115) - proxied through document-service so the browser never talks
+        to rendering-service (or storage-service) directly, consistent with
+        this project's architecture."""
+        try:
+            response = await self._client.post(
+                "/render/pdf-page-count",
+                files={"file": ("document.pdf", data, "application/pdf")},
+                headers={"X-DMS-Principal": x_dms_principal},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RenderingUnavailableError(str(exc)) from exc
+        return response.json()["page_count"]
+
+    async def pdf_page_image(self, *, data: bytes, page_number: int, x_dms_principal: str) -> bytes:
+        try:
+            response = await self._client.post(
+                "/render/pdf-page-image",
+                data={"page_number": str(page_number)},
+                files={"file": ("document.pdf", data, "application/pdf")},
+                headers={"X-DMS-Principal": x_dms_principal},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RenderingUnavailableError(str(exc)) from exc
+        return response.content
+
+    async def redact(self, *, data: bytes, regions: list[dict], x_dms_principal: str) -> bytes:
+        try:
+            response = await self._client.post(
+                "/render/redact",
+                data={"regions": json.dumps(regions)},
+                files={"file": ("document.pdf", data, "application/pdf")},
+                headers={"X-DMS-Principal": x_dms_principal},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RenderingUnavailableError(str(exc)) from exc
+        return response.content
+
     async def close(self) -> None:
         await self._client.aclose()

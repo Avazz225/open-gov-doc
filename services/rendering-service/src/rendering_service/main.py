@@ -34,6 +34,12 @@ from rendering_service.export_pdf import (
 from rendering_service.models import Base, Rendition
 from rendering_service.ocr_client import OcrServiceClient
 from rendering_service.pipeline import retry_rendition
+from rendering_service.redaction import (
+    InvalidRedactionRegionError,
+    apply_redactions,
+    get_page_count,
+    render_page_image,
+)
 from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
 from rendering_service.schemas import ExportHistoryEntryIn, RenditionOut
 from rendering_service.settings import Settings
@@ -389,6 +395,76 @@ async def render_convert_to_pdf(
             status_code=400, detail=f"PDF-Konvertierung fehlgeschlagen: {exc}"
         ) from exc
     return Response(content=output.data, media_type="application/pdf")
+
+
+@app.post("/render/pdf-page-count")
+async def render_pdf_page_count(
+    file: UploadFile = File(...),
+    x_dms_principal: str = Header(default=""),
+) -> dict:
+    """Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
+    lets the caller (document-service, proxying for the redaction UI) know
+    how many pages to offer navigation for, before requesting individual page
+    images below."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    data = await file.read()
+    try:
+        return {"page_count": get_page_count(data)}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail=f"PDF konnte nicht gelesen werden: {exc}"
+        ) from exc
+
+
+@app.post("/render/pdf-page-image")
+async def render_pdf_page_image(
+    file: UploadFile = File(...),
+    page_number: int = Form(...),
+    x_dms_principal: str = Header(default=""),
+) -> Response:
+    """Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
+    rasterizes one page so a redaction UI has something to draw regions on
+    (see `redaction.py` for why this works for any PDF, not just scans)."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    data = await file.read()
+    try:
+        image = render_page_image(data, page_number)
+    except InvalidRedactionRegionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Seite konnte nicht gerendert werden: {exc}"
+        ) from exc
+    return Response(content=image, media_type="image/png")
+
+
+@app.post("/render/redact")
+async def render_redact(
+    file: UploadFile = File(...),
+    regions: str = Form(...),
+    x_dms_principal: str = Header(default=""),
+) -> Response:
+    """Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
+    burns `regions` (JSON list of `{page_number, x, y, width, height}`,
+    fractions of each page's own dimensions) into the PDF, actually removing
+    the covered content (see `redaction.py`). `regions` is a JSON-encoded
+    form field rather than a request body, matching every other multipart
+    on-demand endpoint in this file (`file` + form fields)."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    try:
+        parsed_regions = json.loads(regions)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="regions ist kein gültiges JSON") from exc
+    if not parsed_regions:
+        raise HTTPException(status_code=400, detail="regions darf nicht leer sein")
+    data = await file.read()
+    try:
+        redacted = apply_redactions(data, parsed_regions)
+    except InvalidRedactionRegionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Schwärzung fehlgeschlagen: {exc}") from exc
+    return Response(content=redacted, media_type="application/pdf")
 
 
 @app.post("/render/export/document")

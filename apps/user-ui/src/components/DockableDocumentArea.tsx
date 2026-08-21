@@ -135,7 +135,7 @@ function DocumentPreviewContent(props: IDockviewPanelProps<{ documentId: string 
   const ctx = useWorkspaceContext();
   const doc = ctx.openDocumentsById.get(props.params.documentId) ?? null;
   const versionBump = doc ? (ctx.versionBumps[doc.id] ?? 0) : 0;
-  return <PreviewPane document={doc} versionBump={versionBump} />;
+  return <PreviewPane document={doc} versionBump={versionBump} onDocumentCreated={ctx.onUploaded} />;
 }
 
 const PANEL_COMPONENTS = {

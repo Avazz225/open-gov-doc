@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, delete, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from permission_service.models import (
@@ -479,15 +480,36 @@ async def get_effective_permissions(
 
     roles = await _collect_effective_roles(session, principal_id, resource_id)
     permissions = sorted({p for role in roles for p in role.permissions})
-    entry = EffectivePermissionCache(
-        principal_id=principal_id,
-        resource_id=resource_id,
-        roles=sorted(role.name for role in roles),
-        permissions=permissions,
-        computed_at=datetime.now(UTC),
+    # Concurrency-safe cache population (found live during post-roadmap
+    # phase 31 session 4's browser verification, ADR 0115 - two of the new
+    # redaction-preview endpoints checking `document.read` on the same
+    # resource in quick succession triggered this on a real, previously
+    # unexercised cold-cache race): `session.merge()` is NOT atomic - it
+    # does an internal existence check, then either UPDATE or INSERT, so two
+    # concurrent cache-miss requests for the same `(principal_id,
+    # resource_id)` can both compute a fresh entry and both attempt an
+    # INSERT, the second failing on the composite primary key. Same
+    # `INSERT ... ON CONFLICT DO NOTHING` + re-read pattern already
+    # established for object-type-service's counter rows (P5e-S1) - no
+    # `SELECT ... FOR UPDATE` needed here (unlike there), since a cache
+    # entry is never incremented, only ever (re)computed identically from
+    # the same input, so "someone else already wrote it" is a fine outcome
+    # to just read back.
+    insert_stmt = (
+        pg_insert(EffectivePermissionCache)
+        .values(
+            principal_id=principal_id,
+            resource_id=resource_id,
+            roles=sorted(role.name for role in roles),
+            permissions=permissions,
+            computed_at=datetime.now(UTC),
+        )
+        .on_conflict_do_nothing(index_elements=["principal_id", "resource_id"])
     )
-    await session.merge(entry)
+    await session.execute(insert_stmt)
     await session.flush()
+    entry = await session.get(EffectivePermissionCache, (principal_id, resource_id))
+    assert entry is not None
     return entry
 
 

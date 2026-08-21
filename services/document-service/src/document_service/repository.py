@@ -120,6 +120,22 @@ async def list_documents_by_kennzeichen(session: AsyncSession, kennzeichen: str)
     return list(result.scalars().all())
 
 
+async def list_derived_documents(session: AsyncSession, document_id: str) -> list[Document]:
+    """First actual reader of `derived_from_document_id` (post-roadmap phase
+    31 session 4, ADR 0115) - the P6-S3 provenance fields were write-only
+    until this session (round-tripped in `DocumentOut`, but never queried by
+    anything). Used by the redaction workflow to show an original document's
+    redacted copies, but deliberately not redaction-specific itself (no
+    `derivation_type` filter) - any future derivation reason benefits from
+    the same "what was derived from me" lookup."""
+    result = await session.execute(
+        select(Document)
+        .where(Document.derived_from_document_id == document_id, Document.deleted_at.is_(None))
+        .order_by(Document.created_at)
+    )
+    return list(result.scalars().all())
+
+
 async def create_document(
     session: AsyncSession,
     *,
@@ -141,6 +157,7 @@ async def create_document(
     archive_after: datetime | None = None,
     draft: bool = False,
     classification_level: str | None = None,
+    derivation_type: str | None = None,
 ) -> Document:
     now = datetime.now(UTC)
     document = Document(
@@ -156,6 +173,8 @@ async def create_document(
         derived_from_document_id=derived_from_document_id,
         derived_from_version_number=derived_from_version_number,
         originating_case_id=originating_case_id,
+        # Typed cross-reference (post-roadmap phase 31 session 4, ADR 0115).
+        derivation_type=derivation_type,
         # Retention (5.2, since P7-S1): copied once from
         # `ObjectType.default_retention_days` if no manual date was set at
         # creation time (see main.py create_document) - later changes to the

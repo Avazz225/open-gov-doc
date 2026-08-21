@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S3 (per-document classification level — see below under "Post-Roadmap: Phase 31"), the third session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S4 (document redaction workflow — see below under "Post-Roadmap: Phase 31"), the fourth session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S4 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** any other Phase 31 session (P31-S5 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -3700,6 +3700,135 @@ original seed. A temporary Playwright spec (deleted afterward) drove the real `u
 an unclassified document → "Nicht eingestuft" shown → click "Anheben" → "VS-NfD" badge shown — using a
 temporarily-granted role assignment on the bootstrapped `users-admin` technical account, revoked again
 after the run. All test data (test object type, test document, test role assignments) removed afterward.
+
+### Post-Roadmap: Phase 31 Session 4 — document redaction workflow (2026-08-20)
+
+Fourth Phase 31 session. A user selects rectangular regions on a PDF's pages; `rendering-service`'s new
+`POST /render/redact` burns them in via PyMuPDF's redaction annotations (`add_redact_annot()` +
+`apply_redactions()`) — **genuine content removal**, not a visual overlay like the existing
+`watermark.py` (`pypdf`'s `merge_page()`, which only covers content, never deletes it from the stream).
+`document-service`'s new `POST /documents/{id}/redact` orchestrates the workflow: downloads the
+original's current-version bytes, calls rendering-service, and creates the result as a genuinely new,
+independent document through the exact same creation pipeline as any other upload
+(`_prepare_document_fields`/`_persist_new_document`) — its own Kennzeichen, retention/classification
+seeding, and picked up by the same downstream OCR → rendering → search-indexing event pipeline as any
+other document. See [ADR 0115](docs/adr/0115-document-redaction-genuine-content-removal.md) for the full
+rationale, in particular why genuine removal was chosen specifically because of the plan's other
+requirement ("exclude the redacted copy's full-text index entry from exposing the removed content"): since
+the content is actually gone from the PDF, the redacted copy's own OCR pass structurally cannot find it,
+so search-service's indexing pipeline excludes it automatically with **zero changes to search-service** —
+building a separate exclusion mechanism would have been strictly worse (more code, a second place the
+exclusion could drift out of sync with what the PDF actually contains).
+
+New `pymupdf` dependency for `rendering-service` (already used by `ocr-service` since early in the
+project, same version constraint, no new supply-chain risk). The redacted copy links back to the original
+via the existing-but-previously-write-only P6-S3 provenance fields (`derived_from_document_id`/
+`derived_from_version_number`, round-tripped in `DocumentOut` since P6-S3 but never read or queried by
+anything until this session) plus a new `Document.derivation_type = "redaction"` discriminator column —
+the "typed cross-reference" the plan calls for, extending the existing mechanism rather than building a
+new generic typed-link system (no other precedent for one exists in this codebase; the closest analog,
+case-service's `CaseDocumentReference`, is itself a single-purpose join table, not generic).
+`classification_level` is seeded from the **original's current level** (not the object type's static
+default `_prepare_document_fields` would otherwise compute) — redaction must never silently declassify;
+safe because classification can only ever be raised (ADR 0114). No virus re-scan on the redacted copy —
+same reasoning and precedent as `POST /documents/from-quarantine-release` (ADR 0052): server-derived from
+an already-scanned source. New `GET /documents/{id}/derived` is the first actual reader of
+`derived_from_document_id` anywhere in the codebase — deliberately not redaction-specific, so any future
+derivation reason benefits from the same lookup. `document.read` gate on the original mirrors the PDF
+export feature's endpoint (P28, ADR 0107); creating the redacted copy itself is deliberately left as
+ungated as `POST /documents` already is (a pre-existing, documented gap, not newly introduced here).
+
+Two new document-service proxy endpoints (`GET .../redaction-preview/page-count`,
+`GET .../redaction-preview/page-image`) let the browser get page images without ever talking to
+rendering-service or storage-service directly, consistent with this project's architecture. Any PDF page
+can be rasterized this way (PyMuPDF's `get_pixmap()`) regardless of whether it has a native text layer or
+is a scan — unlike `ocr-service`'s page images, which exist only for the Tesseract-processed subset (a
+real gap confirmed during this session's research, not shared by the new endpoint).
+
+**Frontend (`user-ui`)**: new `RedactionModal` (opened via a "Schwärzen" button in `PreviewPane`, shown
+only for a PDF current version) — one page at a time (Previous/Next), click-drag rectangle drawing over
+the rasterized page image using the same percentage-of-image positioning technique already established for
+the OCR word overlay, with new `mousedown`/`mousemove`/`mouseup` handlers for the drawing interaction
+itself (the first interactively-drawn overlay in this codebase; the OCR one is read-only display). After a
+successful redaction, triggers the same `onUploaded` workspace-context refresh callback
+`DockableDocumentArea` already uses after a regular upload (threaded through as `PreviewPane`'s new
+`onDocumentCreated` prop) — a redacted copy is a genuinely new document, not a new version. New
+`DerivedDocumentsPanel` (same standalone-panel pattern as `RetentionPanel`/`ClassificationPanel`), shown
+only when at least one derived copy exists — the first UI surface for the previously write-only
+provenance fields, each entry a plain `<a href="/?document=ID">` link resolved by `DocumentWorkspace`'s
+existing direct-link mount effect (P29, ADR 0109) rather than a new in-app navigation mechanism.
+Deliberately scoped as a bounded MVP: one page at a time, not a full thumbnail-grid multi-page editor —
+no concrete requirement called for the added complexity.
+
+Tests: rendering-service 73 (previously 62 before this session's other in-flight work, +11: 8 pure
+`redaction.py` function tests in a new `test_redaction.py` — page count, page rasterization, genuine text
+removal confirmed by re-extracting text not inspecting pixels, multi-page isolation, multi-region support,
+out-of-range rejection — plus 5 new `/render/pdf-page-count`/`/render/pdf-page-image`/`/render/redact` API
+tests); document-service 304 (previously 291, +13: a new `test_redaction.py` covering the full
+authorization/creation/linking/classification-inheritance/derived-listing/preview-proxy matrix, verified
+via the real running rendering-service, not mocked); permission-service 138 (previously 137, +1, see the
+cache-race fix below). user-ui 217 (previously 215, +2: drawing a region and submitting it end-to-end with
+a mocked `getBoundingClientRect`, and derived-documents display in the metadata panel). All
+`ruff`/`tsc`/`eslint`/`next build` gates clean.
+
+**Four real, previously-undiscovered issues found and fixed via this session's live verification** (not
+via unit/integration tests, all four only surfaced when actually exercising the real stack) — kept here in
+detail since each is a genuine lesson, not routine bug-fixing noise:
+
+1. After adding `pymupdf` to `rendering-service`'s `pyproject.toml`, a scoped
+   `uv sync --package rendering-service` unexpectedly uninstalled most of the rest of the shared workspace
+   venv — recovered via `uv sync --all-packages` (the correct command for this multi-service uv workspace).
+2. document-service's new redaction tests initially failed with `503 Service Unavailable` even though
+   rendering-service's container was confirmed running — the container was serving its **old** image,
+   since `scripts/run-tests.sh` only stops/restarts a service's existing container around its own test run,
+   it never rebuilds; document-service's new HTTP calls to rendering-service's brand-new endpoints
+   therefore hit routes that didn't exist yet until `docker compose build rendering-service` was run
+   explicitly.
+3. **The most significant finding**: the first live curl round-trip (classified object type + document
+   created, `POST /documents/{id}/redact` correctly returned a new document with the right
+   `derivation_type`/`derived_from_document_id`/inherited `classification_level`, and the redacted copy's
+   downloaded content genuinely lacked the covered text via `pypdf`) looked completely correct — but the
+   redacted copy never actually appeared in `search-service`, not even for its still-present, non-redacted
+   text. Root cause: the redact endpoint published a custom `document.redacted` event type instead of the
+   default `document.created` — `rendering-service`'s consumer (`consumer.py`'s `make_handler`) dispatches
+   on an *exact* match against `"document.created"`/`"document.version.created"` only, silently
+   `return`-ing for anything else, so the redacted copy never got a rendition, was never picked up by OCR,
+   and therefore never reached the search index at all. Fixed by leaving `event_type` at its default
+   (`_persist_new_document`'s existing default is already `"document.created"`) and moving the
+   redaction-specific context (`derivation_type`, `source_document_id`, region count) into the event
+   *payload* instead, which `audit-service` records regardless of `event_type` via its existing
+   `document.>` wildcard subscription. Re-verified after the fix: the redacted copy correctly got its own
+   `substitute_text` rendition and appeared in search for "OEFFENTLICH" (its remaining text) but not for
+   "GEHEIMNIS" (the actually-redacted text) — confirming ADR 0115's central architectural claim end to end
+   against the real pipeline, not just asserted.
+4. The real browser Playwright run (see below) hit a genuine `500` loading the redaction preview page
+   image — traced to a **pre-existing, previously unexercised concurrency bug** in `permission-service`:
+   `repository.get_effective_permissions`'s cache-population step used `session.merge()`, which is not
+   atomic (an internal existence check followed by a separate UPDATE-or-INSERT) - two of the new
+   redaction-preview endpoints checking `document.read` on the same resource in quick succession raced on
+   a cold cache and the second request's INSERT hit `IntegrityError: duplicate key ... effective_permission_
+   cache_pkey`. Fixed with the same `INSERT ... ON CONFLICT DO NOTHING` + re-read pattern already
+   established for object-type-service's counter rows (P5e-S1) - unrelated to redaction itself, but this
+   session's frontend was the first real caller anywhere in the app to fire two back-to-back permission
+   checks for the same resource fast enough to expose it. New regression test
+   (`test_get_effective_permissions_concurrent_cache_miss_does_not_raise`, `asyncio.gather` over 5 genuinely
+   independent sessions, same reproduction style as the P5e-S1 concurrency test) — permission-service now
+   **138 tests** (previously 137).
+
+**Fully verified live end to end, twice** (once before finding issue 3, once again after fixing both 3 and
+4): a classified object type + document created via curl, `POST /documents/{id}/redact` (with
+`document.read` granted) returns the new document correctly linked and classified; content comparison
+confirms genuine text removal; `search-service` now correctly indexes the redacted copy's remaining text
+while excluding the redacted text, exactly as ADR 0115 claims. **A real Playwright browser session** (this
+environment does have a working Chromium, unlike several earlier sessions in this project's history that
+assumed none was available) drove the actual `user-ui`: uploaded a real PDF, opened the redaction modal,
+drew a rectangle by real mouse drag over the rasterized page image, submitted it, and confirmed the
+`" (geschwärzt)"`-suffixed copy appeared — this is what caught issue 4 above; a first attempt at the test
+itself also had a real off-by-a-few-pixels bug (the drag's end coordinate landed just outside the modal's
+visible bottom edge, onto the backdrop, closing the modal via its `onClick={onClose}` before the region
+was ever added) which was a test-authoring mistake, not a product bug, and was fixed by keeping the drag
+comfortably inside the image bounds. All test data (object type, both documents, role assignments, the
+temporary Playwright spec file itself) removed afterward.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.
