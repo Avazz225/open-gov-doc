@@ -103,6 +103,25 @@ class RenderingClient:
             raise RenderingUnavailableError(str(exc)) from exc
         return response.content
 
+    async def stamp(
+        self, *, data: bytes, stamp_type: str, value: str, position: str, x_dms_principal: str
+    ) -> bytes:
+        """Output stamping (post-roadmap phase 31 session 6, ADR 0117) -
+        thin proxy to rendering-service's generic `POST /render/watermark`,
+        reused as-is for the export pipeline's optional automatic stamping
+        step rather than duplicating stamp logic here."""
+        try:
+            response = await self._client.post(
+                "/render/watermark",
+                data={"value": value, "stamp_type": stamp_type, "position": position},
+                files={"file": ("document.pdf", data, "application/pdf")},
+                headers={"X-DMS-Principal": x_dms_principal},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RenderingUnavailableError(str(exc)) from exc
+        return response.content
+
     async def redact(self, *, data: bytes, regions: list[dict], x_dms_principal: str) -> bytes:
         try:
             response = await self._client.post(

@@ -12,7 +12,7 @@
 | `GET` | `/renditions/{id}` | Single rendition (metadata) — 404 on unknown `id`; since **P19-S8** `rendering.read`-gated |
 | `GET` | `/renditions/{id}/content` | Bytes of the rendition (proxy to the Storage Service) — 404 on unknown `id`, 409 on status `failed`/`failed_permanent`; since **P19-S8** `rendering.read`-gated |
 | `POST` | `/renditions/{id}/retry` | Manual restart of a `failed_permanent` rendition (since **P20-S4**, [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)) — `404` on unknown `id`, `409` if `status != "failed_permanent"`, otherwise an immediate retry for ONLY the affected renderer; `rendering.write`-gated |
-| `POST` | `/render/watermark` | Multipart (`file`: PDF, `text`) → on-demand watermarking, returns the stamped PDF directly, **without** persisting it; since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gated |
+| `POST` | `/render/watermark` | Multipart (`file`: PDF, `value`, optional `stamp_type`/`position`) → on-demand output stamp, returns the stamped PDF directly, **without** persisting it; since **P19-S8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)) `rendering.write`-gated. Since **Post-Roadmap Phase 31 Session 6** ([ADR 0117](../adr/0117-output-stamping-qr-barcode-position-export-pipeline.md)): `stamp_type` (`"text"`/`"qr"`/`"barcode"`) and `position` (`"diagonal-center"`/four page corners), see "Output Stamping" below |
 | `POST` | `/render/convert-to-pdf` | Multipart (`file`: any `PdfArchiveRenderer`-supported format) → on-demand PDF conversion, same dispatch as the automatic pipeline but without persisting a `Rendition` row; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
 | `POST` | `/render/export/document` | Multipart (`file`, `title`, `history_position`, `history`: JSON array) → Pass A of the PDF export feature — converts + merges with the (already document-service-resolved) export history, stamps a local page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
 | `POST` | `/render/export/folder` | Multipart (`titles`: repeated form field, `files`: repeated, each already the output of `/render/export/document`) → Pass B — table of contents, bookmarks, global page-number footer; since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)) `rendering.write`-gated |
@@ -93,9 +93,42 @@ This closes the gap deliberately left open in P5-S2: scanned/image-based documen
 
 **Since P5b-S5, tolerant of a missing `ocr-service`** ([ADR 0016](../adr/0016-ocr-configurability-compose-profile-and-live-settings.md)): `ocr-service` is now optionally deployable via a Docker Compose profile (`ocrEnabled`). A legacy `ocr.completed` event from when OCR was still running would otherwise throw an unhandled exception during the HTTP lookup and be redelivered endlessly without ever being processable — `get_full_text()` is therefore now wrapped in `try`/`except` (the same pattern search-service already had beforehand).
 
-## Watermarking as an On-Demand Function, Not an Automatic Rule (3.7)
+## Output Stamping: Text/QR/Barcode, Configurable Position (3.7, extended Post-Roadmap Phase 31 Session 6, [ADR 0117](../adr/0117-output-stamping-qr-barcode-position-export-pipeline.md))
 
-Unlike renditions, `POST /render/watermark` is deliberately **not** an automatic pipeline step and is **not** persisted: a watermark (e.g. "CONFIDENTIAL", a recipient name on an export) is typically a deliberate one-off action for a specific occasion, not a default step for every uploaded PDF. The implementation (`watermark.py`, reportlab + pypdf) is deliberately kept simple: a single diagonal, semi-transparent text stamp on every page, no position/color/repetition configuration.
+`POST /render/watermark` remains **not** an automatic pipeline step and **not** persisted on its own — a
+stamp (e.g. "CONFIDENTIAL", a recipient name, a QR code for paper-trail reconciliation) is typically
+either a deliberate one-off action for a specific occasion or, since this session, a configured automatic
+step of the export pipeline (see below), never a default step for every uploaded PDF's regular renditions.
+
+`watermark.py`'s original single function (`add_text_watermark`) is generalized into `add_stamp(data, *,
+stamp_type, value, position)`:
+
+- **`stamp_type`**: `"text"` (default — same diagonal, semi-transparent, page-centered stamp as before,
+  unchanged when `position` is also left at its default), `"qr"` (`qrcode` library, new dependency), or
+  `"barcode"` (Code128 via `python-barcode`, new dependency — rendered without its usual printed digits
+  below the bars, `write_text=False`, since the small corner footprint has no room for both).
+- **`position`**: `"diagonal-center"` (text-only, rotated 45°, unreadable for a scannable code — rejected
+  with `422` in combination with `stamp_type="qr"`/`"barcode"`) or one of the four page corners
+  (`top-left`/`top-right`/`bottom-left`/`bottom-right`), drawn upright. All three stamp types support the
+  corner positions; only `"text"` also supports the diagonal.
+- QR/barcode content is generated as a PNG (via Pillow, already a dependency) and embedded with
+  reportlab's `drawImage`, then merged into every page via the exact same `pypdf.PdfWriter.merge_page()`
+  overlay idiom the original diagonal text stamp already used — no new PDF-mutation technique, just a new
+  overlay content type.
+- **Validation is the caller's responsibility, not `add_stamp()`'s**: the function stays a lenient, pure
+  renderer (same precedent as `export_pdf.build_document_export`'s `history_position` handling) — the
+  `stamp_type`/`position` enum check and the diagonal-center/non-text rejection both happen once, at the
+  `POST /render/watermark` endpoint.
+
+## Output Stamping Wired Into the Export Pipeline (Post-Roadmap Phase 31 Session 6, [ADR 0117](../adr/0117-output-stamping-qr-barcode-position-export-pipeline.md))
+
+`document-service`'s `ExportConfig` (Phase 28) can now enable stamping as an **optional automatic step**
+of both `POST /documents/{id}/export` and the combined folder export — this service's role is unchanged:
+`document-service` resolves the configured template into a concrete value and calls this service's
+existing `POST /render/watermark` on its own already-composed Pass-A export PDF, exactly like an on-demand
+caller would. No export-specific stamping logic lives in `rendering-service` — see
+`docs/services/document-service.md` "Output Stamping in the Export Pipeline" for the full mechanism
+(per-document application inside a folder export, template resolution, the config-write-time validation).
 
 ## Document Redaction: Genuine Content Removal (14.2, Post-Roadmap Phase 31 Session 4, [ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md))
 

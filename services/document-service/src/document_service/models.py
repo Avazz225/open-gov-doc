@@ -441,12 +441,28 @@ class ExportConfig(Base):
     history section is appended after or prepended before the document
     content itself; an optional `?history_position=` query param on
     `POST /documents/{id}/export` overrides this default per call without
-    changing it."""
+    changing it.
+
+    `stamp_*` (post-roadmap phase 31 session 6, ADR 0117): an optional
+    automatic output-stamping step layered on top of every export (single-
+    document and, per contained document, folder export alike) - reuses
+    rendering-service's generic `POST /render/watermark` primitive (extended
+    the same session with QR/barcode support and configurable position)
+    rather than building export-specific stamping logic. `stamp_value_
+    template` is a `str.format()` template resolved server-side against the
+    exported document (`{document_id}`/`{kennzeichen}`), same mechanism as
+    object-type-service's `kennzeichen_format` placeholders. Deliberately
+    config-only, no per-call override (unlike `history_position` above) -
+    see ADR 0117."""
 
     __tablename__ = "export_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     history_position: Mapped[str] = mapped_column(String(16), default="after")
+    stamp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    stamp_type: Mapped[str] = mapped_column(String(16), default="qr")
+    stamp_value_template: Mapped[str] = mapped_column(String(256), default="{kennzeichen}")
+    stamp_position: Mapped[str] = mapped_column(String(16), default="bottom-right")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -458,13 +474,23 @@ class FolderExportJob(Base):
     `ArchivalTransfer` (post-roadmap phase 20 session 2, ADR 0078):
     `attempts`/`next_retry_at` drive full-jitter backoff between attempts,
     `failed_permanent` is the real terminal failure state (not a bare
-    `failed`) once `max_folder_export_attempts` is exhausted."""
+    `failed`) once `max_folder_export_attempts` is exhausted.
+
+    `stamp_*` (post-roadmap phase 31 session 6, ADR 0117): resolved from
+    `ExportConfig` once at job-creation time and frozen onto the job row,
+    same reasoning as `history_position` above - a job can sit `pending` for
+    a while before its tick runs, and shouldn't pick up a stamping config
+    change made after the export was actually requested."""
 
     __tablename__ = "folder_export_job"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     folder_id: Mapped[str] = mapped_column(String(128), index=True)
     history_position: Mapped[str] = mapped_column(String(16))
+    stamp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    stamp_type: Mapped[str] = mapped_column(String(16), default="qr")
+    stamp_value_template: Mapped[str] = mapped_column(String(256), default="{kennzeichen}")
+    stamp_position: Mapped[str] = mapped_column(String(16), default="bottom-right")
     status: Mapped[str] = mapped_column(String(16), default="pending")
     storage_object_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)

@@ -419,6 +419,37 @@ A short-lived (`webdav_edit_token_ttl_hours`, default 8h), document-scoped `Webd
 
 New settings: `rendering_service_base_url` (default `http://localhost:8011`), `audit_service_base_url` (default `http://localhost:8002`), `max_folder_export_attempts` (5, same as `archival-service`'s `max_archival_attempts`), `folder_export_poll_interval_seconds` (30.0). **Both new base URLs must be set via `DMS_RENDERING_SERVICE_BASE_URL`/`DMS_AUDIT_SERVICE_BASE_URL` in `docker-compose.yml`** — the `Settings` defaults only work outside Docker; a real, live bug (502 with no matching rendering-service log entry at all) was found and fixed during this session's own live verification when this wiring was initially missed.
 
+## Output Stamping in the Export Pipeline (Post-Roadmap Phase 31 Session 6, [ADR 0117](../adr/0117-output-stamping-qr-barcode-position-export-pipeline.md))
+
+`ExportConfig` gained four new fields making output stamping (rendering-service's generalized
+`watermark.py`, see `docs/services/rendering-service.md` "Output Stamping") an **optional automatic step**
+of every export, single-document and folder alike: `stamp_enabled` (default `false` — a fresh
+installation's export behavior is unchanged), `stamp_type` (`"text"`/`"qr"`/`"barcode"`, default `"qr"`),
+`stamp_value_template` (a `str.format()` template resolved against the exported document —
+`{document_id}`/`{kennzeichen}`, default `"{kennzeichen}"` — same placeholder mechanism as
+object-type-service's `kennzeichen_format`), `stamp_position` (one of rendering-service's four page corners
+or, text-only, `"diagonal-center"`, default `"bottom-right"`).
+
+- **`PUT /export-config` validates both new cross-field rules immediately**: `422` if `stamp_position=
+  "diagonal-center"` together with a non-`"text"` `stamp_type` (a rotated QR/barcode would be unscannable),
+  and `422` if `stamp_value_template` contains a placeholder other than `{document_id}`/`{kennzeichen}`
+  (a dry-run `.format()` call against throwaway values) — a bad template is caught at configuration time,
+  not discovered only the next time someone exports.
+- **Applied per document, inside the already-existing `_build_document_export_pdf` helper** — the same
+  function already shared by the single-document export endpoint and the folder-export job's per-document
+  loop — right after `RenderingClient.export_document()` produces the Pass-A PDF (document + history +
+  local footer) and before it's returned. A new `RenderingClient.stamp()` proxies to rendering-service's
+  `POST /render/watermark` with the resolved value/type/position. Because this runs per document rather
+  than once on a folder export's final combined PDF, every page of a combined export still carries the
+  identity of its own source document after the merge — the point of "paper-trail reconciliation": a stray
+  printed page must be traceable back to which document it came from.
+- **`FolderExportJob` freezes the four resolved stamp fields at job-creation time**, same reasoning as the
+  pre-existing `history_position` freeze on the same model — a job can sit `pending` for a while before its
+  tick runs, and shouldn't silently pick up a stamping-policy change made after the export was requested.
+- **Deliberately config-only, no per-call override** (unlike `history_position`'s `?history_position=`
+  query override) — stamping is an installation-wide compliance/reconciliation policy, not a per-export
+  stylistic choice; adding an override matrix wasn't asked for and would be speculative scope.
+
 ## Open Points
 
 - **Reference number display in the frontend** (before the filename, globally or overridable per object type) not yet wired up — follows with P5e-S3.

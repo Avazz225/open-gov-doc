@@ -1273,16 +1273,34 @@ async def get_export_config(session: AsyncSession) -> ExportConfig:
     config = await session.get(ExportConfig, _EXPORT_CONFIG_ID)
     if config is None:
         config = ExportConfig(
-            id=_EXPORT_CONFIG_ID, history_position="after", updated_at=datetime.now(UTC)
+            id=_EXPORT_CONFIG_ID,
+            history_position="after",
+            stamp_enabled=False,
+            stamp_type="qr",
+            stamp_value_template="{kennzeichen}",
+            stamp_position="bottom-right",
+            updated_at=datetime.now(UTC),
         )
         session.add(config)
         await session.flush()
     return config
 
 
-async def update_export_config(session: AsyncSession, *, history_position: str) -> ExportConfig:
+async def update_export_config(
+    session: AsyncSession,
+    *,
+    history_position: str,
+    stamp_enabled: bool,
+    stamp_type: str,
+    stamp_value_template: str,
+    stamp_position: str,
+) -> ExportConfig:
     config = await get_export_config(session)
     config.history_position = history_position
+    config.stamp_enabled = stamp_enabled
+    config.stamp_type = stamp_type
+    config.stamp_value_template = stamp_value_template
+    config.stamp_position = stamp_position
     config.updated_at = datetime.now(UTC)
     await session.flush()
     return config
@@ -1300,11 +1318,23 @@ async def list_documents_for_folder_export(session: AsyncSession, folder_id: str
 
 
 async def create_folder_export_job(
-    session: AsyncSession, *, folder_id: str, history_position: str, created_by: str
+    session: AsyncSession,
+    *,
+    folder_id: str,
+    history_position: str,
+    stamp_enabled: bool,
+    stamp_type: str,
+    stamp_value_template: str,
+    stamp_position: str,
+    created_by: str,
 ) -> FolderExportJob:
     job = FolderExportJob(
         folder_id=folder_id,
         history_position=history_position,
+        stamp_enabled=stamp_enabled,
+        stamp_type=stamp_type,
+        stamp_value_template=stamp_value_template,
+        stamp_position=stamp_position,
         status="pending",
         created_by=created_by,
         created_at=datetime.now(UTC),

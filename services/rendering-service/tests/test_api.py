@@ -123,7 +123,7 @@ def test_render_watermark_returns_stamped_pdf():
     with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.post(
             "/render/watermark",
-            data={"text": "VERTRAULICH"},
+            data={"value": "VERTRAULICH"},
             files={"file": ("akte.pdf", _real_pdf(pages=2), "application/pdf")},
         )
     assert response.status_code == 200
@@ -137,10 +137,66 @@ def test_render_watermark_rejects_garbage():
     with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.post(
             "/render/watermark",
-            data={"text": "VERTRAULICH"},
+            data={"value": "VERTRAULICH"},
             files={"file": ("kaputt.pdf", b"kein pdf", "application/pdf")},
         )
     assert response.status_code == 400
+
+
+def test_render_watermark_qr_at_corner_position():
+    """Post-Roadmap Phase 31 Session 6 (ADR 0117): stamp_type=qr/barcode
+    positioned at a page corner, not the text-only diagonal default."""
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/watermark",
+            data={"value": "DOC-123", "stamp_type": "qr", "position": "bottom-right"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert len(reader.pages) == 1
+
+
+def test_render_watermark_barcode_at_corner_position():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/watermark",
+            data={"value": "DOC-123", "stamp_type": "barcode", "position": "top-left"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert len(reader.pages) == 1
+
+
+def test_render_watermark_rejects_unknown_stamp_type():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/watermark",
+            data={"value": "x", "stamp_type": "hologram"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 422
+
+
+def test_render_watermark_rejects_unknown_position():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/watermark",
+            data={"value": "x", "position": "middle"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 422
+
+
+def test_render_watermark_rejects_diagonal_center_for_qr():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/watermark",
+            data={"value": "DOC-123", "stamp_type": "qr", "position": "diagonal-center"},
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 422
 
 
 def test_render_convert_to_pdf_passes_through_an_already_pdf_file():

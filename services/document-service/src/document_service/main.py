@@ -340,12 +340,26 @@ async def _lock_reminder_poll_loop(session_factory) -> None:
         await asyncio.sleep(settings.lock_reminder_poll_interval_seconds)
 
 
+def _resolve_stamp_value(template: str, *, document_id: str, kennzeichen: str) -> str:
+    """Output stamping (post-roadmap phase 31 session 6, ADR 0117) - the two
+    identifiers actually useful for paper-trail reconciliation, same
+    `str.format()` templating mechanism as object-type-service's
+    `kennzeichen_format` placeholders. Raw values in, not a `Document` -
+    also used by `update_export_config` to validate the template with
+    throwaway values before it's ever saved."""
+    return template.format(document_id=document_id, kennzeichen=kennzeichen)
+
+
 async def _build_document_export_pdf(
     document: Document,
     version: DocumentVersion,
     *,
     x_dms_principal: str,
     history_position: str,
+    stamp_enabled: bool,
+    stamp_type: str,
+    stamp_value_template: str,
+    stamp_position: str,
     storage: StorageClient,
     rendering_client: RenderingClient,
     audit_client: AuditServiceClient,
@@ -361,16 +375,38 @@ async def _build_document_export_pdf(
     `pipeline.run_active_transfers_tick`, needed here because httpx clients
     constructed on one asyncio event loop cannot be reused from another
     (relevant for tests that drive a tick directly, outside `TestClient`'s
-    own loop)."""
+    own loop).
+
+    `stamp_*` (post-roadmap phase 31 session 6, ADR 0117): an optional
+    additional overlay pass on TOP of the already-composed Pass-A PDF
+    (document + history + local page footer), applied per document rather
+    than once on a combined folder export - so a stray printed page from a
+    folder export still carries its own document's identity, not just the
+    folder's. Reuses `rendering_client.stamp()` (the same generic primitive
+    `POST /render/watermark` exposes on demand), no export-specific stamping
+    logic duplicated here."""
     data = await storage.download(version.storage_object_key)
     history = await audit_client.list_export_history(document.id)
-    return await rendering_client.export_document(
+    export_pdf = await rendering_client.export_document(
         data=data,
         filename=document.title,
         content_type=version.content_type,
         title=document.title,
         history_position=history_position,
         history=history,
+        x_dms_principal=x_dms_principal,
+    )
+    if not stamp_enabled:
+        return export_pdf
+    return await rendering_client.stamp(
+        data=export_pdf,
+        stamp_type=stamp_type,
+        value=_resolve_stamp_value(
+            stamp_value_template,
+            document_id=document.id,
+            kennzeichen=document.attributes.get("Kennzeichen") or "",
+        ),
+        position=stamp_position,
         x_dms_principal=x_dms_principal,
     )
 
@@ -397,6 +433,10 @@ async def _run_folder_export_tick(
             await session.commit()
             folder_id = job.folder_id
             history_position = job.history_position
+            stamp_enabled = job.stamp_enabled
+            stamp_type = job.stamp_type
+            stamp_value_template = job.stamp_value_template
+            stamp_position = job.stamp_position
             created_by = job.created_by
             job_id = job.id
 
@@ -413,6 +453,10 @@ async def _run_folder_export_tick(
                         version,
                         x_dms_principal=created_by,
                         history_position=history_position,
+                        stamp_enabled=stamp_enabled,
+                        stamp_type=stamp_type,
+                        stamp_value_template=stamp_value_template,
+                        stamp_position=stamp_position,
                         storage=storage,
                         rendering_client=rendering_client,
                         audit_client=audit_client,
@@ -654,6 +698,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "TYPE INTEGER USING object_type_id::integer"
                 )
             )
+        # Output stamping (post-roadmap phase 31 session 6, ADR 0117) - same
+        # ad-hoc migration pattern. `export_config` is a pre-existing
+        # singleton row (phase 28), so `NOT NULL DEFAULT ...` is needed here
+        # (unlike a fresh table) to satisfy it retroactively.
+        for statement in (
+            "ALTER TABLE document.export_config "
+            "ADD COLUMN IF NOT EXISTS stamp_enabled BOOLEAN DEFAULT FALSE NOT NULL",
+            "ALTER TABLE document.export_config "
+            "ADD COLUMN IF NOT EXISTS stamp_type VARCHAR(16) DEFAULT 'qr' NOT NULL",
+            "ALTER TABLE document.export_config "
+            "ADD COLUMN IF NOT EXISTS stamp_value_template VARCHAR(256) "
+            "DEFAULT '{kennzeichen}' NOT NULL",
+            "ALTER TABLE document.export_config "
+            "ADD COLUMN IF NOT EXISTS stamp_position VARCHAR(16) DEFAULT 'bottom-right' NOT NULL",
+            "ALTER TABLE document.folder_export_job "
+            "ADD COLUMN IF NOT EXISTS stamp_enabled BOOLEAN DEFAULT FALSE NOT NULL",
+            "ALTER TABLE document.folder_export_job "
+            "ADD COLUMN IF NOT EXISTS stamp_type VARCHAR(16) DEFAULT 'qr' NOT NULL",
+            "ALTER TABLE document.folder_export_job "
+            "ADD COLUMN IF NOT EXISTS stamp_value_template VARCHAR(256) "
+            "DEFAULT '{kennzeichen}' NOT NULL",
+            "ALTER TABLE document.folder_export_job "
+            "ADD COLUMN IF NOT EXISTS stamp_position VARCHAR(16) DEFAULT 'bottom-right' NOT NULL",
+        ):
+            await conn.execute(text(statement))
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -2947,7 +3016,31 @@ async def get_export_config(session: AsyncSession = Depends(get_session)) -> Exp
 async def update_export_config(
     body: ExportConfigIn, session: AsyncSession = Depends(get_session)
 ) -> ExportConfigOut:
-    config = await repository.update_export_config(session, history_position=body.history_position)
+    """`stamp_*` (post-roadmap phase 31 session 6, ADR 0117): validated once
+    here at config-write time (`stamp_type`/`stamp_position` are already
+    `Literal`-typed by the schema; the cross-field "diagonal-center only for
+    text" rule and the template's placeholder names aren't expressible as a
+    single field's type, so both are checked explicitly), not re-checked on
+    every export."""
+    if body.stamp_type != "text" and body.stamp_position == "diagonal-center":
+        raise HTTPException(
+            status_code=422,
+            detail="stamp_position 'diagonal-center' ist nur für stamp_type='text' verfügbar",
+        )
+    try:
+        _resolve_stamp_value(body.stamp_value_template, document_id="x", kennzeichen="y")
+    except (KeyError, IndexError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"stamp_value_template ungültig: unbekannter Platzhalter {exc}"
+        ) from exc
+    config = await repository.update_export_config(
+        session,
+        history_position=body.history_position,
+        stamp_enabled=body.stamp_enabled,
+        stamp_type=body.stamp_type,
+        stamp_value_template=body.stamp_value_template,
+        stamp_position=body.stamp_position,
+    )
     await session.commit()
     return config
 
@@ -2986,10 +3079,10 @@ async def export_document(
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
 
-    effective_position = history_position
-    if effective_position is None:
-        config = await repository.get_export_config(session)
-        effective_position = config.history_position
+    config = await repository.get_export_config(session)
+    effective_position = (
+        history_position if history_position is not None else config.history_position
+    )
 
     try:
         export_pdf = await _build_document_export_pdf(
@@ -2997,6 +3090,10 @@ async def export_document(
             version,
             x_dms_principal=x_dms_principal,
             history_position=effective_position,
+            stamp_enabled=config.stamp_enabled,
+            stamp_type=config.stamp_type,
+            stamp_value_template=config.stamp_value_template,
+            stamp_position=config.stamp_position,
             storage=app.state.storage,
             rendering_client=app.state.rendering_client,
             audit_client=app.state.audit_client,
@@ -3042,15 +3139,19 @@ async def start_folder_export(
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf diesen Ordner")
 
-    effective_position = history_position
-    if effective_position is None:
-        config = await repository.get_export_config(session)
-        effective_position = config.history_position
+    config = await repository.get_export_config(session)
+    effective_position = (
+        history_position if history_position is not None else config.history_position
+    )
 
     job = await repository.create_folder_export_job(
         session,
         folder_id=folder_id,
         history_position=effective_position,
+        stamp_enabled=config.stamp_enabled,
+        stamp_type=config.stamp_type,
+        stamp_value_template=config.stamp_value_template,
+        stamp_position=config.stamp_position,
         created_by=x_dms_principal,
     )
     await session.commit()

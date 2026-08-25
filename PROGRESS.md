@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S5 (records quarantine — see below under "Post-Roadmap: Phase 31"), the fifth session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S6 (output stamping — see below under "Post-Roadmap: Phase 31"), the sixth session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S6 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** any other Phase 31 session (P31-S7 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -3943,6 +3943,117 @@ folder) cleaned up via soft-delete + folder trash; the two documents left in the
 be hard-purged without a `dms-admin` legacy-role grant (a heavier, Keycloak-side change not worth making
 purely for cleanup of already-invisible trashed test data) — left in the trash, not in normal view,
 consistent with how this project has occasionally handled equivalent minor cleanup gaps before.
+
+### Post-Roadmap: Phase 31 Session 6 — output stamping (2026-08-25)
+
+Sixth Phase 31 session. `rendering-service`'s `watermark.py` — previously a single, fixed diagonal
+text-only overlay behind `POST /render/watermark` — is generalized: `add_text_watermark` became
+`add_stamp(data, *, stamp_type, value, position)`. `stamp_type` is `"text"` (unchanged default
+behavior), `"qr"` (new `qrcode` dependency), or `"barcode"` (Code128 via new `python-barcode` dependency,
+`write_text=False` — no room for the printed digits below the bars at this small footprint). `position`
+is `"diagonal-center"` (the original rotated stamp, text only — rejected `422` in combination with
+`qr`/`barcode`, since a rotated scannable code is unscannable) or one of the four page corners, drawn
+upright for all three stamp types, both new content types embedded as a PNG via reportlab's `drawImage`
+and merged through the exact same `pypdf.merge_page()` overlay idiom the original watermark already used.
+See [ADR 0117](docs/adr/0117-output-stamping-qr-barcode-position-export-pipeline.md) for the full
+rationale, including why this was a clean rename rather than a compatibility-shimmed extension (confirmed
+via a full-codebase search that `POST /render/watermark` had exactly one caller anywhere — its own test
+suite — before this session).
+
+`document-service`'s `ExportConfig` (Phase 28) gained `stamp_enabled` (default `false`), `stamp_type`,
+`stamp_value_template` (a `str.format()` template — `{document_id}`/`{kennzeichen}` — same placeholder
+mechanism as object-type-service's `kennzeichen_format`), `stamp_position`, making stamping an **optional
+automatic step** of both `POST /documents/{id}/export` and the combined folder export. Both cross-field
+rules unexpressible as a single field's type are validated once, at `PUT /export-config` write time, not
+on every export: `422` for `stamp_position="diagonal-center"` with a non-`"text"` `stamp_type`, and `422`
+for a template referencing an unknown placeholder (a dry-run `.format()` call against throwaway values).
+Applied inside the already-shared `_build_document_export_pdf` helper, right after
+`RenderingClient.export_document()` produces the Pass-A PDF and before it's returned — **per document,
+not once on a folder export's final combined PDF** — via a new `RenderingClient.stamp()` proxy to
+`POST /render/watermark`. This was the central design decision: because stamping happens before the
+Pass-B folder merge, every page of a combined folder export still carries the identity of its own source
+document after merging, not just a single stamp for the folder as a whole — the actual point of "paper-
+trail reconciliation" (gap analysis #8): a stray printed page found later must be traceable back to which
+document it came from. `FolderExportJob` freezes the four resolved stamp fields at job-creation time
+(same reasoning already applied to its pre-existing `history_position` field) rather than re-reading
+`ExportConfig` live when its tick eventually runs.
+
+Deliberately scoped to the export pipeline only, per the plan's own wording — the gap analysis also
+mentions print/e-mail/handoff as future stamping trigger points, but none of those have a unified
+pipeline in this codebase yet to hook into. Deliberately config-only, no per-call override (unlike
+`history_position`'s `?history_position=` query override) — stamping is an installation-wide compliance
+policy, not a per-export stylistic choice, and an override matrix wasn't asked for. Deliberately no new
+frontend surface: `GET`/`PUT /export-config` had zero frontend callers anywhere in the project even
+before this session (a raw, admin-API-only setting since Phase 28, `history_position` included) —
+`user-ui`'s existing "Exportieren" button (`exportDocument()`/`exportFolder()`) only ever calls the export
+*action* endpoints and needs no code change at all to pick up stamping once an admin enables it via the
+raw API; building a first admin-facing settings page for `ExportConfig` is a reasonable, separate future
+cut.
+
+Tests: rendering-service 87 (previously 78: +2 rewritten `test_render_watermark_*` for the renamed `text`→
+`value` form field, +5 new API tests for qr/barcode/corner-position/validation, +9 new pure-function tests
+in a new `test_watermark.py` verifying an actual image `XObject` was embedded — not just "no exception" —
+for every stamp type/corner, plus the diagonal-center-unchanged and no-pages-rejected cases); document-
+service 328 (previously 322, +6: extended `test_get_and_update_export_config` for the four new fields,
+three new `PUT /export-config` validation-rejection tests, one end-to-end single-document stamp-applied
+test and one no-stamp-when-disabled test against the real running rendering-service, plus a folder-export
+tick test confirming the TOC page stays unstamped while every real per-document page — content AND its
+own history section — does get one). All `ruff`/pytest gates clean.
+
+**Two real, environment-level findings during this session's live verification, neither caused by this
+session's own code, both investigated to a confirmed root cause rather than assumed**:
+
+1. The full rendering-service suite intermittently failed 2 (sometimes 3) tests unrelated to
+   watermarking/stamping (`test_consumer_integration.py`'s two NATS-event-driven rendering tests, and once
+   `test_main.py::test_run_retry_tick_processes_a_due_rendition`) and took an abnormal 16-17 minutes
+   instead of ~2. Root cause traced to **99 orphaned `test_*` JetStream streams accumulated in this
+   long-running dev stack's NATS instance** (confirmed via `GET :8222/jsz?streams=true&accounts=true` —
+   119 total streams, only 20 matching this project's real, non-test-prefixed application streams;
+   `nats-server`'s own startup log showed it individually "Recovering 1 consumer" for each of the 99 on
+   every restart). Purged via a throwaway script (`nats.js.delete_stream()` for every `test_`-prefixed
+   stream) — brought the full suite down to a consistent ~2 minutes, though the two
+   `test_consumer_integration.py` failures (confirmed, via running them alone with the real
+   rendering-service container stopped, to fail identically even in complete isolation — genuine NATS
+   JetStream request/subscribe timing flakiness under this stack's conditions, not a stream-count effect)
+   persisted across repeated runs both before and after the purge. **Left unfixed** (root-causing/hardening
+   NATS event-delivery timing in a shared, long-running dev stack is a real but separate concern from
+   output stamping) — the purge itself is a safe, reversible cleanup of test-only artifacts (verified by
+   name prefix and by cross-checking the remaining 20 stream names against every real application stream
+   in this project) and was applied since it was actively blocking this session's own verification loop,
+   not scope creep beyond it.
+2. Two of this session's own new `test_export.py` assertions were initially wrong, not the product: the
+   folder-export stamping test first asserted every page of the combined export carries a stamp, which
+   ignores that the TOC page (rendered fresh during Pass B, no source document of its own) is correctly
+   never stamped; then, after narrowing to "every page except the TOC", it asserted an exact count of 2
+   without accounting for each document's own history-section page also being stamped (both content and
+   history are part of the same already-merged Pass-A PDF the stamp is applied to) - actual count was 4,
+   correctly. Both were test-authoring mistakes caught by the test itself failing honestly, not silently
+   accepted.
+
+**Fully verified live against the real running stack** (curl via the gateway, real login as
+`config-admin` plus a temporary `document.read` role grant — created via `users-admin`, since `config-
+admin` itself lacks `admin.user_management` — revoked again afterward; `document-service`/`rendering-
+service` freshly rebuilt beforehand, both were still serving pre-session images when first tried, caught
+immediately by a `404`-shaped/stale-response mismatch and corrected): all four on-demand
+`POST /render/watermark` cases (text diagonal unchanged, qr bottom-right, barcode top-left, `422` for
+qr+diagonal-center) confirmed, **and visually inspected** by rasterizing each result with PyMuPDF and
+reading the rendered page images directly — the diagonal text stamp pixel-identical in composition to the
+pre-session behavior, the QR code showing correct finder-pattern structure at bottom-right, the barcode
+showing clean bars with no text label at top-left. `PUT /export-config`'s three new validation cases (`422`
+for diagonal-center+non-text, unknown placeholder, invalid stamp_type) and the enable/config-write round
+trip confirmed. A real document exported with `stamp_value_template="{document_id}"` produced a 2-page PDF
+(content + history) with the QR stamp visually confirmed present and correctly positioned on **both**
+pages, including the history section — the intended consequence of stamping the already-composed Pass-A
+PDF rather than only the original content. A real 2-document folder export produced a 5-page combined PDF
+(1 TOC + 2 pages per document) with the QR stamp visually confirmed present on all 4 real document pages
+and absent on the TOC page, alongside both the pre-existing local "i/N" and global "j/total (overall)"
+footers with no visual overlap between any of the three overlays. Disabling `stamp_enabled` again and
+re-exporting confirmed zero embedded images, matching pre-session behavior exactly (verified via PyMuPDF's
+`page.get_images()`, not just "no error"). All test artifacts (documents, folder, role assignment)
+subsequently removed/revoked. **No new frontend surface exists for this session to browser-test** (see
+above) - the export pipeline was exercised end to end through the exact same document-service/
+rendering-service code path the existing `user-ui` "Exportieren" button would also invoke, so the curl-
+based verification above already covers what a browser click would additionally exercise.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

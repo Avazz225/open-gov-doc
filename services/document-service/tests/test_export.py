@@ -9,6 +9,7 @@ from document_service.main import _run_folder_export_tick, app
 from document_service.rendering_client import RenderingClient
 from document_service.storage_client import StorageClient
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 from reportlab.pdfgen import canvas
 
 # Deliberately self-contained (no cross-file import from test_api.py) - same
@@ -127,13 +128,109 @@ def test_export_document_404_for_unknown_document(client):
 def test_get_and_update_export_config(client):
     response = client.get("/export-config")
     assert response.status_code == 200
-    assert response.json()["history_position"] == "after"
+    body = response.json()
+    assert body["history_position"] == "after"
+    # Output stamping defaults (Post-Roadmap Phase 31 Session 6, ADR 0117) -
+    # disabled by default, so a fresh installation's export behavior is
+    # unchanged from before this session.
+    assert body["stamp_enabled"] is False
+    assert body["stamp_type"] == "qr"
+    assert body["stamp_value_template"] == "{kennzeichen}"
+    assert body["stamp_position"] == "bottom-right"
 
-    response = client.put("/export-config", json={"history_position": "before"})
+    response = client.put(
+        "/export-config",
+        json={
+            "history_position": "before",
+            "stamp_enabled": True,
+            "stamp_type": "barcode",
+            "stamp_value_template": "{document_id}",
+            "stamp_position": "top-left",
+        },
+    )
     assert response.status_code == 200
-    assert response.json()["history_position"] == "before"
+    body = response.json()
+    assert body["history_position"] == "before"
+    assert body["stamp_enabled"] is True
+    assert body["stamp_type"] == "barcode"
+    assert body["stamp_value_template"] == "{document_id}"
+    assert body["stamp_position"] == "top-left"
 
-    assert client.get("/export-config").json()["history_position"] == "before"
+    persisted = client.get("/export-config").json()
+    assert persisted["history_position"] == "before"
+    assert persisted["stamp_type"] == "barcode"
+
+
+def test_update_export_config_rejects_diagonal_center_for_non_text_stamp(client):
+    """Post-Roadmap Phase 31 Session 6 (ADR 0117): `diagonal-center` only
+    makes sense for a rotated text stamp - a QR code/barcode drawn that way
+    would be unreadable."""
+    response = client.put(
+        "/export-config",
+        json={"stamp_type": "qr", "stamp_position": "diagonal-center"},
+    )
+    assert response.status_code == 422
+
+
+def test_update_export_config_rejects_unknown_template_placeholder(client):
+    response = client.put(
+        "/export-config",
+        json={"stamp_value_template": "{unbekannt}"},
+    )
+    assert response.status_code == 422
+
+
+def test_update_export_config_rejects_invalid_stamp_type(client):
+    response = client.put("/export-config", json={"stamp_type": "hologram"})
+    assert response.status_code == 422
+
+
+def _has_embedded_image(page) -> bool:
+    resources = page.get("/Resources")
+    if resources is None or "/XObject" not in resources:
+        return False
+    xobjects = resources["/XObject"]
+    return any(xobjects[name]["/Subtype"] == "/Image" for name in xobjects)
+
+
+def test_export_document_applies_configured_stamp_when_enabled(client):
+    """Post-Roadmap Phase 31 Session 6 (ADR 0117): the export pipeline's new
+    optional automatic stamping step, exercised end to end through the real
+    running rendering-service (`POST /render/watermark`), not mocked."""
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+
+    config_response = client.put(
+        "/export-config",
+        json={
+            "stamp_enabled": True,
+            "stamp_type": "qr",
+            "stamp_value_template": "{document_id}",
+            "stamp_position": "bottom-right",
+        },
+    )
+    assert config_response.status_code == 200
+
+    response = client.post(
+        f"/documents/{document_id}/export", headers={"X-DMS-Principal": principal}
+    )
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert _has_embedded_image(reader.pages[0])
+
+
+def test_export_document_no_stamp_when_disabled(client):
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/export", headers={"X-DMS-Principal": principal}
+    )
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert not _has_embedded_image(reader.pages[0])
 
 
 def test_start_folder_export_requires_read_permission(client):
@@ -163,6 +260,10 @@ def test_start_folder_export_creates_a_pending_job(client):
     assert body["status"] == "pending"
     assert body["history_position"] == "after"
     assert body["attempts"] == 0
+    # Output stamping (Post-Roadmap Phase 31 Session 6, ADR 0117): frozen
+    # onto the job from `ExportConfig` at creation time (default disabled).
+    assert body["stamp_enabled"] is False
+    assert body["stamp_type"] == "qr"
 
 
 def test_get_folder_export_404_for_unknown_job(client):
@@ -251,6 +352,67 @@ async def test_folder_export_tick_processes_a_folder_and_completes(
     assert content_response.status_code == 200
     assert content_response.headers["content-type"] == "application/pdf"
     assert content_response.content.startswith(b"%PDF")
+
+
+async def test_folder_export_tick_applies_configured_stamp_per_document(
+    client, session_factory, monkeypatch
+):
+    """Post-Roadmap Phase 31 Session 6 (ADR 0117): stamping is applied per
+    document (Pass A) before the folder merge (Pass B), not once on the
+    combined result - so every page keeps its own document's stamp even
+    after being merged into one big folder export PDF."""
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    folder_id = "root"
+    _grant_folder_read(principal, folder_id)
+
+    upload(client, title="A.pdf", folder_id=folder_id)
+    upload(client, title="B.pdf", folder_id=folder_id)
+
+    config_response = client.put(
+        "/export-config",
+        json={
+            "stamp_enabled": True,
+            "stamp_type": "qr",
+            "stamp_value_template": "{document_id}",
+            "stamp_position": "top-right",
+        },
+    )
+    assert config_response.status_code == 200
+
+    job_id = client.post(
+        f"/folders/{folder_id}/export", headers={"X-DMS-Principal": principal}
+    ).json()["id"]
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        pass
+
+    monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
+
+    storage = StorageClient(STORAGE_SERVICE_URL)
+    rendering_client = RenderingClient(RENDERING_SERVICE_URL)
+    audit_client = AuditServiceClient(AUDIT_SERVICE_URL)
+    try:
+        await _run_folder_export_tick(
+            session_factory,
+            storage=storage,
+            rendering_client=rendering_client,
+            audit_client=audit_client,
+        )
+    finally:
+        await storage.close()
+        await rendering_client.close()
+        await audit_client.close()
+
+    content_response = client.get(f"/folder-exports/{job_id}/content")
+    assert content_response.status_code == 200
+    reader = PdfReader(BytesIO(content_response.content))
+    assert len(reader.pages) >= 3  # TOC + each document's own content+history pages
+    # The TOC page (rendering_service's `_render_toc_pdf`, added fresh during
+    # Pass B) has no source document of its own to stamp and is correctly
+    # never stamped - unlike every carried-over Pass-A page (both documents'
+    # content AND their own export-history section), which is.
+    assert not _has_embedded_image(reader.pages[0])
+    assert all(_has_embedded_image(page) for page in reader.pages[1:])
 
 
 async def test_folder_export_tick_fails_gracefully_for_an_empty_folder(client, session_factory):

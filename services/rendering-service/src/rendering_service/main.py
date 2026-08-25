@@ -44,7 +44,7 @@ from rendering_service.renderers.pdf_archive import PdfArchiveRenderer
 from rendering_service.schemas import ExportHistoryEntryIn, RenditionOut
 from rendering_service.settings import Settings
 from rendering_service.storage_client import StorageClient
-from rendering_service.watermark import add_text_watermark
+from rendering_service.watermark import add_stamp
 
 settings = Settings()
 configure_logging(settings)
@@ -349,23 +349,46 @@ async def download_rendition_content(
     return Response(content=data, media_type=rendition.target_content_type)
 
 
+_VALID_STAMP_TYPES = ("text", "qr", "barcode")
+_VALID_STAMP_POSITIONS = ("diagonal-center", "top-left", "top-right", "bottom-left", "bottom-right")
+
+
 @app.post("/render/watermark")
 async def render_watermark(
     file: UploadFile = File(...),
-    text_: str = Form(..., alias="text"),
+    value_: str = Form(..., alias="value"),
+    stamp_type: str = Form("text"),
+    position: str = Form("diagonal-center"),
     x_dms_principal: str = Header(default=""),
 ) -> Response:
-    """On-demand watermark (3.7) - not an automatic pipeline step,
-    no persistence (see watermark.py)."""
+    """On-demand stamp (3.7, extended Post-Roadmap Phase 31 Session 6, ADR
+    0117) - not an automatic pipeline step on its own, no persistence (see
+    watermark.py). `stamp_type="text"` (default) reproduces the original
+    diagonal watermark exactly; `"qr"`/`"barcode"` render a QR code/Code128
+    barcode at one of the four page corners instead - `position` must then
+    be one of those corners, not the text-only `"diagonal-center"` default."""
     await _require_rendering_permission(x_dms_principal, access_type="write")
+    if stamp_type not in _VALID_STAMP_TYPES:
+        raise HTTPException(
+            status_code=422, detail=f"stamp_type muss eines von {_VALID_STAMP_TYPES} sein"
+        )
+    if position not in _VALID_STAMP_POSITIONS:
+        raise HTTPException(
+            status_code=422, detail=f"position muss eines von {_VALID_STAMP_POSITIONS} sein"
+        )
+    if stamp_type != "text" and position == "diagonal-center":
+        raise HTTPException(
+            status_code=422,
+            detail="position 'diagonal-center' ist nur für stamp_type='text' verfügbar",
+        )
     data = await file.read()
     try:
-        watermarked = add_text_watermark(data, text_)
+        stamped = add_stamp(data, stamp_type=stamp_type, value=value_, position=position)
     except Exception as exc:
         raise HTTPException(
-            status_code=400, detail=f"Wasserzeichen konnte nicht angewendet werden: {exc}"
+            status_code=400, detail=f"Stempel konnte nicht angewendet werden: {exc}"
         ) from exc
-    return Response(content=watermarked, media_type="application/pdf")
+    return Response(content=stamped, media_type="application/pdf")
 
 
 @app.post("/render/convert-to-pdf")

@@ -432,8 +432,22 @@ class WebdavEditTokenResolveOut(BaseModel):
 # (post-roadmap phase 28, ADR 0107) ----------------------------------
 
 
+# Output stamping (post-roadmap phase 31 session 6, ADR 0117): shared
+# between the config schema below and `FolderExportJobOut` - same three
+# stamp types/five positions rendering-service's `/render/watermark`
+# accepts (validated there too; duplicated here at the config-write
+# boundary for immediate 422 feedback instead of a deferred failure at
+# export time).
+StampType = Literal["text", "qr", "barcode"]
+StampPosition = Literal["diagonal-center", "top-left", "top-right", "bottom-left", "bottom-right"]
+
+
 class ExportConfigIn(BaseModel):
     history_position: Literal["before", "after"] = "after"
+    stamp_enabled: bool = False
+    stamp_type: StampType = "qr"
+    stamp_value_template: str = "{kennzeichen}"
+    stamp_position: StampPosition = "bottom-right"
 
 
 class ExportConfigOut(ExportConfigIn):
@@ -448,6 +462,10 @@ class FolderExportJobOut(BaseModel):
     id: str
     folder_id: str
     history_position: str
+    stamp_enabled: bool
+    stamp_type: str
+    stamp_value_template: str
+    stamp_position: str
     status: Literal["pending", "processing", "completed", "failed_permanent"]
     error_message: str | None
     attempts: int
