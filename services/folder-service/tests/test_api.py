@@ -1,4 +1,5 @@
 import os
+import uuid
 from unittest.mock import AsyncMock
 
 import httpx
@@ -8,6 +9,8 @@ from fastapi.testclient import TestClient
 from folder_service.main import app
 
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+# Hand folders (post-roadmap phase 31 session 7, ADR 0118).
+ROLE_ADMIN_PRINCIPAL_ID = "folder-service-test-role-admin"
 
 
 @pytest.fixture
@@ -23,8 +26,37 @@ def client():
         fake_document_client.cascade_trash.return_value = []
         fake_document_client.cascade_restore.return_value = []
         fake_document_client.count_active.return_value = 0
+        # Hand folders (ADR 0118) - default "unknown document" (`None`),
+        # overridden per test where a resolvable document is needed.
+        fake_document_client.get.return_value = None
         app.state.document_client = fake_document_client
         yield c
+
+
+def _grant_folder_permission(principal_id: str, folder_id: str, *, permissions: list[str]) -> None:
+    """Hand folders (ADR 0118) - creates a throwaway role with the given
+    permissions and grants it to `principal_id` on `folder_id` specifically
+    (not `root`) - the real, resource-scoped RBAC this feature is gated by.
+    Same pattern as document-service's `test_export.py::_grant_read`."""
+    role = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/roles",
+        json={"name": f"hand-folder-test-role-{uuid.uuid4().hex[:8]}", "permissions": permissions},
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
+        timeout=30.0,
+    )
+    role.raise_for_status()
+    assignment = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": principal_id,
+            "role_id": role.json()["id"],
+            "resource_id": folder_id,
+        },
+        timeout=30.0,
+    )
+    assignment.raise_for_status()
+    assert assignment.json()["status"] == "created"
 
 
 def test_healthz(client):
@@ -714,3 +746,138 @@ def test_apply_folder_template_unknown_target_returns_404(client):
     )
 
     assert response.status_code == 404
+
+
+# --- Hand folders (14.2, post-roadmap phase 31 session 7, ADR 0118) ---
+
+
+def test_add_folder_document_reference_without_permission_is_403(client):
+    folder = _create_folder(client, name="Handakte-Test")
+    response = client.post(
+        f"/folders/{folder['id']}/document-references",
+        json={"document_id": "doc-1", "added_by": "alice"},
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_add_folder_document_reference_without_principal_is_401(client):
+    folder = _create_folder(client, name="Handakte-Test")
+    response = client.post(
+        f"/folders/{folder['id']}/document-references",
+        json={"document_id": "doc-1", "added_by": "alice"},
+    )
+    assert response.status_code == 401
+
+
+def test_add_folder_document_reference_unknown_document_returns_400(client):
+    folder = _create_folder(client, name="Handakte-Test")
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_folder_permission(principal, folder["id"], permissions=["folder.write", "folder.read"])
+    # `client` fixture's fake_document_client.get defaults to None ("unknown").
+
+    response = client.post(
+        f"/folders/{folder['id']}/document-references",
+        json={"document_id": "doc-unknown", "added_by": principal},
+        headers={"X-DMS-Principal": principal},
+    )
+    assert response.status_code == 400
+
+
+def test_add_folder_document_reference_unknown_folder_returns_404(client):
+    """404 (folder existence) is checked before 403 (folder-scoped
+    permission) - resolving whether the resource even exists has to happen
+    before asking "does X have permission on it", so no grant is needed
+    here at all to observe the 404."""
+    response = client.post(
+        "/folders/does-not-exist/document-references",
+        json={"document_id": "doc-1", "added_by": "alice"},
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 404
+
+
+def test_folder_document_reference_lifecycle(client):
+    """Add, resolve live document metadata, list (including a removed
+    entry, soft-removed for traceability), remove, 404 on a second removal
+    of the same reference."""
+    folder = _create_folder(client, name="Handakte-Test")
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_folder_permission(principal, folder["id"], permissions=["folder.write", "folder.read"])
+    app.state.document_client.get.return_value = {
+        "current_version_number": 3,
+        "deleted_at": None,
+    }
+
+    add_response = client.post(
+        f"/folders/{folder['id']}/document-references",
+        json={"document_id": "doc-1", "added_by": principal},
+        headers={"X-DMS-Principal": principal},
+    )
+    assert add_response.status_code == 201
+    body = add_response.json()
+    assert body["document_id"] == "doc-1"
+    assert body["current_version_number"] == 3
+    assert body["removed_at"] is None
+
+    list_response = client.get(
+        f"/folders/{folder['id']}/document-references",
+        headers={"X-DMS-Principal": principal},
+    )
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+    remove_response = client.request(
+        "DELETE",
+        f"/folders/{folder['id']}/document-references/doc-1",
+        json={"removed_by": principal},
+        headers={"X-DMS-Principal": principal},
+    )
+    assert remove_response.status_code == 200
+    assert remove_response.json()["removed_at"] is not None
+
+    # Soft-removed - still listed, not gone.
+    list_after_remove = client.get(
+        f"/folders/{folder['id']}/document-references",
+        headers={"X-DMS-Principal": principal},
+    ).json()
+    assert len(list_after_remove) == 1
+    assert list_after_remove[0]["removed_at"] is not None
+
+    second_remove = client.request(
+        "DELETE",
+        f"/folders/{folder['id']}/document-references/doc-1",
+        json={"removed_by": principal},
+        headers={"X-DMS-Principal": principal},
+    )
+    assert second_remove.status_code == 404
+
+
+def test_list_folder_document_references_without_permission_is_403(client):
+    folder = _create_folder(client, name="Handakte-Test")
+    response = client.get(
+        f"/folders/{folder['id']}/document-references",
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_folder_read_permission_does_not_grant_write(client):
+    """`folder.read` alone must not be enough to curate the compilation -
+    only `folder.write` may add/remove references."""
+    folder = _create_folder(client, name="Handakte-Test")
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_folder_permission(principal, folder["id"], permissions=["folder.read"])
+
+    list_response = client.get(
+        f"/folders/{folder['id']}/document-references",
+        headers={"X-DMS-Principal": principal},
+    )
+    assert list_response.status_code == 200
+
+    add_response = client.post(
+        f"/folders/{folder['id']}/document-references",
+        json={"document_id": "doc-1", "added_by": principal},
+        headers={"X-DMS-Principal": principal},
+    )
+    assert add_response.status_code == 403

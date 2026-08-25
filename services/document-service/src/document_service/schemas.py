@@ -257,6 +257,16 @@ class DocumentRegisterRequest(BaseModel):
     registered_by: str
 
 
+class DocumentPromoteRequest(BaseModel):
+    """Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR
+    0118): register + an optional move to a real destination folder, as one
+    atomic action/event - see `promote_document` in main.py. `promoted_by`
+    is opaque, same pattern as `registered_by` above."""
+
+    promoted_by: str
+    target_folder_id: str | None = None
+
+
 class DeletionRegisterEntryOut(BaseModel):
     id: str
     document_id: str

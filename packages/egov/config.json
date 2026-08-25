@@ -70,6 +70,26 @@
       "kennzeichen_format": "{Federführung}-{YYYY}-{Laufende_Nummer}",
       "default_retention_days": 3653,
       "classification_level": "VS-NfD"
+    },
+    {
+      "name": "Handakte",
+      "applies_to": "folder",
+      "attributes": [],
+      "allowed_parent_types": [
+        "$ROOT",
+        "Abteilung"
+      ],
+      "icon": "briefcase"
+    },
+    {
+      "name": "Arbeitsvorrat",
+      "applies_to": "folder",
+      "attributes": [],
+      "allowed_parent_types": [
+        "$ROOT",
+        "Abteilung"
+      ],
+      "icon": "folder-open"
     }
   ],
   "realm_roles": [

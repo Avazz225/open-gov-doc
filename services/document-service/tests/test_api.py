@@ -789,6 +789,87 @@ def test_register_unknown_document_returns_404(client):
     assert response.status_code == 404
 
 
+def test_list_documents_registered_filter(client):
+    """`registered` (post-roadmap phase 31 session 7, ADR 0118)."""
+    draft_id = upload(client, title="Entwurf", folder_id="root", draft="true").json()["id"]
+    regular_id = upload(client, title="Regulär", folder_id="root").json()["id"]
+
+    unfiltered = {d["id"] for d in client.get("/documents?folder_id=root").json()}
+    assert {draft_id, regular_id} <= unfiltered
+
+    drafts_only = {d["id"] for d in client.get("/documents?folder_id=root&registered=false").json()}
+    assert draft_id in drafts_only
+    assert regular_id not in drafts_only
+
+    registered_only = {
+        d["id"] for d in client.get("/documents?folder_id=root&registered=true").json()
+    }
+    assert regular_id in registered_only
+    assert draft_id not in registered_only
+
+
+# --- Work tray promotion (post-roadmap phase 31 session 7, ADR 0118) --
+
+
+def test_promote_draft_document_without_target_folder_just_registers(client):
+    """No `target_folder_id` given - identical outcome to `register`."""
+    document_id = upload(client, draft="true").json()["id"]
+
+    response = client.post(f"/documents/{document_id}/promote", json={"promoted_by": "alice"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["registered_at"] is not None
+    assert body["folder_id"] is None
+
+
+def test_promote_draft_document_moves_to_target_folder(client):
+    new_folder = httpx.post(
+        f"{FOLDER_SERVICE_URL}/folders",
+        json={"name": "Zielordner-Promote", "parent_id": "root", "created_by": "alice"},
+    ).json()
+    document_id = upload(client, folder_id="root", draft="true").json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/promote",
+        json={"promoted_by": "alice", "target_folder_id": new_folder["id"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["registered_at"] is not None
+    assert body["folder_id"] == new_folder["id"]
+    get_response = client.get(f"/documents/{document_id}")
+    assert get_response.json()["folder_id"] == new_folder["id"]
+
+
+def test_promote_already_registered_document_returns_409(client):
+    document_id = upload(client).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/promote", json={"promoted_by": "alice"})
+
+    assert response.status_code == 409
+
+
+def test_promote_unknown_document_returns_404(client):
+    response = client.post("/documents/does-not-exist/promote", json={"promoted_by": "alice"})
+    assert response.status_code == 404
+
+
+def test_promote_draft_document_unknown_target_folder_returns_400(client):
+    document_id = upload(client, folder_id="root", draft="true").json()["id"]
+
+    response = client.post(
+        f"/documents/{document_id}/promote",
+        json={"promoted_by": "alice", "target_folder_id": "does-not-exist"},
+    )
+
+    assert response.status_code == 400
+    # Not registered either - a failed move doesn't partially apply the
+    # promotion (both steps share one commit).
+    assert client.get(f"/documents/{document_id}").json()["registered_at"] is None
+
+
 def test_upload_content_type_is_sniffed_not_trusted(client):
     """P5d-S1: der vom Browser gesendete Header wird nicht mehr übernommen -
     hier klar sichtbar, da `upload()` Klartext-Inhalt als "application/pdf"

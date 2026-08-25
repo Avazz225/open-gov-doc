@@ -21,6 +21,34 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 # Post-Roadmap Phase 19 Session 10 (ADR 0075): `POST /legal-holds`/
 # `.../release` verlangen seither `admin.legal_hold`.
 LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "folder-service-test-legal-hold-admin"
+# Hand folders (post-roadmap phase 31 session 7, ADR 0118): test helpers
+# that grant resource-scoped `folder.read`/`folder.write` roles need to
+# create their own throwaway roles first (`POST /roles` itself requires
+# `admin.user_management`) - same pattern as document-service's
+# `ROLE_ADMIN_PRINCIPAL_ID`/`_grant_role_admin_permission`.
+ROLE_ADMIN_PRINCIPAL_ID = "folder-service-test-role-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_role_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -56,7 +84,8 @@ async def _clean_tables():
         await conn.execute(
             text(
                 "TRUNCATE folder.legal_hold, folder.deletion_register_entry, folder.folder, "
-                "folder.retention_config, folder.trash_config, folder.folder_template CASCADE"
+                "folder.retention_config, folder.trash_config, folder.folder_template, "
+                "folder.folder_document_reference CASCADE"
             )
         )
     await eng.dispose()

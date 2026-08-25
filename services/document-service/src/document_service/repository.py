@@ -100,7 +100,9 @@ async def get_document(session: AsyncSession, document_id: str) -> Document:
     return document
 
 
-async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> list[Document]:
+async def list_documents_by_folder(
+    session: AsyncSession, folder_id: str, *, registered: bool | None = None
+) -> list[Document]:
     """Basis for the folder navigation of the user UI (P4-S2). `folder_id` is
     treated here, as everywhere else in this service, as an opaque foreign
     reference (no existence check against the Folder Service) - an unknown
@@ -112,19 +114,25 @@ async def list_documents_by_folder(session: AsyncSession, folder_id: str) -> lis
     N+1 `has_active_hold`-per-candidate pattern used by the low-volume
     retention poll loop) since this is a hot path hit on every folder
     navigation. `list_documents_for_folder_export` (P28) reuses this
-    function directly and therefore inherits the same exclusion."""
+    function directly and therefore inherits the same exclusion.
+
+    `registered` (post-roadmap phase 31 session 7, ADR 0118): `None`
+    (default) applies no filter, preserving every existing caller's
+    behavior unchanged - `list_documents_for_folder_export` (below) also
+    inherits this new parameter's default via its own passthrough."""
     quarantine_subquery = select(RecordsQuarantine.id).where(
         RecordsQuarantine.document_id == Document.id, RecordsQuarantine.released_at.is_(None)
     )
-    result = await session.execute(
-        select(Document)
-        .where(
-            Document.folder_id == folder_id,
-            Document.deleted_at.is_(None),
-            ~exists(quarantine_subquery),
-        )
-        .order_by(Document.title)
-    )
+    conditions = [
+        Document.folder_id == folder_id,
+        Document.deleted_at.is_(None),
+        ~exists(quarantine_subquery),
+    ]
+    if registered is True:
+        conditions.append(Document.registered_at.isnot(None))
+    elif registered is False:
+        conditions.append(Document.registered_at.is_(None))
+    result = await session.execute(select(Document).where(*conditions).order_by(Document.title))
     return list(result.scalars().all())
 
 

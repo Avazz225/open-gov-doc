@@ -72,6 +72,33 @@ class FolderTemplate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class FolderDocumentReference(Base):
+    """Hand folder document reference (14.2, post-roadmap phase 31 session
+    7, ADR 0118) - a folder's reference to a document living elsewhere in
+    the hierarchy (possibly under a completely different case/department),
+    NOT a copy or move of the document into this folder: "assembles
+    references, not copies, into one working compilation." Structurally
+    mirrors case-service's `CaseDocumentReference` (2.3) - a container's
+    reference-not-copy join to a document - minus the case-closure
+    snapshot mechanism, since a folder has no terminating lifecycle the
+    way a circulation folder does. Soft-removed (removed_by/removed_at)
+    like its case-service counterpart, for traceability. Deliberately not
+    restricted to folders of any particular object type - any folder can
+    hold references, the same way any folder can hold legal holds/
+    retention settings above; a "Handakte" object type exists only as a
+    naming/icon convenience, not an enforced precondition."""
+
+    __tablename__ = "folder_document_reference"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    folder_id: Mapped[str] = mapped_column(String(128), ForeignKey("folder.folder.id"), index=True)
+    document_id: Mapped[str] = mapped_column(String(128))
+    added_by: Mapped[str] = mapped_column(String(128))
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    removed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class LegalHold(Base):
     """Legal hold for folders (5.2, since P7-S1b) - structurally identical
     to `document_service.LegalHold` (P7-S1), but a standalone table in the

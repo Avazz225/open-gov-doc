@@ -40,5 +40,18 @@ class DocumentClient:
         response.raise_for_status()
         return response.json()["count"]
 
+    async def get(self, document_id: str) -> dict | None:
+        """Hand folder reference resolution (14.2, post-roadmap phase 31
+        session 7, ADR 0118) - exact mirror of case-service's own
+        `DocumentClient.get()`. A soft-deleted document remains retrievable
+        via `GET /documents/{id}` (no 404), which already covers "a
+        reference survives the deletion of its original, traceably" without
+        any extra logic here."""
+        response = await self._client.get(f"/documents/{document_id}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()

@@ -8,6 +8,7 @@ from folder_service.document_client import DocumentClient
 from folder_service.models import (
     DeletionRegisterEntry,
     Folder,
+    FolderDocumentReference,
     FolderTemplate,
     LegalHold,
     RetentionConfig,
@@ -186,11 +187,20 @@ async def update_folder(
 async def delete_folder(session: AsyncSession, folder_id: str) -> None:
     """Immediate hard delete - remains as a fallback for already-empty
     cases that never had retention applied (see `soft_delete_folder` for
-    the regular trash path, since P7-S1b)."""
+    the regular trash path, since P7-S1b). Removes dependent hand-folder
+    reference rows first (14.2, post-roadmap phase 31 session 7, ADR 0118)
+    - found live during this session's own verification: an active
+    reference otherwise violates `folder_document_reference`'s FK on
+    `folder.folder.id` (`IntegrityError`/`500`), the same class of
+    dependent-row cleanup `hard_delete_folder` below already does for
+    `legal_hold`."""
     folder = await get_folder(session, folder_id)
     children = await list_children(session, folder_id)
     if children:
         raise FolderNotEmptyError(f"Ordner {folder_id!r} enthält noch {len(children)} Unterordner")
+    for reference in await _list_document_references_raw(session, folder_id):
+        await session.delete(reference)
+    await session.flush()
     await session.delete(folder)
     await session.flush()
 
@@ -307,10 +317,14 @@ async def hard_delete_folder(session: AsyncSession, folder_id: str) -> None:
     """Complete, irrecoverable removal (5.2a, since P7-S1b) - first removes
     the legal-hold history so that the FK constraint is not violated (same
     interim-flush pattern as
-    `document_service.repository.hard_delete_document`)."""
+    `document_service.repository.hard_delete_document`). Since post-roadmap
+    phase 31 session 7 (ADR 0118), also removes hand-folder reference rows
+    the same way - see `delete_folder` above for how this was found."""
     folder = await _get_folder_row(session, folder_id)
     for hold in await list_holds(session, folder_id):
         await session.delete(hold)
+    for reference in await _list_document_references_raw(session, folder_id):
+        await session.delete(reference)
     await session.flush()
     await session.delete(folder)
     await session.flush()
@@ -335,6 +349,69 @@ async def set_retention(
     folder.updated_at = datetime.now(UTC)
     await session.flush()
     return folder
+
+
+async def add_document_reference(
+    session: AsyncSession, folder_id: str, *, document_id: str, added_by: str
+) -> FolderDocumentReference:
+    """Hand folder (14.2, post-roadmap phase 31 session 7, ADR 0118) - no
+    uniqueness check, same permissive precedent as case-service's
+    `add_document_reference` (the same document may be referenced twice;
+    harmless, and not worth a new constraint this feature didn't ask for)."""
+    await get_folder(session, folder_id)
+    reference = FolderDocumentReference(
+        folder_id=folder_id, document_id=document_id, added_by=added_by, added_at=datetime.now(UTC)
+    )
+    session.add(reference)
+    await session.flush()
+    return reference
+
+
+async def remove_document_reference(
+    session: AsyncSession, folder_id: str, document_id: str, *, removed_by: str
+) -> FolderDocumentReference:
+    await get_folder(session, folder_id)
+    result = await session.execute(
+        select(FolderDocumentReference).where(
+            FolderDocumentReference.folder_id == folder_id,
+            FolderDocumentReference.document_id == document_id,
+            FolderDocumentReference.removed_at.is_(None),
+        )
+    )
+    reference = result.scalars().first()
+    if reference is None:
+        raise NotFoundError(f"Aktive Referenz auf {document_id!r} in {folder_id!r} unbekannt")
+    reference.removed_by = removed_by
+    reference.removed_at = datetime.now(UTC)
+    await session.flush()
+    return reference
+
+
+async def _list_document_references_raw(
+    session: AsyncSession, folder_id: str
+) -> list[FolderDocumentReference]:
+    """No existence check, unlike `list_document_references` below - for
+    `delete_folder`/`hard_delete_folder`'s dependent-row cleanup, which must
+    also work on a folder already soft-deleted (trash-filtered `get_folder`
+    would otherwise raise `NotFoundError` on exactly the folders these two
+    are meant to finish removing). Same no-existence-check shape as
+    `list_holds` above, which this mirrors."""
+    result = await session.execute(
+        select(FolderDocumentReference).where(FolderDocumentReference.folder_id == folder_id)
+    )
+    return list(result.scalars().all())
+
+
+async def list_document_references(
+    session: AsyncSession, folder_id: str
+) -> list[FolderDocumentReference]:
+    await get_folder(session, folder_id)
+    result = await session.execute(
+        select(FolderDocumentReference)
+        .where(FolderDocumentReference.folder_id == folder_id)
+        .order_by(FolderDocumentReference.added_at)
+    )
+    return list(result.scalars().all())
 
 
 async def create_legal_hold(

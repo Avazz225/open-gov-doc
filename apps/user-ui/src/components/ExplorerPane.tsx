@@ -35,6 +35,7 @@ import { BulkEditModal, type BulkEditItem } from "./BulkEditModal";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FolderRetentionModal } from "./FolderRetentionModal";
 import { FolderTree } from "./FolderTree";
+import { HandFolderReferencesModal } from "./HandFolderReferencesModal";
 import { ShareLinkModal } from "./ShareLinkModal";
 import { UploadForm } from "./UploadForm";
 
@@ -133,6 +134,7 @@ export function ExplorerPane({
   const [isTrashLoading, setIsTrashLoading] = useState(false);
   const [trashError, setTrashError] = useState<string | null>(null);
   const [retentionModalFolder, setRetentionModalFolder] = useState<Folder | null>(null);
+  const [handFolderModalFolder, setHandFolderModalFolder] = useState<Folder | null>(null);
   const [folderDeleteRequiresApproval, setFolderDeleteRequiresApproval] = useState(false);
   const [documentDeleteRequiresApproval, setDocumentDeleteRequiresApproval] = useState(false);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
@@ -788,6 +790,13 @@ export function ExplorerPane({
                       >
                         🕒
                       </button>
+                      <button
+                        type="button"
+                        aria-label={t("explorer.handFolderReferences", { name: folder.name })}
+                        onClick={() => setHandFolderModalFolder(folder)}
+                      >
+                        📎
+                      </button>
                     </span>
                   </>
                 )}
@@ -819,6 +828,13 @@ export function ExplorerPane({
             ))}
           </ul>
         </>
+      )}
+
+      {handFolderModalFolder && (
+        <HandFolderReferencesModal
+          folder={handFolderModalFolder}
+          onClose={() => setHandFolderModalFolder(null)}
+        />
       )}
 
       {retentionModalFolder && (

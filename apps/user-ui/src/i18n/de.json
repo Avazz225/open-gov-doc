@@ -112,6 +112,7 @@
     "restoreDocument": "Wiederherstellen",
     "restoreFolder": "Wiederherstellen",
     "folderRetention": "Aufbewahrung für {name}",
+    "handFolderReferences": "Handakte-Referenzen für {name}",
     "requestDeleteFolder": "Löschung für \"{name}\" beantragen",
     "confirmRequestDeleteFolder": "Löschung für Ordner \"{name}\" beantragen? Eine zweite Person muss zustimmen.",
     "deleteDocument": "\"{name}\" löschen",
@@ -147,7 +148,12 @@
     "draftHint": "Dieses Dokument ist noch nicht registriert - es hat noch kein Kennzeichen.",
     "registerAction": "Registrieren",
     "registering": "Registriere...",
-    "registerError": "Registrierung fehlgeschlagen"
+    "registerError": "Registrierung fehlgeschlagen",
+    "promoteTargetFolderLabel": "Zielordner-ID (optional)",
+    "promoteTargetFolderPlaceholder": "leer lassen, um nur zu registrieren",
+    "promoteAction": "Aus Arbeitsvorrat übernehmen",
+    "promoting": "Übernehme...",
+    "promoteError": "Übernahme fehlgeschlagen"
   },
   "signatures": {
     "heading": "Signaturen",
@@ -216,6 +222,20 @@
   },
   "folderRetention": {
     "heading": "Aufbewahrung & Löschung: {name}"
+  },
+  "handFolder": {
+    "heading": "Handakte-Referenzen: {name}",
+    "description": "Verweist auf Dokumente an anderer Stelle in der Ablage (auch aus anderen Akten/Vorgängen), ohne sie zu kopieren oder zu verschieben.",
+    "documentIdLabel": "Dokument-ID",
+    "add": "Referenz hinzufügen",
+    "adding": "Füge hinzu...",
+    "addError": "Referenz konnte nicht hinzugefügt werden",
+    "remove": "Entfernen",
+    "removeError": "Referenz konnte nicht entfernt werden",
+    "loadError": "Referenzen konnten nicht geladen werden",
+    "empty": "Keine Referenzen in dieser Handakte.",
+    "unresolvedTitle": "Unbekanntes Dokument ({id})",
+    "deletedHint": "Original gelöscht"
   },
   "recordsQuarantine": {
     "paneLabel": "Schriftgutquarantäne",

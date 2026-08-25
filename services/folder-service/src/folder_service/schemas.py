@@ -64,6 +64,31 @@ class RetentionUpdate(BaseModel):
     notify_email: str | None = None
 
 
+class FolderDocumentReferenceAdd(BaseModel):
+    document_id: str
+    added_by: str
+
+
+class FolderDocumentReferenceRemove(BaseModel):
+    removed_by: str
+
+
+class FolderDocumentReferenceOut(BaseModel):
+    """Combines the reference row with a live-resolved snapshot of the
+    referenced document (14.2, post-roadmap phase 31 session 7, ADR 0118) -
+    same shape/reasoning as case-service's `CaseDocumentReferenceOut`. No
+    `from_attributes`, since the resolved fields don't live on the DB model
+    itself."""
+
+    document_id: str
+    added_by: str
+    added_at: datetime
+    removed_by: str | None
+    removed_at: datetime | None
+    current_version_number: int | None
+    document_deleted_at: datetime | None
+
+
 class LegalHoldCreate(BaseModel):
     folder_id: str
     set_by: str

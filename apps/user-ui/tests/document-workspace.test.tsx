@@ -42,6 +42,7 @@ const deleteFolderMock = vi.fn();
 const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
 const registerDocumentMock = vi.fn();
+const promoteDocumentMock = vi.fn();
 const setDocumentClassificationLevelMock = vi.fn();
 const getRedactionPreviewPageCountMock = vi.fn();
 const getRedactionPreviewPageImageMock = vi.fn();
@@ -134,6 +135,7 @@ vi.mock("@/lib/api", () => ({
   getKennzeichenConfig: (...args: unknown[]) => getKennzeichenConfigMock(...args),
   updateDocumentMetadata: (...args: unknown[]) => updateDocumentMetadataMock(...args),
   registerDocument: (...args: unknown[]) => registerDocumentMock(...args),
+  promoteDocument: (...args: unknown[]) => promoteDocumentMock(...args),
   setDocumentClassificationLevel: (...args: unknown[]) =>
     setDocumentClassificationLevelMock(...args),
   getRedactionPreviewPageCount: (...args: unknown[]) => getRedactionPreviewPageCountMock(...args),
@@ -233,6 +235,7 @@ describe("DocumentWorkspace", () => {
     getObjectTypeMock.mockReset();
     updateDocumentMetadataMock.mockReset();
     registerDocumentMock.mockReset();
+    promoteDocumentMock.mockReset();
     setDocumentClassificationLevelMock.mockReset();
     getRedactionPreviewPageCountMock.mockReset();
     getRedactionPreviewPageImageMock.mockReset();
@@ -1600,6 +1603,40 @@ describe("DocumentWorkspace", () => {
 
     await waitFor(() =>
       expect(registerDocumentMock).toHaveBeenCalledWith("token-123", "d-draft", "alice")
+    );
+    await waitFor(() =>
+      expect(within(metadataPanel).queryByText("Entwurf")).not.toBeInTheDocument()
+    );
+  });
+
+  it("promotes a draft document to a target folder in one step (work tray, ADR 0118)", async () => {
+    const draftDocument = { ...document1, id: "d-draft", registered_at: null };
+    listChildFoldersMock.mockResolvedValue([]);
+    listDocumentsInFolderMock.mockResolvedValue([draftDocument]);
+    promoteDocumentMock.mockResolvedValue({
+      ...draftDocument,
+      registered_at: "2026-02-01T00:00:00Z",
+      folder_id: "folder-target",
+    });
+
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByText(/Rechnung.pdf/));
+
+    const metadataPanel = getPaneSectionByLabel("Metadaten");
+    await user.click(metadataPanel);
+    await user.type(
+      within(metadataPanel).getByLabelText("Zielordner-ID (optional)"),
+      "folder-target"
+    );
+    await user.click(within(metadataPanel).getByText("Aus Arbeitsvorrat übernehmen"));
+
+    await waitFor(() =>
+      expect(promoteDocumentMock).toHaveBeenCalledWith("token-123", "d-draft", {
+        promotedBy: "alice",
+        targetFolderId: "folder-target",
+      })
     );
     await waitFor(() =>
       expect(within(metadataPanel).queryByText("Entwurf")).not.toBeInTheDocument()

@@ -29,6 +29,9 @@ from folder_service.object_type_client import ObjectTypeClient
 from folder_service.schemas import (
     DeletionRegisterEntryOut,
     FolderCreate,
+    FolderDocumentReferenceAdd,
+    FolderDocumentReferenceOut,
+    FolderDocumentReferenceRemove,
     FolderOut,
     FolderTemplateApplyRequest,
     FolderTemplateApplyResult,
@@ -767,6 +770,154 @@ async def put_retention(
         },
     )
     return updated
+
+
+async def _require_folder_document_reference_permission(
+    x_dms_principal: str, folder_id: str, *, access_type: str
+) -> None:
+    """Hand folders (14.2, post-roadmap phase 31 session 7, ADR 0118) -
+    unlike almost every other endpoint in this service (folder-service
+    enforces essentially no RBAC of its own, see "Open Points" in
+    docs/services/folder-service.md), curating a hand folder's cross-
+    referenced compilation is gated by a real, folder-scoped `folder.read`/
+    `folder.write` check against permission-service's existing resource
+    tree (populated from this service's own `folder.resource.*` events,
+    see docs/services/permission-service.md) - the first actual consumer of
+    that tree from within folder-service itself. A compilation that can
+    surface documents from many different, possibly sensitive cases/
+    departments in one place deserves a real check, unlike the mostly-open
+    folder CRUD around it. Callers check `401`/`404` (missing principal /
+    unknown folder) themselves before calling this - resolving whether the
+    resource even exists has to happen before asking "does X have
+    permission on it", same ordering already established by the public
+    share-link creation endpoint (document-service, ADR 0047)."""
+    permission = "folder.read" if access_type == "read" else "folder.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=folder_id,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung {permission!r} auf {folder_id!r}"
+        )
+
+
+def _resolve_document_reference(reference, document: dict | None) -> FolderDocumentReferenceOut:
+    return FolderDocumentReferenceOut(
+        document_id=reference.document_id,
+        added_by=reference.added_by,
+        added_at=reference.added_at,
+        removed_by=reference.removed_by,
+        removed_at=reference.removed_at,
+        current_version_number=document["current_version_number"] if document else None,
+        document_deleted_at=document["deleted_at"] if document else None,
+    )
+
+
+@app.post(
+    "/folders/{folder_id}/document-references",
+    response_model=FolderDocumentReferenceOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_folder_document_reference(
+    folder_id: str,
+    payload: FolderDocumentReferenceAdd,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FolderDocumentReferenceOut:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_document_reference_permission(
+        x_dms_principal, folder_id, access_type="write"
+    )
+    document = await app.state.document_client.get(payload.document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=400, detail=f"document_id {payload.document_id!r} unbekannt"
+        )
+    reference = await repository.add_document_reference(
+        session, folder_id, document_id=payload.document_id, added_by=payload.added_by
+    )
+    await session.commit()
+    await publish_event(
+        "folder.document_reference.added",
+        subject=folder_id,
+        payload={"document_id": payload.document_id, "added_by": payload.added_by},
+        actor=payload.added_by,
+    )
+    return _resolve_document_reference(reference, document)
+
+
+@app.delete(
+    "/folders/{folder_id}/document-references/{document_id}",
+    response_model=FolderDocumentReferenceOut,
+)
+async def remove_folder_document_reference(
+    folder_id: str,
+    document_id: str,
+    payload: FolderDocumentReferenceRemove,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FolderDocumentReferenceOut:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_document_reference_permission(
+        x_dms_principal, folder_id, access_type="write"
+    )
+    try:
+        reference = await repository.remove_document_reference(
+            session, folder_id, document_id, removed_by=payload.removed_by
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "folder.document_reference.removed",
+        subject=folder_id,
+        payload={"document_id": document_id, "removed_by": payload.removed_by},
+        actor=payload.removed_by,
+    )
+    document = await app.state.document_client.get(document_id)
+    return _resolve_document_reference(reference, document)
+
+
+@app.get(
+    "/folders/{folder_id}/document-references", response_model=list[FolderDocumentReferenceOut]
+)
+async def list_folder_document_references(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[FolderDocumentReferenceOut]:
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        await repository.get_folder(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_document_reference_permission(
+        x_dms_principal, folder_id, access_type="read"
+    )
+    references = await repository.list_document_references(session, folder_id)
+    resolved = []
+    for reference in references:
+        document = (
+            await app.state.document_client.get(reference.document_id)
+            if reference.removed_at is None
+            else None
+        )
+        resolved.append(_resolve_document_reference(reference, document))
+    return resolved
 
 
 async def _require_legal_hold_permission(x_dms_principal: str) -> None:

@@ -9,6 +9,7 @@ import {
   type ObjectType,
   getObjectType,
   getObjectTypeLayout,
+  promoteDocument,
   registerDocument,
   updateDocumentMetadata,
 } from "@/lib/api";
@@ -60,6 +61,8 @@ export function MetadataPanel({
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isPromoting, setIsPromoting] = useState(false);
+  const [promoteTargetFolderId, setPromoteTargetFolderId] = useState("");
 
   useEffect(() => {
     setError(null);
@@ -136,6 +139,32 @@ export function MetadataPanel({
     }
   }
 
+  // Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR 0118) -
+  // register plus an optional move to a real destination folder in one
+  // step. A blank target folder ID behaves exactly like `handleRegister`
+  // above (the backend endpoint itself treats an omitted target the same
+  // way) - kept as a separate action rather than replacing "Register"
+  // entirely, since promotion (implying "take this out of the informal
+  // work tray") is a materially different intent from simply assigning a
+  // reference number in place.
+  async function handlePromote() {
+    if (!accessToken || !activeDocument) return;
+    setError(null);
+    setIsPromoting(true);
+    try {
+      const promoted = await promoteDocument(accessToken, activeDocument.id, {
+        promotedBy: user?.username ?? "",
+        targetFolderId: promoteTargetFolderId.trim() || null,
+      });
+      setPromoteTargetFolderId("");
+      onSaved(promoted);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("metadata.promoteError"));
+    } finally {
+      setIsPromoting(false);
+    }
+  }
+
   return (
     <section className="metadata-panel" aria-label={t("metadata.paneLabel")}>
       <h2 className="pane-heading">{t("metadata.heading")}</h2>
@@ -146,6 +175,18 @@ export function MetadataPanel({
           <p className="hint">{t("metadata.draftHint")}</p>
           <button type="button" onClick={handleRegister} disabled={isRegistering}>
             {isRegistering ? t("metadata.registering") : t("metadata.registerAction")}
+          </button>
+
+          <label>
+            {t("metadata.promoteTargetFolderLabel")}
+            <input
+              value={promoteTargetFolderId}
+              onChange={(e) => setPromoteTargetFolderId(e.target.value)}
+              placeholder={t("metadata.promoteTargetFolderPlaceholder")}
+            />
+          </label>
+          <button type="button" onClick={handlePromote} disabled={isPromoting}>
+            {isPromoting ? t("metadata.promoting") : t("metadata.promoteAction")}
           </button>
         </div>
       )}

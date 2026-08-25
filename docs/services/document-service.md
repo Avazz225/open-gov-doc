@@ -2,7 +2,7 @@
 
 **Purpose:** Documents as the core entity (Concept 2.1) — CRUD, permanent versioning (2.1a, no overwriting/discarding), an editing lock for external editing including force-unlock and conflict copy (4.2). Never holds file content itself — every byte access goes through the Storage Service's HTTP API (3.6).
 
-**Concept reference:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (retention/legal hold/forced deletion, since P7-S1)/5.4b (audit depth for forensic trace, since P7-S2c)/5.6 (records disposal lifecycle fields, since P7-S3)/4.2a (public share link, since P14-S10)/14.2 (classification level, redaction, records quarantine, Post-Roadmap Phase 31 Sessions 3–5)
+**Concept reference:** 2.1/2.1a/4.2/3.1/3.6/5.2/5.2a (retention/legal hold/forced deletion, since P7-S1)/5.4b (audit depth for forensic trace, since P7-S2c)/5.6 (records disposal lifecycle fields, since P7-S3)/4.2a (public share link, since P14-S10)/14.2 (classification level, redaction, records quarantine, output stamping, work tray promotion, Post-Roadmap Phase 31 Sessions 3–7)
 **Own Postgres schema:** `document` (tables `document`, `document_version`, `document_lock`, `upload_config`, `legal_hold`, `records_quarantine`, `deletion_register_entry`, `retention_config`, `trash_config`, `audit_trace_config`, `audit_trace_role_override`, `share_link_config`, `share_link`)
 
 ## API
@@ -11,13 +11,14 @@
 |---|---|---|
 | `POST` | `/documents` | Create (multipart: `file`, `title`, `created_by`, optional `folder_id`/`object_type_id`/`attributes` as a JSON string, optional `derived_from_document_id`/`derived_from_version_number`/`originating_case_id` for editing copies, see below) — creates a document + version 1. Since P5-S1: `422` on a virus finding, `503` if the virus scan service is unreachable (see below). Since **P5e-S2**: with a reference number generator configured, `attributes["Kennzeichen"]` is assigned server-side; a value sent by the client for this key is discarded (see "Reference Number Generator" below). Since **Post-Roadmap Phase 31 Session 2**: optional `draft` form field skips that assignment, see "Draft / Pre-Registration Lifecycle" below |
 | `POST` | `/documents/{id}/register` | Draft → registered transition (Post-Roadmap Phase 31 Session 2, ADR 0113) — assigns the reference number deferred by `draft=true` above. `409` if already registered, `422` on a missing placeholder attribute (same as at creation time), see below |
+| `POST` | `/documents/{id}/promote` | Work tray promotion (Post-Roadmap Phase 31 Session 7, ADR 0118) — register (as above) plus an optional move to `target_folder_id`, as one atomic action/event. `409`/`422` same as register; `400` for an unknown target folder (document left untouched, still a draft); see "Work Tray Promotion" below |
 | `PUT` | `/documents/{id}/classification-level` | Set/raise a document's classification level (14.2, Post-Roadmap Phase 31 Session 3, ADR 0114) — requires `admin.classification`. `409` on an attempted downgrade, see "Classification Level" below |
 | `POST` | `/documents/{id}/redact` | Burns the given regions into a new, independent redacted copy (14.2, Post-Roadmap Phase 31 Session 4, ADR 0115) — requires `document.read` on the original, `422` for a non-PDF source, see "Document Redaction" below |
 | `GET` | `/documents/{id}/derived` | Documents derived from this one (currently only redacted copies) — the first actual reader of the P6-S3 `derived_from_document_id` field, see below |
 | `GET` | `/documents/{id}/redaction-preview/page-count` | Proxies to rendering-service's `/render/pdf-page-count` — requires `document.read` |
 | `GET` | `/documents/{id}/redaction-preview/page-image?page_number=...` | Proxies to rendering-service's `/render/pdf-page-image` — requires `document.read` |
 | `POST` | `/documents/from-quarantine-release` | Internal creation path exclusively for `virus-scan-service` (2.5/10.3, since P15-S2) — identical fields to `POST /documents` plus `source_scan_id`, but deliberately triggers NO virus scan. `401`/`403` without `X-DMS-Principal`/`quarantine_release_admin_role` (default `dms-admin`). See "Quarantine Area" below and [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) |
-| `GET` | `/documents?folder_id=...` | Non-deleted documents of a folder (since P4-S2, basis for user UI navigation) — an unknown `folder_id` returns `[]`, no 404 |
+| `GET` | `/documents?folder_id=...&registered=...` | Non-deleted documents of a folder (since P4-S2, basis for user UI navigation) — an unknown `folder_id` returns `[]`, no 404. `registered` (optional `true`/`false`, Post-Roadmap Phase 31 Session 7, ADR 0118) filters on `registered_at IS (NOT) NULL`; omitted (default), unfiltered — basis for a work-tray view showing only a folder's still-unregistered drafts, see "Work Tray Promotion" below |
 | `GET` | `/documents/{id}` | Metadata. Since **P7-S2c**: optionally publishes `document.viewed` on success (forensic trace, 5.4b) — depending on the audit depth configuration, see below |
 | `PATCH` | `/documents/{id}` | Change metadata after the fact (`title`/`attributes`, both optional — since P4-S4, basis for the user UI's metadata panel) — with `object_type_id` set, re-validates against the Object-Type Service, otherwise 400. Since **P5e-S2**: a change to `attributes["Kennzeichen"]` is rejected with `403` unless the `X-DMS-Roles` header contains `dms-admin` (see below). Since **P12-S1**: an optional `folder_id` moves the document to a different folder (400 for an unknown target), see below |
 | `DELETE` | `/documents/{id}?deleted_by=...` | Soft delete (`deleted_at` set, metadata retained) — an ungated path, unchanged since P7-S1; no frontend currently calls it (see `POST .../trash` below) |
@@ -115,6 +116,40 @@ itself never requiring that role for the original at-creation-time assignment.
 A regular (non-draft) document is considered registered immediately — `registered_at` is set to its
 creation time. Existing rows from before this session were backfilled the same way, once, the moment the
 column was added (see the ad-hoc migration comment in `main.py`'s `lifespan`).
+
+## Work Tray Promotion (14.2, Post-Roadmap Phase 31 Session 7, [ADR 0118](../adr/0118-hand-folders-and-work-trays.md))
+
+A "work tray" is deliberately not a new entity — see ADR 0118 for the full reasoning — but the
+composition of an existing `teamspace-service` teamspace (the "informal, permission-securable...
+collaboration area" half) with the draft lifecycle above (the "pre-record" half) plus two small additions
+that make the combination actually usable as a tray:
+
+- **`GET /documents?folder_id=...&registered=false`**: the first query surface for `registered_at` as a
+  distinct filter dimension — ADR 0113 explicitly left this undone ("nothing in the codebase currently
+  needs to list-and-exclude drafts as a distinct query"). `registered=true`/`false`/omitted, implemented
+  in `repository.list_documents_by_folder` as one more `WHERE` condition alongside the existing records-
+  quarantine exclusion (ADR 0116) — `list_documents_for_folder_export` (Phase 28) inherits the same
+  parameter with its default (`None`, unfiltered) unchanged.
+- **`POST /documents/{id}/promote`** ("promotable to a real record"): combines `register` (above) with an
+  optional move to `target_folder_id` into one atomic action/event, instead of a frontend having to
+  orchestrate `register` then `PATCH .../folder_id` as two independently-committed calls. The target
+  folder (if given) is validated **before** `register_document` runs — an unknown target folder (`400`)
+  leaves the document completely untouched, still a draft, not a partially-promoted state. Reuses the
+  exact same object-hierarchy validation (`object_type_client.validate(parent_object_type_id=...,
+  parent_is_root=...)`) as the existing PATCH move branch. Publishes `document.promoted`
+  (`{kennzeichen, target_folder_id}`). Deliberately ungated, like both primitives it replaces (`register`,
+  and the PATCH move branch) — a new permission check here would be an arbitrary inconsistency, not a
+  considered decision this session's scope called for.
+- **Documents only, not cases**: `case-service`'s cases were considered and excluded — a case cannot be
+  an "informal, no-process pre-record object" even as a draft, since `POST /cases` mandatorily starts a
+  real BPMN process instance regardless of the `draft` flag (only `vorgangsnummer` assignment is
+  deferred). Same scoping conclusion this project already reached for redaction (ADR 0115) and records
+  quarantine (ADR 0116) after `case-service` turned out to have no realistic hook for either feature.
+- **Inherits teamspace-service's own documented RBAC limitation**: a work tray built on a teamspace's
+  root folder is only as securable in practice as the teamspace's own permission-service anchoring
+  already is, which is not the primary enforcement mechanism anywhere except `search-service` today (see
+  `docs/services/teamspace-service.md` "Open Points"). Not addressed in this session — a materially
+  larger, separate RBAC-hardening effort.
 
 ## Classification Level (14.2, Post-Roadmap Phase 31 Session 3, [ADR 0114](../adr/0114-per-document-classification-level.md))
 

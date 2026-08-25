@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S6 (output stamping — see below under "Post-Roadmap: Phase 31"), the sixth session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S7 (hand folders and work trays — see below under "Post-Roadmap: Phase 31"), the seventh session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S7 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** any other Phase 31 session (P31-S8 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4054,6 +4054,117 @@ subsequently removed/revoked. **No new frontend surface exists for this session 
 above) - the export pipeline was exercised end to end through the exact same document-service/
 rendering-service code path the existing `user-ui` "Exportieren" button would also invoke, so the curl-
 based verification above already covers what a browser click would additionally exercise.
+
+### Post-Roadmap: Phase 31 Session 7 — hand folders and work trays (2026-08-25)
+
+Seventh Phase 31 session, and the largest single-session change of the phase so far — two related but
+structurally distinct concepts. A dedicated research agent first mapped every candidate reuse
+(`case-service`'s `CaseDocumentReference`, `object-type-service`'s behavior model, `folder-service`'s
+RBAC state, `teamspace-service`'s permission anchoring) before any code was written, per the plan's own
+instruction to check for overlap with the P31-S2 draft lifecycle first. See
+[ADR 0118](docs/adr/0118-hand-folders-and-work-trays.md) for the full design record.
+
+**Hand folder (Handakte)** — "assembles references (not copies) to records from different cases into one
+working compilation": a new `FolderDocumentReference` table in `folder-service` (`folder_id` real FK,
+`document_id` opaque, soft-removed via `removed_by`/`removed_at`), structurally mirroring case-service's
+existing `CaseDocumentReference` minus its case-closure snapshot mechanism (a folder has no terminating
+BPMN-driven lifecycle). Confirmed via research that `case-service`'s reference join is hard-bound to
+exactly one `case_id` (real FK, and every `Case` mandatorily starts a real BPMN process instance even as a
+draft) and that `object-type-service` has no behavior-hook mechanism at all — a "Handakte" object type
+alone would have given a name/icon for free and zero actual behavior. `folder-service` was chosen as the
+home for the new table specifically because folders are the **only** resource type that feeds
+permission-service's `ResourceNode` tree — the only place in this system a genuinely per-object-securable
+compilation container can exist without inventing a new permission-resource concept from scratch. Three
+new endpoints (`POST`/`DELETE`/`GET /folders/{id}/document-references`), gated by a new, folder-scoped
+`folder.read`/`folder.write` check via `PermissionServiceClient.check(resource_id=folder_id, ...)` — the
+**first actual consumer of folder-service's own resource tree from within folder-service itself** (almost
+nothing else in this service checks any permission at all). Existence resolved before permission (`404`
+before `403`), matching the ordering the public share-link endpoint already established (ADR 0047) — a
+first attempt at ordering it the other way around made the 404 test un-writable (granting a role on a
+nonexistent `resource_id` fails at the permission-service FK itself), caught and fixed before any test
+ran against the live stack. New `DocumentClient.get()` in folder-service (an exact mirror of case-service's
+own) resolves live `current_version_number`/`document_deleted_at` per reference. A new "Handakte" object
+type (`packages/egov/config.json`, name + icon only, not enforced) exists purely for discoverability — any
+folder can hold references.
+
+**Work tray (Arbeitsvorrat)** — "an informal, permission-securable pre-record collaboration area, later
+promotable to a real record": deliberately **not** a new entity. Research confirmed two things: a draft
+document/case (P31-S2, ADR 0113) is a fully real row from the first millisecond, deferring only the
+reference-number assignment — not a genuine "pre-record" state, and there was no way to *list* drafts as a
+distinct group before this session; and `teamspace-service` already provides everything the "informal,
+permission-securable... area" half needs (self-service creation, a named member set, a real backing
+folder, resource-scoped permission-service anchoring) — building a second, parallel collaboration
+mechanism next to it would have been the exact redundancy the plan warned against. So a work tray is
+simply the *composition*: a teamspace (or any folder with real permission grants) plus two small,
+document-service-only additions. `GET /documents?folder_id=...&registered=true|false` — the first query
+surface for `registered_at` as a distinct filter dimension, added to `repository.list_documents_by_folder`
+as one more `WHERE` condition alongside the existing records-quarantine exclusion (ADR 0116);
+`list_documents_for_folder_export` (Phase 28) inherits the new parameter with its default (unfiltered)
+unchanged. `POST /documents/{id}/promote` — register plus an optional move to `target_folder_id`, as one
+atomic action/event (`document.promoted`) instead of a frontend orchestrating `register` then `PATCH
+.../folder_id` as two independently-committed calls; the target folder is validated *before*
+`register_document` runs, so an unknown target folder (`400`) leaves the document completely untouched,
+still a draft. Deliberately ungated, like both primitives it replaces. `case-service`'s cases were
+considered and excluded from the promotion mechanism — a case cannot be an "informal, no-process
+pre-record object" even as a draft, since `POST /cases` always starts a real BPMN process instance
+regardless of the `draft` flag — same scoping conclusion already reached for redaction (ADR 0115) and
+records quarantine (ADR 0116). A new "Arbeitsvorrat" object type (name + icon only) exists for the same
+discoverability reason as "Handakte" above.
+
+**A real bug found and fixed during this session's own live verification, not by a test — the second one
+this phase (after P31-S4's redaction event-dispatch miss)**: deleting a folder with an active hand-folder
+reference (via `DELETE /folders/{id}` or `hard_delete_folder`, used by forced deletion/purge) raised a
+Postgres `ForeignKeyViolationError` — `folder_document_reference`'s FK on `folder.folder.id` was never
+cleaned up before the folder row itself, exactly the class of bug `legal_hold`'s existing cleanup in
+`hard_delete_folder` already guards against, just not yet extended to the new table. The first attempted
+fix (reusing the public `list_document_references()` inside the deletion cascade) immediately broke two
+*pre-existing* tests — that function correctly 404s on an unknown/already-trashed folder, which
+`hard_delete_folder`'s own contract (it must also work on a folder already sitting in the trash) directly
+depends on not happening. Fixed with a new, existence-check-free `_list_document_references_raw()` used
+only by the two deletion paths, mirroring `list_holds`'s already-existing no-existence-check shape. Two
+new regression tests reproduce the exact live failure (`test_repository.py::
+test_delete_folder_removes_hand_folder_references`, `test_retention_actions.py::
+test_execute_forced_deletion_removes_folder_with_hand_folder_reference`).
+
+Tests: folder-service 135 (previously 120, +15: 7 repository tests for the reference join incl. the FK
+regression, 7 API tests for the full RBAC/lifecycle matrix, 1 retention_actions regression for the same FK
+fix through `hard_delete_folder`); document-service 334 (previously 328, +6: `registered` filter roundtrip,
+promote-without-target equals register, promote-with-move, `409` already-registered, `404` unknown
+document, `400` unknown target folder leaves the document untouched); user-ui 226 (previously 220, +6: 5
+`HandFolderReferencesModal` tests incl. an unresolvable-reference placeholder, 1 `document-workspace.test.tsx`
+promote-with-move integration test). All `ruff`/`tsc`/`eslint`/`vitest`/`next build` gates clean.
+
+**Frontend**: new `HandFolderReferencesModal.tsx` (same modal pattern as `ShareLinkModal.tsx`/
+`FolderRetentionModal.tsx`), opened via a new inline 📎 icon next to each folder row in `ExplorerPane.tsx`
+(same placement convention as the existing 🕒 retention icon) — an "add" form is a plain document-ID text
+input (no document picker exists anywhere in this codebase yet; consistent with the project's established
+minimal-MVP philosophy for this class of feature). `MetadataPanel.tsx`'s existing draft banner (P31-S2)
+gained a second, separate "Promote" action alongside the existing "Register" button (kept as two distinct
+actions rather than merging them, since promotion — "take this out of the informal work tray" — is a
+materially different intent from simply assigning a reference number in place, and merging would have
+required rewriting P31-S2's already-tested Register button/test for no functional gain) — an optional
+target-folder-ID text input, blank behaving exactly like Register alone.
+
+**Fully verified live against the real running stack** (curl via the gateway; `folder-service`/
+`document-service`/`user-ui` freshly rebuilt beforehand). Hand folders: `401` without a token, `404` for an
+unknown folder, `403` for a principal without a folder-scoped grant (had to switch the negative-permission
+test subject from `users-admin` to `config-admin` mid-session after discovering `users-admin` already holds
+broad `folder.read`/`folder.write` via the pre-existing, permanent `e2e-playwright-reader` fixture role
+documented in `apps/user-ui/e2e/README.md` — not a bug, just the wrong principal for a negative test),
+`400` for an unknown document, a real folder-scoped role grant (via `users-admin`, which does have
+`admin.user_management`) confirmed working on a specific non-root `resource_id`, full add/list/remove
+lifecycle including a soft-removed entry staying listed with `current_version_number` correctly turning
+`null` once inactive, and — the actual regression check — deleting a folder that still had an active
+reference, which failed with `500` before the fix and now returns `204` (confirmed gone via a follow-up
+`404`) after it. Work tray: the `registered` filter correctly split a draft and a regular document into
+disjoint result sets, `promote` confirmed for `404`/`400`-untouched/success-with-move/`409`-already-
+registered. **A real Playwright browser session** drove both new UI surfaces end to end in the same spec
+run: uploading a document, resolving its ID via a direct API call, opening the hand-folder modal via the
+new 📎 button, adding and then removing the reference through the real UI; and uploading a draft, opening
+it, filling the target-folder field with `root`, clicking "Aus Arbeitsvorrat übernehmen", and confirming
+the draft badge disappeared. All test artifacts (documents, folders, the temporary folder-scoped role
+assignment, the temporary Playwright spec file itself) removed/revoked afterward — the permanent
+`e2e-playwright-reader` fixture role was left untouched, per its own documented purpose.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

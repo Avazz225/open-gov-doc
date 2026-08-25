@@ -453,6 +453,70 @@ export async function releaseFolderLegalHold(
   return response.json();
 }
 
+// Hand folders (14.2, post-roadmap phase 31 session 7, ADR 0118) - a
+// folder's reference (not copy) to a document living elsewhere in the
+// hierarchy. `add`/`remove` require `folder.write` on the folder, `list`
+// requires `folder.read` (folder-service, resource-scoped).
+export interface FolderDocumentReference {
+  document_id: string;
+  added_by: string;
+  added_at: string;
+  removed_by: string | null;
+  removed_at: string | null;
+  current_version_number: number | null;
+  document_deleted_at: string | null;
+}
+
+export async function listFolderDocumentReferences(
+  token: string,
+  folderId: string
+): Promise<FolderDocumentReference[]> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/document-references`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function addFolderDocumentReference(
+  token: string,
+  folderId: string,
+  params: { documentId: string; addedBy: string }
+): Promise<FolderDocumentReference> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/document-references`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_id: params.documentId, added_by: params.addedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+export async function removeFolderDocumentReference(
+  token: string,
+  folderId: string,
+  documentId: string,
+  removedBy: string
+): Promise<FolderDocumentReference> {
+  const response = await request(
+    "folder-service",
+    `folders/${encodeURIComponent(folderId)}/document-references/${encodeURIComponent(documentId)}`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ removed_by: removedBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export interface ObjectTypeAttribute {
   name: string;
   type?: string;
@@ -577,14 +641,18 @@ export interface DocumentSummary {
 
 export async function listDocumentsInFolder(
   token: string,
-  folderId: string
+  folderId: string,
+  // `registered` (post-roadmap phase 31 session 7, ADR 0118) - omitted
+  // (default) is unfiltered, unchanged behavior for every existing caller.
+  // `false` = only still-unregistered drafts, the basis for a work-tray
+  // view.
+  registered?: boolean
 ): Promise<DocumentSummary[]> {
-  const response = await request(
-    "document-service",
-    `documents?folder_id=${encodeURIComponent(folderId)}`,
-    {},
-    token
-  );
+  const query =
+    registered === undefined
+      ? `documents?folder_id=${encodeURIComponent(folderId)}`
+      : `documents?folder_id=${encodeURIComponent(folderId)}&registered=${registered}`;
+  const response = await request("document-service", query, {}, token);
   return response.json();
 }
 
@@ -657,6 +725,31 @@ export async function registerDocument(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ registered_by: registeredBy }),
+    },
+    token
+  );
+  return response.json();
+}
+
+// Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR 0118) -
+// register plus an optional move to a real destination folder, as one
+// atomic action. `targetFolderId` omitted is identical to `registerDocument`
+// above.
+export async function promoteDocument(
+  token: string,
+  documentId: string,
+  params: { promotedBy: string; targetFolderId?: string | null }
+): Promise<DocumentSummary> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/promote`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        promoted_by: params.promotedBy,
+        target_folder_id: params.targetFolderId ?? null,
+      }),
     },
     token
   );

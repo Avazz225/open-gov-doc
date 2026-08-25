@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock
 
+import pytest
 from dms_db_base import make_session_factory
 from folder_service import main, repository, retention_actions
 from folder_service.settings import ROOT_FOLDER_ID
@@ -35,6 +36,25 @@ async def test_execute_forced_deletion_removes_folder_and_writes_register_entry(
     assert len(entries) == 1
     assert entries[0].trigger == "forced_deletion"
     assert entries[0].reason == "Frist abgelaufen"
+
+
+async def test_execute_forced_deletion_removes_folder_with_hand_folder_reference(session):
+    """Regression (14.2, post-roadmap phase 31 session 7, ADR 0118) - same
+    finding as `test_delete_folder_removes_hand_folder_references` in
+    `test_repository.py`, but through `hard_delete_folder` (used by forced
+    deletion/purge), not the plain `DELETE /folders/{id}` path."""
+    folder = await _make_folder(session)
+    await repository.add_document_reference(
+        session, folder.id, document_id="doc-1", added_by="alice"
+    )
+
+    await retention_actions.execute_forced_deletion(
+        session, folder.id, reason="Frist abgelaufen", triggered_by="system:retention-poll"
+    )
+    await session.commit()
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.get_folder(session, folder.id)
 
 
 async def test_purge_expired_trash_entry_removes_folder_and_writes_register_entry(session):

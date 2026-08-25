@@ -58,6 +58,7 @@ from document_service.schemas import (
     CountActiveResult,
     DeletionRegisterEntryOut,
     DocumentOut,
+    DocumentPromoteRequest,
     DocumentRegisterRequest,
     DocumentUpdate,
     DocumentVersionOut,
@@ -1435,9 +1436,15 @@ async def create_document_from_quarantine_release(
 
 @app.get("/documents", response_model=list[DocumentOut])
 async def list_documents(
-    folder_id: str, session: AsyncSession = Depends(get_session)
+    folder_id: str, registered: bool | None = None, session: AsyncSession = Depends(get_session)
 ) -> list[DocumentOut]:
-    return await repository.list_documents_by_folder(session, folder_id)
+    """`registered` (post-roadmap phase 31 session 7, ADR 0118): optional
+    filter on `registered_at IS (NOT) NULL` - `None` (default) is
+    unfiltered, unchanged behavior. The first reader of this field as a
+    distinct query dimension (ADR 0113 explicitly left this undone) - basis
+    for a "work tray" view showing only a folder's still-unregistered
+    drafts."""
+    return await repository.list_documents_by_folder(session, folder_id, registered=registered)
 
 
 @app.get("/documents/by-kennzeichen", response_model=list[DocumentOut])
@@ -1769,6 +1776,77 @@ async def register_document(
         actor=payload.registered_by,
     )
     return registered
+
+
+@app.post("/documents/{document_id}/promote", response_model=DocumentOut)
+async def promote_document(
+    document_id: str,
+    payload: DocumentPromoteRequest,
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    """Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR
+    0118) - "promotable to a real record": combines the draft->registered
+    transition above with an optional move to a real destination folder
+    into ONE atomic action/event, instead of a frontend having to
+    orchestrate `register` then `PATCH .../folder_id` as two independently-
+    committed calls (register succeeding while the move fails would leave
+    an inconsistent intermediate state, and two generic events instead of
+    one dedicated `document.promoted` entry). `target_folder_id` omitted or
+    unchanged is exactly `register_document` above (a work tray promotion
+    doesn't have to move anything - only reference-number assignment is
+    ever mandatory). Deliberately ungated, like `register`/the PATCH move
+    branch it replaces - adding a new permission check here that neither
+    underlying primitive has today would be an arbitrary inconsistency,
+    not a considered decision this session's scope calls for."""
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    target_folder_id = payload.target_folder_id
+    is_move = target_folder_id is not None and target_folder_id != document.folder_id
+    if is_move:
+        target_parent_folder = await app.state.folder_client.get(target_folder_id)
+        if target_parent_folder is None:
+            raise HTTPException(status_code=400, detail=f"folder_id {target_folder_id!r} unbekannt")
+        if document.object_type_id is not None:
+            errors = await app.state.object_type_client.validate(
+                document.object_type_id,
+                name=document.title,
+                attributes=document.attributes,
+                parent_object_type_id=target_parent_folder["object_type_id"],
+                parent_is_root=target_folder_id == "root",
+            )
+            if errors:
+                raise HTTPException(status_code=400, detail={"errors": errors})
+
+    kennzeichen: str | None = None
+    if document.object_type_id is not None:
+        try:
+            kennzeichen = await app.state.object_type_client.next_kennzeichen(
+                document.object_type_id, document.attributes
+            )
+        except MissingKennzeichenAttributeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        promoted = await repository.register_document(session, document_id, kennzeichen=kennzeichen)
+    except repository.AlreadyRegisteredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if is_move:
+        promoted = await repository.update_document_metadata(
+            session, document_id, title=None, attributes=None, folder_id=target_folder_id
+        )
+
+    await session.commit()
+    await publish_event(
+        "document.promoted",
+        subject=document_id,
+        payload={"kennzeichen": kennzeichen, "target_folder_id": target_folder_id},
+        actor=payload.promoted_by,
+    )
+    return promoted
 
 
 async def _require_classification_permission(x_dms_principal: str) -> None:
