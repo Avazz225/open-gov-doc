@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S10 (dynamic org-hierarchy-based access grants: a minimal task-claim mechanism in `workflow-service`, reusing `permission-service`'s `Delegation` mechanism for the actual grant — see below under "Post-Roadmap: Phase 31"), the tenth session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S11 (supervisor/team task oversight view: a new, read-only `/team/` area in `reviewer-ui`, composing already-existing P31-S9/S10 data with no new backend endpoint — see below under "Post-Roadmap: Phase 31"), the eleventh session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** P31-S11 (supervisor/team task oversight view, depends on P31-S9 — already unblocked) or any other independent Phase 31 session (P31-S12/S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
+**Next session:** P31-S12 or P31-S13 — see `IMPLEMENTATION_PLAN.md` "Phase 31"; both independent, no remaining P31-S9 dependents.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4438,6 +4438,65 @@ definition itself could not be deleted (`409` — instances still reference it, 
 process-instance deletion endpoint at all, by design, ADR 0019/2.1a-style append-only history) — the two
 completed test process instances remain in the dev stack, consistent with how every prior workflow-service
 live-verification session in this project has already behaved when no deletion path exists.
+
+### Post-Roadmap: Phase 31 Session 11 — supervisor/team task oversight view (2026-08-31)
+
+Eleventh session of Phase 31 (14.2, eGov feature gap closure) — "a new view (`reviewer-ui`) lets a manager
+see every open workflow task across their direct reports, using P31-S9's 'who reports to me' data". See
+[ADR 0122](docs/adr/0122-supervisor-team-task-oversight-view-read-only-composition.md) for the full design
+reasoning.
+
+**By far the smallest of the org-hierarchy trilogy (P31-S9/S10/S11) — no new backend endpoint at all.**
+P31-S9 already built `GET /supervisor-assignments?supervisor_principal_id=` (direct reports), and P31-S10
+already enriched `GET /tasks` with `claimed_by` for its own claim/grant UI — this session is a pure
+`reviewer-ui` composition of two already-shipped, already-tested reads, client-side filtered. A useful
+confirmation that P31-S9's foundation-first approach paid off: two downstream sessions built real features
+on it (one requiring new backend work, one requiring none) without needing to revisit its data model.
+
+**New `TeamTaskList.tsx`** (route `/team/`, a third tab in `Shell.tsx` alongside "Aufgaben"/"Freigaben") —
+deliberately a SEPARATE component from `TaskList.tsx`, not a filter mode on it (the plan's own wording:
+"the existing TaskList... stays a flat, instance-agnostic list... this is a separate... view alongside
+it"). Fetches direct reports via `listDirectReports(user.sub)` and the full open-task list via the
+already-existing `listReadyTasks()`, filters client-side to tasks whose `claimed_by` matches a direct
+report. Two distinct empty states (no direct reports configured at all, vs. reports exist but have no
+open claimed tasks currently) — deliberately different messages since they mean different things for
+someone trying to understand an empty view. Deliberately read-only: no claim/complete/grant buttons here —
+a manager *viewing* a report's work isn't the same as *acting* on it, and both existing "act for someone
+else" mechanisms (self-service delegation, ADR 0048; the org-hierarchy grant, ADR 0121) already live on
+`TaskList.tsx` itself, so duplicating them here would just split one capability across two discoverability
+paths. A "Vorgang öffnen" button per row reuses the existing `?instance=` direct-link scheme (ADR 0109)
+via a real route navigation back to `/`, rather than duplicating `InstanceDetail.tsx`'s rendering logic on
+the new route.
+
+**A load-bearing identity clarification, worth calling out even though it required no code change**: the
+direct-reports lookup uses `user.sub` (the real Keycloak subject, exactly what the gateway injects as
+`X-DMS-Principal`), not `user.username`. Traced through why: `SupervisorAssignment.supervisor_principal_id`
+must already be the real `sub` for P31-S10's org-hierarchy grant to be genuinely *exercisable* by that
+supervisor (workflow-service's on-behalf-of check compares the deputy against the real
+`X-DMS-Principal`, confirmed directly in `gateway-service/main.py: X-DMS-Principal = claims["sub"]`) — this
+session's own lookup just reuses that same, already-necessary convention. Documented explicitly in ADR
+0122 rather than left as an implicit assumption, since it's easy to get wrong (the *assignee* side of the
+same table has no such requirement, only the *supervisor* side does — an asymmetry that isn't obvious from
+the schema alone).
+
+**Test counts**: reviewer-ui 41 (+4: dedicated empty state with no direct reports at all vs. reports-but-
+no-open-tasks, lists only a direct report's claimed task while correctly excluding an unclaimed task and
+one claimed by someone who isn't a report, opens the Vorgang for a listed team task). No backend test
+changes (no backend code changed). `tsc --noEmit`/`eslint`/`next build` clean.
+
+**Fully verified live against the real, freshly rebuilt stack** (`reviewer-ui` rebuilt and restarted;
+`permission-service`/`workflow-service` unchanged, already current from P31-S10): `curl` confirmed both
+underlying data sources independently — a real supervisor-assignment (`report-live` → sub `"2"`, the real
+decoded subject of the `users-admin` technical account used for verification) correctly resolves via
+`GET /supervisor-assignments?supervisor_principal_id=2`, and a real claimed task correctly shows
+`claimed_by: "report-live"` in `GET /tasks`. **A real Playwright browser session** logged in as
+`users-admin`, navigated to `/team/`, confirmed the oversight table shows exactly the direct report's
+claimed task with the right columns (screenshot taken and inspected), and clicked "Vorgang öffnen" —
+confirmed it correctly navigates to `/?instance=<id>` and renders the real instance detail heading,
+proving the cross-route navigation actually works end to end, not just in isolation. All test data cleaned
+up afterward (supervisor-assignment deleted, the leftover claimed task completed rather than left
+dangling); the temporary Playwright spec file removed. Same honest exception as P31-S10: the test process
+definition/instances themselves remain (no instance-deletion endpoint exists by design).
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

@@ -324,6 +324,36 @@ export async function listActiveDelegationsForDeputy(
   return response.json();
 }
 
+// Org-hierarchy foundation (post-roadmap phase 31 session 9) - direct
+// reports of the logged-in person, the basis for the supervisor/team task
+// oversight view (session 10... actually 11, see TeamTaskList.tsx). Queried
+// by `user.sub`, not `user.username` - unlike the claim/completion free-text
+// fields elsewhere in this app, `SupervisorAssignment.supervisor_principal_id`
+// must be the real Keycloak `sub` for the org-hierarchy access grant
+// (session 10) to actually be exercisable (workflow-service's on-behalf-of
+// check compares a delegation's deputy against the real `X-DMS-Principal`,
+// which is always `sub` - see gateway-service/main.py), so this view reuses
+// exactly that identity for consistency.
+export interface SupervisorAssignment {
+  id: number;
+  principal_id: string;
+  supervisor_principal_id: string;
+  created_at: string;
+}
+
+export async function listDirectReports(
+  token: string,
+  supervisorPrincipalId: string
+): Promise<SupervisorAssignment[]> {
+  const response = await request(
+    "permission-service",
+    `supervisor-assignments?supervisor_principal_id=${encodeURIComponent(supervisorPrincipalId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 // --- Permission Service (4.3) - generic four-eyes approvals ----------------
 //
 // `permission-service`'s `/approval-requests` is already fully generic

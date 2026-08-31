@@ -30,7 +30,8 @@
   },
   "nav": {
     "tasks": "Aufgaben",
-    "approvals": "Freigaben"
+    "approvals": "Freigaben",
+    "team": "Team"
   },
   "taskList": {
     "heading": "Freigabeaufgaben",
@@ -71,6 +72,13 @@
     "grantSubmit": "Freigabe erteilen",
     "grantEmptyResult": "Keine Person gefunden (keine Vorgesetzten/Gruppenmitgliedschaft konfiguriert).",
     "grantResult": "Freigabe erteilt an: {deputies}"
+  },
+  "teamTaskList": {
+    "heading": "Team-Aufgaben",
+    "hint": "Offene Aufgaben, die von direkt unterstellten Personen beansprucht wurden (14.2, Organisations-Hierarchie). Rein lesend - zum Bearbeiten im Auftrag siehe die Zugriffsfreigabe/Stellvertretung in den Aufgaben selbst.",
+    "claimedByColumn": "Beansprucht von",
+    "empty": "Keine offenen Aufgaben bei direkt unterstellten Personen.",
+    "noDirectReports": "Keine direkt unterstellten Personen konfiguriert (Organisations-Hierarchie)."
   },
   "instanceDetail": {
     "paneLabel": "Vorgang",
