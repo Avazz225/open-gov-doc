@@ -11,18 +11,24 @@ import {
   listOutboundMessages,
   rejectInboundMessage,
   routeInboundMessage,
+  searchRoutingLog,
   sendOutboundMessage,
   type InboundMessage,
   type MailboxInfo,
   type OutboundMessage,
+  type RoutingLogEntryWithMessage,
 } from "@/lib/api";
 
 // Inbox/outbox (2.5/3.3, P15-S3) - external correspondence not yet
 // assigned to a case. Unlike the trash, the concept specifies NO
 // "personal" view here - the icon rail entry itself is already role-gated
 // in IconRail.tsx (`dms-poststelle`), this component itself does not check
-// any role.
-type Tab = "inbox" | "outbox";
+// any role. "postbuch" (searchable cross-message routing register, 14.2,
+// post-roadmap phase 31 session 12c) only ever renders once more than one
+// mailbox is configured - with a single mailbox, routing (and thus a
+// routing register) can never have happened, same gate as the mailbox
+// filter/routing action from session 12b.
+type Tab = "inbox" | "outbox" | "postbuch";
 
 function statusLabel(t: ReturnType<typeof useI18n>["t"], status: InboundMessage["status"]): string {
   return t(`poststelle.status.${status}`);
@@ -51,6 +57,11 @@ export function PoststellePane({ token }: { token: string }) {
   const [routingId, setRoutingId] = useState<string | null>(null);
   const [routeTargetMailboxId, setRouteTargetMailboxId] = useState("");
   const [routeReason, setRouteReason] = useState("");
+  // Searchable "Postbuch" register (14.2, post-roadmap phase 31 session
+  // 12c).
+  const [postbuch, setPostbuch] = useState<RoutingLogEntryWithMessage[]>([]);
+  const [postbuchMailboxFilter, setPostbuchMailboxFilter] = useState("");
+  const [postbuchQuery, setPostbuchQuery] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -63,26 +74,45 @@ export function PoststellePane({ token }: { token: string }) {
     return mailboxes.find((m) => m.id === mailboxId)?.name ?? mailboxId;
   }
 
-  const reload = useCallback(async () => {
-    if (!token) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      if (tab === "inbox") {
-        setInbound(await listInboundMessages(token, { mailboxId: mailboxFilter || undefined }));
-      } else {
-        setOutbound(await listOutboundMessages(token));
+  const reload = useCallback(
+    async (postbuchQueryOverride?: string) => {
+      if (!token) return;
+      setIsLoading(true);
+      setError(null);
+      try {
+        if (tab === "inbox") {
+          setInbound(await listInboundMessages(token, { mailboxId: mailboxFilter || undefined }));
+        } else if (tab === "outbox") {
+          setOutbound(await listOutboundMessages(token));
+        } else {
+          setPostbuch(
+            await searchRoutingLog(token, {
+              mailboxId: postbuchMailboxFilter || undefined,
+              q: (postbuchQueryOverride ?? postbuchQuery).trim() || undefined,
+            })
+          );
+        }
+      } catch {
+        setError(tab === "postbuch" ? t("poststelle.postbuchLoadError") : t("poststelle.loadError"));
+      } finally {
+        setIsLoading(false);
       }
-    } catch {
-      setError(t("poststelle.loadError"));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token, tab, mailboxFilter, t]);
+    },
+    // `postbuchQuery` deliberately excluded - it's a free-text field, only
+    // applied on explicit form submit (`runPostbuchSearch`), not on every
+    // keystroke (same pattern as `AussonderungPane`'s `query`/`runSearch`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, tab, mailboxFilter, postbuchMailboxFilter, t]
+  );
 
   useEffect(() => {
     reload();
   }, [reload]);
+
+  function runPostbuchSearch(e: React.FormEvent) {
+    e.preventDefault();
+    reload(postbuchQuery);
+  }
 
   function startAction(message: InboundMessage) {
     setActionId(message.id);
@@ -204,6 +234,16 @@ export function PoststellePane({ token }: { token: string }) {
         >
           {t("poststelle.outbox")}
         </button>
+        {mailboxes.length > 1 && (
+          <button
+            type="button"
+            className={tab === "postbuch" ? "view-mode-active" : undefined}
+            aria-pressed={tab === "postbuch"}
+            onClick={() => setTab("postbuch")}
+          >
+            {t("poststelle.postbuch")}
+          </button>
+        )}
       </span>
 
       {tab === "inbox" && mailboxes.length > 1 && (
@@ -218,6 +258,37 @@ export function PoststellePane({ token }: { token: string }) {
             ))}
           </select>
         </label>
+      )}
+
+      {tab === "postbuch" && (
+        <form className="poststelle-postbuch-search" onSubmit={runPostbuchSearch}>
+          <label>
+            {t("poststelle.postbuchMailboxLabel")}
+            <select
+              value={postbuchMailboxFilter}
+              onChange={(e) => setPostbuchMailboxFilter(e.target.value)}
+            >
+              <option value="">{t("poststelle.postbuchMailboxAll")}</option>
+              {mailboxes.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t("poststelle.postbuchSearchLabel")}
+            <input
+              type="text"
+              value={postbuchQuery}
+              onChange={(e) => setPostbuchQuery(e.target.value)}
+              placeholder={t("poststelle.postbuchSearchPlaceholder")}
+            />
+          </label>
+          <button type="submit" disabled={isLoading}>
+            {t("poststelle.postbuchSearchSubmit")}
+          </button>
+        </form>
       )}
 
       {error && (
@@ -386,7 +457,7 @@ export function PoststellePane({ token }: { token: string }) {
             ))}
           </ul>
         )
-      ) : (
+      ) : tab === "outbox" ? (
         <>
           <button type="button" onClick={() => setComposeOpen((prev) => !prev)}>
             {t("poststelle.compose")}
@@ -436,6 +507,30 @@ export function PoststellePane({ token }: { token: string }) {
             </ul>
           )}
         </>
+      ) : postbuch.length === 0 ? (
+        <p className="empty-state">{t("poststelle.postbuchEmpty")}</p>
+      ) : (
+        <ul className="entry-list poststelle-postbuch-list">
+          {postbuch.map((entry) => (
+            <li className="entry-row" key={entry.id}>
+              <span className="entry-name">{entry.message_subject}</span>
+              <span className="entry-meta">
+                {t("poststelle.postbuchEntry", {
+                  from: mailboxName(entry.from_mailbox_id),
+                  to: mailboxName(entry.to_mailbox_id),
+                  by: entry.routed_by,
+                })}
+                {entry.reason && ` — ${entry.reason}`}
+                {" · "}
+                {t("poststelle.postbuchCurrentLocation", {
+                  mailbox: mailboxName(entry.message_current_mailbox_id),
+                })}
+                {" · "}
+                {statusLabel(t, entry.message_status)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

@@ -39,6 +39,26 @@ class MailRoutingLogEntryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MailRoutingLogEntryWithMessageOut(BaseModel):
+    """One row of the searchable, standalone "Postbuch" register (14.2,
+    Post-Roadmap Phase 31 Session 12c) - a `MailRoutingLogEntryOut` plus
+    just enough of its message's own context (subject/sender/current
+    mailbox/status) to be useful without a second round trip to
+    `GET /inbound/{id}`."""
+
+    id: int
+    message_id: str
+    from_mailbox_id: str
+    to_mailbox_id: str
+    routed_by: str
+    routed_at: datetime
+    reason: str | None
+    message_subject: str
+    message_from_address: str
+    message_current_mailbox_id: str
+    message_status: Literal["unassigned", "proposed_match", "confirmed", "rejected"]
+
+
 class InboundMessageOut(BaseModel):
     id: str
     mailbox_id: str

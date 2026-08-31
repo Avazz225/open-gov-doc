@@ -418,7 +418,18 @@
     "routeTargetPlaceholder": "Postfach wählen",
     "routeReasonLabel": "Begründung (optional)",
     "routeSubmit": "Weiterleiten",
-    "routeLogEntry": "{from} → {to} (von {by})"
+    "routeLogEntry": "{from} → {to} (von {by})",
+    "postbuch": "Postbuch",
+    "postbuchHint": "Durchsuchbares Register jeder Weiterleitung zwischen Postfächern (14.2) - über alle Nachrichten hinweg, nicht nur die einer einzelnen.",
+    "postbuchEmpty": "Noch keine Weiterleitungen.",
+    "postbuchLoadError": "Postbuch konnte nicht geladen werden",
+    "postbuchMailboxLabel": "Postfach",
+    "postbuchMailboxAll": "Alle Postfächer",
+    "postbuchSearchLabel": "Betreff durchsuchen",
+    "postbuchSearchPlaceholder": "Suchbegriff",
+    "postbuchSearchSubmit": "Suchen",
+    "postbuchEntry": "{from} → {to} (von {by})",
+    "postbuchCurrentLocation": "aktuell in {mailbox}"
   },
   "kontakte": {
     "paneLabel": "Kontakte",

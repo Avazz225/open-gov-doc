@@ -12,6 +12,7 @@ const sendOutboundMessageMock = vi.fn();
 const listOutboundMessagesMock = vi.fn();
 const listMailboxesMock = vi.fn();
 const routeInboundMessageMock = vi.fn();
+const searchRoutingLogMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -25,6 +26,7 @@ vi.mock("@/lib/api", async () => {
     listOutboundMessages: (...args: unknown[]) => listOutboundMessagesMock(...args),
     listMailboxes: (...args: unknown[]) => listMailboxesMock(...args),
     routeInboundMessage: (...args: unknown[]) => routeInboundMessageMock(...args),
+    searchRoutingLog: (...args: unknown[]) => searchRoutingLogMock(...args),
   };
 });
 
@@ -78,11 +80,13 @@ describe("PoststellePane", () => {
     listOutboundMessagesMock.mockReset();
     listMailboxesMock.mockReset();
     routeInboundMessageMock.mockReset();
+    searchRoutingLogMock.mockReset();
     listInboundMessagesMock.mockResolvedValue([]);
     listOutboundMessagesMock.mockResolvedValue([]);
     listMailboxesMock.mockResolvedValue([
       { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
     ]);
+    searchRoutingLogMock.mockResolvedValue([]);
   });
 
   it("shows the empty state when the inbox has nothing unassigned", async () => {
@@ -291,5 +295,80 @@ describe("PoststellePane", () => {
       await screen.findByText("Zentrale Poststelle → Poststelle Finanzen (von poststelle-1)")
     ).toBeInTheDocument();
     expect(screen.getByText(/Fachbezug Finanzen/)).toBeInTheDocument();
+  });
+
+  it("hides the postbuch tab with only one configured mailbox", async () => {
+    renderPane();
+    await screen.findByText("Kein ungesichteter Zulauf.");
+    expect(screen.queryByText("Postbuch")).not.toBeInTheDocument();
+  });
+
+  it("shows the postbuch register with results across messages", async () => {
+    listMailboxesMock.mockResolvedValue([
+      { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
+      {
+        id: "finanzen",
+        name: "Poststelle Finanzen",
+        kind: "departmental",
+        owning_group_id: "group-finanzen",
+      },
+    ]);
+    searchRoutingLogMock.mockResolvedValue([
+      {
+        id: 1,
+        message_id: "msg-9",
+        from_mailbox_id: "central",
+        to_mailbox_id: "finanzen",
+        routed_by: "poststelle-1",
+        routed_at: new Date().toISOString(),
+        reason: "Fachbezug",
+        message_subject: "Antrag auf Baugenehmigung",
+        message_from_address: "buerger@example.com",
+        message_current_mailbox_id: "finanzen",
+        message_status: "unassigned",
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Kein ungesichteter Zulauf.");
+    await user.click(screen.getByText("Postbuch"));
+
+    expect(await screen.findByText("Antrag auf Baugenehmigung")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Zentrale Poststelle → Poststelle Finanzen \(von poststelle-1\)/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Fachbezug/)).toBeInTheDocument();
+    expect(screen.getByText(/aktuell in Poststelle Finanzen/)).toBeInTheDocument();
+  });
+
+  it("shows the postbuch empty state and searches by subject", async () => {
+    listMailboxesMock.mockResolvedValue([
+      { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
+      {
+        id: "finanzen",
+        name: "Poststelle Finanzen",
+        kind: "departmental",
+        owning_group_id: "group-finanzen",
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Kein ungesichteter Zulauf.");
+    await user.click(screen.getByText("Postbuch"));
+    await screen.findByText("Noch keine Weiterleitungen.");
+
+    await user.type(screen.getByPlaceholderText("Suchbegriff"), "Bau");
+    await user.click(screen.getByText("Suchen"));
+
+    await waitFor(() =>
+      expect(searchRoutingLogMock).toHaveBeenLastCalledWith(
+        "token-123",
+        expect.objectContaining({ q: "Bau" })
+      )
+    );
   });
 });

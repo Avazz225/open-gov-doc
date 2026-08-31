@@ -1040,6 +1040,23 @@ export interface RoutingLogEntry {
   reason: string | null;
 }
 
+// Searchable, standalone cross-message "Postbuch" register (14.2,
+// post-roadmap phase 31 session 12c) - one row per routing hop across every
+// message, unlike `RoutingLogEntry` which is embedded per-message.
+export interface RoutingLogEntryWithMessage {
+  id: number;
+  message_id: string;
+  from_mailbox_id: string;
+  to_mailbox_id: string;
+  routed_by: string;
+  routed_at: string;
+  reason: string | null;
+  message_subject: string;
+  message_from_address: string;
+  message_current_mailbox_id: string;
+  message_status: "unassigned" | "proposed_match" | "confirmed" | "rejected";
+}
+
 export interface InboundMessage {
   id: string;
   mailbox_id: string;
@@ -1111,6 +1128,24 @@ export async function routeInboundMessage(
         reason: params.reason ?? null,
       }),
     },
+    token
+  );
+  return response.json();
+}
+
+export async function searchRoutingLog(
+  token: string,
+  params?: { mailboxId?: string; routedBy?: string; q?: string }
+): Promise<RoutingLogEntryWithMessage[]> {
+  const query = new URLSearchParams();
+  if (params?.mailboxId) query.set("mailbox_id", params.mailboxId);
+  if (params?.routedBy) query.set("routed_by", params.routedBy);
+  if (params?.q) query.set("q", params.q);
+  const queryString = query.toString();
+  const response = await request(
+    "mail-connector",
+    queryString ? `routing-log?${queryString}` : "routing-log",
+    {},
     token
   );
   return response.json();

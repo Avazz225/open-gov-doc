@@ -36,6 +36,7 @@ from mail_connector.schemas import (
     InboundMessageOut,
     MailboxOut,
     MailRoutingLogEntryOut,
+    MailRoutingLogEntryWithMessageOut,
     OutboundMessageCreate,
     OutboundMessageOut,
     RejectRequest,
@@ -529,6 +530,53 @@ async def route_message(
         },
     )
     return await _to_message_out(session, message)
+
+
+@app.get("/routing-log", response_model=list[MailRoutingLogEntryWithMessageOut])
+async def search_routing_log(
+    mailbox_id: str | None = None,
+    routed_by: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    q: str | None = None,
+    limit: int = 200,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[MailRoutingLogEntryWithMessageOut]:
+    """The searchable, standalone cross-message "Postbuch" register (14.2,
+    Post-Roadmap Phase 31 Session 12b built the per-message `routing_log`
+    this reads from; this session, 12c, adds the register view across every
+    message). `mailbox_id` matches a hop touching that mailbox on either
+    side (routed FROM or TO it); `q` is a substring match against the
+    message's subject. Same gate as every other `/inbound`-area endpoint -
+    no per-mailbox visibility narrowing yet (ADR 0123/0124 "Consequences")."""
+    _require_poststelle(x_dms_principal, x_dms_roles)
+    rows = await repository.search_routing_log(
+        session,
+        mailbox_id=mailbox_id,
+        routed_by=routed_by,
+        since=since,
+        until=until,
+        q=q,
+        limit=limit,
+    )
+    return [
+        MailRoutingLogEntryWithMessageOut(
+            id=entry.id,
+            message_id=entry.message_id,
+            from_mailbox_id=entry.from_mailbox_id,
+            to_mailbox_id=entry.to_mailbox_id,
+            routed_by=entry.routed_by,
+            routed_at=entry.routed_at,
+            reason=entry.reason,
+            message_subject=message.subject,
+            message_from_address=message.from_address,
+            message_current_mailbox_id=message.mailbox_id,
+            message_status=message.status,
+        )
+        for entry, message in rows
+    ]
 
 
 async def _create_documents_for_message(

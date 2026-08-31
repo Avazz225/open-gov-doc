@@ -644,3 +644,104 @@ async def test_route_message_to_mailbox_with_colliding_source_uid_returns_409(
     unchanged = client.get(f"/inbound/{message['id']}", headers=ADMIN_HEADERS).json()
     assert unchanged["mailbox_id"] == "central"
     assert unchanged["routing_log"] == []
+
+
+# --- Durchsuchbares "Postbuch"-Register (14.2, Post-Roadmap Phase 31 Session
+# 12c) - ueber alle Nachrichten hinweg, im Unterschied zum je-Nachricht
+# eingebetteten `routing_log` aus P31-S12b -------------------------------
+
+
+def test_search_routing_log_requires_principal(client):
+    response = client.get("/routing-log")
+    assert response.status_code == 401
+
+
+async def test_search_routing_log_returns_hop_with_message_context(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-postbuch-1", subject="Postbuch Testeintrag")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "Postbuch Testeintrag"
+    ]
+    client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "finanzen", "reason": "Fachbezug"},
+        headers=ADMIN_HEADERS,
+    )
+
+    response = client.get("/routing-log", headers=ADMIN_HEADERS)
+
+    assert response.status_code == 200
+    [entry] = [e for e in response.json() if e["message_id"] == message["id"]]
+    assert entry["from_mailbox_id"] == "central"
+    assert entry["to_mailbox_id"] == "finanzen"
+    assert entry["routed_by"] == "poststelle-1"
+    assert entry["reason"] == "Fachbezug"
+    assert entry["message_subject"] == "Postbuch Testeintrag"
+    assert entry["message_current_mailbox_id"] == "finanzen"
+    assert entry["message_status"] == "unassigned"
+
+
+async def test_search_routing_log_filters_by_mailbox_id_and_q(
+    client, session, with_finanzen_mailbox
+):
+    """Seeds both messages directly via `repository.create_inbound_message`
+    (bypassing the virus-scan/event-publish `_ingest` pipeline, same reason
+    as `test_route_message_to_mailbox_with_colliding_source_uid_returns_409`
+    - this test's own subject is `GET /routing-log`'s filtering, not
+    ingestion, and two back-to-back `_ingest` calls would double this test's
+    exposure to the pre-existing event-loop flakiness documented elsewhere
+    in this file)."""
+    alpha = await repository.create_inbound_message(
+        session,
+        mailbox_id="central",
+        source_uid="uid-postbuch-2",
+        from_address="buerger@example.com",
+        subject="Postbuch Filtertest Alpha",
+        body_text="Hallo",
+        received_at=datetime.now(UTC),
+        match_type=None,
+        match_value=None,
+        proposed_target_type=None,
+        proposed_target_id=None,
+        match_candidates=[],
+    )
+    beta = await repository.create_inbound_message(
+        session,
+        mailbox_id="central",
+        source_uid="uid-postbuch-3",
+        from_address="buerger@example.com",
+        subject="Postbuch Filtertest Beta",
+        body_text="Hallo",
+        received_at=datetime.now(UTC),
+        match_type=None,
+        match_value=None,
+        proposed_target_type=None,
+        proposed_target_id=None,
+        match_candidates=[],
+    )
+    await session.commit()
+    client.post(
+        f"/inbound/{alpha.id}/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+    client.post(
+        f"/inbound/{beta.id}/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+
+    by_q = client.get("/routing-log", params={"q": "Alpha"}, headers=ADMIN_HEADERS).json()
+    by_mailbox = client.get(
+        "/routing-log", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+    ).json()
+    by_unrelated_mailbox = client.get(
+        "/routing-log", params={"mailbox_id": "does-not-exist"}, headers=ADMIN_HEADERS
+    ).json()
+
+    assert [e["message_id"] for e in by_q] == [alpha.id]
+    assert {e["message_id"] for e in by_mailbox} >= {alpha.id, beta.id}
+    assert by_unrelated_mailbox == []

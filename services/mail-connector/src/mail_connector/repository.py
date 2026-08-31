@@ -7,7 +7,7 @@ from mail_connector.models import (
     MailRoutingLogEntry,
     OutboundMessage,
 )
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -177,6 +177,53 @@ async def list_routing_log(session: AsyncSession, message_id: str) -> list[MailR
         .order_by(MailRoutingLogEntry.routed_at)
     )
     return list(result.scalars().all())
+
+
+async def search_routing_log(
+    session: AsyncSession,
+    *,
+    mailbox_id: str | None = None,
+    routed_by: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    q: str | None = None,
+    limit: int = 200,
+) -> list[tuple[MailRoutingLogEntry, InboundMessage]]:
+    """The searchable, standalone cross-message "Postbuch" register (14.2,
+    Post-Roadmap Phase 31 Session 12c) - unlike `list_routing_log` (scoped
+    to one message, embedded as `InboundMessageOut.routing_log`), this joins
+    every hop across every message so a mail-room principal can find "what
+    happened to this piece of correspondence" without already knowing its
+    `message_id`. `mailbox_id` matches a hop touching that mailbox on
+    EITHER side (it was routed FROM it or TO it) - a department wants to
+    see both what left and what arrived. `q` is a case-insensitive substring
+    match against the message's subject (same `ilike` mechanism SQL already
+    offers, no new search infrastructure - a dedicated full-text engine is
+    `search-service`'s job for `document-service`/`case-service` content,
+    not raw inbound mail). Ordered newest-first, same convention as
+    `audit-service`'s `GET /events` (the closest existing precedent for a
+    filtered, capped register view)."""
+    query = select(MailRoutingLogEntry, InboundMessage).join(
+        InboundMessage, MailRoutingLogEntry.message_id == InboundMessage.id
+    )
+    if mailbox_id is not None:
+        query = query.where(
+            or_(
+                MailRoutingLogEntry.from_mailbox_id == mailbox_id,
+                MailRoutingLogEntry.to_mailbox_id == mailbox_id,
+            )
+        )
+    if routed_by is not None:
+        query = query.where(MailRoutingLogEntry.routed_by == routed_by)
+    if since is not None:
+        query = query.where(MailRoutingLogEntry.routed_at >= since)
+    if until is not None:
+        query = query.where(MailRoutingLogEntry.routed_at <= until)
+    if q is not None:
+        query = query.where(InboundMessage.subject.ilike(f"%{q}%"))
+    query = query.order_by(MailRoutingLogEntry.routed_at.desc()).limit(limit)
+    result = await session.execute(query)
+    return [(entry, message) for entry, message in result.all()]
 
 
 async def list_messages(

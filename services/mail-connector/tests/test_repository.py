@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from mail_connector import repository
@@ -195,6 +195,89 @@ async def test_route_message_raises_on_duplicate_source_uid_at_target(session):
     unchanged = await repository.get_message(session, message.id)
     assert unchanged.mailbox_id == "central"
     assert await repository.list_routing_log(session, message.id) == []
+
+
+async def test_search_routing_log_returns_hops_across_messages_newest_first(session):
+    """ "Postbuch"-Register (P31-S12c) - im Unterschied zu `list_routing_log`
+    (ein Ergebnis pro Nachricht) hier ueber ALLE Nachrichten hinweg."""
+    first = await _create_message(session, mailbox_id="central", source_uid="uid-a")
+    second = await _create_message(session, mailbox_id="central", source_uid="uid-b")
+
+    await repository.route_message(
+        session, first.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+    )
+    await repository.route_message(
+        session, second.id, target_mailbox_id="personal", routed_by="carol", reason=None
+    )
+
+    rows = await repository.search_routing_log(session)
+
+    assert [entry.message_id for entry, _message in rows] == [second.id, first.id]
+    assert [message.subject for _entry, message in rows] == [second.subject, first.subject]
+
+
+async def test_search_routing_log_filters_by_mailbox_id_either_side(session):
+    message = await _create_message(session, mailbox_id="central", source_uid="uid-c")
+    await repository.route_message(
+        session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+    )
+
+    from_side = await repository.search_routing_log(session, mailbox_id="central")
+    to_side = await repository.search_routing_log(session, mailbox_id="finanzen")
+    unrelated = await repository.search_routing_log(session, mailbox_id="personal")
+
+    assert [e.message_id for e, _m in from_side] == [message.id]
+    assert [e.message_id for e, _m in to_side] == [message.id]
+    assert unrelated == []
+
+
+async def test_search_routing_log_filters_by_routed_by(session):
+    message = await _create_message(session, mailbox_id="central", source_uid="uid-d")
+    await repository.route_message(
+        session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+    )
+
+    matching = await repository.search_routing_log(session, routed_by="bob")
+    other = await repository.search_routing_log(session, routed_by="carol")
+
+    assert [e.message_id for e, _m in matching] == [message.id]
+    assert other == []
+
+
+async def test_search_routing_log_filters_by_subject_substring(session):
+    message = await _create_message(
+        session, mailbox_id="central", source_uid="uid-e", subject="Antrag auf Baugenehmigung"
+    )
+    await repository.route_message(
+        session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+    )
+
+    matching = await repository.search_routing_log(session, q="baugenehmigung")
+    other = await repository.search_routing_log(session, q="does-not-occur")
+
+    assert [e.message_id for e, _m in matching] == [message.id]
+    assert other == []
+
+
+async def test_search_routing_log_filters_by_date_range(session):
+    message = await _create_message(session, mailbox_id="central", source_uid="uid-f")
+    await repository.route_message(
+        session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+    )
+    [entry] = await repository.list_routing_log(session, message.id)
+
+    before = entry.routed_at - timedelta(minutes=1)
+    after = entry.routed_at + timedelta(minutes=1)
+
+    since_before = await repository.search_routing_log(session, since=before)
+    since_after = await repository.search_routing_log(session, since=after)
+    until_after = await repository.search_routing_log(session, until=after)
+    until_before = await repository.search_routing_log(session, until=before)
+
+    assert [e.message_id for e, _m in since_before] == [message.id]
+    assert since_after == []
+    assert [e.message_id for e, _m in until_after] == [message.id]
+    assert until_before == []
 
 
 async def test_set_attachment_document_clears_storage_key(session):
