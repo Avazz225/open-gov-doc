@@ -60,6 +60,25 @@ hardcoded "everyone" group that has existed since Phase 19 Session 2 with real m
   when the `admin.user_management` capability is missing is the actual enforcement, identical to the
   existing pattern for role creation.
 
+## Org-Hierarchy Management (14.2, Post-Roadmap Phase 31 Session 9, [ADR 0120](../adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md))
+
+New "Organisations-Hierarchie" section in `UserManagement.tsx` (`/users/`), right after Groups — same
+page, same audience, since org-hierarchy data is administered exactly like groups/roles
+(`admin.user_management`). Uses `permission-service`'s new `SupervisorAssignment` edges (see
+`docs/services/permission-service.md` "Org-Hierarchy Foundation").
+
+- Form for creating an assignment (principal ID + supervisor principal ID, both free-text — same
+  deliberate simplicity as group membership's `principalId` field, no picker), flat table of all
+  assignments with a "delete" button per row — no expand/collapse needed here, unlike Groups, since a
+  `SupervisorAssignment` row has no nested sub-list of its own.
+- A second, small form below the table: a chain-lookup tool (enter a principal ID, see the resolved
+  transitive supervisor chain via `GET /supervisor-chain/{id}`) — this is the actual value the session
+  exists to demonstrate/verify (the plan's own wording: "a principal's direct supervisor, and the
+  supervisor chain derived from it"), and gives immediate admin value even before P31-S10/S11 have a
+  feature that consumes the data.
+- **No new RBAC special case in the frontend**, same reasoning as Groups above — page-level gating plus
+  the server-side `403` is the actual enforcement.
+
 ## Four-Eyes Settings (Post-Roadmap Phase 22 Session 3, [ADR 0089](../adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md))
 
 New page `/approval-settings/` (`ApprovalSettings.tsx`) — the first Admin UI integration of the generic
@@ -294,7 +313,7 @@ Two-stage Docker image (`apps/admin-ui/Dockerfile`), identical to the User UI. `
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build`.
-- `npm test` (Vitest + Testing Library, **220 tests** — since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)): `admin-sidebar.test.tsx`/`forensic-trace-view.test.tsx`/`query-console-view.test.tsx`/`user-management.test.tsx` updated to assert the gender-neutral string variants, no new test cases (a text-content pass, not a new feature) — before that, 204 tests — since **Post-Roadmap Phase 22 Session 7** (see
+- `npm test` (Vitest + Testing Library, **224 tests** — since **Post-Roadmap Phase 31 Session 9** ([ADR 0120](../adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md)): 4 new `user-management.test.tsx` cases for the org-hierarchy section (empty state, create + reload, list + delete, chain lookup unioning multiple upward paths) — before that, 220 tests — since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)): `admin-sidebar.test.tsx`/`forensic-trace-view.test.tsx`/`query-console-view.test.tsx`/`user-management.test.tsx` updated to assert the gender-neutral string variants, no new test cases (a text-content pass, not a new feature) — before that, 204 tests — since **Post-Roadmap Phase 22 Session 7** (see
   "Storage Guard" above): `storage-guard.test.tsx` extended by three tests (toggling the
   object-lock mode including reload, toggling the records-disposal role, error display on
   `422`); previously 201 — since **Post-Roadmap Phase 22 Session 6** (see

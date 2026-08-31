@@ -9,18 +9,24 @@ import {
   type KeycloakUser,
   type Role,
   type RoleAssignment,
+  type SupervisorAssignment,
+  type SupervisorChain,
   addGroupMember,
   createGroup,
   createRole,
   createRoleAssignment,
+  createSupervisorAssignment,
   createUser,
   deleteGroup,
   deleteRoleAssignment,
+  deleteSupervisorAssignment,
   deleteUser,
+  getSupervisorChain,
   listGroupMembers,
   listGroups,
   listRoleAssignments,
   listRoles,
+  listSupervisorAssignments,
   listUsers,
   removeGroupMember,
 } from "@/lib/api";
@@ -43,6 +49,14 @@ export function UserManagement() {
   const [membersByGroup, setMembersByGroup] = useState<Record<string, GroupMember[]>>({});
   const [newMemberPrincipalId, setNewMemberPrincipalId] = useState("");
 
+  const [supervisorAssignments, setSupervisorAssignments] = useState<SupervisorAssignment[]>([]);
+  const [newSupervisorAssignment, setNewSupervisorAssignment] = useState({
+    principalId: "",
+    supervisorPrincipalId: "",
+  });
+  const [chainLookupPrincipalId, setChainLookupPrincipalId] = useState("");
+  const [chainLookupResult, setChainLookupResult] = useState<SupervisorChain | null>(null);
+
   const [newUser, setNewUser] = useState({
     username: "",
     email: "",
@@ -60,16 +74,18 @@ export function UserManagement() {
   const reload = useCallback(async () => {
     if (!accessToken) return;
     try {
-      const [u, r, a, g] = await Promise.all([
+      const [u, r, a, g, s] = await Promise.all([
         listUsers(accessToken),
         listRoles(accessToken),
         listRoleAssignments(accessToken),
         listGroups(accessToken),
+        listSupervisorAssignments(accessToken),
       ]);
       setUsers(u);
       setRoles(r);
       setAssignments(a);
       setGroups(g);
+      setSupervisorAssignments(s);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("common.loadError"));
     }
@@ -223,6 +239,47 @@ export function UserManagement() {
       setMembersByGroup((prev) => ({ ...prev, [groupId]: members }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("groups.removeMemberError"));
+    }
+  }
+
+  async function handleCreateSupervisorAssignment(event: FormEvent) {
+    event.preventDefault();
+    if (
+      !accessToken ||
+      !newSupervisorAssignment.principalId.trim() ||
+      !newSupervisorAssignment.supervisorPrincipalId.trim()
+    )
+      return;
+    try {
+      await createSupervisorAssignment(accessToken, {
+        principalId: newSupervisorAssignment.principalId.trim(),
+        supervisorPrincipalId: newSupervisorAssignment.supervisorPrincipalId.trim(),
+      });
+      setNewSupervisorAssignment({ principalId: "", supervisorPrincipalId: "" });
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("orgHierarchy.createError"));
+    }
+  }
+
+  async function handleDeleteSupervisorAssignment(assignmentId: number) {
+    if (!accessToken) return;
+    try {
+      await deleteSupervisorAssignment(accessToken, assignmentId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("orgHierarchy.deleteError"));
+    }
+  }
+
+  async function handleChainLookup(event: FormEvent) {
+    event.preventDefault();
+    if (!accessToken || !chainLookupPrincipalId.trim()) return;
+    try {
+      const chain = await getSupervisorChain(accessToken, chainLookupPrincipalId.trim());
+      setChainLookupResult(chain);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("orgHierarchy.chainLookupError"));
     }
   }
 
@@ -444,6 +501,96 @@ export function UserManagement() {
           </tbody>
         </table>
         {groups.length === 0 && <p className="empty-state">{t("groups.empty")}</p>}
+      </section>
+
+      <section className="card">
+        <h2>{t("orgHierarchy.sectionTitle")}</h2>
+        <p className="hint">{t("orgHierarchy.hint")}</p>
+        <form
+          aria-label={t("orgHierarchy.formLabel")}
+          className="form-grid"
+          onSubmit={handleCreateSupervisorAssignment}
+        >
+          <label>
+            {t("orgHierarchy.principalId")}
+            <input
+              value={newSupervisorAssignment.principalId}
+              onChange={(e) =>
+                setNewSupervisorAssignment({
+                  ...newSupervisorAssignment,
+                  principalId: e.target.value,
+                })
+              }
+              required
+            />
+          </label>
+          <label>
+            {t("orgHierarchy.supervisorPrincipalId")}
+            <input
+              value={newSupervisorAssignment.supervisorPrincipalId}
+              onChange={(e) =>
+                setNewSupervisorAssignment({
+                  ...newSupervisorAssignment,
+                  supervisorPrincipalId: e.target.value,
+                })
+              }
+              required
+            />
+          </label>
+          <button type="submit">{t("common.create")}</button>
+        </form>
+
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("orgHierarchy.principalId")}</th>
+              <th>{t("orgHierarchy.supervisorPrincipalId")}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {supervisorAssignments.map((a) => (
+              <tr key={a.id}>
+                <td>{a.principal_id}</td>
+                <td>{a.supervisor_principal_id}</td>
+                <td>
+                  <button type="button" onClick={() => handleDeleteSupervisorAssignment(a.id)}>
+                    {t("common.delete")}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {supervisorAssignments.length === 0 && (
+          <p className="empty-state">{t("orgHierarchy.empty")}</p>
+        )}
+
+        <form
+          aria-label={t("orgHierarchy.chainLookupFormLabel")}
+          className="form-grid"
+          onSubmit={handleChainLookup}
+        >
+          <label>
+            {t("orgHierarchy.chainLookupPrincipalId")}
+            <input
+              value={chainLookupPrincipalId}
+              onChange={(e) => setChainLookupPrincipalId(e.target.value)}
+              required
+            />
+          </label>
+          <button type="submit">{t("orgHierarchy.chainLookupSubmit")}</button>
+        </form>
+        {chainLookupResult && (
+          <p>
+            {chainLookupResult.supervisor_ids.length === 0
+              ? t("orgHierarchy.chainLookupEmpty", { principalId: chainLookupResult.principal_id })
+              : t("orgHierarchy.chainLookupResult", {
+                  principalId: chainLookupResult.principal_id,
+                  chain: chainLookupResult.supervisor_ids.join(", "),
+                })}
+          </p>
+        )}
       </section>
 
       <section className="card">

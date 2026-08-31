@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S8 (accessibility pass: classification badge iconography/contrast, gender-neutral system messaging, tagged-PDF export warning — see below under "Post-Roadmap: Phase 31"), the eighth session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S9 (org-hierarchy foundation: supervisor DAG in `permission-service` — see below under "Post-Roadmap: Phase 31"), the ninth session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S9 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** P31-S10 (dynamic org-hierarchy-based access grants, depends on P31-S9 — now unblocked) or P31-S11 (supervisor/team task oversight view, likewise depends on P31-S9), or any other independent Phase 31 session (P31-S12/S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4258,6 +4258,71 @@ settings popover) renders pure black/yellow with visible chrome, confirming the 
 takes effect; `admin-ui`'s nav correctly shows "Nutzende & Rollen" for an account with
 `admin.user_management`. All test documents/folders created during verification were cleaned up
 (soft-deleted or removed via the isolated-folder fixture's own teardown) afterward.
+
+### Post-Roadmap: Phase 31 Session 9 — org-hierarchy foundation (2026-08-31)
+
+Ninth session of Phase 31 (14.2, eGov feature gap closure) — a reporting-line concept (a principal's
+direct supervisor, and the supervisor chain derived from it) as a prerequisite for P31-S10 (dynamic
+org-hierarchy-based access grants) and P31-S11 (supervisor/team task oversight view). See
+[ADR 0120](docs/adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md) for the full design
+reasoning.
+
+**Flagged in the plan as higher-risk** ("validate the data model against real org-chart shapes — single
+vs. multiple supervisors — before committing"), so this session opened with a research pass across
+`auth-service`, `permission-service`, `teamspace-service`, and the existing delegation mechanism (ADR
+0048) to ground the decision in the actual current data shapes, confirming this really is new ground (no
+`supervisor`/`reports_to`/`org_unit` concept existed anywhere) rather than a rename of something already
+present. The two shape questions the plan explicitly called out were then put to the user directly rather
+than assumed: **(1) single supervisor per principal, or multiple (dotted-line/matrix)?** — the user chose
+multiple, a genuine DAG rather than a tree. **(2) new org-unit concept, or reuse the existing
+`Group`/`GroupMembership`?** — the user chose reuse; this session makes no code change for that half, it's
+a forward-looking decision recorded for P31-S10.
+
+**Backend (`permission-service`)**: new `SupervisorAssignment` model (`principal_id`,
+`supervisor_principal_id`, a plain edge table, not a single nullable parent column — the DAG needs
+multiple rows per principal). `repository.create_supervisor_assignment` rejects self-supervision (`422`)
+and any edge that would close a cycle (`409`, checked by testing whether the principal already appears in
+the candidate supervisor's own chain before insert) — idempotent on an exact duplicate, matching
+`add_group_member`'s precedent. `repository.get_supervisor_chain` is a breadth-first union over the DAG
+(not a linear parent-pointer walk like `ResourceNode`'s single-parent resource hierarchy) — two
+supervisors whose own chains reconverge onto a shared ancestor contribute it only once, which is the
+concrete meaning "the full supervisor chain" must have once multiple direct supervisors are possible.
+New endpoints: `POST`/`GET`/`DELETE /supervisor-assignments` (optionally filtered by either end of the
+relationship — direct supervisors of a principal, or direct reports of a supervisor) and
+`GET /supervisor-chain/{id}`. Writes gated by the same `admin.user_management` capability as
+`POST`/`DELETE /groups` (`_require_role_management`); reads deliberately ungated, same precedent as
+`GET /groups`.
+
+**Frontend (`admin-ui`)**: new "Organisations-Hierarchie" section in `UserManagement.tsx` (`/users/`),
+right after Groups — same page, same audience, same self-gating story. Flat create/list/delete table
+(principal ID + supervisor principal ID, both free text, no picker — same deliberate simplicity as group
+membership) plus a chain-lookup tool (enter a principal, see the resolved transitive chain) — this second
+piece is the actual value the session exists to demonstrate, giving immediate admin value even before
+P31-S10/S11 have a feature that consumes the data.
+
+**Test counts**: permission-service 147 (+9: unauthenticated/unauthorized create, create+list via both
+filter directions, idempotent duplicate, self-supervision `422`, cycle `409`, delete unknown `404`,
+delete, and the diamond-DAG chain-union test — heidi reports to both ivan and judy, both report to karl,
+chain of heidi correctly resolves to exactly `{ivan, judy, karl}`, karl's own chain is empty); admin-ui
+224 (+4: empty state, create+reload, list+delete, chain lookup). All `ruff check`/`ruff format --check`
+clean except the same pre-existing, unrelated `loadtest/`/`federation-hub-service` issues already noted in
+prior sessions (not touched here) — one genuine catch during the run: the new `test_api.py` additions
+initially failed `ruff format --check` (one line too long), fixed by running `ruff format` directly rather
+than hand-wrapping it. `tsc --noEmit`/`eslint`/`next build` clean for admin-ui.
+
+**Fully verified live against the real, freshly rebuilt stack**: `permission-service`/`admin-ui` rebuilt
+and restarted. `curl`: `401`/`403` confirmed directly against the service (the gateway's own bearer-token
+gate sits in front of the `X-DMS-Principal` header, so the service-level 401/403 tests had to go straight
+to the service port rather than through the gateway with a spoofed header); the full diamond-DAG scenario
+recreated end-to-end via the real gateway with a real bearer token (`heidi→ivan`, `heidi→judy`,
+`ivan→karl`, `judy→karl`), self-supervision correctly `422`, the reverse edge `karl→heidi` correctly `409`
+(would close the loop), `GET /supervisor-chain/heidi` correctly returns the three-element union, direct
+reports of `karl` correctly return exactly `ivan`/`judy`. **A real Playwright browser session** logged in,
+navigated to `/users/`, created an assignment through the actual form, confirmed it in the table, ran the
+chain-lookup tool and confirmed the rendered sentence, then deleted the row through the UI and confirmed
+it disappeared — screenshot taken and inspected. All test data (both via curl and via the browser session)
+cleaned up afterward; the temporary Playwright spec file itself removed, same as every prior session's
+verification pass.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

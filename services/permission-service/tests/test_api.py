@@ -273,6 +273,131 @@ def test_delete_group_removes_it_and_its_memberships(client, role_management_hea
     assert all(g["id"] != group["id"] for g in groups)
 
 
+def test_create_supervisor_assignment_requires_authentication(client):
+    response = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "alice", "supervisor_principal_id": "bob"},
+    )
+    assert response.status_code == 401
+
+
+def test_create_supervisor_assignment_returns_403_without_permission(client):
+    response = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "alice", "supervisor_principal_id": "bob"},
+        headers={"X-DMS-Principal": "nobody"},
+    )
+    assert response.status_code == 403
+
+
+def test_create_and_list_supervisor_assignments(client, role_management_headers):
+    created = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "alice-s9", "supervisor_principal_id": "bob-s9"},
+        headers=role_management_headers,
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["principal_id"] == "alice-s9"
+    assert body["supervisor_principal_id"] == "bob-s9"
+
+    direct_supervisors = client.get(
+        "/supervisor-assignments", params={"principal_id": "alice-s9"}
+    ).json()
+    assert [a["supervisor_principal_id"] for a in direct_supervisors] == ["bob-s9"]
+
+    direct_reports = client.get(
+        "/supervisor-assignments", params={"supervisor_principal_id": "bob-s9"}
+    ).json()
+    assert [a["principal_id"] for a in direct_reports] == ["alice-s9"]
+
+
+def test_create_supervisor_assignment_is_idempotent(client, role_management_headers):
+    first = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "alice-idem", "supervisor_principal_id": "bob-idem"},
+        headers=role_management_headers,
+    ).json()
+    second = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "alice-idem", "supervisor_principal_id": "bob-idem"},
+        headers=role_management_headers,
+    ).json()
+    assert first["id"] == second["id"]
+
+
+def test_self_supervision_returns_422(client, role_management_headers):
+    response = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "carol-self", "supervisor_principal_id": "carol-self"},
+        headers=role_management_headers,
+    )
+    assert response.status_code == 422
+
+
+def test_supervisor_cycle_returns_409(client, role_management_headers):
+    """dave-cy -> erin-cy (erin ist Vorgesetzte von dave); der Versuch, den
+    umgekehrten Bogen erin-cy -> dave-cy anzulegen, würde einen Zyklus
+    erzeugen und muss abgelehnt werden."""
+    client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "dave-cy", "supervisor_principal_id": "erin-cy"},
+        headers=role_management_headers,
+    )
+    response = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "erin-cy", "supervisor_principal_id": "dave-cy"},
+        headers=role_management_headers,
+    )
+    assert response.status_code == 409
+
+
+def test_delete_unknown_supervisor_assignment_returns_404(client, role_management_headers):
+    response = client.delete("/supervisor-assignments/999999", headers=role_management_headers)
+    assert response.status_code == 404
+
+
+def test_delete_supervisor_assignment(client, role_management_headers):
+    created = client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "frank-del", "supervisor_principal_id": "grace-del"},
+        headers=role_management_headers,
+    ).json()
+
+    response = client.delete(
+        f"/supervisor-assignments/{created['id']}", headers=role_management_headers
+    )
+    assert response.status_code == 204
+
+    remaining = client.get("/supervisor-assignments", params={"principal_id": "frank-del"}).json()
+    assert remaining == []
+
+
+def test_supervisor_chain_unions_multiple_upward_paths(client, role_management_headers):
+    """Rautenform (matrix/DAG statt einfacher Baum, siehe ADR 0119-Nachfolge-
+    ADR fuer P31-S9): heidi berichtet sowohl an ivan als auch an judy, beide
+    wiederum an karl - die transitive Kette von heidi muss die Vereinigung
+    aller Pfade sein, karl nur einmal enthalten."""
+    for principal, supervisor in [
+        ("heidi-dag", "ivan-dag"),
+        ("heidi-dag", "judy-dag"),
+        ("ivan-dag", "karl-dag"),
+        ("judy-dag", "karl-dag"),
+    ]:
+        client.post(
+            "/supervisor-assignments",
+            json={"principal_id": principal, "supervisor_principal_id": supervisor},
+            headers=role_management_headers,
+        )
+
+    chain = client.get("/supervisor-chain/heidi-dag").json()
+    assert set(chain["supervisor_ids"]) == {"ivan-dag", "judy-dag", "karl-dag"}
+
+    # Ein Principal ohne Vorgesetzte hat eine leere Kette.
+    empty_chain = client.get("/supervisor-chain/karl-dag").json()
+    assert empty_chain["supervisor_ids"] == []
+
+
 def test_assignment_with_unknown_role_returns_404(client):
     response = client.post(
         "/role-assignments",

@@ -16,6 +16,7 @@ from permission_service.models import (
     Role,
     RoleAssignment,
     ScopeLock,
+    SupervisorAssignment,
     SystemMaintenanceMode,
 )
 from permission_service.settings import ROOT_RESOURCE_ID
@@ -39,6 +40,16 @@ class MissingRequiredPermissionError(Exception):
     capability at the root resource, as stated by
     ``ApprovalActionConfig.required_permission`` - neither the initiator nor
     the approver is exempt from this."""
+
+
+class SelfSupervisionError(Exception):
+    """A principal cannot be its own supervisor (P31-S9)."""
+
+
+class SupervisorCycleError(Exception):
+    """Adding this edge would make the new supervisor an indirect report of
+    the principal it's meant to supervise, closing a loop in the DAG
+    (P31-S9) - see ``create_supervisor_assignment``."""
 
 
 async def invalidate_cache(session: AsyncSession) -> None:
@@ -361,6 +372,96 @@ async def remove_group_member(session: AsyncSession, group_id: str, principal_id
         raise NotFoundError(f"{principal_id!r} ist kein Mitglied von Gruppe {group_id!r}")
     await session.delete(membership)
     await invalidate_cache(session)
+
+
+async def create_supervisor_assignment(
+    session: AsyncSession, principal_id: str, supervisor_principal_id: str
+) -> SupervisorAssignment:
+    """Org-hierarchy foundation (P31-S9). Idempotent on an exact duplicate
+    (same precedent as ``add_group_member``); rejects self-supervision and
+    any assignment that would close a cycle in the DAG (a cycle would make
+    ``get_supervisor_chain`` loop forever without the defensive visited-set
+    there, and would corrupt P31-S10's chain-based grant resolution).
+    Deliberately no ``invalidate_cache`` call - unlike ``Group``, this table
+    doesn't feed ``_collect_effective_roles``/the permission cache (same as
+    ``Delegation``, which likewise doesn't invalidate it)."""
+    if principal_id == supervisor_principal_id:
+        raise SelfSupervisionError(f"{principal_id!r} kann nicht die eigene Führungskraft sein")
+    existing = await session.execute(
+        select(SupervisorAssignment).where(
+            SupervisorAssignment.principal_id == principal_id,
+            SupervisorAssignment.supervisor_principal_id == supervisor_principal_id,
+        )
+    )
+    assignment = existing.scalars().first()
+    if assignment is not None:
+        return assignment
+    chain_above_supervisor = await get_supervisor_chain(session, supervisor_principal_id)
+    if principal_id in chain_above_supervisor:
+        raise SupervisorCycleError(
+            f"Zuordnung abgelehnt: {supervisor_principal_id!r} berichtet bereits "
+            f"(direkt oder indirekt) an {principal_id!r} - diese Zuordnung würde einen "
+            "Zyklus erzeugen"
+        )
+    assignment = SupervisorAssignment(
+        principal_id=principal_id,
+        supervisor_principal_id=supervisor_principal_id,
+        created_at=datetime.now(UTC),
+    )
+    session.add(assignment)
+    await session.flush()
+    return assignment
+
+
+async def list_supervisor_assignments(
+    session: AsyncSession,
+    *,
+    principal_id: str | None = None,
+    supervisor_principal_id: str | None = None,
+) -> list[SupervisorAssignment]:
+    """Direct supervisors of ``principal_id`` (P31-S10's grant resolution),
+    or direct reports of ``supervisor_principal_id`` (P31-S11's "who reports
+    to me" oversight view) - same optional-filter shape as
+    ``list_role_assignments``. Unfiltered: every assignment, the admin
+    overview listing."""
+    query = select(SupervisorAssignment)
+    if principal_id is not None:
+        query = query.where(SupervisorAssignment.principal_id == principal_id)
+    if supervisor_principal_id is not None:
+        query = query.where(SupervisorAssignment.supervisor_principal_id == supervisor_principal_id)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def delete_supervisor_assignment(session: AsyncSession, assignment_id: int) -> None:
+    assignment = await session.get(SupervisorAssignment, assignment_id)
+    if assignment is None:
+        raise NotFoundError(f"supervisor_assignment {assignment_id!r} unbekannt")
+    await session.delete(assignment)
+
+
+async def get_supervisor_chain(session: AsyncSession, principal_id: str) -> set[str]:
+    """All transitive supervisors of ``principal_id`` (P31-S9, prerequisite
+    for P31-S10's "grant the full supervisor chain access"). A DAG breadth-
+    first union, not a single-line tree walk: ``principal_id`` may have
+    several direct supervisors (matrix reporting), and their own chains may
+    reconverge (e.g. a diamond shape) - ``chain`` accumulates the union of
+    every upward path, each principal visited at most once. The visited-set
+    (``chain``) doubles as cycle protection even though
+    ``create_supervisor_assignment`` already rejects cycles at write time -
+    defensive, not load-bearing, in the normal case."""
+    chain: set[str] = set()
+    frontier = {principal_id}
+    while frontier:
+        result = await session.execute(
+            select(SupervisorAssignment.supervisor_principal_id).where(
+                SupervisorAssignment.principal_id.in_(frontier)
+            )
+        )
+        next_frontier = {row[0] for row in result.all()} - chain - {principal_id}
+        chain |= next_frontier
+        frontier = next_frontier
+    return chain
 
 
 async def _group_ids_for_principal(session: AsyncSession, principal_id: str) -> set[str]:

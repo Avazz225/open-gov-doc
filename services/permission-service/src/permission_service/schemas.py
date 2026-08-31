@@ -83,6 +83,25 @@ class GroupMemberOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SupervisorAssignmentCreate(BaseModel):
+    principal_id: str
+    supervisor_principal_id: str
+
+
+class SupervisorAssignmentOut(BaseModel):
+    id: int
+    principal_id: str
+    supervisor_principal_id: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SupervisorChainOut(BaseModel):
+    principal_id: str
+    supervisor_ids: list[str]
+
+
 class ResourceNodeUpdate(BaseModel):
     inherit: bool
 

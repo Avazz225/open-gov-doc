@@ -2,8 +2,8 @@
 
 **Responsibility:** RBAC — roles, assignments to principals (users/groups) on resources, inheritance along a resource hierarchy, a materialized event-driven permissions cache (Concept 4.1). Since P3-S4, additionally scope locks (4.7): temporary, RBAC-overriding locking of entire resource subtrees. Since P6-S4, additionally the generic four-eyes approval mechanism (4.3), also used by other services (e.g. Document Service). Since P6-S5, additionally home of the system's own, domain-separated admin roles (4.6) — completely separate from Keycloak realm roles, see [ADR 0023](../adr/0023-superuser-breakglass-and-domain-admin-accounts.md). Since P6-S6, additionally home of the system-wide maintenance-mode state (emergency shutdown, 4.8) — see [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 
-**Concept reference:** 4.1, 4.3, 4.6, 4.7, 4.8, 4.4a (deputizing during absence, since P14-S11)
-**Own Postgres schema:** `permission` (tables `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`, `group`, `group_membership`)
+**Concept reference:** 4.1, 4.3, 4.6, 4.7, 4.8, 4.4a (deputizing during absence, since P14-S11), 14.2 (org-hierarchy foundation, Post-Roadmap Phase 31 Session 9)
+**Own Postgres schema:** `permission` (tables `role`, `role_assignment`, `resource_node`, `effective_permission_cache`, `scope_lock`, `approval_action_config`, `approval_request`, `system_maintenance_mode`, `delegation`, `group`, `group_membership`, `supervisor_assignment`)
 
 ## API
 
@@ -18,6 +18,10 @@
 | `GET` | `/groups/{id}/members` | List a group's members — ungated |
 | `POST` | `/groups/{id}/members` | Add a member (`principal_id`) — idempotent, `404` on unknown group, gated |
 | `DELETE` | `/groups/{id}/members/{principal_id}` | Remove a member — `404` if no membership exists, gated |
+| `POST` | `/supervisor-assignments` | Create a direct-supervisor edge (Post-Roadmap Phase 31 Session 9, [ADR 0120](../adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md)) — gated like `POST /groups`; idempotent on an exact duplicate, `422` on self-supervision, `409` if the edge would close a cycle in the DAG |
+| `GET` | `/supervisor-assignments?principal_id=&supervisor_principal_id=` | `principal_id` filter → that principal's direct supervisors; `supervisor_principal_id` filter → direct reports; neither → every assignment. Ungated |
+| `DELETE` | `/supervisor-assignments/{id}` | Remove an edge — `404` on unknown ID, gated |
+| `GET` | `/supervisor-chain/{principal_id}` | The full transitive supervisor chain (union of every upward DAG path, not a single line) — ungated, see "Org-Hierarchy Foundation" below |
 | `POST` | `/role-assignments` | Create an assignment — response `{status: "created"\|"pending_approval", role_assignment, approval_request_id}` (since P17-S3, `permission.role_assignment.create`, see below), `404` on unknown role/resource |
 | `GET` | `/role-assignments?principal_id=...&resource_id=...` | List assignments, optionally filtered (since P4-S3, the basis for the Admin UI) |
 | `DELETE` | `/role-assignments/{id}` | Remove an assignment |
@@ -192,6 +196,40 @@ principal, no own data row), every group created via `POST /groups` needs explic
   next independent cache clear.
 - **Admin UI integration**: `apps/admin-ui`'s `UserManagement` page got a new section
   "Groups" (see `docs/services/admin-ui.md`).
+
+## Org-Hierarchy Foundation (14.2, Post-Roadmap Phase 31 Session 9, [ADR 0120](../adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md))
+
+`SupervisorAssignment` (`principal_id`, `supervisor_principal_id`) records a principal's direct
+supervisor(s) — prerequisite for P31-S10 (dynamic org-hierarchy-based access grants) and P31-S11
+(supervisor/team task oversight view). Per the plan's own explicit call to validate the shape against real
+org-chart forms before committing, this was a **user-decided data-model choice**, not an assumed default —
+see ADR 0120 for the full reasoning.
+
+- **A DAG, not a tree**: a principal may have more than one direct supervisor (dotted-line/matrix
+  reporting) — unlike `ResourceNode`'s single-parent resource hierarchy above, there is no single
+  `parent_id` column here, only edges.
+- **`repository.get_supervisor_chain`** (backing `GET /supervisor-chain/{id}`) is a breadth-first union of
+  every upward path, not a single-line walk — two supervisors whose own chains reconverge onto a shared
+  ancestor contribute that ancestor only once. This is the concrete meaning P31-S10 must use for "grant
+  the full supervisor chain access": a set of grantees, not an ordered escalation sequence.
+- **Cycle prevention at write time**: `create_supervisor_assignment` rejects self-supervision (`422`) and
+  any edge that would close a loop in the existing DAG (`409`, checked by testing whether the principal is
+  already in the candidate supervisor's own chain) — a cycle would corrupt the chain resolution P31-S10
+  depends on. Idempotent on an exact duplicate, same precedent as `add_group_member`.
+- **Same self-gating as `POST`/`DELETE /groups`** (`admin.user_management`) for the write endpoints; the
+  two `GET` endpoints stay ungated, same rationale as `GET /groups`/`GET /role-assignments` — org-structure
+  shape is no more sensitive than group membership already exposed.
+- **Deliberately no cache invalidation call** — unlike `Group`/`GroupMembership`, this table doesn't feed
+  `_collect_effective_roles`/the permission cache (same as `Delegation`, which likewise never invalidates
+  it); P31-S10 is expected to query it directly at grant-resolution time rather than folding it into the
+  existing cached-role machinery.
+- **Org units are deliberately NOT a new concept here** — by explicit user decision, P31-S10 will resolve
+  "the assignee's/creator's org unit" via the existing `Group`/`GroupMembership` rather than a second,
+  competing grouping mechanism (see ADR 0120 "Consequences" for the open question this leaves for that
+  session: how to pick *which* group counts as "the" org unit for a principal in several).
+- **Admin UI integration**: `apps/admin-ui`'s `UserManagement` page got a new section
+  "Organisations-Hierarchie" (see `docs/services/admin-ui.md`) — create/list/delete assignments plus a
+  chain-lookup tool, same page and pattern as Groups.
 
 ## Structure Synchronization (Contract Confirmed Since P3-S3)
 

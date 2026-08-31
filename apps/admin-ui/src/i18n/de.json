@@ -114,6 +114,22 @@
     "removeMember": "Entfernen",
     "removeMemberError": "Mitglied entfernen fehlgeschlagen"
   },
+  "orgHierarchy": {
+    "sectionTitle": "Organisations-Hierarchie",
+    "hint": "Ordnet einer Person eine oder mehrere Vorgesetzte zu (mehrere sind möglich, z. B. bei Matrix-Organisationen). Grundlage für dynamische Zugriffsfreigaben und die Vorgesetzten-Übersicht in einer der nächsten Sessions.",
+    "formLabel": "Vorgesetzten-Zuordnung anlegen",
+    "principalId": "Nutzername/Principal-ID",
+    "supervisorPrincipalId": "Vorgesetzte/r (Nutzername/Principal-ID)",
+    "empty": "Keine Vorgesetzten-Zuordnungen.",
+    "createError": "Zuordnung anlegen fehlgeschlagen",
+    "deleteError": "Zuordnung löschen fehlgeschlagen",
+    "chainLookupFormLabel": "Vorgesetztenkette nachschlagen",
+    "chainLookupPrincipalId": "Nutzername/Principal-ID",
+    "chainLookupSubmit": "Kette anzeigen",
+    "chainLookupError": "Vorgesetztenkette konnte nicht ermittelt werden",
+    "chainLookupEmpty": "{principalId} hat keine (auch keine indirekten) Vorgesetzten.",
+    "chainLookupResult": "Vorgesetztenkette von {principalId}: {chain}"
+  },
   "teamspacesAdmin": {
     "pageTitle": "Team-Arbeitsbereiche",
     "hint": "Installationsweite Übersicht über alle Teamspaces (2.5) - unabhängig von der eigenen Mitgliedschaft. Anlegen/Löschen/Mitgliederverwaltung bleibt Selbstverwaltung, hier nur Sichtbarkeit.",

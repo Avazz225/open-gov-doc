@@ -200,6 +200,35 @@ class GroupMembership(Base):
     principal_id: Mapped[str] = mapped_column(String(128), index=True)
 
 
+class SupervisorAssignment(Base):
+    """Org-hierarchy foundation (14.2, Post-Roadmap Phase 31 Session 9) - a
+    principal's direct supervisor(s), prerequisite for P31-S10 (dynamic
+    org-hierarchy-based access grants) and P31-S11 (supervisor/team task
+    oversight view). Deliberately a DAG, not a tree: unlike
+    ``ResourceNode``'s single-parent hierarchy, ``principal_id`` may have
+    more than one ``supervisor_principal_id`` row (dotted-line/matrix
+    reporting) - real org charts aren't always a strict tree. Cycle
+    prevention happens in ``repository.create_supervisor_assignment`` (a
+    cycle would make a principal its own indirect supervisor, corrupting
+    ``get_supervisor_chain``'s upward union). Org units themselves are
+    deliberately NOT a new concept here - P31-S10 resolves "the assignee's/
+    creator's org unit" via the existing ``Group``/``GroupMembership``
+    (Post-Roadmap Phase 22 Session 2) rather than a second, competing
+    grouping mechanism."""
+
+    __tablename__ = "supervisor_assignment"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_id", "supervisor_principal_id", name="uq_supervisor_assignment"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    supervisor_principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SystemMaintenanceMode(Base):
     """System-wide emergency lock & maintenance mode (4.8, P6-S6) - singleton
     (fixed ``id=1``, same pattern as ``OcrConfig``/``GuardConfig`` in other

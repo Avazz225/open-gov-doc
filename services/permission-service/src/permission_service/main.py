@@ -55,6 +55,9 @@ from permission_service.schemas import (
     ScopeLockCreate,
     ScopeLockOut,
     ScopeLockRelease,
+    SupervisorAssignmentCreate,
+    SupervisorAssignmentOut,
+    SupervisorChainOut,
 )
 from permission_service.settings import Settings
 
@@ -334,6 +337,74 @@ async def remove_group_member(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+
+
+@app.post("/supervisor-assignments", response_model=SupervisorAssignmentOut, status_code=201)
+async def create_supervisor_assignment(
+    payload: SupervisorAssignmentCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> SupervisorAssignmentOut:
+    """Org-hierarchy foundation (14.2, Post-Roadmap Phase 31 Session 9) - a
+    principal's direct supervisor(s), prerequisite for P31-S10/S11. Same
+    self-gating as `POST /groups` (`admin.user_management`) - org-structure
+    data is administered the same way as groups/roles, not self-service like
+    `POST /delegations`."""
+    await _require_role_management(session, x_dms_principal)
+    try:
+        assignment = await repository.create_supervisor_assignment(
+            session, payload.principal_id, payload.supervisor_principal_id
+        )
+    except repository.SelfSupervisionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except repository.SupervisorCycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return assignment
+
+
+@app.get("/supervisor-assignments", response_model=list[SupervisorAssignmentOut])
+async def list_supervisor_assignments(
+    principal_id: str | None = None,
+    supervisor_principal_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[SupervisorAssignmentOut]:
+    """`principal_id` filter -> that principal's direct supervisors (P31-S10's
+    grant resolution); `supervisor_principal_id` filter -> that principal's
+    direct reports (P31-S11's "who reports to me" oversight view); neither ->
+    every assignment, the admin overview listing. Ungated, same precedent as
+    `GET /groups`/`GET /groups/{id}/members`/`GET /role-assignments`."""
+    return await repository.list_supervisor_assignments(
+        session, principal_id=principal_id, supervisor_principal_id=supervisor_principal_id
+    )
+
+
+@app.delete("/supervisor-assignments/{assignment_id}", status_code=204)
+async def delete_supervisor_assignment(
+    assignment_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _require_role_management(session, x_dms_principal)
+    try:
+        await repository.delete_supervisor_assignment(session, assignment_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+
+
+@app.get("/supervisor-chain/{principal_id}", response_model=SupervisorChainOut)
+async def get_supervisor_chain(
+    principal_id: str, session: AsyncSession = Depends(get_session)
+) -> SupervisorChainOut:
+    """The full transitive supervisor chain of `principal_id` (P31-S9) - the
+    union of every upward path in the DAG, not just the direct supervisor(s).
+    P31-S10 resolves its "grant the full supervisor chain access" option
+    against this. Ungated, same reasoning as the listing endpoint above -
+    reveals only org-structure shape, nothing more sensitive than
+    `GET /supervisor-assignments` already does."""
+    chain = await repository.get_supervisor_chain(session, principal_id)
+    return SupervisorChainOut(principal_id=principal_id, supervisor_ids=sorted(chain))
 
 
 @app.post("/role-assignments", response_model=RoleAssignmentActionResult, status_code=201)

@@ -25,6 +25,10 @@ const deleteGroupMock = vi.fn();
 const listGroupMembersMock = vi.fn();
 const addGroupMemberMock = vi.fn();
 const removeGroupMemberMock = vi.fn();
+const listSupervisorAssignmentsMock = vi.fn();
+const createSupervisorAssignmentMock = vi.fn();
+const deleteSupervisorAssignmentMock = vi.fn();
+const getSupervisorChainMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listUsers: (...args: unknown[]) => listUsersMock(...args),
@@ -41,6 +45,10 @@ vi.mock("@/lib/api", () => ({
   listGroupMembers: (...args: unknown[]) => listGroupMembersMock(...args),
   addGroupMember: (...args: unknown[]) => addGroupMemberMock(...args),
   removeGroupMember: (...args: unknown[]) => removeGroupMemberMock(...args),
+  listSupervisorAssignments: (...args: unknown[]) => listSupervisorAssignmentsMock(...args),
+  createSupervisorAssignment: (...args: unknown[]) => createSupervisorAssignmentMock(...args),
+  deleteSupervisorAssignment: (...args: unknown[]) => deleteSupervisorAssignmentMock(...args),
+  getSupervisorChain: (...args: unknown[]) => getSupervisorChainMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -81,6 +89,10 @@ describe("UserManagement", () => {
     listGroupMembersMock.mockReset();
     addGroupMemberMock.mockReset();
     removeGroupMemberMock.mockReset();
+    listSupervisorAssignmentsMock.mockReset();
+    createSupervisorAssignmentMock.mockReset();
+    deleteSupervisorAssignmentMock.mockReset();
+    getSupervisorChainMock.mockReset();
 
     listUsersMock.mockResolvedValue([
       { id: "u1", username: "alice", email: "alice@example.com", enabled: true, first_name: "Alice", last_name: "A" },
@@ -92,6 +104,7 @@ describe("UserManagement", () => {
       { id: 10, principal_type: "user", principal_id: "carol", role_id: 1, resource_id: "root" },
     ]);
     listGroupsMock.mockResolvedValue([]);
+    listSupervisorAssignmentsMock.mockResolvedValue([]);
   });
 
   it("lists users, roles and assignments", async () => {
@@ -278,5 +291,77 @@ describe("UserManagement", () => {
       expect(removeGroupMemberMock).toHaveBeenCalledWith("token-123", "g1", "dave")
     );
     await waitFor(() => expect(screen.queryByText("dave")).not.toBeInTheDocument());
+  });
+
+  it("shows an empty state without any supervisor assignments", async () => {
+    renderUserManagement();
+
+    expect(await screen.findByText("Keine Vorgesetzten-Zuordnungen.")).toBeInTheDocument();
+  });
+
+  it("creates a supervisor assignment and reloads the list", async () => {
+    createSupervisorAssignmentMock.mockResolvedValue({
+      id: 1,
+      principal_id: "alice",
+      supervisor_principal_id: "bob",
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listSupervisorAssignmentsMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Vorgesetzten-Zuordnung anlegen" });
+    fireEvent.change(within(form).getByLabelText("Nutzername/Principal-ID"), {
+      target: { value: "alice" },
+    });
+    fireEvent.change(within(form).getByLabelText("Vorgesetzte/r (Nutzername/Principal-ID)"), {
+      target: { value: "bob" },
+    });
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(createSupervisorAssignmentMock).toHaveBeenCalledWith("token-123", {
+        principalId: "alice",
+        supervisorPrincipalId: "bob",
+      })
+    );
+    await waitFor(() => expect(listSupervisorAssignmentsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists supervisor assignments and deletes one", async () => {
+    listSupervisorAssignmentsMock.mockResolvedValue([
+      {
+        id: 1,
+        principal_id: "quentin",
+        supervisor_principal_id: "bob",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    deleteSupervisorAssignmentMock.mockResolvedValue(undefined);
+    renderUserManagement();
+
+    await screen.findByText("quentin");
+    const row = screen.getByText("quentin").closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Löschen" }));
+
+    await waitFor(() => expect(deleteSupervisorAssignmentMock).toHaveBeenCalledWith("token-123", 1));
+  });
+
+  it("looks up a supervisor chain, unioning multiple upward paths", async () => {
+    getSupervisorChainMock.mockResolvedValue({
+      principal_id: "heidi",
+      supervisor_ids: ["ivan", "judy", "karl"],
+    });
+    renderUserManagement();
+
+    const form = screen.getByRole("form", { name: "Vorgesetztenkette nachschlagen" });
+    fireEvent.change(within(form).getByLabelText("Nutzername/Principal-ID"), {
+      target: { value: "heidi" },
+    });
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(getSupervisorChainMock).toHaveBeenCalledWith("token-123", "heidi"));
+    expect(
+      await screen.findByText("Vorgesetztenkette von heidi: ivan, judy, karl")
+    ).toBeInTheDocument();
   });
 });

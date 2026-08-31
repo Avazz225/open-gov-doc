@@ -308,6 +308,64 @@ export async function removeGroupMember(
   );
 }
 
+export interface SupervisorAssignment {
+  id: number;
+  principal_id: string;
+  supervisor_principal_id: string;
+  created_at: string;
+}
+
+export interface SupervisorChain {
+  principal_id: string;
+  supervisor_ids: string[];
+}
+
+export async function listSupervisorAssignments(token: string): Promise<SupervisorAssignment[]> {
+  const response = await request("permission-service", "supervisor-assignments", {}, token);
+  return response.json();
+}
+
+export async function createSupervisorAssignment(
+  token: string,
+  params: { principalId: string; supervisorPrincipalId: string }
+): Promise<SupervisorAssignment> {
+  const response = await request(
+    "permission-service",
+    "supervisor-assignments",
+    jsonInit({
+      principal_id: params.principalId,
+      supervisor_principal_id: params.supervisorPrincipalId,
+    }),
+    token
+  );
+  return response.json();
+}
+
+export async function deleteSupervisorAssignment(
+  token: string,
+  assignmentId: number
+): Promise<void> {
+  await request(
+    "permission-service",
+    `supervisor-assignments/${assignmentId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function getSupervisorChain(
+  token: string,
+  principalId: string
+): Promise<SupervisorChain> {
+  const response = await request(
+    "permission-service",
+    `supervisor-chain/${encodeURIComponent(principalId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 // Generic four-eyes principle settings page (Post-Roadmap Phase 22 Session
 // 3) - `GET /approval-config` returns ONLY already-configured action types
 // (if a row is missing, `requires_approval=false` applies implicitly, see
