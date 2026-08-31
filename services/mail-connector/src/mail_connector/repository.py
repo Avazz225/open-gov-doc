@@ -16,9 +16,16 @@ class NotInStatusError(Exception):
     message."""
 
 
-async def get_by_source_uid(session: AsyncSession, source_uid: str) -> InboundMessage | None:
+async def get_by_source_uid(
+    session: AsyncSession, mailbox_id: str, source_uid: str
+) -> InboundMessage | None:
+    """Since Post-Roadmap Phase 31 Session 12a, scoped to `mailbox_id` -
+    `source_uid` is only unique WITHIN a mailbox (see `models.
+    InboundMessage`)."""
     result = await session.execute(
-        select(InboundMessage).where(InboundMessage.source_uid == source_uid)
+        select(InboundMessage).where(
+            InboundMessage.mailbox_id == mailbox_id, InboundMessage.source_uid == source_uid
+        )
     )
     return result.scalars().first()
 
@@ -26,6 +33,7 @@ async def get_by_source_uid(session: AsyncSession, source_uid: str) -> InboundMe
 async def create_inbound_message(
     session: AsyncSession,
     *,
+    mailbox_id: str,
     source_uid: str,
     from_address: str,
     subject: str,
@@ -39,6 +47,7 @@ async def create_inbound_message(
 ) -> InboundMessage:
     message = InboundMessage(
         id=str(uuid.uuid4()),
+        mailbox_id=mailbox_id,
         source_uid=source_uid,
         from_address=from_address,
         subject=subject,
@@ -96,11 +105,13 @@ async def list_attachments(session: AsyncSession, message_id: str) -> list[Inbou
 
 
 async def list_messages(
-    session: AsyncSession, *, status: str | None = None
+    session: AsyncSession, *, status: str | None = None, mailbox_id: str | None = None
 ) -> list[InboundMessage]:
     query = select(InboundMessage)
     if status is not None:
         query = query.where(InboundMessage.status == status)
+    if mailbox_id is not None:
+        query = query.where(InboundMessage.mailbox_id == mailbox_id)
     result = await session.execute(query.order_by(InboundMessage.received_at.desc()))
     return list(result.scalars().all())
 

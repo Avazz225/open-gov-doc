@@ -557,8 +557,11 @@ current state before it was allowed onto the list. Full inventory, current-state
 explicit triage of what was deliberately **not** carried forward: see
 [`docs/egov-feature-gap-analysis.md`](docs/egov-feature-gap-analysis.md).
 
-Twelve sessions, grouped by dependency rather than by a fixed sub-phase split — P31-S9 (org-hierarchy
-foundation) blocks P31-S10/S11, otherwise sessions are independent and may run in any order.
+Originally twelve sessions, grouped by dependency rather than by a fixed sub-phase split — P31-S9
+(org-hierarchy foundation) blocks P31-S10/S11, otherwise sessions are independent and may run in any
+order. P31-S12 was itself further split into P31-S12a/b/c once scoped in detail (see
+[ADR 0123](docs/adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md) "Decision") — fifteen
+actual sessions in total (S1–S11, S12a/b/c, S13).
 
 | Session | Deliverable |
 |---|---|
@@ -573,7 +576,10 @@ foundation) blocks P31-S10/S11, otherwise sessions are independent and may run i
 | P31-S9 | ✅ Org-hierarchy foundation: new `SupervisorAssignment` edge table in `permission-service` — a DAG, not a tree (user-chosen: a principal may have multiple direct supervisors), with cycle prevention at write time and a breadth-first chain resolution (`GET /supervisor-chain/{id}`) that unions every upward path. Org units deliberately reuse the existing `Group`/`GroupMembership` rather than a new concept (user-chosen). See [ADR 0120](docs/adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md). |
 | P31-S10 | ✅ Dynamic org-hierarchy access grants: a minimal `TaskClaim` mechanism in `workflow-service` (no assignee concept existed before) resolves a real assignee, then `POST .../org-hierarchy-grant` auto-creates `permission-service` `Delegation` rows (reusing ADR 0048's already-enforced on-behalf-of check) for the resolved supervisor/chain/org-unit — distinct from self-service delegation, revoked automatically when the claim ends. See [ADR 0121](docs/adr/0121-dynamic-org-hierarchy-access-grants-task-claim-and-delegation-reuse.md). |
 | P31-S11 | ✅ Supervisor/team task oversight view: new `TeamTaskList.tsx` (`reviewer-ui`, route `/team/`) — no new backend endpoint, purely composes P31-S9's `GET /supervisor-assignments?supervisor_principal_id=` with P31-S10's already-`claimed_by`-enriched `GET /tasks`, client-side filtered. Read-only, a separate view alongside `TaskList` (ADR 0041). See [ADR 0122](docs/adr/0122-supervisor-team-task-oversight-view-read-only-composition.md). |
-| P31-S12 | Central + decentralized inbox model with a cross-inbox routing registry ("Postbuch"): extends `mail-connector` from its current single-mailbox model (`docs/services/mail-connector.md`) to multiple named inboxes (one central, N per-department) plus a searchable log of every item's routing history between them. Sized as a substantial `mail-connector` extension in its own right — expect this session to run long or split further once scoped in detail. |
+| P31-S12 | Central + decentralized inbox model with a cross-inbox routing registry ("Postbuch") — per research + user decision, split into three independently-shippable sessions (see [ADR 0123](docs/adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md) "Decision"): **P31-S12a** ✅ multi-inbox config/plumbing, **P31-S12b** routing/hand-off semantics between inboxes, **P31-S12c** the searchable Postbuch log UI. |
+| P31-S12a | ✅ Multi-inbox configuration: `Settings.mailboxes: list[MailboxConfig]` (env-var JSON list, same pattern as `storage-service`'s `DMS_TARGETS`/ADR 0004/0017/0091 — credentials stay env-var/restart-only, not DB-CRUD) replaces the previous single, service-wide POP3/IMAP/SMTP block. `InboundMessage` gained `mailbox_id` (`source_uid` uniqueness now scoped per mailbox), one poll loop iterates every configured mailbox each tick, new `GET /mailboxes` (credential-free) and an optional `mailbox_id` filter on `GET /inbound`. A departmental mailbox's owner is a `permission-service` `Group.id` (user-chosen — reuses P31-S9's `Group` rather than a new org-unit concept). Per-mailbox RBAC deliberately deferred. See [ADR 0123](docs/adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md). |
+| P31-S12b | Routing/hand-off semantics between inboxes — not yet started. |
+| P31-S12c | The searchable Postbuch log UI — not yet started. |
 | P31-S13 | General xdomea/XJustiz exchange: extend ADR 0029's `xdomea.py` (currently export-only, XDOMEA 4.0.0-only, scoped exclusively to `archival-service`'s disposal pipeline for `Case` objects) with an import direction, generalize beyond the disposal pipeline to general document/case export for inter-agency handoff, and add XJustiz support for judiciary exchange (zero references in the repo today). The largest and most complex item in this phase — sequenced last deliberately, after the foundation sessions above have proven out the patterns this will need to reuse (typed references, classification, redaction). |
 
 **Definition of Done**: tests green per session per `CONTRIBUTING.md`; a new ADR for each session with a

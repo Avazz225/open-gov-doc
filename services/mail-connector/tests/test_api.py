@@ -38,12 +38,18 @@ def _build_raw_message(
 
 
 async def _ingest(
-    session, *, uid: str, subject: str, body: str = "Hallo", attachment: bytes | None = None
+    session,
+    *,
+    uid: str,
+    subject: str,
+    body: str = "Hallo",
+    attachment: bytes | None = None,
+    mailbox_id: str = "central",
 ):
     raw = RawIncomingMessage(
         uid=uid, raw_bytes=_build_raw_message(subject=subject, body=body, attachment=attachment)
     )
-    await _ingest_message(session, raw)
+    await _ingest_message(session, mailbox_id, raw)
     await session.commit()
 
 
@@ -158,6 +164,9 @@ async def test_ingest_without_match_stays_unassigned(client, session):
     [message] = [m for m in response.json() if m["from_address"] == "buerger@example.com"]
     assert message["status"] == "unassigned"
     assert message["proposed_target_id"] is None
+    # Multi-Postfach-Modell (14.2, Post-Roadmap Phase 31 Session 12a) -
+    # `_ingest` beansprucht standardmaessig das Standard-Postfach "central".
+    assert message["mailbox_id"] == "central"
     # Textkörper zählt als eigener (synthetischer) Anhang.
     assert len(message["attachments"]) == 1
     assert message["attachments"][0]["scan_status"] == "clean"
@@ -406,3 +415,49 @@ def test_send_outbound_with_unknown_related_document_returns_400(client):
     # siehe `_attach_related_document`s Aufrufstelle in `send_outbound`).
     listed = client.get("/outbound", headers=ADMIN_HEADERS)
     assert not any(m["subject"] == "Sollte nicht versendet werden" for m in listed.json())
+
+
+# --- Multi-Postfach-Modell (14.2, Post-Roadmap Phase 31 Session 12a) -------
+
+
+def test_list_mailboxes_requires_principal(client):
+    response = client.get("/mailboxes")
+    assert response.status_code == 401
+
+
+def test_list_mailboxes_requires_poststelle_role(client):
+    response = client.get(
+        "/mailboxes", headers={"X-DMS-Principal": "someone", "X-DMS-Roles": "nothing-relevant"}
+    )
+    assert response.status_code == 403
+
+
+def test_list_mailboxes_returns_configured_mailboxes_without_credentials(client):
+    response = client.get("/mailboxes", headers=ADMIN_HEADERS)
+
+    assert response.status_code == 200
+    [mailbox] = response.json()
+    assert mailbox == {
+        "id": "central",
+        "name": "Zentrale Poststelle",
+        "kind": "central",
+        "owning_group_id": None,
+    }
+    # Keine Zugangsdaten in der Antwort (ADR 0091-Praezedenzfall - Secrets
+    # bleiben env-var-only, niemals in einer GET-Antwort).
+    assert "pop3_password" not in mailbox
+    assert "pop3_username" not in mailbox
+
+
+async def test_list_inbound_filters_by_mailbox_id(client, session):
+    await _ingest(session, uid="uid-mailbox-filter", subject="Fuer das Standard-Postfach")
+
+    matching = client.get(
+        "/inbound", params={"mailbox_id": "central"}, headers=ADMIN_HEADERS
+    ).json()
+    other = client.get(
+        "/inbound", params={"mailbox_id": "does-not-exist"}, headers=ADMIN_HEADERS
+    ).json()
+
+    assert any(m["subject"] == "Fuer das Standard-Postfach" for m in matching)
+    assert not any(m["subject"] == "Fuer das Standard-Postfach" for m in other)

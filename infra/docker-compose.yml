@@ -1190,13 +1190,27 @@ services:
       # falls back to the local dev default (`localhost:8007`), which points
       # nowhere there.
       DMS_OBJECT_TYPE_SERVICE_BASE_URL: http://object-type-service:8000
-      # Inbox/outbox (2.5/3.3, P15-S3): mailpit's own POP3 server serves
-      # as the self-loopback source (see comment there) - credentials
-      # must match `infra/mailpit-pop3-auth`.
-      DMS_POP3_HOST: mailpit
-      DMS_POP3_PORT: "1110"
-      DMS_POP3_USERNAME: ${MAIL_CONNECTOR_POP3_USERNAME:-mailconnector}
-      DMS_POP3_PASSWORD: ${MAIL_CONNECTOR_POP3_PASSWORD:-mailconnector}
+      # Multi-inbox model (14.2, Post-Roadmap Phase 31 Session 12a) - any
+      # number of named mailboxes instead of one fixed POP3/IMAP block, same
+      # env-var-JSON-list pattern as storage-service's DMS_TARGETS (ADR
+      # 0004/0017/0091: credentials stay env-var/restart-only, not
+      # DB-backed/live-editable). The single default entry below is the
+      # dev-standard mailpit self-loopback source (see comment there),
+      # credentials match `infra/mailpit-pop3-auth`. Env var values are NOT
+      # expanded further inside a MAIL_CONNECTOR_MAILBOXES override (same
+      # caveat as STORAGE_SERVICE_TARGETS below) - a custom override must
+      # enter every credential literally, e.g. to add a departmental
+      # mailbox:
+      #   MAIL_CONNECTOR_MAILBOXES='[{"id":"central","name":"Zentrale Poststelle",
+      #     "kind":"central","inbound_protocol":"pop3","pop3_host":"mailpit","pop3_port":1110,
+      #     "pop3_username":"mailconnector","pop3_password":"mailconnector","pop3_use_tls":false},
+      #     {"id":"finanzen","name":"Poststelle Finanzen","kind":"departmental",
+      #      "owning_group_id":"<permission-service Group.id>","inbound_protocol":"imap",
+      #      "imap_host":"...","imap_username":"...","imap_password":"..."}]'
+      DMS_MAILBOXES: >-
+        ${MAIL_CONNECTOR_MAILBOXES:-[{"id":"central","name":"Zentrale Poststelle","kind":"central",
+        "inbound_protocol":"pop3","pop3_host":"mailpit","pop3_port":1110,
+        "pop3_username":"mailconnector","pop3_password":"mailconnector","pop3_use_tls":false}]}
       DMS_SMTP_HOST: mailpit
       DMS_SMTP_PORT: "1025"
       DMS_POSTSTELLE_ROLE: ${MAIL_CONNECTOR_POSTSTELLE_ROLE:-dms-poststelle}

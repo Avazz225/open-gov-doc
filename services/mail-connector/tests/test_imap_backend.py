@@ -122,10 +122,11 @@ async def test_dedup_contract_matches_pop3_via_repository(monkeypatch, session):
     backend = ImapBackend("irrelevant-host", 143, "user", "pass", use_tls=False)
 
     [raw] = await backend.fetch_new_messages()
-    assert await repository.get_by_source_uid(session, raw.uid) is None
+    assert await repository.get_by_source_uid(session, "central", raw.uid) is None
 
     await repository.create_inbound_message(
         session,
+        mailbox_id="central",
         source_uid=raw.uid,
         from_address="buerger@example.com",
         subject="Test",
@@ -141,7 +142,7 @@ async def test_dedup_contract_matches_pop3_via_repository(monkeypatch, session):
 
     [raw_again] = await backend.fetch_new_messages()
     assert raw_again.uid == raw.uid
-    assert await repository.get_by_source_uid(session, raw_again.uid) is not None
+    assert await repository.get_by_source_uid(session, "central", raw_again.uid) is not None
 
 
 @pytest.mark.parametrize("use_tls", [True, False])

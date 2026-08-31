@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S11 (supervisor/team task oversight view: a new, read-only `/team/` area in `reviewer-ui`, composing already-existing P31-S9/S10 data with no new backend endpoint — see below under "Post-Roadmap: Phase 31"), the eleventh session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S12a (multi-inbox configuration: `mail-connector`'s `Settings.mailboxes` env-var-JSON-list, replacing the previous single-mailbox model — see below under "Post-Roadmap: Phase 31"), the twelfth session of the new Phase 31 (eGov feature gap closure). P31-S12 (the original single-session plan line) was, per research + user decision, split into P31-S12a/b/c — only 12a is done.
 
-**Next session:** P31-S12 or P31-S13 — see `IMPLEMENTATION_PLAN.md` "Phase 31"; both independent, no remaining P31-S9 dependents.
+**Next session:** P31-S12b (routing/hand-off semantics between inboxes, builds directly on P31-S12a) or P31-S13 (general xdomea/XJustiz exchange, independent) — see `IMPLEMENTATION_PLAN.md` "Phase 31". P31-S12c (searchable Postbuch log) depends on P31-S12b existing first.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4497,6 +4497,86 @@ proving the cross-route navigation actually works end to end, not just in isolat
 up afterward (supervisor-assignment deleted, the leftover claimed task completed rather than left
 dangling); the temporary Playwright spec file removed. Same honest exception as P31-S10: the test process
 definition/instances themselves remain (no instance-deletion endpoint exists by design).
+
+### Post-Roadmap: Phase 31 Session 12a — multi-inbox configuration (2026-08-31)
+
+Twelfth session of Phase 31 (14.2, eGov feature gap closure) — the first of a three-part split of the
+original P31-S12 ask ("central + decentralized inbox model with a cross-inbox routing registry
+'Postbuch'"). See [ADR 0123](docs/adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md)
+for the full design reasoning.
+
+**Scoped via research + two user decisions, again, before any code.** Both the gap-analysis authors and
+`IMPLEMENTATION_PLAN.md` itself had already flagged this session as likely too big for one pass. A
+research agent read the actual `mail-connector` code (not just the docs) and confirmed it: one
+service-wide `Settings` block (`inbound_protocol`/`pop3_*`/`imap_*`), one backend instance, one poll loop,
+baked into `main.py`'s lifespan — no multi-mailbox plumbing to extend, only a single-mailbox assumption to
+unwind. It also confirmed nothing in the codebase models a "department" today (P31-S9's `Group` is the
+only candidate). Put both findings to the user directly: **(1) split into P31-S12a (config/plumbing) →
+P31-S12b (routing/hand-off) → P31-S12c (searchable log)**, each independently shippable — chosen over
+attempting all three in one tightly-scoped pass. **(2) a departmental mailbox's owner reuses
+`permission-service`'s existing `Group`** (by `Group.id`) rather than a new, competing org-unit concept —
+chosen over inventing one, consistent with P31-S9's own explicit choice not to build a dedicated org-unit
+entity.
+
+**`Settings.mailboxes: list[MailboxConfig]`** (env-var JSON list) replaces the previous single mailbox
+block — the exact same pattern as `storage-service`'s `DMS_TARGETS`/`BackendTargetConfig` (ADR 0004/0017),
+deliberately NOT a DB-backed CRUD table: mailbox config includes real POP3/IMAP credentials, and
+[ADR 0091](docs/adr/0091-connector-operational-config-live-editable.md) already established, for the
+*exact same class* of problem (storage/signature connector credentials), that live-editable secrets need
+new encryption/masking infrastructure a `GET` response must never leak plaintext through — explicitly out
+of scope there, and correctly recognized as out of scope here too rather than silently taken on. Each
+`MailboxConfig` carries `id`/`name`/`kind` (`"central"`|`"departmental"`)/`owning_group_id`
+(required iff departmental) plus its own protocol/host/port/credentials. `InboundMessage` gained
+`mailbox_id`; `source_uid` uniqueness moved from globally-unique to `UNIQUE(mailbox_id, source_uid)` (a
+POP3/IMAP UID is only guaranteed stable *within* one mail account, RFC 1939 — two mailboxes could
+plausibly reuse the same native UID). The poll loop now iterates every configured mailbox each tick (one
+backend instance per mailbox, built once at startup) rather than N concurrent poll tasks — matches this
+project's established simple, sequential poll-loop idiom; each mailbox's fetch/ingest gets its own
+`try`/`except` within the tick so one mailbox's failure doesn't block the others. New `GET /mailboxes`
+(credential-free projection) and an optional `mailbox_id` filter on `GET /inbound`.
+
+**Ad-hoc migration, not a fresh table**: `mailbox_id` added, backfilled to `"central"` (the fixed id the
+single default mailbox entry uses — every message that ever arrived did so through what's now named the
+"central" mailbox), then the old single-column unique constraint on `source_uid` alone replaced with the
+composite one — guarded via `information_schema` checks (same idiom as document-service's P15-S1
+`object_type_id` type-drift fix) so a fresh install's `create_all`-created composite constraint isn't
+touched a second time.
+
+**Existing `docker-compose.yml`/`.env.example` config migrated directly, not kept on a fallback path**:
+the old `DMS_POP3_HOST`/`DMS_POP3_USERNAME`/etc. env vars are gone, replaced by `DMS_MAILBOXES` with a
+single default entry reproducing the exact previous behavior against the same `mailpit` self-loopback dev
+target. **A real mistake caught before shipping**: an initial draft nested `${MAIL_CONNECTOR_POP3_USERNAME
+:-mailconnector}` inside `DMS_MAILBOXES`'s own `${...:-default}` JSON value, to allow overriding just the
+credential sub-fields — reverted once recognized that docker-compose's variable interpolation is not
+brace-nesting-aware (a single regex pass terminating at the first `}`, silently truncating the outer
+reference). Same, already-documented caveat as `STORAGE_SERVICE_TARGETS`'s own comment — credentials in
+the default JSON are now literal, consistent with that established precedent.
+
+**Test counts**: mail-connector 47 (+6: `source_uid` scoped-per-mailbox repository test, `list_messages`
+mailbox-id filter, `GET /mailboxes` auth/role/credential-exclusion, `GET /inbound?mailbox_id=` filter,
+plus the existing `test_dedup_contract_matches_pop3_via_repository` IMAP test and the base ingestion test
+updated for the new per-mailbox signatures). All `ruff check`/`ruff format --check` clean (pre-existing,
+unrelated `loadtest/`/`federation-hub-service` issues untouched, same as every prior session this phase).
+**A genuinely flaky, pre-existing test found (not caused by this session)**: `test_ingest_detects_unique_
+kennzeichen_match`/`test_confirm_match_creates_document_in_matched_folder` intermittently fail with
+`RuntimeError: ... is bound to a different event loop` — confirmed via `git diff` that this session's
+changes never touch the code path involved (`matching.resolve_match`'s `document_client`/`case_client`
+usage), and confirmed the SAME two tests pass reliably together and in isolation on a clean retry — a
+pre-existing pytest-asyncio/httpx event-loop interaction this file's own `_load_candidate_pattern`
+docstring already documents as a known risk category for direct `_ingest_message()` test calls, not a
+regression.
+
+**Fully verified live against the real, freshly rebuilt stack**: `mail-connector` rebuilt and restarted —
+the ad-hoc migration ran cleanly against the real dev stack's 653 pre-existing `inbound_message` rows, all
+correctly backfilled to `mailbox_id="central"`, the composite unique constraint confirmed in place via
+`\d mail_connector.inbound_message`. `curl`: `GET /mailboxes` returns exactly the default central mailbox
+with no credential fields present; `401`/`403` gates confirmed; `GET /inbound?mailbox_id=central` returns
+all 653 real messages, `?mailbox_id=does-not-exist` correctly empty. **A genuine end-to-end SMTP→POP3
+roundtrip** through the real, rebuilt poll loop: sent a real test email via `mailpit`'s SMTP, waited a full
+poll interval, confirmed it arrived correctly tagged `mailbox_id: "central"` — proof the multi-mailbox
+poll-loop rewrite still actually receives mail, not just that the API/migration are correct in isolation.
+Test message rejected afterward (mail-connector has no delete-message endpoint, `"rejected"` is the
+correct terminal state for a test artifact, consistent with this service's append-only message history).
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

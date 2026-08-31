@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("mail_connector")
@@ -11,12 +11,20 @@ class InboundMessage(Base):
     """A message retrieved via the inbound mail path, not yet (or already)
     assigned (2.5/10.3). `source_uid` is the backend's own stable identifier
     (POP3 UIDL) - basis for the idempotency check, so that the same poll
-    tick doesn't create an already-processed message twice."""
+    tick doesn't create an already-processed message twice. Since
+    Post-Roadmap Phase 31 Session 12a, `source_uid` is only unique WITHIN a
+    mailbox (`mailbox_id`, a `settings.MailboxConfig.id`, no FK enforcement
+    across the config/DB boundary) - two different mailboxes could plausibly
+    reuse the same backend-native UID, they are different mail accounts."""
 
     __tablename__ = "inbound_message"
+    __table_args__ = (
+        UniqueConstraint("mailbox_id", "source_uid", name="uq_inbound_message_mailbox_source"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    source_uid: Mapped[str] = mapped_column(String(255), unique=True)
+    mailbox_id: Mapped[str] = mapped_column(String(128), index=True)
+    source_uid: Mapped[str] = mapped_column(String(255))
     from_address: Mapped[str] = mapped_column(String(320))
     subject: Mapped[str] = mapped_column(String(998))
     body_text: Mapped[str] = mapped_column(String)

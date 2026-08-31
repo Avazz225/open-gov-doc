@@ -16,8 +16,21 @@ class InboundAttachmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MailboxOut(BaseModel):
+    """Read-only reflection of a configured `settings.MailboxConfig` (14.2,
+    Post-Roadmap Phase 31 Session 12a) - deliberately excludes every
+    credential field (host/port/username/password), only what's needed to
+    render a mailbox selector/label in the frontend."""
+
+    id: str
+    name: str
+    kind: Literal["central", "departmental"]
+    owning_group_id: str | None
+
+
 class InboundMessageOut(BaseModel):
     id: str
+    mailbox_id: str
     from_address: str
     subject: str
     body_text: str

@@ -6,6 +6,7 @@ from mail_connector import repository
 
 async def _create_message(session, **overrides):
     kwargs = {
+        "mailbox_id": "central",
         "source_uid": "uid-1",
         "from_address": "buerger@example.com",
         "subject": "Rueckmeldung",
@@ -24,7 +25,7 @@ async def _create_message(session, **overrides):
 async def test_create_and_get_by_source_uid(session):
     created = await _create_message(session)
 
-    fetched = await repository.get_by_source_uid(session, "uid-1")
+    fetched = await repository.get_by_source_uid(session, "central", "uid-1")
 
     assert fetched is not None
     assert fetched.id == created.id
@@ -32,7 +33,22 @@ async def test_create_and_get_by_source_uid(session):
 
 
 async def test_get_by_source_uid_returns_none_when_unknown(session):
-    assert await repository.get_by_source_uid(session, "does-not-exist") is None
+    assert await repository.get_by_source_uid(session, "central", "does-not-exist") is None
+
+
+async def test_get_by_source_uid_is_scoped_per_mailbox(session):
+    """Since Post-Roadmap Phase 31 Session 12a: `source_uid` is only unique
+    WITHIN a mailbox - two different mailboxes may reuse the same
+    backend-native UID without colliding."""
+    await _create_message(session, mailbox_id="central", source_uid="uid-shared")
+    await _create_message(session, mailbox_id="finanzen", source_uid="uid-shared")
+
+    central = await repository.get_by_source_uid(session, "central", "uid-shared")
+    finanzen = await repository.get_by_source_uid(session, "finanzen", "uid-shared")
+
+    assert central is not None
+    assert finanzen is not None
+    assert central.id != finanzen.id
 
 
 async def test_message_with_proposed_target_starts_as_proposed_match(session):
@@ -88,6 +104,19 @@ async def test_list_messages_filters_by_status(session):
 
     assert len(unassigned) == 1
     assert len(proposed) == 1
+
+
+async def test_list_messages_filters_by_mailbox_id(session):
+    await _create_message(session, mailbox_id="central", source_uid="uid-central")
+    await _create_message(session, mailbox_id="finanzen", source_uid="uid-finanzen")
+
+    central = await repository.list_messages(session, mailbox_id="central")
+    finanzen = await repository.list_messages(session, mailbox_id="finanzen")
+    all_messages = await repository.list_messages(session)
+
+    assert [m.source_uid for m in central] == ["uid-central"]
+    assert [m.source_uid for m in finanzen] == ["uid-finanzen"]
+    assert len(all_messages) == 2
 
 
 async def test_mark_confirmed_sets_status_and_confirmer(session):

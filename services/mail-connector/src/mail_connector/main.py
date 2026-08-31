@@ -34,6 +34,7 @@ from mail_connector.schemas import (
     ConfirmMatchRequest,
     InboundAttachmentOut,
     InboundMessageOut,
+    MailboxOut,
     OutboundMessageCreate,
     OutboundMessageOut,
     RejectRequest,
@@ -103,7 +104,7 @@ def _safe_filename(name: str) -> str:
     return _FILENAME_SANITIZE_RE.sub("_", name).strip() or "unbenannt"
 
 
-async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> None:
+async def _ingest_message(session: AsyncSession, mailbox_id: str, raw: RawIncomingMessage) -> None:
     from_address, subject, received_at, body_text, attachment_parts = _parse_message(raw.raw_bytes)
 
     # Candidate pattern loaded fresh per message instead of cached once at
@@ -121,6 +122,7 @@ async def _ingest_message(session: AsyncSession, raw: RawIncomingMessage) -> Non
     )
     message = await repository.create_inbound_message(
         session,
+        mailbox_id=mailbox_id,
         source_uid=raw.uid,
         from_address=from_address,
         subject=subject,
@@ -219,20 +221,31 @@ async def _load_candidate_pattern() -> "re.Pattern[str]":
 async def _poll_loop(session_factory) -> None:
     """Cyclically retrieves new messages (2.5/3.3) - same poll-loop idiom as
     document-service's `_retention_poll_loop` (ADR 0020), here at a
-    considerably shorter cadence (mail room operation, see settings.py)."""
+    considerably shorter cadence (mail room operation, see settings.py).
+    Since Post-Roadmap Phase 31 Session 12a, one tick polls every configured
+    mailbox in turn (`app.state.backends`, `dict[mailbox_id,
+    MailboxBackend]`) - a failure fetching/ingesting one mailbox does not
+    prevent the others from being polled in the same tick (each mailbox's
+    `try` is independent, not the whole loop's)."""
     while True:
-        try:
-            messages = await app.state.backend.fetch_new_messages()
-            for raw in messages:
-                async with session_factory() as session:
-                    if await repository.get_by_source_uid(session, raw.uid) is not None:
-                        continue
-                    await _ingest_message(session, raw)
-                    await session.commit()
-        except Exception:
-            logger.exception(
-                "Posteingang-Poll-Tick fehlgeschlagen - wird beim naechsten Tick erneut versucht."
-            )
+        for mailbox_id, backend in app.state.backends.items():
+            try:
+                messages = await backend.fetch_new_messages()
+                for raw in messages:
+                    async with session_factory() as session:
+                        if (
+                            await repository.get_by_source_uid(session, mailbox_id, raw.uid)
+                            is not None
+                        ):
+                            continue
+                        await _ingest_message(session, mailbox_id, raw)
+                        await session.commit()
+            except Exception:
+                logger.exception(
+                    "Posteingang-Poll-Tick fuer Postfach %r fehlgeschlagen - wird beim "
+                    "naechsten Tick erneut versucht.",
+                    mailbox_id,
+                )
         await asyncio.sleep(settings.poll_interval_seconds)
 
 
@@ -243,6 +256,62 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS mail_connector"))
         await conn.run_sync(Base.metadata.create_all)
+        # Multi-inbox model (14.2, Post-Roadmap Phase 31 Session 12a) - ad
+        # hoc migration (no Alembic, see CONTRIBUTING.md): `mailbox_id` is
+        # new, backfilled to `"central"` (the fixed id of the single default
+        # mailbox this session's `Settings.mailboxes` default reproduces),
+        # then the old single-column unique constraint on `source_uid`
+        # alone is replaced with the new composite one (see
+        # `models.InboundMessage`) - guarded so a fresh install (where
+        # `create_all` above already created the composite constraint
+        # directly) does no-ops on every check.
+        await conn.execute(
+            text(
+                "ALTER TABLE mail_connector.inbound_message "
+                "ADD COLUMN IF NOT EXISTS mailbox_id VARCHAR(128)"
+            )
+        )
+        await conn.execute(
+            text(
+                "UPDATE mail_connector.inbound_message SET mailbox_id = 'central' "
+                "WHERE mailbox_id IS NULL"
+            )
+        )
+        mailbox_id_nullable = await conn.execute(
+            text(
+                "SELECT is_nullable FROM information_schema.columns "
+                "WHERE table_schema = 'mail_connector' AND table_name = 'inbound_message' "
+                "AND column_name = 'mailbox_id'"
+            )
+        )
+        if mailbox_id_nullable.scalar() == "YES":
+            await conn.execute(
+                text(
+                    "ALTER TABLE mail_connector.inbound_message "
+                    "ALTER COLUMN mailbox_id SET NOT NULL"
+                )
+            )
+        legacy_constraint = await conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.table_constraints "
+                "WHERE table_schema = 'mail_connector' AND table_name = 'inbound_message' "
+                "AND constraint_name = 'inbound_message_source_uid_key'"
+            )
+        )
+        if legacy_constraint.scalar() is not None:
+            await conn.execute(
+                text(
+                    "ALTER TABLE mail_connector.inbound_message "
+                    "DROP CONSTRAINT inbound_message_source_uid_key"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE mail_connector.inbound_message "
+                    "ADD CONSTRAINT uq_inbound_message_mailbox_source "
+                    "UNIQUE (mailbox_id, source_uid)"
+                )
+            )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -250,7 +319,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.virus_scan = VirusScanClient(settings.virus_scan_service_base_url)
     app.state.documents = DocumentClient(settings.document_service_base_url)
     app.state.cases = CaseClient(settings.case_service_base_url)
-    app.state.backend = build_backend(settings)
+    app.state.backends = {mailbox.id: build_backend(mailbox) for mailbox in settings.mailboxes}
 
     event_bus = NatsEventBusClient(settings.nats_url, stream="mail_connector")
     await event_bus.connect()
@@ -351,15 +420,31 @@ async def _to_message_out(session: AsyncSession, message) -> InboundMessageOut:
     )
 
 
+@app.get("/mailboxes", response_model=list[MailboxOut])
+async def list_mailboxes(
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+) -> list[MailboxOut]:
+    """The configured mailbox list (14.2, Post-Roadmap Phase 31 Session
+    12a) - basis for a mailbox selector in the frontend. Credential fields
+    are deliberately excluded (`MailboxOut`), same gate as `/inbound` -
+    every poststelle-role principal currently sees every mailbox (no
+    per-department visibility narrowing yet, see this session's ADR "Open
+    Points")."""
+    _require_poststelle(x_dms_principal, x_dms_roles)
+    return [MailboxOut.model_validate(mailbox.model_dump()) for mailbox in settings.mailboxes]
+
+
 @app.get("/inbound", response_model=list[InboundMessageOut])
 async def list_inbound(
     status_filter: str | None = None,
+    mailbox_id: str | None = None,
     x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[InboundMessageOut]:
     _require_poststelle(x_dms_principal, x_dms_roles)
-    messages = await repository.list_messages(session, status=status_filter)
+    messages = await repository.list_messages(session, status=status_filter, mailbox_id=mailbox_id)
     return [await _to_message_out(session, m) for m in messages]
 
 
