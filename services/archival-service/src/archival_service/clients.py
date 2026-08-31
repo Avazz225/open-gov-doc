@@ -19,6 +19,30 @@ class DocumentClient:
         response.raise_for_status()
         return response.json()
 
+    async def create_document(
+        self,
+        *,
+        data: bytes,
+        filename: str,
+        content_type: str | None,
+        title: str,
+        created_by: str,
+        folder_id: str,
+    ) -> dict:
+        """XDOMEA import (14.2, Post-Roadmap Phase 31 Session 13b) - same
+        multipart shape as `mail_connector.document_client.DocumentClient.
+        create_document` (this project's established pattern for creating a
+        document from externally-sourced content: document-service's own
+        `POST /documents` already runs the mandatory virus scan (10.3), no
+        special-cased import path needed)."""
+        response = await self._client.post(
+            "/documents",
+            data={"title": title, "created_by": created_by, "folder_id": folder_id},
+            files={"file": (filename, data, content_type or "application/octet-stream")},
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_version(self, document_id: str, version_number: int) -> dict:
         response = await self._client.get(f"/documents/{document_id}/versions/{version_number}")
         response.raise_for_status()
@@ -193,6 +217,41 @@ class CaseClient:
         response = await self._client.put(f"/cases/{case_id}/archived")
         response.raise_for_status()
         return response.json()
+
+    async def create_case(
+        self, *, name: str, process_definition_id: int, created_by: str, attributes: dict
+    ) -> dict:
+        """XDOMEA import (14.2, Post-Roadmap Phase 31 Session 13b) - creating
+        a NEW case always starts a real BPMN process instance
+        (case-service's own `POST /cases` requirement, `process_definition_id`
+        mandatory) - there is no XDOMEA-derivable value for this, the
+        importer supplies it explicitly (user-chosen scope decision, see
+        ADR 0128 "Decision")."""
+        response = await self._client.post(
+            "/cases",
+            json={
+                "name": name,
+                "process_definition_id": process_definition_id,
+                "created_by": created_by,
+                "attributes": attributes,
+            },
+            headers=self._SYSTEM_PRINCIPAL_HEADERS,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def add_document_reference(
+        self, case_id: str, *, document_id: str, added_by: str
+    ) -> None:
+        """Same shape as `mail_connector.case_client.CaseClient.
+        add_document_reference` - the established pattern for attaching an
+        externally-sourced document to an EXISTING case."""
+        response = await self._client.post(
+            f"/cases/{case_id}/documents",
+            json={"document_id": document_id, "added_by": added_by},
+            headers=self._SYSTEM_PRINCIPAL_HEADERS,
+        )
+        response.raise_for_status()
 
     async def get_archival_config(self) -> dict:
         response = await self._client.get(

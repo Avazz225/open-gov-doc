@@ -203,3 +203,72 @@ def test_build_aussonderung_message_still_has_kontextobjekt_and_rueckmeldungarch
     ns = {"xdomea": xdomea.XDOMEA_NS}
     assert root.find(".//xdomea:Vorgang/xdomea:Kontextobjekt", ns).text == "0"
     assert root.find(".//xdomea:RueckmeldungArchivkennung", ns).text == "0"
+
+
+# --- Parsing an Abgabe.Abgabe.0401 message back (XDOMEA import, 14.2,
+# Post-Roadmap Phase 31 Session 13b, ADR 0128) -----------------------------
+
+
+def test_parse_abgabe_message_roundtrips_a_case_export():
+    case = {"id": "case-roundtrip-1", "name": "Testfall Roundtrip"}
+    documents = [
+        _document("doc-1", 1, "application/pdf"),
+        _document("doc-2", 2, "text/plain"),
+    ]
+    xml_bytes = xdomea.build_abgabe_message_for_case(
+        case, documents, leser_name="Landesarchiv Test"
+    )
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff == "Testfall Roundtrip"
+    assert parsed.vorgang_xdomea_uuid is not None
+    assert [d.dateiname for d in parsed.documents] == [doc["package_filename"] for doc in documents]
+    assert parsed.documents[0].original_filename == "Rechnung.pdf"
+    assert parsed.documents[0].content_type == "application/pdf"
+
+
+def test_parse_abgabe_message_roundtrips_an_empty_case_export():
+    case = {"id": "case-roundtrip-2", "name": "Leere Umlaufmappe"}
+    xml_bytes = xdomea.build_abgabe_message_for_case(case, [], leser_name="Andere Behoerde")
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff == "Leere Umlaufmappe"
+    assert parsed.documents == []
+
+
+def test_parse_abgabe_message_roundtrips_a_standalone_document_export():
+    document = _document("doc-standalone", 1, "application/pdf")
+    xml_bytes = xdomea.build_abgabe_message_for_document(document, leser_name="Andere Behoerde")
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff is None
+    assert parsed.vorgang_xdomea_uuid is None
+    assert len(parsed.documents) == 1
+    assert parsed.documents[0].dateiname == document["package_filename"]
+    assert parsed.documents[0].original_filename == "Rechnung.pdf"
+
+
+def test_parse_dokument_element_raises_parse_error_without_a_dateiname():
+    """A schema-VALID but structurally-unexpected message (e.g. hand-crafted
+    or from a third-party system not following this module's own
+    `dokumente/<Dateiname>` packaging convention) - `Primaerdokument` itself
+    is `minOccurs="0"` per the schema, so a `Dokument` without one is not a
+    schema violation, but this module cannot import it."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:DokumentOderDokumentMitSchriftstueck>
+      <xdomea:Dokument>
+        <xdomea:Version>
+          <xdomea:Format/>
+        </xdomea:Version>
+      </xdomea:Dokument>
+    </xdomea:DokumentOderDokumentMitSchriftstueck>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    with pytest.raises(xdomea.ParseError):
+        xdomea.parse_abgabe_message(xml_bytes)

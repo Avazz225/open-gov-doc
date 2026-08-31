@@ -10,15 +10,18 @@
 - `Abgabe.Abgabe.0401` (since Post-Roadmap Phase 31 Session 13a): "the
   complete export of records objects upon change of jurisdiction between
   authorities or system changes" - general document/case handoff, NOT tied
-  to the disposal pipeline. Reuses the exact same `Vorgang`/
-  `DokumentOderDokumentMitSchriftstueck` substructure as the 0503 message
-  (shared XDOMEA types, `VorgangType`/`DokumentOderDokumentMitSchriftstueckType`
-  in `xdomea-Baukasten.xsd`), wrapped in a `Schriftgutobjekt` choice element
-  instead of nested inside a single fixed `Vorgang`, and can carry a
-  standalone `Dokument` with no enclosing `Vorgang` at all - the general
-  export case a bare document (no case) needs. Only the 0401 message itself
-  is generated, not the 0402/0403 import-confirmation counterparts (P31-S13b
-  is the IMPORT direction, a separate session).
+  to the disposal pipeline. Reuses the exact same
+  `DokumentOderDokumentMitSchriftstueckType` substructure as the 0503
+  message, wrapped in a `Schriftgutobjekt` choice element instead of nested
+  inside a single fixed `Vorgang`, and can carry a standalone `Dokument`
+  with no enclosing `Vorgang` at all - the general export case a bare
+  document (no case) needs. Only the 0401 message itself is built/emitted,
+  not the 0402/0403 import-confirmation counterparts. Since Session 13b,
+  `parse_abgabe_message` reads a 0401 message back (the IMPORT direction) -
+  deliberately scoped to the exact package shape THIS module's own export
+  produces (one `dokumente/<Dateiname>` ZIP entry per `Primaerdokument`,
+  `Schriftgutobjekt` containing at most one `Vorgang`), not arbitrary
+  third-party XDOMEA packaging conventions (see that function's docstring).
 
 Every field here was validated against the real XDOMEA 4.0.0 schema vendored
 in `xdomea_schema/` (not speculative - see comments at the places where the
@@ -26,6 +29,7 @@ structure was surprising)."""
 
 import mimetypes
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from lxml import etree
@@ -345,3 +349,94 @@ def validate_abgabe_message(xml_bytes: bytes) -> None:
         _ABGABE_SCHEMA.assertValid(document)
     except etree.DocumentInvalid as exc:
         raise ValidationError(str(exc)) from exc
+
+
+class ParseError(Exception):
+    """The message is schema-valid XML but is missing a field
+    `parse_abgabe_message` needs (e.g. `Primaerdokument/Dateiname` on a
+    `Dokument`, technically optional per the schema's own `minOccurs`, but
+    required for THIS module's own round-trip)."""
+
+
+@dataclass
+class ParsedAbgabeDocument:
+    dateiname: str
+    """Matches the ZIP entry `dokumente/{dateiname}` (`Primaerdokument/Dateiname`)."""
+    original_filename: str
+    content_type: str | None
+
+
+@dataclass
+class ParsedAbgabeMessage:
+    vorgang_betreff: str | None
+    """`None` if the package contains no `Vorgang` at all (a standalone
+    document export, see `build_abgabe_message_for_document`)."""
+    vorgang_xdomea_uuid: str | None
+    documents: list[ParsedAbgabeDocument] = field(default_factory=list)
+
+
+def _parse_dokument_element(dokument_el: "etree._Element") -> ParsedAbgabeDocument:
+    ns = {"xdomea": XDOMEA_NS}
+    primaerdokument_el = dokument_el.find(
+        "./xdomea:Version/xdomea:Format/xdomea:Primaerdokument", ns
+    )
+    dateiname_el = (
+        primaerdokument_el.find("./xdomea:Dateiname", ns)
+        if primaerdokument_el is not None
+        else None
+    )
+    if dateiname_el is None or not dateiname_el.text:
+        raise ParseError(
+            "Dokument ohne Primaerdokument/Dateiname - Paket entspricht nicht dem von "
+            "diesem Modul erwarteten Format"
+        )
+    original_el = primaerdokument_el.find("./xdomea:DateinameOriginal", ns)
+    sonstiger_name_el = dokument_el.find("./xdomea:Version/xdomea:Format/xdomea:SonstigerName", ns)
+    return ParsedAbgabeDocument(
+        dateiname=dateiname_el.text,
+        original_filename=(
+            original_el.text if original_el is not None and original_el.text else dateiname_el.text
+        ),
+        content_type=sonstiger_name_el.text if sonstiger_name_el is not None else None,
+    )
+
+
+def parse_abgabe_message(xml_bytes: bytes) -> ParsedAbgabeMessage:
+    """Reads an `Abgabe.Abgabe.0401` message back (14.2, Post-Roadmap Phase
+    31 Session 13b) - the IMPORT direction, the mirror of
+    `build_abgabe_message_for_case`/`build_abgabe_message_for_document`.
+    Does NOT re-validate against the schema (call `validate_abgabe_message`
+    first, same two-step pattern as `general_export.py`'s own build/validate
+    calls) and deliberately does not attempt to be a general-purpose XDOMEA
+    reader: it looks for `Dokument` elements ANYWHERE under a
+    `Schriftgutobjekt` (covers both a `Vorgang`'s nested documents and a
+    standalone top-level `Dokument`, but deliberately excludes the optional
+    `Anschreiben` cover-letter element, a sibling of `Schriftgutobjekt`, not
+    a descendant), and reads the FIRST `Vorgang`'s `Betreff`/`xdomeaUUID` if
+    one exists. A package with more than one top-level `Schriftgutobjekt`
+    (this module's own export never produces more than one, but the schema
+    permits `maxOccurs="unbounded"`) has all of its documents flattened into
+    one list rather than rejected - a deliberately lenient, bounded scope,
+    not a claim of full third-party-XDOMEA-package generality."""
+    root = etree.fromstring(xml_bytes)
+    ns = {"xdomea": XDOMEA_NS}
+
+    vorgang_betreff: str | None = None
+    vorgang_xdomea_uuid: str | None = None
+    for vorgang_el in root.findall(".//xdomea:Schriftgutobjekt/xdomea:Vorgang", ns):
+        betreff_el = vorgang_el.find("./xdomea:AllgemeineMetadaten/xdomea:Betreff", ns)
+        uuid_el = vorgang_el.find("./xdomea:Identifikation/xdomea:xdomeaUUID", ns)
+        vorgang_betreff = betreff_el.text if betreff_el is not None else None
+        vorgang_xdomea_uuid = uuid_el.text if uuid_el is not None else None
+        break
+
+    documents = [
+        _parse_dokument_element(dokument_el)
+        for dokument_el in root.findall(".//xdomea:Schriftgutobjekt//xdomea:Dokument", ns)
+    ]
+
+    return ParsedAbgabeMessage(
+        vorgang_betreff=vorgang_betreff,
+        vorgang_xdomea_uuid=vorgang_xdomea_uuid,
+        documents=documents,
+    )

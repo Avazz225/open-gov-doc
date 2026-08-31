@@ -40,6 +40,16 @@ class ReleasedItemOut(BaseModel):
     purge_at: datetime | None
 
 
+class XdomeaImportResultOut(BaseModel):
+    """Result of `POST /xdomea/import` (14.2, Post-Roadmap Phase 31 Session
+    13b, ADR 0128)."""
+
+    case_id: str | None
+    case_created: bool
+    vorgang_betreff: str | None
+    document_ids: list[str]
+
+
 class CaseArchivalTransferOut(BaseModel):
     id: str
     case_id: str

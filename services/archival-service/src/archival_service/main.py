@@ -16,11 +16,19 @@ from dms_metrics_client import (
 )
 from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from archival_service import browse, case_pipeline, crypto, general_export, pipeline, repository
+from archival_service import (
+    browse,
+    case_pipeline,
+    crypto,
+    general_export,
+    general_import,
+    pipeline,
+    repository,
+)
 from archival_service.clients import (
     CaseClient,
     DocumentClient,
@@ -30,7 +38,12 @@ from archival_service.clients import (
 )
 from archival_service.keystore import EnvKeyStore, KeyNotFoundError
 from archival_service.models import Base
-from archival_service.schemas import ArchivalTransferOut, CaseArchivalTransferOut, ReleasedItemOut
+from archival_service.schemas import (
+    ArchivalTransferOut,
+    CaseArchivalTransferOut,
+    ReleasedItemOut,
+    XdomeaImportResultOut,
+)
 from archival_service.settings import Settings
 
 settings = Settings()
@@ -538,3 +551,53 @@ async def export_case_xdomea(
     except general_export.ExportError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(content=package, media_type="application/zip")
+
+
+@app.post("/xdomea/import", response_model=XdomeaImportResultOut)
+async def import_xdomea(
+    file: UploadFile = File(...),
+    folder_id: str = Form(...),
+    case_id: str | None = Form(None),
+    process_definition_id: int | None = Form(None),
+    x_dms_principal: str = Header(default=""),
+) -> XdomeaImportResultOut:
+    """General XDOMEA import for inter-agency handoff (14.2, Post-Roadmap
+    Phase 31 Session 13b, ADR 0128) - the mirror of `export_document_xdomea`/
+    `export_case_xdomea` above. Accepts an `Abgabe.Abgabe.0401` package
+    (same ZIP shape those two endpoints produce), creates the referenced
+    document(s) in `folder_id`. If the package contains a `Vorgang`, exactly
+    one of `case_id` (attach to an EXISTING case) or `process_definition_id`
+    (start a brand-new case via this process definition, named after the
+    Vorgang's Betreff) must be given - `422` for either violation, `422` for
+    a structurally-invalid package. See ADR 0128 for why case creation
+    requires a caller-supplied `process_definition_id` rather than being
+    derived from the XDOMEA data (there is no such value in it)."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    zip_bytes = await file.read()
+    try:
+        result = await general_import.import_abgabe_package(
+            zip_bytes,
+            folder_id=folder_id,
+            case_id=case_id,
+            process_definition_id=process_definition_id,
+            created_by=x_dms_principal,
+            case_client=app.state.case_client,
+            document_client=app.state.document_client,
+        )
+    except (
+        general_import.CaseTargetConflictError,
+        general_import.CaseTargetRequiredError,
+        general_import.ProcessDefinitionWithoutVorgangError,
+        general_import.InvalidPackageError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Abhaengiger Dienst hat den Import abgelehnt: {exc}"
+        ) from exc
+    return XdomeaImportResultOut(
+        case_id=result.case_id,
+        case_created=result.case_created,
+        vorgang_betreff=result.vorgang_betreff,
+        document_ids=result.document_ids,
+    )

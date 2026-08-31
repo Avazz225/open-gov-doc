@@ -573,3 +573,198 @@ async def test_export_case_xdomea_returns_a_valid_zip_package_excluding_removed_
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         message_xml = archive.read("abgabe.xml")
     xdomea.validate_abgabe_message(message_xml)
+
+
+# --- General XDOMEA import (14.2, Post-Roadmap Phase 31 Session 13b, ADR 0128) --
+
+
+def _build_case_package(*, name="Testfall Import", documents=None) -> bytes:
+    documents = (
+        documents
+        if documents is not None
+        else [
+            {
+                "document_id": "src-doc-1",
+                "version_number": 1,
+                "content_type": "application/pdf",
+                "original_filename": "schreiben.pdf",
+                "package_filename": xdomea.package_filename("src-doc-1", 1, "application/pdf"),
+            }
+        ]
+    )
+    case = {"id": "src-case-1", "name": name}
+    message_xml = xdomea.build_abgabe_message_for_case(case, documents, leser_name="DMS")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("abgabe.xml", message_xml)
+        for doc in documents:
+            archive.writestr(f"dokumente/{doc['package_filename']}", b"%PDF-fake-content")
+    return buffer.getvalue()
+
+
+def _build_document_package() -> bytes:
+    document = {
+        "document_id": "src-doc-2",
+        "version_number": 1,
+        "content_type": "application/pdf",
+        "original_filename": "einzeldok.pdf",
+        "package_filename": xdomea.package_filename("src-doc-2", 1, "application/pdf"),
+    }
+    message_xml = xdomea.build_abgabe_message_for_document(document, leser_name="DMS")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("abgabe.xml", message_xml)
+        archive.writestr(f"dokumente/{document['package_filename']}", b"%PDF-fake-content")
+    return buffer.getvalue()
+
+
+def test_import_xdomea_without_principal_header_is_401(client):
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root"},
+        files={"file": ("abgabe.zip", _build_document_package(), "application/zip")},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_import_xdomea_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("archival.write")
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root"},
+        files={"file": ("abgabe.zip", _build_document_package(), "application/zip")},
+    )
+    assert response.status_code == 403
+
+
+def test_import_xdomea_rejects_a_non_zip_file(client):
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root"},
+        files={"file": ("abgabe.zip", b"not a zip file", "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+def test_import_xdomea_rejects_case_id_and_process_definition_id_together(client):
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root", "case_id": "case-1", "process_definition_id": "1"},
+        files={"file": ("abgabe.zip", _build_case_package(), "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+def test_import_xdomea_requires_a_case_target_when_package_has_a_vorgang(client):
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root"},
+        files={"file": ("abgabe.zip", _build_case_package(), "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+def test_import_xdomea_rejects_process_definition_id_without_a_vorgang(client):
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root", "process_definition_id": "1"},
+        files={"file": ("abgabe.zip", _build_document_package(), "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+async def test_import_xdomea_standalone_document_creates_it_in_the_target_folder(client):
+    app.state.document_client.create_document.return_value = {"id": "new-doc-1"}
+
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "target-folder"},
+        files={"file": ("abgabe.zip", _build_document_package(), "application/zip")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "case_id": None,
+        "case_created": False,
+        "vorgang_betreff": None,
+        "document_ids": ["new-doc-1"],
+    }
+    app.state.document_client.create_document.assert_called_once()
+    call_kwargs = app.state.document_client.create_document.call_args.kwargs
+    assert call_kwargs["folder_id"] == "target-folder"
+    assert call_kwargs["data"] == b"%PDF-fake-content"
+    app.state.case_client.add_document_reference.assert_not_called()
+
+
+async def test_import_xdomea_case_package_attaches_to_an_existing_case(client):
+    app.state.document_client.create_document.return_value = {"id": "new-doc-2"}
+
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "target-folder", "case_id": "existing-case-1"},
+        files={"file": ("abgabe.zip", _build_case_package(), "application/zip")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["case_id"] == "existing-case-1"
+    assert body["case_created"] is False
+    assert body["vorgang_betreff"] == "Testfall Import"
+    assert body["document_ids"] == ["new-doc-2"]
+    app.state.case_client.create_case.assert_not_called()
+    app.state.case_client.add_document_reference.assert_called_once_with(
+        "existing-case-1", document_id="new-doc-2", added_by="archival-service-tests"
+    )
+
+
+async def test_import_xdomea_case_package_creates_a_new_case(client):
+    app.state.document_client.create_document.return_value = {"id": "new-doc-3"}
+    app.state.case_client.create_case.return_value = {"id": "brand-new-case-1"}
+
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "target-folder", "process_definition_id": "42"},
+        files={"file": ("abgabe.zip", _build_case_package(name="Neuer Fall"), "application/zip")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["case_id"] == "brand-new-case-1"
+    assert body["case_created"] is True
+    assert body["vorgang_betreff"] == "Neuer Fall"
+    app.state.case_client.create_case.assert_called_once()
+    create_kwargs = app.state.case_client.create_case.call_args.kwargs
+    assert create_kwargs["name"] == "Neuer Fall"
+    assert create_kwargs["process_definition_id"] == 42
+    app.state.case_client.add_document_reference.assert_called_once_with(
+        "brand-new-case-1", document_id="new-doc-3", added_by="archival-service-tests"
+    )
+
+
+async def test_import_xdomea_rejects_a_package_missing_a_referenced_content_file(client):
+    documents = [
+        {
+            "document_id": "src-doc-3",
+            "version_number": 1,
+            "content_type": "application/pdf",
+            "original_filename": "fehlend.pdf",
+            "package_filename": xdomea.package_filename("src-doc-3", 1, "application/pdf"),
+        }
+    ]
+    case = {"id": "src-case-2", "name": "Fall ohne Dateien"}
+    message_xml = xdomea.build_abgabe_message_for_case(case, documents, leser_name="DMS")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("abgabe.xml", message_xml)
+        # Deliberately NOT writing the "dokumente/..." entry the message references.
+    incomplete_package = buffer.getvalue()
+
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "root", "case_id": "case-1"},
+        files={"file": ("abgabe.zip", incomplete_package, "application/zip")},
+    )
+
+    assert response.status_code == 422

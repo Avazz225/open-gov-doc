@@ -2,15 +2,16 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S13a (general XDOMEA export for inter-agency handoff: the new `Abgabe.Abgabe.0401`
-message, synchronous `POST /xdomea/export/documents/{id}`/`.../cases/{id}`, a `PreviewPane` button — see
-below under "Post-Roadmap: Phase 31"), the fifteenth session of the new Phase 31 (eGov feature gap
-closure). P31-S13 (the original single-session plan line) was, per research + user decision, split into
-P31-S13a/b/c — only 13a is done.
+**Last completed:** P31-S13b (general XDOMEA import for inter-agency handoff: `POST /xdomea/import`,
+attaching an imported Vorgang's documents to an existing case OR creating a brand-new one via a
+caller-supplied `process_definition_id` — see below under "Post-Roadmap: Phase 31"), the sixteenth session
+of the new Phase 31 (eGov feature gap closure). P31-S13 (the original single-session plan line) was, per
+research + user decision, split into P31-S13a/b/c — 13a and 13b are done.
 
-**Next session:** P31-S13b (XDOMEA import — receive/parse an `Abgabe.Abgabe.0401` package, create
-documents/case references from it) or P31-S13c (XJustiz — scoped down to one representative message type,
-researched at that session's own start) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
+**Next session:** P31-S13c (XJustiz — scoped down to one representative message type, researched at that
+session's own start) — see `IMPLEMENTATION_PLAN.md` "Phase 31". After that, all of P31-S13 (and thus
+Phase 31 as currently scoped) is complete — the user has asked for a full gap re-analysis and a new
+follow-up plan once that happens.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4840,6 +4841,81 @@ already-documented noise: the login page's SSO-config-probe `401`, the `document
 check's silent-fallback `403`). Test user and all throwaway artifacts (downloaded file, screenshot,
 spec script) cleaned up afterward, confirmed via a failed login attempt and `git status` showing no
 unintended changes.
+
+### Post-Roadmap: Phase 31 Session 13b — general XDOMEA import for inter-agency handoff (2026-08-31)
+
+Sixteenth session of Phase 31 (14.2, eGov feature gap closure) — the second of the three-part P31-S13
+split. See [ADR 0128](docs/adr/0128-xdomea-import-existing-or-new-case-required-process-definition.md)
+for this session's own design reasoning.
+
+**Scoped via a genuine design decision, put to the user before any code**: creating a brand-new
+`case-service` Case has always required starting a real BPMN process (`POST /cases`'s `process_definition_id`)
+— there is no XDOMEA field that maps to "which local process should represent this." Every other
+inbound-content flow in this codebase (`mail-connector`'s `assign_manually`) deliberately never
+auto-creates a case from external data, only ever attaches to an existing one. Presented via
+`AskUserQuestion`: **(recommended, narrower) attach to an existing case only**, vs. **also support
+creating a brand-new case** (requiring the importer to additionally supply `process_definition_id`) — the
+user chose the larger scope. `POST /xdomea/import` therefore requires exactly one of `case_id`/
+`process_definition_id` whenever the imported package contains a Vorgang, mutually exclusive; a brand-new
+case is named after the Vorgang's Betreff and gains a `xdomea_herkunft_uuid` attribute (the source
+Vorgang's own `xdomeaUUID`) purely for traceability.
+
+**`xdomea.parse_abgabe_message`** (new) reads a validated `Abgabe.Abgabe.0401` message back — the mirror
+of P31-S13a's `build_abgabe_message_for_case`/`_for_document`. Deliberately scoped to THIS module's own
+export shape (the same `dokumente/<Dateiname>` ZIP layout, `Dokument` elements found anywhere under a
+`Schriftgutobjekt` but excluding the sibling `Anschreiben` cover-letter element), not a general-purpose
+third-party XDOMEA reader — documented explicitly as a bounded-scope choice, not a silently incomplete one.
+Round-trip-verified: building a package with either export function and parsing it back with the new
+function recovers the exact original Betreff/document metadata.
+
+**New client capabilities, reusing `mail-connector`'s own established shapes**: `DocumentClient.
+create_document` (multipart, mirrors `mail_connector.document_client`'s exact call, reuses
+document-service's own mandatory virus scan — no import-specific bypass), `CaseClient.create_case`/
+`add_document_reference` (mirrors `mail_connector.case_client`'s exact shapes). New `general_import.py`
+orchestrates: parse ZIP → validate schema → parse message → (create-or-resolve target case) → create each
+document → (attach to the target case, if any).
+
+**Test counts**: archival-service 100 (+14: `test_xdomea.py` +4 — `parse_abgabe_message` round-trips both
+builders' output exactly including the empty-case and standalone-document shapes, raises `ParseError` on a
+schema-valid-but-structurally-unusable message missing `Primaerdokument/Dateiname`; `test_api.py` +10 —
+auth/role gates, a non-ZIP upload rejected, `case_id`+`process_definition_id` together rejected, a Vorgang
+package with neither given rejected, `process_definition_id` without a Vorgang rejected, a standalone
+document import creates it with no case involvement, a Vorgang package attaches to an EXISTING case, a
+Vorgang package creates a BRAND-NEW case named after its Betreff, a package referencing a missing ZIP entry
+rejected). `tsc`/`eslint`/`next build` not applicable — no frontend work this session (see below). All
+`ruff check`/`ruff format --check` clean on every file this session touched (pre-existing, unrelated
+`loadtest/`/`federation-hub-service` issues untouched).
+
+**A real, live-verification-only bug, found by the Docker rebuild itself, not by the test suite**: the full
+pytest suite passed cleanly with the new `File`/`Form`-based import endpoint BEFORE any dependency fix —
+this project's local dev/test runs share one workspace `.venv`, where `document-service`'s own declared
+`python-multipart` dependency was already present transitively. The REBUILT DOCKER IMAGE, whose dependency
+set is built strictly from `archival-service`'s own `pyproject.toml`, crash-looped on startup with
+`RuntimeError: Form data requires "python-multipart" to be installed` — a dependency this service never
+needed before (no prior endpoint took a file upload). Fixed by adding `python-multipart>=0.0.9` to
+`archival-service/pyproject.toml` directly (matching `document-service`'s own declared version), rebuilt,
+confirmed healthy. A concrete, session-own demonstration of why this project's Definition of Done requires
+an actual Docker rebuild + live verification, not just a green pytest run.
+
+**No frontend entry point this session** — same deliberate scoping as P31-S13a's case-level export: no
+existing case-browsing UI anywhere in `user-ui` to attach an import trigger to, and a case-import UI would
+additionally need a process-definition picker that doesn't exist anywhere in `user-ui` today (that's
+`process-designer`'s domain). API-only, a plausible future addition.
+
+**Fully verified live against the real, freshly rebuilt stack** (after the `python-multipart` fix above):
+a real document (`dfb8dc8c-...`, the same one P31-S13a's own live verification used) was exported via
+`POST /xdomea/export/documents/{id}` and the resulting ZIP re-imported via `POST /xdomea/import` —
+confirmed a genuine new document was created in document-service with the right title/content. A real,
+empty case (`c1f46dbe-...`) was exported and re-imported with `case_id` set to a DIFFERENT real existing
+case (`49ac0faf-...`) — confirmed the response correctly reported that existing case, no new case created.
+The same case package was re-imported again with `process_definition_id=1173` (a real process definition
+from the live stack) — confirmed a genuinely NEW case was created (fetched directly from case-service
+afterward: correct name "Testfall", a real `process_instance_id`, a real auto-generated `vorgangsnummer`,
+and the `xdomea_herkunft_uuid` attribute correctly set to the source Vorgang's UUID). All four validation
+error paths (`case_id`+`process_definition_id` together, a Vorgang package with neither, a non-ZIP upload,
+missing principal) confirmed live via `curl`, each returning the correct status code with a clear message.
+Live-verification artifacts (the imported document, the two case attachments/creations) left in place as
+ordinary dev-stack data, same precedent as every prior session's live-verification artifacts in this stack.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.
