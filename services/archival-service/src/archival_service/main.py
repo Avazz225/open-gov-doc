@@ -601,3 +601,67 @@ async def import_xdomea(
         vorgang_betreff=result.vorgang_betreff,
         document_ids=result.document_ids,
     )
+
+
+@app.post("/xjustiz/export/documents/{document_id}")
+async def export_document_xjustiz(
+    document_id: str, empfaenger_name: str, x_dms_principal: str = Header(default="")
+) -> Response:
+    """General XJustiz export for inter-agency handoff (14.2, Post-Roadmap
+    Phase 31 Session 13c, ADR 0129) - a `nachricht.gds.
+    uebermittlungSchriftgutobjekte.0005005` package for a single, arbitrary
+    document-service Document (its current version). The XJustiz mirror of
+    `export_document_xdomea` above - same execution model (synchronous, no
+    disposal-pipeline machinery), different message format. `empfaenger_name`
+    (the receiving court/authority) is a required query parameter, same
+    reasoning as `leser_name` above."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    if not empfaenger_name.strip():
+        raise HTTPException(status_code=422, detail="empfaenger_name darf nicht leer sein")
+    try:
+        package = await general_export.build_document_export_package_xjustiz(
+            document_id,
+            document_client=app.state.document_client,
+            empfaenger_name=empfaenger_name,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=404, detail=f"Dokument {document_id!r} unbekannt"
+            ) from exc
+        raise
+    except general_export.ExportError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return Response(content=package, media_type="application/zip")
+
+
+@app.post("/xjustiz/export/cases/{case_id}")
+async def export_case_xjustiz(
+    case_id: str, empfaenger_name: str, x_dms_principal: str = Header(default="")
+) -> Response:
+    """Case counterpart to `export_document_xjustiz` above - a `nachricht.
+    gds.uebermittlungSchriftgutobjekte.0005005` package for an arbitrary
+    case-service Case and its currently-active document references, mapped
+    to a `Type.GDS.Akte` (XJustiz's own structural unit, not an XDOMEA-style
+    Vorgang). Same `409` data-integrity check as `export_case_xdomea` above."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    if not empfaenger_name.strip():
+        raise HTTPException(status_code=422, detail="empfaenger_name darf nicht leer sein")
+    try:
+        case = await app.state.case_client.get_case(case_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Fall {case_id!r} unbekannt") from exc
+        raise
+    try:
+        package = await general_export.build_case_export_package_xjustiz(
+            case,
+            case_client=app.state.case_client,
+            document_client=app.state.document_client,
+            empfaenger_name=empfaenger_name,
+        )
+    except general_export.ReferencedDocumentMissingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except general_export.ExportError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return Response(content=package, media_type="application/zip")

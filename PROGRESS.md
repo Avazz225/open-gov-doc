@@ -2,16 +2,17 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S13b (general XDOMEA import for inter-agency handoff: `POST /xdomea/import`,
-attaching an imported Vorgang's documents to an existing case OR creating a brand-new one via a
-caller-supplied `process_definition_id` — see below under "Post-Roadmap: Phase 31"), the sixteenth session
-of the new Phase 31 (eGov feature gap closure). P31-S13 (the original single-session plan line) was, per
-research + user decision, split into P31-S13a/b/c — 13a and 13b are done.
+**Last completed:** P31-S13c (general XJustiz export for inter-agency handoff: `nachricht.gds.
+uebermittlungSchriftgutobjekte.0005005`, `POST /xjustiz/export/documents/{id}`/`.../cases/{id}` — see below
+under "Post-Roadmap: Phase 31"), the seventeenth session of the new Phase 31 (eGov feature gap closure).
+P31-S13 (the original single-session plan line) was, per research + user decision, split into
+P31-S13a/b/c — **all three parts are now done**, completing gap #12 from the eGov feature gap analysis.
+**This also completes Phase 31 as currently scoped in `IMPLEMENTATION_PLAN.md`.**
 
-**Next session:** P31-S13c (XJustiz — scoped down to one representative message type, researched at that
-session's own start) — see `IMPLEMENTATION_PLAN.md` "Phase 31". After that, all of P31-S13 (and thus
-Phase 31 as currently scoped) is complete — the user has asked for a full gap re-analysis and a new
-follow-up plan once that happens.
+**Next session:** none scheduled yet — per the user's own standing instruction, the next step is a full
+gap re-analysis (checking `docs/egov-feature-gap-analysis.md`'s "not carried forward" section and
+re-scanning the codebase for what's changed since Phase 31 began) and a new follow-up plan built from
+whatever gaps remain or have newly surfaced, not further XDOMEA/XJustiz work.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4916,6 +4917,93 @@ error paths (`case_id`+`process_definition_id` together, a Vorgang package with 
 missing principal) confirmed live via `curl`, each returning the correct status code with a clear message.
 Live-verification artifacts (the imported document, the two case attachments/creations) left in place as
 ordinary dev-stack data, same precedent as every prior session's live-verification artifacts in this stack.
+
+### Post-Roadmap: Phase 31 Session 13c — general XJustiz export for inter-agency handoff (2026-08-31)
+
+Seventeenth session of Phase 31 (14.2, eGov feature gap closure) — the third and last of the P31-S13
+split, and the last session of Phase 31 as currently scoped. See
+[ADR 0129](docs/adr/0129-xjustiz-uebermittlungschriftgutobjekte-general-message.md) for this session's own
+design reasoning.
+
+**Message choice found via direct research against the real, official schema, not assumed.** XJustiz's
+real catalog (confirmed against the current 3.6.2 release, downloaded directly from `xjustiz.justiz.de`)
+spans 30 specialized modules and 158 message types — an order of magnitude larger than XDOMEA's single
+implemented message, exactly as anticipated back at the P31-S13 split decision (ADR 0126). Research
+identified `nachricht.gds.uebermittlungSchriftgutobjekte.0005005` ("Übermittlung Schriftgutobjekte") as
+the one message that's actually analogous to what P31-S13a built for XDOMEA: defined in XJustiz's own base
+module (Grundmodul), explicitly documented as usable across every communication scenario ("Justiz zu
+Justiz", "Justiz zu Extern", "Extern zu Justiz"), not tied to any single judicial process type — confirmed
+by reading the message's own schema documentation, a dedicated XJustiz implementation guide PDF, and
+cross-checking the actual field table against the real, currently-shipping 3.6.2 XSD (the guide PDF was
+from 2018 and had since drifted in field names, caught by not trusting it blindly).
+
+**Vendored schema**: 11 new XJustiz-specific XSD files (`xjustiz_schema/`, downloaded directly via `curl`
+from the real `xjustiz.justiz.de` ZIP package — same official-source rigor as ADR 0029, no GPL mirror),
+plus `xoev-code.xsd`/`din-norm-91379-datatypes.xsd` reused verbatim from `xdomea_schema/` — confirmed both
+standards genuinely depend on the identical shared XÖV-framework files, not just similarly named ones. The
+full dependency closure was traced (each file's own `xs:include`/`xs:import`) and actually compiled with
+`lxml.etree.XMLSchema` BEFORE any project code was written, same discipline as every prior XDOMEA session.
+
+**New `xjustiz.py`** mirrors `xdomea.py`'s shape: `build_uebermittlung_schriftgutobjekte_for_document`/
+`_for_case` + `validate_uebermittlung_schriftgutobjekte`. Two new endpoints, `POST /xjustiz/export/
+documents/{id}`/`.../cases/{id}` — same synchronous execution model, same `archival.write` gate, same
+error shapes as the XDOMEA export endpoints (`general_export.py` gained parallel
+`build_document_export_package_xjustiz`/`build_case_export_package_xjustiz` functions, reusing the exact
+same document-fetching logic and the same `ReferencedDocumentMissingError` data-integrity check). Export
+only, mirroring P31-S13a's own scope — no XJustiz import direction this session.
+
+**Three real, schema-verified surprises, each found only by compiling against the actual vendored schema
+(not assumed from XDOMEA's own shape)**:
+1. XJustiz's `Akte` (its case-like structural unit — NOT called "Vorgang" like XDOMEA) nests its documents
+   inside `akte/xjustiz.fachspezifischeDaten/inhalt/dokument`, not as flat siblings of `akte` the way an
+   initial draft assumed by analogy to XDOMEA's flatter `Schriftgutobjekt` choice — caught by actually
+   reading `Type.GDS.Akte`'s own `inhalt` sub-structure in the vendored XSD, locked in with a dedicated
+   regression test.
+2. `nachrichtenkopf`'s `xjustizVersion` attribute (fixed `"3.6.2"`) is required but declared as an
+   `xs:attribute` appended AFTER the type's own `xs:sequence` block — invisible if only the sequence is
+   read, found live via the schema validator's own rejection on the very first build attempt.
+3. The generic "Andere / Sonstige" fallback code does NOT line up across different XJustiz codelists:
+   `gds.dokumentklasse`'s is `001` (an externally-versioned Typ3 codelist, its real current values fetched
+   live via xrepository.de's genericode API — version 1.4); `gds.aktentyp`'s is `017` (an embedded Typ2
+   enumeration read directly from the vendored XSD — `001` there means "Zivilakte"). Each was confirmed
+   independently, never assumed from the other.
+
+**Filename convention also confirmed to differ from XDOMEA's, not assumed to match**: XJustiz's own
+specification recommends `{Dokumentname}_{UUID}.{Dateiformat}` (name-then-UUID, and a RECOMMENDATION, not
+schema-enforced — `dateiname` is plain free text, unlike XDOMEA's `stringDateinameType` regex) — the exact
+opposite field order of `xdomea.package_filename`'s `{UUID}{ext}`. `xjustiz.package_filename` sanitizes
+unrepresentable characters from the title before use.
+
+**Test counts**: archival-service 119 (+19: `test_xjustiz.py` +11 — both builders validated against the
+real vendored schema, a standalone document has no `akte`, empty/multi-document cases, a case's
+`anzeigename` set correctly AND its documents confirmed nested inside `akte/.../inhalt/dokument` (the
+regression test for surprise #1 above), the generic `aktentyp` code confirmed as `017` (surprise #3),
+reproducibility across retries, structurally-invalid-XML rejection, the filename convention's reversed
+field order confirmed, filename determinism, unsafe-character sanitization; `test_api.py` +8 — auth/role/
+empty-`empfaenger_name` gates, `404` for an unknown document/case, a full document export producing a
+real, schema-valid ZIP, a case export excluding removed references, the SAME `409` data-integrity check
+from P31-S13a confirmed to work correctly when reused for the XJustiz endpoint). `tsc`/`eslint`/
+`next build` not applicable — no frontend work this session, same deliberate scoping as P31-S13a's
+case-export/P31-S13b's whole-feature UI gaps (no case-browsing UI anywhere in `user-ui` to attach an
+export trigger to). All `ruff check`/`ruff format --check` clean on every file this session touched
+(pre-existing, unrelated `loadtest/`/`federation-hub-service` issues untouched).
+
+**Fully verified live against the real, freshly rebuilt stack** — healthy on the first rebuild this time
+(P31-S13b's own `python-multipart` fix already covers this session's `File`/`Form` needs, no repeat
+surprise): a real document (`dfb8dc8c-...`, the same one every P31-S13 session's own live verification has
+used) was exported via `POST /xjustiz/export/documents/{id}` and produced a genuine, schema-valid ZIP with
+the correct `xjustiz_nachricht.xml` filename and `{Name}_{UUID}.{ext}` document filename. A real case
+(`49ac0faf-...`) was exported via `POST /xjustiz/export/cases/{id}` and produced a valid ZIP containing a
+real `akte`/`anzeigename`. All four error paths (`404` unknown document, `404` unknown case, `422` empty
+`empfaenger_name`, `401` missing principal) confirmed live via `curl`. The SAME real, data-drift case from
+P31-S13a's own verification (`bcd12e9e-...`, whose document reference had gone stale) was exported via the
+NEW XJustiz endpoint and correctly returned the identical `409` diagnosis — confirming the shared
+`ReferencedDocumentMissingError` check genuinely works for both formats, not just the one it was originally
+written for.
+
+**Phase 31, as currently scoped in `IMPLEMENTATION_PLAN.md`, is now fully complete** (P31-S1 through
+P31-S13c). Per the user's own standing instruction from earlier this session, the next step is a full gap
+re-analysis and a new follow-up plan — not a further P31-Sxx session.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

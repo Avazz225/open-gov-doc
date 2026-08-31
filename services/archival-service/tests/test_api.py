@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from archival_service import crypto, repository, xdomea
+from archival_service import crypto, repository, xdomea, xjustiz
 from archival_service.keystore import EnvKeyStore
 from archival_service.main import app
 from fastapi.testclient import TestClient
@@ -768,3 +768,122 @@ async def test_import_xdomea_rejects_a_package_missing_a_referenced_content_file
     )
 
     assert response.status_code == 422
+
+
+# --- General XJustiz export (14.2, Post-Roadmap Phase 31 Session 13c, ADR 0129) --
+
+
+def test_export_document_xjustiz_without_principal_header_is_401(client):
+    response = client.post(
+        "/xjustiz/export/documents/doc-1",
+        params={"empfaenger_name": "Testgericht"},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_export_document_xjustiz_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("archival.write")
+    response = client.post(
+        "/xjustiz/export/documents/doc-1", params={"empfaenger_name": "Testgericht"}
+    )
+    assert response.status_code == 403
+
+
+def test_export_document_xjustiz_requires_non_empty_empfaenger_name(client):
+    response = client.post("/xjustiz/export/documents/doc-1", params={"empfaenger_name": "  "})
+    assert response.status_code == 422
+
+
+async def test_export_document_xjustiz_returns_404_for_unknown_document(client):
+    app.state.document_client.get_document.side_effect = httpx.HTTPStatusError(
+        "not found", request=httpx.Request("GET", "http://x"), response=httpx.Response(404)
+    )
+
+    response = client.post(
+        "/xjustiz/export/documents/does-not-exist", params={"empfaenger_name": "Testgericht"}
+    )
+
+    assert response.status_code == 404
+
+
+async def test_export_document_xjustiz_returns_a_valid_zip_package(client):
+    app.state.document_client.get_document.return_value = {
+        "id": "doc-1",
+        "title": "Testschreiben",
+        "current_version_number": 1,
+    }
+    app.state.document_client.get_version.return_value = {
+        "content_type": "application/pdf",
+        "filename": "schreiben.pdf",
+    }
+    app.state.document_client.download_version_content.return_value = b"%PDF-fake-content"
+
+    response = client.post(
+        "/xjustiz/export/documents/doc-1", params={"empfaenger_name": "Testgericht"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+        assert "xjustiz_nachricht.xml" in names
+        assert any(n.startswith("dokumente/") for n in names)
+        message_xml = archive.read("xjustiz_nachricht.xml")
+    xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)
+
+
+async def test_export_case_xjustiz_returns_404_for_unknown_case(client):
+    app.state.case_client.get_case.side_effect = httpx.HTTPStatusError(
+        "not found", request=httpx.Request("GET", "http://x"), response=httpx.Response(404)
+    )
+
+    response = client.post(
+        "/xjustiz/export/cases/does-not-exist", params={"empfaenger_name": "Testgericht"}
+    )
+
+    assert response.status_code == 404
+
+
+async def test_export_case_xjustiz_returns_409_when_a_referenced_document_is_gone(client):
+    app.state.case_client.get_case.return_value = {"id": "case-1", "name": "Testfall"}
+    app.state.case_client.list_document_references.return_value = [
+        {"document_id": "doc-gone", "snapshot_version_number": 1, "removed_at": None},
+    ]
+    app.state.document_client.get_version.side_effect = httpx.HTTPStatusError(
+        "not found", request=httpx.Request("GET", "http://x"), response=httpx.Response(404)
+    )
+
+    response = client.post(
+        "/xjustiz/export/cases/case-1", params={"empfaenger_name": "Testgericht"}
+    )
+
+    assert response.status_code == 409
+    assert "doc-gone" in response.json()["detail"]
+
+
+async def test_export_case_xjustiz_returns_a_valid_zip_package_excluding_removed_references(client):
+    app.state.case_client.get_case.return_value = {"id": "case-1", "name": "Testfall XJustiz"}
+    app.state.case_client.list_document_references.return_value = [
+        {"document_id": "doc-1", "snapshot_version_number": 1, "removed_at": None},
+        {
+            "document_id": "doc-2",
+            "snapshot_version_number": 1,
+            "removed_at": "2026-01-01T00:00:00Z",
+        },
+    ]
+    app.state.document_client.get_version.return_value = {
+        "content_type": "application/pdf",
+        "filename": "schreiben.pdf",
+    }
+    app.state.document_client.download_version_content.return_value = b"%PDF-fake-content"
+
+    response = client.post(
+        "/xjustiz/export/cases/case-1", params={"empfaenger_name": "Testgericht"}
+    )
+
+    assert response.status_code == 200
+    app.state.document_client.get_version.assert_called_once_with("doc-1", 1)
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        message_xml = archive.read("xjustiz_nachricht.xml")
+    xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)

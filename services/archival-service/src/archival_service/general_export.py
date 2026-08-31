@@ -1,22 +1,29 @@
-"""General XDOMEA export for inter-agency handoff (14.2, Post-Roadmap Phase
-31 Session 13a, ADR 0126) - builds an `Abgabe.Abgabe.0401` package (ZIP:
-`abgabe.xml` + `dokumente/<paketname>`) for an arbitrary `document-service`
-Document or `case-service` Case, synchronously (a downloadable response,
-same shape as document-service's `POST /documents/{id}/export`, P28-S1) -
-NOT the disposal pipeline's async, multi-phase, encrypted transfer state
-machine (`case_pipeline.py`/`pipeline.py`): this is a one-shot, on-demand
+"""General export for inter-agency handoff, synchronous (a downloadable
+response, same shape as document-service's `POST /documents/{id}/export`,
+P28-S1) - NOT the disposal pipeline's async, multi-phase, encrypted transfer
+state machine (`case_pipeline.py`/`pipeline.py`): a one-shot, on-demand
 handoff package, not a legally significant records-disposal operation, so
-none of that machinery's retry/verification/encryption phases apply here."""
+none of that machinery's retry/verification/encryption phases apply here.
+
+- XDOMEA (14.2, Post-Roadmap Phase 31 Session 13a, ADR 0126): an
+  `Abgabe.Abgabe.0401` package (ZIP: `abgabe.xml` + `dokumente/<paketname>`)
+  for an arbitrary `document-service` Document or `case-service` Case.
+- XJustiz (14.2, Post-Roadmap Phase 31 Session 13c, ADR 0129): a
+  `nachricht.gds.uebermittlungSchriftgutobjekte.0005005` package (ZIP:
+  `xjustiz_nachricht.xml` - the exact filename XJustiz's own specification
+  mandates - + `dokumente/<paketname>`), same shape, same data-fetching
+  logic, different message format via `xjustiz.py`."""
 
 import io
 import zipfile
 
 import httpx
 
-from archival_service import xdomea
+from archival_service import xdomea, xjustiz
 from archival_service.clients import CaseClient, DocumentClient
 
 _ABGABE_MESSAGE_FILENAME = "abgabe.xml"
+_XJUSTIZ_MESSAGE_FILENAME = "xjustiz_nachricht.xml"
 
 
 class ExportError(Exception):
@@ -136,6 +143,106 @@ async def build_case_export_package(
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(_ABGABE_MESSAGE_FILENAME, message_xml)
+        for filename, data in contents.items():
+            archive.writestr(f"dokumente/{filename}", data)
+    return buffer.getvalue()
+
+
+async def build_document_export_package_xjustiz(
+    document_id: str, *, document_client: DocumentClient, empfaenger_name: str
+) -> bytes:
+    """XJustiz counterpart to `build_document_export_package` above - same
+    data fetching, different message format (`xjustiz.py`)."""
+    document = await document_client.get_document(document_id)
+    version_number = document["current_version_number"]
+    version = await document_client.get_version(document_id, version_number)
+    content_type = version.get("content_type")
+    title = document.get("title") or document_id
+    filename = xjustiz.package_filename(title, document_id, version_number, content_type)
+    content = await document_client.download_version_content(document_id, version_number)
+
+    entry = {
+        "document_id": document_id,
+        "version_number": version_number,
+        "content_type": content_type,
+        "title": title,
+        "package_filename": filename,
+    }
+    message_xml = xjustiz.build_uebermittlung_schriftgutobjekte_for_document(
+        entry, empfaenger_name=empfaenger_name
+    )
+    try:
+        xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)
+    except xjustiz.ValidationError as exc:
+        raise ExportError(f"XJustiz-Nachricht ungueltig: {exc}") from exc
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(_XJUSTIZ_MESSAGE_FILENAME, message_xml)
+        archive.writestr(f"dokumente/{filename}", content)
+    return buffer.getvalue()
+
+
+async def build_case_export_package_xjustiz(
+    case: dict,
+    *,
+    case_client: CaseClient,
+    document_client: DocumentClient,
+    empfaenger_name: str,
+) -> bytes:
+    """XJustiz counterpart to `build_case_export_package` above - same data
+    fetching (incl. the same `ReferencedDocumentMissingError` data-integrity
+    check), different message format (`xjustiz.py`, mapping the case to a
+    `Type.GDS.Akte` rather than an XDOMEA-style `Vorgang`). `case` is the
+    ALREADY-FETCHED case dict, same reasoning as `build_case_export_package`."""
+    case_id = case["id"]
+    references = await case_client.list_document_references(case_id)
+    active_references = [
+        r
+        for r in references
+        if r["removed_at"] is None and r["snapshot_version_number"] is not None
+    ]
+
+    documents: list[dict] = []
+    contents: dict[str, bytes] = {}
+    for reference in active_references:
+        document_id = reference["document_id"]
+        version_number = reference["snapshot_version_number"]
+        try:
+            version = await document_client.get_version(document_id, version_number)
+            content = await document_client.download_version_content(document_id, version_number)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise ReferencedDocumentMissingError(
+                    f"Vom Fall {case_id!r} referenziertes Dokument {document_id!r} "
+                    f"(Version {version_number}) existiert nicht mehr"
+                ) from exc
+            raise
+        content_type = version.get("content_type")
+        title = version.get("filename") or document_id
+        filename = xjustiz.package_filename(title, document_id, version_number, content_type)
+        documents.append(
+            {
+                "document_id": document_id,
+                "version_number": version_number,
+                "content_type": content_type,
+                "title": title,
+                "package_filename": filename,
+            }
+        )
+        contents[filename] = content
+
+    message_xml = xjustiz.build_uebermittlung_schriftgutobjekte_for_case(
+        case, documents, empfaenger_name=empfaenger_name
+    )
+    try:
+        xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)
+    except xjustiz.ValidationError as exc:
+        raise ExportError(f"XJustiz-Nachricht ungueltig: {exc}") from exc
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(_XJUSTIZ_MESSAGE_FILENAME, message_xml)
         for filename, data in contents.items():
             archive.writestr(f"dokumente/{filename}", data)
     return buffer.getvalue()
