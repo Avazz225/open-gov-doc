@@ -2521,6 +2521,26 @@ export async function downloadCaseArchivalPackage(
   return response.blob();
 }
 
+// General XDOMEA export for inter-agency handoff (14.2, post-roadmap phase
+// 31 session 13a, ADR 0126) - unlike the disposal pipeline above, this is a
+// synchronous, on-demand download (same shape as `exportDocument`), not a
+// polled multi-phase transfer.
+export async function exportDocumentXdomea(
+  token: string,
+  documentId: string,
+  leserName: string
+): Promise<Blob> {
+  const response = await request(
+    "archival-service",
+    `xdomea/export/documents/${encodeURIComponent(documentId)}?leser_name=${encodeURIComponent(
+      leserName
+    )}`,
+    { method: "POST" },
+    token
+  );
+  return response.blob();
+}
+
 // Structure templates (2.5/7.3, P15-S6) - a folder subtree as a named,
 // reusable template (e.g. a file-plan skeleton).
 export interface FolderTemplate {

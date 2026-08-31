@@ -2,7 +2,7 @@
 
 **Responsibility:** Records disposal & long-term archiving of documents and cases (5.6). **Documents**: after the active phase expires (object type deadline or manual trigger), transfers documents mandatorily as PDF/A (fallback: plain PDF) to a separate archive target, removes the live storage copy after a transition period ("dehydration"), and provides an audited, role-gated retrieval process. **Cases** (since P7-S3b): for closed cases, generates a real, schema-validated XDOMEA 4.0.0 records-disposal message + packages the referenced document contents into a transfer package. In both cases, coordinates only the transfer mechanics — `document-service`/`case-service` remain the sole authority for the respective lifecycle fields.
 
-**Concept Reference:** 5.6
+**Concept Reference:** 5.6/14.2 (general XDOMEA export, Post-Roadmap Phase 31 Session 13a)
 **Own Postgres Schema:** `archival` (tables `archival_transfer`, `case_archival_transfer`)
 
 ## Architecture Decisions
@@ -17,6 +17,7 @@
 - **No NATS consumer/producer**: this service is purely poll-/HTTP-based (candidate discovery via `GET /documents/due-for-archival`, no event-driven triggering) — `document.archived`/`document.dehydrated`/`document.rehydrated` are published by `document-service` itself (domain-owner principle) when this service calls its internal callback endpoints, not by this service.
 - **XDOMEA 4.0.0 instead of 3.0.0** (since P7-S3b, [ADR-0029 Addendum](../adr/0029-aussonderung-xdomea-eigenimplementierung-kdbx-plugin.md)): the version 3.0.0 originally named in ADR 0029 was, according to the official KoSIT registry, about to expire at the time of the P7-S3b implementation and was only findable via a GPL-3.0 third-party mirror — 4.0.0 is the current standard, cleanly obtainable via the official KoSIT schema infrastructure (`schema.kdo.de`, `xoev.de`), no licensing concern.
 - **Only the 0503 message ("records disposal"), not the full bilateral negotiation flow** (0501 offer directory → 0502 assessment directory → 0504–0507 confirmations): the full flow requires an actually responding second system (an archive system), which does not exist here. 0503 is the actual export/transfer message with the content data — sufficient to produce a valid records-disposal transfer handable off to an external archive.
+- **General inter-agency handoff (14.2, Post-Roadmap Phase 31 Session 13a, [ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md)) reuses `xdomea.py`'s infrastructure but is a genuinely different message and a genuinely different execution model**: `Abgabe.Abgabe.0401` (not `Aussonderung.Aussonderung.0503`) for an arbitrary document or case, built synchronously on demand (`POST /xdomea/export/documents/{id}`/`.../cases/{id}`, same shape as document-service's own `POST /documents/{id}/export`) rather than through this service's async, multi-phase, encrypted disposal state machine — a one-shot handoff package isn't a legally significant records-disposal operation, none of that machinery's retry/verification/encryption phases apply. See "General XDOMEA Export for Inter-Agency Handoff" below.
 
 ## State Machine
 
@@ -111,7 +112,7 @@ Deliberate simplifications (documented, not hidden):
 
 ### Vendored Schema Files (`xdomea_schema/`)
 
-7 files, all sourced from the official KoSIT infrastructure (no GPL third-party mirror, see `xdomea_schema/README.md` for exact source URLs): `xdomea-Baukasten.xsd`, `xdomea-Datentypen.xsd`, `xdomea-Nachrichten-AussonderungDurchfuehren.xsd`, `xdomea-Typen-AussonderungDurchfuehren.xsd`, `xoev-code.xsd`, `xoev-basisnachricht-unqualified-g2g_1.1.xsd`, `din-norm-91379-datatypes.xsd` — exactly the dependency chain of the `Aussonderung.Aussonderung.0503` message, not the full XDOMEA schema scope. Automatically built in as package data by `hatchling` (verified: `uv build --wheel` includes all 7 `.xsd` files in the wheel).
+9 files, all sourced from the official KoSIT infrastructure (no GPL third-party mirror, see `xdomea_schema/README.md` for exact source URLs): `xdomea-Baukasten.xsd`, `xdomea-Datentypen.xsd`, `xdomea-Nachrichten-AussonderungDurchfuehren.xsd`, `xdomea-Typen-AussonderungDurchfuehren.xsd`, `xdomea-Nachrichten-AbgabeDurchfuehren.xsd`, `xdomea-Typen-AbgabeDurchfuehren.xsd` (since Post-Roadmap Phase 31 Session 13a), `xoev-code.xsd`, `xoev-basisnachricht-unqualified-g2g_1.1.xsd`, `din-norm-91379-datatypes.xsd` — the dependency chain of the `Aussonderung.Aussonderung.0503` AND `Abgabe.Abgabe.0401` messages, not the full XDOMEA schema scope. Automatically built in as package data by `hatchling` (verified: `uv build --wheel` includes all 9 `.xsd` files in the wheel).
 
 ### API
 
@@ -125,6 +126,53 @@ Deliberate simplifications (documented, not hidden):
 ### Data Model
 
 `case_archival_transfer`: `id` (UUID PK), `case_id`, `status`, `encrypted` (boolean), `storage_object_key` (nullable until `packaged`), `checksum_sha256` (nullable until `packaged`), `error_message` (nullable), `attempts` (integer, default 0, since P20-S2), `next_retry_at` (nullable, since P20-S2), `locked_at`/`packaged_at`/`verified_at`/`released_at` (each nullable), `created_at`/`updated_at`.
+
+## General XDOMEA Export for Inter-Agency Handoff (14.2, Post-Roadmap Phase 31 Session 13a, [ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md))
+
+Unlike the disposal pipeline above (async, multi-phase, closed-cases-only, always addressed to "Archiv"),
+this is a synchronous, on-demand export of an arbitrary document or case for handoff to a named external
+authority — no persisted job, no poll loop, no encryption phase.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/xdomea/export/documents/{id}?leser_name=...` | Exports the document's CURRENT version (same scope as document-service's own `POST /documents/{id}/export`, Phase 28) as an `Abgabe.Abgabe.0401` package — `404` unknown document, `422` empty `leser_name`, gated by `archival.write` |
+| `POST` | `/xdomea/export/cases/{id}?leser_name=...` | Exports every currently-active document reference of the case (case need NOT be closed, unlike disposal) as an `Abgabe.Abgabe.0401` package — `404` unknown case, `409` if one of the case's OWN document references points at a document that no longer exists (data drift, see "A live-verification-found data-integrity distinction" below), `422` empty `leser_name`, gated by `archival.write` |
+
+Both return the ZIP directly (`Response(media_type="application/zip")`), same response shape as
+`GET /case-archival-transfers/{id}/package`.
+
+### `Abgabe.Abgabe.0401`, not `Aussonderung.Aussonderung.0503`
+
+Confirmed via the real, official KoSIT schema that XDOMEA 4.0.0 organizes messages into distinct groups per
+process — Aussonderung (disposal), **Abgabe** (handover on jurisdiction/system change — "Die Nachricht
+beschreibt den vollständigen Export von Schriftgutobjekten bei Zuständigkeitswechseln zwischen Behörden
+oder bei Systemwechseln", a direct match for this session's ask), Übermittlung, Geschäftsgang, etc. `xdomea.py`
+gained `build_abgabe_message_for_case`/`build_abgabe_message_for_document` + `validate_abgabe_message`
+(a second, separately loaded `etree.XMLSchema` against `xdomea-Nachrichten-AbgabeDurchfuehren.xsd`) — see
+[ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md) for the full
+design reasoning.
+
+**A real, schema-verified surprise, found only by compiling against the actual vendored schema**: the 0401
+message's `Schriftgutobjekt/Vorgang` is typed the GENERIC `xdomea:VorgangType` (`xdomea-Baukasten.xsd`),
+while the 0503 message's is `VorgangAussonderungType` (`xdomea-Typen-AussonderungDurchfuehren.xsd`,
+disposal-specific — requires an extra `Kontextobjekt` element `VorgangType` doesn't have at all). An
+initial implementation attempt assumed these were the same shared type and failed real schema validation
+immediately (`lxml.etree.DocumentInvalid: Element 'Kontextobjekt': This element is not expected.`) —
+`xdomea.py` therefore has two separate Vorgang-builders, `_build_vorgang_aussonderung`/
+`_build_vorgang_generic`, not one shared between both messages.
+`DokumentOderDokumentMitSchriftstueckType`, by contrast, genuinely IS identical across both message
+families and remains shared (`_build_dokument_wrapper`).
+
+### A live-verification-found data-integrity distinction, fixed properly
+
+Exporting a real dev-stack case whose `CaseDocumentReference` pointed at an already-deleted document
+produced a `404` mislabeled "case unknown" — misleading, since the case itself was real; the actual problem
+was one of the case's OWN document references being stale. Fixed by fetching the case in `main.py` FIRST
+(translating only that lookup's `404` to "case unknown") and passing the already-fetched case dict into
+`general_export.build_case_export_package`, which now raises a distinct `ReferencedDocumentMissingError`
+for a missing per-reference document, translated to `409` (a data-integrity condition, not a caller
+mistake) — same pre-check-before-conflation principle as `mail-connector`'s `DuplicateInTargetMailboxError`
+(ADR 0124).
 
 ## KeyStore Plugin (5.6, [ADR 0029](../adr/0029-aussonderung-xdomea-eigenimplementierung-kdbx-plugin.md))
 
@@ -154,8 +202,8 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/archival-service/tests` (**71 tests**, of which 15 new since **Post-Roadmap Phase 20 Session 2** — retry/backoff behavior below/upon exhaustion of `max_archival_attempts`, `next_retry_at` filtering in `list_active_transfers`, `reset_for_retry`, same pattern for `case_pipeline`, both new `retry` endpoints including `404`/`409`/`403`, see [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)). Of these, 9 new since P15-S5: `test_keystore.py`/`test_crypto.py` (roundtrip, wrong key, missing key, fresh nonce per call), `test_repository.py` (CRUD, active-transfer detection including exclusion of terminal statuses, dehydration due-date filter), `test_pipeline.py` (full phase cascade `pending → released` against fake clients, staying in `locked` while the rendition is not ready, `failed` on failed conversion/verification, encryption path, dehydration tick including legal hold blocking), `test_api.py` (endpoint wiring with mocked external clients — role gate `403`, status gate `409`, successful retrieval including live upload/`mark_rehydrated` call). Since P7-S3b additionally: **`test_xdomea.py` validates the generated message against the actual, vendored XDOMEA 4.0.0 schema** (no mock, no simplified subset — the most valuable test of this session, verifies the complete schema chain end to end without network access), `test_case_pipeline.py` (phase cascade `pending → released` including ZIP content check, exclusion of soft-deleted document references, encryption path, `failed` on verification error), `test_api.py` extension for `/case-archival-transfers`. Since **P15-S5** additionally: `test_browse.py` (hydration of document+case, skipping unresolvable references, substring filtering against title/reference number, sorting by `released_at`), `test_api.py` extension for `/released-items` (role gate, empty, exclusion of non-`released` transfers, hydrated mixed results, search filter).
-- No dedicated live Docker smoke test section here — see `PROGRESS.md` "P7-S3"/"P7-S3b" for the complete end-to-end flow across multiple services (object type with `default_archive_after_days`, PDF/`.docx`/`.png` documents, dehydration, legal hold blocking, encrypted retrieval; since P7-S3b additionally a closed case with several documents, package download, independent second validation of `aussonderung.xml` outside the pytest suite).
+- `uv run pytest services/archival-service/tests` (**86 tests**, of which 15 new since **Post-Roadmap Phase 31 Session 13a** ([ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md)): `test_xdomea.py` (7 new — both `build_abgabe_message_for_case`/`build_abgabe_message_for_document` validated against the real, vendored `Abgabe.Abgabe.0401` schema, empty/multi-document cases, Betreff/leser-name/document-UUID content assertions, reproducibility across retries, a standalone document has no `Vorgang` wrapper, structurally-invalid-XML rejection, a regression guard confirming the 0503 message's own `Kontextobjekt`/`RueckmeldungArchivkennung` fields are unchanged after the `_build_vorgang` refactor split), `test_api.py` (8 new — auth/role/empty-`leser_name` gates on both new endpoints, `404` for an unknown document/case, a full document export producing a real, schema-valid ZIP, a case export excluding removed references, `409` — found live during this session's own verification, not by a test first — when a case's own document reference points at a deleted document) — before that, 71 tests, of which 15 new since **Post-Roadmap Phase 20 Session 2** — retry/backoff behavior below/upon exhaustion of `max_archival_attempts`, `next_retry_at` filtering in `list_active_transfers`, `reset_for_retry`, same pattern for `case_pipeline`, both new `retry` endpoints including `404`/`409`/`403`, see [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md)). Of these, 9 new since P15-S5: `test_keystore.py`/`test_crypto.py` (roundtrip, wrong key, missing key, fresh nonce per call), `test_repository.py` (CRUD, active-transfer detection including exclusion of terminal statuses, dehydration due-date filter), `test_pipeline.py` (full phase cascade `pending → released` against fake clients, staying in `locked` while the rendition is not ready, `failed` on failed conversion/verification, encryption path, dehydration tick including legal hold blocking), `test_api.py` (endpoint wiring with mocked external clients — role gate `403`, status gate `409`, successful retrieval including live upload/`mark_rehydrated` call). Since P7-S3b additionally: **`test_xdomea.py` validates the generated message against the actual, vendored XDOMEA 4.0.0 schema** (no mock, no simplified subset — the most valuable test of this session, verifies the complete schema chain end to end without network access), `test_case_pipeline.py` (phase cascade `pending → released` including ZIP content check, exclusion of soft-deleted document references, encryption path, `failed` on verification error), `test_api.py` extension for `/case-archival-transfers`. Since **P15-S5** additionally: `test_browse.py` (hydration of document+case, skipping unresolvable references, substring filtering against title/reference number, sorting by `released_at`), `test_api.py` extension for `/released-items` (role gate, empty, exclusion of non-`released` transfers, hydrated mixed results, search filter).
+- No dedicated live Docker smoke test section here — see `PROGRESS.md` "P7-S3"/"P7-S3b" for the complete end-to-end flow across multiple services (object type with `default_archive_after_days`, PDF/`.docx`/`.png` documents, dehydration, legal hold blocking, encrypted retrieval; since P7-S3b additionally a closed case with several documents, package download, independent second validation of `aussonderung.xml` outside the pytest suite). Since **Post-Roadmap Phase 31 Session 13a**: both new endpoints live-verified against the real, freshly rebuilt container and real document-service/case-service data — a real document export produced a genuine, valid ZIP; a real case export succeeded for a case with zero active references AND correctly returned `409` for a real dev-stack case whose document reference had gone stale (see `PROGRESS.md`).
 
 ## Open Points
 
@@ -167,3 +215,4 @@ None yet — follows in Phase 11.
 - ~~No searchable "records-disposal special area" (2.5)~~ — closed since **P15-S5**, see "Records-Disposal Access Area" above and [ADR 0055](../adr/0055-aussonderungs-zugriffsbereich-hydrated-read-only-view.md).
 - **Cases have no automatic "disappears after transition period" mechanism** (visible since P15-S5) — `CaseArchivalTransfer` has no `dehydrated` status, so a case remains visible in the records-disposal access area indefinitely, even long after a transition period named in Concept 5.6 has elapsed. A real case-purge concept is not part of this session, see ADR 0055 "Consequences".
 - **Test fixture race in `test_api.py`'s `client` fixture** (discovered during live verification of P20-S2, pre-existing, not fixed): `TestClient(app)`'s lifespan starts the poll task before the fixture body can replace `app.state.document_client` with an `AsyncMock()` — if the very first tick hits the still-real `DocumentClient` instance, and a real, currently due test document exists on the same host (e.g. from manual live verification), a real transfer can end up in `dms_test` and cause subsequent "empty" assertions to fail. Outside this session's scope, see [ADR 0078](../adr/0078-archival-service-retry-backoff-failed-permanent.md) "Consequences".
+- **General XDOMEA export (Post-Roadmap Phase 31 Session 13a) has no case-level `user-ui` entry point yet** — `case-service`'s "Case" concept has essentially no dedicated browsing UI anywhere in `user-ui` today, so there is no natural existing screen to attach a "export this case" button to; document-level export (`PreviewPane`) is the only frontend entry point this session. **XDOMEA import (P31-S13b) and XJustiz (P31-S13c) are separate, not-yet-started sessions**, see [ADR 0126](../adr/0126-xdomea-general-exchange-split-download-upload-not-federation-hub.md)/[ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md).

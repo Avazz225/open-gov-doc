@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
+import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_metrics_client import (
@@ -19,7 +20,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from archival_service import browse, case_pipeline, crypto, pipeline, repository
+from archival_service import browse, case_pipeline, crypto, general_export, pipeline, repository
 from archival_service.clients import (
     CaseClient,
     DocumentClient,
@@ -470,3 +471,70 @@ async def download_case_archival_package(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return Response(content=data, media_type="application/zip")
+
+
+@app.post("/xdomea/export/documents/{document_id}")
+async def export_document_xdomea(
+    document_id: str, leser_name: str, x_dms_principal: str = Header(default="")
+) -> Response:
+    """General XDOMEA export for inter-agency handoff (14.2, Post-Roadmap
+    Phase 31 Session 13a, ADR 0126) - an `Abgabe.Abgabe.0401` package for a
+    single, arbitrary document-service Document (its current version), NOT
+    tied to the disposal pipeline. Synchronous, downloadable response - same
+    shape as document-service's own `POST /documents/{id}/export` (P28-S1),
+    unlike the async, multi-phase disposal transfer state machine. `leser_name`
+    (the receiving authority) is a required query parameter - there is no
+    sensible default recipient for a general handoff (unlike the 0503
+    message, always addressed to "Archiv")."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    if not leser_name.strip():
+        raise HTTPException(status_code=422, detail="leser_name darf nicht leer sein")
+    try:
+        package = await general_export.build_document_export_package(
+            document_id, document_client=app.state.document_client, leser_name=leser_name
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=404, detail=f"Dokument {document_id!r} unbekannt"
+            ) from exc
+        raise
+    except general_export.ExportError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return Response(content=package, media_type="application/zip")
+
+
+@app.post("/xdomea/export/cases/{case_id}")
+async def export_case_xdomea(
+    case_id: str, leser_name: str, x_dms_principal: str = Header(default="")
+) -> Response:
+    """Case counterpart to `export_document_xdomea` above - an
+    `Abgabe.Abgabe.0401` package for an arbitrary case-service Case and its
+    currently-active document references. Unlike disposal (`case_pipeline.py`),
+    the case does NOT need to be closed first - any case may be exported for
+    handoff."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    if not leser_name.strip():
+        raise HTTPException(status_code=422, detail="leser_name darf nicht leer sein")
+    try:
+        case = await app.state.case_client.get_case(case_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Fall {case_id!r} unbekannt") from exc
+        raise
+    try:
+        package = await general_export.build_case_export_package(
+            case,
+            case_client=app.state.case_client,
+            document_client=app.state.document_client,
+            leser_name=leser_name,
+        )
+    except general_export.ReferencedDocumentMissingError as exc:
+        # Data drift, not a caller mistake (409, not 404/422) - the case
+        # itself is real, but one of its OWN document references points at
+        # a document that no longer exists (found live during this
+        # session's own verification, see the exception's docstring).
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except general_export.ExportError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return Response(content=package, media_type="application/zip")

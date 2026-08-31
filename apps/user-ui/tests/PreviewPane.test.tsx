@@ -13,6 +13,7 @@ const downloadDocumentVersionMock = vi.fn();
 const listOcrResultsMock = vi.fn();
 const downloadOcrPageImageMock = vi.fn();
 const exportDocumentMock = vi.fn();
+const exportDocumentXdomeaMock = vi.fn();
 const getExportAccessibilityCheckMock = vi.fn();
 // Test-only, spied fresh onto the real `navigator.clipboard.writeText`
 // each test (see beforeEach) - typed loosely since the exact spy generic
@@ -26,6 +27,7 @@ vi.mock("@/lib/api", () => ({
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
   exportDocument: (...args: unknown[]) => exportDocumentMock(...args),
+  exportDocumentXdomea: (...args: unknown[]) => exportDocumentXdomeaMock(...args),
   getExportAccessibilityCheck: (...args: unknown[]) => getExportAccessibilityCheckMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
   downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
@@ -130,6 +132,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     downloadRenditionContentMock.mockReset();
     downloadDocumentVersionMock.mockReset();
     exportDocumentMock.mockReset();
+    exportDocumentXdomeaMock.mockReset();
     getExportAccessibilityCheckMock.mockReset();
     getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: true, is_tagged: true });
     listOcrResultsMock.mockReset();
@@ -486,6 +489,74 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     expect(
       await within(previewPane).findByText("Export fehlgeschlagen. Bitte später erneut versuchen.")
+    ).toBeInTheDocument();
+  });
+
+  it("exportiert ein XDOMEA-Abgabe-Paket fuer eine benannte Behoerde (Post-Roadmap Phase 31 Session 13a, ADR 0126)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentXdomeaMock.mockResolvedValue(new Blob(["PK-zip"], { type: "application/zip" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    expect(
+      within(previewPane).queryByLabelText("Empfangende Behörde")
+    ).not.toBeInTheDocument();
+
+    await user.click(within(previewPane).getByText("Export für Behördenübergabe"));
+    await user.type(
+      within(previewPane).getByLabelText("Empfangende Behörde"),
+      "Landesarchiv Test"
+    );
+    await user.click(within(previewPane).getByText("Paket exportieren"));
+
+    expect(exportDocumentXdomeaMock).toHaveBeenCalledWith("token-123", "d1", "Landesarchiv Test");
+  });
+
+  it("laesst das Paket-Export-Formular nicht ohne eine Behoerde absenden", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Export für Behördenübergabe"));
+    expect(within(previewPane).getByText("Paket exportieren")).toBeDisabled();
+    expect(exportDocumentXdomeaMock).not.toHaveBeenCalled();
+  });
+
+  it("zeigt bei einem fehlgeschlagenen XDOMEA-Export eine Fehlermeldung", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentXdomeaMock.mockRejectedValue(new Error("Serverfehler"));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Export für Behördenübergabe"));
+    await user.type(
+      within(previewPane).getByLabelText("Empfangende Behörde"),
+      "Andere Behoerde"
+    );
+    await user.click(within(previewPane).getByText("Paket exportieren"));
+
+    expect(
+      await within(previewPane).findByText(
+        "XDOMEA-Export fehlgeschlagen. Bitte später erneut versuchen."
+      )
     ).toBeInTheDocument();
   });
 

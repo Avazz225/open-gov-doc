@@ -14,6 +14,7 @@ import {
   downloadOcrPageImage,
   downloadRenditionContent,
   exportDocument,
+  exportDocumentXdomea,
   getExportAccessibilityCheck,
   listDocumentVersions,
   listOcrResults,
@@ -136,6 +137,13 @@ export function PreviewPane({
   const [showRedactionModal, setShowRedactionModal] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // General XDOMEA export for inter-agency handoff (14.2, post-roadmap
+  // phase 31 session 13a, ADR 0126) - a downloadable Abgabe.Abgabe.0401
+  // package, unlike `handleExport` above (a plain PDF).
+  const [xdomeaExportOpen, setXdomeaExportOpen] = useState(false);
+  const [xdomeaLeserName, setXdomeaLeserName] = useState("");
+  const [xdomeaExporting, setXdomeaExporting] = useState(false);
+  const [xdomeaExportError, setXdomeaExportError] = useState<string | null>(null);
   // Accessibility pass (14.2, post-roadmap phase 31 session 8) - `null`
   // while unknown/not yet loaded (e.g. no `document.read`), in which case
   // no warning is shown (fail silent, not fail loud - the export action
@@ -537,6 +545,22 @@ export function PreviewPane({
     }
   }
 
+  async function handleXdomeaExport() {
+    if (!accessToken || !activeDocument || !xdomeaLeserName.trim()) return;
+    setXdomeaExportError(null);
+    setXdomeaExporting(true);
+    try {
+      const blob = await exportDocumentXdomea(accessToken, activeDocument.id, xdomeaLeserName.trim());
+      triggerBrowserDownload(blob, `${activeDocument.title}-abgabe.zip`);
+      setXdomeaExportOpen(false);
+      setXdomeaLeserName("");
+    } catch {
+      setXdomeaExportError(t("preview.xdomeaExportErrorGeneric"));
+    } finally {
+      setXdomeaExporting(false);
+    }
+  }
+
   // Authenticated direct links (post-roadmap phase 29, ADR 0109) - a stable
   // resource ID in the URL plus the normal session/permission-check path,
   // resolved client-side by DocumentWorkspace.tsx on mount.
@@ -763,6 +787,44 @@ export function PreviewPane({
           {accessibilityCheck.is_pdf
             ? t("preview.exportNotTaggedPdfWarning")
             : t("preview.exportNotPdfWarning")}
+        </p>
+      )}
+      {/* General XDOMEA export for inter-agency handoff (14.2, post-roadmap
+          phase 31 session 13a, ADR 0126) - a downloadable Abgabe.Abgabe.0401
+          package (ZIP), unlike the plain-PDF Export button above. Needs the
+          receiving authority's name, hence an inline form rather than a
+          one-click action. */}
+      <button type="button" onClick={() => setXdomeaExportOpen((prev) => !prev)}>
+        {t("preview.xdomeaExport")}
+      </button>
+      {xdomeaExportOpen && (
+        <div className="inline-form">
+          <label>
+            {t("preview.xdomeaExportLeserLabel")}
+            <input
+              type="text"
+              value={xdomeaLeserName}
+              onChange={(e) => setXdomeaLeserName(e.target.value)}
+              placeholder={t("preview.xdomeaExportLeserPlaceholder")}
+            />
+          </label>
+          <span className="actions">
+            <button
+              type="button"
+              disabled={xdomeaExporting || !xdomeaLeserName.trim()}
+              onClick={handleXdomeaExport}
+            >
+              {xdomeaExporting ? t("preview.exporting") : t("preview.xdomeaExportSubmit")}
+            </button>
+            <button type="button" onClick={() => setXdomeaExportOpen(false)}>
+              {t("common.cancel")}
+            </button>
+          </span>
+        </div>
+      )}
+      {xdomeaExportError && (
+        <p className="error-text" role="alert">
+          {xdomeaExportError}
         </p>
       )}
       <button type="button" onClick={handleCopyLink}>

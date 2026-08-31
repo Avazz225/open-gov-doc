@@ -536,6 +536,11 @@
     "exportErrorGeneric": "Export fehlgeschlagen. Bitte später erneut versuchen.",
     "exportNotTaggedPdfWarning": "Das Original-PDF enthält keine Dokumentstruktur (Tags) - der Export ist voraussichtlich nicht barrierefrei.",
     "exportNotPdfWarning": "Kein PDF als Ursprungsformat - der Export ist voraussichtlich nicht barrierefrei.",
+    "xdomeaExport": "Export für Behördenübergabe",
+    "xdomeaExportLeserLabel": "Empfangende Behörde",
+    "xdomeaExportLeserPlaceholder": "Name der Behörde",
+    "xdomeaExportSubmit": "Paket exportieren",
+    "xdomeaExportErrorGeneric": "XDOMEA-Export fehlgeschlagen. Bitte später erneut versuchen.",
     "copyLink": "Link kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
     "linkCopyError": "Link konnte nicht kopiert werden."

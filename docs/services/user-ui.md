@@ -210,6 +210,16 @@ Last session of Phase 5e — closes off the backend chain built in P5e-S1/S2 (Ob
   `docs/services/document-service.md` "Accessibility: Export Warning for Untagged PDFs") and, when the
   source isn't (or can't become) a tagged PDF, shows a non-blocking `role="status"` warning next to the
   "Exportieren" button — informational only, the export button itself is never disabled or gated by it.
+- **General XDOMEA export for inter-agency handoff (14.2, Post-Roadmap Phase 31 Session 13a,
+  [ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md))**: a
+  separate "Export für Behördenübergabe" button next to "Exportieren" — unlike the plain-PDF export, this
+  needs the receiving authority's name, so clicking it opens an inline form (`<label>` + text input +
+  submit/cancel, `.inline-form`) instead of firing immediately. Submit is disabled while the name field is
+  empty. `exportDocumentXdomea()` (`lib/api.ts`) calls `archival-service`'s new
+  `POST /xdomea/export/documents/{id}?leser_name=...` and downloads the returned ZIP as
+  `<title>-abgabe.zip` via the same `triggerBrowserDownload` helper the plain export already uses.
+  Case-level export has no `user-ui` entry point yet — `case-service`'s "Case" has no dedicated browsing
+  view anywhere in this app to attach a button to, see the ADR's "Consequences".
 
 ## Signatures (3.10, since P6-S7)
 
@@ -353,6 +363,7 @@ Two-stage Docker image (`apps/user-ui/Dockerfile`): Node only in the build stage
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — type checking, ESLint, production-ready static export.
+- **Since Post-Roadmap Phase 31 Session 13a: 240 tests** ([ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md)) — new `PreviewPane.test.tsx` cases (3 new: submits the XDOMEA export form with a named receiving authority and confirms `exportDocumentXdomea` is called with the right arguments, the submit button stays disabled while the authority field is empty, a failed export shows the generic error message) — verified against the real, exact live count via a full test run (`npm test`, 240 total).
 - **Since Post-Roadmap Phase 31 Session 12c: 237 tests** ([ADR 0125](../adr/0125-postbuch-register-in-service-filtering-no-search-service.md)) — new `poststelle-pane.test.tsx` cases (3 new: the Postbuch tab is hidden with only one configured mailbox, the register shows a routing entry with its message context across the mailbox filter, the empty state renders and a subject search calls `searchRoutingLog` with the typed query on submit) — verified against the real, exact live count via a full test run (`npm test`, 237 total).
 - **Since Post-Roadmap Phase 31 Session 12b: 234 tests** ([ADR 0124](../adr/0124-mail-routing-hop-log-orthogonal-to-matching.md)) — new `poststelle-pane.test.tsx` cases (4 new: mailbox filter/routing action hidden with only one configured mailbox, routing a message to a different mailbox, the target selector excludes the message's current mailbox, per-message routing history rendering) — verified against the real, exact live count via a full test run (`npm test -- --run`, 234 total), not carried forward from a possibly-stale prior figure.
 - **Since Post-Roadmap Phase 31 Session 8: 230 tests** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)) — new cases in `PreviewPane.test.tsx` (conflict/classification badge `aria-label` presence; the accessibility warning appears for an untagged PDF and a non-PDF source, and stays absent for a tagged PDF) and `document-workspace.test.tsx` (redaction badge's `aria-label` and new `.badge.redacted` class; classification panel `aria-label`) — the exact prior count was not tracked precisely across the several intervening sessions this doc's "Tests" log had fallen behind on documenting, so the delta above isn't stated as a precise `+N`.

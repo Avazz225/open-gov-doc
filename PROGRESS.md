@@ -2,13 +2,15 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S12c (searchable, standalone cross-mailbox "Postbuch" register: `GET /routing-log`
-+ a third `PoststellePane` tab — see below under "Post-Roadmap: Phase 31"), the fourteenth session of the
-new Phase 31 (eGov feature gap closure). P31-S12 (the original single-session plan line) was, per research
-+ user decision, split into P31-S12a/b/c — **all three parts are now done**, completing gap #6 from the
-eGov feature gap analysis in full.
+**Last completed:** P31-S13a (general XDOMEA export for inter-agency handoff: the new `Abgabe.Abgabe.0401`
+message, synchronous `POST /xdomea/export/documents/{id}`/`.../cases/{id}`, a `PreviewPane` button — see
+below under "Post-Roadmap: Phase 31"), the fifteenth session of the new Phase 31 (eGov feature gap
+closure). P31-S13 (the original single-session plan line) was, per research + user decision, split into
+P31-S13a/b/c — only 13a is done.
 
-**Next session:** P31-S13 (general xdomea/XJustiz exchange) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
+**Next session:** P31-S13b (XDOMEA import — receive/parse an `Abgabe.Abgabe.0401` package, create
+documents/case references from it) or P31-S13c (XJustiz — scoped down to one representative message type,
+researched at that session's own start) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4737,6 +4739,107 @@ override unset, `mail-connector` restarted and confirmed back to the default sin
 state, no leftover message/routing state was created beyond the one deliberately-verified success hop
 (left in place as ordinary, harmless dev-stack data, same precedent as every prior session's live-
 verification artifacts in this stack).
+
+### Post-Roadmap: Phase 31 Session 13a — general XDOMEA export for inter-agency handoff (2026-08-31)
+
+Fifteenth session of Phase 31 (14.2, eGov feature gap closure) — the first of the three-part P31-S13
+split (gap #12 in `docs/egov-feature-gap-analysis.md`). See
+[ADR 0126](docs/adr/0126-xdomea-general-exchange-split-download-upload-not-federation-hub.md) for the
+split decision and [ADR 0127](docs/adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md)
+for this session's own design reasoning.
+
+**Scoped via research + two user decisions before any code**, same pattern as every other large P31
+session. A research agent read `archival-service`'s current `xdomea.py` (export-only, one message,
+disposal-scoped, ADR 0029), `federation-hub-service`'s trust/transport model (ADR 0028), this project's
+existing typed-reference/classification/redaction patterns, and did external web research confirming
+XJustiz's official catalog (27 modules, 144 message types) is roughly two orders of magnitude larger than
+XDOMEA's one implemented message. Put to the user via `AskUserQuestion`: **(1) split into P31-S13a (XDOMEA
+export) → P31-S13b (XDOMEA import) → P31-S13c (XJustiz)**, isolating XJustiz's disproportionate scale into
+its own session rather than blending it with XDOMEA work — chosen over combining export+import into one
+session. **(2) "inter-agency handoff" means a downloadable/uploadable package via the existing UI, NOT new
+automatic delivery through `federation-hub-service`** — chosen over wiring `federation-hub-service`'s
+signed-envelope transport (built for BPMN task handover, never designed for binary ZIP payloads) to also
+carry the export package; automatic cross-installation delivery remains a separate, deliberately deferred
+effort.
+
+**`Abgabe.Abgabe.0401`, not `Aussonderung.Aussonderung.0503`, for general handoff**: confirmed via the
+real, official KoSIT schema (downloaded directly via `curl` from `schema.kdo.de`, not assumed) that XDOMEA
+4.0.0 organizes messages into distinct groups per process — Aussonderung (disposal, already implemented),
+**Abgabe** ("Zuständigkeitswechsel zwischen Behörden oder Systemwechseln" — a literal match for this
+session's ask), Übermittlung, Geschäftsgang, etc. Two new schema files vendored
+(`xdomea-Nachrichten-AbgabeDurchfuehren.xsd`/`xdomea-Typen-AbgabeDurchfuehren.xsd`, same official-source
+rigor as ADR 0029 — no GPL mirror). `xdomea.py` gained `build_abgabe_message_for_case`/
+`build_abgabe_message_for_document` + a second, separately-loaded `validate_abgabe_message` schema.
+
+**A real, schema-verified surprise, found only by compiling against the actual vendored schema (not
+assumed from the 0503 code's shape)**: the 0401 message's `Schriftgutobjekt/Vorgang` is typed the GENERIC
+`xdomea:VorgangType` (`xdomea-Baukasten.xsd`), while the 0503 message's is `VorgangAussonderungType`
+(disposal-specific, requires an extra `Kontextobjekt` element `VorgangType` doesn't have at all). An
+initial implementation attempt assumed these were the same shared type and failed real schema validation
+immediately (`lxml.etree.DocumentInvalid: Element 'Kontextobjekt': This element is not expected.`) —
+`xdomea.py` therefore ended up with two separate Vorgang-builders (`_build_vorgang_aussonderung`/
+`_build_vorgang_generic`), not one shared between both messages; `DokumentOderDokumentMitSchriftstueckType`,
+by contrast, genuinely IS identical across both message families and remained shared. The existing 0503
+message's own behavior is completely unchanged by this refactor (regression test added to prove it).
+
+**Synchronous, not the disposal pipeline's async multi-phase state machine**: new
+`general_export.py` + two new endpoints, `POST /xdomea/export/documents/{id}`/`.../cases/{id}`
+(`leser_name` — the receiving authority — required, no sensible default unlike the 0503 message's fixed
+"Archiv" recipient), gated by the service's existing `archival.write` RBAC check. Both return the ZIP
+directly, same shape as document-service's own single-document PDF export (Phase 28) — no new DB table, no
+poll loop, no persisted job; a case does NOT need to be closed to be exported (unlike disposal).
+
+**A second real bug, found live and fixed properly (not the schema-shape one above — a data-integrity
+distinction)**: exporting a real dev-stack case whose `CaseDocumentReference` pointed at an
+already-deleted document produced a `404` mislabeled "case unknown" — misleading, since the case itself
+was real. Fixed by fetching the case in `main.py` FIRST (translating only that lookup's `404` to "case
+unknown") and passing the already-fetched case dict into `build_case_export_package`, which now raises a
+distinct `ReferencedDocumentMissingError` for a missing per-reference document, translated to `409` (data
+drift, not a caller mistake) — same pre-check-before-conflation principle as `mail-connector`'s
+`DuplicateInTargetMailboxError` (ADR 0124, P31-S12b). A regression test locks this in.
+
+**`user-ui`**: `PreviewPane` gained a new "Export für Behördenübergabe" button next to the existing plain
+"Exportieren" — since it needs the receiving authority's name, it opens an inline form (`.inline-form`,
+matching `AussonderungPane`'s search-box pattern) rather than firing immediately; submit stays disabled
+until a name is typed. Case-level export has **no `user-ui` entry point this session** —
+`case-service`'s "Case" concept has essentially no dedicated browsing UI anywhere in `user-ui` today (only
+`PoststellePane` references a `caseId` in passing), so there was no natural existing screen to attach a
+button to; shipping the API only rather than forcing a premature UI home was the deliberate call, see
+ADR 0127 "Consequences".
+
+**Test counts**: archival-service 86 (+15: `test_xdomea.py` +7 — both new builders validated against the
+real vendored `Abgabe.Abgabe.0401` schema, empty/multi-document cases, Betreff/leser-name/document-UUID
+content assertions, reproducibility across retries, a standalone document has no `Vorgang` wrapper,
+structurally-invalid-XML rejection, a regression guard proving the 0503 message's own
+`Kontextobjekt`/`RueckmeldungArchivkennung` are unchanged after the `_build_vorgang` refactor split;
+`test_api.py` +8 — auth/role/empty-`leser_name` gates on both new endpoints, `404` for an unknown
+document/case, a full document export producing a real, schema-valid ZIP, a case export excluding removed
+references, and the `409` regression test for the live-found data-integrity bug). `user-ui` 240 tests
+(+3: submits the export form with a named authority and confirms the right API call, the submit button
+stays disabled with an empty authority field, a failed export shows the generic error message). `tsc
+--noEmit`/`eslint`/`next build` all clean. All `ruff check`/`ruff format --check` clean on every file this
+session touched (pre-existing, unrelated `loadtest/`/`federation-hub-service` issues untouched).
+
+**Fully verified live against the real, freshly rebuilt stack**: `archival-service` and `user-ui` both
+rebuilt and restarted. Backend, via `curl` against real document-service/case-service data: a real
+document export produced a genuine, valid ZIP with real content; the `404` path confirmed for an unknown
+document; a real case export succeeded for a case with zero active document references (a genuine,
+non-mocked round trip); and — the live-found bug above — a real dev-stack case whose document reference
+had gone stale correctly returned the new, accurate `409` after the fix (confirmed it was a raw,
+misleading `404` before the fix, via the same real case, same real data). **Frontend, via a real Playwright
+browser session** (Docker `playwright` image, no host Node.js available; a temporary Keycloak technical
+test user created for this since document/case access needs no special role beyond the "everyone" group's
+default `archival.write`/`archival.read`, fully deleted again afterward): logged in, opened a real document
+("Live-Test-P19-S11-Mailmatch"), confirmed the "Export für Behördenübergabe" button appears next to
+"Exportieren", clicked it, confirmed the inline form (label "Empfangende Behörde", placeholder "Name der
+Behörde") with an initially-disabled "Paket exportieren" submit, typed "Landesarchiv Testverifikation",
+confirmed the button became enabled, clicked it, and confirmed a REAL download occurred — a valid,
+non-corrupt ZIP (`testzip()` clean) named exactly `Live-Test-P19-S11-Mailmatch-abgabe.zip` (1020 bytes)
+containing `abgabe.xml` + `dokumente/<uuid>.txt`. No console errors tied to the feature (only pre-existing,
+already-documented noise: the login page's SSO-config-probe `401`, the `document.read`-gated accessibility
+check's silent-fallback `403`). Test user and all throwaway artifacts (downloaded file, screenshot,
+spec script) cleaned up afterward, confirmed via a failed login attempt and `git status` showing no
+unintended changes.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.
