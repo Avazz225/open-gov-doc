@@ -17,6 +17,7 @@
 | `GET` | `/documents/{id}/derived` | Documents derived from this one (currently only redacted copies) — the first actual reader of the P6-S3 `derived_from_document_id` field, see below |
 | `GET` | `/documents/{id}/redaction-preview/page-count` | Proxies to rendering-service's `/render/pdf-page-count` — requires `document.read` |
 | `GET` | `/documents/{id}/redaction-preview/page-image?page_number=...` | Proxies to rendering-service's `/render/pdf-page-image` — requires `document.read` |
+| `GET` | `/documents/{id}/export/accessibility-check` | `{is_pdf, is_tagged}` for the document's current version (14.2, Post-Roadmap Phase 31 Session 8, ADR 0119) — requires `document.read`, same gate as the export action itself; see "Accessibility: Export Warning for Untagged PDFs" below |
 | `POST` | `/documents/from-quarantine-release` | Internal creation path exclusively for `virus-scan-service` (2.5/10.3, since P15-S2) — identical fields to `POST /documents` plus `source_scan_id`, but deliberately triggers NO virus scan. `401`/`403` without `X-DMS-Principal`/`quarantine_release_admin_role` (default `dms-admin`). See "Quarantine Area" below and [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) |
 | `GET` | `/documents?folder_id=...&registered=...` | Non-deleted documents of a folder (since P4-S2, basis for user UI navigation) — an unknown `folder_id` returns `[]`, no 404. `registered` (optional `true`/`false`, Post-Roadmap Phase 31 Session 7, ADR 0118) filters on `registered_at IS (NOT) NULL`; omitted (default), unfiltered — basis for a work-tray view showing only a folder's still-unregistered drafts, see "Work Tray Promotion" below |
 | `GET` | `/documents/{id}` | Metadata. Since **P7-S2c**: optionally publishes `document.viewed` on success (forensic trace, 5.4b) — depending on the audit depth configuration, see below |
@@ -484,6 +485,21 @@ or, text-only, `"diagonal-center"`, default `"bottom-right"`).
 - **Deliberately config-only, no per-call override** (unlike `history_position`'s `?history_position=`
   query override) — stamping is an installation-wide compliance/reconciliation policy, not a per-export
   stylistic choice; adding an override matrix wasn't asked for and would be speculative scope.
+
+## Accessibility: Export Warning for Untagged PDFs (14.2, Post-Roadmap Phase 31 Session 8, [ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md))
+
+`GET /documents/{id}/export/accessibility-check` answers one question — "will this document's export be a
+tagged, screen-reader-friendly PDF?" — checked against the **source**, not the export output (the pipeline
+never produces a tagged PDF regardless of input, see `docs/services/rendering-service.md` "Accessibility:
+Tagged-PDF Check"). Resolution shortcuts on `content_type` first: any non-PDF current version returns
+`{is_pdf: false, is_tagged: false}` immediately, no storage download and no `rendering-service` call — an
+Office document or image is never structurally a tagged PDF after conversion, so there's nothing to check.
+Only an already-`application/pdf` source triggers the real check: content is fetched from `storage-service`
+and handed to `rendering_client.check_tagged_pdf()` (`POST /render/pdf-tag-check`). Same `document.read`
+gate as export itself — the response reveals nothing more sensitive than the export action already would.
+`user-ui`'s `PreviewPane` fetches this proactively per active document/version and shows a non-blocking,
+dismissable-by-navigation `role="status"` warning next to the "Exportieren" button — never a confirmation
+dialog gating the click, matching the plan's own wording ("an explicit warning", not a required gate).
 
 ## Open Points
 

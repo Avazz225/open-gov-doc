@@ -29,6 +29,7 @@ from rendering_service.export_pdf import (
     FolderExportEntry,
     build_document_export,
     build_folder_export,
+    is_tagged_pdf,
     render_history_pdf,
 )
 from rendering_service.models import Base, Rendition
@@ -437,6 +438,24 @@ async def render_pdf_page_count(
         raise HTTPException(
             status_code=400, detail=f"PDF konnte nicht gelesen werden: {exc}"
         ) from exc
+
+
+@app.post("/render/pdf-tag-check")
+async def render_pdf_tag_check(
+    file: UploadFile = File(...),
+    x_dms_principal: str = Header(default=""),
+) -> dict:
+    """Accessibility pass (14.2, post-roadmap phase 31 session 8) - whether
+    the uploaded PDF is tagged (`is_tagged_pdf`, `/StructTreeRoot` present),
+    the basis for the Phase 28 export flow's pre-export warning
+    (document-service's `GET /documents/{id}/export/accessibility-check`).
+    Callers are expected to only call this for an already-PDF source - a
+    caller that already knows the source isn't a PDF at all doesn't need
+    this endpoint (see the document-service proxy, which shortcuts on
+    `content_type` first)."""
+    await _require_rendering_permission(x_dms_principal, access_type="write")
+    data = await file.read()
+    return {"is_tagged": is_tagged_pdf(data)}
 
 
 @app.post("/render/pdf-page-image")

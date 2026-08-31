@@ -105,7 +105,7 @@ describe("QueryConsoleView", () => {
 
     renderQueryConsoleView();
 
-    await user.type(screen.getByPlaceholderText("Nach Nutzer filtern (Akteur)"), "alice");
+    await user.type(screen.getByPlaceholderText("Nach Akteur filtern"), "alice");
     await user.click(screen.getByText("Abfragen"));
 
     await waitFor(() => expect(listQueryEventsMock).toHaveBeenCalled());

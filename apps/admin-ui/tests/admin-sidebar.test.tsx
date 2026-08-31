@@ -41,7 +41,7 @@ describe("AdminSidebar", () => {
   it("shows both groups expanded by default with their nav items", () => {
     renderSidebar();
 
-    expect(screen.getByText("Nutzer & Rollen")).toBeInTheDocument();
+    expect(screen.getByText("Nutzende & Rollen")).toBeInTheDocument();
     expect(screen.getByText("Objekttypen")).toBeInTheDocument();
     expect(screen.getByText("Registry")).toBeInTheDocument();
     expect(screen.getByText("Installationsverwaltung")).toBeInTheDocument();
@@ -53,11 +53,11 @@ describe("AdminSidebar", () => {
 
     fireEvent.click(screen.getByText("Verwaltung"));
 
-    expect(screen.queryByText("Nutzer & Rollen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nutzende & Rollen")).not.toBeInTheDocument();
     unmount();
 
     renderSidebar();
-    expect(screen.queryByText("Nutzer & Rollen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nutzende & Rollen")).not.toBeInTheDocument();
     expect(screen.getByText("Installationsverwaltung")).toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ describe("AdminSidebar", () => {
 
     renderSidebar();
 
-    expect(screen.queryByText("Nutzer & Rollen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nutzende & Rollen")).not.toBeInTheDocument();
     expect(screen.getByText("Objekttypen")).toBeInTheDocument();
   });
 

@@ -43,6 +43,7 @@ const getObjectTypeMock = vi.fn();
 const updateDocumentMetadataMock = vi.fn();
 const registerDocumentMock = vi.fn();
 const promoteDocumentMock = vi.fn();
+const getExportAccessibilityCheckMock = vi.fn();
 const setDocumentClassificationLevelMock = vi.fn();
 const getRedactionPreviewPageCountMock = vi.fn();
 const getRedactionPreviewPageImageMock = vi.fn();
@@ -136,6 +137,7 @@ vi.mock("@/lib/api", () => ({
   updateDocumentMetadata: (...args: unknown[]) => updateDocumentMetadataMock(...args),
   registerDocument: (...args: unknown[]) => registerDocumentMock(...args),
   promoteDocument: (...args: unknown[]) => promoteDocumentMock(...args),
+  getExportAccessibilityCheck: (...args: unknown[]) => getExportAccessibilityCheckMock(...args),
   setDocumentClassificationLevel: (...args: unknown[]) =>
     setDocumentClassificationLevelMock(...args),
   getRedactionPreviewPageCount: (...args: unknown[]) => getRedactionPreviewPageCountMock(...args),
@@ -236,6 +238,8 @@ describe("DocumentWorkspace", () => {
     updateDocumentMetadataMock.mockReset();
     registerDocumentMock.mockReset();
     promoteDocumentMock.mockReset();
+    getExportAccessibilityCheckMock.mockReset();
+    getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: true, is_tagged: true });
     setDocumentClassificationLevelMock.mockReset();
     getRedactionPreviewPageCountMock.mockReset();
     getRedactionPreviewPageImageMock.mockReset();
@@ -1655,6 +1659,10 @@ describe("DocumentWorkspace", () => {
     const classificationPanel = getPaneSectionByLabel("Einstufung");
     expect(within(classificationPanel).getByText("VS-NfD")).toBeInTheDocument();
     expect(within(classificationPanel).queryByText("Anheben")).not.toBeInTheDocument();
+    // Accessibility pass (post-roadmap phase 31 session 8): the value line
+    // now has its own accessible name tying it back to "Einstufung",
+    // instead of being bare, unlabeled text.
+    expect(within(classificationPanel).getByLabelText("Einstufung: VS-NfD")).toBeInTheDocument();
   });
 
   it("raises the classification level for a principal with admin.classification", async () => {
@@ -1781,6 +1789,13 @@ describe("DocumentWorkspace", () => {
       await within(metadataPanel).findByText("Rechnung.pdf (geschwärzt)")
     ).toBeInTheDocument();
     expect(within(metadataPanel).getByText("Schwärzung")).toBeInTheDocument();
+    // Accessibility pass (post-roadmap phase 31 session 8): its own badge
+    // class/icon now, deliberately not a reuse of the classification
+    // badge's red "sensitive content" tone (a redacted copy has content
+    // REMOVED, not classified) - see globals.css `.badge.redacted`.
+    expect(
+      within(metadataPanel).getByLabelText("Schwärzung", { selector: "span.badge" })
+    ).toBeInTheDocument();
   });
 
   it("accepts a dropped file via drag-and-drop in the upload modal", async () => {
@@ -2237,7 +2252,7 @@ describe("DocumentWorkspace", () => {
     expect(kennzeichenInput).toHaveValue("2026-001");
     expect(kennzeichenInput).toBeDisabled();
     expect(
-      within(metadataPanel).getByText(/Nur Nutzer mit der Rolle "dms-admin"/)
+      within(metadataPanel).getByText(/Nur Personen mit der Rolle "dms-admin"/)
     ).toBeInTheDocument();
   });
 

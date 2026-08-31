@@ -1410,6 +1410,29 @@ export async function exportDocument(token: string, documentId: string): Promise
   return response.blob();
 }
 
+// Accessibility pass (14.2, post-roadmap phase 31 session 8) - "explicit
+// warning in the Phase 28 export flow when the source document isn't
+// tagged/accessible-PDF". `is_pdf=false` implies `is_tagged=false` (an
+// Office document/image is never tagged after the export pipeline's
+// LibreOffice/Pillow conversion, regardless of source).
+export interface AccessibilityCheck {
+  is_pdf: boolean;
+  is_tagged: boolean;
+}
+
+export async function getExportAccessibilityCheck(
+  token: string,
+  documentId: string
+): Promise<AccessibilityCheck> {
+  const response = await request(
+    "document-service",
+    `documents/${encodeURIComponent(documentId)}/export/accessibility-check`,
+    {},
+    token
+  );
+  return response.json();
+}
+
 // Combined folder export (post-roadmap phase 28, ADR 0107) - runs as a
 // background job (document-service), polled via getFolderExport until
 // status is "completed"/"failed_permanent".

@@ -1,12 +1,14 @@
 from datetime import UTC, datetime
 from io import BytesIO
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DictionaryObject, NameObject
 from rendering_service.export_pdf import (
     ExportHistoryEntry,
     FolderExportEntry,
     build_document_export,
     build_folder_export,
+    is_tagged_pdf,
     render_history_pdf,
 )
 from reportlab.pdfgen import canvas
@@ -24,6 +26,38 @@ def _real_pdf(pages: int = 2, text: str = "Page") -> bytes:
 
 def _page_text(data: bytes, index: int) -> str:
     return PdfReader(BytesIO(data)).pages[index].extract_text()
+
+
+def _add_struct_tree_root(data: bytes) -> bytes:
+    """Test-only helper (no `reportlab`/`pypdf` writer feature produces a
+    real tagged PDF short of a full structure tree) - adds a minimal,
+    otherwise-empty `/StructTreeRoot` dictionary directly onto the writer's
+    document catalog. Enough for `is_tagged_pdf`'s presence check, not a
+    real, navigable tag tree."""
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(data)))
+    struct_tree_root = writer._add_object(DictionaryObject())
+    writer._root_object[NameObject("/StructTreeRoot")] = struct_tree_root
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_is_tagged_pdf_false_for_untagged_pdf():
+    assert is_tagged_pdf(_real_pdf(pages=1)) is False
+
+
+def test_is_tagged_pdf_true_when_struct_tree_root_present():
+    assert is_tagged_pdf(_add_struct_tree_root(_real_pdf(pages=1))) is True
+
+
+def test_is_tagged_pdf_false_for_garbage_bytes():
+    """Malformed/unparseable input is reported as untagged, not raised -
+    see `is_tagged_pdf`'s own docstring."""
+    assert is_tagged_pdf(b"not a pdf at all") is False
+
+
+def test_is_tagged_pdf_false_for_empty_bytes():
+    assert is_tagged_pdf(b"") is False
 
 
 def test_render_history_pdf_empty_history():

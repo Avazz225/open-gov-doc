@@ -138,7 +138,7 @@
     "formLabel": "Dokumentmetadaten bearbeiten",
     "titleLabel": "Titel",
     "kennzeichenLabel": "Kennzeichen",
-    "kennzeichenReadOnlyHint": "Nur Nutzer mit der Rolle \"dms-admin\" dürfen ein vergebenes Kennzeichen ändern.",
+    "kennzeichenReadOnlyHint": "Nur Personen mit der Rolle \"dms-admin\" dürfen ein vergebenes Kennzeichen ändern.",
     "noSelection": "Kein Dokument ausgewählt.",
     "noObjectType": "Kein Objekttyp zugewiesen - keine weiteren Attribute.",
     "loadObjectTypeError": "Objekttyp konnte nicht geladen werden",
@@ -514,6 +514,8 @@
     "export": "Exportieren",
     "exporting": "Exportiere...",
     "exportErrorGeneric": "Export fehlgeschlagen. Bitte später erneut versuchen.",
+    "exportNotTaggedPdfWarning": "Das Original-PDF enthält keine Dokumentstruktur (Tags) - der Export ist voraussichtlich nicht barrierefrei.",
+    "exportNotPdfWarning": "Kein PDF als Ursprungsformat - der Export ist voraussichtlich nicht barrierefrei.",
     "copyLink": "Link kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
     "linkCopyError": "Link konnte nicht kopiert werden."

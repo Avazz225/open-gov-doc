@@ -63,7 +63,16 @@ export function ClassificationPanel({
   return (
     <section className="classification-panel" aria-label={t("classification.paneLabel")}>
       <h2 className="pane-heading">{t("classification.heading")}</h2>
-      <p>
+      {/* Accessibility pass (14.2, post-roadmap phase 31 session 8): the
+          current level used to be bare, unlabeled text - a screen reader
+          landing on it out of context (e.g. via heading/region navigation
+          rather than reading top to bottom) got just "GEHEIM" with nothing
+          tying it to "Einstufung". `aria-label` on the value line restates
+          that association explicitly; the 🔒 glyph mirrors the badge used
+          elsewhere for the same field (PreviewPane.tsx) - shown only once
+          an actual level is set, not for "Nicht eingestuft". */}
+      <p aria-label={`${t("classification.heading")}: ${activeDocument.classification_level ?? t("classification.unclassified")}`}>
+        {activeDocument.classification_level && <span aria-hidden="true">🔒 </span>}
         {activeDocument.classification_level ?? t("classification.unclassified")}
       </p>
 

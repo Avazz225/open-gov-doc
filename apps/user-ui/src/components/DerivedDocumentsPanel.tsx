@@ -36,7 +36,10 @@ export function DerivedDocumentsPanel({ document: activeDocument }: { document: 
           <li key={doc.id}>
             <a href={`/?document=${encodeURIComponent(doc.id)}`}>{doc.title}</a>
             {doc.derivation_type === "redaction" && (
-              <span className="badge classified">{t("derivedDocuments.redactionBadge")}</span>
+              <span className="badge redacted" aria-label={t("derivedDocuments.redactionBadge")}>
+                <span aria-hidden="true">✂️ </span>
+                {t("derivedDocuments.redactionBadge")}
+              </span>
             )}
           </li>
         ))}

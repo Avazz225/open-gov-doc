@@ -257,6 +257,29 @@ def test_render_pdf_page_image_returns_png():
     assert response.content.startswith(b"\x89PNG")
 
 
+# --- Accessibility pass (14.2, post-roadmap phase 31 session 8) ----------
+
+
+def test_render_pdf_tag_check_untagged():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/pdf-tag-check",
+            files={"file": ("akte.pdf", _real_pdf(pages=1), "application/pdf")},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"is_tagged": False}
+
+
+def test_render_pdf_tag_check_rejects_garbage_as_untagged_not_error():
+    with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
+        response = client.post(
+            "/render/pdf-tag-check",
+            files={"file": ("kaputt.pdf", b"kein pdf", "application/pdf")},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"is_tagged": False}
+
+
 def test_render_pdf_page_image_rejects_out_of_range_page():
     with TestClient(app, headers={"X-DMS-Principal": "rendering-service-tests"}) as client:
         response = client.post(

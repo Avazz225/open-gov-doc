@@ -19,6 +19,7 @@
 | `POST` | `/render/pdf-page-count` | Multipart (`file`: PDF) → `{page_count}`, since **Post-Roadmap Phase 31 Session 4** ([ADR 0115](../adr/0115-document-redaction-genuine-content-removal.md)) — for the redaction UI's page navigation; `rendering.write`-gated |
 | `POST` | `/render/pdf-page-image` | Multipart (`file`: PDF, `page_number`) → PNG raster of that page (any PDF, not just scans — see "Document Redaction" below); `rendering.write`-gated |
 | `POST` | `/render/redact` | Multipart (`file`: PDF, `regions`: JSON array of `{page_number, x, y, width, height}` fractions) → the PDF with those regions' content genuinely removed (not just covered), returned directly, **without** persisting it; `rendering.write`-gated |
+| `POST` | `/render/pdf-tag-check` | Multipart (`file`: PDF) → `{is_tagged: bool}`, since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)) — `/StructTreeRoot` presence check, see "Accessibility: Tagged-PDF Check" below; `rendering.write`-gated |
 | `GET` | `/healthz` | Health check |
 
 The `id` of a rendition is a natural key `{document_id}:{version_number}:{rendition_type}` (see Data Model) — not a random UUID.
@@ -162,6 +163,18 @@ version constraint here.
 
 `POST /render/convert-to-pdf` (on-demand, no persisted `Rendition`) reuses `PdfArchiveRenderer`'s format dispatch directly rather than duplicating it — the same conversion logic the automatic pipeline uses for the `pdf_archive` rendition type. `POST /render/export/document`/`POST /render/export/folder` compose `export_pdf.py`'s functions with that same conversion step.
 
+## Accessibility: Tagged-PDF Check (14.2, Post-Roadmap Phase 31 Session 8, [ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md))
+
+`is_tagged_pdf(data: bytes) -> bool` (`export_pdf.py`) checks the actual technical basis of a "tagged"
+PDF — presence of a `/StructTreeRoot` entry in the document catalog (`pypdf.PdfReader(...).root_object`) —
+not merely whether the bytes parse as a PDF at all. Malformed/unparseable input is reported `False`
+(untagged) rather than raising, mirroring the same fail-soft posture already used elsewhere in this module
+(e.g. `build_document_export`'s lenient `history_position` handling) — a warning path should never itself
+become a new failure mode. `POST /render/pdf-tag-check` is a thin wrapper exposing this to `document-service`
+(see `docs/services/document-service.md` "Accessibility: Export Warning for Untagged PDFs"), which proxies it
+into the export UI. Deliberately **not** a full PDF/UA conformance check — the same documented limitation
+category as this service's existing PDF/A-without-veraPDF gap (see "Open Points" below).
+
 ## Backend Integration
 
 - **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key.
@@ -188,7 +201,15 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests` (**59 tests**, +13 since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)): `test_export_pdf.py` (6, `build_document_export`/`build_folder_export`/`render_history_pdf` — local vs. global footer stability, TOC offsets, bookmark page indices) and `test_api.py` (7, `/render/convert-to-pdf`/`/render/export/document`/`/render/export/folder` incl. format-rejection and mismatched-titles/files cases); before that 46, previously 44, +2 since **Post-Roadmap Phase
+- `uv run pytest services/rendering-service/tests` (**93 tests** by direct count at end of session,
+  +6 since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)):
+  `test_export_pdf.py` (4, `is_tagged_pdf` against a real, manually-constructed `/StructTreeRoot` catalog
+  entry, an untagged PDF, and malformed bytes) and `test_api.py` (2, `/render/pdf-tag-check` against an
+  untagged real PDF and garbage input, both reporting `is_tagged: false` rather than an error) — the base
+  this session started from was actually 87, not the 59 this doc had last recorded; the doc's count had
+  fallen out of sync across the intervening Post-Roadmap Phase 31 sessions (S4 redaction, S6 output
+  stamping) that added tests without updating this line, not re-audited further here; before that 59, +13
+  since **Post-Roadmap Phase 28** ([ADR 0107](../adr/0107-pdf-export-two-pass-merge-subnumbering.md)): `test_export_pdf.py` (6, `build_document_export`/`build_folder_export`/`render_history_pdf` — local vs. global footer stability, TOC offsets, bookmark page indices) and `test_api.py` (7, `/render/convert-to-pdf`/`/render/export/document`/`/render/export/folder` incl. format-rejection and mismatched-titles/files cases); before that 46, previously 44, +2 since **Post-Roadmap Phase
   20 Session 7** ([ADR 0083](../adr/0083-admin-ui-processing-failures-visibility.md)): `document_id`
   optional in `GET /renditions` — a repository test and an API test confirm the cross-document
   call with the `status` filter, without a `422` being returned; before that 44, +11 since **Post-Roadmap Phase 20 Session 4** — backoff behavior, `list_due_for_retry` filtering, `reset_for_retry` regression test, `process_version`'s `failed_permanent` path, new `/retry` endpoint, new `test_main.py` for `_run_retry_tick`, see [ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): renderer behavior against real, in-memory generated files (real PNG/`.docx`/`.pptx`/PDF, no fixture files, no mocks), repository (upsert/overwrite/filter), pipeline (`process_version` directly against the real running Document/Storage Service, incl. error isolation on a corrupted PDF; since P5-S3 additionally `process_ocr_text` for the follow-up effect), API (`/renditions` endpoints, watermarking incl. rejection on an invalid PDF), consumer integration (a real NATS event `document.created`/`document.version.created` triggers real rendering; since P5-S3 additionally `test_ocr_consumer.py` for the `ocr.completed` dispatch incl. duplicate check, with a fake `OcrServiceClient` instead of a real OCR service call; since P5b-S5 additionally a regression test with an `OcrServiceClient` that simulates a connection error — the handler must not crash in that case).
@@ -204,3 +225,8 @@ None yet — follows in Phase 11.
 - ~~**No cleanup of failed renditions**~~ — **fixed in Post-Roadmap Phase 20 Session 4** ([ADR 0080](../adr/0080-rendering-ocr-service-retry-backoff-failed-permanent.md)): automatic retry with full-jitter backoff up to `max_rendering_attempts`, after that `failed_permanent` + manual restart via `POST .../retry` (targeted only at the affected renderer).
 - ~~No authorization~~ — **fixed in Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)): all endpoints now check `rendering.read`/`rendering.write` via `permission-service`. Still open: per 2.4, renditions should inherit the same permissions as the original (fine-grained, document-specific) — the new check is a coarse, service-wide `read`/`write`, not inheritance of the concrete document permission.
 - **Watermark endpoint deliberately minimal**: fixed diagonal stamp, no position/repetition/color configuration.
+- **`is_tagged_pdf()` is a `/StructTreeRoot`-presence check, not full PDF/UA validation** (Post-Roadmap
+  Phase 31 Session 8, ADR 0119) — same documented limitation category as the PDF/A-without-veraPDF gap
+  above. The export pipeline itself also still doesn't preserve a tagged source PDF's structure tree
+  through conversion (`PdfArchiveRenderer`/`export_pdf.py` have no tag-copying capability) — the new check
+  surfaces this gap to the user but does not close it.

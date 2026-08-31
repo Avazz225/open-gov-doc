@@ -186,6 +186,31 @@ Last session of Phase 5e — closes off the backend chain built in P5e-S1/S2 (Ob
 - **`RedactionModal`**: opened via a "Schwärzen" button in `PreviewPane` (only shown for a PDF current version). One page at a time (Previous/Next), fetched as a rasterized image via `getRedactionPreviewPageCount()`/`getRedactionPreviewPageImage()` (proxied through document-service). Click-drag over the image draws a rectangle; released drags with a size above a small threshold are added to a per-page region list — same percentage-of-image positioning technique as `PreviewPane`'s existing OCR word overlay, with new `mousedown`/`mousemove`/`mouseup` handlers for the drawing interaction itself (nothing else in this codebase draws new overlays interactively). "Schwärzung anwenden" calls `redactDocument()`, then triggers the same `onUploaded` workspace-context refresh callback `DockableDocumentArea` already uses after a regular upload (threaded through as `PreviewPane`'s new `onDocumentCreated` prop) — a redacted copy is a genuinely new document, not a new version of the current one.
 - **`DerivedDocumentsPanel`**: attached below `MetadataPanel`'s form (same standalone-panel pattern as `RetentionPanel`/`ClassificationPanel`), shown only when `listDerivedDocuments()` returns at least one entry — the first UI surface for the previously write-only P6-S3 provenance fields. Each entry is a plain `<a href="/?document=ID">` (not an in-app tab-open callback): a real navigation, resolved by `DocumentWorkspace`'s existing direct-link mount effect (Post-Roadmap Phase 29, ADR 0109) — the simplest correct way to open an arbitrary document from a leaf panel with no workspace context of its own. A redacted copy additionally shows a `.badge.classified`-styled "Schwärzung" label.
 
+## Accessibility pass: badges, icons, tagged-PDF export warning (14.2, Post-Roadmap Phase 31 Session 8, [ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md))
+
+- **Badges pair color with an icon and a real `aria-label`, never color alone** (WCAG 1.4.1): the version
+  conflict badge (`.badge.down`, `PreviewPane`) gets a ⚠️ icon; the classification badge (`.badge.classified`,
+  `PreviewPane`/`ClassificationPanel`) gets a 🔒 icon; each `aria-label` restates the badge's meaning in
+  words (e.g. `"Einstufung: GEHEIM."` plus the existing tooltip text), not just the raw level string.
+- **`.badge.classified` is no longer reused for the redaction badge** (`DerivedDocumentsPanel`) — a
+  semantically backwards reuse found this session (a redacted copy has content *removed*, making it *less*
+  sensitive than the original, not more). It now uses a new, neutral `.badge.redacted` class (bordered, no
+  red fill) plus a ✂️ icon and `aria-label`.
+- **`ClassificationPanel`'s current-level text** is now wrapped with an `aria-label` tying the raw level
+  value back to "Einstufung", so a screen reader landing on it out of surrounding context (e.g. via
+  region/heading navigation) doesn't read just a bare level string with nothing to anchor it.
+- **High-contrast theme bugfix**: `globals.css`'s `[data-theme="high-contrast"]` badge-border override
+  previously applied only to `.badge.down` — generalized to the base `.badge` class so every badge variant
+  keeps a visible border once the theme's `--dms-*-bg` tokens flatten to the page background. A second,
+  unrelated bug fixed in the same pass: this app's `globals.css` never defined `--dms-success`/
+  `--dms-success-bg` (present in every other app's theme tokens), leaving `.badge.ok` (`BulkEditModal`)
+  completely unstyled in all five theme blocks.
+- **Tagged-PDF export warning**: `PreviewPane` fetches `getExportAccessibilityCheck()` proactively per
+  active document/version (`GET /documents/{id}/export/accessibility-check`, see
+  `docs/services/document-service.md` "Accessibility: Export Warning for Untagged PDFs") and, when the
+  source isn't (or can't become) a tagged PDF, shows a non-blocking `role="status"` warning next to the
+  "Exportieren" button — informational only, the export button itself is never disabled or gated by it.
+
 ## Signatures (3.10, since P6-S7)
 
 New `components/SignaturesPanel.tsx`, rendered below the form in `MetadataPanel` — an add-on pattern like the OCR/renditions display in `PreviewPane` (own `list*` call, own load effect, non-blocking fallback UI), but as a separate section rather than within the preview itself, since it is document-bound, non-editable supplementary information.
@@ -326,6 +351,7 @@ Two-stage Docker image (`apps/user-ui/Dockerfile`): Node only in the build stage
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — type checking, ESLint, production-ready static export.
+- **Since Post-Roadmap Phase 31 Session 8: 230 tests** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)) — new cases in `PreviewPane.test.tsx` (conflict/classification badge `aria-label` presence; the accessibility warning appears for an untagged PDF and a non-PDF source, and stays absent for a tagged PDF) and `document-workspace.test.tsx` (redaction badge's `aria-label` and new `.badge.redacted` class; classification panel `aria-label`) — the exact prior count was not tracked precisely across the several intervening sessions this doc's "Tests" log had fallen behind on documenting, so the delta above isn't stated as a precise `+N`.
 - **Since P23-S8 (last session of Phase 23): 183 tests** (previously 181, +2) — two new `document-workspace.test.tsx` cases: right-click on a folder row in the tree view opens the same context menu as in the list view, "Delete" correctly calls `trashFolder()`; right-click on a document row in the tree view + "Add to favorites" calls `addFavorite()` and the ⭐ prefix appears afterward.
 - **Since P23-S7: 181 tests** (previously 180, +1) — a new `document-workspace.test.tsx` case opens a document (version selector still invisible, only one version), signs it via `SignaturesPanel`, and confirms that `PreviewPane`'s version selector appears afterward without reopening and offers the new version for selection — with staged `listDocumentVersions` mock responses (first two calls only version 1, thereafter both versions), to prove that a real reload occurs rather than just a re-render.
 - **Since P23-S6: 180 tests** (previously 178, +2) — new standalone `layout-form-fields.test.tsx`: confirms that `LayoutFormFields` renders a `data-layout-container` wrapper and a `<style>` block with an `@container (max-width: ...)` rule (no more `window.innerWidth` in the code), as well as that two simultaneously rendered layout instances get different scoping IDs (no mutual overwriting of thresholds).

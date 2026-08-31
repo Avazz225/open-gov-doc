@@ -75,7 +75,7 @@ describe("ForensicTraceView", () => {
 
     renderForensicTraceView();
 
-    await user.type(screen.getByPlaceholderText("Nach Nutzer filtern (Akteur)"), "alice");
+    await user.type(screen.getByPlaceholderText("Nach Akteur filtern"), "alice");
     await user.click(screen.getByText("Trace abfragen"));
 
     await waitFor(() => expect(getForensicTraceMock).toHaveBeenCalled());

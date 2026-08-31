@@ -30,6 +30,25 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 # already established in watermark.py (add_text_watermark), just as a small
 # corner label instead of a diagonal stamp.
 
+
+def is_tagged_pdf(data: bytes) -> bool:
+    """Accessibility pass (14.2, post-roadmap phase 31 session 8): whether a
+    PDF carries a structure tree (`/StructTreeRoot` in its document catalog)
+    - the actual technical basis of a "tagged"/accessibility-oriented PDF,
+    not merely "is a PDF". Used to warn before export (see main.py's
+    `/render/pdf-tag-check`), not to validate full PDF/UA conformance (no
+    veraPDF integration here, same documented limitation as the existing
+    PDF/A-without-ISO-19005-validation gap, docs/services/rendering-
+    service.md "Open Points"). Malformed/unreadable input is reported as
+    untagged rather than raising - content that can't even be parsed is
+    certainly not a valid tagged PDF."""
+    try:
+        reader = PdfReader(BytesIO(data))
+        return "/StructTreeRoot" in reader.root_object
+    except Exception:
+        return False
+
+
 _TABLE_STYLE = TableStyle(
     [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dddddd")),

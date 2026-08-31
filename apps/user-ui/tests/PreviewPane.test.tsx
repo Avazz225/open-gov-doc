@@ -13,6 +13,7 @@ const downloadDocumentVersionMock = vi.fn();
 const listOcrResultsMock = vi.fn();
 const downloadOcrPageImageMock = vi.fn();
 const exportDocumentMock = vi.fn();
+const getExportAccessibilityCheckMock = vi.fn();
 // Test-only, spied fresh onto the real `navigator.clipboard.writeText`
 // each test (see beforeEach) - typed loosely since the exact spy generic
 // isn't worth spelling out here.
@@ -25,6 +26,7 @@ vi.mock("@/lib/api", () => ({
   downloadRenditionContent: (...args: unknown[]) => downloadRenditionContentMock(...args),
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
   exportDocument: (...args: unknown[]) => exportDocumentMock(...args),
+  getExportAccessibilityCheck: (...args: unknown[]) => getExportAccessibilityCheckMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
   downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
   officeLaunchInfo: vi.fn().mockReturnValue(null),
@@ -128,6 +130,8 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     downloadRenditionContentMock.mockReset();
     downloadDocumentVersionMock.mockReset();
     exportDocumentMock.mockReset();
+    getExportAccessibilityCheckMock.mockReset();
+    getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: true, is_tagged: true });
     listOcrResultsMock.mockReset();
     listOcrResultsMock.mockResolvedValue([]);
     downloadOcrPageImageMock.mockReset();
@@ -182,6 +186,52 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(embed).toHaveAttribute("type", "application/pdf");
     expect(embed).toHaveAttribute("src", "blob:mock-url");
     expect(downloadDocumentVersionMock).toHaveBeenCalledWith("token-123", "d1", 1);
+  });
+
+  it("warnt vor dem Export bei einem PDF ohne Dokumentstruktur (14.2, P31-S8)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: true, is_tagged: false });
+
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    expect(
+      await within(previewPane).findByText(/enthält keine Dokumentstruktur/)
+    ).toBeInTheDocument();
+  });
+
+  it("warnt vor dem Export mit anderem Text, wenn die Quelle gar kein PDF ist (14.2, P31-S8)", async () => {
+    const doc = makeDocument({ title: "notiz.txt" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "text/plain" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["Hallo"], { type: "text/plain" }));
+    getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: false, is_tagged: false });
+
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: notiz.txt");
+    await screen.findByText("Hallo");
+
+    expect(
+      await within(previewPane).findByText(/Kein PDF als Ursprungsformat/)
+    ).toBeInTheDocument();
+  });
+
+  it("zeigt keine Barrierefreiheits-Warnung für ein bereits getaggtes PDF (14.2, P31-S8)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: true, is_tagged: true });
+
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    expect(within(previewPane).queryByText(/nicht barrierefrei/)).not.toBeInTheDocument();
   });
 
   it("zeigt bei einem später erneut geöffneten PDF weiterhin das native Embed, selbst wenn inzwischen eine substitute_text-Rendition existiert", async () => {
@@ -474,6 +524,13 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     expect(within(previewPane).getByText("Konflikt")).toBeInTheDocument();
     expect(within(previewPane).getByText("Kommentar: Konflikt beim Check-in")).toBeInTheDocument();
+    // Accessibility pass (post-roadmap phase 31 session 8): the conflict
+    // badge's meaning must not depend on its color alone (identical red
+    // tone as the unrelated classification badge below) - an aria-label
+    // restates it for anyone not perceiving color/the emoji glyph.
+    expect(
+      within(previewPane).getByLabelText(/Konflikt: Diese Version ist als Konfliktversion markiert/)
+    ).toBeInTheDocument();
 
     const select = within(previewPane).getByLabelText("Version auswählen");
     const conflictOption = within(select).getByText(/Version 2/) as HTMLOptionElement;
@@ -483,6 +540,27 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
 
     expect(within(previewPane).queryByText("Konflikt")).not.toBeInTheDocument();
     expect(within(previewPane).getByText("Kommentar: Erste Fassung")).toBeInTheDocument();
+  });
+
+  it("zeigt für eine eingestufte Version ein Badge mit Schloss-Symbol und Aria-Label (14.2, P31-S8)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([
+      makeVersion({ version_number: 1, classification_level: "GEHEIM" }),
+    ]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    expect(within(previewPane).getByText("GEHEIM")).toBeInTheDocument();
+    // Not color alone: a real accessible name ties the badge's meaning to
+    // "Einstufung" (the same field's own panel heading) for anyone not
+    // perceiving the red tone/lock glyph.
+    expect(
+      within(previewPane).getByLabelText(/Einstufung: GEHEIM\..*Check-ins/)
+    ).toBeInTheDocument();
   });
 
   it("pollt eine noch nicht fertige pdf_archive-Rendition und zeigt die formatierte Ansicht, sobald sie bereit ist (P23-S3)", async () => {

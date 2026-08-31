@@ -466,6 +466,19 @@ class ExportConfigOut(ExportConfigIn):
     updated_at: datetime
 
 
+class AccessibilityCheckOut(BaseModel):
+    """Accessibility pass (14.2, post-roadmap phase 31 session 8) -
+    "explicit warning in the Phase 28 export flow when the source document
+    isn't tagged/accessible-PDF". `is_pdf=False` implies `is_tagged=False`
+    (an Office document/image is never tagged after the export pipeline's
+    LibreOffice/Pillow conversion, regardless of source) - both fields
+    returned separately so the frontend can phrase the warning precisely
+    ("not a PDF at all" vs. "a PDF without a structure tree")."""
+
+    is_pdf: bool
+    is_tagged: bool
+
+
 class FolderExportJobOut(BaseModel):
     model_config = {"from_attributes": True}
 

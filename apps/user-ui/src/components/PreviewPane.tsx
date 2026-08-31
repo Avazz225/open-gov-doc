@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  type AccessibilityCheck,
   type DocumentSummary,
   type DocumentVersion,
   type OcrResultSummary,
@@ -13,6 +14,7 @@ import {
   downloadOcrPageImage,
   downloadRenditionContent,
   exportDocument,
+  getExportAccessibilityCheck,
   listDocumentVersions,
   listOcrResults,
   listRenditions,
@@ -134,6 +136,11 @@ export function PreviewPane({
   const [showRedactionModal, setShowRedactionModal] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Accessibility pass (14.2, post-roadmap phase 31 session 8) - `null`
+  // while unknown/not yet loaded (e.g. no `document.read`), in which case
+  // no warning is shown (fail silent, not fail loud - the export action
+  // itself already fails cleanly if unauthorized).
+  const [accessibilityCheck, setAccessibilityCheck] = useState<AccessibilityCheck | null>(null);
   // Authenticated direct links (post-roadmap phase 29, ADR 0109).
   const [linkCopyMessage, setLinkCopyMessage] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -160,6 +167,30 @@ export function PreviewPane({
       })
       .catch(() => {
         if (!cancelled) setVersions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, activeDocument?.id, versionBump]);
+
+  // Accessibility pass (14.2, post-roadmap phase 31 session 8) - fetched
+  // alongside the version list above (same dependencies: a new version via
+  // `versionBump` can change the current version's content type/tagging).
+  // The export endpoint itself always exports the CURRENT version (see
+  // `handleExport` below), so that's what this check applies to as well.
+  useEffect(() => {
+    if (!accessToken || !activeDocument) {
+      setAccessibilityCheck(null);
+      return;
+    }
+    let cancelled = false;
+    getExportAccessibilityCheck(accessToken, activeDocument.id)
+      .then((result) => {
+        if (!cancelled) setAccessibilityCheck(result);
+      })
+      .catch(() => {
+        if (!cancelled) setAccessibilityCheck(null);
       });
     return () => {
       cancelled = true;
@@ -587,7 +618,9 @@ export function PreviewPane({
             <span
               className="badge down version-conflict-badge"
               title={t("preview.versionConflictTooltip")}
+              aria-label={`${t("preview.versionConflictBadge")}: ${t("preview.versionConflictTooltip")}`}
             >
+              <span aria-hidden="true">⚠️ </span>
               {t("preview.versionConflictBadge")}
             </span>
           )}
@@ -600,7 +633,9 @@ export function PreviewPane({
             <span
               className="badge classified version-classification-badge"
               title={t("preview.versionClassificationTooltip")}
+              aria-label={`${t("classification.paneLabel")}: ${currentVersionMeta.classification_level}. ${t("preview.versionClassificationTooltip")}`}
             >
+              <span aria-hidden="true">🔒 </span>
               {currentVersionMeta.classification_level}
             </span>
           )}
@@ -713,6 +748,21 @@ export function PreviewPane({
       {exportError && (
         <p className="error-text" role="alert">
           {exportError}
+        </p>
+      )}
+      {/* Accessibility pass (14.2, post-roadmap phase 31 session 8): "explicit
+          warning ... when the source document isn't tagged/accessible-PDF" -
+          shown next to Export, not blocking it (the export still runs; this
+          is a heads-up, not a confirmation gate). `accessibilityCheck ===
+          null` (not yet loaded, or the caller lacks `document.read`) shows
+          nothing - fail silent, the export action itself already fails
+          cleanly if unauthorized. */}
+      {accessibilityCheck && !accessibilityCheck.is_tagged && (
+        <p className="hint accessibility-warning" role="status">
+          ⚠️{" "}
+          {accessibilityCheck.is_pdf
+            ? t("preview.exportNotTaggedPdfWarning")
+            : t("preview.exportNotPdfWarning")}
         </p>
       )}
       <button type="button" onClick={handleCopyLink}>

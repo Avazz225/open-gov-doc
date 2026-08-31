@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S7 (hand folders and work trays — see below under "Post-Roadmap: Phase 31"), the seventh session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S8 (accessibility pass: classification badge iconography/contrast, gender-neutral system messaging, tagged-PDF export warning — see below under "Post-Roadmap: Phase 31"), the eighth session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** any other Phase 31 session (P31-S8 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
+**Next session:** any other Phase 31 session (P31-S9 through S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31"; only P31-S10/S11 have a hard dependency (on P31-S9), the rest are independent and can run in any order.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4165,6 +4165,99 @@ it, filling the target-folder field with `root`, clicking "Aus Arbeitsvorrat üb
 the draft badge disappeared. All test artifacts (documents, folders, the temporary folder-scoped role
 assignment, the temporary Playwright spec file itself) removed/revoked afterward — the permanent
 `e2e-playwright-reader` fixture role was left untouched, per its own documented purpose.
+
+### Post-Roadmap: Phase 31 Session 8 — accessibility pass (2026-08-31)
+
+Eighth session of Phase 31 (14.2, eGov feature gap closure) — the "Barrierefreiheit"/accessibility gap
+from the original gap-analysis pass, three bounded sub-parts per the plan's own wording: classification-
+related UI iconography/contrast, gender-neutral system messaging, and a tagged-PDF export warning. See
+[ADR 0119](docs/adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md) for the full
+design reasoning; only the session-specific narrative (what was found, what broke, what was verified) is
+recorded here.
+
+**A dedicated research pass first surveyed the actual state** across all six frontend apps before writing
+any code — confirmed no prior accessibility ADR, no axe/a11y harness, and no prior WCAG/BITV mention
+anywhere in this project. This immediately paid off: it surfaced two real, previously unnoticed bugs (the
+`--dms-success`/`--dms-success-bg` tokens missing entirely from `user-ui`'s `globals.css`, leaving
+`.badge.ok` completely unstyled; and the high-contrast theme's badge-border override applying only to
+`.badge.down`, silently losing every other badge's pill shape) and one real semantic-correctness bug (the
+redaction badge in `DerivedDocumentsPanel` reusing `.badge.classified`'s red "danger" styling, which is
+actually backwards — a redacted copy has content *removed*, making it *less* sensitive than the original,
+not more).
+
+**Part 1 — classification badges/icons**: `.badge.down` (conflict), `.badge.classified` (classification),
+and the redaction badge each now pair color with a distinguishing glyph (⚠️/🔒/✂️) and a real `aria-label`
+restating the meaning in words — the actual WCAG 1.4.1 fix. Redaction gets its own `.badge.redacted` class
+(neutral border, no red fill) instead of reusing `.badge.classified`. The high-contrast border override was
+generalized from `.badge.down` to the base `.badge` class (one rule covers every current and future
+variant). `ClassificationPanel`'s bare current-level `<p>` now carries an `aria-label` tying the raw level
+string back to "Einstufung" for out-of-context screen-reader navigation.
+
+**Part 2 — gender-neutral messaging**: a careful, per-string review (not a mechanical find/replace) across
+all six apps' `de.json` files, following the codebase's own already-latent convention
+(`"Mitarbeitender"`/`"ausführende Person"` predate this session) rather than inventing a new one. Ended up
+around 16 real edits — substantivized participles for standalone category labels (`"Nutzer"` →
+`"Nutzende"`: `admin-ui`'s `nav.users`, `users.*`, `license.users`) and `"Person"`/`"Personen"` for prose
+describing what an individual did/may do (`groups.hint`, `forensicTrace.*`, `queryConsole.filterActor`,
+`auditTraceSettings.hint`, `retentionSettings.deletionReasonCatalogEmpty`, `user-ui`'s
+`kennzeichenReadOnlyHint`). The bulk of the initial ~40-line regex survey turned out to be field/credential
+labels (`"Benutzername"`) or compound technical nouns (`"Nutzerkonto"`, `"Empfänger-Domain"`) — deliberately
+left untouched, a genuinely different category from a gendered-language issue, not a shortcut to reduce the
+edit count (see ADR 0119 for the full per-string reasoning). Backend `detail=` error strings that surface
+verbatim in the UI were deliberately scoped out — a materially larger, separate-session surface.
+
+**Part 3 — tagged-PDF export warning**: new `is_tagged_pdf()` in `rendering-service` (`pypdf`,
+`/StructTreeRoot` presence — the actual technical basis of a "tagged" PDF, not merely "is this a PDF"),
+exposed via `POST /render/pdf-tag-check` and proxied by `document-service`'s new
+`GET /documents/{id}/export/accessibility-check`. Checks the **source**, not the export output — research
+confirmed the export pipeline (LibreOffice/Pillow conversion + `pypdf`-based merge/stamp) never produces a
+tagged PDF regardless of input, so checking the output would always say "untagged" and teach nothing
+actionable; a tagged source PDF getting detagged by this pipeline remains a real, honestly-documented gap
+this warning surfaces but doesn't close. Only an already-`application/pdf` source is actually checked
+against rendering-service — every other format is trivially reported untagged without a storage download or
+service round trip, since conversion never produces tagging for anything else. Surfaced in `user-ui`'s
+`PreviewPane` as a non-blocking `role="status"` warning next to "Exportieren", fetched proactively per
+active document/version — never a confirmation dialog gating the click, matching the plan's literal wording
+("an explicit warning", not a required gate). Same `document.read` gate as the export action itself.
+
+**Test counts**: rendering-service 93 (+6: `is_tagged_pdf` against a real, manually-constructed
+`/StructTreeRoot` catalog entry plus an untagged PDF and malformed bytes; `/render/pdf-tag-check` API tests
+for both cases) — document-service 339 (+5: accessibility-check endpoint covering PDF/non-PDF source,
+`document.read` gate, dehydrated-content `409`, unknown-document `404`); admin-ui 220 (+16, all existing
+test files updated to assert the gender-neutral string variants — a text-content pass, not new test cases);
+user-ui 230 (+10: conflict/classification badge `aria-label` presence, redaction badge's new
+`.badge.redacted` class + `aria-label`, classification panel `aria-label`, and three cases for the
+accessibility warning appearing/not-appearing per source type). All `ruff check`/`ruff format --check`
+clean except pre-existing, unrelated `loadtest/`/`federation-hub-service` issues (not touched this session);
+`tsc --noEmit`/`eslint`/`next build` clean for both admin-ui and user-ui.
+
+**A genuine mistake made and learned from mid-session**: running `./scripts/run-tests.sh document-service`
+while a background `./scripts/run-tests.sh rendering-service` run was still active caused the
+document-service run to fail catastrophically (178 errors, "consumer is already bound to a subscription")
+— `scripts/run-tests.sh` invocations must never run concurrently, they contend for the same NATS JetStream
+durable consumers. Investigating this surfaced a second, independent, longer-standing issue: **958
+orphaned NATS durable consumers** (named `test-<hash>`) had accumulated across at least four streams from
+many prior sessions' test runs never cleaning them up — purged via a throwaway script calling
+`js.delete_consumer()` for every `test-`/`test_`-prefixed name across the known stream list. Distinct from
+P31-S6's already-documented orphaned-*streams* finding — this one is orphaned *consumers* on streams that
+otherwise get cleaned up correctly.
+
+**Fully verified live against the real, freshly rebuilt stack**: `document-service`/`rendering-service`
+rebuilt and restarted first (needed for the automated test suite itself), `user-ui`/`admin-ui` rebuilt and
+restarted afterward for the frontend changes. `curl` verification: `POST /render/pdf-tag-check` against a
+real, genuinely untagged `reportlab`-generated PDF and against garbage bytes, both correctly returning
+`is_tagged: false`, no error. `GET /documents/{id}/export/accessibility-check` against a real uploaded PDF
+and a real uploaded `.txt` — both correctly `403` (`config-admin` lacks `document.read` on `root`, verified
+as consistent, not a bug, by confirming the pre-existing `POST .../export` and
+`GET .../redaction-preview/page-count` endpoints return the identical `403` for the identical account);
+`401` with no token, `404` for an unknown document ID, both confirmed. **A real Playwright browser session**
+(via each app's already-existing `e2e/` Playwright setup, temporary spec files removed afterward) confirmed,
+with actual screenshots: the tagged-PDF warning icon/text render live next to "Exportieren" for a freshly
+uploaded untagged PDF, without disabling the button; the high-contrast theme (toggled via the real UI's
+settings popover) renders pure black/yellow with visible chrome, confirming the badge-border generalization
+takes effect; `admin-ui`'s nav correctly shows "Nutzende & Rollen" for an account with
+`admin.user_management`. All test documents/folders created during verification were cleaned up
+(soft-deleted or removed via the isolated-folder fixture's own teardown) afterward.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

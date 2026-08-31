@@ -125,6 +125,68 @@ def test_export_document_404_for_unknown_document(client):
     assert response.status_code == 404
 
 
+# --- Accessibility pass (14.2, post-roadmap phase 31 session 8) ---------
+
+
+def test_accessibility_check_without_principal_is_401(client):
+    document_id = upload(client).json()["id"]
+    response = client.get(f"/documents/{document_id}/export/accessibility-check")
+    assert response.status_code == 401
+
+
+def test_accessibility_check_requires_read_permission(client):
+    document_id = upload(client).json()["id"]
+    response = client.get(
+        f"/documents/{document_id}/export/accessibility-check",
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 403
+
+
+def test_accessibility_check_404_for_unknown_document(client):
+    response = client.get(
+        "/documents/unbekannt/export/accessibility-check",
+        headers={"X-DMS-Principal": f"principal-{uuid.uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 404
+
+
+def test_accessibility_check_untagged_pdf_source(client):
+    """`upload()`'s default content is a plain reportlab-generated PDF -
+    real, but without a structure tree, exactly the common case this
+    feature warns about."""
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client).json()["id"]
+
+    response = client.get(
+        f"/documents/{document_id}/export/accessibility-check",
+        headers={"X-DMS-Principal": principal},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"is_pdf": True, "is_tagged": False}
+
+
+def test_accessibility_check_non_pdf_source_is_trivially_untagged(client):
+    """A non-PDF source (here: plain text) never becomes a tagged PDF after
+    the export pipeline's LibreOffice conversion either, regardless of
+    what the original contained - `is_tagged` is `False` without ever
+    calling rendering-service, `is_pdf` distinguishes the two cases for the
+    frontend's warning text."""
+    principal = f"principal-{uuid.uuid4().hex[:8]}"
+    _grant_document_read(principal)
+    document_id = upload(client, content=b"Hallo Welt", title="notiz.txt").json()["id"]
+
+    response = client.get(
+        f"/documents/{document_id}/export/accessibility-check",
+        headers={"X-DMS-Principal": principal},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"is_pdf": False, "is_tagged": False}
+
+
 def test_get_and_update_export_config(client):
     response = client.get("/export-config")
     assert response.status_code == 200

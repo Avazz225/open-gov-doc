@@ -112,7 +112,7 @@ describe("UserManagement", () => {
     fireEvent.change(screen.getByLabelText("Passwort"), { target: { value: "secret123" } });
     fireEvent.change(screen.getByLabelText("Vorname"), { target: { value: "Bob" } });
     fireEvent.change(screen.getByLabelText("Nachname"), { target: { value: "B" } });
-    fireEvent.submit(screen.getByRole("form", { name: "Nutzer anlegen" }));
+    fireEvent.submit(screen.getByRole("form", { name: "Konto anlegen" }));
 
     await waitFor(() => expect(createUserMock).toHaveBeenCalledWith("token-123", {
       username: "bob",

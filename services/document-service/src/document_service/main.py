@@ -44,6 +44,7 @@ from document_service.object_type_client import MissingKennzeichenAttributeError
 from document_service.permission_client import PermissionServiceClient
 from document_service.rendering_client import RenderingClient, RenderingUnavailableError
 from document_service.schemas import (
+    AccessibilityCheckOut,
     ArchiveStatusOut,
     AuditTraceConfigIn,
     AuditTraceConfigOut,
@@ -3121,6 +3122,58 @@ async def update_export_config(
     )
     await session.commit()
     return config
+
+
+@app.get(
+    "/documents/{document_id}/export/accessibility-check", response_model=AccessibilityCheckOut
+)
+async def get_document_export_accessibility_check(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> AccessibilityCheckOut:
+    """Accessibility pass (14.2, post-roadmap phase 31 session 8) - "explicit
+    warning in the Phase 28 export flow when the source document isn't
+    tagged/accessible-PDF", queried by `user-ui`'s `PreviewPane` before/next
+    to the "Exportieren" button. Same `document.read` gate as the export
+    action itself (`export_document` below) - this reveals nothing more
+    sensitive than the export already would. Shortcuts on `version.
+    content_type` first: only an already-PDF source can possibly carry a
+    `/StructTreeRoot` at all (the export pipeline's LibreOffice/Pillow
+    conversion never produces one for anything else, see ADR
+    0107/`PdfArchiveRenderer`) - avoids a storage download and a
+    rendering-service round trip for the common non-PDF case."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        document = await repository.get_document(session, document_id)
+        version = await repository.get_current_version(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if document.dehydrated_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
+        )
+    allowed = await app.state.permission_client.check_read(
+        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
+
+    is_pdf = version.content_type == "application/pdf"
+    is_tagged = False
+    if is_pdf:
+        data = await app.state.storage.download(version.storage_object_key)
+        try:
+            is_tagged = await app.state.rendering_client.check_tagged_pdf(
+                data=data, x_dms_principal=x_dms_principal
+            )
+        except RenderingUnavailableError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Barrierefreiheits-Prüfung nicht möglich: {exc}"
+            ) from exc
+    return AccessibilityCheckOut(is_pdf=is_pdf, is_tagged=is_tagged)
 
 
 @app.post("/documents/{document_id}/export")

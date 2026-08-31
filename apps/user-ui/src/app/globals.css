@@ -19,6 +19,11 @@
   --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
   --dms-danger: #b91c1c;
   --dms-danger-bg: #b91c1c33;
+  /* Accessibility pass (14.2, post-roadmap phase 31 session 8) - previously
+     missing here (only admin-ui/reviewer-ui/etc. defined these), leaving
+     `.badge.ok` (BulkEditModal.tsx) unstyled in this app. */
+  --dms-success: #16a34a;
+  --dms-success-bg: #16a34a33;
   --dms-surface: canvas;
   --dms-surface-fg: canvastext;
 
@@ -77,6 +82,8 @@
     --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
     --dms-danger: #f87171;
     --dms-danger-bg: #f8717133;
+    --dms-success: #4ade80;
+    --dms-success-bg: #4ade8033;
   }
 }
 
@@ -90,6 +97,8 @@
   --dms-accent-bg-strong: rgba(37, 99, 235, 0.5);
   --dms-danger: #b91c1c;
   --dms-danger-bg: #b91c1c33;
+  --dms-success: #16a34a;
+  --dms-success-bg: #16a34a33;
 }
 
 :root[data-theme="dark"] {
@@ -102,6 +111,8 @@
   --dms-accent-bg-strong: rgba(96, 165, 250, 0.5);
   --dms-danger: #f87171;
   --dms-danger-bg: #f8717133;
+  --dms-success: #4ade80;
+  --dms-success-bg: #4ade8033;
 }
 
 /* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
@@ -116,11 +127,19 @@
   --dms-accent-bg-strong: #ffff00;
   --dms-danger: #ff6b6b;
   --dms-danger-bg: #000000;
+  --dms-success: #6bff6b;
+  --dms-success-bg: #000000;
   --dms-surface: #000000;
   --dms-surface-fg: #ffffff;
 }
 
-:root[data-theme="high-contrast"] .badge.down {
+/* Accessibility pass (14.2, post-roadmap phase 31 session 8): high contrast
+   flattens every `--dms-*-bg` token to the page background (see comment
+   above), so a badge's pill shape - its only remaining visual cue once the
+   fill disappears - needs an explicit border. Previously only `.badge.down`
+   had one; `.classified`/`.draft`/`.ok`/`.redacted` silently lost their
+   shape entirely in this theme. */
+:root[data-theme="high-contrast"] .badge {
   border: 1px solid currentColor;
 }
 
@@ -522,10 +541,37 @@ body {
 
 /* Classification level (post-roadmap phase 31 session 3, ADR 0114) - same
    `.badge` base class, `--dms-danger` tone since a classified version
-   warrants more visual weight than a plain informational badge. */
+   warrants more visual weight than a plain informational badge. Since
+   post-roadmap phase 31 session 8 (accessibility pass): always paired with
+   a 🔒 glyph in markup (ClassificationPanel.tsx/PreviewPane.tsx), not
+   color alone - `.badge.down`'s conflict badge uses the identical red tone
+   for an unrelated meaning, so color cannot be the only distinguishing
+   signal between the two. */
 .badge.classified {
   background: var(--dms-danger-bg);
   color: var(--dms-danger);
+}
+
+/* Success/positive tone (bulk-edit result summary, BulkEditModal.tsx) -
+   added post-roadmap phase 31 session 8: this app defined `--dms-danger`/
+   `--dms-accent` tones but never `--dms-success`, leaving `.badge.ok`
+   unstyled (transparent background, inherited text color - effectively
+   invisible as a "this succeeded" signal). */
+.badge.ok {
+  background: var(--dms-success-bg);
+  color: var(--dms-success);
+}
+
+/* Document redaction (post-roadmap phase 31 session 4/8, ADR 0115) -
+   deliberately its OWN class, not a reuse of `.badge.classified`
+   (DerivedDocumentsPanel.tsx originally reused it purely for the red tone,
+   which was semantically backwards: a redacted copy has content REMOVED
+   for wider distribution, making it less sensitive than the original, not
+   more). Neutral border-only treatment plus a ✂️ glyph in markup instead. */
+.badge.redacted {
+  background: transparent;
+  color: var(--dms-fg);
+  border: 1px solid var(--dms-border);
 }
 
 /* Document redaction (14.2, post-roadmap phase 31 session 4, ADR 0115) -
