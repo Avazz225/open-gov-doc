@@ -12,6 +12,7 @@ from workflow_service.models import (
     FederationTask,
     ProcessDefinition,
     ProcessInstance,
+    TaskClaim,
 )
 
 
@@ -73,6 +74,12 @@ class TaskNotReadyError(Exception):
     """The specified task is not (or no longer) found among this
     instance's currently ready Manual/User Tasks - already completed,
     wrong ID, or the instance has already finished."""
+
+
+class TaskAlreadyClaimedError(Exception):
+    """The task already has an active claim by a DIFFERENT principal
+    (Post-Roadmap Phase 31 Session 10) - claiming is exclusive, one
+    principal at a time."""
 
 
 class InstanceNotRunningError(Exception):
@@ -521,6 +528,86 @@ async def complete_task(
             instance.completed_at = now
         await session.flush()
     return instance
+
+
+async def get_task_claim(session: AsyncSession, instance_id: str, task_id: str) -> TaskClaim | None:
+    result = await session.execute(
+        select(TaskClaim).where(TaskClaim.instance_id == instance_id, TaskClaim.task_id == task_id)
+    )
+    return result.scalars().first()
+
+
+async def get_task_claims_for_instance(session: AsyncSession, instance_id: str) -> list[TaskClaim]:
+    """Basis for enriching a task listing with `claimed_by`/`grant_kind`
+    (Post-Roadmap Phase 31 Session 10) - one query per instance instead of
+    per task, mirroring `get_ready_tasks`' own per-instance shape."""
+    result = await session.execute(select(TaskClaim).where(TaskClaim.instance_id == instance_id))
+    return list(result.scalars().all())
+
+
+async def claim_task(
+    session: AsyncSession, instance_id: str, task_id: str, principal_id: str
+) -> TaskClaim:
+    """Minimal task-claim mechanism (Post-Roadmap Phase 31 Session 10, see
+    `models.TaskClaim`). Idempotent if the SAME principal claims again
+    (matches `permission_service.add_group_member`'s precedent); a
+    DIFFERENT principal attempting to claim an already-claimed task gets
+    `TaskAlreadyClaimedError` - claiming is exclusive."""
+    tasks = await get_ready_tasks(session, instance_id)
+    if not any(t.id == task_id for t in tasks):
+        raise TaskNotReadyError(
+            f"task_id {task_id!r} ist bei instance_id {instance_id!r} nicht bereit"
+        )
+    existing = await get_task_claim(session, instance_id, task_id)
+    if existing is not None:
+        if existing.principal_id != principal_id:
+            raise TaskAlreadyClaimedError(
+                f"task_id {task_id!r} ist bereits von {existing.principal_id!r} beansprucht"
+            )
+        return existing
+    claim = TaskClaim(
+        instance_id=instance_id,
+        task_id=task_id,
+        principal_id=principal_id,
+        claimed_at=datetime.now(UTC),
+    )
+    session.add(claim)
+    await session.flush()
+    return claim
+
+
+async def set_claim_grant(
+    session: AsyncSession, claim: TaskClaim, *, grant_kind: str, delegation_ids: list[str]
+) -> TaskClaim:
+    """Records which `Delegation` IDs (permission-service) were auto-created
+    for this claim's org-hierarchy access grant (Post-Roadmap Phase 31
+    Session 10), so `release_task_claim`/task completion can revoke exactly
+    those again. A second grant request for the same claim REPLACES the
+    previous one rather than accumulating - "the" active grant for a claim
+    is singular at any moment, matching the concept wording ("a workflow
+    task can grant ... temporary access", not "grants")."""
+    claim.grant_kind = grant_kind
+    claim.granted_delegation_ids = delegation_ids
+    await session.flush()
+    return claim
+
+
+async def release_task_claim(session: AsyncSession, instance_id: str, task_id: str) -> list[str]:
+    """Releases a claim and returns the `Delegation` IDs (if any) that were
+    granted for it, so the caller (`main.py`) can revoke them at
+    permission-service BEFORE they're gone from the DB - hard-deleted, not
+    soft-released, same precedent as `document-service`'s `DocumentLock`
+    force-unlock (ADR 0002: "deletes the lock entirely rather than moving
+    it into a third state")."""
+    claim = await get_task_claim(session, instance_id, task_id)
+    if claim is None:
+        raise NotFoundError(
+            f"Kein aktiver Claim für task_id {task_id!r} bei instance_id {instance_id!r}"
+        )
+    delegation_ids = list(claim.granted_delegation_ids or [])
+    await session.delete(claim)
+    await session.flush()
+    return delegation_ids
 
 
 async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInstance:

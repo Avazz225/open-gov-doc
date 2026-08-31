@@ -4,9 +4,12 @@ import { Fragment, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  claimTask,
   completeTask,
+  createTaskOrgHierarchyGrant,
   listActiveDelegationsForDeputy,
   listReadyTasks,
+  releaseTaskClaim,
   type Delegation,
   type ReadyTaskWithInstance,
 } from "@/lib/api";
@@ -34,6 +37,17 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
   // currently actively registered as a deputy for, populates the "On behalf
   // of" selector below.
   const [delegations, setDelegations] = useState<Delegation[]>([]);
+
+  // Task-claim & dynamic org-hierarchy access grants (post-roadmap phase 31
+  // session 10) - claim/release act directly (no expand needed), the grant
+  // form lives inside the existing expandable detail row, shown only once
+  // the task is claimed by the logged-in person.
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [grantKind, setGrantKind] = useState<"supervisor" | "supervisor_chain" | "org_unit">(
+    "supervisor"
+  );
+  const [grantOrgUnitOf, setGrantOrgUnitOf] = useState<"assignee" | "creator">("assignee");
+  const [grantResultByTaskId, setGrantResultByTaskId] = useState<Record<string, string[]>>({});
 
   const reload = () => {
     if (!accessToken) return;
@@ -98,6 +112,55 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
     }
   }
 
+  async function handleClaim(task: ReadyTaskWithInstance) {
+    if (!accessToken) return;
+    setClaimError(null);
+    try {
+      await claimTask(accessToken, {
+        instanceId: task.instance_id,
+        taskId: task.id,
+        principalId: user?.username ?? "",
+      });
+      reload();
+    } catch (err) {
+      setClaimError(err instanceof ApiError ? err.message : t("common.actionError"));
+    }
+  }
+
+  async function handleReleaseClaim(task: ReadyTaskWithInstance) {
+    if (!accessToken) return;
+    setClaimError(null);
+    try {
+      await releaseTaskClaim(accessToken, { instanceId: task.instance_id, taskId: task.id });
+      setGrantResultByTaskId((prev) => {
+        const next = { ...prev };
+        delete next[task.id];
+        return next;
+      });
+      reload();
+    } catch (err) {
+      setClaimError(err instanceof ApiError ? err.message : t("common.actionError"));
+    }
+  }
+
+  async function handleCreateGrant(task: ReadyTaskWithInstance, event: React.FormEvent) {
+    event.preventDefault();
+    if (!accessToken) return;
+    setClaimError(null);
+    try {
+      const result = await createTaskOrgHierarchyGrant(accessToken, {
+        instanceId: task.instance_id,
+        taskId: task.id,
+        grantKind,
+        orgUnitOf: grantKind === "org_unit" ? grantOrgUnitOf : undefined,
+      });
+      setGrantResultByTaskId((prev) => ({ ...prev, [task.id]: result.deputy_principal_ids }));
+      reload();
+    } catch (err) {
+      setClaimError(err instanceof ApiError ? err.message : t("common.actionError"));
+    }
+  }
+
   return (
     <section>
       <h1>{t("taskList.heading")}</h1>
@@ -108,6 +171,11 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
         </p>
       )}
       {successMessage && <p className="success-text">{successMessage}</p>}
+      {claimError && (
+        <p className="error-text" role="alert">
+          {claimError}
+        </p>
+      )}
 
       {tasks.length === 0 ? (
         <p className="empty-state">{t("taskList.empty")}</p>
@@ -119,6 +187,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
               <th>{t("taskList.processColumn")}</th>
               <th>{t("taskList.businessKeyColumn")}</th>
               <th>{t("taskList.laneColumn")}</th>
+              <th>{t("taskList.claimColumn")}</th>
               <th></th>
               <th>{t("taskList.actionsColumn")}</th>
             </tr>
@@ -126,6 +195,7 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
           <tbody>
             {tasks.map((task) => {
               const isSignature = task.extensions.taskType === "signature";
+              const isClaimedByMe = task.claimed_by !== null && task.claimed_by === user?.username;
               return (
                 <Fragment key={task.id}>
                   <tr>
@@ -144,6 +214,28 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                     <td>{task.business_key ?? "-"}</td>
                     <td>{task.lane ?? "-"}</td>
                     <td>
+                      {/* Task-claim mechanism (post-roadmap phase 31 session
+                          10) - the prerequisite for the org-hierarchy access
+                          grant offered inside the expanded detail row below. */}
+                      {task.claimed_by === null ? (
+                        <button type="button" onClick={() => handleClaim(task)}>
+                          {t("taskList.claimButton")}
+                        </button>
+                      ) : (
+                        <>
+                          <span>{t("taskList.claimedByLabel", { principalId: task.claimed_by })}</span>
+                          {isClaimedByMe && (
+                            <>
+                              {" "}
+                              <button type="button" onClick={() => handleReleaseClaim(task)}>
+                                {t("taskList.releaseClaimButton")}
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </td>
+                    <td>
                       {/* Authenticated direct links (post-roadmap phase 29,
                           ADR 0109) - `instance_id` was already fetched for
                           `completeTask` above, but never shown/linked until
@@ -160,7 +252,65 @@ export function TaskList({ onOpenInstance }: { onOpenInstance: (instanceId: stri
                   </tr>
                   {expandedTaskId === task.id && (
                     <tr className="detail-row">
-                      <td colSpan={6}>
+                      <td colSpan={7}>
+                        {isClaimedByMe && (
+                          <form
+                            aria-label={t("taskList.grantFormLabel")}
+                            className="inline-form"
+                            onSubmit={(event) => handleCreateGrant(task, event)}
+                          >
+                            <h2 className="hint">{t("taskList.grantHeading")}</h2>
+                            <label htmlFor={`grant-kind-${task.id}`}>
+                              {t("taskList.grantKindLabel")}
+                            </label>
+                            <select
+                              id={`grant-kind-${task.id}`}
+                              value={grantKind}
+                              onChange={(e) =>
+                                setGrantKind(
+                                  e.target.value as "supervisor" | "supervisor_chain" | "org_unit"
+                                )
+                              }
+                            >
+                              <option value="supervisor">{t("taskList.grantKindSupervisor")}</option>
+                              <option value="supervisor_chain">
+                                {t("taskList.grantKindSupervisorChain")}
+                              </option>
+                              <option value="org_unit">{t("taskList.grantKindOrgUnit")}</option>
+                            </select>
+                            {grantKind === "org_unit" && (
+                              <>
+                                <label htmlFor={`grant-org-unit-of-${task.id}`}>
+                                  {t("taskList.grantOrgUnitOfLabel")}
+                                </label>
+                                <select
+                                  id={`grant-org-unit-of-${task.id}`}
+                                  value={grantOrgUnitOf}
+                                  onChange={(e) =>
+                                    setGrantOrgUnitOf(e.target.value as "assignee" | "creator")
+                                  }
+                                >
+                                  <option value="assignee">
+                                    {t("taskList.grantOrgUnitOfAssignee")}
+                                  </option>
+                                  <option value="creator">
+                                    {t("taskList.grantOrgUnitOfCreator")}
+                                  </option>
+                                </select>
+                              </>
+                            )}
+                            <button type="submit">{t("taskList.grantSubmit")}</button>
+                            {grantResultByTaskId[task.id] && (
+                              <p className="hint">
+                                {grantResultByTaskId[task.id].length === 0
+                                  ? t("taskList.grantEmptyResult")
+                                  : t("taskList.grantResult", {
+                                      deputies: grantResultByTaskId[task.id].join(", "),
+                                    })}
+                              </p>
+                            )}
+                          </form>
+                        )}
                         <form
                           className="inline-form"
                           onSubmit={(event) => handleComplete(task, event)}

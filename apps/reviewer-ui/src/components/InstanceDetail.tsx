@@ -142,6 +142,7 @@ export function InstanceDetail({
             <tr>
               <th>{t("taskList.nameColumn")}</th>
               <th>{t("taskList.laneColumn")}</th>
+              <th>{t("taskList.claimColumn")}</th>
               <th>{t("taskList.actionsColumn")}</th>
             </tr>
           </thead>
@@ -163,6 +164,12 @@ export function InstanceDetail({
                       )}
                     </td>
                     <td>{task.lane ?? "-"}</td>
+                    {/* Read-only awareness only (post-roadmap phase 31 session
+                        10) - claiming/org-hierarchy grants stay a TaskList.tsx
+                        action, this view deliberately stays a lightweight
+                        status display (ADR 0110), same precedent as omitting
+                        the "on behalf of" delegation selector below. */}
+                    <td>{task.claimed_by ?? "-"}</td>
                     <td>
                       <button type="button" onClick={() => toggleExpand(task)}>
                         {t("taskList.completeButton")}
@@ -171,7 +178,7 @@ export function InstanceDetail({
                   </tr>
                   {expandedTaskId === task.id && (
                     <tr className="detail-row">
-                      <td colSpan={3}>
+                      <td colSpan={4}>
                         <form
                           className="inline-form"
                           onSubmit={(event) => handleComplete(task, event)}

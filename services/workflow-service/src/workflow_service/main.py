@@ -5,7 +5,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import httpx
@@ -49,6 +49,8 @@ from workflow_service.schemas import (
     DmnDefinitionOut,
     FederationConfigOut,
     FederationConfigUpdate,
+    OrgHierarchyGrantRequest,
+    OrgHierarchyGrantResultOut,
     ProcessDefinitionDetailOut,
     ProcessDefinitionImportResult,
     ProcessDefinitionOut,
@@ -56,6 +58,8 @@ from workflow_service.schemas import (
     ProcessInstanceOut,
     ReadyTaskOut,
     ReadyTaskWithInstanceOut,
+    TaskClaimCreate,
+    TaskClaimOut,
     TaskCompleteRequest,
 )
 from workflow_service.settings import Settings
@@ -1157,9 +1161,14 @@ async def list_ready_tasks(
     instances = await repository.list_instances(session, status="running")
     tasks: list[ReadyTaskWithInstanceOut] = []
     for instance in instances:
+        claims_by_task_id = {
+            claim.task_id: claim
+            for claim in await repository.get_task_claims_for_instance(session, instance.id)
+        }
         for task in await repository.get_ready_tasks(session, instance.id):
             if task.extensions.get("taskType") in _FEDERATED_TASK_TYPES:
                 continue
+            claim = claims_by_task_id.get(task.id)
             tasks.append(
                 ReadyTaskWithInstanceOut(
                     id=task.id,
@@ -1167,6 +1176,8 @@ async def list_ready_tasks(
                     lane=task.lane,
                     data=task.data,
                     extensions=task.extensions,
+                    claimed_by=claim.principal_id if claim else None,
+                    grant_kind=claim.grant_kind if claim else None,
                     instance_id=instance.id,
                     process_definition_id=instance.process_definition_id,
                     business_key=instance.business_key,
@@ -1187,8 +1198,20 @@ async def get_ready_tasks(
         tasks = await repository.get_ready_tasks(session, instance_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    claims_by_task_id = {
+        claim.task_id: claim
+        for claim in await repository.get_task_claims_for_instance(session, instance_id)
+    }
     return [
-        ReadyTaskOut(id=t.id, name=t.name, lane=t.lane, data=t.data, extensions=t.extensions)
+        ReadyTaskOut(
+            id=t.id,
+            name=t.name,
+            lane=t.lane,
+            data=t.data,
+            extensions=t.extensions,
+            claimed_by=claims_by_task_id[t.id].principal_id if t.id in claims_by_task_id else None,
+            grant_kind=claims_by_task_id[t.id].grant_kind if t.id in claims_by_task_id else None,
+        )
         for t in tasks
     ]
 
@@ -1299,6 +1322,154 @@ async def _require_delegation_if_on_behalf_of(
         )
 
 
+async def _revoke_claim_grants(delegation_ids: list[str]) -> None:
+    """Best-effort cleanup of org-hierarchy-auto-created delegations
+    (Post-Roadmap Phase 31 Session 10) - called when a claim is released
+    or its task completes, ending "temporary access ... for the task's
+    duration" at the actual end of that duration rather than only at the
+    grant's backstop `ends_at`. Deliberately swallows failures: this is
+    ancillary cleanup, it must never fail the primary action (claim
+    release/task completion) that triggered it - a missed revocation only
+    means the backstop `ends_at` is the fallback, not a security hole
+    (the grant was never open-ended to begin with)."""
+    for delegation_id in delegation_ids:
+        try:
+            await app.state.permission_client.revoke_org_hierarchy_grant(delegation_id)
+        except Exception:
+            logger.warning(
+                "Widerruf der Zugriffsfreigabe (delegation_id=%s) fehlgeschlagen - "
+                "verbleibt bis zum regulären Ablauf aktiv",
+                delegation_id,
+                exc_info=True,
+            )
+
+
+@app.post(
+    "/instances/{instance_id}/tasks/{task_id}/claim",
+    response_model=TaskClaimOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def claim_task(
+    instance_id: str,
+    task_id: str,
+    payload: TaskClaimCreate,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> TaskClaimOut:
+    """Minimal task-claim mechanism (14.2/8, Post-Roadmap Phase 31 Session
+    10, ADR 0121) - the prerequisite for the org-hierarchy access grant
+    below, which needs a real assignee to resolve a supervisor/org-unit
+    FROM (workflow-service had no assignee concept at all before this, see
+    `models.TaskClaim`). `payload.principal_id` is deliberately an explicit
+    field, not always `X-DMS-Principal` - unlike `POST /delegations`
+    (self-service), a claim can be made on someone else's behalf (e.g. by
+    an admin distributing work), same posture as `TaskCompleteRequest.
+    completed_by` being free-form rather than forced to the caller."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
+    try:
+        claim = await repository.claim_task(session, instance_id, task_id, payload.principal_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except repository.TaskNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except repository.TaskAlreadyClaimedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return claim
+
+
+@app.delete(
+    "/instances/{instance_id}/tasks/{task_id}/claim",
+    status_code=204,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def release_task_claim(
+    instance_id: str,
+    task_id: str,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
+    try:
+        delegation_ids = await repository.release_task_claim(session, instance_id, task_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await _revoke_claim_grants(delegation_ids)
+
+
+@app.post(
+    "/instances/{instance_id}/tasks/{task_id}/org-hierarchy-grant",
+    response_model=OrgHierarchyGrantResultOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def create_task_org_hierarchy_grant(
+    instance_id: str,
+    task_id: str,
+    payload: OrgHierarchyGrantRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> OrgHierarchyGrantResultOut:
+    """Dynamic org-hierarchy-based temporary access grant (14.2,
+    Post-Roadmap Phase 31 Session 10, ADR 0121) - distinct from and
+    additional to the existing self-service delegation mechanism (ADR
+    0048): that one is a person explicitly naming ONE deputy for
+    themselves; this one is auto-resolved from `permission-service`'s
+    org-hierarchy data (`SupervisorAssignment`/`Group`, P31-S9) and can
+    grant SEVERAL people at once. Requires an existing claim (`404` if the
+    task isn't claimed) - there is no assignee to resolve a supervisor/org
+    unit from otherwise. A second grant request on the same claim REPLACES
+    the previous one (revokes the old delegations first) rather than
+    accumulating."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
+    try:
+        instance = await repository.get_instance(session, instance_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    claim = await repository.get_task_claim(session, instance_id, task_id)
+    if claim is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"task_id {task_id!r} bei instance_id {instance_id!r} ist nicht beansprucht - "
+                "eine Zugriffsfreigabe setzt einen bestehenden Claim voraus"
+            ),
+        )
+    if payload.grant_kind == "org_unit":
+        if payload.org_unit_of is None:
+            raise HTTPException(
+                status_code=422,
+                detail="org_unit_of ist bei grant_kind='org_unit' erforderlich",
+            )
+        target_principal_id = (
+            claim.principal_id if payload.org_unit_of == "assignee" else instance.created_by
+        )
+    else:
+        target_principal_id = claim.principal_id
+
+    await _revoke_claim_grants(list(claim.granted_delegation_ids or []))
+    ends_at = datetime.now(UTC) + timedelta(hours=settings.org_hierarchy_grant_max_duration_hours)
+    result = await app.state.permission_client.create_org_hierarchy_grant(
+        principal_id=target_principal_id,
+        grant_kind=payload.grant_kind,
+        process_definition_id=instance.process_definition_id,
+        ends_at=ends_at,
+    )
+    await repository.set_claim_grant(
+        session, claim, grant_kind=payload.grant_kind, delegation_ids=result["delegation_ids"]
+    )
+    await session.commit()
+    return OrgHierarchyGrantResultOut(
+        grant_kind=payload.grant_kind, deputy_principal_ids=result["deputy_principal_ids"]
+    )
+
+
 @app.post(
     "/instances/{instance_id}/tasks/{task_id}/complete",
     response_model=ProcessInstanceOut,
@@ -1349,6 +1520,17 @@ async def complete_task(
         )
     await _dispatch_pending_federation_tasks(session, instance_id)
     await session.commit()
+    # Task-claim cleanup (Post-Roadmap Phase 31 Session 10) - "for the
+    # task's duration" ends here, at completion, not only at the grant's
+    # backstop `ends_at`. Best-effort: a missing claim (never claimed) is
+    # the common case, not an error.
+    try:
+        delegation_ids = await repository.release_task_claim(session, instance_id, task_id)
+    except repository.NotFoundError:
+        delegation_ids = []
+    else:
+        await session.commit()
+    await _revoke_claim_grants(delegation_ids)
     return instance
 
 

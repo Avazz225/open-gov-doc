@@ -50,6 +50,8 @@
 | `GET` | `/delegations?delegator_principal_id=&deputy_principal_id=&active_only=` | List delegations, optionally filtered |
 | `GET` | `/delegations/active-for-deputy/{principal_id}` | For whom `principal_id` is currently recorded as an active deputy — the basis for the "on behalf of" selection in `reviewer-ui`/`user-ui` |
 | `GET` | `/delegations/check?deputy_principal_id=&delegator_principal_id=&process_definition_id=&object_type_id=&folder_resource_id=` | The actual enforcement endpoint (same response format as `/check`) — called by `workflow-service` on task completion "on behalf of" |
+| `POST` | `/org-hierarchy-grants` | Dynamic org-hierarchy-based access grant (Post-Roadmap Phase 31 Session 10, [ADR 0121](../adr/0121-dynamic-org-hierarchy-access-grants-task-claim-and-delegation-reuse.md)) — resolves `principal_id`'s deputy set for `grant_kind` (`"supervisor"`\|`"supervisor_chain"`\|`"org_unit"`) and creates one `Delegation` per deputy, scoped to `process_definition_id`. Deliberately ungated (called only by `workflow-service`), empty resolved set is a graceful `200`, not an error |
+| `DELETE` | `/org-hierarchy-grants/{delegation_id}` | Revokes a delegation created via the endpoint above — a SEPARATE, likewise ungated endpoint from `DELETE /delegations/{id}` (that one requires the caller to be the delegator, an identity `workflow-service`'s automated cleanup call has no natural way to present), `404` on unknown ID |
 | `DELETE` | `/delegations/{id}` | Early revocation — only the deputized person or `X-DMS-Roles: dms-admin` (configurable, `delegation_revoke_admin_role`), `404` on unknown ID, idempotent. Publishes `permission.delegation.revoked` |
 
 ## Data Model
@@ -253,6 +255,38 @@ Time-limited, scope-restricted transfer of task handling from an absent person (
 - **`GET /delegations/check`** is the only real enforcement point — `workflow-service`'s `POST .../tasks/{id}/complete` calls it whenever a completion includes `on_behalf_of_principal_id` (see `docs/services/workflow-service.md`).
 - **Revocation** (`DELETE /delegations/{id}`) only by the deputized person or `X-DMS-Roles: dms-admin` (configurable, `delegation_revoke_admin_role`) — NOT by the deputy themselves.
 - `admin-ui` (`/delegations/`) offers a pure installation-wide overview + admin revocation; creation remains purely self-service (`user-ui`'s `DelegationsPane`).
+
+## Org-Hierarchy Foundation Put to Use: Dynamic Access Grants (14.2, Post-Roadmap Phase 31 Session 10, [ADR 0121](../adr/0121-dynamic-org-hierarchy-access-grants-task-claim-and-delegation-reuse.md))
+
+`repository.create_org_hierarchy_grant()` is where P31-S9's org-hierarchy foundation (`SupervisorAssignment`
+DAG, reused `Group`/`GroupMembership`) becomes actually consequential: it resolves a deputy SET (not one
+hand-picked deputy, unlike self-service delegation above) and creates one `Delegation` row per deputy via
+the existing `create_delegation` — no parallel creation path, no new table.
+
+- **`grant_kind="supervisor"`**: every direct supervisor (`list_supervisor_assignments(principal_id=...)`)
+  — plural, since P31-S9's DAG allows more than one.
+- **`grant_kind="supervisor_chain"`**: the full transitive union (`get_supervisor_chain`) — everyone
+  reachable upward, deduplicated across reconverging paths (a diamond shape contributes its shared
+  ancestor only once).
+- **`grant_kind="org_unit"`**: every member of every group the principal belongs to
+  (`_group_ids_for_principal` + `list_group_members`, the same helper `_collect_effective_roles` already
+  uses), minus the principal itself (a self-delegation would be meaningless). No `is_org_unit` marker
+  exists on `Group` (a deliberate P31-S9 decision, ADR 0120) — "the" org unit is every group, unioned, not
+  a single picked one.
+- **An empty resolved deputy set is a graceful, successful empty result**, not an error — same posture as
+  `get_supervisor_chain` for a principal with no configured supervisor.
+- **Called exclusively by `workflow-service`**, never a browser directly — `POST /instances/{id}/tasks/
+  {task_id}/org-hierarchy-grant` there requires an existing task claim first (see
+  `docs/services/workflow-service.md` "Task Claim & Dynamic Org-Hierarchy Access Grants"), resolves the
+  target principal from the claim (or the process instance's creator, for `org_unit`), and calls this
+  endpoint with `scope_process_definition_ids=[process_definition_id]` — the one delegation-scope
+  dimension `GET /delegations/check` actually evaluates.
+- **`DELETE /org-hierarchy-grants/{id}` is a deliberately separate endpoint from `DELETE /delegations/{id}`**
+  — that one requires the caller to BE the delegator or hold the delegation-admin role, an identity
+  `workflow-service`'s automated cleanup call (claim released, or task completed) has no natural way to
+  present. Both new endpoints are, like `GET /delegations/check`, deliberately ungated — no internal
+  service-to-service auth exists anywhere in this project (a documented, accepted gap), and this pair's
+  only intended caller is `workflow-service` itself.
 
 ## Events
 

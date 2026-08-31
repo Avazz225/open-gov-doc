@@ -45,6 +45,40 @@ def _create_delegation(
     return response.json()
 
 
+def _create_supervisor_assignment(
+    *, principal_id: str, supervisor_principal_id: str, users_admin_headers: dict[str, str]
+) -> dict:
+    """Org-hierarchy foundation (P31-S9) - echter Aufruf gegen den laufenden
+    permission-service, gleiches Prinzip wie `_create_delegation`."""
+    response = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/supervisor-assignments",
+        json={"principal_id": principal_id, "supervisor_principal_id": supervisor_principal_id},
+        headers=users_admin_headers,
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _create_group_with_members(
+    *, name: str, member_ids: list[str], users_admin_headers: dict[str, str]
+) -> dict:
+    group = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/groups",
+        json={"name": name},
+        headers=users_admin_headers,
+        timeout=30.0,
+    ).json()
+    for principal_id in member_ids:
+        httpx.post(
+            f"{PERMISSION_SERVICE_URL}/groups/{group['id']}/members",
+            json={"principal_id": principal_id},
+            headers=users_admin_headers,
+            timeout=30.0,
+        ).raise_for_status()
+    return group
+
+
 def _upload_definition(
     client, xml: str, *, name: str, headers: dict[str, str], process_id: str | None = None
 ):
@@ -659,6 +693,237 @@ def test_complete_unknown_task_returns_409(client, manual_task_bpmn, admin_heade
         json={"completed_by": "bob"},
     )
     assert response.status_code == 409
+
+
+# --- Task-Claim & dynamische Org-Hierarchie-Zugriffsfreigaben (14.2,
+# Post-Roadmap Phase 31 Session 10) ------------------------------------------
+
+
+def _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, *, name: str) -> dict:
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name=name, headers=admin_headers
+    ).json()["id"]
+    return client.post(
+        f"/process-definitions/{definition_id}/instances", json={"created_by": "carla-creator"}
+    ).json()
+
+
+def test_claim_task_and_it_is_visible_in_task_listing(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim1")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee"},
+    )
+    assert response.status_code == 200
+    assert response.json()["principal_id"] == "dora-assignee"
+
+    tasks = client.get(f"/instances/{instance['id']}/tasks").json()
+    assert tasks[0]["claimed_by"] == "dora-assignee"
+    cross_instance = [t for t in client.get("/tasks").json() if t["instance_id"] == instance["id"]]
+    assert cross_instance[0]["claimed_by"] == "dora-assignee"
+
+
+def test_claim_task_by_same_principal_is_idempotent(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim2")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    first = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee"},
+    ).json()
+    second = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee"},
+    ).json()
+    assert first["id"] == second["id"]
+
+
+def test_claim_task_already_claimed_by_different_principal_returns_409(
+    client, manual_task_bpmn, admin_headers
+):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim3")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "someone-else"},
+    )
+    assert response.status_code == 409
+
+
+def test_claim_unknown_task_returns_409(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim4")
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/does-not-exist/claim",
+        json={"principal_id": "dora-assignee"},
+    )
+    assert response.status_code == 409
+
+
+def test_release_task_claim_clears_it(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim5")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee"},
+    )
+
+    response = client.delete(f"/instances/{instance['id']}/tasks/{task_id}/claim")
+    assert response.status_code == 204
+
+    tasks = client.get(f"/instances/{instance['id']}/tasks").json()
+    assert tasks[0]["claimed_by"] is None
+
+
+def test_release_unknown_task_claim_returns_404(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim6")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    response = client.delete(f"/instances/{instance['id']}/tasks/{task_id}/claim")
+    assert response.status_code == 404
+
+
+def test_org_hierarchy_grant_requires_existing_claim_returns_404(
+    client, manual_task_bpmn, admin_headers
+):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Grant1")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "supervisor"},
+    )
+    assert response.status_code == 404
+
+
+def test_org_hierarchy_grant_supervisor_grants_the_assignees_direct_supervisor(
+    client, manual_task_bpmn, admin_headers, users_admin_headers
+):
+    _create_supervisor_assignment(
+        principal_id="dora-assignee-g2",
+        supervisor_principal_id="petra-supervisor-g2",
+        users_admin_headers=users_admin_headers,
+    )
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Grant2")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-g2"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "supervisor"},
+    )
+    assert response.status_code == 200
+    assert response.json()["deputy_principal_ids"] == ["petra-supervisor-g2"]
+
+    # Now a real, active delegation exists at permission-service.
+    check = httpx.get(
+        f"{PERMISSION_SERVICE_URL}/delegations/check",
+        params={
+            "deputy_principal_id": "petra-supervisor-g2",
+            "delegator_principal_id": "dora-assignee-g2",
+            "process_definition_id": instance["process_definition_id"],
+        },
+    ).json()
+    assert check["allowed"] is True
+
+    tasks = client.get(f"/instances/{instance['id']}/tasks").json()
+    assert tasks[0]["grant_kind"] == "supervisor"
+
+
+def test_org_hierarchy_grant_org_unit_without_org_unit_of_returns_422(
+    client, manual_task_bpmn, admin_headers
+):
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Grant3")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-g3"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "org_unit"},
+    )
+    assert response.status_code == 422
+
+
+def test_org_hierarchy_grant_org_unit_of_creator_resolves_from_instance_creator(
+    client, manual_task_bpmn, admin_headers, users_admin_headers
+):
+    """`created_by` beim Instanzstart ist hier immer "carla-creator" (siehe
+    `_start_instance_with_one_task`) - die Gruppe muss also carla-creator
+    enthalten, nicht die Assignee."""
+    _create_group_with_members(
+        name=f"OrgUnitWorkflowG4-{uuid.uuid4().hex[:8]}",
+        member_ids=["carla-creator", "erik-colleague-g4"],
+        users_admin_headers=users_admin_headers,
+    )
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Grant4")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-g4"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "org_unit", "org_unit_of": "creator"},
+    )
+    assert response.status_code == 200
+    assert response.json()["deputy_principal_ids"] == ["erik-colleague-g4"]
+
+
+def test_completing_task_auto_releases_claim_and_revokes_grant(
+    client, manual_task_bpmn, admin_headers, users_admin_headers
+):
+    _create_supervisor_assignment(
+        principal_id="dora-assignee-g5",
+        supervisor_principal_id="petra-supervisor-g5",
+        users_admin_headers=users_admin_headers,
+    )
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Grant5")
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-g5"},
+    )
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "supervisor"},
+    )
+    check_params = {
+        "deputy_principal_id": "petra-supervisor-g5",
+        "delegator_principal_id": "dora-assignee-g5",
+        "process_definition_id": instance["process_definition_id"],
+    }
+    # Discriminating pre-check: the grant is genuinely active before
+    # completion, so the post-completion assertion below actually proves
+    # revocation happened, rather than the grant having never existed.
+    assert (
+        httpx.get(f"{PERMISSION_SERVICE_URL}/delegations/check", params=check_params).json()[
+            "allowed"
+        ]
+        is True
+    )
+
+    complete_response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/complete",
+        json={"completed_by": "dora-assignee-g5"},
+    )
+    assert complete_response.status_code == 200
+
+    # "for the task's duration" - completion ends the grant immediately,
+    # not only at its backstop `ends_at`.
+    check = httpx.get(f"{PERMISSION_SERVICE_URL}/delegations/check", params=check_params).json()
+    assert check["allowed"] is False
 
 
 # --- Stellvertretung bei Abwesenheit (4.4a, P14-S11) -------------------------

@@ -69,6 +69,40 @@ async def _grant_config_admin_permission():
         response.raise_for_status()
 
 
+# Task-claim/org-hierarchy access grants (14.2, Post-Roadmap Phase 31 Session
+# 10): setting up `SupervisorAssignment`/`Group` fixtures for these tests
+# needs `admin.user_management` at permission-service (`_require_role_
+# management`), a different capability than `admin.object_config` above.
+USERS_ADMIN_PRINCIPAL_ID = "workflow-test-users-admin"
+
+
+@pytest.fixture
+def users_admin_headers() -> dict[str, str]:
+    return {"X-DMS-Principal": USERS_ADMIN_PRINCIPAL_ID}
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_users_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
+        roles = (await client.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = (
+            await client.get("/role-assignments", params={"principal_id": USERS_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": USERS_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture(autouse=True)
 def _default_licensed(monkeypatch):
     """Demo-Modus/Sperrverhalten (Konzept 9.3, P9-S2) greift real gegen den

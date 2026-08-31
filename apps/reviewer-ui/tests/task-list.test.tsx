@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskList } from "@/components/TaskList";
 import { I18nProvider } from "@/i18n";
@@ -6,12 +6,18 @@ import { I18nProvider } from "@/i18n";
 const listReadyTasksMock = vi.fn();
 const completeTaskMock = vi.fn();
 const listActiveDelegationsForDeputyMock = vi.fn();
+const claimTaskMock = vi.fn();
+const releaseTaskClaimMock = vi.fn();
+const createTaskOrgHierarchyGrantMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listReadyTasks: (...args: unknown[]) => listReadyTasksMock(...args),
   completeTask: (...args: unknown[]) => completeTaskMock(...args),
   listActiveDelegationsForDeputy: (...args: unknown[]) =>
     listActiveDelegationsForDeputyMock(...args),
+  claimTask: (...args: unknown[]) => claimTaskMock(...args),
+  releaseTaskClaim: (...args: unknown[]) => releaseTaskClaimMock(...args),
+  createTaskOrgHierarchyGrant: (...args: unknown[]) => createTaskOrgHierarchyGrantMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -48,6 +54,8 @@ const MANUAL_TASK = {
   lane: "Sachbearbeitung",
   data: {},
   extensions: {},
+  claimed_by: null,
+  grant_kind: null,
   instance_id: "instance-1",
   process_definition_id: 5,
   business_key: "case-42",
@@ -59,6 +67,8 @@ const SIGNATURE_TASK = {
   lane: null,
   data: { document_id: "doc-1" },
   extensions: { taskType: "signature", requiredLevel: "aes" },
+  claimed_by: null,
+  grant_kind: null,
   instance_id: "instance-2",
   process_definition_id: 6,
   business_key: null,
@@ -70,6 +80,9 @@ describe("TaskList", () => {
     completeTaskMock.mockReset();
     listActiveDelegationsForDeputyMock.mockReset();
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
+    claimTaskMock.mockReset();
+    releaseTaskClaimMock.mockReset();
+    createTaskOrgHierarchyGrantMock.mockReset();
     onOpenInstanceMock.mockReset();
   });
 
@@ -216,5 +229,124 @@ describe("TaskList", () => {
         onBehalfOfPrincipalId: "carol-sub",
       })
     );
+  });
+
+  it("claims an unclaimed task as the logged-in user and reloads", async () => {
+    listReadyTasksMock
+      .mockResolvedValueOnce([MANUAL_TASK])
+      .mockResolvedValueOnce([{ ...MANUAL_TASK, claimed_by: "alice" }]);
+    claimTaskMock.mockResolvedValue(undefined);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Beanspruchen" }));
+
+    await waitFor(() =>
+      expect(claimTaskMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-1",
+        principalId: "alice",
+      })
+    );
+    expect(await screen.findByText("Beansprucht von alice")).toBeInTheDocument();
+  });
+
+  it("shows a claim by someone else without offering a release button", async () => {
+    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "bob" }]);
+    renderList();
+
+    expect(await screen.findByText("Beansprucht von bob")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Freigeben" })).not.toBeInTheDocument();
+  });
+
+  it("releases a task claim held by the logged-in user", async () => {
+    listReadyTasksMock
+      .mockResolvedValueOnce([{ ...MANUAL_TASK, claimed_by: "alice" }])
+      .mockResolvedValueOnce([MANUAL_TASK]);
+    releaseTaskClaimMock.mockResolvedValue(undefined);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Beansprucht von alice")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Freigeben" }));
+
+    await waitFor(() =>
+      expect(releaseTaskClaimMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-1",
+      })
+    );
+    expect(await screen.findByText("Beanspruchen")).toBeInTheDocument();
+  });
+
+  it("offers the org-hierarchy grant form only once claimed by the logged-in user, and reports the result", async () => {
+    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "alice" }]);
+    createTaskOrgHierarchyGrantMock.mockResolvedValue({
+      grant_kind: "supervisor",
+      deputy_principal_ids: ["petra-supervisor"],
+    });
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Beansprucht von alice")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
+    const form = await screen.findByRole("form", { name: "Zugriffsfreigabe erteilen" });
+    fireEvent.click(within(form).getByRole("button", { name: "Freigabe erteilen" }));
+
+    await waitFor(() =>
+      expect(createTaskOrgHierarchyGrantMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-1",
+        grantKind: "supervisor",
+        orgUnitOf: undefined,
+      })
+    );
+    expect(
+      await screen.findByText("Freigabe erteilt an: petra-supervisor")
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer the org-hierarchy grant form for an unclaimed task", async () => {
+    listReadyTasksMock.mockResolvedValue([MANUAL_TASK]);
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Rechnung prüfen")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
+
+    expect(
+      screen.queryByRole("form", { name: "Zugriffsfreigabe erteilen" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("sends org_unit_of only for grant_kind=org_unit", async () => {
+    listReadyTasksMock.mockResolvedValue([{ ...MANUAL_TASK, claimed_by: "alice" }]);
+    createTaskOrgHierarchyGrantMock.mockResolvedValue({
+      grant_kind: "org_unit",
+      deputy_principal_ids: [],
+    });
+    renderList();
+
+    await waitFor(() => expect(screen.getByText("Beansprucht von alice")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Bearbeiten" }));
+    const form = await screen.findByRole("form", { name: "Zugriffsfreigabe erteilen" });
+    fireEvent.change(within(form).getByLabelText("Freigabe für"), {
+      target: { value: "org_unit" },
+    });
+    fireEvent.change(within(form).getByLabelText("Organisationseinheit von"), {
+      target: { value: "creator" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Freigabe erteilen" }));
+
+    await waitFor(() =>
+      expect(createTaskOrgHierarchyGrantMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-1",
+        grantKind: "org_unit",
+        orgUnitOf: "creator",
+      })
+    );
+    expect(
+      await screen.findByText(
+        "Keine Person gefunden (keine Vorgesetzten/Gruppenmitgliedschaft konfiguriert)."
+      )
+    ).toBeInTheDocument();
   });
 });

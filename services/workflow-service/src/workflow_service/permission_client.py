@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 import httpx
@@ -72,6 +73,46 @@ class PermissionServiceClient:
         )
         response.raise_for_status()
         return bool(response.json()["allowed"])
+
+    async def create_org_hierarchy_grant(
+        self,
+        *,
+        principal_id: str,
+        grant_kind: str,
+        process_definition_id: int,
+        ends_at: datetime,
+    ) -> dict:
+        """Dynamic org-hierarchy-based temporary access grant (14.2,
+        Post-Roadmap Phase 31 Session 10) - resolves ``principal_id``'s
+        supervisor(s)/chain/org-unit at permission-service and auto-creates
+        one ``Delegation`` per resolved deputy. Returns the raw response
+        dict (``{"delegation_ids": [...], "deputy_principal_ids": [...]}``)
+        - callers need both: the delegation IDs to store for later
+        revocation (``main.py``'s ``TaskClaim.granted_delegation_ids``) and
+        the deputy IDs to report back to whoever requested the grant."""
+        response = await self._client.post(
+            "/org-hierarchy-grants",
+            json={
+                "principal_id": principal_id,
+                "grant_kind": grant_kind,
+                "process_definition_id": process_definition_id,
+                "ends_at": ends_at.isoformat(),
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def revoke_org_hierarchy_grant(self, delegation_id: str) -> None:
+        """Cleanup counterpart (Post-Roadmap Phase 31 Session 10) - ends an
+        auto-created delegation early instead of waiting for its backstop
+        `ends_at`, called when a claim is released or its task completes.
+        Tolerant of an already-revoked/unknown ID (`404`) - best-effort
+        cleanup must not fail the primary action (claim release/task
+        completion) that triggered it."""
+        response = await self._client.delete(f"/org-hierarchy-grants/{delegation_id}")
+        if response.status_code == 404:
+            return
+        response.raise_for_status()
 
     async def close(self) -> None:
         await self._client.aclose()

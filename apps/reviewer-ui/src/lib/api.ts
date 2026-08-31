@@ -143,6 +143,9 @@ export interface ReadyTaskWithInstance {
   lane: string | null;
   data: Record<string, unknown>;
   extensions: Record<string, string>;
+  // Task-claim mechanism (post-roadmap phase 31 session 10) - `null` if unclaimed.
+  claimed_by: string | null;
+  grant_kind: string | null;
   instance_id: string;
   process_definition_id: number;
   business_key: string | null;
@@ -184,6 +187,8 @@ export interface ReadyTask {
   lane: string | null;
   data: Record<string, unknown>;
   extensions: Record<string, string>;
+  claimed_by: string | null;
+  grant_kind: string | null;
 }
 
 export async function listInstanceTasks(
@@ -225,6 +230,70 @@ export async function completeTask(
     },
     token
   );
+}
+
+// Task-claim mechanism & dynamic org-hierarchy access grants (14.2,
+// post-roadmap phase 31 session 10) - distinct from and additional to the
+// self-service delegation mechanism below (ADR 0048): that one is a person
+// naming ONE deputy for themselves, this one is auto-resolved from
+// permission-service's org-hierarchy data and can grant SEVERAL people at
+// once, but requires an existing claim to resolve "the assignee" from.
+export async function claimTask(
+  token: string,
+  params: { instanceId: string; taskId: string; principalId: string }
+): Promise<void> {
+  await request(
+    "workflow-service",
+    `instances/${params.instanceId}/tasks/${params.taskId}/claim`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ principal_id: params.principalId }),
+    },
+    token
+  );
+}
+
+export async function releaseTaskClaim(
+  token: string,
+  params: { instanceId: string; taskId: string }
+): Promise<void> {
+  await request(
+    "workflow-service",
+    `instances/${params.instanceId}/tasks/${params.taskId}/claim`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export interface OrgHierarchyGrantResult {
+  grant_kind: string;
+  deputy_principal_ids: string[];
+}
+
+export async function createTaskOrgHierarchyGrant(
+  token: string,
+  params: {
+    instanceId: string;
+    taskId: string;
+    grantKind: "supervisor" | "supervisor_chain" | "org_unit";
+    orgUnitOf?: "assignee" | "creator";
+  }
+): Promise<OrgHierarchyGrantResult> {
+  const response = await request(
+    "workflow-service",
+    `instances/${params.instanceId}/tasks/${params.taskId}/org-hierarchy-grant`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_kind: params.grantKind,
+        org_unit_of: params.orgUnitOf ?? null,
+      }),
+    },
+    token
+  );
+  return response.json();
 }
 
 // Absence deputization (4.4a, P14-S11) - who the logged-in person is

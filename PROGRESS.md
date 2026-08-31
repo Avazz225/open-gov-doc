@@ -2,9 +2,9 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S9 (org-hierarchy foundation: supervisor DAG in `permission-service` — see below under "Post-Roadmap: Phase 31"), the ninth session of the new Phase 31 (eGov feature gap closure).
+**Last completed:** P31-S10 (dynamic org-hierarchy-based access grants: a minimal task-claim mechanism in `workflow-service`, reusing `permission-service`'s `Delegation` mechanism for the actual grant — see below under "Post-Roadmap: Phase 31"), the tenth session of the new Phase 31 (eGov feature gap closure).
 
-**Next session:** P31-S10 (dynamic org-hierarchy-based access grants, depends on P31-S9 — now unblocked) or P31-S11 (supervisor/team task oversight view, likewise depends on P31-S9), or any other independent Phase 31 session (P31-S12/S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
+**Next session:** P31-S11 (supervisor/team task oversight view, depends on P31-S9 — already unblocked) or any other independent Phase 31 session (P31-S12/S13) — see `IMPLEMENTATION_PLAN.md` "Phase 31".
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4323,6 +4323,121 @@ chain-lookup tool and confirmed the rendered sentence, then deleted the row thro
 it disappeared — screenshot taken and inspected. All test data (both via curl and via the browser session)
 cleaned up afterward; the temporary Playwright spec file itself removed, same as every prior session's
 verification pass.
+
+### Post-Roadmap: Phase 31 Session 10 — dynamic org-hierarchy access grants (2026-08-31)
+
+Tenth session of Phase 31 (14.2, eGov feature gap closure) — "a workflow task can grant its assignee's
+supervisor, the full supervisor chain, or the assignee's/creator's org unit temporary access to the case
+for the task's duration", building on P31-S9's org-hierarchy foundation. See
+[ADR 0121](docs/adr/0121-dynamic-org-hierarchy-access-grants-task-claim-and-delegation-reuse.md) for the
+full design reasoning.
+
+**Research before any code, again** (this session was also explicitly flagged as needing validation):
+dispatched a research pass on `workflow-service`'s task/instance model and the existing delegation
+mechanism (ADR 0048) before designing anything. It surfaced a real gap between the plan's own wording and
+what actually exists: **no task has a persisted "assignee" anywhere in this system** (a task is a
+transient dataclass derived on every request from SpiffWorkflow's opaque `workflow_state` blob, per ADR
+0019 — only `ProcessInstance.created_by` is a real tracked identity), and **`case-service` has no per-case
+resource in `permission-service`** to grant access "to the case" on (only a system-wide `case.read`/
+`case.write` check at the root — a `Case` has no `folder_id`/resource pointer of its own). Both gaps were
+put to the user directly rather than silently worked around, since either changes the session's scope
+materially. **Two decisions, both by explicit user choice**: (1) implement "temporary access to the case"
+by auto-creating `Delegation` rows (reusing `workflow-service`'s already-enforced on-behalf-of check at
+task completion) rather than building new per-case RBAC in `case-service` — the latter would be a
+materially larger, separate RBAC uplift, not a natural fit for this session. (2) Build a minimal
+task-claim mechanism first, rather than accepting an unvalidated `principal_id` at grant time with no
+persisted meaning — closing the assignee gap properly instead of propagating the same laxness
+(`TaskCompleteRequest.completed_by`'s known, accepted unvalidated-free-text gap) into a new,
+access-*granting* feature, which is a materially different consequence than an audit-log annotation.
+
+**Backend (`workflow-service`)**: new `TaskClaim` model (keyed by `(instance_id, task_id)`, the same
+address `complete_task` already uses — no new normalized task model, ADR 0019's stance stays intact).
+`POST`/`DELETE /instances/{id}/tasks/{task_id}/claim` (idempotent for a repeat claim by the same
+principal, `409` if claimed by someone else); `POST .../org-hierarchy-grant` (`grant_kind:
+"supervisor"|"supervisor_chain"|"org_unit"`, `org_unit_of` required only for `org_unit`) requires an
+existing claim (`404` otherwise), resolves the target principal (the claim's principal, or
+`ProcessInstance.created_by` for `org_unit_of="creator"`), and calls a new `permission_client.
+create_org_hierarchy_grant()`. A second grant on the same claim replaces the first (revokes, then
+re-grants) rather than accumulating. Both claim release and successful task completion actively revoke any
+granted delegations (`_revoke_claim_grants`, best-effort — logged, never fails the primary action) — "for
+the task's duration" is a real duration, not merely "up to the grant's backstop `ends_at`"
+(`org_hierarchy_grant_max_duration_hours`, default 72h, a safety net against an abandoned claim only).
+`GET /tasks`/`GET /instances/{id}/tasks` enrich each task with `claimed_by`/`grant_kind`.
+
+**Backend (`permission-service`)**: new `repository.create_org_hierarchy_grant()` resolves the deputy SET
+for a `grant_kind` from P31-S9's data (`SupervisorAssignment`'s direct edges or full DAG-union chain, or
+every member of every group the principal belongs to for `org_unit` — the still-open question ADR 0120
+left for this session, "which group counts as 'the' org unit", resolved pragmatically: all of them,
+unioned, minus the principal itself) and creates one `Delegation` row per deputy via the already-existing
+`create_delegation` — no parallel creation path. New `POST`/`DELETE /org-hierarchy-grants`, deliberately
+ungated (same "no internal service-to-service auth" posture `GET /delegations/check` already has) and
+deliberately a SEPARATE `DELETE` endpoint from `DELETE /delegations/{id}` (that one requires the caller to
+be the delegator, an identity workflow-service's automated cleanup call has no natural way to present).
+
+**Frontend (`reviewer-ui`)**: `TaskList.tsx` gained a "Beanspruchung" column (claim/release buttons) and,
+once claimed by the logged-in person, an inline org-hierarchy-grant form inside the existing expandable
+task-detail row — reports the resolved deputies back, including the graceful-empty case (no
+supervisor/group configured). `InstanceDetail.tsx` gained the same column read-only only — claim/grant
+actions deliberately stay a `TaskList.tsx` concern, consistent with that view already omitting the
+"on behalf of" delegation selector (ADR 0110), so as not to duplicate the feature in a second place.
+
+**Test counts**: permission-service 153 (+6: diamond-DAG `supervisor_chain` resolution unioning
+reconverging paths, `supervisor` grants every direct supervisor not just one, `org_unit` excludes the
+principal itself, an unconfigured principal gets a graceful empty result not an error, revoke actually
+ends an active delegation, revoke-unknown-`404`); workflow-service 194 (+15: claim lifecycle
+incl. idempotency/already-claimed-`409`/claim-unknown-task-`409`/release/release-unknown-`404`,
+grant-without-claim-`404`, a real supervisor grant creates a genuinely active `Delegation` — verified via a
+real `GET /delegations/check` round trip against the live-running permission-service, not mocked —
+reflected in the task listing's `claimed_by`/`grant_kind`, `org_unit` without `org_unit_of` → `422`,
+`org_unit_of="creator"` correctly resolves from the instance creator rather than the claim's assignee via a
+real `Group`/`GroupMembership` round trip, and the actual "for the task's duration" proof: completing a
+claimed, granted task revokes the delegation immediately — checked genuinely active before completion,
+inactive after, not a vacuous pass); reviewer-ui 37 (+6: claim/release/grant flows, the grant form hidden
+for an unclaimed task, `org_unit_of` sent only for `grant_kind="org_unit"`). All `ruff check`/
+`ruff format --check` clean; `tsc --noEmit`/`eslint`/`next build` clean for reviewer-ui. New
+session-scoped `users_admin_headers` fixture added to `workflow-service`'s `conftest.py` (mirrors the
+existing `admin_headers`/`CONFIG_ADMIN_PRINCIPAL_ID` pattern, but for `admin.user_management`, which
+`permission-service`'s `/supervisor-assignments`/`/groups` require instead of `admin.object_config`).
+
+**A real, honest test-authoring mistake found and fixed during this session**: the first version of two new
+`workflow-service` tests called `GET /delegations/check` WITHOUT `process_definition_id`, which — per
+`_delegation_scope_matches`'s deliberate fail-closed design — makes an unscoped check always return
+`allowed: false` regardless of whether a real, correctly-scoped delegation exists. This made the
+"grant creates an active delegation" assertion trivially FALSE (test bug, not a feature bug — the grant was
+actually working) and, more subtly, made the "completion revokes the grant" assertion **vacuously pass**
+for the wrong reason (an unscoped check is always `false`, whether the delegation is active or revoked,
+so the assertion "proved" nothing). Fixed by passing `process_definition_id` and adding a discriminating
+pre-completion assertion (`allowed: true` before completing, `false` after) so the revocation test
+actually exercises what it claims to.
+
+**Also found and fixed live, not by a test**: running the workflow-service test suite against the real
+`permission-service` container (not `TestClient` — these tests hit the live-running service over HTTP)
+initially failed with `404 Not Found` for `POST /org-hierarchy-grants`, because `permission-service`'s
+Docker image hadn't been rebuilt yet this session (it was last rebuilt during P31-S9, before this
+session's endpoint existed). Rebuilding it before the test run resolved this — a reminder that this
+project's cross-service integration tests exercise the REAL container images, not just freshly-written
+code, so a new backend endpoint consumed by another service's tests needs its own image rebuilt first, not
+just the consuming service's.
+
+**Fully verified live against the real, freshly rebuilt stack** (`permission-service`/`workflow-service`/
+`reviewer-ui` all rebuilt and restarted): `curl`, end to end via the real gateway with a real bearer token
+— uploaded a real BPMN process definition, started an instance, listed its ready task (`claimed_by: null`),
+claimed it, created a real supervisor-assignment, requested a `supervisor` grant, confirmed the listing
+now shows `claimed_by`/`grant_kind` and that a genuinely active `Delegation` exists at permission-service
+(`GET /delegations/check` → `true`), completed the task, confirmed the delegation was auto-revoked
+(`→ false`) and that re-claiming the now-completed task correctly `409`s. A second instance confirmed
+`org_unit_of="creator"` resolves from the real process creator (not the assignee) via a real group with two
+members, and that `org_unit` without `org_unit_of` correctly `422`s. **A real Playwright browser session**
+logged in, created its own isolated process instance + supervisor-assignment via direct API calls (never
+mutating a task it didn't create, same precedent as the existing `tasks.spec.ts`), claimed the task through
+the real UI, confirmed the claim/release button state, opened the detail row, submitted the grant form, and
+confirmed the rendered "Freigabe erteilt an: pw-verify-supervisor" result — screenshot taken and inspected.
+All test data cleaned up afterward (permission-service supervisor-assignments/group deleted via the API;
+the temporary Playwright spec file removed). **One deliberate, honest exception**: the test process
+definition itself could not be deleted (`409` — instances still reference it, and this project has no
+process-instance deletion endpoint at all, by design, ADR 0019/2.1a-style append-only history) — the two
+completed test process instances remain in the dev stack, consistent with how every prior workflow-service
+live-verification session in this project has already behaved when no deletion path exists.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

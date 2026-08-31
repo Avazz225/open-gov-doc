@@ -67,3 +67,11 @@ class Settings(BaseServiceSettings):
     # docs/services/migration-service.md) is deliberately synchronous and
     # potentially long-running for a reference implementation.
     connector_call_timeout_seconds: float = 300.0
+
+    # Dynamic org-hierarchy-based temporary access grants (14.2, Post-Roadmap
+    # Phase 31 Session 10): backstop expiry for an auto-created Delegation,
+    # not the real revocation mechanism - a grant is expected to be revoked
+    # explicitly when its claim is released or the task completes (`main.py`'s
+    # `_revoke_claim_grants`), this is only a safety net against an abandoned
+    # claim that is never released/completed.
+    org_hierarchy_grant_max_duration_hours: float = 72.0

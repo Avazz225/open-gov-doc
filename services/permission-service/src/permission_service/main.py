@@ -43,6 +43,8 @@ from permission_service.schemas import (
     MaintenanceModeLift,
     MaintenanceModeOut,
     MaintenanceModeTrigger,
+    OrgHierarchyGrantCreate,
+    OrgHierarchyGrantOut,
     ResourceNodeOut,
     ResourceNodeUpdate,
     RoleAssignmentActionResult,
@@ -1026,3 +1028,56 @@ async def revoke_delegation(
         {"delegation_id": delegation_id},
         actor=x_dms_principal,
     )
+
+
+@app.post("/org-hierarchy-grants", response_model=OrgHierarchyGrantOut, status_code=201)
+async def create_org_hierarchy_grant(
+    payload: OrgHierarchyGrantCreate,
+    session: AsyncSession = Depends(get_session),
+) -> OrgHierarchyGrantOut:
+    """The org-hierarchy foundation (P31-S9) put to use for dynamic access
+    grants (Post-Roadmap Phase 31 Session 10, [ADR 0121]) - called by
+    `workflow-service` when a claimed task's assignee (or the instance's
+    creator) requests temporary access for their supervisor(s)/chain/org
+    unit. Deliberately ungated, like `GET /delegations/check` - no internal
+    service auth exists in this project (same documented gap), and this
+    endpoint's only intended caller is workflow-service itself, never a
+    browser directly. Unlike `POST /delegations` (self-service, delegator
+    always = `X-DMS-Principal`), `principal_id` here is an explicit body
+    field - the caller resolves it from its own claim/instance data, not
+    from whoever happens to be calling."""
+    delegations = await repository.create_org_hierarchy_grant(
+        session,
+        principal_id=payload.principal_id,
+        grant_kind=payload.grant_kind,
+        process_definition_id=payload.process_definition_id,
+        ends_at=payload.ends_at,
+    )
+    await session.commit()
+    return OrgHierarchyGrantOut(
+        delegation_ids=[d.id for d in delegations],
+        deputy_principal_ids=[d.deputy_principal_id for d in delegations],
+    )
+
+
+@app.delete("/org-hierarchy-grants/{delegation_id}", status_code=204)
+async def revoke_org_hierarchy_grant(
+    delegation_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    """Cleanup counterpart to `POST /org-hierarchy-grants` (Post-Roadmap
+    Phase 31 Session 10) - `workflow-service` calls this when a task's
+    claim is released or the task completes, ending the "for the task's
+    duration" grant early rather than waiting for `ends_at`. Deliberately a
+    SEPARATE, ungated endpoint from `DELETE /delegations/{id}` rather than
+    reusing it: that endpoint requires the caller to BE the delegator (or
+    hold the delegation-admin role), an identity workflow-service's
+    automated cleanup call has no natural way to present - this endpoint is
+    system-to-system revocation of grants the system itself created, the
+    same "no internal service auth" posture as creation above."""
+    try:
+        await repository.revoke_delegation(
+            session, delegation_id, revoked_by="system:workflow-service"
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()

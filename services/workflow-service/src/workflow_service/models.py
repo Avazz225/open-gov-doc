@@ -136,6 +136,43 @@ class ProcessInstance(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class TaskClaim(Base):
+    """Minimal task-claim mechanism (14.2/8, Post-Roadmap Phase 31 Session
+    10, ADR 0121) - workflow-service had no assignee concept at all before
+    this (ADR 0019 above: a "task" is a transient dataclass derived from
+    the opaque ``workflow_state`` blob on every request, never its own
+    persisted row). A claim is a deliberately minimal exception: a small
+    side table keyed by the same ``(instance_id, task_id)`` pair
+    ``complete_task`` already uses to address a specific task, recording
+    who is currently working on it. Built as the prerequisite for the
+    org-hierarchy access grant below (it needs a real assignee to resolve
+    a supervisor/org-unit FROM), not as a general task-assignment feature -
+    no reassignment, no queueing, no notifications.
+
+    ``granted_delegation_ids``/``grant_kind`` are populated only if an
+    org-hierarchy access grant (see ``permission_client.
+    create_org_hierarchy_grant``) was requested for this claim, so that
+    releasing the claim or completing the task can revoke exactly those
+    delegations again (``main.py``'s ``_revoke_claim_grants``) - "for the
+    task's duration" ends when the claim ends, not only at the grant's
+    backstop ``ends_at``."""
+
+    __tablename__ = "task_claim"
+    __table_args__ = (
+        UniqueConstraint("instance_id", "task_id", name="uq_task_claim_instance_task"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workflow.process_instance.id"), index=True
+    )
+    task_id: Mapped[str] = mapped_column(String(128))
+    principal_id: Mapped[str] = mapped_column(String(128))
+    claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    grant_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    granted_delegation_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+
+
 class FederationIdentity(Base):
     """This installation's own federation identity (7.4, P6-S9) -
     deliberately a single row with fixed ``id=1``, same singleton pattern

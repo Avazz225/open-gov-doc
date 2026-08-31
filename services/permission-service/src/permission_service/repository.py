@@ -1011,3 +1011,60 @@ async def is_active_deputy_for(
         )
         for d in delegations
     )
+
+
+async def create_org_hierarchy_grant(
+    session: AsyncSession,
+    *,
+    principal_id: str,
+    grant_kind: str,
+    process_definition_id: int,
+    ends_at: datetime,
+) -> list[Delegation]:
+    """The org-hierarchy foundation (P31-S9's `SupervisorAssignment`/reused
+    `Group`) put to use for dynamic access grants (Post-Roadmap Phase 31
+    Session 10, ADR 0121). Resolves the deputy SET for `grant_kind` and
+    creates one `Delegation` row per resolved deputy via the existing
+    `create_delegation` - `principal_id` becomes the delegator, each
+    resolved person the deputy, exactly Delegation's existing self-service
+    shape (ADR 0048), just auto-derived from org-hierarchy data instead of
+    a person picking one deputy by hand. `scope_process_definition_ids`
+    is set to exactly `[process_definition_id]` (the only delegation-scope
+    dimension `workflow-service`'s check actually evaluates) - unrestricted
+    on the other two dimensions, same as a self-service delegation left at
+    its defaults.
+
+    Deliberately no error for an empty resolved deputy set (e.g. a
+    principal with no configured supervisor, or no group membership) - a
+    graceful zero-delegations result, not a failure, same posture as
+    `get_supervisor_chain` for a principal with none."""
+    if grant_kind == "supervisor":
+        assignments = await list_supervisor_assignments(session, principal_id=principal_id)
+        deputy_ids = {a.supervisor_principal_id for a in assignments}
+    elif grant_kind == "supervisor_chain":
+        deputy_ids = await get_supervisor_chain(session, principal_id)
+    elif grant_kind == "org_unit":
+        deputy_ids = set()
+        for group_id in await _group_ids_for_principal(session, principal_id):
+            members = await list_group_members(session, group_id)
+            deputy_ids.update(m.principal_id for m in members)
+        deputy_ids.discard(principal_id)
+    else:
+        raise ValueError(f"unbekannter grant_kind {grant_kind!r}")
+
+    now = datetime.now(UTC)
+    delegations: list[Delegation] = []
+    for deputy_id in deputy_ids:
+        delegations.append(
+            await create_delegation(
+                session,
+                delegator_principal_id=principal_id,
+                deputy_principal_id=deputy_id,
+                starts_at=now,
+                ends_at=ends_at,
+                scope_object_type_ids=None,
+                scope_process_definition_ids=[process_definition_id],
+                scope_folder_resource_ids=None,
+            )
+        )
+    return delegations

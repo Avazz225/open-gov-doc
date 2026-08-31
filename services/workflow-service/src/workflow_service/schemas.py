@@ -81,6 +81,11 @@ class ReadyTaskOut(BaseModel):
     # `taskType=signature`/`requiredLevel=...` for a Signature Task, see
     # spiff_adapter.py. Empty for every ordinary Manual Task.
     extensions: dict[str, str] = {}
+    # Task-claim mechanism (Post-Roadmap Phase 31 Session 10) - `None` if
+    # unclaimed. Enriched by `main.py` from `TaskClaim` (a side table, not
+    # part of the transient task itself, see `models.TaskClaim`).
+    claimed_by: str | None = None
+    grant_kind: str | None = None
 
 
 class ReadyTaskWithInstanceOut(ReadyTaskOut):
@@ -109,6 +114,40 @@ class TaskCompleteRequest(BaseModel):
     # main.py.complete_task), NOT this field - `on_behalf_of_principal_id`
     # is only the person being represented.
     on_behalf_of_principal_id: str | None = None
+
+
+class TaskClaimCreate(BaseModel):
+    principal_id: str
+
+
+class TaskClaimOut(BaseModel):
+    id: int
+    instance_id: str
+    task_id: str
+    principal_id: str
+    claimed_at: datetime
+    grant_kind: str | None
+    granted_delegation_ids: list[str] | None
+
+    model_config = {"from_attributes": True}
+
+
+class OrgHierarchyGrantRequest(BaseModel):
+    """Dynamic org-hierarchy-based temporary access grant (14.2,
+    Post-Roadmap Phase 31 Session 10) - requires the task to already be
+    claimed (`TaskClaim`), since the grant is always resolved FROM the
+    claim's principal (`grant_kind="supervisor"`/`"supervisor_chain"`) or,
+    for `grant_kind="org_unit"`, from either the claim's principal
+    (assignee) or the process instance's `created_by` (creator) -
+    `org_unit_of` picks which, required only for that grant kind."""
+
+    grant_kind: Literal["supervisor", "supervisor_chain", "org_unit"]
+    org_unit_of: Literal["assignee", "creator"] | None = None
+
+
+class OrgHierarchyGrantResultOut(BaseModel):
+    grant_kind: str
+    deputy_principal_ids: list[str]
 
 
 class FederationConfigOut(BaseModel):

@@ -272,3 +272,19 @@ class DelegationOut(BaseModel):
 
 class DelegationCheckResult(BaseModel):
     allowed: bool
+
+
+# --- Org-hierarchy-based dynamic access grants (14.2, Post-Roadmap Phase 31
+# Session 10) ------------------------------------------------------------
+
+
+class OrgHierarchyGrantCreate(BaseModel):
+    principal_id: str
+    grant_kind: Literal["supervisor", "supervisor_chain", "org_unit"]
+    process_definition_id: int
+    ends_at: datetime
+
+
+class OrgHierarchyGrantOut(BaseModel):
+    delegation_ids: list[str]
+    deputy_principal_ids: list[str]

@@ -1296,3 +1296,153 @@ def test_revoke_delegation_by_delegator_succeeds_and_publishes_event(client, mon
 def test_revoke_delegation_unknown_id_returns_404(client):
     response = client.delete("/delegations/does-not-exist", headers={"X-DMS-Principal": "alice"})
     assert response.status_code == 404
+
+
+# --- Org-hierarchy-based dynamic access grants (14.2, Post-Roadmap Phase 31
+# Session 10) --------------------------------------------------------------
+
+
+def test_org_hierarchy_grant_supervisor_creates_one_delegation_per_direct_supervisor(
+    client, role_management_headers
+):
+    """oskar-p10 hat zwei direkte Vorgesetzte (Matrix-Organisation, wie in
+    P31-S9 vom Nutzer gewählt) - "supervisor" muss beiden eine Delegation
+    einräumen, nicht nur einem."""
+    client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "oskar-p10", "supervisor_principal_id": "petra-p10"},
+        headers=role_management_headers,
+    )
+    client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "oskar-p10", "supervisor_principal_id": "quirin-p10"},
+        headers=role_management_headers,
+    )
+
+    response = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "oskar-p10",
+            "grant_kind": "supervisor",
+            "process_definition_id": 1,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body["deputy_principal_ids"]) == {"petra-p10", "quirin-p10"}
+    assert len(body["delegation_ids"]) == 2
+
+    delegations = client.get("/delegations", params={"delegator_principal_id": "oskar-p10"}).json()
+    assert {d["deputy_principal_id"] for d in delegations} == {"petra-p10", "quirin-p10"}
+    assert all(d["scope_process_definition_ids"] == [1] for d in delegations)
+
+
+def test_org_hierarchy_grant_supervisor_chain_unions_diamond_dag(client, role_management_headers):
+    for principal, supervisor in [
+        ("rosa-p10", "sven-p10"),
+        ("rosa-p10", "tanja-p10"),
+        ("sven-p10", "ulf-p10"),
+        ("tanja-p10", "ulf-p10"),
+    ]:
+        client.post(
+            "/supervisor-assignments",
+            json={"principal_id": principal, "supervisor_principal_id": supervisor},
+            headers=role_management_headers,
+        )
+
+    response = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "rosa-p10",
+            "grant_kind": "supervisor_chain",
+            "process_definition_id": 2,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body["deputy_principal_ids"]) == {"sven-p10", "tanja-p10", "ulf-p10"}
+    assert len(body["delegation_ids"]) == 3
+
+
+def test_org_hierarchy_grant_org_unit_grants_every_group_member_except_self(
+    client, role_management_headers
+):
+    group = client.post(
+        "/groups", json={"name": "OrgUnitP10"}, headers=role_management_headers
+    ).json()
+    for principal_id in ("viktor-p10", "wanda-p10", "xaver-p10"):
+        client.post(
+            f"/groups/{group['id']}/members",
+            json={"principal_id": principal_id},
+            headers=role_management_headers,
+        )
+
+    response = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "viktor-p10",
+            "grant_kind": "org_unit",
+            "process_definition_id": 3,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    # viktor-p10 selbst ist ausgeschlossen - eine Delegation an sich selbst wäre sinnlos.
+    assert set(body["deputy_principal_ids"]) == {"wanda-p10", "xaver-p10"}
+
+
+def test_org_hierarchy_grant_returns_empty_result_without_error_for_unconfigured_principal(client):
+    """Eine Person ohne konfigurierte Vorgesetzte/Gruppenmitgliedschaft
+    erhält ein leeres, aber erfolgreiches Ergebnis - kein Fehler."""
+    response = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "yvonne-lonely-p10",
+            "grant_kind": "supervisor",
+            "process_definition_id": 4,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {"delegation_ids": [], "deputy_principal_ids": []}
+
+
+def test_revoke_org_hierarchy_grant_revokes_the_underlying_delegation(
+    client, role_management_headers
+):
+    client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "zora-p10", "supervisor_principal_id": "adam-p10"},
+        headers=role_management_headers,
+    )
+    created = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "zora-p10",
+            "grant_kind": "supervisor",
+            "process_definition_id": 5,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+        },
+    ).json()
+    delegation_id = created["delegation_ids"][0]
+
+    response = client.delete(f"/org-hierarchy-grants/{delegation_id}")
+    assert response.status_code == 204
+
+    still_active = client.get(
+        "/delegations/check",
+        params={"deputy_principal_id": "adam-p10", "delegator_principal_id": "zora-p10"},
+    ).json()
+    assert still_active["allowed"] is False
+
+
+def test_revoke_org_hierarchy_grant_unknown_id_returns_404(client):
+    response = client.delete("/org-hierarchy-grants/does-not-exist")
+    assert response.status_code == 404
