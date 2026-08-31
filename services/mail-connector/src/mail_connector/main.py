@@ -35,9 +35,11 @@ from mail_connector.schemas import (
     InboundAttachmentOut,
     InboundMessageOut,
     MailboxOut,
+    MailRoutingLogEntryOut,
     OutboundMessageCreate,
     OutboundMessageOut,
     RejectRequest,
+    RouteMessageRequest,
 )
 from mail_connector.settings import Settings
 from mail_connector.storage_client import ObjectNotFoundError, StorageClient
@@ -414,9 +416,13 @@ def _require_poststelle(x_dms_principal: str, x_dms_roles: str) -> None:
 
 async def _to_message_out(session: AsyncSession, message) -> InboundMessageOut:
     attachments = await repository.list_attachments(session, message.id)
+    routing_log = await repository.list_routing_log(session, message.id)
     base = InboundMessageOut.model_validate(message)
     return base.model_copy(
-        update={"attachments": [InboundAttachmentOut.model_validate(a) for a in attachments]}
+        update={
+            "attachments": [InboundAttachmentOut.model_validate(a) for a in attachments],
+            "routing_log": [MailRoutingLogEntryOut.model_validate(r) for r in routing_log],
+        }
     )
 
 
@@ -460,6 +466,68 @@ async def get_inbound(
         message = await repository.get_message(session, message_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return await _to_message_out(session, message)
+
+
+@app.post("/inbound/{message_id}/route", response_model=InboundMessageOut)
+async def route_message(
+    message_id: str,
+    payload: RouteMessageRequest,
+    x_dms_principal: str = Header(default=""),
+    x_dms_roles: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> InboundMessageOut:
+    """Hands a message off to a different mailbox (14.2, Post-Roadmap Phase
+    31 Session 12b, ADR 0124) - e.g. central intake routing a message to
+    the right department's mailbox. Orthogonal to
+    matching/assignment: `status`/`match_*`/`proposed_target_*` are left
+    untouched, only `mailbox_id` changes plus a permanent
+    `MailRoutingLogEntry` hop record (`GET /inbound/{id}`'s `routing_log`).
+    Any configured mailbox may route to any other - no topology
+    restriction, same "everyone with poststelle_role can act on everything"
+    posture P31-S12a already established (per-mailbox RBAC remains
+    deliberately deferred)."""
+    _require_poststelle(x_dms_principal, x_dms_roles)
+    try:
+        message = await repository.get_message(session, message_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if message.status in ("confirmed", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Nachricht ist bereits abschließend bearbeitet (status={message.status!r}) "
+            "und kann nicht mehr weitergeleitet werden",
+        )
+    if payload.target_mailbox_id not in {mailbox.id for mailbox in settings.mailboxes}:
+        raise HTTPException(
+            status_code=422, detail=f"Postfach {payload.target_mailbox_id!r} ist nicht konfiguriert"
+        )
+    if payload.target_mailbox_id == message.mailbox_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Nachricht befindet sich bereits im Postfach {payload.target_mailbox_id!r}",
+        )
+    previous_mailbox_id = message.mailbox_id
+    try:
+        message = await repository.route_message(
+            session,
+            message_id,
+            target_mailbox_id=payload.target_mailbox_id,
+            routed_by=x_dms_principal,
+            reason=payload.reason,
+        )
+    except repository.DuplicateInTargetMailboxError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "mail_connector.message.routed",
+        subject=message_id,
+        payload={
+            "from_mailbox_id": previous_mailbox_id,
+            "to_mailbox_id": payload.target_mailbox_id,
+            "routed_by": x_dms_principal,
+        },
+    )
     return await _to_message_out(session, message)
 
 

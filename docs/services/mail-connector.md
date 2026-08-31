@@ -1,8 +1,8 @@
 # mail-connector
 
-**Responsibility:** Technical receipt/sending of external correspondence for the inbox/outbox special area (Concept 2.5), review/assignment by a dedicated mail room role, automatic assignment suggestion based on a reference number found in the subject/body (document-service) or a case number (case-service). Since Post-Roadmap Phase 31 Session 12a (14.2), any number of independently-polled named mailboxes instead of one fixed mailbox per installation.
-**Concept reference:** 2.5/3.3 (connector principle)/7.1 (assignment workflow, here directly instead of via BPMN)/14.2 (multi-inbox model, Post-Roadmap Phase 31 Session 12a)
-**Own Postgres schema:** `mail_connector` (`inbound_message`, `inbound_attachment`, `outbound_message`)
+**Responsibility:** Technical receipt/sending of external correspondence for the inbox/outbox special area (Concept 2.5), review/assignment by a dedicated mail room role, automatic assignment suggestion based on a reference number found in the subject/body (document-service) or a case number (case-service). Since Post-Roadmap Phase 31 Session 12a (14.2), any number of independently-polled named mailboxes instead of one fixed mailbox per installation; since Session 12b, messages can be routed/handed off between them with a permanent hop log (the "Postbuch" foundation).
+**Concept reference:** 2.5/3.3 (connector principle)/7.1 (assignment workflow, here directly instead of via BPMN)/14.2 (multi-inbox model + routing, Post-Roadmap Phase 31 Sessions 12a/12b)
+**Own Postgres schema:** `mail_connector` (`inbound_message`, `inbound_attachment`, `outbound_message`, `mail_routing_log_entry`)
 
 ## API
 
@@ -14,6 +14,7 @@
 | `POST` | `/inbound/{id}/confirm-match` | Confirms a proposed match (`status="proposed_match"`, otherwise 409) — creates a document in the folder of the assigned document (or `folder_id`, if specified) for each clean attachment (including the body text, see below); for case-number matches, `folder_id` is mandatory (400 without it) |
 | `POST` | `/inbound/{id}/assign` | Manual assignment — mandatory fields `title`/`folder_id`, optional `case_id` (adds a document reference to the circulation folder on success) |
 | `POST` | `/inbound/{id}/reject` | Discards a message (e.g. spam) — `status="rejected"`, optional reason |
+| `POST` | `/inbound/{id}/route` | Hands a message off to a different mailbox (Post-Roadmap Phase 31 Session 12b, [ADR 0124](../adr/0124-mail-routing-hop-log-orthogonal-to-matching.md)) — `target_mailbox_id`, optional `reason`. `404` unknown message, `409` if already `confirmed`/`rejected`, `422` for an unconfigured or unchanged target. Orthogonal to matching — only `mailbox_id` changes plus a permanent routing-log hop, see "Routing Between Mailboxes" below |
 | `POST` | `/outbound` | Outbox — sends an external email (SMTP), logs success/failure; `sent_by` comes from `X-DMS-Principal`, not from the body. If `related_document_id` is set, the current content of the referenced document is attached as a file (400 for an unknown `related_document_id`, checked BEFORE the send attempt) |
 | `GET` | `/outbound` | List of sent messages |
 | `GET` | `/healthz` | Health check |
@@ -45,8 +46,9 @@ large for one session.
 - **`source_uid` uniqueness is scoped per mailbox** (`UNIQUE(mailbox_id, source_uid)`, was globally unique
   before this session) — a POP3/IMAP UID is only guaranteed stable within one mail account (RFC 1939), two
   different mailboxes could plausibly reuse the same native UID.
-- **`GET /mailboxes`** exposes the configured list without credentials — the basis for a future mailbox
-  selector in the frontend (not built in this session, see "Open Points").
+- **`GET /mailboxes`** exposes the configured list without credentials — the basis for the mailbox
+  filter/routing-target selector `PoststellePane.tsx` gained in Session 12b, see "Routing Between
+  Mailboxes" below.
 - **Ad hoc migration** (no Alembic, see CONTRIBUTING.md): `mailbox_id` added, backfilled to `"central"`
   (the fixed id of the single default mailbox this session's `Settings.mailboxes` default reproduces —
   every message that ever arrived did so through what is now named the "central" mailbox), then the old
@@ -55,9 +57,46 @@ large for one session.
   constraint directly) does no-ops on every startup.
 - **Deliberately unchanged in this session**: RBAC (`poststelle_role` stays one single, global role — every
   holder sees every mailbox, central and departmental alike, exactly like today's single-mailbox model;
-  per-department visibility narrowing is a real, separate RBAC design question, not solved here), outbound/
-  SMTP (stays one global config; the plan's own wording is about *inbox* multiplicity), and the frontend
-  (`PoststellePane.tsx`, user-ui, is untouched — no mailbox selector yet).
+  per-department visibility narrowing is a real, separate RBAC design question, not solved here) and
+  outbound/SMTP (stays one global config; the plan's own wording is about *inbox* multiplicity).
+
+## Routing Between Mailboxes (14.2, Post-Roadmap Phase 31 Session 12b, [ADR 0124](../adr/0124-mail-routing-hop-log-orthogonal-to-matching.md))
+
+`POST /inbound/{id}/route` hands a message off to a different configured mailbox — e.g. central intake
+routing a message to the right department. The literal beginning of the "Postbuch" the plan asks for
+(P31-S12a built the multi-inbox foundation, this session adds the actual hand-off + a permanent hop log);
+the standalone, searchable cross-message register view is still P31-S12c, not this session.
+
+- **Orthogonal to matching/assignment**: `status`/`match_type`/`match_value`/`proposed_target_type`/
+  `proposed_target_id` are left completely untouched by a route action — only `mailbox_id` changes, plus a
+  new `MailRoutingLogEntry` row. A document/case reference candidate found in the message text doesn't
+  become invalid just because a different mailbox now administers the message.
+- **`MailRoutingLogEntry`**: `message_id` (FK), `from_mailbox_id`, `to_mailbox_id`, `routed_by`,
+  `routed_at`, `reason` (optional) — pure append-only audit trail, no soft-delete (unlike
+  `FolderDocumentReference`/`CaseDocumentReference`'s removable references, a routing hop has nothing to
+  "undo," only further hops). `InboundMessage.mailbox_id` always reflects the current location; the log
+  accumulates every past transition. Embedded per-message as `routing_log` on `GET /inbound`/
+  `GET /inbound/{id}` (same pattern `attachments` already uses).
+- **Validation**: `404` unknown message; `409` if the message is already `confirmed`/`rejected` (same
+  inline status-check pattern `confirm_match`/`assign_manually`/`reject_message` already use in `main.py` —
+  routing a terminally-resolved message would be meaningless, there's no longer an open item to review
+  anywhere); `422` if the target isn't a currently configured mailbox, or equals the message's current
+  mailbox (a caller mistake, not treated as an idempotent no-op); `409` (`DuplicateInTargetMailboxError`)
+  if the target mailbox already holds a message with the same `source_uid` — `repository.route_message`
+  pre-checks this BEFORE mutating `mailbox_id`, rather than letting the composite unique constraint
+  (`uq_inbound_message_mailbox_source`, P31-S12a) surface as a raw `IntegrityError`/`500`. **Found live
+  during this session's own verification**: two mailboxes independently polling the same physical mail
+  account can each ingest their own copy of a message sharing the same backend-native UID.
+- **No topology restriction** — any configured mailbox may route to any other, matching the "everyone with
+  `poststelle_role` can act on everything" posture P31-S12a already established (per-mailbox RBAC remains
+  deliberately deferred).
+- **`user-ui` integration**: `PoststellePane.tsx` fetches `GET /mailboxes` once on mount (independent of
+  the inbox/outbox tab reload cycle). A mailbox filter dropdown and the "Weiterleiten" (route) action only
+  render once more than one mailbox is configured (`mailboxes.length > 1`) — hidden entirely for the
+  still-default single-mailbox dev stack, since a filter with one option or a route action with no valid
+  target could never do anything useful. Mailbox IDs are resolved to display names client-side from the
+  fetched list (no separate resolution call needed, `GET /mailboxes` is already small and complete). Per-
+  message routing history renders as a small list below the attachments, when non-empty.
 
 ## Retrieval protocol (3.3, connector principle)
 
@@ -130,8 +169,8 @@ Registers itself with the registry on startup via `dms-registry-client`, same pa
 
 ## Tests
 
-- `uv run pytest services/mail-connector/tests` (**47 tests**, previously 41 — since **Post-Roadmap Phase 31 Session 12a** ([ADR 0123](../adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md)): `test_repository.py` (2 new: `source_uid` scoped per mailbox — two different mailboxes may reuse the same UID without colliding; `list_messages` filters by `mailbox_id`), `test_api.py` (4 new: `GET /mailboxes` requires principal/role, returns the configured default mailbox with no credential fields present, `GET /inbound?mailbox_id=` filters correctly), plus the existing ingestion test extended with a `mailbox_id` assertion; `test_imap_backend.py`'s dedup-contract test updated for the new per-mailbox `get_by_source_uid` signature) — before that, 41 tests, previously 30: `matching.py` (candidate extraction, unambiguous/ambiguous/missing match via fake clients), repository (CRUD for inbound/outbound messages), API (role gate, full ingestion via `_ingest_message` directly instead of via a real POP3 connection — faster/more deterministic, candidate matching against real `document-service`/`case-service` incl. case fixture via the real `workflow-service`, confirm/assign/reject incl. 400/409, outbound send against real `mailpit` incl. file attachment from `related_document_id` — verified via mailpit's own REST API, filename/content-type/bytes of a real uploaded test document), IMAP backend (`test_imap_backend.py`, mocked at the `imaplib` boundary instead of running against a real server — see [ADR 0095](../adr/0095-imap-backend-mocked-imaplib.md) for the rationale: stable composite UID, no repeated deletion/marking on a repeated poll tick, real dedup contract via `repository.get_by_source_uid`, TLS/plain class selection) — the remaining part continues to run against real Postgres AND the real running sibling services, no mocks (same rationale as throughout the project).
-- Live verified: real SMTP→POP3 roundtrip against `mailpit` within the running compose stack (see PROGRESS.md); since P24-S3 additionally a real SMTP→IMAP roundtrip against a temporary `greenmail` container as well as a real outbox attachment send (see PROGRESS.md). Since **Post-Roadmap Phase 31 Session 12a**: the ad-hoc migration verified live against the real dev stack's 653 pre-existing messages (all correctly backfilled to `mailbox_id="central"`, the old single-column unique constraint correctly replaced with the composite one), plus a genuine end-to-end SMTP→POP3 roundtrip through the real, rebuilt poll loop confirming a newly arriving message is correctly tagged with `mailbox_id` (see PROGRESS.md).
+- `uv run pytest services/mail-connector/tests` (**58 tests**, previously 47 — since **Post-Roadmap Phase 31 Session 12b** ([ADR 0124](../adr/0124-mail-routing-hop-log-orthogonal-to-matching.md)): `test_repository.py` (4 new: routing updates `mailbox_id` and logs the hop, multiple hops are each logged in order, an empty log for a never-routed message, `DuplicateInTargetMailboxError` when the target mailbox already holds the same `source_uid` — mailbox_id/routing log stay unchanged), `test_api.py` (7 new, via a `with_finanzen_mailbox` fixture monkeypatching `settings.mailboxes` with a second test mailbox: auth/role gate, `404` unknown message, `422` unconfigured target, `422` same-mailbox target, a full success round trip incl. the returned `routing_log` entry and the message disappearing from the origin mailbox's filtered listing, `409` on an already-confirmed message, `409` — not a raw `500` — when the target mailbox already has a colliding `source_uid`, found live during this session's own verification, see "Routing Between Mailboxes" above) — before that, 47 tests, previously 41 — since **Post-Roadmap Phase 31 Session 12a** ([ADR 0123](../adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md)): `test_repository.py` (2 new: `source_uid` scoped per mailbox — two different mailboxes may reuse the same UID without colliding; `list_messages` filters by `mailbox_id`), `test_api.py` (4 new: `GET /mailboxes` requires principal/role, returns the configured default mailbox with no credential fields present, `GET /inbound?mailbox_id=` filters correctly), plus the existing ingestion test extended with a `mailbox_id` assertion; `test_imap_backend.py`'s dedup-contract test updated for the new per-mailbox `get_by_source_uid` signature) — before that, 41 tests, previously 30: `matching.py` (candidate extraction, unambiguous/ambiguous/missing match via fake clients), repository (CRUD for inbound/outbound messages), API (role gate, full ingestion via `_ingest_message` directly instead of via a real POP3 connection — faster/more deterministic, candidate matching against real `document-service`/`case-service` incl. case fixture via the real `workflow-service`, confirm/assign/reject incl. 400/409, outbound send against real `mailpit` incl. file attachment from `related_document_id` — verified via mailpit's own REST API, filename/content-type/bytes of a real uploaded test document), IMAP backend (`test_imap_backend.py`, mocked at the `imaplib` boundary instead of running against a real server — see [ADR 0095](../adr/0095-imap-backend-mocked-imaplib.md) for the rationale: stable composite UID, no repeated deletion/marking on a repeated poll tick, real dedup contract via `repository.get_by_source_uid`, TLS/plain class selection) — the remaining part continues to run against real Postgres AND the real running sibling services, no mocks (same rationale as throughout the project).
+- Live verified: real SMTP→POP3 roundtrip against `mailpit` within the running compose stack (see PROGRESS.md); since P24-S3 additionally a real SMTP→IMAP roundtrip against a temporary `greenmail` container as well as a real outbox attachment send (see PROGRESS.md). Since **Post-Roadmap Phase 31 Session 12a**: the ad-hoc migration verified live against the real dev stack's 653 pre-existing messages (all correctly backfilled to `mailbox_id="central"`, the old single-column unique constraint correctly replaced with the composite one), plus a genuine end-to-end SMTP→POP3 roundtrip through the real, rebuilt poll loop confirming a newly arriving message is correctly tagged with `mailbox_id` (see PROGRESS.md). Since **Post-Roadmap Phase 31 Session 12b**: a temporary second `finanzen` mailbox (same physical `mailpit` account as `central`, deliberately, to reproduce the collision) confirmed `DuplicateInTargetMailboxError` surfaces as a clean `409` against the real, rebuilt container rather than a raw `500` (see PROGRESS.md).
 
 ## Open Points
 
@@ -139,4 +178,4 @@ Registers itself with the registry on startup via `dms-registry-client`, same pa
 - **No bulk rescan of already received, unconfirmed messages on a subsequent format change** — the new format-derived pattern is only applied on the INITIAL ingestion of a message; older messages already sitting as `unassigned` are not retroactively re-checked on a later format change.
 - ~~**Only POP3 implemented**~~ — **IMAP built since P24-S3** (`backends/imap_backend.py`, `ImapBackend`). **Microsoft Graph (Exchange/O365) remains deliberately open**: a full Graph OAuth2 client-credentials integration (external app registration, token refresh, Graph REST semantics instead of IMAP/POP3) is a standalone, significantly larger undertaking that doesn't fit into the same session as IMAP + outbox attachments — a deliberate scoping decision for this session. `backends/interface.py`'s `MailboxBackend` interface already supports a future addition following the same pattern as `Pop3Backend`/`ImapBackend` (a new backend only implements `fetch_new_messages`, the rest of the service remains unchanged) — no structural preparation effort needed, only the actual Graph client implementation.
 - ~~**Outbox without attachment support**~~ — **fixed in P24-S3**: `POST /outbound` attaches the current content of the referenced document when `related_document_id` is set (see "Outbox attachment" above).
-- ~~**Only one mailbox per installation**~~ — **fixed in Post-Roadmap Phase 31 Session 12a**: any number of named mailboxes (see "Multi-Inbox Model" above). **Still open, deliberately deferred to a later session**: per-mailbox/department RBAC (`poststelle_role` stays one global role, every holder sees every mailbox — see ADR 0123 "Consequences"), a frontend mailbox selector (`PoststellePane.tsx` untouched), and admin-UI mailbox management (adding/reconfiguring a mailbox still needs an env var change + restart, consistent with `storage-service`/`signature-service`'s connector *lists* being equally restart-only, ADR 0091). Routing/hand-off between inboxes and the searchable cross-inbox "Postbuch" log are P31-S12b/S12c, not part of this session.
+- ~~**Only one mailbox per installation**~~ — **fixed in Post-Roadmap Phase 31 Session 12a**: any number of named mailboxes (see "Multi-Inbox Model" above). ~~**No frontend mailbox selector**~~ — **fixed in Post-Roadmap Phase 31 Session 12b**: `PoststellePane.tsx` gained a filter + routing UI (see "Routing Between Mailboxes" above), shown once more than one mailbox is configured. **Still open, deliberately deferred to a later session**: per-mailbox/department RBAC (`poststelle_role` stays one global role, every holder sees every mailbox — see ADR 0123/0124 "Consequences"), and admin-UI mailbox management (adding/reconfiguring a mailbox still needs an env var change + restart, consistent with `storage-service`/`signature-service`'s connector *lists* being equally restart-only, ADR 0091). The searchable, standalone cross-mailbox "Postbuch" register view is P31-S12c, not part of this session — `MailRoutingLogEntry` (Session 12b) is already the data it will read from.

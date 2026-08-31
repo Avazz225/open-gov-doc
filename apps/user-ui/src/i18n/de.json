@@ -409,7 +409,16 @@
     "subjectLabel": "Betreff",
     "bodyLabel": "Text",
     "send": "Senden",
-    "sendError": "Versand fehlgeschlagen"
+    "sendError": "Versand fehlgeschlagen",
+    "mailboxFilterLabel": "Postfach",
+    "mailboxFilterAll": "Alle Postfächer",
+    "route": "Weiterleiten",
+    "routeError": "Weiterleitung fehlgeschlagen",
+    "routeTargetLabel": "Zielpostfach",
+    "routeTargetPlaceholder": "Postfach wählen",
+    "routeReasonLabel": "Begründung (optional)",
+    "routeSubmit": "Weiterleiten",
+    "routeLogEntry": "{from} → {to} (von {by})"
   },
   "kontakte": {
     "paneLabel": "Kontakte",

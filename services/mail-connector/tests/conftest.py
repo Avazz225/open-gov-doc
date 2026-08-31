@@ -6,6 +6,17 @@ from dms_db_base import build_engine, make_session_factory
 from mail_connector.models import Base
 from sqlalchemy import text
 
+if "TEST_POSTGRES_DSN" not in os.environ:
+    raise RuntimeError(
+        "TEST_POSTGRES_DSN ist nicht gesetzt - dieses Modul truncatet in "
+        "'_clean_tables' die mail_connector-Tabellen vor JEDEM Test; ohne "
+        "explizite Ueberschreibung faellt die DSN unten auf die echte "
+        "'dms'-Datenbank zurueck (live verifiziert: P31-S12b hat das genau "
+        "so per 'uv run pytest' ausserhalb von scripts/run-tests.sh live "
+        "gewischt). scripts/run-tests.sh exportiert diese Variable immer "
+        "explizit auf 'dms_test' - bitte darueber laufen lassen, nicht "
+        "direkt per pytest."
+    )
 DSN = os.environ.get(
     "TEST_POSTGRES_DSN",
     "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms",

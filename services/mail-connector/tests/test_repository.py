@@ -138,6 +138,65 @@ async def test_mark_rejected_sets_status_and_reason(session):
     assert rejected.rejected_reason == "Spam"
 
 
+async def test_route_message_updates_mailbox_and_logs_the_hop(session):
+    message = await _create_message(session, mailbox_id="central")
+
+    routed = await repository.route_message(
+        session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason="Fachbezug"
+    )
+
+    assert routed.mailbox_id == "finanzen"
+    [entry] = await repository.list_routing_log(session, message.id)
+    assert entry.from_mailbox_id == "central"
+    assert entry.to_mailbox_id == "finanzen"
+    assert entry.routed_by == "bob"
+    assert entry.reason == "Fachbezug"
+
+
+async def test_route_message_multiple_hops_logs_each_in_order(session):
+    """ "Postbuch"-Grundlage (P31-S12c) - jeder Hop bleibt als eigener
+    Log-Eintrag erhalten, `mailbox_id` spiegelt nur den aktuellen Stand."""
+    message = await _create_message(session, mailbox_id="central")
+
+    await repository.route_message(
+        session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+    )
+    routed_again = await repository.route_message(
+        session, message.id, target_mailbox_id="personal", routed_by="carol", reason=None
+    )
+
+    assert routed_again.mailbox_id == "personal"
+    entries = await repository.list_routing_log(session, message.id)
+    assert [(e.from_mailbox_id, e.to_mailbox_id) for e in entries] == [
+        ("central", "finanzen"),
+        ("finanzen", "personal"),
+    ]
+
+
+async def test_list_routing_log_empty_for_never_routed_message(session):
+    message = await _create_message(session)
+    assert await repository.list_routing_log(session, message.id) == []
+
+
+async def test_route_message_raises_on_duplicate_source_uid_at_target(session):
+    """Found live during P31-S12b verification: two mailboxes independently
+    polling the same physical mail account can each ingest their own copy of
+    a message with the same backend-native `source_uid` - routing one into
+    the other's mailbox must not surface the composite unique constraint as
+    a raw `IntegrityError`."""
+    message = await _create_message(session, mailbox_id="central", source_uid="shared-uid")
+    await _create_message(session, mailbox_id="finanzen", source_uid="shared-uid")
+
+    with pytest.raises(repository.DuplicateInTargetMailboxError):
+        await repository.route_message(
+            session, message.id, target_mailbox_id="finanzen", routed_by="bob", reason=None
+        )
+
+    unchanged = await repository.get_message(session, message.id)
+    assert unchanged.mailbox_id == "central"
+    assert await repository.list_routing_log(session, message.id) == []
+
+
 async def test_set_attachment_document_clears_storage_key(session):
     message = await _create_message(session)
     attachment = await repository.add_attachment(

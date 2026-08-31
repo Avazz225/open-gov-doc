@@ -2,9 +2,15 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S12a (multi-inbox configuration: `mail-connector`'s `Settings.mailboxes` env-var-JSON-list, replacing the previous single-mailbox model — see below under "Post-Roadmap: Phase 31"), the twelfth session of the new Phase 31 (eGov feature gap closure). P31-S12 (the original single-session plan line) was, per research + user decision, split into P31-S12a/b/c — only 12a is done.
+**Last completed:** P31-S12b (routing/hand-off semantics between mailboxes: `POST /inbound/{id}/route` +
+the append-only `MailRoutingLogEntry` hop log, plus a live-verification-found `DuplicateInTargetMailboxError`
+fix — see below under "Post-Roadmap: Phase 31"), the thirteenth session of the new Phase 31 (eGov feature
+gap closure). P31-S12 (the original single-session plan line) was, per research + user decision, split
+into P31-S12a/b/c — 12a and 12b are done.
 
-**Next session:** P31-S12b (routing/hand-off semantics between inboxes, builds directly on P31-S12a) or P31-S13 (general xdomea/XJustiz exchange, independent) — see `IMPLEMENTATION_PLAN.md` "Phase 31". P31-S12c (searchable Postbuch log) depends on P31-S12b existing first.
+**Next session:** P31-S12c (searchable, standalone cross-mailbox "Postbuch" register view — builds directly
+on P31-S12b's `MailRoutingLogEntry`) or P31-S13 (general xdomea/XJustiz exchange, independent) — see
+`IMPLEMENTATION_PLAN.md` "Phase 31".
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -4577,6 +4583,79 @@ poll interval, confirmed it arrived correctly tagged `mailbox_id: "central"` —
 poll-loop rewrite still actually receives mail, not just that the API/migration are correct in isolation.
 Test message rejected afterward (mail-connector has no delete-message endpoint, `"rejected"` is the
 correct terminal state for a test artifact, consistent with this service's append-only message history).
+
+### Post-Roadmap: Phase 31 Session 12b — routing between mailboxes (2026-08-31)
+
+Thirteenth session of Phase 31 (14.2, eGov feature gap closure) — the second of the three-part P31-S12
+split (see P31-S12a above, [ADR 0123](docs/adr/0123-multi-inbox-model-env-var-config-no-department-rbac-yet.md)).
+Adds the actual hand-off action P31-S12a's config/plumbing was built for. See
+[ADR 0124](docs/adr/0124-mail-routing-hop-log-orthogonal-to-matching.md) for the full design reasoning.
+
+**`POST /inbound/{id}/route`** hands a message off to any other configured mailbox — orthogonal to
+matching/assignment (`status`/`match_*`/`proposed_target_*` untouched, only `mailbox_id` changes) plus a
+new, permanent `MailRoutingLogEntry` hop row (append-only, deliberately no soft-delete unlike
+`FolderDocumentReference`/`CaseDocumentReference` — a routing hop has nothing to "undo," only further
+hops), embedded as `routing_log` on `GET /inbound`/`GET /inbound/{id}` (same pattern `attachments` already
+uses). `404` unknown message, `409` already `confirmed`/`rejected`, `422` unconfigured or unchanged
+target — no topology restriction otherwise, same "everyone with `poststelle_role` can act on everything"
+posture P31-S12a already established. `user-ui`'s `PoststellePane` gained its first mailbox-aware UI: a
+mailbox filter and a "Weiterleiten" action, both gated on `mailboxes.length > 1` (hidden entirely for the
+still-default single-mailbox dev stack), plus a per-message routing history list.
+
+**A real bug found via this session's own live verification, fixed properly rather than worked around**:
+routing a real message from "central" to a temporarily-configured second "finanzen" mailbox produced a raw
+`500` (`sqlalchemy.exc.IntegrityError` on the composite `uq_inbound_message_mailbox_source` constraint) —
+because both test mailboxes were pointed at the same physical `mailpit` account, so "finanzen" had already
+independently ingested its own copy of the same message (same POP3 UIDL/`source_uid`) before the routing
+attempt tried to move the "central" copy there too. Diagnosed as a genuine, plausible production edge case
+(a shared or duplicated mail account polled by two mailboxes), not just a test-setup artifact. Fixed with a
+new `DuplicateInTargetMailboxError`, raised from a pre-check `SELECT` in `repository.route_message` BEFORE
+the `mailbox_id` mutation, caught in `main.py` and translated to a clean `409` — matching this project's
+general preference for explicit validation over parsing raw DB constraint violations. Two new regression
+tests added (repository-level and API-level) to lock this in.
+
+**A second, more serious mistake this session made itself, unrelated to the feature code**: while
+debugging the flaky-test failures below, several `uv run pytest` calls were run directly instead of
+through `scripts/run-tests.sh` — without `TEST_POSTGRES_DSN` explicitly set, `mail-connector/tests/
+conftest.py`'s DSN default falls back to the real `dms` database (documented at the very top of this file
+since the P5-S2/P5b-S6 incidents), and its autouse `_clean_tables` fixture `TRUNCATE`s `mail_connector`'s
+three tables before every test. This **wiped the live dev stack's actual `inbound_message`/
+`inbound_attachment`/`outbound_message` history** — confirmed via the live API afterward: every message in
+the running "central" mailbox had a `received_at` within the same few minutes and status `unassigned`,
+including messages whose subjects belonged to much earlier phases' live verifications (e.g. "P31-S12a
+Live-Verifikation Multi-Postfach", "Superuser Break-Glass aktiviert") — their processing history was lost,
+though the live poll loop had already re-ingested fresh copies of the raw mail itself (`mailpit` retains/
+redelivers). Damage was confirmed contained to `mail_connector`'s own three tables (schema-scoped
+`TRUNCATE`, no other service touched). Put directly to the user rather than silently cleaned up; the user
+chose to accept it as disposable dev-stack noise (no downstream/other-service data affected) and add a
+guard rather than investigate further. `services/mail-connector/tests/conftest.py` now raises immediately
+if `TEST_POSTGRES_DSN` is unset, rather than silently falling back to the real database.
+
+**Test counts**: mail-connector 58 (+11 total this session incl. the guard-triggered rerun: `test_repository.py`
++4 — routing updates `mailbox_id` and logs the hop, multiple hops each logged in order, an empty log for a
+never-routed message, `DuplicateInTargetMailboxError` on a colliding `source_uid` at the target leaves
+`mailbox_id`/the log unchanged; `test_api.py` +7 via a new `with_finanzen_mailbox` fixture — auth/role
+gate, `404` unknown message, `422` unconfigured/same-mailbox target, a full success round trip incl. the
+returned `routing_log` entry and disappearance from the origin mailbox's filtered listing, `409` on an
+already-confirmed message, `409` (not `500`) on a colliding `source_uid` at the target — the latter
+deliberately seeds its duplicate via `repository.create_inbound_message` directly rather than a second full
+`_ingest` pipeline call, to avoid doubling this test's exposure to the pre-existing event-loop flakiness
+below). All `ruff check`/`ruff format --check` clean on every file this session touched (pre-existing,
+unrelated `loadtest/`/`federation-hub-service` issues untouched). **The same genuinely flaky, pre-existing
+event-loop issue documented at P31-S12a surfaced again**, on different tests each rerun
+(`test_ingest_detects_unique_kennzeichen_match`/`test_ingest_detects_unique_vorgangsnummer_match`/
+`test_confirm_match_creates_document_in_matched_folder`/`test_route_already_confirmed_message_returns_409`)
+— consistent with the already-documented `RuntimeError: ... bound to a different event loop` category, not
+a regression from this session's own changes.
+
+**Fully verified live against the real, freshly rebuilt stack**: `mail-connector` rebuilt and restarted.
+Reproduced the exact original bug one more time against the rebuilt container — a temporary second
+`finanzen` mailbox pointed at the same `mailpit` account (same setup that originally found the bug), routed
+a real "central" message that "finanzen" had already independently ingested a duplicate of: `curl` now
+returns a clean `409` with a clear German message instead of the original raw `500`. Config reverted to the
+default single-mailbox shape afterward, `GET /mailboxes` confirmed back to just `"central"`, container
+healthy. No leftover routing-log/message state changed by this verification (the route was correctly
+rejected, not performed) — this time performed purely through the HTTP API, not direct DB access.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.

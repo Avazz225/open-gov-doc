@@ -28,6 +28,17 @@ class MailboxOut(BaseModel):
     owning_group_id: str | None
 
 
+class MailRoutingLogEntryOut(BaseModel):
+    id: int
+    from_mailbox_id: str
+    to_mailbox_id: str
+    routed_by: str
+    routed_at: datetime
+    reason: str | None
+
+    model_config = {"from_attributes": True}
+
+
 class InboundMessageOut(BaseModel):
     id: str
     mailbox_id: str
@@ -45,8 +56,18 @@ class InboundMessageOut(BaseModel):
     confirmed_at: datetime | None
     rejected_reason: str | None
     attachments: list[InboundAttachmentOut] = []
+    # Routing history (14.2, Post-Roadmap Phase 31 Session 12b) - every hop
+    # this message has been routed through, oldest first. Embedded the same
+    # way `attachments` already is - the standalone, cross-message
+    # searchable log view is P31-S12c, not this session.
+    routing_log: list[MailRoutingLogEntryOut] = []
 
     model_config = {"from_attributes": True}
+
+
+class RouteMessageRequest(BaseModel):
+    target_mailbox_id: str
+    reason: str | None = None
 
 
 class ConfirmMatchRequest(BaseModel):

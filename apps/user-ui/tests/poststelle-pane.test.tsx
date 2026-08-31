@@ -10,6 +10,8 @@ const assignInboundMessageMock = vi.fn();
 const rejectInboundMessageMock = vi.fn();
 const sendOutboundMessageMock = vi.fn();
 const listOutboundMessagesMock = vi.fn();
+const listMailboxesMock = vi.fn();
+const routeInboundMessageMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -21,6 +23,8 @@ vi.mock("@/lib/api", async () => {
     rejectInboundMessage: (...args: unknown[]) => rejectInboundMessageMock(...args),
     sendOutboundMessage: (...args: unknown[]) => sendOutboundMessageMock(...args),
     listOutboundMessages: (...args: unknown[]) => listOutboundMessagesMock(...args),
+    listMailboxes: (...args: unknown[]) => listMailboxesMock(...args),
+    routeInboundMessage: (...args: unknown[]) => routeInboundMessageMock(...args),
   };
 });
 
@@ -34,6 +38,7 @@ function renderPane() {
 
 const proposedMessage = {
   id: "msg-1",
+  mailbox_id: "central",
   from_address: "buerger@example.com",
   subject: "Rueckmeldung zu Az: 2026-001",
   body_text: "Hallo",
@@ -48,6 +53,7 @@ const proposedMessage = {
   confirmed_at: null,
   rejected_reason: null,
   attachments: [],
+  routing_log: [],
 };
 
 const unassignedMessage = {
@@ -70,8 +76,13 @@ describe("PoststellePane", () => {
     rejectInboundMessageMock.mockReset();
     sendOutboundMessageMock.mockReset();
     listOutboundMessagesMock.mockReset();
+    listMailboxesMock.mockReset();
+    routeInboundMessageMock.mockReset();
     listInboundMessagesMock.mockResolvedValue([]);
     listOutboundMessagesMock.mockResolvedValue([]);
+    listMailboxesMock.mockResolvedValue([
+      { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
+    ]);
   });
 
   it("shows the empty state when the inbox has nothing unassigned", async () => {
@@ -177,5 +188,108 @@ describe("PoststellePane", () => {
       "token-123",
       expect.objectContaining({ toAddress: "extern@example.com", subject: "Antwort", body: "Hallo" })
     );
+  });
+
+  it("hides the mailbox filter and routing action with only one configured mailbox", async () => {
+    listInboundMessagesMock.mockResolvedValue([unassignedMessage]);
+
+    renderPane();
+
+    await screen.findByText(/Ohne Bezug/);
+    expect(screen.queryByLabelText("Postfach")).not.toBeInTheDocument();
+    expect(screen.queryByText("Weiterleiten")).not.toBeInTheDocument();
+  });
+
+  it("routes a message to a different mailbox", async () => {
+    listMailboxesMock.mockResolvedValue([
+      { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
+      {
+        id: "finanzen",
+        name: "Poststelle Finanzen",
+        kind: "departmental",
+        owning_group_id: "group-finanzen",
+      },
+    ]);
+    listInboundMessagesMock
+      .mockResolvedValueOnce([unassignedMessage])
+      .mockResolvedValueOnce([{ ...unassignedMessage, mailbox_id: "finanzen" }]);
+    routeInboundMessageMock.mockResolvedValue({ ...unassignedMessage, mailbox_id: "finanzen" });
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText(/Ohne Bezug/);
+    await user.click(screen.getByText("Weiterleiten"));
+    await user.selectOptions(screen.getByLabelText("Zielpostfach"), "finanzen");
+    await user.type(screen.getByLabelText("Begründung (optional)"), "Fachbezug");
+    await user.click(screen.getAllByText("Weiterleiten")[1]);
+
+    await waitFor(() =>
+      expect(routeInboundMessageMock).toHaveBeenCalledWith("token-123", "msg-2", {
+        targetMailboxId: "finanzen",
+        reason: "Fachbezug",
+      })
+    );
+  });
+
+  it("shows the mailbox filter and offers only the other mailbox as a routing target", async () => {
+    listMailboxesMock.mockResolvedValue([
+      { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
+      {
+        id: "finanzen",
+        name: "Poststelle Finanzen",
+        kind: "departmental",
+        owning_group_id: "group-finanzen",
+      },
+    ]);
+    listInboundMessagesMock.mockResolvedValue([unassignedMessage]);
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText(/Ohne Bezug/);
+    expect(screen.getByLabelText("Postfach")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Weiterleiten"));
+    const targetSelect = screen.getByLabelText("Zielpostfach") as HTMLSelectElement;
+    const optionLabels = Array.from(targetSelect.options).map((o) => o.text);
+    // "central" ist das aktuelle Postfach der Nachricht - nicht als Ziel wählbar.
+    expect(optionLabels).not.toContain("Zentrale Poststelle");
+    expect(optionLabels).toContain("Poststelle Finanzen");
+  });
+
+  it("shows the routing history for a message that has been routed before", async () => {
+    listMailboxesMock.mockResolvedValue([
+      { id: "central", name: "Zentrale Poststelle", kind: "central", owning_group_id: null },
+      {
+        id: "finanzen",
+        name: "Poststelle Finanzen",
+        kind: "departmental",
+        owning_group_id: "group-finanzen",
+      },
+    ]);
+    listInboundMessagesMock.mockResolvedValue([
+      {
+        ...unassignedMessage,
+        mailbox_id: "finanzen",
+        routing_log: [
+          {
+            id: 1,
+            from_mailbox_id: "central",
+            to_mailbox_id: "finanzen",
+            routed_by: "poststelle-1",
+            routed_at: new Date().toISOString(),
+            reason: "Fachbezug Finanzen",
+          },
+        ],
+      },
+    ]);
+
+    renderPane();
+
+    expect(
+      await screen.findByText("Zentrale Poststelle → Poststelle Finanzen (von poststelle-1)")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Fachbezug Finanzen/)).toBeInTheDocument();
   });
 });

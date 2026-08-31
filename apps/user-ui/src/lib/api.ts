@@ -1021,8 +1021,28 @@ export interface InboundAttachment {
   resulting_document_id: string | null;
 }
 
+// Multi-inbox model & routing between mailboxes (14.2, post-roadmap phase 31
+// sessions 12a/12b) - `MailboxInfo` deliberately excludes credential fields
+// (mail-connector's `GET /mailboxes` never returns them, see ADR 0123).
+export interface MailboxInfo {
+  id: string;
+  name: string;
+  kind: "central" | "departmental";
+  owning_group_id: string | null;
+}
+
+export interface RoutingLogEntry {
+  id: number;
+  from_mailbox_id: string;
+  to_mailbox_id: string;
+  routed_by: string;
+  routed_at: string;
+  reason: string | null;
+}
+
 export interface InboundMessage {
   id: string;
+  mailbox_id: string;
   from_address: string;
   subject: string;
   body_text: string;
@@ -1037,6 +1057,7 @@ export interface InboundMessage {
   confirmed_at: string | null;
   rejected_reason: string | null;
   attachments: InboundAttachment[];
+  routing_log: RoutingLogEntry[];
 }
 
 export interface OutboundMessage {
@@ -1054,12 +1075,44 @@ export interface OutboundMessage {
 
 export async function listInboundMessages(
   token: string,
-  statusFilter?: string
+  params?: { statusFilter?: string; mailboxId?: string }
 ): Promise<InboundMessage[]> {
-  const path = statusFilter
-    ? `inbound?status_filter=${encodeURIComponent(statusFilter)}`
-    : "inbound";
-  const response = await request("mail-connector", path, {}, token);
+  const query = new URLSearchParams();
+  if (params?.statusFilter) query.set("status_filter", params.statusFilter);
+  if (params?.mailboxId) query.set("mailbox_id", params.mailboxId);
+  const queryString = query.toString();
+  const response = await request(
+    "mail-connector",
+    queryString ? `inbound?${queryString}` : "inbound",
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function listMailboxes(token: string): Promise<MailboxInfo[]> {
+  const response = await request("mail-connector", "mailboxes", {}, token);
+  return response.json();
+}
+
+export async function routeInboundMessage(
+  token: string,
+  messageId: string,
+  params: { targetMailboxId: string; reason?: string }
+): Promise<InboundMessage> {
+  const response = await request(
+    "mail-connector",
+    `inbound/${encodeURIComponent(messageId)}/route`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_mailbox_id: params.targetMailboxId,
+        reason: params.reason ?? null,
+      }),
+    },
+    token
+  );
   return response.json();
 }
 

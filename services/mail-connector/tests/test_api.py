@@ -1,12 +1,15 @@
 import email.message
 import os
 import uuid
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from mail_connector import repository
 from mail_connector.backends.interface import RawIncomingMessage
-from mail_connector.main import _ingest_message, app
+from mail_connector.main import _ingest_message, app, settings
+from mail_connector.settings import MailboxConfig
 
 OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
@@ -461,3 +464,183 @@ async def test_list_inbound_filters_by_mailbox_id(client, session):
 
     assert any(m["subject"] == "Fuer das Standard-Postfach" for m in matching)
     assert not any(m["subject"] == "Fuer das Standard-Postfach" for m in other)
+
+
+# --- Weiterleitung zwischen Postfächern / "Postbuch"-Grundlage (14.2,
+# Post-Roadmap Phase 31 Session 12b) ----------------------------------------
+
+
+@pytest.fixture
+def with_finanzen_mailbox(monkeypatch):
+    """Fuegt fuer die Dauer eines Tests ein zweites, konfiguriertes Postfach
+    hinzu (Settings sind sonst nur mit dem Standard-Postfach "central"
+    bestueckt) - echte Weiterleitung zwischen zwei Postfaechern ist ohne
+    ein zweites konfiguriertes Ziel nicht sinnvoll testbar."""
+    monkeypatch.setattr(
+        settings,
+        "mailboxes",
+        [
+            *settings.mailboxes,
+            MailboxConfig(
+                id="finanzen",
+                name="Poststelle Finanzen",
+                kind="departmental",
+                owning_group_id="group-finanzen",
+                inbound_protocol="pop3",
+                pop3_host="irrelevant",
+                pop3_username="irrelevant",
+                pop3_password="irrelevant",
+            ),
+        ],
+    )
+
+
+def test_route_message_requires_principal(client):
+    response = client.post("/inbound/does-not-exist/route", json={"target_mailbox_id": "finanzen"})
+    assert response.status_code == 401
+
+
+def test_route_unknown_message_returns_404(client, with_finanzen_mailbox):
+    response = client.post(
+        "/inbound/does-not-exist/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+async def test_route_message_to_unconfigured_mailbox_returns_422(client, session):
+    await _ingest(session, uid="uid-route-1", subject="Weiterleitung Ziel unbekannt")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "Weiterleitung Ziel unbekannt"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "does-not-exist"},
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+async def test_route_message_to_same_mailbox_returns_422(client, session, with_finanzen_mailbox):
+    await _ingest(session, uid="uid-route-2", subject="Weiterleitung dasselbe Postfach")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "Weiterleitung dasselbe Postfach"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "central"},
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+async def test_route_message_updates_mailbox_and_records_history(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-route-3", subject="Weiterleitung Erfolg")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "Weiterleitung Erfolg"
+    ]
+    assert message["mailbox_id"] == "central"
+    assert message["routing_log"] == []
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "finanzen", "reason": "Fachbezug Finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mailbox_id"] == "finanzen"
+    [entry] = body["routing_log"]
+    assert entry["from_mailbox_id"] == "central"
+    assert entry["to_mailbox_id"] == "finanzen"
+    assert entry["routed_by"] == "poststelle-1"
+    assert entry["reason"] == "Fachbezug Finanzen"
+
+    # Erscheint jetzt beim Ziel-Postfach, nicht mehr beim Ursprungs-Postfach.
+    finanzen = client.get(
+        "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+    ).json()
+    central = client.get("/inbound", params={"mailbox_id": "central"}, headers=ADMIN_HEADERS).json()
+    assert any(m["id"] == message["id"] for m in finanzen)
+    assert not any(m["id"] == message["id"] for m in central)
+
+
+async def test_route_already_confirmed_message_returns_409(client, session, with_finanzen_mailbox):
+    document_id, kennzeichen = _real_document_with_kennzeichen()
+    await _ingest(session, uid="uid-route-4", subject=f"Az: {kennzeichen}")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["match_value"] == kennzeichen
+    ]
+    client.post(
+        f"/inbound/{message['id']}/confirm-match",
+        json={"title": "Erledigt"},
+        headers=ADMIN_HEADERS,
+    )
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+    assert response.status_code == 409
+
+
+async def test_route_message_to_mailbox_with_colliding_source_uid_returns_409(
+    client, session, with_finanzen_mailbox
+):
+    """Found live during P31-S12b verification (see `DuplicateInTargetMailboxError`
+    in `repository.py`): two mailboxes independently polling the same physical
+    mail account can each ingest their own copy of a message sharing the same
+    backend-native UID - routing must surface a clean 409, not a raw 500 from
+    the composite unique constraint. The "finanzen" duplicate is created
+    directly via `repository.create_inbound_message` (bypassing the virus-scan/
+    event-publish pipeline `_ingest` goes through) - only the "central" message
+    actually being routed needs the full pipeline, since it's the one fetched
+    and posted to through `client` below."""
+    await _ingest(
+        session, uid="uid-route-collision", subject="Zentrale Kopie", mailbox_id="central"
+    )
+    await repository.create_inbound_message(
+        session,
+        mailbox_id="finanzen",
+        source_uid="uid-route-collision",
+        from_address="buerger@example.com",
+        subject="Finanzen Kopie",
+        body_text="Hallo",
+        received_at=datetime.now(UTC),
+        match_type=None,
+        match_value=None,
+        proposed_target_type=None,
+        proposed_target_id=None,
+        match_candidates=[],
+    )
+    await session.commit()
+    central_messages = client.get(
+        "/inbound", params={"mailbox_id": "central"}, headers=ADMIN_HEADERS
+    ).json()
+    [message] = [m for m in central_messages if m["subject"] == "Zentrale Kopie"]
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 409
+    unchanged = client.get(f"/inbound/{message['id']}", headers=ADMIN_HEADERS).json()
+    assert unchanged["mailbox_id"] == "central"
+    assert unchanged["routing_log"] == []

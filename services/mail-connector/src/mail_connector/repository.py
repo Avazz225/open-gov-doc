@@ -1,13 +1,29 @@
 import uuid
 from datetime import UTC, datetime
 
-from mail_connector.models import InboundAttachment, InboundMessage, OutboundMessage
+from mail_connector.models import (
+    InboundAttachment,
+    InboundMessage,
+    MailRoutingLogEntry,
+    OutboundMessage,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class NotFoundError(Exception):
     pass
+
+
+class DuplicateInTargetMailboxError(Exception):
+    """Routing target (14.2, Post-Roadmap Phase 31 Session 12b) already has
+    a message with the identical `source_uid` (`route_message`, checked
+    BEFORE the update, not just relying on the DB constraint - a raw
+    `IntegrityError` would surface as an unhandled 500) - found live during
+    this session's own verification: two mailboxes independently polling
+    the same physical mail account (or a message legitimately duplicated to
+    both) can each ingest their own copy of a message sharing the same
+    backend-native UID."""
 
 
 class NotInStatusError(Exception):
@@ -100,6 +116,65 @@ async def get_message(session: AsyncSession, message_id: str) -> InboundMessage:
 async def list_attachments(session: AsyncSession, message_id: str) -> list[InboundAttachment]:
     result = await session.execute(
         select(InboundAttachment).where(InboundAttachment.message_id == message_id)
+    )
+    return list(result.scalars().all())
+
+
+async def route_message(
+    session: AsyncSession,
+    message_id: str,
+    *,
+    target_mailbox_id: str,
+    routed_by: str,
+    reason: str | None,
+) -> InboundMessage:
+    """Hands a message off to a different mailbox (14.2, Post-Roadmap Phase
+    31 Session 12b) - records the hop in `MailRoutingLogEntry` and updates
+    `InboundMessage.mailbox_id` to the new current location. Status/match/
+    proposed-target fields are left untouched: routing is orthogonal to
+    matching, a document/case reference candidate found in the message text
+    doesn't become invalid just because a different mailbox now administers
+    it. Status validity (message not already `confirmed`/`rejected`) and
+    target-mailbox validity (a configured mailbox, not the current one) are
+    checked at `main.py`'s call site, same pattern as `confirm_match`/
+    `assign_manually`/`reject_message`.
+
+    Pre-checks the target mailbox for an existing message with the same
+    `source_uid` (raises `DuplicateInTargetMailboxError` rather than letting
+    the composite unique constraint surface as a raw, unhandled
+    `IntegrityError`/500 - found live during this session's own
+    verification, see the exception's docstring)."""
+    message = await get_message(session, message_id)
+    existing_at_target = await session.execute(
+        select(InboundMessage).where(
+            InboundMessage.mailbox_id == target_mailbox_id,
+            InboundMessage.source_uid == message.source_uid,
+        )
+    )
+    if existing_at_target.scalars().first() is not None:
+        raise DuplicateInTargetMailboxError(
+            f"Im Zielpostfach {target_mailbox_id!r} existiert bereits eine Nachricht mit "
+            f"identischem source_uid {message.source_uid!r} - Weiterleitung abgelehnt"
+        )
+    log_entry = MailRoutingLogEntry(
+        message_id=message_id,
+        from_mailbox_id=message.mailbox_id,
+        to_mailbox_id=target_mailbox_id,
+        routed_by=routed_by,
+        routed_at=datetime.now(UTC),
+        reason=reason,
+    )
+    session.add(log_entry)
+    message.mailbox_id = target_mailbox_id
+    await session.flush()
+    return message
+
+
+async def list_routing_log(session: AsyncSession, message_id: str) -> list[MailRoutingLogEntry]:
+    result = await session.execute(
+        select(MailRoutingLogEntry)
+        .where(MailRoutingLogEntry.message_id == message_id)
+        .order_by(MailRoutingLogEntry.routed_at)
     )
     return list(result.scalars().all())
 

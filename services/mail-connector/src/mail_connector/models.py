@@ -75,6 +75,29 @@ class InboundAttachment(Base):
     resulting_document_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
+class MailRoutingLogEntry(Base):
+    """One hop of an inbound message's routing history between mailboxes
+    (14.2, Post-Roadmap Phase 31 Session 12b) - the "Postbuch" foundation
+    P31-S12c's searchable cross-message log view will read from. Pure
+    append-only audit trail, no soft-delete (a routing hop, once it
+    happened, is permanent history - unlike e.g. `FolderDocumentReference`'s
+    removable references, there is nothing to "undo" here, only further
+    hops). `InboundMessage.mailbox_id` always reflects the CURRENT
+    location; this table accumulates every past hop."""
+
+    __tablename__ = "mail_routing_log_entry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("mail_connector.inbound_message.id"), index=True
+    )
+    from_mailbox_id: Mapped[str] = mapped_column(String(128))
+    to_mailbox_id: Mapped[str] = mapped_column(String(128))
+    routed_by: Mapped[str] = mapped_column(String(128))
+    routed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
 class OutboundMessage(Base):
     """Outbound mail (2.5) - every external correspondence sent via
     `POST /outbound`, auditable with an optional reference to the

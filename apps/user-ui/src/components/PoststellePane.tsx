@@ -7,10 +7,13 @@ import {
   assignInboundMessage,
   confirmInboundMatch,
   listInboundMessages,
+  listMailboxes,
   listOutboundMessages,
   rejectInboundMessage,
+  routeInboundMessage,
   sendOutboundMessage,
   type InboundMessage,
+  type MailboxInfo,
   type OutboundMessage,
 } from "@/lib/api";
 
@@ -41,6 +44,24 @@ export function PoststellePane({ token }: { token: string }) {
   const [composeTo, setComposeTo] = useState("");
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
+  // Multi-inbox model & routing between mailboxes (14.2, post-roadmap phase
+  // 31 sessions 12a/12b).
+  const [mailboxes, setMailboxes] = useState<MailboxInfo[]>([]);
+  const [mailboxFilter, setMailboxFilter] = useState("");
+  const [routingId, setRoutingId] = useState<string | null>(null);
+  const [routeTargetMailboxId, setRouteTargetMailboxId] = useState("");
+  const [routeReason, setRouteReason] = useState("");
+
+  useEffect(() => {
+    if (!token) return;
+    listMailboxes(token)
+      .then(setMailboxes)
+      .catch(() => setMailboxes([]));
+  }, [token]);
+
+  function mailboxName(mailboxId: string): string {
+    return mailboxes.find((m) => m.id === mailboxId)?.name ?? mailboxId;
+  }
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -48,7 +69,7 @@ export function PoststellePane({ token }: { token: string }) {
     setError(null);
     try {
       if (tab === "inbox") {
-        setInbound(await listInboundMessages(token));
+        setInbound(await listInboundMessages(token, { mailboxId: mailboxFilter || undefined }));
       } else {
         setOutbound(await listOutboundMessages(token));
       }
@@ -57,7 +78,7 @@ export function PoststellePane({ token }: { token: string }) {
     } finally {
       setIsLoading(false);
     }
-  }, [token, tab, t]);
+  }, [token, tab, mailboxFilter, t]);
 
   useEffect(() => {
     reload();
@@ -118,6 +139,31 @@ export function PoststellePane({ token }: { token: string }) {
     }
   }
 
+  function startRouting(message: InboundMessage) {
+    setRoutingId(message.id);
+    setRouteTargetMailboxId("");
+    setRouteReason("");
+    setError(null);
+  }
+
+  async function routeMessage(message: InboundMessage) {
+    if (!routeTargetMailboxId) return;
+    setBusyId(message.id);
+    setError(null);
+    try {
+      await routeInboundMessage(token, message.id, {
+        targetMailboxId: routeTargetMailboxId,
+        reason: routeReason.trim() || undefined,
+      });
+      setRoutingId(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("poststelle.routeError"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function sendCompose() {
     setError(null);
     try {
@@ -160,6 +206,20 @@ export function PoststellePane({ token }: { token: string }) {
         </button>
       </span>
 
+      {tab === "inbox" && mailboxes.length > 1 && (
+        <label className="poststelle-mailbox-filter">
+          {t("poststelle.mailboxFilterLabel")}
+          <select value={mailboxFilter} onChange={(e) => setMailboxFilter(e.target.value)}>
+            <option value="">{t("poststelle.mailboxFilterAll")}</option>
+            {mailboxes.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       {error && (
         <p className="error-text" role="alert">
           {error}
@@ -178,6 +238,7 @@ export function PoststellePane({ token }: { token: string }) {
                 <span className="entry-name">
                   {message.subject} — {message.from_address} ({statusLabel(t, message.status)})
                   {message.match_value && ` · ${message.match_type}: ${message.match_value}`}
+                  {mailboxes.length > 1 && ` · ${mailboxName(message.mailbox_id)}`}
                 </span>
                 {(message.status === "unassigned" || message.status === "proposed_match") && (
                   <span className="actions">
@@ -190,6 +251,15 @@ export function PoststellePane({ token }: { token: string }) {
                         ? t("poststelle.confirm")
                         : t("poststelle.assign")}
                     </button>
+                    {mailboxes.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => startRouting(message)}
+                        disabled={busyId === message.id}
+                      >
+                        {t("poststelle.route")}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => reject(message)}
@@ -198,6 +268,46 @@ export function PoststellePane({ token }: { token: string }) {
                       {t("poststelle.reject")}
                     </button>
                   </span>
+                )}
+                {routingId === message.id && (
+                  <div className="poststelle-action-form">
+                    <label>
+                      {t("poststelle.routeTargetLabel")}
+                      <select
+                        value={routeTargetMailboxId}
+                        onChange={(e) => setRouteTargetMailboxId(e.target.value)}
+                      >
+                        <option value="">{t("poststelle.routeTargetPlaceholder")}</option>
+                        {mailboxes
+                          .filter((m) => m.id !== message.mailbox_id)
+                          .map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label>
+                      {t("poststelle.routeReasonLabel")}
+                      <input
+                        type="text"
+                        value={routeReason}
+                        onChange={(e) => setRouteReason(e.target.value)}
+                      />
+                    </label>
+                    <span className="actions">
+                      <button
+                        type="button"
+                        disabled={busyId === message.id || !routeTargetMailboxId}
+                        onClick={() => routeMessage(message)}
+                      >
+                        {t("poststelle.routeSubmit")}
+                      </button>
+                      <button type="button" onClick={() => setRoutingId(null)}>
+                        {t("poststelle.actionCancel")}
+                      </button>
+                    </span>
+                  </div>
                 )}
                 {actionId === message.id && (
                   <div className="poststelle-action-form">
@@ -252,6 +362,22 @@ export function PoststellePane({ token }: { token: string }) {
                     {message.attachments.map((a) => (
                       <li key={a.id}>
                         {a.filename} ({a.scan_status})
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {message.routing_log.length > 0 && (
+                  <ul className="poststelle-routing-log">
+                    {message.routing_log.map((entry) => (
+                      <li key={entry.id}>
+                        <span>
+                          {t("poststelle.routeLogEntry", {
+                            from: mailboxName(entry.from_mailbox_id),
+                            to: mailboxName(entry.to_mailbox_id),
+                            by: entry.routed_by,
+                          })}
+                        </span>
+                        {entry.reason && ` — ${entry.reason}`}
                       </li>
                     ))}
                   </ul>
