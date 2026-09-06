@@ -10,6 +10,13 @@ from workflow_service import main
 from workflow_service.main import app
 
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+# Delegation scope resolution (4.4a, P32-S2, ADR 0130) - `document-service`/
+# `object-type-service` round trips are real (no mocking); the
+# `case-service` path is monkeypatched at `app.state.case_client.get_case`
+# instead (see the object-type-scope tests below for why a real `POST
+# /cases` call is structurally incompatible with this test suite).
+DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+OBJECT_TYPE_SERVICE_URL = os.environ.get("TEST_OBJECT_TYPE_SERVICE_URL", "http://localhost:8007")
 
 
 @pytest.fixture
@@ -23,10 +30,14 @@ def _create_delegation(
     deputy_principal_id: str,
     delegator_principal_id: str,
     process_definition_id: int | None = None,
+    object_type_id: int | None = None,
+    folder_resource_id: str | None = None,
 ) -> dict:
     """Stellvertretung bei Abwesenheit (4.4a, P14-S11) - echter Aufruf gegen
     den laufenden permission-service (kein Mocking, gleiches Prinzip wie
-    `_grant_config_admin_permission` in conftest.py)."""
+    `_grant_config_admin_permission` in conftest.py). `object_type_id`/
+    `folder_resource_id` since P32-S2 (ADR 0130) - previously dead scope
+    dimensions, now actually resolvable/enforceable at task completion."""
     now = datetime.now(UTC)
     body = {
         "deputy_principal_id": deputy_principal_id,
@@ -35,10 +46,45 @@ def _create_delegation(
     }
     if process_definition_id is not None:
         body["scope_process_definition_ids"] = [process_definition_id]
+    if object_type_id is not None:
+        body["scope_object_type_ids"] = [object_type_id]
+    if folder_resource_id is not None:
+        body["scope_folder_resource_ids"] = [folder_resource_id]
     response = httpx.post(
         f"{PERMISSION_SERVICE_URL}/delegations",
         json=body,
         headers={"X-DMS-Principal": delegator_principal_id},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _create_object_type(*, applies_to: str = "folder") -> int:
+    """Delegation scope resolution (P32-S2) - `case-service`'s `POST /cases`
+    validates a supplied `object_type_id` against a REAL object type via
+    `object_type_client.validate` (no FK, but a live HTTP check), so a
+    made-up integer would 400 - a minimal, unconstrained type is enough."""
+    response = httpx.post(
+        f"{OBJECT_TYPE_SERVICE_URL}/object-types",
+        json={"name": f"wf-delegation-scope-test-{uuid.uuid4().hex[:8]}", "applies_to": applies_to},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def _create_document(*, folder_id: str = "root") -> dict:
+    """Delegation scope resolution (P32-S2) - fallback document-service
+    path for `_resolve_business_key_scope` (no real process sets a document
+    business_key today, see `document_client.py`'s own docstring, but the
+    resolution path itself needs a real document to exercise). `folder_id`
+    defaults to `"root"`, already a registered permission-service resource
+    - no extra folder-service setup needed."""
+    response = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        data={"title": "wf-delegation-scope-test", "created_by": "alice", "folder_id": folder_id},
+        files={"file": ("test.txt", b"delegation scope test content", "text/plain")},
         timeout=30.0,
     )
     response.raise_for_status()
@@ -1040,6 +1086,167 @@ def test_complete_task_on_behalf_of_respects_process_definition_scope(
     )
 
     assert response.status_code == 403
+
+
+def test_complete_task_on_behalf_of_respects_object_type_scope(
+    client, manual_task_bpmn, admin_headers, monkeypatch
+):
+    """P32-S2 (ADR 0130) - activates `scope_object_type_ids`, previously
+    dead: `business_key` resolves via `case-service` to a real
+    `object_type_id`. The case-service HTTP call itself is monkeypatched
+    at `app.state.case_client.get_case` (same boundary-patch precedent as
+    `test_complete_task_on_behalf_of_with_active_delegation_succeeds_and_
+    annotates_event`'s event-bus patch above) - a real `POST /cases` call
+    would itself trigger case-service's OWN `workflow_client.start_instance`
+    against the live `workflow-service` container, which this test suite
+    requires stopped (NATS durable-consumer isolation, `scripts/
+    run-tests.sh`) - a genuine, unavoidable structural conflict, not a
+    shortcut of convenience. `object_type_id` itself is still a real,
+    live object-type-service row (`_create_object_type`) - only the case
+    lookup is stubbed, not the object-type validation this ultimately
+    depends on. A delegation scoped to a DIFFERENT object type must still
+    be rejected, even though the process-definition scope (unset here)
+    would otherwise allow it."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="ObjectTypeScope", headers=admin_headers
+    ).json()["id"]
+    matching_type_id = _create_object_type()
+    other_type_id = _create_object_type()
+    business_key = f"fake-case-{uuid.uuid4().hex[:8]}"
+
+    async def fake_get_case(case_id: str, *, x_dms_principal: str) -> dict | None:
+        if case_id == business_key:
+            return {"id": case_id, "object_type_id": matching_type_id}
+        return None
+
+    monkeypatch.setattr(app.state.case_client, "get_case", fake_get_case)
+
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "business_key": business_key},
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    delegator = f"delegator-{uuid.uuid4().hex[:8]}"
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+    _create_delegation(
+        deputy_principal_id=deputy, delegator_principal_id=delegator, object_type_id=other_type_id
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": deputy, "on_behalf_of_principal_id": delegator},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 403
+
+
+def test_complete_task_on_behalf_of_allows_matching_object_type_scope(
+    client, manual_task_bpmn, admin_headers, monkeypatch
+):
+    """Counterpart to the mismatch test above - a delegation scoped to the
+    SAME object type as the resolved case must succeed, confirming the
+    resolution path (not just the fail-closed rejection path) genuinely
+    works end to end. Same `case_client.get_case` boundary patch as above,
+    for the same structural reason."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="ObjectTypeScopeMatch", headers=admin_headers
+    ).json()["id"]
+    type_id = _create_object_type()
+    business_key = f"fake-case-{uuid.uuid4().hex[:8]}"
+
+    async def fake_get_case(case_id: str, *, x_dms_principal: str) -> dict | None:
+        if case_id == business_key:
+            return {"id": case_id, "object_type_id": type_id}
+        return None
+
+    monkeypatch.setattr(app.state.case_client, "get_case", fake_get_case)
+
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "business_key": business_key},
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    delegator = f"delegator-{uuid.uuid4().hex[:8]}"
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+    _create_delegation(
+        deputy_principal_id=deputy, delegator_principal_id=delegator, object_type_id=type_id
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": deputy, "on_behalf_of_principal_id": delegator},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 200
+
+
+def test_complete_task_on_behalf_of_respects_folder_resource_scope(
+    client, manual_task_bpmn, admin_headers
+):
+    """P32-S2 (ADR 0130) - activates `scope_folder_resource_ids` via the
+    document-service fallback path: no real process sets a document
+    business_key today, but the resolution must still work correctly if
+    one does. A delegation scoped to a folder OTHER than the resolved
+    document's own folder must be rejected."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="FolderScope", headers=admin_headers
+    ).json()["id"]
+    document = _create_document(folder_id="root")
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "business_key": document["id"]},
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    delegator = f"delegator-{uuid.uuid4().hex[:8]}"
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+    _create_delegation(
+        deputy_principal_id=deputy,
+        delegator_principal_id=delegator,
+        folder_resource_id="not-the-documents-folder",
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": deputy, "on_behalf_of_principal_id": delegator},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 403
+
+
+def test_complete_task_on_behalf_of_allows_matching_folder_resource_scope(
+    client, manual_task_bpmn, admin_headers
+):
+    """Counterpart to the mismatch test above - a delegation scoped to
+    `"root"` (the resolved document's own folder) must succeed."""
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="FolderScopeMatch", headers=admin_headers
+    ).json()["id"]
+    document = _create_document(folder_id="root")
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "business_key": document["id"]},
+    ).json()
+    task = client.get(f"/instances/{instance['id']}/tasks").json()[0]
+
+    delegator = f"delegator-{uuid.uuid4().hex[:8]}"
+    deputy = f"deputy-{uuid.uuid4().hex[:8]}"
+    _create_delegation(
+        deputy_principal_id=deputy, delegator_principal_id=delegator, folder_resource_id="root"
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task['id']}/complete",
+        json={"completed_by": deputy, "on_behalf_of_principal_id": delegator},
+        headers={"X-DMS-Principal": deputy},
+    )
+
+    assert response.status_code == 200
 
 
 def test_complete_task_without_on_behalf_of_needs_no_principal_header(

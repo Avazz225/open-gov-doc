@@ -37,6 +37,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from workflow_service import consumer, federation_crypto, repository, spiff_adapter
 from workflow_service.approval_client import ApprovalClient
+from workflow_service.case_client import CaseServiceClient
+from workflow_service.document_client import DocumentServiceClient
 from workflow_service.federation_client import FederationHubClient
 from workflow_service.license_client import LicenseStatusClient
 from workflow_service.models import Base, FederationConfig, FederationIdentity
@@ -352,6 +354,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await repository.refresh_business_calendar_cache(session)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     app.state.signature_client = SignatureServiceClient(settings.signature_service_base_url)
+    app.state.case_client = CaseServiceClient(settings.case_service_base_url)
+    app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
     app.state.federation_client = await _ensure_federation_identity(app.state.session_factory)
     app.state.license_client = LicenseStatusClient(
         settings.registry_service_base_url or "",
@@ -419,6 +423,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.approval_client.close()
     await app.state.permission_client.close()
     await app.state.signature_client.close()
+    await app.state.case_client.close()
+    await app.state.document_client.close()
     await app.state.license_client.close()
     if app.state.federation_client is not None:
         await app.state.federation_client.close()
@@ -1284,6 +1290,34 @@ async def _reject_manual_federated_completion(
         )
 
 
+async def _resolve_business_key_scope(
+    business_key: str | None, x_dms_principal: str
+) -> tuple[int | None, str | None]:
+    """Activates delegation's previously-dead `scope_object_type_ids`/
+    `scope_folder_resource_ids` (P32-S2, ADR 0048's own anticipated
+    "additional resolution step") - `business_key` is a genuinely opaque
+    cross-service reference (no FK enforcement), so this tries
+    `case-service` first (the real, exercised path: every
+    circulation-folder process sets `business_key=case_id`, see
+    `case_service.workflow_client`) and falls back to `document-service`
+    (no real process sets a document business_key today, but the field's
+    own docstring already anticipates it and this reuses an existing
+    endpoint, not new API surface). Returns `(None, None)` if
+    `business_key` is unset or resolves against neither service - callers
+    then fall back to the existing fail-closed scope semantics
+    (`_delegation_scope_matches`), exactly as if the dimension had never
+    been supplied."""
+    if not business_key:
+        return None, None
+    case = await app.state.case_client.get_case(business_key, x_dms_principal=x_dms_principal)
+    if case is not None:
+        return case.get("object_type_id"), None
+    document = await app.state.document_client.get_document(business_key)
+    if document is not None:
+        return document.get("object_type_id"), document.get("folder_id")
+    return None, None
+
+
 async def _require_delegation_if_on_behalf_of(
     session: AsyncSession, instance_id: str, payload: TaskCompleteRequest, x_dms_principal: str
 ) -> None:
@@ -1307,10 +1341,15 @@ async def _require_delegation_if_on_behalf_of(
             ),
         )
     instance = await repository.get_instance(session, instance_id)
+    object_type_id, folder_resource_id = await _resolve_business_key_scope(
+        instance.business_key, x_dms_principal
+    )
     allowed = await app.state.permission_client.check_delegation(
         deputy_principal_id=x_dms_principal,
         delegator_principal_id=payload.on_behalf_of_principal_id,
         process_definition_id=instance.process_definition_id,
+        object_type_id=object_type_id,
+        folder_resource_id=folder_resource_id,
     )
     if not allowed:
         raise HTTPException(

@@ -7,9 +7,11 @@ import {
   createDelegation,
   listActiveDelegationsForDeputy,
   listMyDelegations,
+  listObjectTypes,
   lookupUserByUsername,
   revokeDelegation,
   type Delegation,
+  type ObjectType,
 } from "@/lib/api";
 import { usePrincipalNames } from "@/lib/usePrincipalNames";
 
@@ -51,6 +53,21 @@ export function DelegationsPane({
   const [endsAt, setEndsAt] = useState(toDateTimeInputValue(14));
   const [isCreating, setIsCreating] = useState(false);
 
+  // Scope restriction (4.4a, since P32-S2/ADR 0130) - previously only
+  // settable via a raw API call, no UI at all. Object types are already
+  // listed elsewhere in this app (e.g. upload dialogs); folder resource
+  // IDs have no picker anywhere yet, so a comma-separated text field
+  // follows the same idiom already used for admin-ui's role permissions
+  // field rather than building a new folder browser for this alone.
+  const [objectTypes, setObjectTypes] = useState<ObjectType[]>([]);
+  const [scopeObjectTypeIds, setScopeObjectTypeIds] = useState<number[]>([]);
+  const [scopeFolderResourceIdsText, setScopeFolderResourceIdsText] = useState("");
+
+  useEffect(() => {
+    if (!token) return;
+    listObjectTypes(token).then(setObjectTypes).catch(() => setObjectTypes([]));
+  }, [token]);
+
   const reload = useCallback(async () => {
     if (!token || !currentPrincipalId) return;
     setIsLoading(true);
@@ -87,12 +104,20 @@ export function DelegationsPane({
     setError(null);
     try {
       const deputy = await lookupUserByUsername(token, deputyUsername.trim());
+      const folderResourceIds = scopeFolderResourceIdsText
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
       await createDelegation(token, {
         deputyPrincipalId: deputy.id,
         startsAt: new Date(startsAt).toISOString(),
         endsAt: new Date(endsAt).toISOString(),
+        objectTypeIds: scopeObjectTypeIds,
+        folderResourceIds,
       });
       setDeputyUsername("");
+      setScopeObjectTypeIds([]);
+      setScopeFolderResourceIdsText("");
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("delegations.createError"));
@@ -142,6 +167,34 @@ export function DelegationsPane({
           {t("delegations.endsAtLabel")}
           <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
         </label>
+        <label>
+          {t("delegations.scopeObjectTypesLabel")}
+          <select
+            multiple
+            value={scopeObjectTypeIds.map(String)}
+            onChange={(e) =>
+              setScopeObjectTypeIds(
+                Array.from(e.target.selectedOptions, (option) => Number(option.value))
+              )
+            }
+          >
+            {objectTypes.map((objectType) => (
+              <option key={objectType.id} value={objectType.id}>
+                {objectType.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">{t("delegations.scopeObjectTypesHint")}</p>
+        <label>
+          {t("delegations.scopeFolderResourceIdsLabel")}
+          <input
+            type="text"
+            value={scopeFolderResourceIdsText}
+            onChange={(e) => setScopeFolderResourceIdsText(e.target.value)}
+          />
+        </label>
+        <p className="hint">{t("delegations.scopeFolderResourceIdsHint")}</p>
         <button type="submit" disabled={isCreating}>
           {t("delegations.createButton")}
         </button>

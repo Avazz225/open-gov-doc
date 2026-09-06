@@ -10,6 +10,7 @@ const createDelegationMock = vi.fn();
 const revokeDelegationMock = vi.fn();
 const lookupUserByUsernameMock = vi.fn();
 const lookupUserByIdMock = vi.fn();
+const listObjectTypesMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -22,6 +23,7 @@ vi.mock("@/lib/api", async () => {
     revokeDelegation: (...args: unknown[]) => revokeDelegationMock(...args),
     lookupUserByUsername: (...args: unknown[]) => lookupUserByUsernameMock(...args),
     lookupUserById: (...args: unknown[]) => lookupUserByIdMock(...args),
+    listObjectTypes: (...args: unknown[]) => listObjectTypesMock(...args),
   };
 });
 
@@ -44,9 +46,11 @@ describe("DelegationsPane", () => {
     revokeDelegationMock.mockReset();
     lookupUserByUsernameMock.mockReset();
     lookupUserByIdMock.mockReset();
+    listObjectTypesMock.mockReset();
 
     listMyDelegationsMock.mockResolvedValue([]);
     listActiveDelegationsForDeputyMock.mockResolvedValue([]);
+    listObjectTypesMock.mockResolvedValue([]);
     // Not resolvable by default (P19-S4) - `usePrincipalNames` falls back to
     // the raw principal_id in this case, so existing tests remain valid
     // unchanged; a dedicated test below verifies actual name resolution.
@@ -136,6 +140,48 @@ describe("DelegationsPane", () => {
     await waitFor(() => expect(createDelegationMock).toHaveBeenCalled());
     expect(createDelegationMock.mock.calls[0][0]).toBe("token-123");
     expect(createDelegationMock.mock.calls[0][1].deputyPrincipalId).toBe("bob-sub");
+  });
+
+  it("creates a scoped delegation with selected object types and folder IDs (P32-S2)", async () => {
+    listObjectTypesMock.mockResolvedValue([
+      { id: 1, name: "Rechnung", applies_to: "document", attributes: [], icon: null },
+      { id: 2, name: "Vertrag", applies_to: "document", attributes: [], icon: null },
+    ]);
+    lookupUserByUsernameMock.mockResolvedValue({ id: "bob-sub", username: "bob" });
+    createDelegationMock.mockResolvedValue({
+      id: "d1",
+      delegator_principal_id: "alice-sub",
+      deputy_principal_id: "bob-sub",
+      starts_at: farFutureStart,
+      ends_at: farFutureEnd,
+      scope_object_type_ids: [1],
+      scope_process_definition_ids: null,
+      scope_folder_resource_ids: ["folder-a"],
+      created_at: farFutureStart,
+      revoked_at: null,
+      revoked_by: null,
+    });
+
+    const user = userEvent.setup();
+    renderPane();
+
+    await screen.findByText("Noch keine Stellvertretung hinterlegt.");
+    await screen.findByText("Rechnung");
+    await user.type(screen.getByPlaceholderText("Nutzername der Stellvertretung"), "bob");
+    await user.selectOptions(
+      screen.getByLabelText("Nur für diese Dokumentklassen (optional)"),
+      "1"
+    );
+    await user.type(
+      screen.getByLabelText("Nur für diese Ordner-IDs (optional, kommagetrennt)"),
+      "folder-a"
+    );
+    await user.click(screen.getByText("Hinterlegen"));
+
+    await waitFor(() => expect(createDelegationMock).toHaveBeenCalled());
+    const params = createDelegationMock.mock.calls[0][1];
+    expect(params.objectTypeIds).toEqual([1]);
+    expect(params.folderResourceIds).toEqual(["folder-a"]);
   });
 
   it("shows an error when creating with an unknown deputy username", async () => {

@@ -57,20 +57,33 @@ class PermissionServiceClient:
         return response.json()["active"]
 
     async def check_delegation(
-        self, *, deputy_principal_id: str, delegator_principal_id: str, process_definition_id: int
+        self,
+        *,
+        deputy_principal_id: str,
+        delegator_principal_id: str,
+        process_definition_id: int,
+        object_type_id: int | None = None,
+        folder_resource_id: str | None = None,
     ) -> bool:
         """Deputizing during absence (4.4a, P14-S11) - true if
         ``deputy_principal_id`` is currently registered as an active
         deputy for ``delegator_principal_id`` (time window + optional
-        process scope), see main.py's ``complete_task``."""
-        response = await self._client.get(
-            "/delegations/check",
-            params={
-                "deputy_principal_id": deputy_principal_id,
-                "delegator_principal_id": delegator_principal_id,
-                "process_definition_id": process_definition_id,
-            },
-        )
+        process/object-type/folder scope), see main.py's ``complete_task``.
+        ``object_type_id``/``folder_resource_id`` activate the previously
+        dead scope dimensions since P32-S2 (ADR 0048's own anticipated
+        "additional resolution step") - see main.py's
+        ``_resolve_business_key_scope``, which resolves them from the
+        instance's ``business_key`` before this call."""
+        params: dict[str, str | int] = {
+            "deputy_principal_id": deputy_principal_id,
+            "delegator_principal_id": delegator_principal_id,
+            "process_definition_id": process_definition_id,
+        }
+        if object_type_id is not None:
+            params["object_type_id"] = object_type_id
+        if folder_resource_id is not None:
+            params["folder_resource_id"] = folder_resource_id
+        response = await self._client.get("/delegations/check", params=params)
         response.raise_for_status()
         return bool(response.json()["allowed"])
 

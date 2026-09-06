@@ -2426,7 +2426,16 @@ export interface Delegation {
 
 export async function createDelegation(
   token: string,
-  params: { deputyPrincipalId: string; startsAt: string; endsAt: string }
+  params: {
+    deputyPrincipalId: string;
+    startsAt: string;
+    endsAt: string;
+    // Scope restriction (4.4a, since P32-S2/ADR 0130) - unrestricted on a
+    // dimension when omitted/empty, same "null means unrestricted"
+    // semantics as the backend's own `scope_*` fields.
+    objectTypeIds?: number[];
+    folderResourceIds?: string[];
+  }
 ): Promise<Delegation> {
   const response = await request(
     "permission-service",
@@ -2438,6 +2447,10 @@ export async function createDelegation(
         deputy_principal_id: params.deputyPrincipalId,
         starts_at: params.startsAt,
         ends_at: params.endsAt,
+        ...(params.objectTypeIds?.length ? { scope_object_type_ids: params.objectTypeIds } : {}),
+        ...(params.folderResourceIds?.length
+          ? { scope_folder_resource_ids: params.folderResourceIds }
+          : {}),
       }),
     },
     token

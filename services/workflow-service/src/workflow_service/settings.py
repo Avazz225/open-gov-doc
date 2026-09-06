@@ -75,3 +75,17 @@ class Settings(BaseServiceSettings):
     # `_revoke_claim_grants`), this is only a safety net against an abandoned
     # claim that is never released/completed.
     org_hierarchy_grant_max_duration_hours: float = 72.0
+
+    # Delegation scope resolution (4.4a, P32-S2, ADR 0130): resolves
+    # `ProcessInstance.business_key` to an `object_type_id`/
+    # `folder_resource_id` so a delegation's previously-dead
+    # `scope_object_type_ids`/`scope_folder_resource_ids` can actually be
+    # evaluated at task completion - `case_client.py` (the real,
+    # exercised path, every circulation-folder process sets
+    # `business_key=case_id`) and `document_client.py` (a fallback for the
+    # day a document-keyed process exists, `business_key`'s own docstring
+    # already anticipates this). No `depends_on` for either in
+    # `docker-compose.yml` - `case-service` already depends on
+    # `workflow-service`, a mutual `depends_on` would be a cycle.
+    case_service_base_url: str = "http://localhost:8016"
+    document_service_base_url: str = "http://localhost:8006"

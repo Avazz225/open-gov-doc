@@ -298,6 +298,13 @@ def connector_service_task_templated_bpmn() -> str:
 
 
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+# `workflow_service.main` reads `settings` once at module import (P32-S2,
+# ADR 0130, delegation scope resolution) - must be set like
+# `DMS_FEDERATION_HUB_BASE_URL` above before any `from workflow_service.main
+# import app`, which happens in individual test files below, not here.
+os.environ["DMS_DOCUMENT_SERVICE_BASE_URL"] = DOCUMENT_SERVICE_URL
+CASE_SERVICE_URL = os.environ.get("TEST_CASE_SERVICE_URL", "http://localhost:8016")
+os.environ["DMS_CASE_SERVICE_BASE_URL"] = CASE_SERVICE_URL
 SIGNATURE_SERVICE_URL = os.environ.get("TEST_SIGNATURE_SERVICE_URL", "http://localhost:8017")
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
 

@@ -2,18 +2,16 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P32-S1 (`PUT /approval-config/{action_type}` self-gated behind `admin.user_management`,
-reversing [ADR 0089](docs/adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)'s "not this
-session" deferral now that the actual blast radius was mapped call-site by call-site instead of
-estimated; `POST /roles` gains the generic four-eyes mechanism, wrapped response `RoleActionResult` — see
-[ADR 0130](docs/adr/0130-approval-config-self-gated-role-creation-four-eyes.md)), the first session of the
-new Phase 32+ (post-Phase-31 gap re-analysis).
+**Last completed:** P32-S2 (delegation's two dead scope dimensions activated — `workflow-service` now
+resolves `ProcessInstance.business_key` via `case-service` first, falling back to `document-service`,
+before calling `permission-service`'s already-correct `GET /delegations/check`; `DelegationsPane` gained
+a scope picker — see [ADR 0131](docs/adr/0131-delegation-scope-resolution-case-then-document.md)), the
+second session of the new Phase 32+ (post-Phase-31 gap re-analysis).
 
-**Next session:** **P32-S2** (delegation's two dead scope dimensions — `_delegation_scope_matches` already
-checks `scope_object_type_ids`/`scope_folder_resource_ids` correctly, but `workflow-service`'s
-`check_delegation` caller never passes them, so any delegation created via the API with one of those
-scopes is silently always denied). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining
-session breakdown (Phase 32 security/RBAC hardening, Phase 33 accessibility completion, Phase 34
+**Next session:** **P32-S3** (Postbuch: enforce department RBAC via `owning_group_id` — it exists only as
+config metadata today, every `poststelle_role` holder can read/route every mailbox regardless of
+department). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining session breakdown (Phase 32
+security/RBAC hardening continues with P32-S3/S4/S5, Phase 33 accessibility completion, Phase 34
 XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
 quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
 federation).
@@ -5094,6 +5092,74 @@ consistent with every other service's own test-role residue.
 [ADR 0089](docs/adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)'s status line marked
 superseded. `graphify update .` deliberately deferred — Phase 32 has five sessions total, not a phase
 completion (per project convention, only run at phase end).
+
+### Post-Roadmap: Phase 32 Session 2 — delegation scope resolution (case-service, then document-service)
+
+Second session of Phase 32+. See [ADR 0131](docs/adr/0131-delegation-scope-resolution-case-then-document.md)
+for the full design reasoning.
+
+**`business_key` is genuinely opaque, but in practice today is always a case ID or unset** — confirmed
+by finding every real `start_instance` caller in the codebase: `case-service` always sets
+`business_key=case_id` (every circulation-folder process), `migration-service` never sets one at all. No
+document-keyed process exists yet, despite `ProcessInstance.business_key`'s own docstring aspirationally
+naming "a future `document_id`." Given the user's explicit choice (asked directly, since building the
+document-service fallback for a path no real process exercises today is a genuine judgment call) to
+build both resolution paths rather than only the exercised one, `workflow-service`'s new
+`_resolve_business_key_scope()` tries `case-service`'s `GET /cases/{business_key}` first, then falls
+back to `document-service`'s `GET /documents/{business_key}` — reusing two already-existing endpoints,
+no new API surface.
+
+**A real architectural asymmetry found and worked around, not glossed over**: `case-service` has no
+folder concept at all (confirmed via `CaseOut`'s schema and its own RBAC model, which checks only the
+global `root` resource) — only `document-service`'s `folder_id` can ever supply a `folder_resource_id`.
+This means `scope_object_type_ids` is genuinely active today (every real case-backed process exercises
+it), while `scope_folder_resource_ids` is correctly wired but dormant until a document-keyed process
+exists — an honest, documented limitation of this codebase's current process types, not a bug in the
+resolution logic itself.
+
+**A genuine test-design conflict found and resolved, not worked around with a shortcut**: a real `POST
+/cases` call unavoidably triggers case-service's own `workflow_client.start_instance` against the
+**live** `workflow-service` container — but `workflow-service`'s own test suite requires that exact
+container **stopped** (NATS durable-consumer isolation, `scripts/run-tests.sh`). There is no
+configuration under which both hold at once, confirmed empirically (the first version of these tests
+failed with a `500`/DNS-resolution error from case-service trying to reach a container the test runner
+had just stopped). Fixed by monkeypatching `app.state.case_client.get_case` for the two `object_type_id`
+scope tests only — the same boundary-patch precedent already used in this exact test file for the
+event-bus publish call in `test_complete_task_on_behalf_of_with_active_delegation_succeeds_and_
+annotates_event`. The `document-service` fallback tests needed no such patch, since document reads never
+call back into `workflow-service`.
+
+**`DelegationsPane` gained a scope picker** for the two dimensions this session activates: a multi-select
+of object types (`listObjectTypes()`, already used elsewhere in `user-ui`) and a comma-separated text
+field for folder resource IDs (no folder-picker component exists anywhere in this app, so this reuses
+the same "restriction list as plain text" idiom already established for `admin-ui`'s role-permissions
+field, rather than building a new folder browser for this alone). `scope_process_definition_ids` (live
+since P17-S3) still has no UI — a separate, unscoped addition, not part of this session.
+
+**Test counts**: `workflow-service` 198 (+4: `test_complete_task_on_behalf_of_respects_object_type_scope`/
+`_allows_matching_object_type_scope` via the `case_client` boundary patch; `_respects_folder_resource_
+scope`/`_allows_matching_folder_resource_scope` via a real document, no patch needed). `user-ui` 241
+Vitest tests (+1: scoped-delegation creation), `tsc`/`eslint` clean. `ruff check`/`ruff format --check`
+clean on every file this session touched (one own file needed reformatting after edits,
+`workflow-service/tests/test_api.py`; pre-existing, unrelated `loadtest/`/`federation-hub-service` issues
+untouched).
+
+**Fully verified live against the real, freshly rebuilt stack, for BOTH resolution paths — not just the
+mocked test path**: a real object type, a real BPMN process definition, and a real case created via
+case-service (which genuinely triggered its own `workflow_client.start_instance` call against the live
+`workflow-service` container this time, confirming the production code path works end to end, not just
+under monkeypatch) — a delegation scoped to a different object type correctly returned `403`, one scoped
+to the matching object type correctly returned `200` and the task actually completed. Separately, a real
+document created with `folder_id="root"` and a document-keyed instance — a delegation scoped to a
+different folder correctly returned `403`, one scoped to `"root"` correctly returned `200`. Test
+artifacts (delegations, the test document) cleaned up afterward; the test case/object types/process
+definition have no delete endpoint in their respective services and remain as harmless residue,
+consistent with every other service's own test-role/test-data residue pattern.
+
+`docs/services/workflow-service.md` (API table, Delegation section, Tests), `docs/services/
+permission-service.md` (Open Points), `docs/services/user-ui.md` (DelegationsPane, Tests) updated. New
+[ADR 0131](docs/adr/0131-delegation-scope-resolution-case-then-document.md). `graphify update .`
+deliberately deferred — Phase 32 has five sessions total, not a phase completion.
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.
