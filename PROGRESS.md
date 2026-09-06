@@ -9,10 +9,16 @@ P31-S13 (the original single-session plan line) was, per research + user decisio
 P31-S13a/b/c — **all three parts are now done**, completing gap #12 from the eGov feature gap analysis.
 **This also completes Phase 31 as currently scoped in `IMPLEMENTATION_PLAN.md`.**
 
-**Next session:** none scheduled yet — per the user's own standing instruction, the next step is a full
-gap re-analysis (checking `docs/egov-feature-gap-analysis.md`'s "not carried forward" section and
-re-scanning the codebase for what's changed since Phase 31 began) and a new follow-up plan built from
-whatever gaps remain or have newly surfaced, not further XDOMEA/XJustiz work.
+**Next session:** **P32-S1** (four-eyes config gating + role/permission-assignment four-eyes extension).
+Per the user's own standing instruction, all 12 of Phase 31's gaps were re-verified against the actual
+current code (not just ADRs/docs) by four parallel research passes, confirming each is genuinely
+complete for its ADR's own chosen scope — but each ADR honestly names deferred follow-up work, which
+this new **Phase 32+** (`IMPLEMENTATION_PLAN.md`) collects: Phase 32 (security/RBAC hardening, incl.
+one real open issue — an ungated four-eyes config endpoint), Phase 33 (accessibility completion across
+the five frontend apps P31-S8 didn't touch), Phase 34 (XDOMEA/XJustiz completion — XJustiz import,
+frontend entry points, case-level UI), Phase 35 (org-hierarchy/workflow polish), Phase 36 (records
+quarantine/output-stamping/misc completion), Phase 37 (scoping-only session on cross-tenant XDOMEA
+federation). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full session breakdown and citations.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

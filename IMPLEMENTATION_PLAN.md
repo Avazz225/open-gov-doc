@@ -592,6 +592,136 @@ non-trivial design decision (expect at least P31-S2, S3, S4, S5, S9, S10, S12, S
 updated (`docs/services/*.md` for every touched service, `packages/egov/README.md` if a session extends
 that package's scope); `PROGRESS.md` updated per session; `graphify update .` at phase end.
 
+## Phase 32+ — Post-Phase-31 Gap Re-Analysis: Security Hardening, Completion, Polish
+
+Per the user's own standing instruction ("re-analyze all gaps after P31-S13 completes and build another
+plan from that"), four research passes verified all 12 of Phase 31's gaps against the actual current
+code (not just ADRs/docs) and mined every ADR's own "Consequences" section for explicitly-deferred
+scope; a fifth pass re-triaged `docs/egov-feature-gap-analysis.md`'s "Explicitly not prioritized" and
+"Confirmed already-covered ground" sections and swept `docs/`/`docs/adr/` for other open items unrelated
+to gaps #1–12. **Result: all 12 gaps are genuinely, correctly implemented for the scope each ADR
+deliberately chose** — nothing was faked or half-built — but each ADR honestly names real deferred
+follow-up work, plus a handful of independent findings (including one open, if minor, security issue:
+an ungated four-eyes config endpoint). Phase 32+ collects that remaining scope, ordered by
+risk/effort/value: cheap, low-risk security/RBAC fixes first, then completing Phase 31's most
+incompletely-scoped gap (accessibility — only `user-ui` was touched), then XDOMEA/XJustiz completion
+(the largest single topic), then org-hierarchy/workflow polish and the remaining smaller items. A
+scoping-only session on cross-tenant XDOMEA federation closes the plan, since research found that item
+"technically closer now, but not yet design-ready."
+
+### Phase 32 — Security & RBAC Hardening (fast, low-risk, high-value)
+
+| Session | Deliverable |
+|---|---|
+| P32-S1 | Gate `PUT /approval-config/{action_type}` (`permission-service`) — currently has **no auth check at all**, so any compromised low-privilege account can disable the four-eyes requirement for any action type system-wide (`docs/services/permission-service.md:320`); same session also extends the existing generic four-eyes mechanism (ADR 0022) to `POST /role-assignments`/`POST /roles`, which don't use it today (`docs/services/permission-service.md:319`). |
+| P32-S2 | Activate delegation's two dead scope dimensions: `_delegation_scope_matches` (`permission-service/repository.py:958-981`) already correctly fail-closes on `scope_object_type_ids`/`scope_folder_resource_ids`, but `workflow-service`'s `check_delegation` caller (`permission_client.py:56-71`) never passes anything but `process_definition_id` — any delegation created via the API with one of those two scopes is silently **always denied**. Fix: resolve a task's `business_key` to the underlying object's `object_type_id`/`folder_resource_id` (the cross-service lookup ADR 0048 itself anticipated) and thread it through; add the scope picker to `DelegationsPane`'s self-service form. No schema change needed. |
+| P32-S3 | Postbuch: enforce department RBAC via `owning_group_id` — it exists only as config metadata today (`mail-connector/settings.py:35`); every `poststelle_role` holder can read/route every mailbox regardless of department, since `_require_poststelle` is the sole gate (`main.py:407-415`). New ADR documents the tightening over ADR 0123-0125's deliberately-left-open point. |
+| P32-S4 | Wire the `admin.deletion_classified` capability (introduced in P31-S3/ADR 0114 but never called since) into the three call sites that still gate classified-document deletion via the legacy `classified_trash_hard_delete_admin_role` string-role check (`document-service/main.py:1512,1515,1555`, `settings.py:107`). |
+| P32-S5 | Complete HTML preview hardening: the existing rewriter only blocks `src`/`href` — `srcset`, `poster`, `background`, and CSS `url(...)` in `style` attributes/`<style>` blocks are not yet rewritten (`docs/services/document-service.md:300`, open point from the Phase 21 hardening pass). |
+
+**Definition of Done**: new/extended tests per fix (in particular a regression test proving the
+four-eyes config route now returns `403`, and one for the delegation scope combination that was
+silently rejected before); new ADR only for P32-S3 (genuine behavior change); docs and `PROGRESS.md`
+updated per session.
+
+### Phase 33 — Accessibility: Complete Across All Six Frontend Apps
+
+ADR 0119 (P31-S8) deliberately scoped the accessibility pass to `user-ui` only — the other five apps
+(`admin-ui`, `reviewer-ui`, `process-designer`, `migration-console`, `office-addin`) still have
+unlabeled classification/conflict/redaction badges (confirmed e.g. for `admin-ui/src/components/
+ObjectTypeEditor.tsx`'s `.badge.classified`, no nearby `aria-label`). Separately, the export pipeline
+only **detects** missing PDF/UA tags (`is_tagged_pdf()`) but doesn't **preserve** them — an
+already-tagged source PDF loses its tags on export because `pypdf`'s writer can't copy structure trees.
+
+| Session | Deliverable |
+|---|---|
+| P33-S1 | Extend badge icons/`aria-label`s to the remaining five apps, using the pattern already established in `user-ui`'s `ClassificationPanel.tsx`/`PreviewPane.tsx`/`DerivedDocumentsPanel.tsx` (`admin-ui`'s `ObjectTypeEditor.tsx` is the already-identified first case). |
+| P33-S2 | Export pipeline: actually preserve PDF/UA tags — replace or augment the `pypdf` writer with a structure-tree-preserving approach for already-tagged sources, so the existing warning (P31-S8) isn't the only response to a real compliance loss. |
+| P33-S3 | Automated a11y test harness (`axe-core` or equivalent) integrated into at least `user-ui`'s test suite as a regression net for the P31-S8/P33-S1 fixes; extend to other apps as capacity allows. |
+| P33-S4 | Pass over gendered backend `detail=` error strings, deliberately excluded from P31-S8, using the same pattern already applied to frontend strings. |
+
+**Definition of Done**: `axe-core` run (P33-S3) green for the extended apps; before/after visual check
+per badge fix; P33-S2's tag preservation verified by a test that exports an already-tagged source PDF
+and checks the tags survive; new ADR only for P33-S2 (genuine technical decision); docs and
+`PROGRESS.md` updated.
+
+### Phase 34 — XDOMEA/XJustiz Completion
+
+Phase 31 (P31-S13a/b/c) built XDOMEA export+import and XJustiz export — the gap analysis's largest
+single topic — but with explicitly named remaining scope: no XJustiz import, no XJustiz frontend entry
+point, no XDOMEA/XJustiz case-level frontend (partly blocked by `case-service` having no case-browsing
+UI at all), and an import that only round-trips this project's own export shape robustly.
+
+| Session | Deliverable |
+|---|---|
+| P34-S1 | XJustiz import — mirror of P31-S13b (XDOMEA import) for `uebermittlungSchriftgutobjekte`: new `parse_uebermittlung_schriftgutobjekte()` analogous to `parse_abgabe_message()`, same target options (existing case vs. new case via `process_definition_id`), same `409` handling for data-integrity errors. |
+| P34-S2 | XJustiz frontend entry point: at minimum a document-export button in `user-ui` (mirror of `PreviewPane.tsx`'s existing XDOMEA export button), named distinctly to avoid RTL test ambiguity per established project idiom. |
+| P34-S3 | Minimal case-browsing UI + XDOMEA/XJustiz case export/import frontend: since neither format's case-level export/import has any UI today (API-only, because `case-service` has no browsing view at all) — build the smallest viable case list/detail view (session decides `reviewer-ui` vs. `user-ui`; likely `reviewer-ui` per the Phase 29 "Vorgang" detail-view precedent), then wire all four case-level export/import buttons onto it. |
+| P34-S4 | Import robustness for genuine third-party packages: `parse_abgabe_message` currently only round-trips this system's own export shape (`dokumente/<filename>` convention, single top-level `Schriftgutobjekt`) — harden for at least multi-`Vorgang` packages and more tolerant structure detection. |
+
+**Definition of Done**: `test_xjustiz.py` extended with import tests mirroring `test_xdomea.py`'s;
+live verification with real documents/cases (established project pattern); new ADR for P34-S3 (the
+case-browsing-UI scope decision) and likely P34-S1; docs and `PROGRESS.md` updated.
+
+### Phase 35 — Org-Hierarchy & Workflow Polish
+
+P31-S9/S10/S11 built the core mechanism correctly (supervisor DAG, dynamic access grants, team
+oversight view) but each ADR names its own rough edges.
+
+| Session | Deliverable |
+|---|---|
+| P35-S1 | Add an `is_org_unit` marker on `Group` (today "org unit" is resolved pragmatically as "every group the principal belongs to" — ambiguous) plus an admin-UI view for active org-hierarchy grants (today only visible via raw `GET /delegations`, since grants are realized as `Delegation` rows). |
+| P35-S2 | Give `case-service` a real per-case RBAC resource type — today the missing resource type is worked around via `Delegation` scoping (P31-S9/S10); a real `permission-service` resource type (mirroring documents/folders) lets future case features (including P34-S3's case-browsing UI) build on it instead of extending the workaround. |
+| P35-S3 | `TaskClaim` reassignment/notification + an "unclaimed team work" view: P31-S11's `TeamTaskList` only shows direct reports' **claimed** tasks — unclaimed team work is invisible to a supervisor (needs a different data model than pure `claimed_by` filtering). Also: notification when the 72h claim-abandonment window expires (today a silent, action-less expiry). |
+| P35-S4 | Hand folders/work trays: cross-case index + browsing UI — `search-service` doesn't know about `FolderDocumentReference` today (no installation-wide search/browse across all hand folders/work trays); add indexing plus a simple overview page. |
+
+**Definition of Done**: tests per fix; ADR for P35-S2 (genuine architecture decision: new resource
+type instead of the delegation workaround) and P35-S1 (`is_org_unit` semantics); docs and
+`PROGRESS.md` updated.
+
+### Phase 36 — Records Quarantine, Output Stamping & Misc Completion
+
+Smaller, independent remaining items from P31-S5/S6 and the general documentation sweep, bundled
+together.
+
+| Session | Deliverable |
+|---|---|
+| P36-S1 | Admin UI for `ExportConfig` (including stamping) — API-only since Phase 28 (`history_position`, now also `stamp_enabled`/`stamp_type`/`stamp_value_template`/`stamp_position`); new admin-ui page following the pattern of existing config pages (`ApprovalSettings.tsx`/`RetentionSettings.tsx`). |
+| P36-S2 | Records quarantine: `search-service`/`case-service` integration + a cross-folder browsing UI — today document-only and visible only inside `document-service` (no case quarantine, no installation-wide browsing view analogous to `TrashPane`). Also fix the pure documentation gap: `docs/services/user-ui.md` doesn't mention the already-existing `RecordsQuarantinePanel.tsx`. |
+| P36-S3 | `reporting-service`: row-level RBAC filtering for the forensic trace, at parity with `document-service`/`folder-service`'s existing `filtering.py` (`docs/services/query-service.md:85`); same session, add a reject button to the admin-ui Query Console (today approve-only in the UI, reject only via the API — `docs/services/query-service.md:88`). |
+
+**Definition of Done**: tests per fix; no new ADR expected (pure completion of already-established
+patterns, no new architecture decisions); docs and `PROGRESS.md` updated.
+
+### Phase 37 — Scoping Session: Cross-Tenant XDOMEA Federation (no implementation commitment)
+
+The gap analysis deferred "cross-tenant/cross-authority workflow participation via xdomea" as
+"depends entirely on gap #12 (general xdomea) being built first; premature to design before that
+foundation exists." Gap #12 now exists (Phase 31/34), but `federation-hub-service`'s envelope model
+(ADR 0028) is pure JSON metadata for BPMN task handover, never designed for binary ZIP transport — the
+dependency is "technically closer now, but not yet conceptually design-ready" (research finding). This
+session ships **no feature**, only a concept document/ADR resolving two questions before a build
+session can be sensibly planned:
+
+| Session | Deliverable |
+|---|---|
+| P37-S1 | Scoping only: (a) how `federation-hub-service`'s transport layer could carry binary payloads (not just JSON) without breaking its existing trust/encryption model (ADR 0028/0039); (b) what "cross-installation workflow participation" concretely means (pure file handoff vs. real task delegation to a foreign system) — output is a new ADR with a concrete, build-ready recommendation for a later phase, not an implementation. |
+
+**Definition of Done**: new ADR with a clear recommendation (build/don't build/how); no code diff
+expected beyond docs; `PROGRESS.md` explicitly marks this session "Scoping, not a feature."
+
+### Deliberately not carried into this plan (still deferred)
+
+- **AD group→role automatic sync** — referenced as a "future session" since Phase 24, never scheduled; no new trigger found since Phase 31.
+- **`mail-connector`: a real IMAP backend instead of the `imaplib` mock** — production IMAP integration, no installation need identified.
+- **Azure storage backend: real WORM/Object Lock** — blocked by Azurite's lack of WORM support in the test environment; app-layer guard only. Deferred until a real Azure test environment is available.
+- **Third-party long-term archive integration, Java 11 runtime/SBOM/multi-solution coexistence, UI-parity convenience fixes** — unchanged from the original gap analysis, no new triggers found.
+
+**Definition of Done for Phases 32–37** (unchanged, `CONTRIBUTING.md`): tests green per session, new
+ADR for non-trivial decisions, `PROGRESS.md` updated, `graphify update .` at phase end, backend
+regression (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next
+build`) before completion.
+
 ## PROGRESS.md — Resume Mechanism
 
 `dms/PROGRESS.md` is created as the first order of business in P0-S1 and is the entry point for every new session:
