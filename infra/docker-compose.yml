@@ -4,6 +4,14 @@
 # Usage:
 #   cp .env.example .env
 #   docker compose up -d
+#
+# Restart policy: every service uses `restart: "no"` on purpose, so the stack
+# never comes back on its own after a host reboot - the Docker daemon only
+# auto-restarts containers whose policy is `always` or `unless-stopped`. The
+# stack is therefore started explicitly with `docker compose up -d` whenever
+# it is actually needed. Trade-off: a container that crashes during normal
+# operation also stays down (restart it with `docker compose up -d` or
+# `docker compose restart <service>`).
 
 name: dms
 
@@ -57,7 +65,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
+    restart: "no"
     # WAL archiving (10.4, P11-S3) - simplest officially documented pattern
     # (`cp` archive command, no pgBackRest/Barman needed): every completed WAL
     # segment additionally lands permanently under /wal-archive (its own
@@ -98,7 +106,7 @@ services:
   # Keycloak uses the same Postgres instance (concept 10.4) — its own schema, no separate DB server.
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
-    restart: unless-stopped
+    restart: "no"
     command: start-dev
     environment:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
@@ -127,7 +135,7 @@ services:
 
   nats:
     image: nats:2.10-alpine
-    restart: unless-stopped
+    restart: "no"
     command: ["-js", "-sd", "/data", "-m", "8222"]
     ports:
       - "${NATS_CLIENT_PORT:-4222}:4222"
@@ -144,7 +152,7 @@ services:
 
   minio:
     image: minio/minio:RELEASE.2024-06-13T22-53-53Z
-    restart: unless-stopped
+    restart: "no"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dms_minio}
@@ -171,7 +179,7 @@ services:
   # queue/table (10001/10002) are not needed by storage-service.
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.30.0
-    restart: unless-stopped
+    restart: "no"
     # --skipApiVersionCheck: the pinned Azurite image may not yet know the
     # latest API version (`x-ms-version`) sent by the `azure-storage-blob`
     # SDK - otherwise Azurite hard-rejects unknown but actually
@@ -198,7 +206,7 @@ services:
   # (see docs/services/notification-service.md), not a blocker for service startup.
   mailpit:
     image: axllent/mailpit:v1.30.6
-    restart: unless-stopped
+    restart: "no"
     # POP3 server (since mailpit v1.15, disabled by default - only
     # `--pop3-auth-file` enables it) serves `mail-connector` (2.5/3.3,
     # P15-S3) as a self-loopback source: the same delivered mail can be
@@ -228,7 +236,7 @@ services:
   # Postgres.
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
+    restart: "no"
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -244,7 +252,7 @@ services:
     build:
       context: ..
       dockerfile: services/registry-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -287,7 +295,7 @@ services:
     build:
       context: ..
       dockerfile: services/audit-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -318,7 +326,7 @@ services:
     build:
       context: ..
       dockerfile: services/auth-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -366,7 +374,7 @@ services:
     build:
       context: ..
       dockerfile: services/permission-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -394,7 +402,7 @@ services:
     build:
       context: ..
       dockerfile: services/storage-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -454,7 +462,7 @@ services:
     build:
       context: ..
       dockerfile: services/document-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -513,7 +521,7 @@ services:
     build:
       context: ..
       dockerfile: services/virus-scan-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -551,7 +559,7 @@ services:
     build:
       context: ..
       dockerfile: services/rendering-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -593,7 +601,7 @@ services:
     build:
       context: ..
       dockerfile: services/ocr-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     profiles: ["ocr"]
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
@@ -628,7 +636,7 @@ services:
     build:
       context: ..
       dockerfile: services/search-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -667,7 +675,7 @@ services:
     build:
       context: ..
       dockerfile: services/workflow-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -707,7 +715,7 @@ services:
     build:
       context: ..
       dockerfile: services/notification-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -743,7 +751,7 @@ services:
     build:
       context: ..
       dockerfile: services/case-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -780,7 +788,7 @@ services:
     build:
       context: ..
       dockerfile: services/signature-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -819,7 +827,7 @@ services:
     build:
       context: ..
       dockerfile: services/federation-hub-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -836,7 +844,7 @@ services:
     build:
       context: ..
       dockerfile: services/favorite-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -859,7 +867,7 @@ services:
     build:
       context: ..
       dockerfile: services/reporting-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -902,7 +910,7 @@ services:
     build:
       context: ..
       dockerfile: services/archival-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -948,7 +956,7 @@ services:
     build:
       context: ..
       dockerfile: services/query-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -995,7 +1003,7 @@ services:
     build:
       context: ..
       dockerfile: services/license-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1045,7 +1053,7 @@ services:
     build:
       context: ..
       dockerfile: services/plugin-orchestration-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1076,7 +1084,7 @@ services:
     build:
       context: ..
       dockerfile: services/monitoring-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1109,7 +1117,7 @@ services:
     build:
       context: ..
       dockerfile: services/webdav-connector/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1140,7 +1148,7 @@ services:
     build:
       context: ..
       dockerfile: services/cmis-connector/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1175,7 +1183,7 @@ services:
     build:
       context: ..
       dockerfile: services/mail-connector/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1245,7 +1253,7 @@ services:
     build:
       context: ..
       dockerfile: services/migration-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1282,7 +1290,7 @@ services:
     build:
       context: ..
       dockerfile: services/config-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1329,7 +1337,7 @@ services:
     build:
       context: ..
       dockerfile: services/fleet-management-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       # Deliberately NO DMS_INSTALLATION_ID/DMS_REGISTRY_SERVICE_BASE_URL
       # (3a, P13-S2) - this service does not belong to any single
@@ -1350,7 +1358,7 @@ services:
     build:
       context: ..
       dockerfile: services/teamspace-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1377,7 +1385,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.55.1
-    restart: unless-stopped
+    restart: "no"
     # Explicit command re-states the image defaults (a custom command replaces
     # them entirely) plus --web.enable-remote-write-receiver, needed so k6's
     # experimental-prometheus-rw output (loadtest/) can push samples directly.
@@ -1404,7 +1412,7 @@ services:
     # per-service instrumentation. Labels its series with the container
     # name, which matches each service's docker-compose name.
     image: gcr.io/cadvisor/cadvisor:v0.52.1
-    restart: unless-stopped
+    restart: "no"
     privileged: true
     volumes:
       - /:/rootfs:ro
@@ -1419,7 +1427,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.3.1
-    restart: unless-stopped
+    restart: "no"
     environment:
       # Pure dev convenience (default login) - not a production target of
       # this stack, same trust level as POSTGRES_PASSWORD/dms_dev_only.
@@ -1446,7 +1454,7 @@ services:
     build:
       context: ..
       dockerfile: services/object-type-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1468,7 +1476,7 @@ services:
     build:
       context: ..
       dockerfile: services/folder-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1507,7 +1515,7 @@ services:
     build:
       context: ..
       dockerfile: services/gateway-service/Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       DMS_INSTALLATION_ID: ${DMS_INSTALLATION_ID:-local-dev}
       DMS_INSTALLATION_DISPLAY_NAME: ${DMS_INSTALLATION_DISPLAY_NAME:-DMS-Installation (Entwicklung)}
@@ -1561,7 +1569,7 @@ services:
         # webdav-connector reachable from the browser - the browser talks
         # to this service directly for the Office URI scheme start URL.
         NEXT_PUBLIC_WEBDAV_CONNECTOR_BASE_URL: ${USER_UI_WEBDAV_CONNECTOR_BASE_URL:-http://localhost:8027}
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${USER_UI_PORT:-3000}:80"
     depends_on:
@@ -1576,7 +1584,7 @@ services:
       dockerfile: apps/admin-ui/Dockerfile
       args:
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${ADMIN_UI_GATEWAY_BASE_URL:-http://localhost:8009}
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${ADMIN_UI_PORT:-3001}:80"
     depends_on:
@@ -1591,7 +1599,7 @@ services:
       dockerfile: apps/process-designer/Dockerfile
       args:
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${PROCESS_DESIGNER_GATEWAY_BASE_URL:-http://localhost:8009}
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${PROCESS_DESIGNER_PORT:-3002}:80"
     depends_on:
@@ -1606,7 +1614,7 @@ services:
       dockerfile: apps/reviewer-ui/Dockerfile
       args:
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${REVIEWER_UI_GATEWAY_BASE_URL:-http://localhost:8009}
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${REVIEWER_UI_PORT:-3005}:80"
     depends_on:
@@ -1621,7 +1629,7 @@ services:
       dockerfile: apps/migration-console/Dockerfile
       args:
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${MIGRATION_CONSOLE_GATEWAY_BASE_URL:-http://localhost:8009}
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${MIGRATION_CONSOLE_PORT:-3004}:80"
     depends_on:
@@ -1637,7 +1645,7 @@ services:
       args:
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${OFFICE_ADDIN_GATEWAY_BASE_URL:-http://localhost:8009}
         NEXT_PUBLIC_TEMPLATE_LIBRARY_FOLDER_NAME: ${OFFICE_ADDIN_TEMPLATE_LIBRARY_FOLDER_NAME:-Vorlagen}
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "${OFFICE_ADDIN_PORT:-3006}:80"
     depends_on:
