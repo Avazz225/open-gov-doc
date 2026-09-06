@@ -32,6 +32,8 @@ CLASSIFICATION_ADMIN_PRINCIPAL_ID = "document-service-test-classification-admin"
 CLASSIFICATION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFICATION_ADMIN_PRINCIPAL_ID}
 RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantine-admin"
 RECORDS_QUARANTINE_ADMIN_HEADERS = {"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
+CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-classified-deletion-admin"
+CLASSIFIED_DELETION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID}
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
@@ -1376,6 +1378,20 @@ def test_list_deleted_documents_admin_scope_excludes_classified(client):
     assert classified_id not in ids
 
 
+def test_list_deleted_documents_admin_classified_scope_requires_principal(client):
+    response = client.get("/documents/deleted", params={"scope": "admin_classified"})
+    assert response.status_code == 401
+
+
+def test_list_deleted_documents_admin_classified_scope_without_permission_returns_403(client):
+    response = client.get(
+        "/documents/deleted",
+        params={"scope": "admin_classified"},
+        headers={"X-DMS-Principal": "alice"},
+    )
+    assert response.status_code == 403
+
+
 def test_list_deleted_documents_admin_classified_scope_shows_only_classified(client):
     classified_type_id = _create_object_type(is_classified=True)
     regular_id = upload(client, folder_id="root").json()["id"]
@@ -1385,17 +1401,10 @@ def test_list_deleted_documents_admin_classified_scope_shows_only_classified(cli
     client.post(f"/documents/{regular_id}/trash", json={"deleted_by": "alice"})
     client.post(f"/documents/{classified_id}/trash", json={"deleted_by": "alice"})
 
-    forbidden = client.get(
-        "/documents/deleted",
-        params={"scope": "admin_classified"},
-        headers={"X-DMS-Roles": "dms-admin"},
-    )
-    assert forbidden.status_code == 403
-
     response = client.get(
         "/documents/deleted",
         params={"scope": "admin_classified"},
-        headers={"X-DMS-Roles": "classified-trash-hard-delete-admin"},
+        headers=CLASSIFIED_DELETION_ADMIN_HEADERS,
     )
     ids = [d["id"] for d in response.json()]
     assert classified_id in ids
@@ -1455,13 +1464,15 @@ def test_purge_document_with_admin_role_hard_deletes(client):
     assert entry["triggered_by"] == "admin"
 
 
-def test_purge_classified_document_requires_classified_role(client):
+def test_purge_classified_document_requires_classified_deletion_permission(client):
     classified_type_id = _create_object_type(is_classified=True)
     document_id = upload(client, folder_id="root", object_type_id=str(classified_type_id)).json()[
         "id"
     ]
     client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
 
+    # The REGULAR trash role does not suffice for a classified document -
+    # `admin.deletion_classified` is a distinct capability (ADR 0133).
     wrong_role = client.post(
         f"/documents/{document_id}/purge",
         headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
@@ -1470,10 +1481,7 @@ def test_purge_classified_document_requires_classified_role(client):
 
     response = client.post(
         f"/documents/{document_id}/purge",
-        headers={
-            "X-DMS-Principal": "admin",
-            "X-DMS-Roles": "classified-trash-hard-delete-admin",
-        },
+        headers=CLASSIFIED_DELETION_ADMIN_HEADERS,
     )
     assert response.status_code == 204
 

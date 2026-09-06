@@ -102,7 +102,7 @@ Native to the system (not Keycloak realm roles) — full architectural rationale
 | `domain-admin-query-console` | `admin.query_console` | none (enforcement directly in `query-service`, since **P8-S1**, see below) |
 | `domain-admin-query-console-manipulate` | `admin.query_console.manipulate` | none (enforcement directly in `query-service`, since **P8-S2**) |
 | `domain-admin-deletion` | `admin.deletion` | none yet |
-| `domain-admin-deletion-vs` | `admin.deletion_classified` | none yet |
+| `domain-admin-deletion-vs` | `admin.deletion_classified` | none (since **Post-Roadmap Phase 32 Session 4**, [ADR 0133](../adr/0133-document-service-classified-deletion-capability.md) — enforcement in `document-service`'s `GET /documents/deleted?scope=admin_classified`/`POST /documents/{id}/purge` classified branch, replacing the previous `classified_trash_hard_delete_admin_role` string-role setting; `user-ui`'s `TrashPane` shows/hides the classified-trash tab accordingly) |
 | `breakglass-approver` | `breakglass.approve` | none (real humans, manually assigned) |
 | `domain-admin-emergency` | `system.not_shutdown.trigger` | none (since **P6-S6**, real humans, manually assigned — see "Emergency Shutdown" below) |
 | `domain-admin-virus-scan` | `admin.quarantine` | none (since **Post-Roadmap Phase 19 Session 8**, [ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md) — enforcement directly in `virus-scan-service`, replacing its previous plain `X-DMS-Roles` gate) |

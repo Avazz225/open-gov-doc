@@ -98,13 +98,15 @@ class Settings(BaseServiceSettings):
     webdav_edit_token_ttl_hours: float = 8.0
 
     # Trash family (2.5, P15-S1): permanent deletion from the trash
-    # is reserved for two domain-separated admin roles (4.6, same setting
-    # pattern as above) - one regular and one narrower one for documents
-    # classified as classified documents (`ObjectType.classification_level`,
-    # multi-level since P17-S2), which are not necessarily staffed by the
-    # same people.
+    # for REGULAR (non-classified) documents is reserved for a domain-
+    # separated admin role (4.6, same setting pattern as above). The
+    # classified-documents counterpart used an identical string-role setting
+    # until Post-Roadmap Phase 32 Session 4 (ADR 0133), which replaced it
+    # with the `admin.deletion_classified` permission-service capability
+    # (`_require_classified_deletion_permission`, main.py) - a placeholder
+    # mechanism from the start, migrated the same way ADR 0073 migrated
+    # `admin.quarantine`, not kept as a parallel fallback.
     trash_hard_delete_admin_role: str = "dms-admin"
-    classified_trash_hard_delete_admin_role: str = "dms-admin"
 
     # Quarantine area (2.5/10.3, P15-S2): second, independent role
     # gate for `POST /documents/from-quarantine-release` (internal creation

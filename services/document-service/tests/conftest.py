@@ -15,12 +15,6 @@ DSN = os.environ.get(
 # Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
 # siehe PROGRESS.md "Tooling & Testing" (P5-S2-Datenverlust, P5b-S6-Leck).
 os.environ["DMS_POSTGRES_DSN"] = DSN
-# Papierkorb-Familie (2.5, P15-S1): beide Rollen-Settings defaulten auf
-# "dms-admin" (gleiches Muster wie kennzeichen_admin_role) - für Tests, die
-# regulären und Verschlusssachen-Papierkorb tatsächlich unterscheiden müssen,
-# vor dem `Settings()`-Import auf einen eigenen Rollennamen gesetzt, sonst
-# wären beide Rollen in dieser Testumgebung ununterscheidbar identisch.
-os.environ["DMS_CLASSIFIED_TRASH_HARD_DELETE_ADMIN_ROLE"] = "classified-trash-hard-delete-admin"
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
@@ -104,6 +98,37 @@ async def _grant_classification_permission():
             json={
                 "principal_type": "user",
                 "principal_id": CLASSIFICATION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-classified-deletion-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_classified_deletion_permission():
+    """Post-Roadmap Phase 32 Session 4 (ADR 0133): `GET /documents/deleted?
+    scope=admin_classified`/`POST /documents/{id}/purge` (classified branch)
+    require `admin.deletion_classified`, replacing the previous
+    `classified-trash-hard-delete-admin` `X-DMS-Roles` string check."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-deletion-vs")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

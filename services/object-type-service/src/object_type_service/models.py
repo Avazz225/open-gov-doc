@@ -70,7 +70,8 @@ class ObjectType(Base):
     # of the specific level) still triggers the same binary gate as before:
     # a classified, deleted document ends up in the structurally separate
     # classified-documents trash instead of the regular one, see
-    # document-service `settings.classified_trash_hard_delete_admin_role` -
+    # document-service's `admin.deletion_classified` capability check
+    # (`_require_classified_deletion_permission`, ADR 0133) -
     # the specific level is purely additional information (display/audit),
     # not additional role differentiation in this reference implementation.
     # Replaces the purely binary `is_classified: bool` from before P17-S1

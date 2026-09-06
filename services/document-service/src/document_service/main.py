@@ -1462,6 +1462,32 @@ async def list_documents_by_kennzeichen(
     return await repository.list_documents_by_kennzeichen(session, value)
 
 
+async def _require_classified_deletion_permission(x_dms_principal: str) -> None:
+    """RBAC (post-roadmap phase 32 session 4, ADR 0133) - replaces the
+    legacy `classified_trash_hard_delete_admin_role` `X-DMS-Roles`
+    string-equality gate with the newer `has_permission` pattern, same as
+    ADR 0073's `admin.quarantine` migration: this was from the start only a
+    placeholder mechanism (a plain string comparison against an unverified
+    header), not a standalone, conceptually anchored second gate, so it is
+    REPLACED rather than supplemented. New capability `admin.deletion_
+    classified` (role "domain-admin-deletion-vs") had been seeded at
+    permission-service since P31-S3/ADR 0114 but never actually called
+    anywhere until this session. The REGULAR (non-classified) trash gate
+    (`trash_hard_delete_admin_role`) is deliberately untouched - a separate
+    concern (who may purge ordinary documents vs. classified ones), same
+    "who may set vs. who may purge" distinction ADR 0114 itself already
+    drew for classification vs. deletion administration."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.deletion_classified"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Löschadministration (Verschlusssachen)'",
+        )
+
+
 @app.get("/documents/deleted", response_model=list[DocumentOut])
 async def list_deleted_documents(
     folder_id: str | None = None,
@@ -1509,12 +1535,7 @@ async def list_deleted_documents(
         )
 
     if scope == "admin_classified":
-        if settings.classified_trash_hard_delete_admin_role not in roles:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Nur die Rolle {settings.classified_trash_hard_delete_admin_role!r} darf "
-                "den Verschlusssachen-Papierkorb einsehen",
-            )
+        await _require_classified_deletion_permission(x_dms_principal)
         return await repository.list_deleted_documents(
             session, folder_id=folder_id, classified=True
         )
@@ -1538,7 +1559,11 @@ async def purge_document(
     `retention_actions.purge_expired_trash_entry` with
     `trigger="trash_expiry"` once `TrashConfig.restore_period_days` has
     elapsed - here `trigger="manual_purge"` with the real principal as
-    `triggered_by`)."""
+    `triggered_by`). Since post-roadmap phase 32 session 4 (ADR 0133), the
+    classified branch checks `admin.deletion_classified` via
+    `_require_classified_deletion_permission` instead of the legacy
+    `classified_trash_hard_delete_admin_role` string-role gate; the regular
+    branch is unchanged."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
     try:
@@ -1551,18 +1576,16 @@ async def purge_document(
     # Any level being set (regardless of which one) triggers the same gate
     # as the purely binary `is_classified` used up to P17-S1 (P17-S2, 14.2).
     is_classified = document.classification_level is not None
-    required_role = (
-        settings.classified_trash_hard_delete_admin_role
-        if is_classified
-        else settings.trash_hard_delete_admin_role
-    )
-    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
-    if required_role not in roles:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Nur die Rolle {required_role!r} darf Dokumente endgültig aus dem "
-            "Papierkorb löschen",
-        )
+    if is_classified:
+        await _require_classified_deletion_permission(x_dms_principal)
+    else:
+        roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
+        if settings.trash_hard_delete_admin_role not in roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf Dokumente "
+                "endgültig aus dem Papierkorb löschen",
+            )
 
     purged = await retention_actions.purge_expired_trash_entry(
         session,

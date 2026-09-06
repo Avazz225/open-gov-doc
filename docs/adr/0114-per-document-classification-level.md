@@ -79,8 +79,10 @@ govern the object type's own default/seed value.
   Version history shows each version's own snapshot as a small badge — the first genuinely new
   per-version-only display in this codebase (previously only intrinsic, immutable version metadata was
   ever shown per version).
-- A future session could wire up the already-seeded-but-dormant `admin.deletion_classified` capability
+- ~~A future session could wire up the already-seeded-but-dormant `admin.deletion_classified` capability
   (found unused during this session's research — a "Löschadministration (Verschlusssachen)" domain that
   exists in `permission-service`'s seed list but nothing anywhere calls `has_permission` for it) to finally
   replace `classified_trash_hard_delete_admin_role`'s legacy string-role gate with the newer pattern too —
-  not built here, a distinct concern (who may purge vs. who may classify) from this session's scope.
+  not built here, a distinct concern (who may purge vs. who may classify) from this session's scope.~~ —
+  **done in Post-Roadmap Phase 32 Session 4**, see
+  [ADR 0133](0133-document-service-classified-deletion-capability.md).

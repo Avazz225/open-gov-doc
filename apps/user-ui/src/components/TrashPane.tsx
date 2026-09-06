@@ -21,35 +21,37 @@ import {
 // ExplorerPane.tsx (which continues to show only what is deleted WITHIN THE
 // CURRENTLY OPEN folder - unchanged behavior, no backward-compatibility
 // concern). Three structurally separate views, depending on the role of the
-// logged-in user (same client-side gating pattern as MetadataPanel.tsx's
-// reference-number admin check - an installation with differently configured
-// role names would need to adjust these constants accordingly):
+// logged-in user:
 //   - "personal" (always available): only the user's own deletion markers, no
 //     "delete permanently" - per the concept, regular users can only mark for
 //     deletion.
-//   - "admin" (only with trash_hard_delete_admin_role): full but
+//   - "admin" (only with trash_hard_delete_admin_role, client-side gating via
+//     `user.realm_roles` - same pattern as MetadataPanel.tsx's reference-
+//     number admin check, an installation with a differently configured role
+//     name would need to adjust the constant below accordingly): full but
 //     non-classified trash, including "delete permanently".
-//   - "admin_classified" (only with classified_trash_hard_delete_admin_role):
-//     structurally separate classified-documents trash (documents only,
-//     per the concept folders have no classification) including "delete
-//     permanently".
+//   - "admin_classified" (only with the `admin.deletion_classified` domain-
+//     admin capability - since Post-Roadmap Phase 32 Session 4, ADR 0133,
+//     which replaced the previous `classified_trash_hard_delete_admin_role`
+//     realm-role gate with the same system-native `permissions` check
+//     `RecordsQuarantinePanel.tsx`'s `admin.records_quarantine` already
+//     uses): structurally separate classified-documents trash (documents
+//     only, per the concept folders have no classification) including
+//     "delete permanently".
 // Deliberately no "open" button: `folder-service`'s regular `GET /folders/
 // {id}` treats a folder that is already in the trash as non-existent (see
 // `repository.get_folder`) - an in-place preview of a deleted object would be
 // a separate feature, not part of this session (the name/attributes shown in
 // the list already satisfy the concept goal of "searchable/viewable").
 const TRASH_HARD_DELETE_ADMIN_ROLE = "dms-admin";
-const CLASSIFIED_TRASH_HARD_DELETE_ADMIN_ROLE = "dms-admin";
 
 type PaneScope = "personal" | "admin" | "admin_classified";
 
 export function TrashPane({ token }: { token: string }) {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { user, permissions } = useAuth();
   const isTrashAdmin = Boolean(user?.realm_roles.includes(TRASH_HARD_DELETE_ADMIN_ROLE));
-  const isClassifiedTrashAdmin = Boolean(
-    user?.realm_roles.includes(CLASSIFIED_TRASH_HARD_DELETE_ADMIN_ROLE)
-  );
+  const isClassifiedTrashAdmin = permissions.includes("admin.deletion_classified");
 
   const [scope, setScope] = useState<PaneScope>("personal");
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
