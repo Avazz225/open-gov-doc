@@ -290,10 +290,17 @@ def test_download_content_rewrites_external_references_in_html_documents(client)
     """Post-Roadmap Phase 21 Session 3 (ADR 0086): `user-ui`s HTML-Vorschau
     rendert über ein `sandbox=""`-`srcDoc`-iframe, das externe Subressourcen-
     Requests NICHT selbst blockiert - `download_current_content`/
-    `download_version_content` neutralisieren sie deshalb serverseitig."""
+    `download_version_content` neutralisieren sie deshalb serverseitig.
+    Since Post-Roadmap Phase 32 Session 5 (ADR 0134), also `srcset`/CSS
+    `url(...)` - see `test_html_preview_guard.py` for the full, pure-function
+    coverage of every attribute/CSS case; this end-to-end test only proves
+    the wiring itself still applies to the newer cases too."""
     html = (
         b'<html><body><img src="https://tracker.example/pixel.gif" alt="x">'
-        b'<img src="data:image/png;base64,AAAA" alt="ok"></body></html>'
+        b'<img src="data:image/png;base64,AAAA" alt="ok">'
+        b'<img srcset="https://tracker.example/hires.png 2x" alt="y">'
+        b'<div style="background-image: url(https://tracker.example/bg.png);"></div>'
+        b"</body></html>"
     )
     files = {"file": ("preview.html", html, "text/html")}
     response = client.post(
@@ -314,6 +321,9 @@ def test_download_content_rewrites_external_references_in_html_documents(client)
         # data: URIs sind bereits vollständig im Dokument eingebettet - kein
         # Netzwerk-Request, bleiben deshalb unverändert erhalten.
         assert 'src="data:image/png;base64,AAAA"' in body
+        assert "srcset=" not in body
+        assert "Blockierte externe Anfrage: https://tracker.example/hires.png 2x" in body
+        assert "/* Blockierte externe Anfrage: https://tracker.example/bg.png */url()" in body
 
 
 def test_download_content_leaves_non_html_content_byte_identical(client):

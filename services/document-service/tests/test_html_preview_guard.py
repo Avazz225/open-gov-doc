@@ -80,3 +80,66 @@ def test_leaves_html_without_any_references_unchanged_in_substance():
     out = rewrite_external_references(html).decode("utf-8")
     assert "Nur Text, keine Referenzen." in out
     assert "Blockierte" not in out
+
+
+# --- srcset/poster/background/CSS url() (post-roadmap phase 32 session 5,
+# ADR 0134 - closes the gap ADR 0086 "Consequences" left open) -------------
+
+
+def test_blocks_srcset_with_a_single_external_candidate():
+    html = b'<img srcset="https://tracker.example/a.png 1x">'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert "srcset=" not in out
+    assert "Blockierte externe Anfrage: https://tracker.example/a.png 1x" in out
+
+
+def test_blocks_srcset_wholesale_if_any_candidate_is_external():
+    """Kein Vertrauens-Basispfad in einem hochgeladenen HTML-Dokument -
+    daher wird das gesamte `srcset` entfernt, sobald auch nur EIN Kandidat
+    blockiert würde, statt die Liste selektiv zu filtern."""
+    html = b'<img srcset="data:image/png;base64,AAAA 1x, https://tracker.example/b.png 2x">'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert "srcset=" not in out
+    assert "data:image/png;base64,AAAA" not in out.split("Blockierte")[0]
+
+
+def test_allows_srcset_with_only_data_uri_candidates():
+    html = b'<img srcset="data:image/png;base64,AAAA 1x, data:image/png;base64,BBBB 2x">'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert "srcset=" in out
+    assert "Blockierte" not in out
+
+
+def test_blocks_external_video_poster():
+    html = b'<video poster="https://tracker.example/poster.jpg"></video>'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert 'poster="https://tracker.example/poster.jpg"' not in out
+    assert "Blockierte externe Anfrage: https://tracker.example/poster.jpg" in out
+
+
+def test_blocks_external_body_background():
+    html = b'<body background="images/tile.png"></body>'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert 'background="images/tile.png"' not in out
+    assert "Blockierte externe Anfrage: images/tile.png" in out
+
+
+def test_blocks_external_css_url_in_style_attribute():
+    html = b'<div style="background-image: url(https://tracker.example/bg.png);"></div>'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert "https://tracker.example/bg.png" not in out.split("/* Blockierte")[0]
+    assert "/* Blockierte externe Anfrage: https://tracker.example/bg.png */url()" in out
+
+
+def test_blocks_external_css_url_in_style_block():
+    html = b"<style>body { background: url('//cdn.example/bg.png'); }</style>"
+    out = rewrite_external_references(html).decode("utf-8")
+    assert "//cdn.example/bg.png" not in out.split("/* Blockierte")[0]
+    assert "/* Blockierte externe Anfrage: //cdn.example/bg.png */url()" in out
+
+
+def test_allows_data_uri_css_url_in_style_attribute():
+    html = b'<div style="background-image: url(data:image/png;base64,AAAA);"></div>'
+    out = rewrite_external_references(html).decode("utf-8")
+    assert "url(data:image/png;base64,AAAA)" in out
+    assert "Blockierte" not in out

@@ -2,29 +2,28 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P32-S4 (`admin.deletion_classified` wired in — `document-service`'s classified-documents
-trash/purge gate now checks the capability via a new `_require_classified_deletion_permission` helper,
-replacing (not supplementing) the legacy `classified_trash_hard_delete_admin_role` string-role setting,
-removed entirely — same "placeholder mechanism, migrate outright" reasoning ADR 0073 used for
-`admin.quarantine`. The REGULAR trash/purge gate stays on `trash_hard_delete_admin_role`, deliberately
-unchanged; `admin.deletion`/`domain-admin-deletion` remains a separate, still-unwired concern, out of this
-session's scope. `user-ui`'s `TrashPane.tsx` classified-trash tab now follows
-`permissions.includes("admin.deletion_classified")` instead of a realm role, gaining its first-ever test
-file (`trash-pane.test.tsx`, 3 tests — the component previously had none at all). document-service 341
-tests (2 rewritten to grant the real capability via `permission-service` instead of an `X-DMS-Roles`
-header, 1 new for the missing-principal `401` case), user-ui 244 tests (up from 241), `tsc`/`eslint`/
-`next build` clean. Live-verified end-to-end against the running stack: a real classified object type and
-document were created, trashed, confirmed `401`/`403`/`200` on the listing endpoint depending on
-principal/capability, then purged (`204`) only with the real granted `domain-admin-deletion-vs` role,
-`403` with the old `dms-admin` role alone — see
-[ADR 0133](docs/adr/0133-document-service-classified-deletion-capability.md)), the fourth session of the
-new Phase 32+ (post-Phase-31 gap re-analysis).
+**Last completed:** P32-S5 (HTML preview hardening completed — `html_preview_guard.
+rewrite_external_references` (ADR 0086) now also neutralizes the four gaps that session explicitly
+deferred: `srcset` [removed wholesale on any blocked candidate, split on a comma-plus-whitespace rather
+than a bare comma so a `data:` URI's own internal comma isn't mistaken for the candidate separator — a
+real bug found live while writing the "all-`data:`-candidates" test], `poster`/`background` [identical
+single-URL mechanism as `src`/`href`], and CSS `url(...)` in `style` attributes/`<style>` blocks [a
+targeted regex, not a full CSS parser — replaced with an empty `url()` plus a `/* Blocked ... */` comment,
+since CSS has no rendered-text equivalent of the `<span>` marker the other attributes get]. document-service
+349 tests (up from 341, +8 new pure-function tests plus the existing end-to-end HTML test extended with the
+newer cases). Live-verified against the real, rebuilt running stack: an HTML document exercising all four
+new cases was uploaded/downloaded, confirming every reference was correctly neutralized — see
+[ADR 0134](docs/adr/0134-html-preview-hardening-srcset-poster-background-css-url.md)), the fifth and final
+session of Phase 32 (post-Phase-31 security/RBAC hardening). **Phase 32 complete** — `graphify update .`
+still pending at phase end (standing convention: run once per completed phase, not after every session).
 
-**Next session:** **P32-S5** (complete HTML preview hardening in `document-service` — the existing
-rewriter blocks `src`/`href` but not `srcset`/`poster`/`background` or CSS `url(...)` in `style`
-attributes/`<style>` blocks). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining session
-breakdown (Phase 32 security/RBAC hardening concludes with P32-S5, then Phase 33 accessibility completion,
-Phase 34 XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
+**Next session:** **P33-S1** (Phase 33, accessibility completion — extend the badge-icon/`aria-label`
+pattern ADR 0119/P31-S8 established only for `user-ui` to the remaining five frontend apps: `admin-ui`,
+`reviewer-ui`, `process-designer`, `migration-console`, `office-addin`; `admin-ui`'s
+`ObjectTypeEditor.tsx` classification badge is the already-known first concrete case). See
+`IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 33 continues with P33-S2
+PDF/UA tag preservation on export, P33-S3 axe-core test harness, P33-S4 gendered backend error messages;
+then Phase 34 XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
 quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
 federation).
 

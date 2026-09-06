@@ -54,11 +54,13 @@ before being served.
   this system has no legitimate target directory with sibling files reachable via a relative path (the
   document is a single stored object, not a directory structure) — so a relative path can never point to
   real, intended content anyway, only to something unforeseen.
-- **Why deliberately only `src`/`href`, not also `srcset`/`poster`/`background`/CSS `url(...)`**: explicit
+- ~~**Why deliberately only `src`/`href`, not also `srcset`/`poster`/`background`/CSS `url(...)`**: explicit
   plan requirement ("external `src`/`href`") — full coverage of every conceivable subresource vector
   would be a substantially larger task (CSS parsing for `url()` in `<style>` blocks and `style`
   attributes); implemented as a deliberately incomplete but documented first hardening layer, consistent
-  with this project's pattern of honestly documenting limits instead of silently feigning completeness.
+  with this project's pattern of honestly documenting limits instead of silently feigning completeness.~~
+  — **closed in Post-Roadmap Phase 32 Session 5**, see
+  [ADR 0134](0134-html-preview-hardening-srcset-poster-background-css-url.md).
 
 ## Consequences
 
