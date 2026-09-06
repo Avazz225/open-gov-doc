@@ -90,6 +90,10 @@ class Settings(BaseServiceSettings):
     # instead of being hard-coded.
     object_type_service_base_url: str = "http://localhost:8007"
     monitoring_service_base_url: str = "http://localhost:8026"
+    # Department RBAC for departmental mailboxes (P32-S3, ADR 0132) -
+    # `owning_group_id` was stored since P31-S12a but never enforced,
+    # see ADR 0123 "Consequences".
+    permission_service_base_url: str = "http://localhost:8004"
 
     # Multi-inbox model (14.2, Post-Roadmap Phase 31 Session 12a) - replaces
     # the previous single, service-wide `inbound_protocol`/`pop3_*`/`imap_*`

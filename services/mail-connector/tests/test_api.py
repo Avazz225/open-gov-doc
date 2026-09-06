@@ -17,8 +17,41 @@ DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://local
 # gleiche Überschreibung wie `DMS_SMTP_HOST` in conftest.py, hier für den
 # direkten Zugriff auf mailpits eigene REST-API (Nachrichten-Verifikation).
 MAILPIT_URL = os.environ.get("TEST_MAILPIT_URL", "http://localhost:8025")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 ADMIN_HEADERS = {"X-DMS-Principal": "poststelle-1", "X-DMS-Roles": "dms-poststelle"}
+# Department RBAC (P32-S3, ADR 0132) - same `poststelle_role` as ADMIN_HEADERS,
+# but deliberately never granted membership in the "finanzen" department group
+# below, to exercise the negative (403) path.
+OTHER_DEPT_HEADERS = {"X-DMS-Principal": "poststelle-2", "X-DMS-Roles": "dms-poststelle"}
+# `POST /groups`/`POST /groups/{id}/members` are self-gated behind
+# `admin.user_management` (P32-S1, ADR 0130) - same
+# `ROLE_ADMIN_PRINCIPAL_ID`/`domain-admin-users` bootstrap precedent already
+# established in webdav-connector/tests/conftest.py's
+# `_grant_role_admin_permission`.
+ROLE_ADMIN_PRINCIPAL_ID = "mail-connector-test-role-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _grant_role_admin_permission():
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = pc.get(
+            "/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID}
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture
@@ -470,12 +503,49 @@ async def test_list_inbound_filters_by_mailbox_id(client, session):
 # Post-Roadmap Phase 31 Session 12b) ----------------------------------------
 
 
+def _ensure_department_group(name: str, *, member_principal_id: str) -> str:
+    """Department RBAC (P32-S3, ADR 0132) - `MailboxConfig.owning_group_id`
+    is a real `permission-service` `Group.id`, a server-generated UUID
+    (`permission_service.repository.create_group`), not a caller-chosen
+    string - `add_group_member` 404s on a group id that was never created
+    via `POST /groups` (`repository.py`'s `session.get(Group, group_id)`
+    check). Finds-or-creates the group by NAME (idempotent across test
+    runs against the same dev DB, same principle as this file's own
+    `_grant_config_admin_permission` in conftest.py), grants
+    `member_principal_id` membership, and returns the real id to use as a
+    `MailboxConfig.owning_group_id`."""
+    admin_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as client:
+        groups = client.get("/groups").json()
+        group = next((g for g in groups if g["name"] == name), None)
+        if group is None:
+            response = client.post("/groups", json={"name": name}, headers=admin_headers)
+            response.raise_for_status()
+            group = response.json()
+        members = client.get(f"/groups/{group['id']}/members").json()
+        if not any(m["principal_id"] == member_principal_id for m in members):
+            response = client.post(
+                f"/groups/{group['id']}/members",
+                json={"principal_id": member_principal_id},
+                headers=admin_headers,
+            )
+            response.raise_for_status()
+        return group["id"]
+
+
 @pytest.fixture
 def with_finanzen_mailbox(monkeypatch):
     """Fuegt fuer die Dauer eines Tests ein zweites, konfiguriertes Postfach
     hinzu (Settings sind sonst nur mit dem Standard-Postfach "central"
     bestueckt) - echte Weiterleitung zwischen zwei Postfaechern ist ohne
-    ein zweites konfiguriertes Ziel nicht sinnvoll testbar."""
+    ein zweites konfiguriertes Ziel nicht sinnvoll testbar. Since P32-S3
+    (ADR 0132), `owning_group_id` is enforced (department RBAC) - ADMIN_
+    HEADERS' principal is granted real membership so pre-existing routing-
+    mechanics tests keep passing under the new gate instead of bypassing
+    it via a bogus, unenforced group id."""
+    group_id = _ensure_department_group(
+        "mail-connector-test-finanzen", member_principal_id=ADMIN_HEADERS["X-DMS-Principal"]
+    )
     monkeypatch.setattr(
         settings,
         "mailboxes",
@@ -485,7 +555,7 @@ def with_finanzen_mailbox(monkeypatch):
                 id="finanzen",
                 name="Poststelle Finanzen",
                 kind="departmental",
-                owning_group_id="group-finanzen",
+                owning_group_id=group_id,
                 inbound_protocol="pop3",
                 pop3_host="irrelevant",
                 pop3_username="irrelevant",
@@ -745,3 +815,258 @@ async def test_search_routing_log_filters_by_mailbox_id_and_q(
     assert [e["message_id"] for e in by_q] == [alpha.id]
     assert {e["message_id"] for e in by_mailbox} >= {alpha.id, beta.id}
     assert by_unrelated_mailbox == []
+
+
+# --- Abteilungs-RBAC ueber `owning_group_id` (P32-S3, ADR 0132) ------------
+
+
+async def test_list_inbound_with_mailbox_id_filter_requires_department_membership(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-1", subject="RBAC Filter", mailbox_id="finanzen")
+
+    response = client.get("/inbound", params={"mailbox_id": "finanzen"}, headers=OTHER_DEPT_HEADERS)
+
+    assert response.status_code == 403
+
+
+async def test_list_inbound_with_mailbox_id_filter_allows_department_member(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-2", subject="RBAC Filter Erfolg", mailbox_id="finanzen")
+
+    response = client.get("/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS)
+
+    assert response.status_code == 200
+    assert any(m["subject"] == "RBAC Filter Erfolg" for m in response.json())
+
+
+async def test_list_inbound_without_filter_excludes_inaccessible_departmental_mailbox(
+    client, session, with_finanzen_mailbox
+):
+    """Seeds both messages directly via `repository.create_inbound_message`
+    (bypassing the virus-scan/event-publish `_ingest` pipeline, same reason
+    as `test_route_message_to_mailbox_with_colliding_source_uid_returns_409`
+    - two back-to-back real `_ingest` calls in one test proved flaky under
+    this environment's concurrent poll-loop/NATS load, this test's own
+    subject is `GET /inbound`'s unfiltered scoping, not ingestion)."""
+    for uid, subject, mailbox_id in (
+        ("uid-rbac-3", "RBAC Central Sichtbar", "central"),
+        ("uid-rbac-4", "RBAC Finanzen Unsichtbar", "finanzen"),
+    ):
+        await repository.create_inbound_message(
+            session,
+            mailbox_id=mailbox_id,
+            source_uid=uid,
+            from_address="buerger@example.com",
+            subject=subject,
+            body_text="Hallo",
+            received_at=datetime.now(UTC),
+            match_type=None,
+            match_value=None,
+            proposed_target_type=None,
+            proposed_target_id=None,
+            match_candidates=[],
+        )
+    await session.commit()
+
+    subjects = {m["subject"] for m in client.get("/inbound", headers=OTHER_DEPT_HEADERS).json()}
+
+    assert "RBAC Central Sichtbar" in subjects
+    assert "RBAC Finanzen Unsichtbar" not in subjects
+
+
+async def test_get_inbound_message_from_inaccessible_departmental_mailbox_returns_403(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-5", subject="RBAC Einzelabruf", mailbox_id="finanzen")
+    [message] = [
+        m
+        for m in client.get(
+            "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+        ).json()
+        if m["subject"] == "RBAC Einzelabruf"
+    ]
+
+    response = client.get(f"/inbound/{message['id']}", headers=OTHER_DEPT_HEADERS)
+
+    assert response.status_code == 403
+
+
+async def test_route_message_requires_access_to_source_mailbox(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-6", subject="RBAC Route Quelle", mailbox_id="finanzen")
+    [message] = [
+        m
+        for m in client.get(
+            "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+        ).json()
+        if m["subject"] == "RBAC Route Quelle"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "central"},
+        headers=OTHER_DEPT_HEADERS,
+    )
+
+    assert response.status_code == 403
+
+
+async def test_route_message_to_departmental_target_needs_no_target_membership(
+    client, session, with_finanzen_mailbox
+):
+    """Source-only enforcement (`_require_mailbox_access` is checked against
+    `message.mailbox_id`, never `payload.target_mailbox_id`) - central
+    intake staff must be able to route to a department without being a
+    member of it, see `route_message`'s own docstring."""
+    await _ingest(session, uid="uid-rbac-7", subject="RBAC Route Ziel", mailbox_id="central")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=OTHER_DEPT_HEADERS).json()
+        if m["subject"] == "RBAC Route Ziel"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=OTHER_DEPT_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["mailbox_id"] == "finanzen"
+
+
+async def test_confirm_match_on_inaccessible_departmental_mailbox_returns_403(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-8", subject="RBAC Confirm", mailbox_id="finanzen")
+    [message] = [
+        m
+        for m in client.get(
+            "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+        ).json()
+        if m["subject"] == "RBAC Confirm"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/confirm-match",
+        json={"title": "Irrelevant"},
+        headers=OTHER_DEPT_HEADERS,
+    )
+
+    assert response.status_code == 403
+
+
+async def test_assign_manually_on_inaccessible_departmental_mailbox_returns_403(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-9", subject="RBAC Assign", mailbox_id="finanzen")
+    [message] = [
+        m
+        for m in client.get(
+            "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+        ).json()
+        if m["subject"] == "RBAC Assign"
+    ]
+
+    response = client.post(
+        f"/inbound/{message['id']}/assign",
+        json={"title": "Irrelevant", "folder_id": "irrelevant"},
+        headers=OTHER_DEPT_HEADERS,
+    )
+
+    assert response.status_code == 403
+
+
+async def test_reject_message_on_inaccessible_departmental_mailbox_returns_403(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-10", subject="RBAC Reject", mailbox_id="finanzen")
+    [message] = [
+        m
+        for m in client.get(
+            "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+        ).json()
+        if m["subject"] == "RBAC Reject"
+    ]
+
+    response = client.post(f"/inbound/{message['id']}/reject", json={}, headers=OTHER_DEPT_HEADERS)
+
+    assert response.status_code == 403
+
+
+async def test_search_routing_log_with_mailbox_id_filter_requires_department_membership(
+    client, session, with_finanzen_mailbox
+):
+    await _ingest(session, uid="uid-rbac-11", subject="RBAC Postbuch", mailbox_id="central")
+    [message] = [
+        m
+        for m in client.get("/inbound", headers=ADMIN_HEADERS).json()
+        if m["subject"] == "RBAC Postbuch"
+    ]
+    client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "finanzen"},
+        headers=ADMIN_HEADERS,
+    )
+
+    response = client.get(
+        "/routing-log", params={"mailbox_id": "finanzen"}, headers=OTHER_DEPT_HEADERS
+    )
+
+    assert response.status_code == 403
+
+
+async def test_search_routing_log_without_filter_excludes_hops_between_inaccessible_mailboxes(
+    client, session, monkeypatch, with_finanzen_mailbox
+):
+    """`search_routing_log`'s either-side match means a hop touching
+    "central" is visible to anyone (central is always accessible) - to
+    prove the exclusion itself, this hop must touch NO mailbox the caller
+    (OTHER_DEPT_HEADERS) can access on either side, so a second
+    departmental mailbox ("personal") is added, and ADMIN_HEADERS (a
+    "finanzen" member, so allowed to act on the source) routes a message
+    from "finanzen" straight to "personal" - neither end is "central",
+    and OTHER_DEPT_HEADERS belongs to neither department."""
+    personal_group_id = _ensure_department_group(
+        "mail-connector-test-personal", member_principal_id="mail-connector-test-personal-owner"
+    )
+    monkeypatch.setattr(
+        settings,
+        "mailboxes",
+        [
+            *settings.mailboxes,
+            MailboxConfig(
+                id="personal",
+                name="Poststelle Personal",
+                kind="departmental",
+                owning_group_id=personal_group_id,
+                inbound_protocol="pop3",
+                pop3_host="irrelevant",
+                pop3_username="irrelevant",
+                pop3_password="irrelevant",
+            ),
+        ],
+    )
+    await _ingest(
+        session, uid="uid-rbac-12", subject="RBAC Postbuch Ungefiltert", mailbox_id="finanzen"
+    )
+    [message] = [
+        m
+        for m in client.get(
+            "/inbound", params={"mailbox_id": "finanzen"}, headers=ADMIN_HEADERS
+        ).json()
+        if m["subject"] == "RBAC Postbuch Ungefiltert"
+    ]
+    routed = client.post(
+        f"/inbound/{message['id']}/route",
+        json={"target_mailbox_id": "personal"},
+        headers=ADMIN_HEADERS,
+    )
+    assert routed.status_code == 200
+
+    entries = client.get("/routing-log", headers=OTHER_DEPT_HEADERS).json()
+
+    assert not any(e["message_id"] == message["id"] for e in entries)

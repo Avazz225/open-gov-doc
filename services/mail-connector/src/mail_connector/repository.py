@@ -183,6 +183,7 @@ async def search_routing_log(
     session: AsyncSession,
     *,
     mailbox_id: str | None = None,
+    mailbox_ids: set[str] | None = None,
     routed_by: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
@@ -196,7 +197,12 @@ async def search_routing_log(
     happened to this piece of correspondence" without already knowing its
     `message_id`. `mailbox_id` matches a hop touching that mailbox on
     EITHER side (it was routed FROM it or TO it) - a department wants to
-    see both what left and what arrived. `q` is a case-insensitive substring
+    see both what left and what arrived. `mailbox_ids` (P32-S3, ADR 0132)
+    is the same either-side match against a WHOLE accessible set instead of
+    one mailbox, for the unfiltered search (caller has already checked
+    access for the single-`mailbox_id` case, see `main.py`) - the two are
+    mutually exclusive in practice, `mailbox_id` wins if somehow both are
+    given. `q` is a case-insensitive substring
     match against the message's subject (same `ilike` mechanism SQL already
     offers, no new search infrastructure - a dedicated full-text engine is
     `search-service`'s job for `document-service`/`case-service` content,
@@ -213,6 +219,13 @@ async def search_routing_log(
                 MailRoutingLogEntry.to_mailbox_id == mailbox_id,
             )
         )
+    elif mailbox_ids is not None:
+        query = query.where(
+            or_(
+                MailRoutingLogEntry.from_mailbox_id.in_(mailbox_ids),
+                MailRoutingLogEntry.to_mailbox_id.in_(mailbox_ids),
+            )
+        )
     if routed_by is not None:
         query = query.where(MailRoutingLogEntry.routed_by == routed_by)
     if since is not None:
@@ -227,13 +240,25 @@ async def search_routing_log(
 
 
 async def list_messages(
-    session: AsyncSession, *, status: str | None = None, mailbox_id: str | None = None
+    session: AsyncSession,
+    *,
+    status: str | None = None,
+    mailbox_id: str | None = None,
+    mailbox_ids: set[str] | None = None,
 ) -> list[InboundMessage]:
+    """`mailbox_id` narrows to exactly one mailbox (caller has already
+    checked access, see `main.py::_require_mailbox_access`); `mailbox_ids`
+    (P32-S3, ADR 0132) narrows to a caller's whole accessible set for the
+    unfiltered listing - the two are mutually exclusive in practice
+    (`main.py` never passes both), `mailbox_id` wins if somehow both are
+    given."""
     query = select(InboundMessage)
     if status is not None:
         query = query.where(InboundMessage.status == status)
     if mailbox_id is not None:
         query = query.where(InboundMessage.mailbox_id == mailbox_id)
+    elif mailbox_ids is not None:
+        query = query.where(InboundMessage.mailbox_id.in_(mailbox_ids))
     result = await session.execute(query.order_by(InboundMessage.received_at.desc()))
     return list(result.scalars().all())
 

@@ -2,19 +2,28 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P32-S2 (delegation's two dead scope dimensions activated — `workflow-service` now
-resolves `ProcessInstance.business_key` via `case-service` first, falling back to `document-service`,
-before calling `permission-service`'s already-correct `GET /delegations/check`; `DelegationsPane` gained
-a scope picker — see [ADR 0131](docs/adr/0131-delegation-scope-resolution-case-then-document.md)), the
-second session of the new Phase 32+ (post-Phase-31 gap re-analysis).
+**Last completed:** P32-S3 (Postbuch department RBAC enforced — `mail-connector`'s `owning_group_id` had
+been pure config metadata since P31-S12a; a new `PermissionServiceClient.is_group_member` now gates
+reading/routing(source-side)/confirming/assigning/rejecting on a `departmental` mailbox behind real
+`permission-service` group membership, while `GET /mailboxes` stays deliberately unfiltered for the
+routing-target selector. The pre-existing `with_finanzen_mailbox` test fixture used a placeholder group id
+(`"group-finanzen"`) that was never a real, creatable group — fixed by having it find-or-create a real
+group and grant real membership. 12 new tests (77 total, up from 65), live-verified against the running
+stack (real group/membership created via `permission-service`, no regression to the current single-mailbox
+`central`-only live configuration). Full suite runs again hit the same already-documented, pre-existing
+`RuntimeError: ... is bound to a different event loop` flake (see the P32-S3-preceding entry above and
+earlier occurrences) on unrelated, untouched tests — confirmed by isolation reruns, not caused by this
+session — see
+[ADR 0132](docs/adr/0132-mail-connector-department-rbac-group-membership.md)), the third session of the
+new Phase 32+ (post-Phase-31 gap re-analysis).
 
-**Next session:** **P32-S3** (Postbuch: enforce department RBAC via `owning_group_id` — it exists only as
-config metadata today, every `poststelle_role` holder can read/route every mailbox regardless of
-department). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining session breakdown (Phase 32
-security/RBAC hardening continues with P32-S3/S4/S5, Phase 33 accessibility completion, Phase 34
-XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
-quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
-federation).
+**Next session:** **P32-S4** (wire the `admin.deletion_classified` capability, introduced in
+P31-S3/ADR 0114 but never called since, into the three call sites in `document-service` that still gate
+classified-document deletion via the legacy `classified_trash_hard_delete_admin_role` string-role check).
+See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining session breakdown (Phase 32 security/RBAC
+hardening continues with P32-S4/S5, Phase 33 accessibility completion, Phase 34 XDOMEA/XJustiz completion,
+Phase 35 org-hierarchy/workflow polish, Phase 36 records quarantine/output-stamping/misc completion,
+Phase 37 scoping-only session on cross-tenant XDOMEA federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
