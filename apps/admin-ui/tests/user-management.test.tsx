@@ -157,6 +157,58 @@ describe("UserManagement", () => {
     await waitFor(() => expect(deleteRoleAssignmentMock).toHaveBeenCalledWith("token-123", 10));
   });
 
+  it("creates a role and reloads the list", async () => {
+    createRoleMock.mockResolvedValue({
+      status: "created",
+      role: { id: 2, name: "Editor", description: "", permissions: ["write"] },
+      approval_request_id: null,
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listRolesMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Rolle anlegen" });
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Editor" } });
+    fireEvent.change(within(form).getByLabelText("Rechte (kommagetrennt)"), {
+      target: { value: "write" },
+    });
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(createRoleMock).toHaveBeenCalledWith("token-123", {
+        name: "Editor",
+        description: "",
+        permissions: ["write"],
+      })
+    );
+    await waitFor(() => expect(listRolesMock).toHaveBeenCalledTimes(2));
+    expect(
+      screen.queryByText(
+        "Vier-Augen-Prinzip aktiv - die neue Rolle wartet auf Genehmigung durch eine zweite Person, bevor sie angelegt wird."
+      )
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a pending-approval hint without reloading when four-eyes is active for role creation", async () => {
+    createRoleMock.mockResolvedValue({
+      status: "pending_approval",
+      role: null,
+      approval_request_id: "req-2",
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listRolesMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Rolle anlegen" });
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Editor" } });
+    fireEvent.submit(form);
+
+    expect(
+      await screen.findByText(
+        "Vier-Augen-Prinzip aktiv - die neue Rolle wartet auf Genehmigung durch eine zweite Person, bevor sie angelegt wird."
+      )
+    ).toBeInTheDocument();
+    expect(listRolesMock).toHaveBeenCalledTimes(1);
+  });
+
   it("creates a role assignment and reloads the list", async () => {
     createRoleAssignmentMock.mockResolvedValue({
       status: "created",

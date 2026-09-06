@@ -51,17 +51,26 @@ class PermissionServiceClient:
         "folder.read",
         "folder.write",
     ]
+    _PRINCIPAL_ID = "teamspace-service"
 
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        """Since P32-S1 (ADR 0130): `POST /roles` is now self-gated
+        (`admin.user_management`) - this client attaches
+        `X-DMS-Principal` to every call, same pattern as `config-
+        service`'s/`migration-service`'s `PermissionServiceClient`. The
+        `teamspace-service` principal is granted `domain-admin-users` at
+        startup, see `main.py._ensure_bootstrap_permissions`."""
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers={"X-DMS-Principal": self._PRINCIPAL_ID}
+        )
         self._role_id: int | None = None
 
     async def _ensure_role(self) -> int:
         """Get-or-create the role by name (same pattern as
         `migration-service`'s `apply_role_assignment` for migrated
-        permissions) - `POST /roles`/`POST /role-assignments` are
-        deliberately ungated on `permission-service` (verified), no
-        technical account/principal needed for this bootstrap call."""
+        permissions). `POST /roles` now wraps its response in a
+        `status`/`role` envelope (P32-S1, ADR 0130) - unwrap `["role"]`
+        instead of reading fields directly off the top-level object."""
         if self._role_id is not None:
             return self._role_id
         response = await self._client.get("/roles")
@@ -82,7 +91,7 @@ class PermissionServiceClient:
                 },
             )
             create_response.raise_for_status()
-            self._role_id = create_response.json()["id"]
+            self._role_id = create_response.json()["role"]["id"]
         return self._role_id
 
     async def grant_resource_access(self, *, principal_id: str, resource_id: str) -> None:

@@ -30,6 +30,34 @@ from keycloak import KeycloakAdmin  # noqa: E402
 
 settings = Settings()
 
+# `PUT /approval-config/{action_type}` is self-gated since P32-S1 (ADR 0130,
+# `admin.user_management`) - `_bootstrap_domain_admin_role_assignments` below
+# runs BEFORE any `TechnicalAccount` exists (it IS the bootstrap), so it
+# can't yet reuse a real domain-admin account's id the way
+# `everyone_role_without`/`role_assignment_immediate` do further down. A
+# dedicated, test-only principal granted via the still-ungated `POST
+# /role-assignments` (ADR 0023's chicken-and-egg carve-out) breaks the
+# cycle, same pattern as `document-service`'s `ROLE_ADMIN_PRINCIPAL_ID`.
+_ROLE_ADMIN_PRINCIPAL_ID = "auth-service-test-role-admin"
+
+
+def _grant_role_admin_permission(pc: httpx.Client) -> None:
+    roles = pc.get("/roles").json()
+    role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+    existing = pc.get("/role-assignments", params={"principal_id": _ROLE_ADMIN_PRINCIPAL_ID}).json()
+    if any(a["role_id"] == role_id for a in existing):
+        return
+    response = pc.post(
+        "/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": _ROLE_ADMIN_PRINCIPAL_ID,
+            "role_id": role_id,
+            "resource_id": "root",
+        },
+    )
+    response.raise_for_status()
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _bootstrap():
@@ -53,12 +81,15 @@ def _bootstrap_domain_admin_role_assignments(_bootstrap):
     Start der gesamten Session (ein Wegwerf-`TestClient(app)`), exakt das,
     was die Reviewer-UI in einer echten Installation manuell täte."""
     with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
+        _grant_role_admin_permission(pc)
+        admin_headers = {"X-DMS-Principal": _ROLE_ADMIN_PRINCIPAL_ID}
         config = pc.get("/approval-config/permission.role_assignment.create")
         originally_required = config.status_code == 200 and config.json()["requires_approval"]
         if originally_required:
             pc.put(
                 "/approval-config/permission.role_assignment.create",
                 json={"requires_approval": False},
+                headers=admin_headers,
             )
         with TestClient(app):
             pass
@@ -66,6 +97,7 @@ def _bootstrap_domain_admin_role_assignments(_bootstrap):
             pc.put(
                 "/approval-config/permission.role_assignment.create",
                 json={"requires_approval": True},
+                headers=admin_headers,
             )
 
 
@@ -135,7 +167,23 @@ def role_assignment_immediate():
     haben (z. B. durch ein bereits angewendetes Konfigurationspaket) - Tests,
     die eine Rollenzuweisung sofort wirksam brauchen, dürfen diese reale
     Installationseinstellung nicht dauerhaft überschreiben, nur für ihre
-    eigene Laufzeit aussetzen."""
+    eigene Laufzeit aussetzen. `PUT /approval-config/{action_type}` ist seit
+    P32-S1 (ADR 0130) selbst gegatet - anders als
+    `_bootstrap_domain_admin_role_assignments` läuft diese Fixture NACH dem
+    Bootstrap, kann also das bereits berechtigte `DOMAIN_ADMIN_USERS_
+    USERNAME`-Konto direkt wiederverwenden, gleiches `TechnicalAccount.id`-
+    Auflösungsmuster wie `everyone_role_without`."""
+
+    async def _get_account_id() -> str:
+        eng = build_engine(DSN)
+        try:
+            return await domain_admins.get_technical_account_id(
+                make_session_factory(eng), DOMAIN_ADMIN_USERS_USERNAME
+            )
+        finally:
+            await eng.dispose()
+
+    admin_headers = {"X-DMS-Principal": asyncio.run(_get_account_id())}
     with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
         config = pc.get("/approval-config/permission.role_assignment.create")
         originally_required = config.status_code == 200 and config.json()["requires_approval"]
@@ -143,12 +191,14 @@ def role_assignment_immediate():
             pc.put(
                 "/approval-config/permission.role_assignment.create",
                 json={"requires_approval": False},
+                headers=admin_headers,
             )
         yield
         if originally_required:
             pc.put(
                 "/approval-config/permission.role_assignment.create",
                 json={"requires_approval": True},
+                headers=admin_headers,
             )
 
 

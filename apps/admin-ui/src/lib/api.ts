@@ -174,10 +174,19 @@ export async function listRoles(token: string): Promise<Role[]> {
   return response.json();
 }
 
+// Since P32-S1 (ADR 0130): `POST /roles` can optionally be gated by the
+// four-eyes principle, same wrapper pattern as `RoleAssignmentActionResult`
+// below - `role` is only set when `status === "created"`.
+export interface RoleActionResult {
+  status: "created" | "pending_approval";
+  role: Role | null;
+  approval_request_id: string | null;
+}
+
 export async function createRole(
   token: string,
   params: { name: string; description: string; permissions: string[] }
-): Promise<Role> {
+): Promise<RoleActionResult> {
   const response = await request("permission-service", "roles", jsonInit(params), token);
   return response.json();
 }

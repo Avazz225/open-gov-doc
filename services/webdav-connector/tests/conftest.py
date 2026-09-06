@@ -5,8 +5,37 @@ import httpx
 import pytest
 
 AUTH_SERVICE_URL = os.environ.get("TEST_AUTH_SERVICE_URL", "http://localhost:8003")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 _TEST_PASSWORD = "testpass123"
+# `POST /roles` requires `admin.user_management` since ADR 0071 (and `PUT
+# /approval-config/{action_type}` since P32-S1/ADR 0130) - `test_webdav.py`'s
+# `_grant_document_write` needs an authorized test principal for both, same
+# pattern as `document-service`'s/`folder-service`'s
+# `ROLE_ADMIN_PRINCIPAL_ID`/`_grant_role_admin_permission`.
+ROLE_ADMIN_PRINCIPAL_ID = "webdav-connector-test-role-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _grant_role_admin_permission():
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = pc.get(
+            "/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID}
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
 
 
 @pytest.fixture

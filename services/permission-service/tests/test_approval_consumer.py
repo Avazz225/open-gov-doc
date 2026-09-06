@@ -262,6 +262,77 @@ async def test_role_assignment_create_with_missing_keys_is_logged_not_raised(eng
     assert published == []
 
 
+async def test_approved_role_create_executes_and_publishes(engine):
+    """P32-S1 (ADR 0130) - gleiches Muster wie
+    `test_approved_role_assignment_create_executes_and_publishes`, nur mit
+    `permission.role.create`."""
+    session_factory = _session_factory(engine)
+    published = []
+
+    async def fake_publish(event_type, payload, actor=None):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(session_factory, fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-9",
+            "action_type": "permission.role.create",
+            "initiated_by": "admin",
+            "approved_by": "bob",
+            "payload": {
+                "name": "GatedNewRole",
+                "description": "Angelegt über Vier-Augen",
+                "permissions": ["read"],
+            },
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        roles = await repository.list_roles(session)
+    role = next(r for r in roles if r.name == "GatedNewRole")
+    assert role.description == "Angelegt über Vier-Augen"
+    assert role.permissions == ["read"]
+    assert published == [
+        (
+            "permission.role.created",
+            {
+                "role_id": role.id,
+                "name": "GatedNewRole",
+                "description": "Angelegt über Vier-Augen",
+                "permissions": ["read"],
+            },
+        )
+    ]
+
+
+async def test_role_create_with_missing_keys_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, payload, actor=None):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-10",
+            "action_type": "permission.role.create",
+            "initiated_by": "admin",
+            "approved_by": "bob",
+            "payload": {"x": 1},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []
+
+
 async def test_approved_not_shutdown_trigger_activates_and_publishes(engine):
     session_factory = _session_factory(engine)
     async with session_factory() as session:

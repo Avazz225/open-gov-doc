@@ -50,7 +50,9 @@ def _grant_folder_permission(principal_id: str, folder_id: str, *, permissions: 
         json={
             "principal_type": "user",
             "principal_id": principal_id,
-            "role_id": role.json()["id"],
+            # `POST /roles` also wraps its response since P32-S1 (ADR
+            # 0130, `RoleActionResult`) - unwrap `["role"]`.
+            "role_id": role.json()["role"]["id"],
             "resource_id": folder_id,
         },
         timeout=30.0,
@@ -235,6 +237,7 @@ def test_trash_folder_with_approval_required_defers_execution(client):
     httpx.put(
         f"{PERMISSION_SERVICE_URL}/approval-config/folder.delete",
         json={"requires_approval": True},
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
     )
     try:
         created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
@@ -253,6 +256,7 @@ def test_trash_folder_with_approval_required_defers_execution(client):
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/folder.delete",
             json={"requires_approval": False},
+            headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         )
 
 

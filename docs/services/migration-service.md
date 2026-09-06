@@ -93,7 +93,10 @@ required `admin.user_management`. `LocalDmsClient` (`dms_client.py`) now sends a
 target role. `main.py`'s `_ensure_config_admin_permission()` has since additionally
 bootstrapped `domain-admin-users` (`admin.user_management`) alongside the previous
 `domain-admin-config` role (`admin.object_config`) — `_REQUIRED_ROLE_NAMES =
-("domain-admin-config", "domain-admin-users")`.
+("domain-admin-config", "domain-admin-users")`. Since **Post-Roadmap Phase 32 Session 1**
+([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md)), `POST /roles` also wraps its
+response in a `status`/`role` envelope — `apply_role_assignment` reads `create_response.json()["role"]["id"]`
+instead of the previous flat `["id"]`.
 
 ## Deliberate limitations
 

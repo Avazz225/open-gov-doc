@@ -59,7 +59,11 @@ describe("api client", () => {
   });
 
   it("createRole posts to the permission-service route", async () => {
-    const fetchMock = mockFetchOnce({ id: 1, name: "Viewer", description: "", permissions: [] });
+    const fetchMock = mockFetchOnce({
+      status: "created",
+      role: { id: 1, name: "Viewer", description: "", permissions: [] },
+      approval_request_id: null,
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await createRole("token-123", { name: "Viewer", description: "", permissions: ["read"] });

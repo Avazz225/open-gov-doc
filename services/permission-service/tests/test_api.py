@@ -64,13 +64,47 @@ def test_create_role_returns_403_without_permission(client):
 
 
 def test_create_role(client, role_management_headers):
+    """Antwort-Envelope seit P32-S1 (ADR 0130) - `status`/`role`, analog zu
+    `RoleAssignmentActionResult` seit P17-S3, immer gesetzt unabhängig von
+    aktivierter Vier-Augen-Pflicht."""
     response = client.post(
         "/roles",
         json={"name": "Viewer", "description": "", "permissions": ["read"]},
         headers=role_management_headers,
     )
-    assert response.status_code == 200
-    assert response.json()["permissions"] == ["read"]
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "created"
+    assert body["role"]["permissions"] == ["read"]
+    assert body["approval_request_id"] is None
+
+
+def test_create_role_with_approval_required_defers_creation(client, role_management_headers):
+    """Vier-Augen-Retrofit für Rollenanlage (P32-S1, ADR 0130) - identisches
+    Muster wie `test_create_role_assignment_with_approval_required_defers_
+    creation`, nur mit `permission.role.create`."""
+    client.put(
+        "/approval-config/permission.role.create",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    )
+
+    response = client.post(
+        "/roles",
+        json={"name": "GatedNewRole", "permissions": ["read"]},
+        headers=role_management_headers,
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending_approval"
+    assert body["approval_request_id"] is not None
+    assert body["role"] is None
+
+    # Die Rolle existiert noch nicht - Genehmigung erfolgt asynchron ueber
+    # das Event (siehe test_approval_consumer.py fuer die Konsumentenlogik).
+    roles = client.get("/roles").json()
+    assert "GatedNewRole" not in [r["name"] for r in roles]
 
 
 def test_update_role_changes_description_and_permissions(client, role_management_headers):
@@ -78,7 +112,7 @@ def test_update_role_changes_description_and_permissions(client, role_management
         "/roles",
         json={"name": "Editor", "description": "alt", "permissions": ["read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
 
     response = client.put(
         f"/roles/{created['id']}",
@@ -197,7 +231,7 @@ def test_group_membership_grants_role_to_every_member(client, role_management_he
         "/roles",
         json={"name": "GroupEditor", "permissions": ["group_read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     client.post(
         "/role-assignments",
         json={
@@ -414,7 +448,7 @@ def test_assignment_with_unknown_role_returns_404(client):
 def test_assignment_with_unknown_resource_returns_404(client, role_management_headers):
     role = client.post(
         "/roles", json={"name": "Viewer2", "permissions": ["read"]}, headers=role_management_headers
-    ).json()
+    ).json()["role"]
     response = client.post(
         "/role-assignments",
         json={
@@ -432,7 +466,7 @@ def test_full_flow_via_api(client, role_management_headers):
         "/roles",
         json={"name": "Editor", "permissions": ["read", "write"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     # Seit P17-S3 (4.3/14.2) liefert `POST /role-assignments` das gegatete
     # `RoleAssignmentActionResult` - ohne aktivierte Genehmigungspflicht
     # (Default) bleibt `role_assignment` sofort gesetzt, siehe schemas.py.
@@ -474,7 +508,7 @@ def test_check_batch_returns_per_resource_result(client, role_management_headers
         "/roles",
         json={"name": "BatchCheckRole", "permissions": ["document.read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     client.post(
         "/role-assignments",
         json={
@@ -521,7 +555,7 @@ def test_check_batch_respects_blocking_scope_lock(client, role_management_header
         "/roles",
         json={"name": "BatchLockRole", "permissions": ["document.read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     client.post(
         "/role-assignments",
         json={
@@ -569,7 +603,7 @@ def test_list_role_assignments_returns_all(client, role_management_headers):
         "/roles",
         json={"name": "Listener", "permissions": ["read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     created = client.post(
         "/role-assignments",
         json={
@@ -592,7 +626,7 @@ def test_list_role_assignments_filters_by_principal_id(client, role_management_h
         "/roles",
         json={"name": "Filterable", "permissions": ["read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     client.post(
         "/role-assignments",
         json={
@@ -724,7 +758,7 @@ def test_scope_lock_bypass_capability_overrides_block(client, role_management_he
         "/roles",
         json={"name": "ScopeLockBypasser", "permissions": ["scope_lock.bypass", "write"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     client.post(
         "/role-assignments",
         json={
@@ -772,11 +806,15 @@ def test_release_unknown_scope_lock_returns_404(client, role_management_headers)
     assert response.status_code == 404
 
 
-def test_approval_config_defaults_to_false_and_is_settable(client):
+def test_approval_config_defaults_to_false_and_is_settable(client, role_management_headers):
     default = client.get("/approval-config/document.force_unlock").json()
     assert default["requires_approval"] is False
 
-    updated = client.put("/approval-config/document.force_unlock", json={"requires_approval": True})
+    updated = client.put(
+        "/approval-config/document.force_unlock",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    )
     assert updated.status_code == 200
     assert updated.json()["requires_approval"] is True
 
@@ -785,6 +823,24 @@ def test_approval_config_defaults_to_false_and_is_settable(client):
         c["action_type"] == "document.force_unlock" and c["requires_approval"] is True
         for c in listed
     )
+
+
+def test_put_approval_config_requires_authentication(client):
+    """P32-S1 (ADR 0130) - previously ungated entirely (ADR 0089), now
+    self-gated like `POST`/`PUT /roles`."""
+    response = client.put(
+        "/approval-config/document.force_unlock", json={"requires_approval": True}
+    )
+    assert response.status_code == 401
+
+
+def test_put_approval_config_returns_403_without_permission(client):
+    response = client.put(
+        "/approval-config/document.force_unlock",
+        json={"requires_approval": True},
+        headers={"X-DMS-Principal": "nobody"},
+    )
+    assert response.status_code == 403
 
 
 def test_approval_request_lifecycle_publishes_events_with_actor(client, monkeypatch):
@@ -863,7 +919,11 @@ def test_get_unknown_approval_request_returns_404(client):
 
 
 def test_create_scope_lock_with_approval_required_defers_creation(client, role_management_headers):
-    client.put("/approval-config/permission.scope_lock.create", json={"requires_approval": True})
+    client.put(
+        "/approval-config/permission.scope_lock.create",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    )
 
     response = client.post(
         "/scope-locks",
@@ -888,7 +948,11 @@ def test_release_scope_lock_with_approval_required_defers_release(client, role_m
     ).json()
     lock_id = created["scope_lock"]["id"]
 
-    client.put("/approval-config/permission.scope_lock.release", json={"requires_approval": True})
+    client.put(
+        "/approval-config/permission.scope_lock.release",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    )
 
     response = client.request("DELETE", f"/scope-locks/{lock_id}", json={"released_by": "admin"})
 
@@ -911,9 +975,11 @@ def test_create_role_assignment_with_approval_required_defers_creation(
         "/roles",
         json={"name": "GatedAssigneeRole", "permissions": ["read"]},
         headers=role_management_headers,
-    ).json()
+    ).json()["role"]
     client.put(
-        "/approval-config/permission.role_assignment.create", json={"requires_approval": True}
+        "/approval-config/permission.role_assignment.create",
+        json={"requires_approval": True},
+        headers=role_management_headers,
     )
 
     response = client.post(
@@ -959,7 +1025,7 @@ def _grant_permission_via_api(client, headers, *, principal_id, permissions):
         "/roles",
         json={"name": f"role-for-{principal_id}", "permissions": permissions},
         headers=headers,
-    ).json()
+    ).json()["role"]
     client.post(
         "/role-assignments",
         json={
@@ -1067,6 +1133,7 @@ def test_trigger_maintenance_mode_defers_when_approval_required(client, role_man
     client.put(
         "/approval-config/system.not_shutdown.trigger",
         json={"requires_approval": True, "required_permission": "system.not_shutdown.trigger"},
+        headers=role_management_headers,
     )
 
     response = client.post(
@@ -1100,6 +1167,7 @@ def test_trigger_maintenance_mode_via_approval_flow_activates_after_second_appro
     client.put(
         "/approval-config/system.not_shutdown.trigger",
         json={"requires_approval": True, "required_permission": "system.not_shutdown.trigger"},
+        headers=role_management_headers,
     )
     request = client.post(
         "/maintenance-mode/trigger", json={"triggered_by": "alice", "reason": "Verdacht"}

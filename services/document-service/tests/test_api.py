@@ -77,10 +77,12 @@ def _grant_root_permission(
         timeout=30.0,
     )
     originally_required = config.status_code == 200 and config.json()["requires_approval"]
+    admin_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
     if originally_required:
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
             json={"requires_approval": False},
+            headers=admin_headers,
             timeout=30.0,
         )
     try:
@@ -90,7 +92,7 @@ def _grant_root_permission(
                 "name": f"{role_prefix}-{uuid.uuid4().hex[:8]}",
                 "permissions": [permission],
             },
-            headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
+            headers=admin_headers,
             timeout=30.0,
         )
         role.raise_for_status()
@@ -99,7 +101,9 @@ def _grant_root_permission(
             json={
                 "principal_type": "user",
                 "principal_id": principal_id,
-                "role_id": role.json()["id"],
+                # `POST /roles` also wraps its response since P32-S1 (ADR
+                # 0130, `RoleActionResult`) - unwrap `["role"]`.
+                "role_id": role.json()["role"]["id"],
                 "resource_id": resource_id,
             },
             timeout=30.0,
@@ -113,6 +117,7 @@ def _grant_root_permission(
             httpx.put(
                 f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
                 json={"requires_approval": True},
+                headers=admin_headers,
                 timeout=30.0,
             )
 
@@ -496,6 +501,7 @@ def test_force_release_with_approval_required_defers_execution(client):
     httpx.put(
         f"{PERMISSION_SERVICE_URL}/approval-config/document.force_unlock",
         json={"requires_approval": True},
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
     )
     try:
         body = upload(client, content=b"v1").json()
@@ -523,6 +529,7 @@ def test_force_release_with_approval_required_defers_execution(client):
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/document.force_unlock",
             json={"requires_approval": False},
+            headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         )
 
 
@@ -1230,6 +1237,7 @@ def test_trash_document_with_approval_required_defers_execution(client):
     httpx.put(
         f"{PERMISSION_SERVICE_URL}/approval-config/document.delete",
         json={"requires_approval": True},
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
     )
     try:
         document_id = upload(client).json()["id"]
@@ -1249,6 +1257,7 @@ def test_trash_document_with_approval_required_defers_execution(client):
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/document.delete",
             json={"requires_approval": False},
+            headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         )
 
 

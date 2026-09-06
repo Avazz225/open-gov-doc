@@ -47,6 +47,7 @@ from permission_service.schemas import (
     OrgHierarchyGrantOut,
     ResourceNodeOut,
     ResourceNodeUpdate,
+    RoleActionResult,
     RoleAssignmentActionResult,
     RoleAssignmentCreate,
     RoleAssignmentOut,
@@ -227,18 +228,43 @@ async def _require_role_management(session: AsyncSession, x_dms_principal: str) 
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
-@app.post("/roles", response_model=RoleOut)
+@app.post("/roles", response_model=RoleActionResult, status_code=201)
 async def create_role(
     payload: RoleCreate,
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
-) -> RoleOut:
+) -> RoleActionResult:
+    """Baseline `admin.user_management` capability check runs BEFORE the
+    optional four-eyes branch (P19-S6/ADR 0071 ordering precedent, see
+    `create_scope_lock`) - without this order a principal with no
+    permission at all could still open an approval request. Four-eyes
+    wiring added P32-S1 (ADR 0130, `permission.role.create`) - `POST
+    /role-assignments` already had this since P17-S3, `POST /roles` never
+    did. `x_dms_principal` (already resolved for the baseline check) doubles
+    as `initiated_by` - unlike `create_role_assignment`'s body-field
+    fallback, `RoleCreate` has no actor field of its own, and a header is
+    already mandatory here."""
     await _require_role_management(session, x_dms_principal)
+
+    config = await repository.get_approval_config(session, "permission.role.create")
+    if config.requires_approval:
+        request = await _request_approval(
+            session,
+            action_type="permission.role.create",
+            initiated_by=x_dms_principal,
+            payload={
+                "name": payload.name,
+                "description": payload.description,
+                "permissions": payload.permissions,
+            },
+        )
+        return RoleActionResult(status="pending_approval", approval_request_id=request.id)
+
     role = await repository.create_role(
         session, payload.name, payload.description, payload.permissions
     )
     await session.commit()
-    return role
+    return RoleActionResult(status="created", role=role)
 
 
 @app.get("/roles", response_model=list[RoleOut])
@@ -610,17 +636,20 @@ async def get_approval_config(
 async def put_approval_config(
     action_type: str,
     payload: ApprovalActionConfigUpdate,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalActionConfigOut:
-    """Deliberately still ungated (Post-Roadmap Phase 22 Session 3 examined
-    this but did not implement it, see ADR 0089): over a dozen test suites
-    across the repo (auth-/config-/folder-/document-/migration-/workflow-
-    service, webdav-connector) call this endpoint directly as test
-    infrastructure, without `X-DMS-Principal`/capability - a self-gating
-    scheme analogous to `POST`/`PUT /roles` (ADR 0071) would have touched
-    all of these call sites. See `docs/services/permission-service.md`
-    "Open Points" for the documentation of this deliberately deferred
-    hardening."""
+    """Self-gated since P32-S1 (ADR 0130), superseding ADR 0089's "not this
+    session" call - reachable through the gateway by any authenticated
+    principal (confirmed: `gateway-service` has no route-level restriction
+    on this path, and `admin-ui`'s `ApprovalSettings.tsx` calls it exactly
+    this way with no client-side capability check), so an unprivileged
+    account could otherwise disable the four-eyes requirement for any
+    action type system-wide. Same `admin.user_management` capability and
+    `_require_role_management` helper already used by `POST`/`PUT /roles`
+    (ADR 0071) - toggling four-eyes for permission-changing actions is
+    squarely the same "user/permission management" domain."""
+    await _require_role_management(session, x_dms_principal)
     config = await repository.set_approval_config(
         session,
         action_type,

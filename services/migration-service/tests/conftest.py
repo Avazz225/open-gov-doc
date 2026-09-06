@@ -38,9 +38,16 @@ async def _clean_tables():
 @pytest.fixture(autouse=True)
 async def _reset_approval_config():
     """Vier-Augen (4.3) für `migration.transfer.start` bleibt per Default aus -
-    einzelne Tests aktivieren es gezielt, diese Fixture setzt danach zurück."""
+    einzelne Tests aktivieren es gezielt, diese Fixture setzt danach zurück.
+    `PUT /approval-config/{action_type}` ist seit P32-S1 (ADR 0130) selbst
+    gegatet (`admin.user_management`) - reuses the already-running
+    `migration-service` container's own bootstrapped principal (`main.py`'s
+    `_ensure_config_admin_permission`, granted `domain-admin-users` at
+    startup) instead of a separate test-only fixture."""
     yield
     async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
         await client.put(
-            "/approval-config/migration.transfer.start", json={"requires_approval": False}
+            "/approval-config/migration.transfer.start",
+            json={"requires_approval": False},
+            headers={"X-DMS-Principal": "migration-service"},
         )

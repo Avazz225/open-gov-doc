@@ -14,12 +14,12 @@ def make_handler(
     session_factory: async_sessionmaker[AsyncSession],
     publish_event: Callable[[str, dict], Awaitable[None]],
 ) -> Callable[[bytes], Awaitable[None]]:
-    """Executes this service's own gated actions (scope locks, 4.7, plus
-    role assignments since P17-S3, 4.3/14.2) only after approval (4.3) -
-    self-consumption of its own `permission.approval.approved` event, the
-    exact same mechanism used for other services (e.g. `document-service`).
-    Action types that do not belong to this service (e.g.
-    `document.force_unlock`) are ignored."""
+    """Executes this service's own gated actions (scope locks, 4.7, role
+    assignments since P17-S3, 4.3/14.2, and role creation since P32-S1,
+    ADR 0130) only after approval (4.3) - self-consumption of its own
+    `permission.approval.approved` event, the exact same mechanism used for
+    other services (e.g. `document-service`). Action types that do not
+    belong to this service (e.g. `document.force_unlock`) are ignored."""
 
     async def handle(payload: bytes) -> None:
         event = Event.from_bytes(payload)
@@ -29,6 +29,7 @@ def make_handler(
             "permission.scope_lock.release",
             "system.not_shutdown.trigger",
             "permission.role_assignment.create",
+            "permission.role.create",
         )
         if action_type not in known_action_types:
             return
@@ -86,9 +87,8 @@ def make_handler(
                         },
                         actor=lock.released_by,
                     )
-                else:
-                    # permission.role_assignment.create (P17-S3, 14.2
-                    # "permission change") - `create_role_assignment` is
+                elif action_type == "permission.role_assignment.create":
+                    # 14.2 "permission change" - `create_role_assignment` is
                     # already idempotency-friendly, guarded via
                     # `repository.NotFoundError` (unknown role_id/resource),
                     # see the except branch below.
@@ -110,6 +110,32 @@ def make_handler(
                             "resource_id": assignment.resource_id,
                         },
                         actor=assignment.principal_id,
+                    )
+                else:
+                    # permission.role.create (P32-S1, ADR 0130) -
+                    # `create_role` has no not-found precondition (it only
+                    # ever inserts), so this branch has no
+                    # `repository.NotFoundError` case of its own - a
+                    # duplicate `name` would surface as an `IntegrityError`
+                    # instead, deliberately left unguarded like every other
+                    # branch here (a second, distinct decision to fix would
+                    # be adding idempotency, not this session's scope).
+                    role = await repository.create_role(
+                        session,
+                        action_payload["name"],
+                        action_payload.get("description", ""),
+                        action_payload.get("permissions", []),
+                    )
+                    await session.commit()
+                    await publish_event(
+                        "permission.role.created",
+                        {
+                            "role_id": role.id,
+                            "name": role.name,
+                            "description": role.description,
+                            "permissions": role.permissions,
+                        },
+                        actor=event.payload.get("approved_by"),
                     )
             except (repository.NotFoundError, KeyError):
                 # KeyError covers foreign/malformed payloads (e.g. a request

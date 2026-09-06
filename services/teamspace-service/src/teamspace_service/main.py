@@ -3,6 +3,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -38,6 +39,44 @@ settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
 
+_TEAMSPACE_ADMIN_PRINCIPAL_ID = "teamspace-service"
+_REQUIRED_ROLE_NAMES = ("domain-admin-users",)
+
+
+async def _ensure_bootstrap_permissions() -> None:
+    """Since P32-S1 (ADR 0130): `PermissionServiceClient._ensure_role`'s
+    get-or-create call to `POST /roles` is now self-gated
+    (`admin.user_management`) - idempotent self-assignment at startup,
+    same bootstrap pattern as `config-service`'s/`migration-service`'s
+    `_ensure_bootstrap_permissions`/`_ensure_config_admin_permission`."""
+    async with httpx.AsyncClient(
+        base_url=settings.permission_service_base_url, timeout=10.0
+    ) as client:
+        roles = (await client.get("/roles")).json()
+        existing_assignments = (
+            await client.get(
+                "/role-assignments", params={"principal_id": _TEAMSPACE_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        assigned_role_ids = {a["role_id"] for a in existing_assignments}
+        for role_name in _REQUIRED_ROLE_NAMES:
+            role = next((r for r in roles if r["name"] == role_name), None)
+            if role is None:
+                logger.warning("teamspace_service_bootstrap_role_missing: %s", role_name)
+                continue
+            if role["id"] in assigned_role_ids:
+                continue
+            response = await client.post(
+                "/role-assignments",
+                json={
+                    "principal_type": "service",
+                    "principal_id": _TEAMSPACE_ADMIN_PRINCIPAL_ID,
+                    "role_id": role["id"],
+                    "resource_id": "root",
+                },
+            )
+            response.raise_for_status()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -50,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = make_session_factory(engine)
     app.state.folder_client = FolderServiceClient(settings.folder_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    await _ensure_bootstrap_permissions()
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()

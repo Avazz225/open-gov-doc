@@ -301,9 +301,15 @@ def test_import_with_approval_required_defers_execution(authorized_principal):
     Mocking von Sibling-Services"-Muster wie document-service's
     `test_force_release_with_approval_required_defers_execution`."""
     role_name = f"config-import-pending-{uuid.uuid4().hex[:8]}"
+    # Gegatet seit P32-S1 (ADR 0130) - reuses the running `config-service`
+    # container's own bootstrapped principal (`main.py::
+    # _ensure_bootstrap_permissions`, granted `domain-admin-users` at
+    # startup), same reuse pattern as `migration-service`'s tests.
+    config_admin_headers = {"X-DMS-Principal": "config-service"}
     httpx.put(
         f"{PERMISSION_SERVICE_URL}/approval-config/config.import",
         json={"requires_approval": True},
+        headers=config_admin_headers,
     )
     try:
         payload = {
@@ -337,6 +343,7 @@ def test_import_with_approval_required_defers_execution(authorized_principal):
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/config.import",
             json={"requires_approval": False},
+            headers=config_admin_headers,
         )
 
 

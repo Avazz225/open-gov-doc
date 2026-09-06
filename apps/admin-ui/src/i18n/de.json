@@ -93,7 +93,8 @@
     "permissions": "Rechte (kommagetrennt)",
     "permissionsPlaceholder": "read, write",
     "empty": "Keine Rollen.",
-    "createError": "Rolle anlegen fehlgeschlagen"
+    "createError": "Rolle anlegen fehlgeschlagen",
+    "pendingApproval": "Vier-Augen-Prinzip aktiv - die neue Rolle wartet auf Genehmigung durch eine zweite Person, bevor sie angelegt wird."
   },
   "groups": {
     "sectionTitle": "Gruppen",

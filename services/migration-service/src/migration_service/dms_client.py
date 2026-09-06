@@ -127,7 +127,10 @@ class LocalDmsClient:
         when receiving a migrated permission (target role). **Deliberate
         limitation**: `principal_id` remains an opaque reference, no
         validation against this installation's user population (see
-        docs/services/migration-service.md "Deliberate Limitations")."""
+        docs/services/migration-service.md "Deliberate Limitations").
+        `POST /roles` now wraps its response in a `status`/`role` envelope
+        (P32-S1, ADR 0130) - unwrap `["role"]` instead of reading fields
+        directly off the top-level object."""
         roles_response = self._permissions.get("/roles")
         roles_response.raise_for_status()
         existing = next(
@@ -145,7 +148,7 @@ class LocalDmsClient:
                 },
             )
             create_response.raise_for_status()
-            role_id = create_response.json()["id"]
+            role_id = create_response.json()["role"]["id"]
         assignment_response = self._permissions.post(
             "/role-assignments",
             json={

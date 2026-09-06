@@ -1,6 +1,9 @@
 # 0089 — admin-ui: four-eyes settings page, `PUT /approval-config` deliberately stays ungated
 
-**Status:** accepted (Post-roadmap Phase 22 Session 3)
+**Status:** superseded by [ADR 0130](0130-approval-config-self-gated-role-creation-four-eyes.md) (P32-S1) -
+the "not this session" deferral below was actually implemented once the blast radius was mapped
+call-site by call-site rather than estimated.
+**Original status:** accepted (Post-roadmap Phase 22 Session 3)
 **Context:** Post-roadmap Phase 22 Session 3, affects `admin-ui`, `permission-service`
 
 ## Decision

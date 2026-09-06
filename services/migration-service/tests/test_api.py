@@ -147,8 +147,13 @@ def test_transfer_to_unknown_target_returns_404():
 
 def test_transfer_start_requires_approval_when_configured():
     with httpx.Client(base_url=PERMISSION_SERVICE_URL) as permission_client:
+        # Gegatet seit P32-S1 (ADR 0130) - reuses the running
+        # `migration-service` container's own bootstrapped principal, same
+        # as `conftest.py::_reset_approval_config`.
         permission_client.put(
-            "/approval-config/migration.transfer.start", json={"requires_approval": True}
+            "/approval-config/migration.transfer.start",
+            json={"requires_approval": True},
+            headers={"X-DMS-Principal": "migration-service"},
         )
 
     installation = _register_self()

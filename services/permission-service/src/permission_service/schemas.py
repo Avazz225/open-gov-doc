@@ -30,6 +30,19 @@ class RoleOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RoleActionResult(BaseModel):
+    """Like `RoleAssignmentActionResult` (P17-S3) - `POST /roles` can
+    optionally be gated via the generic four-eyes mechanism since P32-S1
+    (`permission.role.create`, ADR 0130). Response shape changes from a bare
+    `RoleOut` to this wrapper regardless of whether approval is configured,
+    same precedent as `RoleAssignmentActionResult` (P17-S3) and
+    `ScopeLockActionResult` (P6-S4) always wrapping their resource."""
+
+    status: Literal["created", "pending_approval"]
+    role: RoleOut | None = None
+    approval_request_id: str | None = None
+
+
 class RoleAssignmentCreate(BaseModel):
     principal_type: Literal["user", "group", "service"]
     principal_id: str

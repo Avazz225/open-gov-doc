@@ -11,6 +11,10 @@ WEBDAV_CONNECTOR_URL = os.environ.get("TEST_WEBDAV_CONNECTOR_URL", "http://local
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+# Muss mit conftest.py::ROLE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
+# `_grant_role_admin_permission`-Fixture berechtigt) - kein Cross-File-Import
+# von Test-Konstanten, gleiche Projektkonvention wie document-service.
+ROLE_ADMIN_PRINCIPAL_ID = "webdav-connector-test-role-admin"
 
 
 def _dav_client(user: tuple[str, str]) -> Client:
@@ -47,6 +51,7 @@ def _grant_document_write(principal_id: str) -> None:
     Konfigurationspaket) - `raise_for_status()` allein reicht daher nicht
     mehr. Die Pflicht wird nur für die Dauer dieses Grants ausgesetzt und
     danach zurückgesetzt, nicht dauerhaft überschrieben."""
+    admin_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
     config = httpx.get(
         f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
         timeout=30.0,
@@ -56,15 +61,21 @@ def _grant_document_write(principal_id: str) -> None:
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
             json={"requires_approval": False},
+            headers=admin_headers,
             timeout=30.0,
         )
     try:
+        # `POST /roles` requires `admin.user_management` since ADR 0071 -
+        # previously called with no header at all here (a pre-existing,
+        # latent gap found while gating `PUT /approval-config` in P32-S1),
+        # fixed alongside since this function was already being touched.
         role = httpx.post(
             f"{PERMISSION_SERVICE_URL}/roles",
             json={
                 "name": f"webdav-connector-edit-token-test-role-{uuid.uuid4().hex[:8]}",
                 "permissions": ["document.write"],
             },
+            headers=admin_headers,
             timeout=30.0,
         )
         role.raise_for_status()
@@ -73,7 +84,9 @@ def _grant_document_write(principal_id: str) -> None:
             json={
                 "principal_type": "user",
                 "principal_id": principal_id,
-                "role_id": role.json()["id"],
+                # `POST /roles` also wraps its response since P32-S1 (ADR
+                # 0130, `RoleActionResult`) - unwrap `["role"]`.
+                "role_id": role.json()["role"]["id"],
                 "resource_id": "root",
             },
             timeout=30.0,
@@ -87,6 +100,7 @@ def _grant_document_write(principal_id: str) -> None:
             httpx.put(
                 f"{PERMISSION_SERVICE_URL}/approval-config/permission.role_assignment.create",
                 json={"requires_approval": True},
+                headers=admin_headers,
                 timeout=30.0,
             )
 

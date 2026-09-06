@@ -128,7 +128,7 @@ def test_create_and_get_process_definition(client, manual_task_bpmn, admin_heade
 
 
 def test_create_process_definition_with_approval_required_defers_creation(
-    client, manual_task_bpmn, admin_headers
+    client, manual_task_bpmn, admin_headers, users_admin_headers
 ):
     """Post-Roadmap Phase 21 Session 4 (ADR 0087) - mit aktivierter
     Genehmigungspflicht wird NICHT sofort angelegt, echte Integration gegen
@@ -141,6 +141,7 @@ def test_create_process_definition_with_approval_required_defers_creation(
     httpx.put(
         f"{PERMISSION_SERVICE_URL}/approval-config/workflow.process_definition.import",
         json={"requires_approval": True},
+        headers=users_admin_headers,
     )
     try:
         name = f"Approval-Pending-{uuid.uuid4().hex[:8]}"
@@ -160,6 +161,7 @@ def test_create_process_definition_with_approval_required_defers_creation(
         httpx.put(
             f"{PERMISSION_SERVICE_URL}/approval-config/workflow.process_definition.import",
             json={"requires_approval": False},
+            headers=users_admin_headers,
         )
 
 

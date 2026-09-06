@@ -59,7 +59,9 @@ def _grant_read(principal_id: str, resource_id: str = "root") -> None:
         json={
             "principal_type": "user",
             "principal_id": principal_id,
-            "role_id": role.json()["id"],
+            # `POST /roles` also wraps its response since P32-S1 (ADR
+            # 0130, `RoleActionResult`) - unwrap `["role"]`.
+            "role_id": role.json()["role"]["id"],
             "resource_id": resource_id,
         },
         timeout=30.0,

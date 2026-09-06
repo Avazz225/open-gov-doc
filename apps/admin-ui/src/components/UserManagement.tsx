@@ -43,6 +43,7 @@ export function UserManagement() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [assignmentPending, setAssignmentPending] = useState(false);
+  const [rolePending, setRolePending] = useState(false);
 
   const [newGroup, setNewGroup] = useState({ name: "", description: "" });
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
@@ -124,8 +125,9 @@ export function UserManagement() {
   async function handleCreateRole(event: FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
+    setRolePending(false);
     try {
-      await createRole(accessToken, {
+      const result = await createRole(accessToken, {
         name: newRole.name,
         description: newRole.description,
         permissions: newRole.permissions
@@ -134,7 +136,13 @@ export function UserManagement() {
           .filter(Boolean),
       });
       setNewRole({ name: "", description: "", permissions: "" });
-      await reload();
+      if (result.status === "pending_approval") {
+        // Four-eyes principle active (P32-S1/ADR 0130) - not yet created,
+        // so no reload() (the list would remain unchanged anyway).
+        setRolePending(true);
+      } else {
+        await reload();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("roles.createError"));
     }
@@ -394,6 +402,7 @@ export function UserManagement() {
           </label>
           <button type="submit">{t("common.create")}</button>
         </form>
+        {rolePending && <p className="hint">{t("roles.pendingApproval")}</p>}
 
         <table className="data-table">
           <thead>

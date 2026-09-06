@@ -2,23 +2,21 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P31-S13c (general XJustiz export for inter-agency handoff: `nachricht.gds.
-uebermittlungSchriftgutobjekte.0005005`, `POST /xjustiz/export/documents/{id}`/`.../cases/{id}` — see below
-under "Post-Roadmap: Phase 31"), the seventeenth session of the new Phase 31 (eGov feature gap closure).
-P31-S13 (the original single-session plan line) was, per research + user decision, split into
-P31-S13a/b/c — **all three parts are now done**, completing gap #12 from the eGov feature gap analysis.
-**This also completes Phase 31 as currently scoped in `IMPLEMENTATION_PLAN.md`.**
+**Last completed:** P32-S1 (`PUT /approval-config/{action_type}` self-gated behind `admin.user_management`,
+reversing [ADR 0089](docs/adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)'s "not this
+session" deferral now that the actual blast radius was mapped call-site by call-site instead of
+estimated; `POST /roles` gains the generic four-eyes mechanism, wrapped response `RoleActionResult` — see
+[ADR 0130](docs/adr/0130-approval-config-self-gated-role-creation-four-eyes.md)), the first session of the
+new Phase 32+ (post-Phase-31 gap re-analysis).
 
-**Next session:** **P32-S1** (four-eyes config gating + role/permission-assignment four-eyes extension).
-Per the user's own standing instruction, all 12 of Phase 31's gaps were re-verified against the actual
-current code (not just ADRs/docs) by four parallel research passes, confirming each is genuinely
-complete for its ADR's own chosen scope — but each ADR honestly names deferred follow-up work, which
-this new **Phase 32+** (`IMPLEMENTATION_PLAN.md`) collects: Phase 32 (security/RBAC hardening, incl.
-one real open issue — an ungated four-eyes config endpoint), Phase 33 (accessibility completion across
-the five frontend apps P31-S8 didn't touch), Phase 34 (XDOMEA/XJustiz completion — XJustiz import,
-frontend entry points, case-level UI), Phase 35 (org-hierarchy/workflow polish), Phase 36 (records
-quarantine/output-stamping/misc completion), Phase 37 (scoping-only session on cross-tenant XDOMEA
-federation). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full session breakdown and citations.
+**Next session:** **P32-S2** (delegation's two dead scope dimensions — `_delegation_scope_matches` already
+checks `scope_object_type_ids`/`scope_folder_resource_ids` correctly, but `workflow-service`'s
+`check_delegation` caller never passes them, so any delegation created via the API with one of those
+scopes is silently always denied). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining
+session breakdown (Phase 32 security/RBAC hardening, Phase 33 accessibility completion, Phase 34
+XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
+quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
+federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
@@ -5010,6 +5008,92 @@ written for.
 **Phase 31, as currently scoped in `IMPLEMENTATION_PLAN.md`, is now fully complete** (P31-S1 through
 P31-S13c). Per the user's own standing instruction from earlier this session, the next step is a full gap
 re-analysis and a new follow-up plan — not a further P31-Sxx session.
+
+### Post-Roadmap: Phase 32 Session 1 — approval-config self-gating + role-creation four-eyes
+
+First session of the new Phase 32+ (post-Phase-31 gap re-analysis, see
+[ADR 0130](docs/adr/0130-approval-config-self-gated-role-creation-four-eyes.md) for the full design
+reasoning). Following user instruction to bundle both fixes into one larger session rather than split
+across a security session and a role-management session.
+
+**`PUT /approval-config/{action_type}` gated, reversing ADR 0089's "not this session" deferral.**
+[ADR 0089](docs/adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md) (Post-Roadmap Phase 22
+Session 3) had already evaluated self-gating this endpoint and declined, estimating "over a dozen test
+suites across eight services" would need updating. This session did the actual, exhaustive mapping
+instead of re-estimating — grep-based enumeration of every `PUT`/`POST` call site across the whole repo,
+not just the services ADR 0089 named. Confirmed reachability is real, not theoretical: `gateway-service`
+has no path-level allow-list beyond `public_routes`, and `admin-ui`'s `ApprovalSettings.tsx` (built by
+ADR 0089 itself) already calls this exact endpoint with no client-side capability check — any
+authenticated end user could disable four-eyes for any action type system-wide. Gated behind
+`admin.user_management` via the same `_require_role_management` helper that already gates `POST`/`PUT
+/roles` (ADR 0071).
+
+**`POST /roles` gains the generic four-eyes mechanism** (`permission.role.create`) — `POST
+/role-assignments` already had this since P17-S3, `POST /roles` never did, despite being arguably the more
+foundational of the two. Response now unconditionally wraps in `RoleActionResult`
+(`status`/`role`/`approval_request_id`), same envelope pattern as `RoleAssignmentActionResult`.
+`approval_consumer.py` gained a new branch for self-consumption on approval.
+
+**The real work was chasing the response-shape change's ripple effect, not the two endpoint changes
+themselves.** Every production and test caller that read a bare `Role`/`id` from `POST /roles`'s response
+needed updating:
+- `config-service`, `migration-service`: both already sent `X-DMS-Principal` with `admin.user_management`
+  from prior, unrelated bootstraps — safe for the RBAC gate; `migration-service`'s `dms_client.py` needed
+  the `["role"]` unwrap fix, `config-service`'s `apply_roles` never read the return value at all.
+- `teamspace-service`: its `PermissionServiceClient` sent **no** principal at all — a comment literally
+  claimed "deliberately ungated... no technical account needed," which this session proved wrong. Added a
+  new `_ensure_bootstrap_permissions` (mirroring `config-service`'s own) granting `domain-admin-users` to
+  a new `teamspace-service` principal at startup.
+- `auth-service`: genuine chicken-and-egg — its `_bootstrap_domain_admin_role_assignments` fixture runs
+  before any `TechnicalAccount` exists (it IS the bootstrap that creates the first one), so it can't reuse
+  a real domain-admin account's id like `everyone_role_without` does. Resolved with a dedicated,
+  test-only principal granted via the still-ungated `POST /role-assignments` (the same ADR 0023
+  chicken-and-egg carve-out domain-admin accounts themselves rely on in production).
+- `document-service`, `folder-service`, `search-service`, `webdav-connector`: all had an existing
+  `ROLE_ADMIN_PRINCIPAL_ID`/`_grant_role_admin_permission` test fixture pattern already granting
+  `admin.user_management` — just needed the `["role"]` unwrap added at each call site (11 sites in
+  `permission-service`'s own test suite alone, found via a repo-wide regex sweep after the first pass
+  missed several).
+- `webdav-connector`: found a **pre-existing, unrelated latent bug** while here — its
+  `_grant_document_write` test helper called `POST /roles` with no `X-DMS-Principal` at all, already
+  broken against ADR 0071's gate from years before this session, just never exercised in a way that
+  surfaced it. Fixed alongside (new `ROLE_ADMIN_PRINCIPAL_ID` fixture built from scratch, since none
+  existed for this service).
+- `admin-ui`: `createRole`'s return type changed from `Role` to `RoleActionResult`; `UserManagement.tsx`
+  gained a `rolePending` state/hint mirroring the existing `assignmentPending` pattern.
+
+**Test counts**: `permission-service` 158 (new: `PUT /approval-config` 401/403 gating tests,
+`permission.role.create` four-eyes defer/consume pair in both `test_api.py` and
+`test_approval_consumer.py`); `document-service` 339, `folder-service` 135, `workflow-service` 194,
+`auth-service` 105, `search-service` 56, `teamspace-service` 45, `migration-service` 8, `config-service`
+48 — all green after the header/unwrap fixes above (no new test cases needed in most of these, since the
+fix was to existing test infrastructure, not new behavior in those services themselves).
+`webdav-connector` 3 passed / 13 failed — the 13 failures are the long-documented, pre-existing PROPFIND
+timeout flake (438+ accumulated root test artifacts from this project's own extensive live-verification
+history across many sessions, see "Tooling & Testing" below), unrelated to this session's changes and
+deliberately not touched (per standing instruction, this dev-database content is not to be deleted
+without being asked). `admin-ui` 226 Vitest tests (2 new: role-creation four-eyes created/pending-approval
+pair), `tsc`/`eslint` clean. `ruff check`/`ruff format --check` clean on every file this session touched
+(one own file needed reformatting after edits, `auth-service/tests/conftest.py`; pre-existing, unrelated
+`loadtest/`/`federation-hub-service` issues untouched).
+
+**Fully verified live against the real, freshly rebuilt stack**: `PUT /approval-config` confirmed `401`
+without a header, `403` with an unprivileged principal; `POST /roles` confirmed `401` without a header,
+`201` with the wrapped envelope for a privileged principal; the full four-eyes deferral→approval→
+async-execution flow for `permission.role.create` confirmed end-to-end via `curl` (enabled four-eyes,
+created a role → `pending_approval`, approved from a different principal, confirmed the role now really
+exists — the consumer's async execution path genuinely works, not just the synchronous one). Restored
+`permission.role.create`'s `requires_approval` to its default `false` afterward; the two throwaway test
+roles could not be deleted (`permission-service` has no `DELETE /roles/{id}` endpoint at all — a
+pre-existing limitation, not something this session introduced) and remain as harmless orphan rows,
+consistent with every other service's own test-role residue.
+
+`docs/services/permission-service.md` (API table, Four-Eyes Approval Mechanism section, Open Points),
+`docs/services/admin-ui.md` (Tests changelog), `docs/services/teamspace-service.md`,
+`docs/services/migration-service.md` updated. New [ADR 0130](docs/adr/0130-approval-config-self-gated-role-creation-four-eyes.md);
+[ADR 0089](docs/adr/0089-approval-settings-ui-config-endpoint-stays-ungated.md)'s status line marked
+superseded. `graphify update .` deliberately deferred — Phase 32 has five sessions total, not a phase
+completion (per project convention, only run at phase end).
 
 ### Roadmap look-ahead planning after P6-S2
 - **bpmn.io license (watermark) accepted**: `bpmn-js` (Process Designer, P6-S8) is under the "bpmn.io License" — free commercial use, but a non-removable watermark on every rendered diagram. Decision: accept (same pattern as ADR 0018), see [ADR 0021](docs/adr/0021-bpmn-io-license-watermark.md). To be revisited on future white-label need. **`bpmn-js-spiffworkflow` itself was in the end not used during the actual P6-S8 implementation** (not published on npm since 2022, license inconsistency npm vs. GitHub) — see [ADR 0026](docs/adr/0026-process-designer-bpmn-js-without-spiffworkflow-addon.md), deviating from the original ADR-0021 assumption.
