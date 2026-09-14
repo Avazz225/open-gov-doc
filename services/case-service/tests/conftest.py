@@ -39,6 +39,12 @@ CONFIG_ADMIN_PRINCIPAL_ID = "case-service-test-config-admin"
 # `CONFIG_ADMIN_PRINCIPAL_ID` oben nur `domain-admin-config`
 # (`admin.object_config`) hält, siehe `everyone_role_without` unten.
 ROLE_ADMIN_PRINCIPAL_ID = "case-service-test-role-admin"
+# Records quarantine (14.2, ADR 0116), since Post-Roadmap Phase 36 Session 2
+# - case-service now surfaces document-level quarantine status per
+# reference, tested here via real calls against the live document-service
+# (no mocking) - a separate principal, since this capability is
+# domain-separated from `admin.object_config`/`admin.user_management`.
+RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "case-service-test-records-quarantine-admin"
 
 
 @pytest.fixture
@@ -52,6 +58,15 @@ def role_admin_headers() -> dict[str, str]:
     Rollen/Rollenzuweisungen gegen permission-service anlegen (Post-Roadmap
     Phase 35 Session 2, ADR 0144: Fall-spezifische RoleAssignments)."""
     return {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+
+
+@pytest.fixture
+def records_quarantine_admin_headers() -> dict[str, str]:
+    """`admin.records_quarantine`-Principal (ADR 0116) - for tests that set/
+    release a real records quarantine directly against the live-running
+    document-service, then confirm case-service's own `GET .../documents`
+    reflects it (Post-Roadmap Phase 36 Session 2)."""
+    return {"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
 
 
 # RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service prüft seit
@@ -145,6 +160,33 @@ async def _grant_role_admin_permission():
             json={
                 "principal_type": "user",
                 "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_records_quarantine_admin_permission():
+    """Records quarantine (14.2, ADR 0116) - same idempotent grant pattern
+    as `_grant_config_admin_permission` above, role `domain-admin-records-
+    quarantine` (capability `admin.records_quarantine`)."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as client:
+        roles = (await client.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-records-quarantine")
+        existing = (
+            await client.get(
+                "/role-assignments", params={"principal_id": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await client.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

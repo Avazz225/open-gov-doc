@@ -1375,12 +1375,19 @@ export interface RecordsQuarantine {
 
 export async function listRecordsQuarantine(
   token: string,
-  documentId: string,
+  documentId?: string,
   activeOnly = false
 ): Promise<RecordsQuarantine[]> {
+  // `documentId` optional (Post-Roadmap Phase 36 Session 2) - the backend's
+  // own `document_id` query param has always been optional (`str | None`),
+  // powering the installation-wide cross-folder browsing view
+  // (`RecordsQuarantineOverviewPane.tsx`) with no new endpoint needed.
+  const query = new URLSearchParams();
+  if (documentId) query.set("document_id", documentId);
+  query.set("active_only", String(activeOnly));
   const response = await request(
     "document-service",
-    `records-quarantine?document_id=${encodeURIComponent(documentId)}&active_only=${activeOnly}`,
+    `records-quarantine?${query.toString()}`,
     {},
     token
   );
@@ -2647,6 +2654,10 @@ export interface CaseDocumentReference {
   snapshot_version_number: number | null;
   current_version_number: number | null;
   document_deleted_at: string | null;
+  // Records quarantine (14.2, ADR 0116), since Post-Roadmap Phase 36
+  // Session 2 - surfaces the document's own quarantine status; case-service
+  // has no quarantine mechanism of its own.
+  has_active_quarantine: boolean;
 }
 
 export async function listCases(token: string, status?: string): Promise<Case[]> {

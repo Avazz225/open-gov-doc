@@ -353,6 +353,7 @@ function CaseDetail({
               )}
               <span className="entry-meta">
                 {t("cases.documentAddedAt", { date: formatDate(ref.added_at, locale) })}
+                {ref.has_active_quarantine ? ` — ${t("cases.documentQuarantined")}` : ""}
               </span>
             </li>
           ))}

@@ -19,7 +19,8 @@ export type WorkspaceView =
   | "aussonderung"
   | "vorlagen"
   | "cases"
-  | "handFolders";
+  | "handFolders"
+  | "recordsQuarantine";
 
 // Quarantine area (2.5/10.3, P15-S2) - unlike the trash (always visible at
 // least in the personal view), the concept specifies NO generally
@@ -51,10 +52,15 @@ export function IconRail({
   onSelectView: (view: WorkspaceView) => void;
 }) {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { user, permissions } = useAuth();
   const isQuarantineAdmin = Boolean(user?.realm_roles.includes(QUARANTINE_ADMIN_ROLE));
   const isPoststelle = Boolean(user?.realm_roles.includes(POSTSTELLE_ROLE));
   const isArchivalAccess = Boolean(user?.realm_roles.includes(ARCHIVAL_ACCESS_ROLE));
+  // Records quarantine (14.2, ADR 0116), since Post-Roadmap Phase 36
+  // Session 2 - the system-native `permissions` capability check
+  // `RecordsQuarantinePanel.tsx` already uses, not a realm role (unlike the
+  // unrelated virus-scan "quarantine" view above).
+  const isRecordsQuarantineAdmin = permissions.includes("admin.records_quarantine");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
@@ -131,6 +137,17 @@ export function IconRail({
           onClick={() => onSelectView("quarantine")}
         >
           <span aria-hidden="true">☣️</span>
+        </button>
+      )}
+      {isRecordsQuarantineAdmin && (
+        <button
+          type="button"
+          className={`icon-rail-button${activeView === "recordsQuarantine" ? " icon-rail-active" : ""}`}
+          title={t("iconRail.recordsQuarantine")}
+          aria-current={activeView === "recordsQuarantine" ? "page" : undefined}
+          onClick={() => onSelectView("recordsQuarantine")}
+        >
+          <span aria-hidden="true">🔏</span>
         </button>
       )}
       {isPoststelle && (

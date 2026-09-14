@@ -20,6 +20,10 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 # dieser Session `admin.user_management` - `test_api.py::_grant_root_read`
 # ruft diesen Endpunkt auf, braucht daher ein berechtigtes Testprincipal.
 ROLE_ADMIN_PRINCIPAL_ID = "search-service-test-role-admin"
+# Records quarantine (14.2, ADR 0116), since Post-Roadmap Phase 36 Session 2
+# - tests set/release a real quarantine against the live document-service to
+# verify it's excluded from search results.
+RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "search-service-test-records-quarantine-admin"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -37,6 +41,31 @@ async def _grant_role_admin_permission():
             json={
                 "principal_type": "user",
                 "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_records_quarantine_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-records-quarantine")
+        existing = (
+            await pc.get(
+                "/role-assignments",
+                params={"principal_id": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID},
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

@@ -28,6 +28,7 @@ import { AussonderungPane } from "./AussonderungPane";
 import { CasesPane } from "./CasesPane";
 import { HandFolderOverviewPane } from "./HandFolderOverviewPane";
 import { KontaktePane } from "./KontaktePane";
+import { RecordsQuarantineOverviewPane } from "./RecordsQuarantineOverviewPane";
 import { PoststellePane } from "./PoststellePane";
 import { QuarantinePane } from "./QuarantinePane";
 import { TrashPane } from "./TrashPane";
@@ -404,6 +405,11 @@ export function DocumentWorkspace() {
                 token={accessToken ?? ""}
                 onOpenDocument={openDocumentTab}
                 onOpenFolder={handleOpenHandFolder}
+              />
+            ) : view === "recordsQuarantine" ? (
+              <RecordsQuarantineOverviewPane
+                token={accessToken ?? ""}
+                onOpenDocument={openDocumentTab}
               />
             ) : (
               <KontaktePane token={accessToken ?? ""} />

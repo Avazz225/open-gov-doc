@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import DateTime, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,16 @@ class SearchDocument(Base):
     # folder's still-unregistered documents) is browsable installation-wide
     # via `/search?registered=false`, not just per-folder as before.
     registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Records quarantine (ADR 0116), denormalized here since Post-Roadmap
+    # Phase 36 Session 2 - a quarantined document is unconditionally
+    # excluded from `/search` results/facets (repository._apply_common_
+    # filters), closing the gap ADR 0116 itself named ("a quarantined
+    # document remains fully findable via search"). No opt-in to see them
+    # through this endpoint - the installation-wide browsing view added in
+    # the same session reads `GET /records-quarantine` directly instead
+    # (already gated by `admin.records_quarantine`, already installation-
+    # wide with no `document_id` filter - no new endpoint needed for it).
+    records_quarantine_active: Mapped[bool] = mapped_column(Boolean, default=False)
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # Maintained in Python/SQL (repository.upsert_document), not a generated
     # column - keeps the weighting logic (title > full text) visible/testable

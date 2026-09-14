@@ -18,5 +18,22 @@ class DocumentServiceClient:
         response.raise_for_status()
         return response.json()
 
+    async def has_active_quarantine(self, document_id: str) -> bool:
+        """Records quarantine (14.2, ADR 0116) - a separate call from `get()`
+        since quarantine status is not a column on the document itself, but
+        a joined `RecordsQuarantine` row. Deliberately the ungated `GET
+        .../has-active-quarantine` (a document's own status isn't
+        restricted-visibility content, only bulk listing is, per that
+        endpoint's own docstring) - safe to call unconditionally during
+        reindexing, same trust level as `get()` itself. `404` (unknown
+        document, e.g. a race with `document.deleted`) is treated as `False`
+        - `reindex_document()` already deletes the row for that case via its
+        own `get()` call, this value is simply discarded."""
+        response = await self._client.get(f"/documents/{document_id}/has-active-quarantine")
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return response.json()["has_active_quarantine"]
+
     async def close(self) -> None:
         await self._client.aclose()

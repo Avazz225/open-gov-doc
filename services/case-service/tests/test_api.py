@@ -163,6 +163,51 @@ def test_add_and_list_case_documents_resolves_current_version(
     assert reference["snapshot_version_number"] is None
 
 
+def test_case_documents_reflect_active_records_quarantine(
+    client, process_definition_id, document_id, case_headers, records_quarantine_admin_headers
+):
+    """Records quarantine (14.2, ADR 0116, Post-Roadmap Phase 36 Session 2) -
+    case-service surfaces the document's own quarantine status, set/released
+    for real against the live-running document-service (no mocking)."""
+    case = client.post(
+        "/cases",
+        json={
+            "name": "Akte",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()
+    client.post(
+        f"/cases/{case['id']}/documents",
+        json={"document_id": document_id, "added_by": "alice"},
+        headers=case_headers,
+    )
+
+    before = client.get(f"/cases/{case['id']}/documents", headers=case_headers).json()
+    assert before[0]["has_active_quarantine"] is False
+
+    quarantine = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/records-quarantine",
+        json={"document_id": document_id, "set_by": "alice", "reason": "Prüfung"},
+        headers=records_quarantine_admin_headers,
+    )
+    quarantine.raise_for_status()
+
+    during = client.get(f"/cases/{case['id']}/documents", headers=case_headers).json()
+    assert during[0]["has_active_quarantine"] is True
+
+    release = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/records-quarantine/{quarantine.json()['id']}/release",
+        json={"released_by": "bob"},
+        headers=records_quarantine_admin_headers,
+    )
+    release.raise_for_status()
+
+    after = client.get(f"/cases/{case['id']}/documents", headers=case_headers).json()
+    assert after[0]["has_active_quarantine"] is False
+
+
 def test_add_document_with_unknown_document_id_returns_400(
     client, process_definition_id, case_headers
 ):

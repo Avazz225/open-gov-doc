@@ -71,6 +71,7 @@ const DOCUMENT_REF: CaseDocumentReference = {
   snapshot_version_number: null,
   current_version_number: 1,
   document_deleted_at: null,
+  has_active_quarantine: false,
 };
 
 function renderPane(onOpenDocument = vi.fn()) {
@@ -136,6 +137,16 @@ describe("CasesPane", () => {
 
     expect(await screen.findByText("Dokument gelöscht")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "doc-1" })).not.toBeInTheDocument();
+  });
+
+  it("shows a quarantine indicator for a document reference under active records quarantine", async () => {
+    listCaseDocumentsMock.mockResolvedValue([{ ...DOCUMENT_REF, has_active_quarantine: true }]);
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(await screen.findByText("Umlaufmappe A (2026-001)"));
+
+    expect(await screen.findByText(/unter Schriftgutquarantäne/)).toBeInTheDocument();
   });
 
   it("opens a case document via onOpenDocument", async () => {

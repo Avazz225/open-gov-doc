@@ -49,6 +49,19 @@ def make_document_handler(
             # unrelated metadata touch.
             "document.registered",
             "document.promoted",
+            # Since Post-Roadmap Phase 36 Session 2 (ADR 0116): a quarantined
+            # document must disappear from search results promptly, not just
+            # on its next unrelated metadata touch, and vice versa on
+            # release. `.auto_deleted` needs no special handling here -
+            # `reindex_document()`'s own `document_client.get()` call
+            # already returns 404 for a hard-deleted document (this
+            # particular deletion path never publishes `document.deleted`,
+            # ADR 0116's own audit-trail rationale), which the existing
+            # "doc is None" branch below already routes to
+            # `repository.delete_document()`.
+            "document.records_quarantine.set",
+            "document.records_quarantine.released",
+            "document.records_quarantine.auto_deleted",
         ):
             return
 

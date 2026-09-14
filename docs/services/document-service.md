@@ -248,13 +248,19 @@ quarantine" in full to avoid confusion with it), and the archival pipeline.
 - **Composable, not exclusive**: a document can be quarantined, legally held, and/or sitting in the
   regular trash all at once — no mutual-exclusion validation, matching legal hold's own precedent of
   having no `deleted_at` check either.
-- Publishes `document.records_quarantine.set`/`.released`/`.auto_deleted` — new event types, not
-  consumed by anything yet (deliberately not reusing `document.deleted` for the auto-delete case, which
-  would make `audit-service`'s verbatim event log incorrectly show a quarantine action as an actual
-  deletion, see ADR 0116).
-- **`case-service` untouched**: no destruction-scheduling primitive exists there to hook a quarantine gate
-  onto (only `status` open/closed and the archival-only `archive_after`/`archived_at`) — same scoping
-  conclusion this project already reached for redaction (ADR 0115).
+- Publishes `document.records_quarantine.set`/`.released`/`.auto_deleted` (deliberately not reusing
+  `document.deleted` for the auto-delete case, which would make `audit-service`'s verbatim event log
+  incorrectly show a quarantine action as an actual deletion, see ADR 0116). **Since Post-Roadmap Phase 36
+  Session 2**: consumed by `search-service` (all three, triggering a reindex that denormalizes
+  `records_quarantine_active`, see `docs/services/search-service.md`) — closes the gap ADR 0116 itself
+  named ("a quarantined document remains fully findable via search").
+- **`case-service` has no quarantine mechanism of its own** — no destruction-scheduling primitive exists
+  there to hook a quarantine gate onto (only `status` open/closed and the archival-only
+  `archive_after`/`archived_at`), same scoping conclusion this project already reached for redaction (ADR
+  0115). **Since Post-Roadmap Phase 36 Session 2**: `case-service` instead surfaces this service's own
+  `GET /documents/{id}/has-active-quarantine` (ungated, see the API table above) per case-document
+  reference — closing ADR 0116's "case-service is untouched" gap by exposing the existing status, not by
+  inventing a new per-case mechanism, see `docs/services/case-service.md`.
 
 ## Editing Copies (2.3, since P6-S3)
 

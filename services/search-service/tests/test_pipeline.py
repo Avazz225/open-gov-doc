@@ -14,6 +14,9 @@ DSN = os.environ.get(
 )
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
 FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
+# Muss mit conftest.py::RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID übereinstimmen
+# (dort per `_grant_records_quarantine_admin_permission`-Fixture berechtigt).
+RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "search-service-test-records-quarantine-admin"
 
 
 class FakeTextClient:
@@ -60,6 +63,27 @@ def _register_document(document_id: str) -> None:
     response = httpx.post(
         f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/register",
         json={"registered_by": "search-service-tests"},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+
+
+def _set_records_quarantine(document_id: str) -> str:
+    response = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/records-quarantine",
+        json={"document_id": document_id, "set_by": "search-service-tests"},
+        headers={"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def _release_records_quarantine(quarantine_id: str) -> None:
+    response = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/records-quarantine/{quarantine_id}/release",
+        json={"released_by": "search-service-tests"},
+        headers={"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID},
         timeout=30.0,
     )
     response.raise_for_status()
@@ -171,3 +195,20 @@ async def test_reindex_document_denormalizes_registered_at():
     _register_document(document_id)
     registered_indexed = await _run_reindex(document_id)
     assert registered_indexed.registered_at is not None
+
+
+async def test_reindex_document_denormalizes_records_quarantine_active():
+    # Records quarantine (ADR 0116, Post-Roadmap Phase 36 Session 2) - real
+    # set/release round trip against the live-running document-service.
+    document_id = _upload_document(filename=f"quarantaene-{uuid.uuid4().hex[:8]}.txt")
+
+    before = await _run_reindex(document_id)
+    assert before.records_quarantine_active is False
+
+    quarantine_id = _set_records_quarantine(document_id)
+    during = await _run_reindex(document_id)
+    assert during.records_quarantine_active is True
+
+    _release_records_quarantine(quarantine_id)
+    after = await _run_reindex(document_id)
+    assert after.records_quarantine_active is False

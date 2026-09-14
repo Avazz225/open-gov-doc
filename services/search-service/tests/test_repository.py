@@ -22,6 +22,7 @@ async def _index(
     full_text="",
     created_by="alice",
     registered_at=None,
+    records_quarantine_active=False,
 ):
     document_id = document_id or f"doc-{uuid.uuid4().hex[:8]}"
     return await repository.upsert_document(
@@ -38,6 +39,7 @@ async def _index(
         created_at=_now(),
         updated_at=_now(),
         registered_at=registered_at,
+        records_quarantine_active=records_quarantine_active,
     )
 
 
@@ -575,6 +577,53 @@ async def test_search_without_registered_filter_returns_both(session):
     )
 
     assert len(rows) == 2
+
+
+# Records quarantine (ADR 0116, Post-Roadmap Phase 36 Session 2).
+
+
+async def test_search_excludes_quarantined_documents_unconditionally(session):
+    findable = await _index(session, title="Findbar", records_quarantine_active=False)
+    quarantined = await _index(session, title="Unter Quarantäne", records_quarantine_active=True)
+    await session.commit()
+
+    rows = await repository.search(
+        session,
+        query=None,
+        folder_id=None,
+        object_type_id=None,
+        created_by=None,
+        created_after=None,
+        created_before=None,
+        attr_filters=[],
+        limit=20,
+        offset=0,
+        sort="updated_at",
+    )
+
+    ids = {doc.document_id for doc, _rank in rows}
+    assert findable.document_id in ids
+    assert quarantined.document_id not in ids
+
+
+async def test_facet_counts_excludes_quarantined_documents(session):
+    await _index(
+        session, folder_id="fq", folder_name="Quarantäne-Ordner", records_quarantine_active=True
+    )
+    await session.commit()
+
+    facets = await repository.facet_counts(
+        session,
+        query=None,
+        folder_id=None,
+        object_type_id=None,
+        created_by=None,
+        created_after=None,
+        created_before=None,
+        attr_filters=[],
+    )
+
+    assert all(row["folder_id"] != "fq" for row in facets["folder"])
 
 
 # Hand-folder cross-index (ADR 0118/0146).

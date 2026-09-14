@@ -80,6 +80,7 @@ async def reindex_document(
                     full_text = text_from_rendering
 
         registered_at = doc.get("registered_at")
+        records_quarantine_active = await document_client.has_active_quarantine(document_id)
 
         await repository.upsert_document(
             session,
@@ -95,6 +96,7 @@ async def reindex_document(
             created_at=_parse_datetime(doc["created_at"]),
             updated_at=_parse_datetime(doc["updated_at"]),
             registered_at=_parse_datetime(registered_at) if registered_at else None,
+            records_quarantine_active=records_quarantine_active,
         )
         await session.commit()
 

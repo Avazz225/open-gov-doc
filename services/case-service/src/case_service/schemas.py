@@ -76,6 +76,13 @@ class CaseDocumentReferenceOut(BaseModel):
     snapshot_version_number: int | None
     current_version_number: int | None = None
     document_deleted_at: datetime | None = None
+    # Records quarantine (14.2, ADR 0116), since Post-Roadmap Phase 36
+    # Session 2 - always live-resolved regardless of case open/closed
+    # status (unlike current_version_number/document_deleted_at above,
+    # quarantine is not part of the closure-snapshot concept: it's a
+    # visibility flag that can change at any time independent of the
+    # case's own lifecycle).
+    has_active_quarantine: bool = False
 
 
 class CaseArchiveStatusOut(BaseModel):

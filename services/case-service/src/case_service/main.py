@@ -256,7 +256,15 @@ async def _resolve_reference(session: AsyncSession, case, reference) -> CaseDocu
     """Two-stage reference model (2.3): while the circulation folder is
     open, the current main version is read live from the Document Service -
     from closure onward, only the fixed closure snapshot counts, without
-    any further document-service call."""
+    any further document-service call. `has_active_quarantine` (14.2, ADR
+    0116, since Post-Roadmap Phase 36 Session 2) is a THIRD, independent
+    resolution - always live, regardless of `case.status`/`removed_at`,
+    since quarantine is a visibility flag that can change at any time, not
+    part of the closure-snapshot concept above. No new case-level
+    quarantine mechanism exists or is planned (case-service has no
+    destruction-scheduling primitive to hook one into, same conclusion ADR
+    0115/0118 already reached for redaction/hand-folders) - this only
+    surfaces the document's own already-existing status."""
     current_version_number = None
     document_deleted_at = None
     if case.status == "open" and reference.removed_at is None:
@@ -264,6 +272,9 @@ async def _resolve_reference(session: AsyncSession, case, reference) -> CaseDocu
         if document is not None:
             current_version_number = document["current_version_number"]
             document_deleted_at = document["deleted_at"]
+    has_active_quarantine = await app.state.document_client.has_active_quarantine(
+        reference.document_id
+    )
     return CaseDocumentReferenceOut(
         document_id=reference.document_id,
         added_by=reference.added_by,
@@ -273,6 +284,7 @@ async def _resolve_reference(session: AsyncSession, case, reference) -> CaseDocu
         snapshot_version_number=reference.snapshot_version_number,
         current_version_number=current_version_number,
         document_deleted_at=document_deleted_at,
+        has_active_quarantine=has_active_quarantine,
     )
 
 

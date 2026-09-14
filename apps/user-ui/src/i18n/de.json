@@ -74,6 +74,7 @@
     "vorlagen": "Vorlagen",
     "cases": "Umlaufmappen",
     "handFolders": "Hand-Ordner/Arbeitsvorrat",
+    "recordsQuarantine": "Schriftgutquarantäne",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -249,6 +250,17 @@
     "autoDeleteAtLabel": "Automatische Löschung am",
     "set": "In Quarantäne verschieben",
     "error": "Quarantäne konnte nicht geändert werden"
+  },
+  "recordsQuarantineOverview": {
+    "paneLabel": "Schriftgutquarantäne (installationsweit)",
+    "heading": "Schriftgutquarantäne (installationsweit)",
+    "hint": "Alle aktuell unter Schriftgutquarantäne stehenden Dokumente über die gesamte Installation hinweg (14.2). Neu unter Quarantäne stellen geschieht weiterhin am jeweiligen Dokument selbst.",
+    "empty": "Aktuell ist kein Dokument unter Quarantäne.",
+    "documentGone": "Dokument nicht mehr abrufbar",
+    "setBy": "gesetzt von {setBy}",
+    "autoDeleteAt": "automatische Löschung am {date}",
+    "release": "Quarantäne aufheben",
+    "releaseError": "Quarantäne konnte nicht aufgehoben werden"
   },
   "shareLinkModal": {
     "heading": "Freigabelink: {name}",
@@ -479,6 +491,7 @@
     "documentsHeading": "Dokumente",
     "documentsEmpty": "Diese Umlaufmappe enthält noch keine Dokumente.",
     "documentDeleted": "Dokument gelöscht",
+    "documentQuarantined": "unter Schriftgutquarantäne",
     "documentAddedAt": "hinzugefügt am {date}",
     "exportHeading": "Export für Behörden-/Justizübergabe",
     "exporting": "Exportiere...",

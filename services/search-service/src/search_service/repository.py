@@ -40,6 +40,7 @@ async def upsert_document(
     created_at: datetime,
     updated_at: datetime,
     registered_at: datetime | None = None,
+    records_quarantine_active: bool = False,
 ) -> SearchDocument:
     """Creates or updates an index entry (natural primary key
     `document_id`, makes re-indexing idempotent). `search_vector` is
@@ -62,6 +63,7 @@ async def upsert_document(
     doc.created_at = created_at
     doc.updated_at = updated_at
     doc.registered_at = registered_at
+    doc.records_quarantine_active = records_quarantine_active
     doc.indexed_at = datetime.now(UTC)
     await session.flush()
 
@@ -98,6 +100,13 @@ def _apply_common_filters(
     attr_filters: list[AttrFilter],
     registered: bool | None = None,
 ):
+    # Records quarantine (ADR 0116, Post-Roadmap Phase 36 Session 2) -
+    # unconditional, no opt-in query param: a quarantined document is never
+    # returned by search/facets, the same restricted visibility
+    # document-service's own folder listing already enforces. Closes the
+    # gap ADR 0116 explicitly named ("a quarantined document remains fully
+    # findable via search").
+    stmt = stmt.where(SearchDocument.records_quarantine_active.is_(False))
     if folder_id is not None:
         stmt = stmt.where(SearchDocument.folder_id == folder_id)
     if object_type_id is not None:

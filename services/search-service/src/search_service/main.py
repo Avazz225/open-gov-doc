@@ -59,6 +59,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ"
             )
         )
+        # Records quarantine (Post-Roadmap Phase 36 Session 2, ADR 0116) -
+        # same ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE search.search_document "
+                "ADD COLUMN IF NOT EXISTS records_quarantine_active BOOLEAN "
+                "DEFAULT FALSE NOT NULL"
+            )
+        )
         # Fuzzy search (concept 3.7a, P14-S7, see ADR 0044) - pg_trgm is a
         # standard contrib module, available in the postgres:16-alpine image
         # without any further build step (already verified in ADR 0012).

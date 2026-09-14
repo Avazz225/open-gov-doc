@@ -42,7 +42,12 @@ def _grant_root_read(principal_id: str) -> None:
     assignment.raise_for_status()
 
 
-async def _index_at_root(title: str, *, registered_at: datetime | None = None) -> str:
+async def _index_at_root(
+    title: str,
+    *,
+    registered_at: datetime | None = None,
+    records_quarantine_active: bool = False,
+) -> str:
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
     engine = build_engine(DSN)
     session_factory = make_session_factory(engine)
@@ -62,6 +67,7 @@ async def _index_at_root(title: str, *, registered_at: datetime | None = None) -
             created_at=now,
             updated_at=now,
             registered_at=registered_at,
+            records_quarantine_active=records_quarantine_active,
         )
         await session.commit()
     await engine.dispose()
@@ -211,6 +217,28 @@ async def test_search_registered_false_lists_only_unregistered_documents_over_ht
     results = response.json()["results"]
     assert any(r["id"] == draft_id for r in results)
     assert all(r["title"] != registered_title for r in results)
+
+
+async def test_search_never_returns_a_quarantined_document_over_http():
+    # Records quarantine (ADR 0116, Post-Roadmap Phase 36 Session 2).
+    unique = uuid.uuid4().hex[:8]
+    findable_title = f"Findbar-{unique}"
+    quarantined_title = f"Quarantaene-{unique}"
+    await _index_at_root(findable_title)
+    await _index_at_root(quarantined_title, records_quarantine_active=True)
+    principal_id = f"alice-{unique}"
+    _grant_root_read(principal_id)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/search",
+            params={"sort": "updated_at", "limit": 100},
+            headers={"X-DMS-Principal": principal_id},
+        )
+    assert response.status_code == 200
+    titles = {r["title"] for r in response.json()["results"]}
+    assert findable_title in titles
+    assert quarantined_title not in titles
 
 
 def test_folder_references_requires_principal_header():
