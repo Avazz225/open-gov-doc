@@ -79,6 +79,8 @@ async def reindex_document(
                 if text_from_rendering:
                     full_text = text_from_rendering
 
+        registered_at = doc.get("registered_at")
+
         await repository.upsert_document(
             session,
             document_id=document_id,
@@ -92,6 +94,7 @@ async def reindex_document(
             created_by=doc["created_by"],
             created_at=_parse_datetime(doc["created_at"]),
             updated_at=_parse_datetime(doc["updated_at"]),
+            registered_at=_parse_datetime(registered_at) if registered_at else None,
         )
         await session.commit()
 

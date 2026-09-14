@@ -31,6 +31,11 @@ class SearchDocument(Base):
     created_by: Mapped[str] = mapped_column(String(128), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Draft/pre-registration lifecycle (ADR 0113), denormalized here since
+    # Post-Roadmap Phase 35 Session 4 (ADR 0146) so a "work tray" (any
+    # folder's still-unregistered documents) is browsable installation-wide
+    # via `/search?registered=false`, not just per-folder as before.
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # Maintained in Python/SQL (repository.upsert_document), not a generated
     # column - keeps the weighting logic (title > full text) visible/testable
@@ -40,3 +45,25 @@ class SearchDocument(Base):
     __table_args__ = (
         Index("ix_search_document_search_vector", "search_vector", postgresql_using="gin"),
     )
+
+
+class FolderReference(Base):
+    """Cross-folder index of `folder-service`'s `FolderDocumentReference`
+    ("hand folders", ADR 0118) - Post-Roadmap Phase 35 Session 4 (ADR 0146)
+    closes the gap ADR 0118 itself named ("no cross-case index... search-
+    service is not made aware of these references"). Composite natural key
+    `(folder_id, document_id)`, deliberately NOT mirroring the source
+    table's own surrogate `id`/soft-remove columns - the source allows the
+    same document to be referenced into the same folder twice (no
+    uniqueness constraint, ADR 0118), but this index is a browse aid, not a
+    system of record, and collapsing duplicate (folder, document) pairs
+    into one row is an accepted simplification (see ADR 0146)."""
+
+    __tablename__ = "search_folder_reference"
+
+    folder_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(128), primary_key=True, index=True)
+    folder_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    added_by: Mapped[str] = mapped_column(String(128))
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

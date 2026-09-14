@@ -18,7 +18,8 @@ export type WorkspaceView =
   | "kontakte"
   | "aussonderung"
   | "vorlagen"
-  | "cases";
+  | "cases"
+  | "handFolders";
 
 // Quarantine area (2.5/10.3, P15-S2) - unlike the trash (always visible at
 // least in the personal view), the concept specifies NO generally
@@ -184,6 +185,21 @@ export function IconRail({
         onClick={() => onSelectView("cases")}
       >
         <span aria-hidden="true">🗃️</span>
+      </button>
+      {/* Hand-folder/work-tray cross-installation overview (14.2, Post-
+          Roadmap Phase 35 Session 4, ADR 0146) - ungated, same posture as
+          "cases": the underlying data is already permission-filtered
+          per-row (folder.read for references, the existing document.read
+          check for work-tray documents), not a capability check on the
+          pane itself. */}
+      <button
+        type="button"
+        className={`icon-rail-button${activeView === "handFolders" ? " icon-rail-active" : ""}`}
+        title={t("iconRail.handFolders")}
+        aria-current={activeView === "handFolders" ? "page" : undefined}
+        onClick={() => onSelectView("handFolders")}
+      >
+        <span aria-hidden="true">🗂️</span>
       </button>
       <div className="icon-rail-settings">
         <button

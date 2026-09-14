@@ -19,6 +19,12 @@ DSN = os.environ.get(
     "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms",
 )
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+FOLDER_SERVICE_URL = os.environ.get("TEST_FOLDER_SERVICE_URL", "http://localhost:8008")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+# Same session-scoped `domain-admin-users` principal conftest.py already
+# grants for this service's own tests - reused here to grant `folder.write`
+# on a throwaway folder (hand-folder references, ADR 0118/0146).
+ROLE_ADMIN_PRINCIPAL_ID = "search-service-test-role-admin"
 
 
 def _upload_document(*, filename: str) -> str:
@@ -30,6 +36,61 @@ def _upload_document(*, filename: str) -> str:
     )
     response.raise_for_status()
     return response.json()["id"]
+
+
+def _create_folder(name: str) -> str:
+    response = httpx.post(
+        f"{FOLDER_SERVICE_URL}/folders",
+        json={"name": name, "parent_id": "root", "created_by": "search-service-tests"},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def _grant_folder_write(principal_id: str, folder_id: str) -> None:
+    role = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/roles",
+        json={
+            "name": f"search-test-hand-folder-role-{uuid.uuid4().hex[:8]}",
+            "permissions": ["folder.write", "folder.read"],
+        },
+        headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
+        timeout=30.0,
+    )
+    role.raise_for_status()
+    assignment = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": principal_id,
+            "role_id": role.json()["role"]["id"],
+            "resource_id": folder_id,
+        },
+        timeout=30.0,
+    )
+    assignment.raise_for_status()
+
+
+def _add_folder_document_reference(folder_id: str, document_id: str, *, added_by: str) -> None:
+    response = httpx.post(
+        f"{FOLDER_SERVICE_URL}/folders/{folder_id}/document-references",
+        json={"document_id": document_id, "added_by": added_by},
+        headers={"X-DMS-Principal": added_by},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+
+
+def _remove_folder_document_reference(folder_id: str, document_id: str, *, removed_by: str) -> None:
+    response = httpx.request(
+        "DELETE",
+        f"{FOLDER_SERVICE_URL}/folders/{folder_id}/document-references/{document_id}",
+        json={"removed_by": removed_by},
+        headers={"X-DMS-Principal": removed_by},
+        timeout=30.0,
+    )
+    response.raise_for_status()
 
 
 async def _poll_until(predicate, timeout_seconds=10.0, interval=0.2) -> bool:
@@ -117,3 +178,82 @@ async def test_text_update_handler_creates_row_from_scratch_without_prior_docume
 
     assert indexed is not None
     assert indexed.document_id == document_id
+
+
+def test_folder_document_reference_added_event_triggers_indexing():
+    """Real end-to-end: folder-service's `POST .../document-references`
+    publishes the real (now `added_at`-enriched) event, search-service's
+    live consumer picks it up (ADR 0118/0146)."""
+    principal = f"hf-tester-{uuid.uuid4().hex[:8]}"
+    folder_id = _create_folder(f"Handakte-{uuid.uuid4().hex[:8]}")
+    _grant_folder_write(principal, folder_id)
+    document_id = _upload_document(filename=f"beleg-{uuid.uuid4().hex[:8]}.txt")
+
+    engine = build_engine(DSN)
+    session_factory = make_session_factory(engine)
+
+    async def _indexed() -> bool:
+        async with session_factory() as session:
+            rows = await repository.list_folder_references(
+                session, folder_id=folder_id, document_id=document_id, limit=1, offset=0
+            )
+            return len(rows) == 1
+
+    with TestClient(app):
+        _add_folder_document_reference(folder_id, document_id, added_by=principal)
+        found = asyncio.run(_poll_until(_indexed, timeout_seconds=30.0))
+
+    asyncio.run(engine.dispose())
+    assert found, "Handakte-Referenz wurde nicht rechtzeitig indiziert"
+
+
+def test_folder_document_reference_removed_event_deletes_index_row():
+    principal = f"hf-tester-{uuid.uuid4().hex[:8]}"
+    folder_id = _create_folder(f"Handakte-{uuid.uuid4().hex[:8]}")
+    _grant_folder_write(principal, folder_id)
+    document_id = _upload_document(filename=f"beleg-{uuid.uuid4().hex[:8]}.txt")
+
+    engine = build_engine(DSN)
+    session_factory = make_session_factory(engine)
+
+    async def _indexed() -> bool:
+        async with session_factory() as session:
+            rows = await repository.list_folder_references(
+                session, folder_id=folder_id, document_id=document_id, limit=1, offset=0
+            )
+            return len(rows) == 1
+
+    async def _removed_from_index() -> bool:
+        async with session_factory() as session:
+            rows = await repository.list_folder_references(
+                session, folder_id=folder_id, document_id=document_id, limit=1, offset=0
+            )
+            return len(rows) == 0
+
+    # Both polls (and the engine disposal) MUST share a single `asyncio.run`
+    # call - asyncpg connections are bound to the event loop they were
+    # created in, so a second, separate `asyncio.run` reusing the same
+    # pooled `session_factory` raises "attached to a different loop". The
+    # remove call itself ALSO belongs inside this one coroutine, fired only
+    # once the add is confirmed indexed - firing both HTTP calls eagerly
+    # up front raced the two events against the poll's own first check: on
+    # a fast run, both add and remove could already be fully processed
+    # before polling ever started, so `_indexed` (looking for the
+    # NOW-ALREADY-GONE `rows==1` state) would loop until timeout and never
+    # even reach the removal check - a real bug in this test, not in the
+    # consumer (confirmed via a temporary handler-side print: both events
+    # were processed correctly and near-instantly, the poll just started
+    # too late to ever observe the intermediate "added" state).
+    async def _wait_for_add_then_remove() -> bool:
+        added = await _poll_until(_indexed, timeout_seconds=30.0)
+        if not added:
+            return False
+        _remove_folder_document_reference(folder_id, document_id, removed_by=principal)
+        return await _poll_until(_removed_from_index, timeout_seconds=30.0)
+
+    with TestClient(app):
+        _add_folder_document_reference(folder_id, document_id, added_by=principal)
+        gone = asyncio.run(_wait_for_add_then_remove())
+
+    asyncio.run(engine.dispose())
+    assert gone, "Handakte-Referenz wurde nach Entfernen nicht rechtzeitig aus dem Index gelöscht"

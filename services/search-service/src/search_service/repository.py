@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from search_service.models import SearchDocument
+from search_service.models import FolderReference, SearchDocument
 from search_service.query_compiler import compile_query
 from search_service.query_language import parse_query
 from sqlalchemy import Date, Numeric, cast, delete, func, null, select, text
@@ -39,6 +39,7 @@ async def upsert_document(
     created_by: str,
     created_at: datetime,
     updated_at: datetime,
+    registered_at: datetime | None = None,
 ) -> SearchDocument:
     """Creates or updates an index entry (natural primary key
     `document_id`, makes re-indexing idempotent). `search_vector` is
@@ -60,6 +61,7 @@ async def upsert_document(
     doc.created_by = created_by
     doc.created_at = created_at
     doc.updated_at = updated_at
+    doc.registered_at = registered_at
     doc.indexed_at = datetime.now(UTC)
     await session.flush()
 
@@ -94,6 +96,7 @@ def _apply_common_filters(
     created_after: datetime | None,
     created_before: datetime | None,
     attr_filters: list[AttrFilter],
+    registered: bool | None = None,
 ):
     if folder_id is not None:
         stmt = stmt.where(SearchDocument.folder_id == folder_id)
@@ -105,6 +108,15 @@ def _apply_common_filters(
         stmt = stmt.where(SearchDocument.created_at >= created_after)
     if created_before is not None:
         stmt = stmt.where(SearchDocument.created_at <= created_before)
+    if registered is not None:
+        # Work tray browsing (ADR 0113/0118, denormalized here since ADR
+        # 0146): `registered=false` lists still-unregistered documents
+        # across every folder in the installation, `true` the opposite.
+        stmt = stmt.where(
+            SearchDocument.registered_at.is_(None)
+            if not registered
+            else SearchDocument.registered_at.is_not(None)
+        )
     for attr_filter in attr_filters:
         field = SearchDocument.attributes[attr_filter.name].astext
         if attr_filter.attr_type in ("decimal", "integer"):
@@ -138,6 +150,7 @@ async def search(
     limit: int,
     offset: int,
     sort: Literal["relevance", "created_at", "updated_at"],
+    registered: bool | None = None,
 ) -> list[tuple[SearchDocument, float | None]]:
     """Returns `(SearchDocument, rank)` pairs, `rank` only set when `query`
     is given. Results are returned BEFORE any permission check - filtering
@@ -167,6 +180,7 @@ async def search(
         created_after=created_after,
         created_before=created_before,
         attr_filters=attr_filters,
+        registered=registered,
     )
 
     if query and sort in ("relevance", None):
@@ -236,3 +250,66 @@ async def facet_counts(
             {"object_type_id": otid, "count": count} for otid, count in object_type_rows
         ],
     }
+
+
+async def upsert_folder_reference(
+    session: AsyncSession,
+    *,
+    folder_id: str,
+    document_id: str,
+    folder_name: str | None,
+    added_by: str,
+    added_at: datetime,
+) -> FolderReference:
+    """Hand-folder cross-index (ADR 0118/0146). Natural composite key
+    `(folder_id, document_id)` - re-adding the same pair (the source table
+    itself allows a duplicate reference row, see ADR 0118) simply refreshes
+    this one row instead of creating a second, indistinguishable index
+    entry, an accepted simplification for a browse aid (see ADR 0146)."""
+    ref = await session.get(FolderReference, (folder_id, document_id))
+    if ref is None:
+        ref = FolderReference(folder_id=folder_id, document_id=document_id)
+        session.add(ref)
+    ref.folder_name = folder_name
+    ref.added_by = added_by
+    ref.added_at = added_at
+    ref.indexed_at = datetime.now(UTC)
+    await session.flush()
+    return ref
+
+
+async def delete_folder_reference(session: AsyncSession, folder_id: str, document_id: str) -> None:
+    await session.execute(
+        delete(FolderReference).where(
+            FolderReference.folder_id == folder_id, FolderReference.document_id == document_id
+        )
+    )
+
+
+async def list_folder_references(
+    session: AsyncSession,
+    *,
+    folder_id: str | None = None,
+    document_id: str | None = None,
+    limit: int,
+    offset: int,
+) -> list[tuple[FolderReference, str | None]]:
+    """Returns `(FolderReference, document_title)` pairs - `document_title`
+    via a `LEFT JOIN` onto `SearchDocument` (so a reference to a document
+    search-service hasn't indexed yet, e.g. still mid-backfill, still
+    appears, just without a title). Returned BEFORE any permission check,
+    same split as `search()` above - `main.py` filters by the referenced
+    folder's own `folder.read` permission, the check this whole feature is
+    gated behind at the source (ADR 0118)."""
+    stmt = (
+        select(FolderReference, SearchDocument.title)
+        .outerjoin(SearchDocument, FolderReference.document_id == SearchDocument.document_id)
+        .order_by(FolderReference.added_at.desc())
+    )
+    if folder_id is not None:
+        stmt = stmt.where(FolderReference.folder_id == folder_id)
+    if document_id is not None:
+        stmt = stmt.where(FolderReference.document_id == document_id)
+    stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return [(row[0], row[1]) for row in result.all()]

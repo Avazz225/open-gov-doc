@@ -52,6 +52,7 @@ async def _clean_tables():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.execute(text("TRUNCATE search.search_document CASCADE"))
+        await conn.execute(text("TRUNCATE search.search_folder_reference CASCADE"))
     await eng.dispose()
     yield
 

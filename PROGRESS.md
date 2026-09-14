@@ -2,66 +2,67 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P35-S3 (closed all three gaps ADR 0121 had explicitly named as its own deferred future
-scope — "no reassignment, no queueing, no notifications" — plus narrowed ADR 0122's "purely read-only"
-`TeamTaskList` stance. New `POST /instances/{id}/tasks/{task_id}/reassign` (`new_principal_id`) on
-`workflow-service`: `repository.reassign_task_claim()` deletes the current `TaskClaim` row and inserts a
-fresh one for the new principal rather than updating in place, so any org-hierarchy grant tied to the old
-claim does NOT silently carry over to the new assignee (it's revoked via the existing
-`_revoke_claim_grants()` first) — gated by the same `workflow.write` capability as claiming itself, no new
-"must be the supervisor" check, since no such relationship-aware authorization primitive exists anywhere in
-this project. New `_task_claim_expiry_poll_loop` (same `while True`/skip-during-maintenance/`finally: sleep`
-idiom as `_sla_poll_loop`) finds claims older than the new `claim_abandonment_threshold_hours` setting
-(default 72h — deliberately a SEPARATE setting from the same-valued `org_hierarchy_grant_max_duration_hours`
-backstop, since one is a hard access cutoff and the other a soft reminder unrelated to whether a grant was
-ever requested) that haven't already been notified (`TaskClaim.expiry_notified_at IS NULL`, same "sent once
-per deadline" dedup pattern as `DocumentLock.reminder_sent_at`), and publishes
-`workflow.task_claim.abandoned` — consumed by `notification-service`'s new `_handle_task_claim_abandoned`
-for a single in-app nudge to the claim holder, mirroring the existing `document.lock.reminder` handler
-exactly (own durable name `notification-service-task-claim-abandoned`, third subject on the `"workflow"`
-stream, own `EMAIL_TEMPLATE_USE_CASES` catalog entry). `GET /tasks`/`GET /instances/{id}/tasks` now also
-return `created_by` (the owning `ProcessInstance`'s creator) on every entry — the only attribution signal an
-UNCLAIMED task has. `reviewer-ui`'s `TeamTaskList.tsx` now also lists an unclaimed task whose instance was
-created by a direct report (not just claimed tasks as before), and gained inline assign/reassign forms (same
-`<tr>`-below-the-row idiom as `TaskList.tsx`'s existing claim/grant forms, using an explicit `React.Fragment`
-with `key` since the `<>` shorthand doesn't support one) — task **completion** deliberately remains excluded
-from this view, preserving ADR 0122's original "oversight ≠ acting on someone else's work" distinction, just
-narrowed rather than reversed. The "instance creator" attribution choice (over a richer but unbuilt "BPMN
-lane/role membership" alternative the plan's own phrasing had floated) was confirmed via `AskUserQuestion`
-before implementation. A real regression found and fixed along the way, unrelated to this session's own
-changes: P35-S1's `is_org_unit` requirement on `POST /groups` had never been retrofitted into
-`workflow-service`'s own `_create_group_with_members()` test helper (only permission-service's/admin-ui's own
-tests were fixed in P35-S1), silently breaking
-`test_org_hierarchy_grant_org_unit_of_creator_resolves_from_instance_creator` — fixed as a drive-by (the
-helper's only call site). `workflow-service` +9 tests (207 total, up from 198) — claim reassignment
-(old claim gone, no carried-over grant), the due-for-notice repository query (threshold filtering,
-already-notified claims excluded), the reassign endpoint (success + 404-if-unclaimed), `created_by` on the
-task listing, plus the drive-by fix above. `notification-service` +3 tests (81 total, up from 78) — fallback
-body without a configured template, a configured `EmailTemplate` override actually rendered, direct-link
-presence/absence. `reviewer-ui` +3 tests (44 total, up from 41) — `team-task-list.test.tsx` grew from 4 to 7:
-a new fixture distinguishing an unclaimed task from a stranger's instance (still excluded) from one from a
-direct report's instance (now included), plus assign and reassign interaction tests. Two testing gotchas hit
-and fixed along the way: the ambiguous-button-after-opening-the-inline-form issue (row action button and form
-submit button share identical visible text) needed `getAllByRole(...)[1]`, found independently in BOTH the
-assign and reassign tests; and the React `Fragment`/`key` shorthand limitation. Live-verified end to end
-against the real, rebuilt running stack: a real `workflow.task_claim.abandoned` event published directly
-against `workflow-service` and confirmed to produce a real in-app notification at `notification-service`; a
-full Playwright pass through reviewer-ui's `/team` page (after resolving a `user.sub`-vs-username mismatch
-in a throwaway `SupervisorAssignment` used for the test) confirming a claimed report task renders correctly
-and clicking "Neu zuweisen" + submitting a new principal ID actually reassigns the claim, with the row
-updating to the new claimant after reload — two screenshots captured and visually confirmed. Throwaway
-Playwright spec and scratchpad files deleted afterward; throwaway live-verification data (a `ProcessDefinition`/
-`ProcessInstance`/`TaskClaim`, a throwaway admin-role-granted principal, two `SupervisorAssignment` rows) left
-in place, same established "harmless leftover test data, no delete endpoint" precedent as prior sessions. See
-[ADR 0145](docs/adr/0145-task-claim-reassignment-expiry-notice-and-unclaimed-team-work-attribution.md)), the
-third session of Phase 35 (org-hierarchy & workflow polish).
+**Last completed:** P35-S4 (closed both gaps ADR 0118 had explicitly named as its own follow-up: no
+cross-installation index/search for hand folders, and no browsing UI for either hand folders or work trays
+— the final session of Phase 35, org-hierarchy & workflow polish, now fully complete. `search-service`
+gained a new cross-folder index (`search_folder_reference`, composite natural key `folder_id`+`document_id`,
+a deliberate simplification since the source table allows duplicate references and this index is a browse
+aid, not a system of record) fed by a new consumer on `folder.document_reference.added`/`.removed` (own
+durable `search-service-folder-references`, third subscription in this service, own "folder" stream). A new
+`GET /folder-references` endpoint (optional `folder_id`/`document_id` filters, the latter also closing
+ADR 0118's named "no reverse lookup" gap) lists them, permission-filtered per row against each reference's
+own `folder_id` via `folder.read` — same overfetch-then-batch-check-then-paginate shape the existing
+`/search` endpoint already uses. `folder-service`'s `folder.document_reference.added` event gained an
+`added_at` field (a one-line addition) since the one endpoint that would let a consumer reload the real
+timestamp, `GET /folders/{id}/document-references`, is itself `folder.read`-gated — the one place in this
+service the usual "reload the full state via an ungated GET" pattern doesn't carry over. The new consumer
+deliberately subscribes with `deliver_new=True`, unlike every other consumer in `search-service` (which all
+rely on JetStream's default full-history replay as a free backfill mechanism) — `folder.document_reference.*`
+has existed since ADR 0118, many sessions before this one, so a first-ever replay here would grow without
+bound as the installation ages, a real cost independent of any test artifact. Accepted, documented
+consequence: a hand-folder reference from before this session's rollout is not retroactively backfilled into
+the cross-index (the source table in `folder-service` remains fully accurate and unaffected regardless).
+Work trays got NO new index of their own — reusing ADR 0118's own "not a new entity" framing, the EXISTING
+document index (`search_document`) gained one new nullable column, `registered_at` (denormalized from
+`document-service`'s existing draft/pre-registration lifecycle, ADR 0113), and the existing `/search`
+endpoint gained a `registered=true|false` query filter powering installation-wide work-tray browsing;
+`document.registered`/`document.promoted` were added to the existing document-event trigger list so the
+filter reflects a registration/promotion promptly. New `user-ui` pane `HandFolderOverviewPane.tsx` (new
+ungated icon-rail entry "Hand-Ordner/Arbeitsvorrat", 🗂️) shows both lists — hand-folder references and
+work-tray documents — each row opening its document/folder via the same resolve-then-navigate pattern
+already used for favorites/teamspaces (`handleOpenHandFolder` mirrors the existing
+`handleOpenTeamspaceFolder` exactly). A real, non-obvious test-sequencing bug found and fixed along the way,
+confirmed unrelated to the actual consumer/production logic via a temporary handler-side debug print: the
+first version of the new "remove" consumer-integration test fired both the add and remove HTTP calls before
+starting to poll, racing the two events against the poll's own first check — on a fast run, both could
+already be fully processed (net effect: no row at all) before polling even began, so the poll's own
+`_indexed` predicate (looking for the by-then-already-gone "added" state) looped until timeout and never
+even reached the removal check; fixed by firing the remove request only once polling confirms the add was
+indexed. `search-service` +15 tests (71 total, up from 56) — `registered` filtering (3), the new
+`FolderReference` repository functions (6: upsert/dedup/delete/filter-by-folder/filter-by-document/title
+join), the consumer end-to-end against the real running `folder-service` (2), `registered_at` denormalization
+in the reindex pipeline (1), and the two new HTTP endpoints' permission filtering (3). `folder-service`'s own
+135 tests are unaffected (the `added_at` payload addition has no existing consumer to break). `user-ui` +4
+tests (264 total, up from 260) — new `hand-folder-overview-pane.test.tsx`: both empty states, a reference
+renders and opens its document, opens its folder, a work-tray document renders and confirms `searchDocuments`
+was called with `registered: false`. Live-verified end to end against the real, rebuilt running stack in an
+actual browser (Playwright): a real hand folder created with `folder.write`/`folder.read` granted on it
+specifically (not `root`), a real document referenced into it, and a real draft (unregistered) document
+uploaded — all confirmed to render correctly in the new pane, including opening the referenced document all
+the way into the document workspace (two screenshots captured and visually confirmed). Throwaway Playwright
+spec and `test-results`/`playwright-report` directories deleted afterward; the live-verification data itself
+(the throwaway folder, role, role-assignment, and two documents) left in place, same established "harmless
+leftover test data, no delete endpoint" precedent as prior sessions. See
+[ADR 0146](docs/adr/0146-hand-folder-cross-index-and-work-tray-browsing.md)).
 
-**Next session:** **P35-S4** (hand folders/work trays: cross-case index + browsing UI —
-`search-service` doesn't know about `FolderDocumentReference` today, so there is no installation-wide
-search/browse across all hand folders/work trays; add indexing plus a simple overview page). See
-`IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (P35-S4 concludes Phase 35; then Phase
-36 records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
-federation).
+**Next session:** **P36-S1** (admin UI for `ExportConfig` including stamping — API-only since Phase 28
+(`history_position`, now also `stamp_enabled`/`stamp_type`/`stamp_value_template`/`stamp_position`); new
+admin-ui page following the pattern of existing config pages like `ApprovalSettings.tsx`/
+`RetentionSettings.tsx`). This begins **Phase 36** (records quarantine, output stamping & misc completion —
+see `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown: P36-S2 records-quarantine
+cross-service integration + browsing UI, P36-S3 `reporting-service` row-level RBAC parity + a Query Console
+reject button; then Phase 37, a scoping-only session on cross-tenant XDOMEA federation, which concludes the
+whole Phase 32+ gap-closure plan).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

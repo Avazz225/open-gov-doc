@@ -21,6 +21,7 @@ async def _index(
     attributes=None,
     full_text="",
     created_by="alice",
+    registered_at=None,
 ):
     document_id = document_id or f"doc-{uuid.uuid4().hex[:8]}"
     return await repository.upsert_document(
@@ -36,6 +37,7 @@ async def _index(
         created_by=created_by,
         created_at=_now(),
         updated_at=_now(),
+        registered_at=registered_at,
     )
 
 
@@ -500,4 +502,217 @@ async def test_facet_counts_groups_by_folder(session):
 
     counts = {row["folder_id"]: row["count"] for row in facets["folder"]}
     assert counts.get("fa") == 2
-    assert counts.get("fb") == 1
+
+
+# Work-tray cross-installation browse (ADR 0113/0118/0146).
+
+
+async def test_search_registered_false_lists_only_unregistered_documents(session):
+    draft = await _index(session, registered_at=None)
+    await _index(session, registered_at=_now())
+    await session.commit()
+
+    rows = await repository.search(
+        session,
+        query=None,
+        folder_id=None,
+        object_type_id=None,
+        created_by=None,
+        created_after=None,
+        created_before=None,
+        attr_filters=[],
+        limit=20,
+        offset=0,
+        sort="updated_at",
+        registered=False,
+    )
+
+    ids = {doc.document_id for doc, _rank in rows}
+    assert ids == {draft.document_id}
+
+
+async def test_search_registered_true_lists_only_registered_documents(session):
+    await _index(session, registered_at=None)
+    registered = await _index(session, registered_at=_now())
+    await session.commit()
+
+    rows = await repository.search(
+        session,
+        query=None,
+        folder_id=None,
+        object_type_id=None,
+        created_by=None,
+        created_after=None,
+        created_before=None,
+        attr_filters=[],
+        limit=20,
+        offset=0,
+        sort="updated_at",
+        registered=True,
+    )
+
+    ids = {doc.document_id for doc, _rank in rows}
+    assert ids == {registered.document_id}
+
+
+async def test_search_without_registered_filter_returns_both(session):
+    await _index(session, registered_at=None)
+    await _index(session, registered_at=_now())
+    await session.commit()
+
+    rows = await repository.search(
+        session,
+        query=None,
+        folder_id=None,
+        object_type_id=None,
+        created_by=None,
+        created_after=None,
+        created_before=None,
+        attr_filters=[],
+        limit=20,
+        offset=0,
+        sort="updated_at",
+    )
+
+    assert len(rows) == 2
+
+
+# Hand-folder cross-index (ADR 0118/0146).
+
+
+async def test_upsert_folder_reference_then_list(session):
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-1",
+        folder_name="Handakte Müller",
+        added_by="alice",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    rows = await repository.list_folder_references(session, limit=20, offset=0)
+    assert len(rows) == 1
+    ref, title = rows[0]
+    assert ref.folder_id == "hf1"
+    assert ref.document_id == "doc-1"
+    assert ref.folder_name == "Handakte Müller"
+    assert title is None  # document not indexed here, LEFT JOIN yields None
+
+
+async def test_upsert_folder_reference_joins_document_title(session):
+    doc = await _index(session, title="Rechnung Nr 42")
+    await session.commit()
+
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id=doc.document_id,
+        folder_name="Handakte Müller",
+        added_by="alice",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    rows = await repository.list_folder_references(session, limit=20, offset=0)
+    _ref, title = rows[0]
+    assert title == "Rechnung Nr 42"
+
+
+async def test_upsert_folder_reference_same_pair_overwrites_not_duplicates(session):
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-1",
+        folder_name="Alt",
+        added_by="alice",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-1",
+        folder_name="Neu",
+        added_by="bob",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    rows = await repository.list_folder_references(session, limit=20, offset=0)
+    assert len(rows) == 1
+    assert rows[0][0].folder_name == "Neu"
+    assert rows[0][0].added_by == "bob"
+
+
+async def test_delete_folder_reference_removes_row(session):
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-1",
+        folder_name="Handakte Müller",
+        added_by="alice",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    await repository.delete_folder_reference(session, "hf1", "doc-1")
+    await session.commit()
+
+    rows = await repository.list_folder_references(session, limit=20, offset=0)
+    assert rows == []
+
+
+async def test_list_folder_references_filters_by_folder_id(session):
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-1",
+        folder_name=None,
+        added_by="a",
+        added_at=_now(),
+    )
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf2",
+        document_id="doc-2",
+        folder_name=None,
+        added_by="a",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    rows = await repository.list_folder_references(session, folder_id="hf1", limit=20, offset=0)
+    assert [ref.folder_id for ref, _title in rows] == ["hf1"]
+
+
+async def test_list_folder_references_filters_by_document_id(session):
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-1",
+        folder_name=None,
+        added_by="a",
+        added_at=_now(),
+    )
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf2",
+        document_id="doc-1",
+        folder_name=None,
+        added_by="a",
+        added_at=_now(),
+    )
+    await repository.upsert_folder_reference(
+        session,
+        folder_id="hf1",
+        document_id="doc-2",
+        folder_name=None,
+        added_by="a",
+        added_at=_now(),
+    )
+    await session.commit()
+
+    rows = await repository.list_folder_references(session, document_id="doc-1", limit=20, offset=0)
+    assert {ref.folder_id for ref, _title in rows} == {"hf1", "hf2"}

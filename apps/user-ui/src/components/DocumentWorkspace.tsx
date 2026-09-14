@@ -26,6 +26,7 @@ import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
 import { AussonderungPane } from "./AussonderungPane";
 import { CasesPane } from "./CasesPane";
+import { HandFolderOverviewPane } from "./HandFolderOverviewPane";
 import { KontaktePane } from "./KontaktePane";
 import { PoststellePane } from "./PoststellePane";
 import { QuarantinePane } from "./QuarantinePane";
@@ -311,6 +312,19 @@ export function DocumentWorkspace() {
     }
   }
 
+  // "Open folder" from the hand-folder/work-tray overview (14.2, Post-
+  // Roadmap Phase 35 Session 4, ADR 0146) - same resolve-then-navigate
+  // pattern as `handleOpenTeamspaceFolder` above.
+  async function handleOpenHandFolder(folderId: string) {
+    if (!accessToken) return;
+    try {
+      const folder = await apiGetFolder(accessToken, folderId);
+      await openFolderPath(folder);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("folderBrowser.loadError"));
+    }
+  }
+
   return (
     <div className="workspace">
       <div className="top-bar">
@@ -385,6 +399,12 @@ export function DocumentWorkspace() {
               <VorlagenPane token={accessToken ?? ""} createdBy={user?.username ?? ""} />
             ) : view === "cases" ? (
               <CasesPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
+            ) : view === "handFolders" ? (
+              <HandFolderOverviewPane
+                token={accessToken ?? ""}
+                onOpenDocument={openDocumentTab}
+                onOpenFolder={handleOpenHandFolder}
+              />
             ) : (
               <KontaktePane token={accessToken ?? ""} />
             )}

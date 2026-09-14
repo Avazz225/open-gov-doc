@@ -848,7 +848,19 @@ async def add_folder_document_reference(
     await publish_event(
         "folder.document_reference.added",
         subject=folder_id,
-        payload={"document_id": payload.document_id, "added_by": payload.added_by},
+        payload={
+            "document_id": payload.document_id,
+            "added_by": payload.added_by,
+            # Post-Roadmap Phase 35 Session 4 (ADR 0146): search-service's
+            # new cross-folder index needs the real `added_at`, not an
+            # approximation from when it happened to observe the event -
+            # this endpoint is the only place that knows it, since the
+            # reference-listing endpoint that WOULD tell a consumer this
+            # otherwise is itself `folder.read`-gated (ADR 0118), unlike
+            # every other resource this service lets search-service read
+            # freely (e.g. `GET /folders/{id}` for folder_name).
+            "added_at": reference.added_at.isoformat(),
+        },
         actor=payload.added_by,
     )
     return _resolve_document_reference(reference, document)

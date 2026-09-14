@@ -95,6 +95,12 @@ lifecycle the way a circulation folder does.
   references_raw()` (the public `list_document_references()` correctly 404s on an unknown/already-trashed
   folder, which broke `hard_delete_folder`'s "also works on an already-soft-deleted folder" contract when
   first tried with the public function).
+- **`folder.document_reference.added`'s event payload carries `added_at`** (since **Post-Roadmap Phase 35
+  Session 4**, [ADR 0146](../adr/0146-hand-folder-cross-index-and-work-tray-browsing.md)) — added for
+  `search-service`'s new cross-folder index, the first consumer of this event. This endpoint's own
+  reference-listing `GET` (the natural place a consumer would otherwise reload the real timestamp from) is
+  itself `folder.read`-gated, unlike every other single-resource `GET` this service exposes, so the event
+  carries the field directly instead.
 
 ## Retention, Legal Hold & Forced Deletion (5.2/5.2a, since P7-S1b)
 

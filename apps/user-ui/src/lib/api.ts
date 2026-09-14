@@ -1785,6 +1785,11 @@ export interface SearchParams {
   createdBy?: string;
   createdAfter?: string;
   createdBefore?: string;
+  // Work-tray browsing (14.2, Post-Roadmap Phase 35 Session 4, ADR 0146) -
+  // `false` lists still-unregistered documents across every folder in the
+  // installation (ADR 0113's draft/pre-registration lifecycle), `true` the
+  // opposite, `undefined` no filter.
+  registered?: boolean;
   // Keys already in the backend convention, e.g. "attr.kunde" or
   // "attr.betrag.gte" - see docs/services/search-service.md.
   attrFilters?: Record<string, string>;
@@ -1800,12 +1805,47 @@ export async function searchDocuments(token: string, params: SearchParams): Prom
   if (params.createdBy) query.set("created_by", params.createdBy);
   if (params.createdAfter) query.set("created_after", params.createdAfter);
   if (params.createdBefore) query.set("created_before", params.createdBefore);
+  if (params.registered !== undefined) query.set("registered", String(params.registered));
   for (const [key, value] of Object.entries(params.attrFilters ?? {})) {
     query.set(key, value);
   }
   if (params.limit !== undefined) query.set("limit", String(params.limit));
   if (params.offset !== undefined) query.set("offset", String(params.offset));
   const response = await request("search-service", `search?${query.toString()}`, {}, token);
+  return response.json();
+}
+
+// Hand-folder cross-index (14.2, Post-Roadmap Phase 35 Session 4,
+// [ADR 0146](../../../docs/adr/0146-hand-folder-cross-index-and-work-tray-browsing.md)).
+export interface FolderReference {
+  folder_id: string;
+  folder_name: string | null;
+  document_id: string;
+  document_title: string | null;
+  added_by: string;
+  added_at: string;
+}
+
+export interface FolderReferencesResponse {
+  results: FolderReference[];
+  total_returned: number;
+}
+
+export async function listFolderReferences(
+  token: string,
+  params: { folderId?: string; documentId?: string; limit?: number; offset?: number } = {}
+): Promise<FolderReferencesResponse> {
+  const query = new URLSearchParams();
+  if (params.folderId) query.set("folder_id", params.folderId);
+  if (params.documentId) query.set("document_id", params.documentId);
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  const response = await request(
+    "search-service",
+    `folder-references?${query.toString()}`,
+    {},
+    token
+  );
   return response.json();
 }
 

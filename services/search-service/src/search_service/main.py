@@ -17,7 +17,11 @@ from dms_metrics_client import (
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from search_service import repository
-from search_service.consumer import start_consuming_documents, start_consuming_text_updates
+from search_service.consumer import (
+    start_consuming_documents,
+    start_consuming_folder_references,
+    start_consuming_text_updates,
+)
 from search_service.document_client import DocumentServiceClient
 from search_service.folder_client import FolderServiceClient
 from search_service.models import Base
@@ -45,6 +49,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS search"))
         await conn.run_sync(Base.metadata.create_all)
+        # Work-tray browsing (Post-Roadmap Phase 35 Session 4, ADR 0146) -
+        # same ad-hoc migration pattern as every other service in this
+        # project (`create_all` only creates brand-new tables/columns for a
+        # fresh database, not columns added to an already-existing table).
+        await conn.execute(
+            text(
+                "ALTER TABLE search.search_document "
+                "ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ"
+            )
+        )
         # Fuzzy search (concept 3.7a, P14-S7, see ADR 0044) - pg_trgm is a
         # standard contrib module, available in the postgres:16-alpine image
         # without any further build step (already verified in ADR 0012).
@@ -95,6 +109,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await start_consuming_documents(event_bus, settings.document_subjects, **client_kwargs)
     await start_consuming_text_updates(
         event_bus, settings.ocr_subjects + settings.rendering_subjects, **client_kwargs
+    )
+    await start_consuming_folder_references(
+        event_bus,
+        settings.folder_subjects,
+        session_factory=app.state.session_factory,
+        folder_client=app.state.folder_client,
     )
 
     registration = await maybe_start_registration(
@@ -195,6 +215,7 @@ async def search(
     created_by: str | None = None,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
+    registered: bool | None = None,
     limit: int = 20,
     offset: int = 0,
     sort: Literal["relevance", "created_at", "updated_at"] = "relevance",
@@ -224,6 +245,7 @@ async def search(
             limit=internal_limit,
             offset=0,
             sort=sort,
+            registered=registered,
         )
     except QuerySyntaxError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -260,6 +282,7 @@ async def search(
                 "attributes": doc.attributes,
                 "current_version_number": doc.current_version_number,
                 "deleted_at": None,
+                "registered_at": doc.registered_at,
                 "created_by": doc.created_by,
                 "created_at": doc.created_at,
                 "updated_at": doc.updated_at,
@@ -282,4 +305,57 @@ async def search_facets() -> dict:
             for ot in object_types
             if ot["applies_to"] == "document"
         ]
+    }
+
+
+@app.get("/folder-references")
+async def folder_references(
+    request: Request,
+    folder_id: str | None = None,
+    document_id: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Installation-wide hand-folder browse/reverse-lookup (ADR 0118/0146) -
+    same permission-filtering shape as `/search` above (overfetch, batch-
+    check, THEN paginate), but against `folder.read` on each result's own
+    `folder_id` (never `"root"` - a hand-folder reference always has one,
+    unlike a document's `folder_id`)."""
+    principal_id = request.headers.get("x-dms-principal")
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+
+    limit = min(limit, 100)
+    internal_limit = min(
+        (limit + offset) * settings.search_result_overfetch_factor,
+        settings.search_result_hard_limit,
+    )
+    rows = await repository.list_folder_references(
+        session, folder_id=folder_id, document_id=document_id, limit=internal_limit, offset=0
+    )
+
+    resource_ids = {ref.folder_id for ref, _title in rows}
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=principal_id,
+        permission="folder.read",
+        access_type="read",
+        resource_ids=list(resource_ids),
+    )
+    readable = [(ref, title) for ref, title in rows if allowed.get(ref.folder_id, False)]
+    page = readable[offset : offset + limit]
+
+    return {
+        "results": [
+            {
+                "folder_id": ref.folder_id,
+                "folder_name": ref.folder_name,
+                "document_id": ref.document_id,
+                "document_title": title,
+                "added_by": ref.added_by,
+                "added_at": ref.added_at,
+            }
+            for ref, title in page
+        ],
+        "total_returned": len(page),
     }

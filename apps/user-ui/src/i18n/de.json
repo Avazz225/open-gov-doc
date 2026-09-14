@@ -73,6 +73,7 @@
     "aussonderung": "Aussonderung",
     "vorlagen": "Vorlagen",
     "cases": "Umlaufmappen",
+    "handFolders": "Hand-Ordner/Arbeitsvorrat",
     "settings": "Einstellungen"
   },
   "theme": {
@@ -502,6 +503,21 @@
     "xdomeaImportErrorGeneric": "XDOMEA-Import fehlgeschlagen. Bitte später erneut versuchen.",
     "xjustizImport": "XJustiz-Import",
     "xjustizImportErrorGeneric": "XJustiz-Import fehlgeschlagen. Bitte später erneut versuchen."
+  },
+  "handFolderOverview": {
+    "paneLabel": "Hand-Ordner/Arbeitsvorrat",
+    "heading": "Hand-Ordner/Arbeitsvorrat (installationsweit)",
+    "referencesHeading": "Hand-Ordner-Referenzen",
+    "referencesHint": "Alle Dokument-Referenzen in Hand-Ordnern (14.2) über die gesamte Installation hinweg - nur sichtbar für Ordner, auf die eine Leseberechtigung besteht.",
+    "referencesEmpty": "Keine (für Sie sichtbaren) Hand-Ordner-Referenzen vorhanden.",
+    "workTrayHeading": "Arbeitsvorrat (unregistrierte Dokumente)",
+    "workTrayHint": "Noch unregistrierte Entwurfs-Dokumente (14.2) über alle Ordner hinweg - z. B. in einem Team-Arbeitsbereich als Arbeitsvorrat genutzt.",
+    "workTrayEmpty": "Keine unregistrierten Dokumente vorhanden.",
+    "folderColumn": "Ordner",
+    "documentColumn": "Dokument",
+    "addedByColumn": "Hinzugefügt von",
+    "addedAtColumn": "Hinzugefügt am",
+    "createdByColumn": "Angelegt von"
   },
   "vorlagen": {
     "paneLabel": "Vorlagen",

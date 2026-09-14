@@ -20,6 +20,10 @@ class Settings(BaseServiceSettings):
     document_subjects: list[str] = ["document.>"]
     ocr_subjects: list[str] = ["ocr.>"]
     rendering_subjects: list[str] = ["rendering.>"]
+    # Hand-folder cross-index (ADR 0118/0146) - deliberately narrower than
+    # `folder.>`: this service has no use for folder CRUD events, only the
+    # reference join.
+    folder_subjects: list[str] = ["folder.document_reference.>"]
 
     # Confidence threshold for a "usable" OCR result - needs_review still
     # yields searchable text, only failed does not.

@@ -40,10 +40,12 @@ def _create_folder(name: str) -> str:
     return response.json()["id"]
 
 
-def _upload_document(*, filename: str, folder_id: str | None = None) -> str:
+def _upload_document(*, filename: str, folder_id: str | None = None, draft: bool = False) -> str:
     data = {"title": filename, "created_by": "search-service-tests"}
     if folder_id is not None:
         data["folder_id"] = folder_id
+    if draft:
+        data["draft"] = "true"
     response = httpx.post(
         f"{DOCUMENT_SERVICE_URL}/documents",
         data=data,
@@ -52,6 +54,15 @@ def _upload_document(*, filename: str, folder_id: str | None = None) -> str:
     )
     response.raise_for_status()
     return response.json()["id"]
+
+
+def _register_document(document_id: str) -> None:
+    response = httpx.post(
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/register",
+        json={"registered_by": "search-service-tests"},
+        timeout=30.0,
+    )
+    response.raise_for_status()
 
 
 def _checkin_version(document_id: str, *, filename: str) -> None:
@@ -147,3 +158,16 @@ async def test_reindex_document_returns_none_for_unknown_document():
     result = await _run_reindex(f"unbekannt-{uuid.uuid4().hex[:8]}")
 
     assert result is None
+
+
+async def test_reindex_document_denormalizes_registered_at():
+    # Work-tray browsing (ADR 0113/0118/0146) - a draft document indexes with
+    # `registered_at=None`, then picks up a real timestamp once registered.
+    document_id = _upload_document(filename=f"entwurf-{uuid.uuid4().hex[:8]}.txt", draft=True)
+
+    draft_indexed = await _run_reindex(document_id)
+    assert draft_indexed.registered_at is None
+
+    _register_document(document_id)
+    registered_indexed = await _run_reindex(document_id)
+    assert registered_indexed.registered_at is not None
