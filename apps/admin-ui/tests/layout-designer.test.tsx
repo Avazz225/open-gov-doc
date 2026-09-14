@@ -152,6 +152,43 @@ describe("LayoutDesigner", () => {
     expect(await screen.findByText("Angepasst")).toBeInTheDocument();
   });
 
+  it("field reorder buttons have accessible names and swap two fields' order", async () => {
+    // Accessibility audit (Post-Roadmap Phase 33 Session 1, ADR 0135): the
+    // ◀/▶ within-row reorder buttons previously had no aria-label at all
+    // (only the raw glyph as visible/accessible content) - unlike their
+    // sibling row-level "Nach oben"/"Nach unten" buttons, which already had
+    // full text labels.
+    getObjectTypeLayoutMock.mockResolvedValue({
+      rows: [
+        {
+          columns: [
+            { attribute: "Rechnungsnummer", label: "Rechnungsnummer", required: true },
+            { attribute: "Betrag", label: "Betrag", required: true },
+          ],
+        },
+      ],
+      responsive_breakpoint_px: 600,
+      is_custom: false,
+    });
+    renderLayoutDesigner();
+    await screen.findByText("Automatisch generiert");
+
+    const moveLeftButtons = screen.getAllByRole("button", { name: "Feld nach links verschieben" });
+    const moveRightButtons = screen.getAllByRole("button", {
+      name: "Feld nach rechts verschieben",
+    });
+    expect(moveLeftButtons).toHaveLength(2);
+    expect(moveRightButtons).toHaveLength(2);
+    // First field: can only move right; second field: can only move left.
+    expect(moveLeftButtons[0]).toBeDisabled();
+    expect(moveRightButtons[1]).toBeDisabled();
+
+    fireEvent.click(moveRightButtons[0]);
+
+    const codes = screen.getAllByText(/Rechnungsnummer|Betrag/, { selector: "code" });
+    expect(codes.map((c) => c.textContent)).toEqual(["Betrag", "Rechnungsnummer"]);
+  });
+
   it("resets the layout back to the generated default", async () => {
     resetObjectTypeLayoutMock.mockResolvedValue(undefined);
     renderLayoutDesigner();

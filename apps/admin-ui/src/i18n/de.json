@@ -317,6 +317,8 @@
     "moveDown": "Nach unten",
     "removeRow": "Zeile entfernen",
     "removeField": "Entfernen",
+    "moveFieldLeft": "Feld nach links verschieben",
+    "moveFieldRight": "Feld nach rechts verschieben",
     "addFieldPlaceholder": "Attribut wählen…",
     "addFieldButton": "Hinzufügen",
     "addRow": "Neue Zeile hinzufügen",

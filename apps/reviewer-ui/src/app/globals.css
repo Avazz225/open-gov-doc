@@ -66,7 +66,14 @@
 }
 
 /* Hoher Kontrast (WCAG-orientiert): reines Schwarz/Weiß, kräftige Ränder,
-   keine transparenten Akzentflächen (schlecht lesbar bei hohem Kontrast). */
+   keine transparenten Akzentflächen (schlecht lesbar bei hohem Kontrast).
+   Post-Roadmap Phase 33 Session 1 (accessibility audit, ADR 0135):
+   `--dms-accent-bg` was previously the identical `#ffff00` as `--dms-accent`
+   itself, rendering `.badge-pending` (TaskList.tsx/InstanceDetail.tsx) as
+   yellow text on a yellow background - completely illegible. Set to
+   `#000000` instead, matching `--dms-danger-bg`/`--dms-success-bg`'s
+   already-correct pattern (a colored foreground on the flattened page
+   background) rather than the accidental solid-yellow fill. */
 :root[data-theme="high-contrast"] {
   color-scheme: dark;
   --dms-bg: #000000;
@@ -74,7 +81,7 @@
   --dms-border: #ffffff;
   --dms-hover-bg: #333333;
   --dms-accent: #ffff00;
-  --dms-accent-bg: #ffff00;
+  --dms-accent-bg: #000000;
   --dms-danger: #ff6b6b;
   --dms-danger-bg: #000000;
   --dms-success: #6bff6b;
@@ -194,6 +201,15 @@ body {
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   font-size: 0.75rem;
+}
+
+/* Post-Roadmap Phase 33 Session 1 (accessibility audit, ADR 0135) - high
+   contrast flattens every `--dms-*-bg` token to the page background, so a
+   badge's pill shape - its only remaining visual cue once the fill
+   disappears - needs an explicit border, same fix already applied to
+   `user-ui`/`admin-ui` in Phase 31 Session 8 (ADR 0119). */
+:root[data-theme="high-contrast"] .badge {
+  border: 1px solid currentColor;
 }
 
 .badge-pending {

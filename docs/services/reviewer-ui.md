@@ -89,7 +89,7 @@ Exclusively via the API Gateway (3.5):
 
 ## Theming/i18n/Auth State
 
-Identical provider copy from user-ui/admin-ui/process-designer (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), own `src/i18n/de.json`, global `dms.tokens` storage key (single installation like process-designer/user-ui, no `InstallationSwitcher` like admin-ui).
+Identical provider copy from user-ui/admin-ui/process-designer (`ThemeProvider`, `I18nProvider`, `auth-context.tsx`), own `src/i18n/de.json`, global `dms.tokens` storage key (single installation like process-designer/user-ui, no `InstallationSwitcher` like admin-ui). **Since Post-Roadmap Phase 33 Session 1** ([ADR 0135](../adr/0135-accessibility-audit-five-frontend-apps.md)): the `high-contrast` theme's `--dms-accent-bg` was fixed from an accidental `#ffff00` (identical to `--dms-accent`, rendering `.badge-pending` — the signature badge in `TaskList.tsx`/`InstanceDetail.tsx` — as illegible yellow-on-yellow) to `#000000`, matching `--dms-danger-bg`/`--dms-success-bg`'s pattern; `.badge` also gained the `high-contrast`-only `border: 1px solid currentColor` rule `user-ui`/`admin-ui` already had since ADR 0119, so `.badge-approved`/`.badge-rejected` keep a visible pill shape once the background flattens to the page background.
 
 ## Build & Delivery
 

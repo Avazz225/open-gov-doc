@@ -288,6 +288,7 @@ export function LayoutDesigner() {
                         type="button"
                         onClick={() => moveFieldWithinRow(rowIndex, colIndex, -1)}
                         disabled={colIndex === 0}
+                        aria-label={t("layoutDesigner.moveFieldLeft")}
                       >
                         ◀
                       </button>
@@ -295,6 +296,7 @@ export function LayoutDesigner() {
                         type="button"
                         onClick={() => moveFieldWithinRow(rowIndex, colIndex, 1)}
                         disabled={colIndex === row.columns.length - 1}
+                        aria-label={t("layoutDesigner.moveFieldRight")}
                       >
                         ▶
                       </button>

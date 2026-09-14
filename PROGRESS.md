@@ -2,27 +2,32 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P32-S5 (HTML preview hardening completed — `html_preview_guard.
-rewrite_external_references` (ADR 0086) now also neutralizes the four gaps that session explicitly
-deferred: `srcset` [removed wholesale on any blocked candidate, split on a comma-plus-whitespace rather
-than a bare comma so a `data:` URI's own internal comma isn't mistaken for the candidate separator — a
-real bug found live while writing the "all-`data:`-candidates" test], `poster`/`background` [identical
-single-URL mechanism as `src`/`href`], and CSS `url(...)` in `style` attributes/`<style>` blocks [a
-targeted regex, not a full CSS parser — replaced with an empty `url()` plus a `/* Blocked ... */` comment,
-since CSS has no rendered-text equivalent of the `<span>` marker the other attributes get]. document-service
-349 tests (up from 341, +8 new pure-function tests plus the existing end-to-end HTML test extended with the
-newer cases). Live-verified against the real, rebuilt running stack: an HTML document exercising all four
-new cases was uploaded/downloaded, confirming every reference was correctly neutralized — see
-[ADR 0134](docs/adr/0134-html-preview-hardening-srcset-poster-background-css-url.md)), the fifth and final
-session of Phase 32 (post-Phase-31 security/RBAC hardening). **Phase 32 complete** — `graphify update .`
-still pending at phase end (standing convention: run once per completed phase, not after every session).
+**Last completed:** P33-S1 (accessibility audit of the five non-`user-ui` apps — the plan's assumed premise
+(`admin-ui`'s `ObjectTypeEditor.tsx` `.badge.classified`) turned out not to exist in the current code on
+direct verification, and a broader check confirmed none of the five apps has an equivalent of `user-ui`'s
+original classification/conflict/redaction badge collision (ADR 0119/P31-S8). Surfaced this to the user
+before proceeding; a deeper audit (their choice over declaring the session done or a blanket polish pass)
+instead found and fixed three real, different bugs: `admin-ui/LayoutDesigner.tsx`'s `◀`/`▶` within-row
+field-reorder buttons had no `aria-label` at all (only the raw glyph, unlike their sibling "move up"/"move
+down" row buttons, which already had full text) — fixed with real `aria-label`s;
+`reviewer-ui`/`migration-console`'s `high-contrast` theme rendered `.badge-pending` (dry-run/signature
+badges) as illegible yellow-on-yellow (`--dms-accent-bg` was the identical `#ffff00` as `--dms-accent`) —
+fixed to `#000000`, matching the sibling danger/success tokens' pattern — and both apps were also missing
+the `.badge` high-contrast border rule `user-ui`/`admin-ui` already had since ADR 0119 (added).
+`process-designer`/`office-addin` confirmed to have nothing to fix (an unused dead `.badge` class in the
+former, no theme switcher at all — by design — in the latter). admin-ui +1 test (227 total), reviewer-ui/
+migration-console `tsc`/`eslint`/`next build` clean (no new tests — this project has no visual-regression
+harness for theme CSS anywhere, matching ADR 0119's own precedent). All three apps rebuilt and live-verified
+by fetching the deployed CSS/JS bundles directly and confirming the fixed tokens/rules/strings are present
+— see [ADR 0135](docs/adr/0135-accessibility-audit-five-frontend-apps.md)), the first session of Phase 33
+(accessibility completion). `graphify update .` was run at the end of Phase 32 (previous session).
 
-**Next session:** **P33-S1** (Phase 33, accessibility completion — extend the badge-icon/`aria-label`
-pattern ADR 0119/P31-S8 established only for `user-ui` to the remaining five frontend apps: `admin-ui`,
-`reviewer-ui`, `process-designer`, `migration-console`, `office-addin`; `admin-ui`'s
-`ObjectTypeEditor.tsx` classification badge is the already-known first concrete case). See
-`IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 33 continues with P33-S2
-PDF/UA tag preservation on export, P33-S3 axe-core test harness, P33-S4 gendered backend error messages;
+**Next session:** **P33-S2** (Phase 33 continues — PDF/UA tag preservation on export: the export pipeline's
+`pypdf`-based writer cannot copy an already-tagged source PDF's structure tree, so a tagged source loses
+its accessibility tags during export today; P31-S8 only added a non-blocking warning about this, this
+session gives the pipeline actual tag-preservation capability). See `IMPLEMENTATION_PLAN.md` "Phase 32+"
+for the full remaining breakdown (Phase 33 continues with P33-S3 axe-core test harness, P33-S4 gendered
+backend error messages;
 then Phase 34 XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
 quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
 federation).
