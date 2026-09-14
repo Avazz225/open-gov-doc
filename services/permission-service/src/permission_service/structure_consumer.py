@@ -27,15 +27,18 @@ def make_handler(
         event = Event.from_bytes(payload)
         async with session_factory() as session:
             if event.event_type.endswith(".resource.created"):
-                resource_id = event.payload["resource_id"]
-                if await session.get(ResourceNode, resource_id) is None:
-                    session.add(
-                        ResourceNode(
-                            resource_id=resource_id,
-                            parent_id=event.payload.get("parent_id"),
-                            resource_type=event.payload.get("resource_type", "folder"),
-                        )
-                    )
+                # Post-Roadmap Phase 35 Session 2 (ADR 0144): shares its
+                # create-if-missing logic with the new, synchronous
+                # `POST /resources` REST path via `repository.
+                # create_resource_node` - both must behave identically
+                # (never overwrite an existing node), so the check lives in
+                # exactly one place.
+                await repository.create_resource_node(
+                    session,
+                    event.payload["resource_id"],
+                    event.payload.get("parent_id"),
+                    event.payload.get("resource_type", "folder"),
+                )
             elif event.event_type.endswith(".resource.moved"):
                 node = await session.get(ResourceNode, event.payload["resource_id"])
                 if node is not None:

@@ -54,6 +54,61 @@ def test_resource_created_event_creates_node(client):
     assert body["parent_id"] == ROOT_RESOURCE_ID
 
 
+# --- POST /resources (Post-Roadmap Phase 35 Session 2, ADR 0144) - the
+# synchronous counterpart to the event-driven creation above, added
+# specifically so `case-service`'s own per-case checks don't have to wait
+# for NATS propagation before the resource they depend on exists. Shares
+# `repository.create_resource_node` with the event handler above, so these
+# tests focus on the REST-specific behavior (immediate consistency, no
+# polling needed) rather than re-testing the shared create-if-missing logic
+# itself. -----------------------------------------------------------------
+
+
+def test_post_resources_synchronously_creates_node_no_polling_needed(client):
+    resource_id = f"case-{uuid.uuid4().hex[:8]}"
+
+    created = client.post(
+        "/resources",
+        json={"resource_id": resource_id, "parent_id": ROOT_RESOURCE_ID, "resource_type": "case"},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["parent_id"] == ROOT_RESOURCE_ID
+    assert created.json()["resource_type"] == "case"
+    # No `_poll_until` here on purpose - the whole point of this endpoint
+    # over the event-driven path is that the row already exists by the time
+    # the response returns.
+    fetched = client.get(f"/resources/{resource_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["resource_type"] == "case"
+
+
+def test_post_resources_is_idempotent_and_never_overwrites_an_existing_node(client):
+    resource_id = f"case-{uuid.uuid4().hex[:8]}"
+    other_parent = f"case-{uuid.uuid4().hex[:8]}"
+    client.post(
+        "/resources",
+        json={"resource_id": other_parent, "parent_id": ROOT_RESOURCE_ID, "resource_type": "case"},
+    )
+    client.post(
+        "/resources",
+        json={"resource_id": resource_id, "parent_id": ROOT_RESOURCE_ID, "resource_type": "case"},
+    )
+
+    second_call = client.post(
+        "/resources",
+        json={"resource_id": resource_id, "parent_id": other_parent, "resource_type": "folder"},
+    )
+
+    assert second_call.status_code == 201
+    # The already-existing node's own parent_id/resource_type win - a
+    # second create-if-missing call is a harmless no-op, never a silent
+    # overwrite (same semantics as the event handler's own prior "if
+    # missing, insert" behavior).
+    assert second_call.json()["parent_id"] == ROOT_RESOURCE_ID
+    assert second_call.json()["resource_type"] == "case"
+
+
 def test_resource_moved_event_updates_parent(client):
     a = f"folder-{uuid.uuid4().hex[:8]}"
     b = f"folder-{uuid.uuid4().hex[:8]}"

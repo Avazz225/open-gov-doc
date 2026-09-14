@@ -5,10 +5,12 @@ import httpx
 import pytest
 from case_service import repository
 from case_service.main import app
+from dms_eventbus_client import Event
 from fastapi.testclient import TestClient
 
 WORKFLOW_SERVICE_URL = os.environ.get("TEST_WORKFLOW_SERVICE_URL", "http://localhost:8014")
 DOCUMENT_SERVICE_URL = os.environ.get("TEST_DOCUMENT_SERVICE_URL", "http://localhost:8006")
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
 
 @pytest.fixture
@@ -496,6 +498,24 @@ async def test_archive_request_and_mark_archived_roundtrip_for_closed_case(
     )
     await repository.close_case(session, case, snapshots={})
     await session.commit()
+    # Bypasses `POST /cases` (needs a real closed case without a full
+    # workflow-completion round trip) - so its `ResourceNode`, normally
+    # created there via the synchronous `POST /resources` call, must be
+    # created here explicitly (Post-Roadmap Phase 35 Session 2, ADR 0144) -
+    # otherwise the `resource_id=case_id` checks below would deny everyone
+    # outright (an unregistered resource_id has no roles at all, see
+    # `_require_case_permission`'s docstring). A plain `httpx` call, not
+    # `app.state.permission_client` directly - that client was constructed
+    # inside `TestClient`'s own internal lifespan/event loop, and awaiting
+    # it from this test's own async context raises "bound to a different
+    # event loop".
+    async with httpx.AsyncClient() as pc:
+        (
+            await pc.post(
+                f"{PERMISSION_SERVICE_URL}/resources",
+                json={"resource_id": case.id, "parent_id": "root", "resource_type": "case"},
+            )
+        ).raise_for_status()
 
     request_response = client.post(f"/cases/{case.id}/archive-request", headers=case_headers)
     assert request_response.status_code == 200
@@ -517,3 +537,144 @@ async def test_archive_request_and_mark_archived_roundtrip_for_closed_case(
 
     due_after = client.get("/cases/due-for-archival").json()
     assert case.id not in [c["id"] for c in due_after]
+
+
+# --- Real per-case RBAC resource (Post-Roadmap Phase 35 Session 2, ADR 0144) --
+
+
+def test_create_case_synchronously_registers_a_resource_node(
+    client, process_definition_id, case_headers
+):
+    """The whole point of the synchronous `POST /resources` call (not just
+    the fire-and-forget `case.resource.created` event) - the node must
+    already exist the MOMENT `POST /cases` returns, no polling/waiting
+    needed, unlike a purely event-driven registration would require."""
+    created = client.post(
+        "/cases",
+        json={
+            "name": "Fall mit echter Ressource",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()
+
+    resource = httpx.get(f"{PERMISSION_SERVICE_URL}/resources/{created['id']}")
+    assert resource.status_code == 200
+    body = resource.json()
+    assert body["parent_id"] == "root"
+    assert body["resource_type"] == "case"
+
+
+def test_create_case_also_publishes_resource_created_event(
+    client, process_definition_id, case_headers, monkeypatch
+):
+    """For symmetry with `folder-service`'s own structure-event contract
+    and as the basis for the startup backfill's self-healing - a harmless
+    duplicate of the synchronous `POST /resources` call above, not the
+    primary mechanism (see `create_case`'s own comment for why)."""
+    published: list[Event] = []
+
+    async def fake_publish(subject: str, data: bytes) -> None:
+        published.append(Event.from_bytes(data))
+
+    monkeypatch.setattr(app.state.producer, "publish", fake_publish)
+
+    created = client.post(
+        "/cases",
+        json={
+            "name": "Fall mit Event",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()
+
+    resource_events = [e for e in published if e.event_type == "case.resource.created"]
+    assert len(resource_events) == 1
+    assert resource_events[0].payload == {
+        "resource_id": created["id"],
+        "parent_id": "root",
+        "resource_type": "case",
+    }
+
+
+def test_case_specific_role_assignment_restricts_access_to_that_case_only(
+    client, process_definition_id, case_headers, everyone_role_without, role_admin_headers
+):
+    """The actual point of this session: a case's own `ResourceNode` lets a
+    role be assigned scoped to just THAT case, not system-wide - proven by
+    stripping `case.read` from "everyone" globally, then showing that only
+    a principal with a case-specific grant can still read it, while every
+    other case/principal is correctly denied."""
+    case_id = client.post(
+        "/cases",
+        json={
+            "name": "Eingeschränkter Fall",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()["id"]
+    other_case_id = client.post(
+        "/cases",
+        json={
+            "name": "Anderer Fall",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()["id"]
+
+    everyone_role_without("case.read")
+
+    # Ohne "everyone"-Grant ist jetzt JEDER Fall für JEDEN unlesbar - auch
+    # für case_headers selbst, das keine spezifische Rolle hat.
+    assert client.get(f"/cases/{case_id}", headers=case_headers).status_code == 403
+    assert client.get(f"/cases/{other_case_id}", headers=case_headers).status_code == 403
+
+    scoped_principal = "case-service-tests-scoped-reader"
+    created_role = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/roles",
+        json={"name": f"case-reader-{case_id}", "permissions": ["case.read"]},
+        headers=role_admin_headers,
+    ).json()
+    # Wrapped `RoleActionResult` (ADR 0130) - {status, role, approval_request_id}.
+    assert created_role["status"] == "created"
+    role_id = created_role["role"]["id"]
+    assignment_response = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/role-assignments",
+        json={
+            "principal_type": "user",
+            "principal_id": scoped_principal,
+            "role_id": role_id,
+            "resource_id": case_id,
+        },
+    )
+    assignment_response.raise_for_status()
+    # Same wrapped shape (P17-S3) - `raise_for_status()` alone wouldn't
+    # catch a silently pending-approval assignment (always 2xx either way).
+    assert assignment_response.json()["status"] == "created"
+
+    # Der gezielt berechtigte Principal darf jetzt GENAU diesen einen Fall
+    # lesen - resource_id=case_id wird also wirklich ausgewertet, nicht
+    # weiterhin pauschal "root".
+    scoped_headers = {"X-DMS-Principal": scoped_principal}
+    assert client.get(f"/cases/{case_id}", headers=scoped_headers).status_code == 200
+    # ...aber NICHT den anderen Fall - die Berechtigung ist wirklich auf
+    # genau diese eine Ressource begrenzt, keine versehentliche
+    # Root-Freigabe.
+    assert client.get(f"/cases/{other_case_id}", headers=scoped_headers).status_code == 403
+
+
+def test_collection_level_case_endpoints_still_check_root(
+    client, process_definition_id, case_headers, everyone_role_without
+):
+    """Regression guard: `POST`/`GET /cases` have no single case to check
+    against yet - they must keep checking `root`, unaffected by this
+    session's per-case switch for the other endpoints."""
+    everyone_role_without("case.read")
+
+    response = client.get("/cases", headers=case_headers)
+
+    assert response.status_code == 403

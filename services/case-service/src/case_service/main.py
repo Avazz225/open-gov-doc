@@ -113,6 +113,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await producer.connect()
     app.state.producer = producer
 
+    # Backfill (Post-Roadmap Phase 35 Session 2, ADR 0144): every case
+    # created BEFORE this session has no `ResourceNode` in permission-service
+    # at all - an unregistered resource_id makes `_collect_effective_roles`
+    # deny everything outright rather than fall back to root, so a
+    # pre-existing case would otherwise become permanently inaccessible the
+    # moment this session's `resource_id=case_id` checks went live. Uses the
+    # same synchronous `POST /resources` call `create_case` uses (not just
+    # the fire-and-forget event) so startup genuinely finishes with every
+    # case registered, not "eventually, once NATS catches up". Running this
+    # on every startup (not just once) is deliberately simple and
+    # self-healing - `create_resource_node` is idempotent (a no-op once
+    # caught up), and it also recovers a case whose ORIGINAL registration
+    # was missed (e.g. permission-service was unreachable at creation time).
+    async with app.state.session_factory() as backfill_session:
+        for case in await repository.list_cases(backfill_session):
+            await app.state.permission_client.create_resource_node(
+                resource_id=case.id, parent_id="root", resource_type="case"
+            )
+
     consumer = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await consumer.connect()
     app.state.consumer = consumer
@@ -180,27 +199,57 @@ async def publish_event(
     await app.state.producer.publish(event_type, event.to_bytes())
 
 
-async def _require_case_permission(x_dms_principal: str, *, access_type: str) -> None:
+async def _require_case_permission(
+    x_dms_principal: str,
+    *,
+    access_type: str,
+    resource_id: str = PermissionServiceClient.ROOT_RESOURCE_ID,
+) -> None:
     """RBAC (post-roadmap Phase 19 Session 5, ADR 0070) - case-service
     previously had NO permission check at all. Checks `case.read`/
-    `case.write` at the root resource (`root`), not at a circulation-
-    folder-owned resource - unlike folder-service, case-service registers
-    no own nodes in the permission-service resource tree, see ADR 0070
-    "Rationale". The first ever consumer of `libs/dms-permission-client`
-    (P19-S1). The "everyone" group (ADR 0067) grants `case.read`/
-    `case.write` to every authenticated principal by default - preserves
-    the previous de-facto-open behavior, but makes it admin-editable."""
+    `case.write` at `resource_id` (default `root`, the collection-level
+    resource used by `POST`/`GET /cases` where no single case exists yet
+    to check against). Since Post-Roadmap Phase 35 Session 2
+    ([ADR 0144](../adr/0144-case-per-case-resource-type.md)), every
+    per-case endpoint passes the case's own `case_id` instead - case-service
+    now registers a real `ResourceNode` per case (`resource_type="case"`,
+    `parent_id="root"`), analogous to `folder-service`'s own resource-tree
+    registration, closing the gap ADR 0070/0121 both explicitly left open.
+    The "everyone" group (ADR 0067) grants `case.read`/`case.write` at
+    `root` by default, inherited by every case's node unless an admin
+    narrows a specific case's own `RoleAssignment`s - preserves the
+    previous de-facto-open behavior by default, but now makes it
+    admin-editable PER CASE, not just system-wide. The first ever consumer
+    of `libs/dms-permission-client` (P19-S1)."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
     permission = "case.read" if access_type == "read" else "case.write"
     allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
-        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        resource_id=resource_id,
         permission=permission,
         access_type=access_type,
     )
     if not allowed:
         raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
+async def _get_case_or_404(session: AsyncSession, case_id: str):
+    """Post-Roadmap Phase 35 Session 2 (ADR 0144) - every per-case endpoint
+    must confirm the case actually EXISTS before calling
+    `_require_case_permission(..., resource_id=case_id)`: a genuinely
+    unknown `case_id` has no `ResourceNode` in permission-service either,
+    and an unregistered resource_id denies every check outright (no roles
+    at all, not even a fallback to root) - without this existence check
+    first, `GET /cases/does-not-exist` would incorrectly return `403`
+    instead of `404` for an otherwise fully authorized principal, exactly
+    the kind of "an unauthorized-*looking* response for what is actually a
+    missing resource" outcome this project's existing tests (rightly)
+    reject."""
+    try:
+        return await repository.get_case(session, case_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 async def _resolve_reference(session: AsyncSession, case, reference) -> CaseDocumentReferenceOut:
@@ -291,6 +340,34 @@ async def create_case(
         payload={"name": payload.name, "created_by": payload.created_by},
         actor=payload.created_by,
     )
+    # Real per-case RBAC resource (Post-Roadmap Phase 35 Session 2, ADR
+    # 0144). `parent_id="root"` so the case's node inherits root's
+    # "everyone" role assignment by default (ADR 0070's "everyone gets
+    # case.read/case.write" stays the default), while still letting an
+    # admin narrow a SPECIFIC case's own `RoleAssignment`s afterward via the
+    # already-generic `POST /role-assignments`. The SYNCHRONOUS `POST
+    # /resources` call (not just the event below) is deliberate: this
+    # response is about to return `case_id` to the caller, who may
+    # immediately act on it (the per-case endpoints below now check
+    # `resource_id=case_id`, and an unregistered resource_id denies
+    # everyone outright) - a purely event-driven registration, sufficient
+    # for `folder-service` (whose own CRUD never self-checks per-resource),
+    # would leave exactly that race window open here. `permission-service`
+    # is already a hard synchronous dependency of every request via
+    # `_require_case_permission` above, so this adds no new failure mode.
+    await app.state.permission_client.create_resource_node(
+        resource_id=case_id, parent_id="root", resource_type="case"
+    )
+    # Also published for symmetry with `folder-service`'s own structure-event
+    # contract and as a self-healing mechanism (see the startup backfill
+    # loop in `lifespan`) - a harmless no-op here since the row already
+    # exists (`structure_consumer.py`'s handler is idempotent).
+    await publish_event(
+        "case.resource.created",
+        subject=case_id,
+        payload={"resource_id": case_id, "parent_id": "root", "resource_type": "case"},
+        actor=payload.created_by,
+    )
     return case
 
 
@@ -304,7 +381,8 @@ async def register_case(
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
     0113) - assigns the Vorgangsnummer at this point instead of at creation
     time (see `draft` on `POST /cases`)."""
-    await _require_case_permission(x_dms_principal, access_type="write")
+    await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     vorgangsnummer = await repository.next_vorgangsnummer(session)
     try:
         case = await repository.register_case(session, case_id, vorgangsnummer=vorgangsnummer)
@@ -370,11 +448,9 @@ async def get_case(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseOut:
-    await _require_case_permission(x_dms_principal, access_type="read")
-    try:
-        return await repository.get_case(session, case_id)
-    except repository.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    case = await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="read", resource_id=case_id)
+    return case
 
 
 @app.post(
@@ -388,7 +464,8 @@ async def add_case_document(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
-    await _require_case_permission(x_dms_principal, access_type="write")
+    await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     document = await app.state.document_client.get(payload.document_id)
     if document is None:
         raise HTTPException(
@@ -421,7 +498,8 @@ async def remove_case_document(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseDocumentReferenceOut:
-    await _require_case_permission(x_dms_principal, access_type="write")
+    await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     try:
         reference = await repository.remove_document_reference(
             session, case_id, document_id, removed_by=payload.removed_by
@@ -447,12 +525,9 @@ async def list_case_documents(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseDocumentReferenceOut]:
-    await _require_case_permission(x_dms_principal, access_type="read")
-    try:
-        case = await repository.get_case(session, case_id)
-        references = await repository.list_document_references(session, case_id)
-    except repository.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    case = await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="read", resource_id=case_id)
+    references = await repository.list_document_references(session, case_id)
     return [await _resolve_reference(session, case, reference) for reference in references]
 
 
@@ -465,7 +540,8 @@ async def request_case_archive(
     """Manual records disposal trigger (5.6, since P7-S3b) - `409` if the
     circulation folder is not yet closed. A human action (unlike `PUT
     .../archived` below), therefore gated since P19-S5."""
-    await _require_case_permission(x_dms_principal, access_type="write")
+    await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="write", resource_id=case_id)
     try:
         case = await repository.request_archive(session, case_id)
     except repository.NotFoundError as exc:
@@ -482,11 +558,8 @@ async def get_case_archive_status(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CaseArchiveStatusOut:
-    await _require_case_permission(x_dms_principal, access_type="read")
-    try:
-        case = await repository.get_case(session, case_id)
-    except repository.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    case = await _get_case_or_404(session, case_id)
+    await _require_case_permission(x_dms_principal, access_type="read", resource_id=case_id)
     return CaseArchiveStatusOut(
         case_id=case.id, archive_after=case.archive_after, archived_at=case.archived_at
     )

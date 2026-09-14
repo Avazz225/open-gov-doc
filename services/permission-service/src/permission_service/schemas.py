@@ -131,6 +131,17 @@ class ResourceNodeUpdate(BaseModel):
     inherit: bool
 
 
+class ResourceNodeCreate(BaseModel):
+    """`POST /resources`'s body (Post-Roadmap Phase 35 Session 2, ADR
+    0144) - the first synchronous, REST-based way to create a
+    `ResourceNode`; previously only possible asynchronously via a
+    `"*.resource.created"` structure event, see `structure_consumer.py`."""
+
+    resource_id: str
+    parent_id: str | None = None
+    resource_type: str = "folder"
+
+
 class ResourceNodeOut(BaseModel):
     resource_id: str
     parent_id: str | None

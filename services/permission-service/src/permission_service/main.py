@@ -46,6 +46,7 @@ from permission_service.schemas import (
     MaintenanceModeTrigger,
     OrgHierarchyGrantCreate,
     OrgHierarchyGrantOut,
+    ResourceNodeCreate,
     ResourceNodeOut,
     ResourceNodeUpdate,
     RoleActionResult,
@@ -535,6 +536,31 @@ async def delete_role_assignment(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
+
+
+@app.post("/resources", response_model=ResourceNodeOut, status_code=201)
+async def create_resource(
+    payload: ResourceNodeCreate, session: AsyncSession = Depends(get_session)
+) -> ResourceNodeOut:
+    """Synchronous counterpart to the `"*.resource.created"` structure-event
+    contract (Post-Roadmap Phase 35 Session 2, ADR 0144) - for a caller
+    (`case-service`) whose own subsequent per-resource permission checks
+    need the node to exist by the time its OWN response returns, not
+    eventually via NATS consumption. Idempotent create-if-missing, same
+    semantics and shared implementation (`repository.create_resource_node`)
+    as the event-driven path - an existing node's `parent_id`/
+    `resource_type` is never overwritten by a second call. Deliberately
+    ungated, same reasoning as `POST /org-hierarchy-grants`: no internal
+    service-to-service auth exists anywhere in this project (a documented,
+    accepted gap), and structure events themselves already carry no auth
+    either - this endpoint is no less trusted than the event bus it
+    mirrors."""
+    resource = await repository.create_resource_node(
+        session, payload.resource_id, payload.parent_id, payload.resource_type
+    )
+    await repository.invalidate_cache(session)
+    await session.commit()
+    return resource
 
 
 @app.get("/resources/{resource_id}", response_model=ResourceNodeOut)

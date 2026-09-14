@@ -1,3 +1,5 @@
+import json
+
 import httpx
 from dms_permission_client import (
     PermissionServiceClient,
@@ -159,6 +161,38 @@ async def test_ensure_role_assignment_raises_when_pending_approval():
         raise AssertionError("expected RoleAssignmentPendingApprovalError")
     except RoleAssignmentPendingApprovalError:
         pass
+
+
+async def test_create_resource_node_posts_the_expected_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/resources"
+        assert json.loads(request.content) == {
+            "resource_id": "case-1",
+            "parent_id": "root",
+            "resource_type": "case",
+        }
+        return httpx.Response(
+            201,
+            json={
+                "resource_id": "case-1",
+                "parent_id": "root",
+                "resource_type": "case",
+                "inherit": True,
+            },
+        )
+
+    await _client(handler).create_resource_node(
+        resource_id="case-1", parent_id="root", resource_type="case"
+    )
+
+
+async def test_create_resource_node_defaults_resource_type_to_folder():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["resource_type"] == "folder"
+        return httpx.Response(201, json={**body, "inherit": True})
+
+    await _client(handler).create_resource_node(resource_id="folder-1", parent_id="root")
 
 
 async def test_close_closes_the_underlying_httpx_client():

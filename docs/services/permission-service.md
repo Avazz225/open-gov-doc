@@ -26,6 +26,7 @@
 | `POST` | `/role-assignments` | Create an assignment — response `{status: "created"\|"pending_approval", role_assignment, approval_request_id}` (since P17-S3, `permission.role_assignment.create`, see below), `404` on unknown role/resource |
 | `GET` | `/role-assignments?principal_id=...&resource_id=...` | List assignments, optionally filtered (since P4-S3, the basis for the Admin UI) |
 | `DELETE` | `/role-assignments/{id}` | Remove an assignment |
+| `POST` | `/resources` | Create a `ResourceNode` synchronously (Post-Roadmap Phase 35 Session 2, ADR 0144) — idempotent create-if-missing, the REST counterpart to the `"*.resource.created"` structure event; deliberately ungated, see "Structure Synchronization" below |
 | `GET` | `/resources/{id}` | Read a resource node |
 | `PATCH` | `/resources/{id}` | Toggle `inherit` |
 | `GET` | `/effective-permissions/{principal_id}/{resource_id}` | Cached effective roles/permissions |
@@ -242,7 +243,7 @@ see ADR 0120 for the full reasoning.
 
 ## Structure Synchronization (Contract Confirmed Since P3-S3)
 
-The Folder Service (P3-S3) implements exactly the contract provisionally assumed in P2-S2 — no adjustment needed. `structure_consumer.py` subscribes to `settings.structure_subjects` (default `["folder.>"]`) via `NatsEventBusClient(ensure_stream=False)`:
+The Folder Service (P3-S3) implements exactly the contract provisionally assumed in P2-S2 — no adjustment needed. `structure_consumer.py` subscribes to `settings.structure_subjects` (default `["folder.>", "case.>"]`, `case.>` added Post-Roadmap Phase 35 Session 2 — see below) via `NatsEventBusClient(ensure_stream=False)`:
 
 | event_type (suffix) | payload |
 |---|---|
@@ -253,6 +254,10 @@ The Folder Service (P3-S3) implements exactly the contract provisionally assumed
 Verified live end-to-end (P3-S3): a folder created via the real Folder Service API immediately appears as a `ResourceNode` in this service, including the correct `parent_id`.
 
 **Known limitation**: if no stream exists yet at startup for a configured subject (no producer has ever run), the subject is skipped (`SubjectNotFoundError` caught, see `dms-eventbus-client`/ADR 0001) instead of blocking service startup — but there is no retry loop that later picks up the stream automatically; a restart is then needed. In practice uncritical, since the Folder Service now exists and creates its stream on its own startup.
+
+**Second producer since Post-Roadmap Phase 35 Session 2** ([ADR 0144](../adr/0144-case-per-case-resource-type.md)): `case-service` now also publishes `case.resource.created` per case (`resource_type="case"`, `parent_id="root"`), the identical contract above under the `case.>` prefix — `structure_consumer.py` itself needed no code change, only the `structure_subjects` config addition, confirming the contract's own "any producer can plug in" design.
+
+- **`POST /resources`** (new) — a SYNCHRONOUS, REST-based counterpart to the `"*.resource.created"` event above, added specifically for `case-service`'s own per-case checks: unlike `folder-service` (whose own CRUD never self-checks per-resource, only the gateway does, decoupled from the exact creation moment), `case-service`'s endpoints self-check immediately, and a purely event-driven registration would leave a race window where a freshly created case is briefly unreadable by anyone (an unregistered `resource_id` denies every check outright, no fallback to `root`). Shares `repository.create_resource_node`'s idempotent create-if-missing logic with the event handler — a second call for an already-registered `resource_id` never overwrites its `parent_id`/`resource_type`. Deliberately ungated, same reasoning as `POST /org-hierarchy-grants` (ADR 0121): no internal service-to-service auth exists anywhere in this project, and the event bus this endpoint mirrors carries no auth either.
 
 ## Deputizing During Absence (4.4a, since P14-S11)
 

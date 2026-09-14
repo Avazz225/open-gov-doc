@@ -86,6 +86,29 @@ class PermissionServiceClient:
         response.raise_for_status()
         return permission in response.json()["permissions"]
 
+    async def create_resource_node(
+        self, *, resource_id: str, parent_id: str | None, resource_type: str = "folder"
+    ) -> None:
+        """`POST /resources` (Post-Roadmap Phase 35 Session 2, ADR 0144) -
+        synchronous, idempotent create-if-missing for a `ResourceNode`.
+        First consumer: `case-service`'s own per-case RBAC resource, whose
+        subsequent permission checks against `resource_id=case_id` need the
+        node to exist by the time case creation RETURNS - purely
+        event-driven registration (`"*.resource.created"`, the pattern
+        `folder-service` already uses) would leave a race window where a
+        freshly created case is briefly unreadable by anyone, since an
+        unregistered `resource_id` denies every check outright rather than
+        falling back to root."""
+        response = await self._client.post(
+            "/resources",
+            json={
+                "resource_id": resource_id,
+                "parent_id": parent_id,
+                "resource_type": resource_type,
+            },
+        )
+        response.raise_for_status()
+
     async def get_role_id(self, name: str) -> int | None:
         response = await self._client.get("/roles")
         response.raise_for_status()

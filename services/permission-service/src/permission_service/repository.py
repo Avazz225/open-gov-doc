@@ -68,6 +68,29 @@ async def ensure_root_resource(session: AsyncSession) -> None:
         await session.flush()
 
 
+async def create_resource_node(
+    session: AsyncSession, resource_id: str, parent_id: str | None, resource_type: str = "folder"
+) -> ResourceNode:
+    """Idempotent create-if-missing (Post-Roadmap Phase 35 Session 2, ADR
+    0144) - shared by `structure_consumer.py`'s `"*.resource.created"`
+    handler (async, via NATS) and `POST /resources` (new, synchronous REST
+    path added specifically for `case-service`, whose own per-case RBAC
+    checks need the node to exist by the time case creation RETURNS, not
+    eventually - see ADR 0144 "Rationale" for why a purely event-driven
+    registration, sufficient for `folder-service`, was not sufficient
+    here). Returns the existing node unchanged if one already exists
+    (matches the event handler's own prior "if missing, insert" behavior
+    exactly - callers on either path never overwrite an existing node's
+    `parent_id`/`resource_type`)."""
+    existing = await session.get(ResourceNode, resource_id)
+    if existing is not None:
+        return existing
+    node = ResourceNode(resource_id=resource_id, parent_id=parent_id, resource_type=resource_type)
+    session.add(node)
+    await session.flush()
+    return node
+
+
 async def create_role(
     session: AsyncSession, name: str, description: str, permissions: list[str]
 ) -> Role:

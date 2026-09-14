@@ -46,6 +46,14 @@ def workflow_admin_headers() -> dict[str, str]:
     return {"X-DMS-Principal": CONFIG_ADMIN_PRINCIPAL_ID}
 
 
+@pytest.fixture
+def role_admin_headers() -> dict[str, str]:
+    """`admin.user_management`-Principal (ADR 0071) - für Tests, die selbst
+    Rollen/Rollenzuweisungen gegen permission-service anlegen (Post-Roadmap
+    Phase 35 Session 2, ADR 0144: Fall-spezifische RoleAssignments)."""
+    return {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+
+
 # RBAC (Post-Roadmap Phase 19 Session 5, ADR 0070) - case-service prüft seit
 # dieser Session `case.read`/`case.write` gegen permission-service. Die
 # "everyone"-Gruppe (ADR 0067) gewährt beides standardmäßig jedem

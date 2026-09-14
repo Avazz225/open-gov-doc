@@ -11,8 +11,11 @@ class Settings(BaseServiceSettings):
     # Provisional contract (see docs/services/permission-service.md): which
     # subjects deliver structure events (resource created/moved/deleted).
     # Expected producer: Folder Service (P3-S3, not yet built) under stream
-    # "folder" - simulated via tests until then.
-    structure_subjects: list[str] = ["folder.>"]
+    # "folder" - simulated via tests until then. `case.>` added in
+    # Post-Roadmap Phase 35 Session 2 (ADR 0144, `case-service`'s own real
+    # per-case resource type) - `structure_consumer.py`'s handler is already
+    # prefix-agnostic, this is a config-only addition.
+    structure_subjects: list[str] = ["folder.>", "case.>"]
 
     # Self-consumption of its own four-eyes approval event (4.3, P6-S4) for
     # action types that permission-service executes itself (scope locks,

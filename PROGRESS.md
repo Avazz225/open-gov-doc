@@ -2,45 +2,56 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P35-S1 (`Group.is_org_unit` marker + admin visibility for org-hierarchy grants shipped
-— closes two gaps ADR 0120/0121 named by their exact intended field names one and two sessions earlier.
-`Group` gains `is_org_unit: bool` (default `false`, no existing group auto-promoted) settable via a new
-`PATCH /groups/{id}` (the first update endpoint a `Group` has ever had). `create_org_hierarchy_grant`'s
-`grant_kind="org_unit"` branch now resolves the deputy set from only `is_org_unit=True` group membership —
-previously EVERY group the principal belonged to, unioned, an explicitly acknowledged pragmatic stand-in;
-a principal in no flagged group now correctly yields zero deputies instead of granting through whichever
-unrelated groups happened to exist. Separately, every `Delegation` row `create_org_hierarchy_grant` creates
-is now stamped with `grant_kind` (`"supervisor"`/`"supervisor_chain"`/`"org_unit"`, `null` for self-service)
-— previously indistinguishable from a self-service delegation except by inspecting
-`scope_process_definition_ids`' shape. `admin-ui`'s `UserManagement` Groups section gained a checkbox
-(creation) + a badge-button toggle (existing groups) for the flag; `DelegationsAdmin` gained a new
-"Herkunft" origin column + a client-side filter checkbox (no new backend query parameter — the page
-already loads every delegation unfiltered). `permission-service` +6 tests (164 total, up from 158):
-membership in an unflagged group correctly yields zero deputies (the actual behavior-change regression
-guard), `PATCH /groups/{id}` toggle + auth/403/404 cases, a self-service delegation's `grant_kind` is
-`null`; one existing `org_unit`-grant test rewritten to flag its group first (the old "every group counts"
-default no longer applies). `admin-ui` +4 tests (232 total, up from 228). A real CSS bug found and fixed
-via live-browser screenshot verification (not caught by any component test, jsdom has no real layout
-engine): a `.hint` placed directly inside a `.form-grid` landed in the wrong grid cell under the existing
-`auto-fit` column layout — fixed with a new `.form-grid > .hint { grid-column: 1 / -1; }` rule, the same
-full-width technique `.deletion-reason-catalog` already established. Live-verified end to end in a REAL
-BROWSER against the real, rebuilt running stack: flagged a real group as an org unit through the UI,
-confirmed the "Ja"/"Nein" toggle round-trips through a reload (screenshot); separately seeded a REAL
-org-hierarchy grant (a real `SupervisorAssignment` + a real `POST /org-hierarchy-grants` call against the
-running service) and confirmed `DelegationsAdmin` correctly labeled it "Org-Hierarchie: Vorgesetzte/r"
-alongside existing "Selbstverwaltet" rows, and that the filter checkbox correctly hid the self-service rows
-while keeping it visible (screenshot). Test artifacts cleaned up (seeded `SupervisorAssignment` deleted;
-the seeded `Delegation` left to expire on its own 4-hour window rather than provision a `dms-admin`-role
-account purely for cleanup). See [ADR 0143](docs/adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)),
-the first session of Phase 35 (org-hierarchy & workflow polish).
+**Last completed:** P35-S2 (a real per-case RBAC resource type for `case-service` shipped — closes the gap
+ADR 0070/0121 both explicitly left open. `case-service` now registers a real `ResourceNode` per case
+(`resource_type="case"`, `parent_id="root"`) in `permission-service`, analogous to `folder-service`'s own
+resource-tree registration. Unlike `folder-service`'s purely event-driven registration, the node is created
+SYNCHRONOUSLY via a new `POST /resources` endpoint (idempotent create-if-missing, sharing its logic with the
+existing `"*.resource.created"` event handler via a new shared `repository.create_resource_node`) — a
+purely event-driven path was found, during design, to leave a genuine race window where a freshly created
+case would be briefly unreadable by anyone (an unregistered `resource_id` denies every permission check
+outright, no fallback to root), since `case-service`'s own endpoints self-check immediately after creation
+unlike `folder-service`'s (which never self-check per-resource at all, only the gateway does). The
+`case.resource.created` event is still published too, for symmetry with `folder-service`'s contract and as
+the basis for a startup backfill loop that registers every case created before this session (self-healing,
+idempotent, re-run on every restart — live-verified against the real dev stack's 157 pre-existing cases,
+all already correctly registered by a prior container restart during this session's own test cycle). Every
+per-case endpoint (`GET`/`PATCH /cases/{id}`, document-reference endpoints, archive-request/status) now
+checks `resource_id=<case_id>` instead of `"root"`; collection-level endpoints (`POST`/`GET /cases`, the
+two config endpoints) stay at `root` unchanged. A real, distinct bug found and fixed while building this:
+reordering surfaced that all seven per-case endpoints would have started returning `403` instead of `404`
+for a genuinely unknown `case_id` (an otherwise fully authorized principal, denied only because the
+nonexistent case also has no `ResourceNode`) — fixed with a new `_get_case_or_404` helper called BEFORE the
+permission check in all seven. No new admin-ui work needed — `admin-ui`'s existing generic role-assignment
+form already has a free-text `resourceId` field, so an admin can already scope a `RoleAssignment` to a
+specific case through the existing UI. `permission-service` +2 tests (166 total, up from 164) —
+`POST /resources` creates a node with no polling needed and is idempotent. `case-service` +4 tests (65
+total, up from 61) — a case's `ResourceNode` exists the instant `POST /cases` returns, the event is also
+published, a case-scoped `RoleAssignment` genuinely restricts access to just that one case (the decisive
+proof of real value, not just plumbing), collection-level endpoints unaffected; one existing test (a case
+created via direct `repository` access, bypassing `POST /cases`'s registration) updated in place to
+register the node explicitly. `libs/dms-permission-client` +2 tests (14 total, up from 12) — the new
+`create_resource_node` method. A real event-loop bug found and fixed while writing that last test: directly
+awaiting `app.state.permission_client` from an async pytest function (not going through `TestClient`'s own
+request-handling thread) raised "bound to a different event loop" — fixed by using a plain `httpx.AsyncClient`
+instead. Live-verified end to end against the real, rebuilt running stack: created a real case and confirmed
+both its `ResourceNode` and a real `GET /cases/{id}` succeeded with zero delay; stripped `case.read` from
+the "everyone" role globally and confirmed the case (and an unrelated pre-existing one) both became
+correctly unreadable; created a case-scoped role + `RoleAssignment` at the specific case's `resource_id` and
+confirmed the scoped principal could read exactly that one case and no other; restored "everyone"'s original
+permissions afterward; confirmed `GET /cases/does-not-exist` correctly returns `404`. Test role-assignment
+cleaned up afterward; the test case itself deliberately left in place (no case delete/purge endpoint, same
+established precedent as prior sessions). See
+[ADR 0144](docs/adr/0144-case-per-case-resource-type.md)), the second session of Phase 35 (org-hierarchy &
+workflow polish).
 
-**Next session:** **P35-S2** (a real per-case RBAC resource type for `case-service` — today the missing
-resource type is worked around via `Delegation` scoping from P31-S9/S10, replace with a genuine
-`permission-service` resource type mirroring documents/folders so future case features can build on it
-instead of extending the workaround). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining
-breakdown (Phase 35 continues with P35-S3 `TaskClaim` reassignment/notification + an "unclaimed team work"
-view, P35-S4 hand-folder/workmap cross-case indexing; then Phase 36 records quarantine/output-stamping/misc
-completion, Phase 37 scoping-only session on cross-tenant XDOMEA federation).
+**Next session:** **P35-S3** (`TaskClaim` reassignment/notification + an "unclaimed team work" view —
+P31-S11's `TeamTaskList` only shows direct reports' claimed tasks, unclaimed team work is invisible to a
+supervisor; also add a notification when the 72h claim-abandonment window expires, today a silent,
+action-less expiry). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 35
+concludes with P35-S4 hand-folder/workmap cross-case indexing; then Phase 36 records
+quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
+federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 
