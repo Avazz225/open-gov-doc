@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { axe } from "jest-axe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutDesigner } from "@/components/LayoutDesigner";
 import { I18nProvider } from "@/i18n";
+
+// Automated a11y regression net for the field-reorder-button fix (post-
+// roadmap phase 33 session 1, ADR 0135) - `color-contrast` disabled, jsdom
+// has no real rendering engine to compute it reliably (post-roadmap phase
+// 33 session 3, ADR 0137).
+const AXE_OPTIONS = { rules: { "color-contrast": { enabled: false } } };
 
 function renderLayoutDesigner() {
   return render(
@@ -187,6 +194,25 @@ describe("LayoutDesigner", () => {
 
     const codes = screen.getAllByText(/Rechnungsnummer|Betrag/, { selector: "code" });
     expect(codes.map((c) => c.textContent)).toEqual(["Betrag", "Rechnungsnummer"]);
+  });
+
+  it("has no axe violations with a multi-field row rendered", async () => {
+    getObjectTypeLayoutMock.mockResolvedValue({
+      rows: [
+        {
+          columns: [
+            { attribute: "Rechnungsnummer", label: "Rechnungsnummer", required: true },
+            { attribute: "Betrag", label: "Betrag", required: true },
+          ],
+        },
+      ],
+      responsive_breakpoint_px: 600,
+      is_custom: false,
+    });
+    const { container } = renderLayoutDesigner();
+    await screen.findByText("Automatisch generiert");
+
+    expect(await axe(container, AXE_OPTIONS)).toHaveNoViolations();
   });
 
   it("resets the layout back to the generated default", async () => {

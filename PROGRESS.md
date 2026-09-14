@@ -2,29 +2,33 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P33-S2 (PDF/UA tag preservation on export — `PdfWriter(clone_from=<reader>)` preserves
-an already-tagged source's `/StructTreeRoot` (confirmed empirically, pypdf 6.14.2); `PdfWriter()` fed via
-`.append()`/`add_page()` never does, regardless of merge order. Fixed `export_pdf.build_document_export`'s
-merge first, per the plan's literal wording about the merge/stamp pass — but a live, end-to-end check (upload
-a manually tagged PDF, export it, inspect the result) showed it was STILL untagged, surfacing that the real
-root cause was upstream: `PdfArchiveRenderer._tag_pdf` (the already-PDF passthrough step of the format-
-conversion dispatch, which runs before the merge) unconditionally stripped tags via its own `PdfWriter()` +
-per-page `add_page()` rebuild — despite its name, unrelated to PDF/UA accessibility tagging (it marks
-`/Producer`/`/Title` metadata for the records-disposal archival-copy feature). Fixed both with the same
-`clone_from`-first technique. `build_folder_export` (multi-document combined export) deliberately still
-drops tags — merging independent structure trees across sources isn't something pypdf supports, and a
-partial per-document fix would be more misleading than the current, consistent behavior; locked in with a
-dedicated regression test rather than left as a silent gap. rendering-service +5 tests (98 total). Live-
-verified end-to-end against the real, rebuilt stack, including re-verifying after the second fix (the first
-fix alone was insufficient) and confirming an untagged source's export is unaffected — see
-[ADR 0136](docs/adr/0136-pdf-ua-tag-preservation-on-export.md)), the second session of Phase 33
+**Last completed:** P33-S3 (automated a11y test harness via `jest-axe` — `user-ui` (required by the plan)
+and `admin-ui` (extended, since it has a real structural fix, P33-S1's `LayoutDesigner` `aria-label` bug,
+worth a regression net) wired up: `expect.extend(toHaveNoViolations)` in each app's `tests/setup.ts`
+(`jest-axe` has no dedicated Vitest entry point, unlike `@testing-library/jest-dom/vitest`), plus a small
+local `jest-axe-vitest.d.ts` type augmentation per app (`@types/jest-axe` only augments Jest's own
+namespace, not Vitest's `Assertion` interface). `color-contrast` deliberately disabled in every axe call —
+jsdom has no real rendering engine to compute it reliably, a well-documented general limitation, not
+specific to this project. `reviewer-ui`/`migration-console` deliberately NOT extended: their P33-S1 fix was
+color-only (`--dms-accent-bg`), which axe can't verify in jsdom anyway — adding the harness there would be
+inert scaffolding with no real regression coverage. `user-ui` +4 tests (247 total: 2 existing
+`PreviewPane.test.tsx` cases extended with axe checks for the conflict/classification badges, 2 new
+standalone files `classification-panel.test.tsx`/`derived-documents-panel.test.tsx` since neither component
+had a dedicated test file before). `admin-ui` +1 (228 total, `layout-designer.test.tsx`). A real test-writing
+bug found and fixed along the way: `screen.findByText("VS-NfD")` matched BOTH the current-level badge and
+the raise-`<select>`'s own option (Testing Library's default text matcher only considers an element's direct
+text-node children, not full recursive `textContent` — the 🔒 glyph living in a sibling `<span>` meant the
+badge `<p>`'s only direct text node was exactly "VS-NfD" too) — fixed by querying the unambiguous
+`aria-label` instead. `tsc`/`eslint`/`next build` clean in both apps, no production code changed (test
+infrastructure only), so no Docker rebuild/live-verification was needed this session — see
+[ADR 0137](docs/adr/0137-axe-core-a11y-test-harness.md)), the third session of Phase 33
 (accessibility completion).
 
-**Next session:** **P33-S3** (Phase 33 continues — automated a11y test harness: integrate `axe-core` or
-equivalent into at least `user-ui`'s test suite as a regression net for the P31-S8/P33-S1 badge/contrast
-fixes; extend to other apps as capacity allows). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full
-remaining breakdown (Phase 33 continues with P33-S4 gendered backend error messages;
-then Phase 34 XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
+**Next session:** **P33-S4** (Phase 33 continues, and concludes it — gendered backend error messages:
+P31-S8's gender-neutral pass deliberately scoped out backend `detail=` strings that surface verbatim in the
+UI, e.g. `ClassificationPanel.tsx`'s `ApiError.message` rendering; this session reviews those across the
+backend services). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 34
+XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
 quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
 federation).
 

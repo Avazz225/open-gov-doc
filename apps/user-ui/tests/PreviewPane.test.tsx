@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "@/components/PreviewPane";
 import { I18nProvider } from "@/i18n";
@@ -64,6 +65,13 @@ function renderPreview(document: DocumentSummary) {
     </I18nProvider>
   );
 }
+
+// Automated a11y regression net (post-roadmap phase 33 session 3, ADR 0137) -
+// `color-contrast` is disabled: jsdom has no real rendering/layout engine, so
+// axe-core cannot reliably compute rendered colors/contrast ratios there
+// (a well-documented jsdom limitation, not something specific to this
+// project) - every OTHER rule (labels, ARIA usage, structure) still runs.
+const AXE_OPTIONS = { rules: { "color-contrast": { enabled: false } } };
 
 function makeDocument(overrides: Partial<DocumentSummary> = {}): DocumentSummary {
   return {
@@ -602,6 +610,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(
       within(previewPane).getByLabelText(/Konflikt: Diese Version ist als Konfliktversion markiert/)
     ).toBeInTheDocument();
+    expect(await axe(previewPane, AXE_OPTIONS)).toHaveNoViolations();
 
     const select = within(previewPane).getByLabelText("Version auswählen");
     const conflictOption = within(select).getByText(/Version 2/) as HTMLOptionElement;
@@ -632,6 +641,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(
       within(previewPane).getByLabelText(/Einstufung: GEHEIM\..*Check-ins/)
     ).toBeInTheDocument();
+    expect(await axe(previewPane, AXE_OPTIONS)).toHaveNoViolations();
   });
 
   it("pollt eine noch nicht fertige pdf_archive-Rendition und zeigt die formatierte Ansicht, sobald sie bereit ist (P23-S3)", async () => {
