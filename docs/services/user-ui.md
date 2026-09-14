@@ -220,6 +220,19 @@ Last session of Phase 5e — closes off the backend chain built in P5e-S1/S2 (Ob
   `<title>-abgabe.zip` via the same `triggerBrowserDownload` helper the plain export already uses.
   Case-level export has no `user-ui` entry point yet — `case-service`'s "Case" has no dedicated browsing
   view anywhere in this app to attach a button to, see the ADR's "Consequences".
+- **General XJustiz export for inter-agency handoff (14.2, Post-Roadmap Phase 34 Session 2,
+  [ADR 0140](../adr/0140-xjustiz-frontend-export-entry-point.md))**: the XJustiz counterpart, right next
+  to the XDOMEA button above — "Export für Justizübergabe" (deliberately worded distinctly from
+  "Behördenübergabe" so the two adjacent buttons aren't ambiguous), same inline-form interaction shape,
+  labeled "Empfangende Justizbehörde" (reusing the existing gender-neutral "Empfangende X" construction)
+  and a distinctly-labeled submit button ("Justiz-Paket exportieren", since both inline forms can be open
+  at once). `exportDocumentXjustiz()` (`lib/api.ts`) calls `archival-service`'s
+  `POST /xjustiz/export/documents/{id}?empfaenger_name=...` and downloads the returned ZIP as
+  `<title>-xjustiz.zip`. Live-verified in a real browser via a one-off Playwright script (not a committed
+  E2E spec, same precedent as the XDOMEA button never getting one either) — both buttons render side by
+  side with clearly distinct labels, form submission triggers a real file download. No case-level XJustiz
+  export entry point either, same reasoning as XDOMEA's own case-export gap above (P34-S3's own, separate
+  concern).
 
 ## Signatures (3.10, since P6-S7)
 
@@ -363,6 +376,7 @@ Two-stage Docker image (`apps/user-ui/Dockerfile`): Node only in the build stage
 ## Tests
 
 - `npm run typecheck` / `npm run lint` / `npm run build` — type checking, ESLint, production-ready static export.
+- **Since Post-Roadmap Phase 34 Session 2: 250 tests** ([ADR 0140](../adr/0140-xjustiz-frontend-export-entry-point.md)) — new `PreviewPane.test.tsx` cases (3 new: submits the XJustiz export form with a named receiving Justizbehörde and confirms `exportDocumentXjustiz` is called with the right arguments, the submit button stays disabled while the recipient field is empty, a failed export shows the generic XJustiz error message) — the exact same three-test shape already established for the XDOMEA button — verified against the real, exact live count via a full test run (`npm test`, 250 total).
 - **Since Post-Roadmap Phase 33 Session 3: 247 tests** ([ADR 0137](../adr/0137-axe-core-a11y-test-harness.md)) — automated a11y regression net via `jest-axe`, registered against Vitest's own `expect` in `tests/setup.ts` (a small local `jest-axe-vitest.d.ts` type augmentation, since `jest-axe` has no Vitest-specific entry point). `color-contrast` deliberately disabled in every axe call (jsdom has no real rendering engine to compute it reliably). 2 existing `PreviewPane.test.tsx` cases extended in-place with an axe assertion (conflict badge, classification badge, ADR 0119); 2 new standalone files targeting the same session's fixes — `classification-panel.test.tsx` (2 tests) and `derived-documents-panel.test.tsx` (1 test), neither component having had a dedicated test file before (both `useAuth()`-dependent, otherwise only exercised via `document-workspace.test.tsx`'s integration harness) — verified against the real, exact live count via a full test run (`npm test`, 247 total).
 - **Since Post-Roadmap Phase 32 Session 2: 241 tests** ([ADR 0131](../adr/0131-delegation-scope-resolution-case-then-document.md)) — one new `delegations-pane.test.tsx` case (creating a scoped delegation with selected object types and comma-separated folder IDs, confirming `createDelegation` is called with the right `objectTypeIds`/`folderResourceIds`) — verified against the real, exact live count via a full test run (`npm test`, 241 total).
 - **Since Post-Roadmap Phase 31 Session 13a: 240 tests** ([ADR 0127](../adr/0127-general-xdomea-export-abgabe-0401-synchronous-not-disposal-pipeline.md)) — new `PreviewPane.test.tsx` cases (3 new: submits the XDOMEA export form with a named receiving authority and confirms `exportDocumentXdomea` is called with the right arguments, the submit button stays disabled while the authority field is empty, a failed export shows the generic error message) — verified against the real, exact live count via a full test run (`npm test`, 240 total).

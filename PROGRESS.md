@@ -2,38 +2,34 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P34-S1 (XJustiz import shipped — `POST /xjustiz/import`, structurally the mirror of
-`POST /xdomea/import` (ADR 0128): new `xjustiz.parse_uebermittlung_schriftgutobjekte()` (mirrors
-`parse_abgabe_message()`) and `general_import.import_uebermittlung_schriftgutobjekte_package()`, same two
-target options (attach to an existing case via `case_id`, or create a brand-new one via
-`process_definition_id`, named after the Akte's `anzeigename`). `ParsedXJustizDokument` carries only the
-package `dateiname` — unlike XDOMEA's `Primaerdokument`, `_build_dokument` never wrote a separate
-original-filename/content-type field to begin with, so there's genuinely nothing else to recover;
-`content_type` is passed as `None` on creation since `document-service`'s own magic-byte sniffing
-determines the real type regardless. Verified directly against `import_xdomea`'s own precedent (not the
-plan's own paraphrase) that a missing-referenced-file package maps to `422`, not `409` — the `409` case
-turned out to describe a different, EXPORT-side data-drift scenario. 3 of `general_import.py`'s 4
-exceptions shared verbatim between both import paths (already format-agnostic); a new
-`ProcessDefinitionWithoutAkteError` added alongside the existing XDOMEA-specific one rather than renaming
-it purely for symmetry. archival-service +14 tests (133 total: 4 pure-function round-trip tests mirroring
-`test_xdomea.py`'s existing four exactly, 10 endpoint tests mirroring the ten existing `/xdomea/import`
-tests one-for-one). Live-verified end-to-end against the real, rebuilt running stack: a real document was
-exported and imported back as a standalone document with byte-identical content; a real, freshly created
-case was exported and re-imported creating a genuine new case via a real process definition, confirmed in
-case-service with the correct name (the case's own document wasn't included in that particular export
-since it had no `snapshot_version_number` yet — a pre-existing, unrelated gate on OPEN cases, not
-something this session touches; the document-inclusion code path itself is already covered by the mocked
-case-import tests) — see
-[ADR 0139](docs/adr/0139-xjustiz-import-uebermittlung-schriftgutobjekte.md)), the first session of Phase 34
+**Last completed:** P34-S2 (XJustiz frontend entry point shipped — a document-export button in `user-ui`'s
+`PreviewPane.tsx`, "Export für Justizübergabe", the exact mirror of the existing XDOMEA button's
+interaction shape (toggle → inline form → submit → ZIP download). Deliberately worded distinctly from the
+XDOMEA button ("Justizübergabe"/"Justizbehörde"/"Justiz-Paket exportieren" vs. "Behördenübergabe"/
+"Behörde"/"Paket exportieren") so the two now-adjacent buttons aren't ambiguous — the plan's own "RTL"
+wording turned out, on verification, not to be an established term anywhere in this project (confirmed via
+grep across the whole codebase); read as a plain "avoid ambiguity between the two buttons" instruction
+instead, satisfied by the distinct wording. `Empfangende Justizbehörde` reuses the existing gender-neutral
+"Empfangende X" construction (already used for the XDOMEA field) rather than inventing a new pattern. New
+`exportDocumentXjustiz()` in `api.ts`. user-ui +3 tests (250 total), the exact three-test shape already
+established for the XDOMEA button. Live-verified in a REAL BROWSER (not just curl/mocked tests) using this
+project's existing Playwright E2E infrastructure (`e2e/fixtures.ts`) as a one-off script — not committed as
+a permanent E2E spec, same precedent as the XDOMEA button itself never getting one; found and fixed two
+real bugs while writing the script (a missing `Authorization` header on the upload/cleanup requests, and an
+ambiguous `getByText` locator matching both the tab title and the heading) before it passed, confirming
+via screenshot that both export buttons render side by side with clearly distinct labels and that
+submitting the form triggers a real `<title>-xjustiz.zip` download — see
+[ADR 0140](docs/adr/0140-xjustiz-frontend-export-entry-point.md)), the second session of Phase 34
 (XDOMEA/XJustiz completion).
 
-**Next session:** **P34-S2** (Phase 34 continues — XJustiz frontend entry point: at least a document-export
-button in `user-ui`, mirroring `PreviewPane.tsx`'s existing XDOMEA export button, distinctly named to avoid
-RTL ambiguity per this project's established idiom). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full
-remaining breakdown (Phase 34 continues with P34-S3 minimal case-browsing UI + XDOMEA/XJustiz case
-export/import frontend, P34-S4 import robustness for real third-party XDOMEA packages; then Phase 35
-org-hierarchy/workflow polish, Phase 36 records quarantine/output-stamping/misc completion, Phase 37
-scoping-only session on cross-tenant XDOMEA federation).
+**Next session:** **P34-S3** (Phase 34 continues — minimal case-browsing UI + XDOMEA/XJustiz case
+export/import frontend: since neither format's case-level export/import has any UI today, build the
+smallest viable case list/detail view — session decides `reviewer-ui` vs. `user-ui`, likely `reviewer-ui`
+per the Phase 29 "Vorgang" detail-view precedent — then wire all four case-level export/import buttons
+onto it). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 34 continues
+with P34-S4 import robustness for real third-party XDOMEA packages; then Phase 35 org-hierarchy/workflow
+polish, Phase 36 records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on
+cross-tenant XDOMEA federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

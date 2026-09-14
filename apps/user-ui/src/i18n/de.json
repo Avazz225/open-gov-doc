@@ -545,6 +545,11 @@
     "xdomeaExportLeserPlaceholder": "Name der Behörde",
     "xdomeaExportSubmit": "Paket exportieren",
     "xdomeaExportErrorGeneric": "XDOMEA-Export fehlgeschlagen. Bitte später erneut versuchen.",
+    "xjustizExport": "Export für Justizübergabe",
+    "xjustizExportEmpfaengerLabel": "Empfangende Justizbehörde",
+    "xjustizExportEmpfaengerPlaceholder": "Name der Justizbehörde",
+    "xjustizExportSubmit": "Justiz-Paket exportieren",
+    "xjustizExportErrorGeneric": "XJustiz-Export fehlgeschlagen. Bitte später erneut versuchen.",
     "copyLink": "Link kopieren",
     "linkCopied": "Link in die Zwischenablage kopiert.",
     "linkCopyError": "Link konnte nicht kopiert werden."

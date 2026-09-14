@@ -2554,6 +2554,27 @@ export async function exportDocumentXdomea(
   return response.blob();
 }
 
+// General XJustiz export for inter-agency handoff (14.2, post-roadmap phase
+// 31 session 13c, ADR 0129) - the XJustiz counterpart to `exportDocumentXdomea`
+// above, same synchronous, on-demand download shape, different message format
+// (`nachricht.gds.uebermittlungSchriftgutobjekte.0005005`) and query parameter
+// name (`empfaenger_name`, the receiving court/authority, not `leser_name`).
+export async function exportDocumentXjustiz(
+  token: string,
+  documentId: string,
+  empfaengerName: string
+): Promise<Blob> {
+  const response = await request(
+    "archival-service",
+    `xjustiz/export/documents/${encodeURIComponent(
+      documentId
+    )}?empfaenger_name=${encodeURIComponent(empfaengerName)}`,
+    { method: "POST" },
+    token
+  );
+  return response.blob();
+}
+
 // Structure templates (2.5/7.3, P15-S6) - a folder subtree as a named,
 // reusable template (e.g. a file-plan skeleton).
 export interface FolderTemplate {

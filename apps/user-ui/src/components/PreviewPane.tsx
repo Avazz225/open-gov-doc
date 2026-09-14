@@ -15,6 +15,7 @@ import {
   downloadRenditionContent,
   exportDocument,
   exportDocumentXdomea,
+  exportDocumentXjustiz,
   getExportAccessibilityCheck,
   listDocumentVersions,
   listOcrResults,
@@ -144,6 +145,15 @@ export function PreviewPane({
   const [xdomeaLeserName, setXdomeaLeserName] = useState("");
   const [xdomeaExporting, setXdomeaExporting] = useState(false);
   const [xdomeaExportError, setXdomeaExportError] = useState<string | null>(null);
+  // General XJustiz export for inter-agency handoff (14.2, post-roadmap
+  // phase 31 session 13c/phase 34 session 2, ADR 0129/ADR 0140) - the
+  // XJustiz counterpart to the XDOMEA block above, distinctly named/labeled
+  // (Justiz vs. Behörde) so the two buttons aren't ambiguous next to each
+  // other.
+  const [xjustizExportOpen, setXjustizExportOpen] = useState(false);
+  const [xjustizEmpfaengerName, setXjustizEmpfaengerName] = useState("");
+  const [xjustizExporting, setXjustizExporting] = useState(false);
+  const [xjustizExportError, setXjustizExportError] = useState<string | null>(null);
   // Accessibility pass (14.2, post-roadmap phase 31 session 8) - `null`
   // while unknown/not yet loaded (e.g. no `document.read`), in which case
   // no warning is shown (fail silent, not fail loud - the export action
@@ -561,6 +571,26 @@ export function PreviewPane({
     }
   }
 
+  async function handleXjustizExport() {
+    if (!accessToken || !activeDocument || !xjustizEmpfaengerName.trim()) return;
+    setXjustizExportError(null);
+    setXjustizExporting(true);
+    try {
+      const blob = await exportDocumentXjustiz(
+        accessToken,
+        activeDocument.id,
+        xjustizEmpfaengerName.trim()
+      );
+      triggerBrowserDownload(blob, `${activeDocument.title}-xjustiz.zip`);
+      setXjustizExportOpen(false);
+      setXjustizEmpfaengerName("");
+    } catch {
+      setXjustizExportError(t("preview.xjustizExportErrorGeneric"));
+    } finally {
+      setXjustizExporting(false);
+    }
+  }
+
   // Authenticated direct links (post-roadmap phase 29, ADR 0109) - a stable
   // resource ID in the URL plus the normal session/permission-check path,
   // resolved client-side by DocumentWorkspace.tsx on mount.
@@ -825,6 +855,46 @@ export function PreviewPane({
       {xdomeaExportError && (
         <p className="error-text" role="alert">
           {xdomeaExportError}
+        </p>
+      )}
+      {/* General XJustiz export for inter-agency handoff (14.2, post-roadmap
+          phase 31 session 13c/phase 34 session 2, ADR 0129/ADR 0140) - a
+          downloadable uebermittlungSchriftgutobjekte package (ZIP), the
+          XJustiz counterpart to the XDOMEA export above. Distinctly
+          labeled ("Justizübergabe"/"Justizbehörde" vs. "Behördenübergabe"/
+          "Behörde" above) so the two buttons aren't ambiguous next to each
+          other. */}
+      <button type="button" onClick={() => setXjustizExportOpen((prev) => !prev)}>
+        {t("preview.xjustizExport")}
+      </button>
+      {xjustizExportOpen && (
+        <div className="inline-form">
+          <label>
+            {t("preview.xjustizExportEmpfaengerLabel")}
+            <input
+              type="text"
+              value={xjustizEmpfaengerName}
+              onChange={(e) => setXjustizEmpfaengerName(e.target.value)}
+              placeholder={t("preview.xjustizExportEmpfaengerPlaceholder")}
+            />
+          </label>
+          <span className="actions">
+            <button
+              type="button"
+              disabled={xjustizExporting || !xjustizEmpfaengerName.trim()}
+              onClick={handleXjustizExport}
+            >
+              {xjustizExporting ? t("preview.exporting") : t("preview.xjustizExportSubmit")}
+            </button>
+            <button type="button" onClick={() => setXjustizExportOpen(false)}>
+              {t("common.cancel")}
+            </button>
+          </span>
+        </div>
+      )}
+      {xjustizExportError && (
+        <p className="error-text" role="alert">
+          {xjustizExportError}
         </p>
       )}
       <button type="button" onClick={handleCopyLink}>

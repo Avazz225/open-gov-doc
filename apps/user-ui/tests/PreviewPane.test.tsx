@@ -15,6 +15,7 @@ const listOcrResultsMock = vi.fn();
 const downloadOcrPageImageMock = vi.fn();
 const exportDocumentMock = vi.fn();
 const exportDocumentXdomeaMock = vi.fn();
+const exportDocumentXjustizMock = vi.fn();
 const getExportAccessibilityCheckMock = vi.fn();
 // Test-only, spied fresh onto the real `navigator.clipboard.writeText`
 // each test (see beforeEach) - typed loosely since the exact spy generic
@@ -29,6 +30,7 @@ vi.mock("@/lib/api", () => ({
   downloadDocumentVersion: (...args: unknown[]) => downloadDocumentVersionMock(...args),
   exportDocument: (...args: unknown[]) => exportDocumentMock(...args),
   exportDocumentXdomea: (...args: unknown[]) => exportDocumentXdomeaMock(...args),
+  exportDocumentXjustiz: (...args: unknown[]) => exportDocumentXjustizMock(...args),
   getExportAccessibilityCheck: (...args: unknown[]) => getExportAccessibilityCheckMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
   downloadOcrPageImage: (...args: unknown[]) => downloadOcrPageImageMock(...args),
@@ -141,6 +143,7 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     downloadDocumentVersionMock.mockReset();
     exportDocumentMock.mockReset();
     exportDocumentXdomeaMock.mockReset();
+    exportDocumentXjustizMock.mockReset();
     getExportAccessibilityCheckMock.mockReset();
     getExportAccessibilityCheckMock.mockResolvedValue({ is_pdf: true, is_tagged: true });
     listOcrResultsMock.mockReset();
@@ -564,6 +567,74 @@ describe("PreviewPane - native Vorschau statt Ersatzdarstellung", () => {
     expect(
       await within(previewPane).findByText(
         "XDOMEA-Export fehlgeschlagen. Bitte später erneut versuchen."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("exportiert ein XJustiz-Uebermittlung-Paket fuer eine benannte Justizbehoerde (Post-Roadmap Phase 34 Session 2, ADR 0140)", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentXjustizMock.mockResolvedValue(new Blob(["PK-zip"], { type: "application/zip" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    expect(
+      within(previewPane).queryByLabelText("Empfangende Justizbehörde")
+    ).not.toBeInTheDocument();
+
+    await user.click(within(previewPane).getByText("Export für Justizübergabe"));
+    await user.type(
+      within(previewPane).getByLabelText("Empfangende Justizbehörde"),
+      "Testgericht"
+    );
+    await user.click(within(previewPane).getByText("Justiz-Paket exportieren"));
+
+    expect(exportDocumentXjustizMock).toHaveBeenCalledWith("token-123", "d1", "Testgericht");
+  });
+
+  it("laesst das Justiz-Paket-Export-Formular nicht ohne eine Justizbehoerde absenden", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Export für Justizübergabe"));
+    expect(within(previewPane).getByText("Justiz-Paket exportieren")).toBeDisabled();
+    expect(exportDocumentXjustizMock).not.toHaveBeenCalled();
+  });
+
+  it("zeigt bei einem fehlgeschlagenen XJustiz-Export eine Fehlermeldung", async () => {
+    const doc = makeDocument({ title: "vertrag.pdf" });
+    listDocumentVersionsMock.mockResolvedValue([makeVersion({ content_type: "application/pdf" })]);
+    downloadDocumentVersionMock.mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" }));
+    exportDocumentXjustizMock.mockRejectedValue(new Error("Serverfehler"));
+
+    const user = userEvent.setup();
+    renderPreview(doc);
+
+    const previewPane = screen.getByLabelText("Vorschau: vertrag.pdf");
+    await within(previewPane).findByTitle("vertrag.pdf");
+
+    await user.click(within(previewPane).getByText("Export für Justizübergabe"));
+    await user.type(
+      within(previewPane).getByLabelText("Empfangende Justizbehörde"),
+      "Anderes Gericht"
+    );
+    await user.click(within(previewPane).getByText("Justiz-Paket exportieren"));
+
+    expect(
+      await within(previewPane).findByText(
+        "XJustiz-Export fehlgeschlagen. Bitte später erneut versuchen."
       )
     ).toBeInTheDocument();
   });
