@@ -43,6 +43,7 @@ from archival_service.schemas import (
     CaseArchivalTransferOut,
     ReleasedItemOut,
     XdomeaImportResultOut,
+    XJustizImportResultOut,
 )
 from archival_service.settings import Settings
 
@@ -665,3 +666,56 @@ async def export_case_xjustiz(
     except general_export.ExportError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(content=package, media_type="application/zip")
+
+
+@app.post("/xjustiz/import", response_model=XJustizImportResultOut)
+async def import_xjustiz(
+    file: UploadFile = File(...),
+    folder_id: str = Form(...),
+    case_id: str | None = Form(None),
+    process_definition_id: int | None = Form(None),
+    x_dms_principal: str = Header(default=""),
+) -> XJustizImportResultOut:
+    """General XJustiz import for inter-agency handoff (14.2, Post-Roadmap
+    Phase 34 Session 1, ADR 0139) - the mirror of `export_document_xjustiz`/
+    `export_case_xjustiz` above, and the XJustiz counterpart to `import_xdomea`
+    above. Accepts a `nachricht.gds.uebermittlungSchriftgutobjekte.
+    0005005` package (same ZIP shape those two endpoints produce), creates
+    the referenced document(s) in `folder_id`. If the package contains an
+    `akte`, exactly one of `case_id` (attach to an EXISTING case) or
+    `process_definition_id` (start a brand-new case via this process
+    definition, named after the Akte's `anzeigename`) must be given - `422`
+    for either violation, `422` for a structurally-invalid package (same
+    status code as `import_xdomea`'s own "referenced file missing from ZIP"
+    case, not `409` - a genuine data-integrity/caller-input problem in the
+    uploaded package itself, not the "reference to since-deleted content"
+    scenario `export_case_xjustiz`'s `409` covers)."""
+    await _require_archival_permission(x_dms_principal, access_type="write")
+    zip_bytes = await file.read()
+    try:
+        result = await general_import.import_uebermittlung_schriftgutobjekte_package(
+            zip_bytes,
+            folder_id=folder_id,
+            case_id=case_id,
+            process_definition_id=process_definition_id,
+            created_by=x_dms_principal,
+            case_client=app.state.case_client,
+            document_client=app.state.document_client,
+        )
+    except (
+        general_import.CaseTargetConflictError,
+        general_import.CaseTargetRequiredError,
+        general_import.ProcessDefinitionWithoutAkteError,
+        general_import.InvalidPackageError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Abhaengiger Dienst hat den Import abgelehnt: {exc}"
+        ) from exc
+    return XJustizImportResultOut(
+        case_id=result.case_id,
+        case_created=result.case_created,
+        akte_anzeigename=result.akte_anzeigename,
+        document_ids=result.document_ids,
+    )

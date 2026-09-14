@@ -887,3 +887,216 @@ async def test_export_case_xjustiz_returns_a_valid_zip_package_excluding_removed
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         message_xml = archive.read("xjustiz_nachricht.xml")
     xjustiz.validate_uebermittlung_schriftgutobjekte(message_xml)
+
+
+# --- General XJustiz import (14.2, Post-Roadmap Phase 34 Session 1, ADR 0139) --
+
+
+def _build_xjustiz_case_package(*, name="Testfall Import", documents=None) -> bytes:
+    documents = (
+        documents
+        if documents is not None
+        else [
+            {
+                "document_id": "src-doc-1",
+                "version_number": 1,
+                "content_type": "application/pdf",
+                "title": "Schreiben",
+                "package_filename": xjustiz.package_filename(
+                    "Schreiben", "src-doc-1", 1, "application/pdf"
+                ),
+            }
+        ]
+    )
+    case = {"id": "src-case-1", "name": name}
+    message_xml = xjustiz.build_uebermittlung_schriftgutobjekte_for_case(
+        case, documents, empfaenger_name="DMS"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("xjustiz_nachricht.xml", message_xml)
+        for doc in documents:
+            archive.writestr(f"dokumente/{doc['package_filename']}", b"%PDF-fake-content")
+    return buffer.getvalue()
+
+
+def _build_xjustiz_document_package() -> bytes:
+    document = {
+        "document_id": "src-doc-2",
+        "version_number": 1,
+        "content_type": "application/pdf",
+        "title": "Einzeldokument",
+        "package_filename": xjustiz.package_filename(
+            "Einzeldokument", "src-doc-2", 1, "application/pdf"
+        ),
+    }
+    message_xml = xjustiz.build_uebermittlung_schriftgutobjekte_for_document(
+        document, empfaenger_name="DMS"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("xjustiz_nachricht.xml", message_xml)
+        archive.writestr(f"dokumente/{document['package_filename']}", b"%PDF-fake-content")
+    return buffer.getvalue()
+
+
+def test_import_xjustiz_without_principal_header_is_401(client):
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_document_package(), "application/zip")},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_import_xjustiz_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("archival.write")
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_document_package(), "application/zip")},
+    )
+    assert response.status_code == 403
+
+
+def test_import_xjustiz_rejects_a_non_zip_file(client):
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root"},
+        files={"file": ("xjustiz.zip", b"not a zip file", "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+def test_import_xjustiz_rejects_case_id_and_process_definition_id_together(client):
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root", "case_id": "case-1", "process_definition_id": "1"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_case_package(), "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+def test_import_xjustiz_requires_a_case_target_when_package_has_an_akte(client):
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_case_package(), "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+def test_import_xjustiz_rejects_process_definition_id_without_an_akte(client):
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root", "process_definition_id": "1"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_document_package(), "application/zip")},
+    )
+    assert response.status_code == 422
+
+
+async def test_import_xjustiz_standalone_document_creates_it_in_the_target_folder(client):
+    app.state.document_client.create_document.return_value = {"id": "new-doc-1"}
+
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "target-folder"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_document_package(), "application/zip")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "case_id": None,
+        "case_created": False,
+        "akte_anzeigename": None,
+        "document_ids": ["new-doc-1"],
+    }
+    app.state.document_client.create_document.assert_called_once()
+    call_kwargs = app.state.document_client.create_document.call_args.kwargs
+    assert call_kwargs["folder_id"] == "target-folder"
+    assert call_kwargs["data"] == b"%PDF-fake-content"
+    app.state.case_client.add_document_reference.assert_not_called()
+
+
+async def test_import_xjustiz_case_package_attaches_to_an_existing_case(client):
+    app.state.document_client.create_document.return_value = {"id": "new-doc-2"}
+
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "target-folder", "case_id": "existing-case-1"},
+        files={"file": ("xjustiz.zip", _build_xjustiz_case_package(), "application/zip")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["case_id"] == "existing-case-1"
+    assert body["case_created"] is False
+    assert body["akte_anzeigename"] == "Testfall Import"
+    assert body["document_ids"] == ["new-doc-2"]
+    app.state.case_client.create_case.assert_not_called()
+    app.state.case_client.add_document_reference.assert_called_once_with(
+        "existing-case-1", document_id="new-doc-2", added_by="archival-service-tests"
+    )
+
+
+async def test_import_xjustiz_case_package_creates_a_new_case(client):
+    app.state.document_client.create_document.return_value = {"id": "new-doc-3"}
+    app.state.case_client.create_case.return_value = {"id": "brand-new-case-1"}
+
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "target-folder", "process_definition_id": "42"},
+        files={
+            "file": (
+                "xjustiz.zip",
+                _build_xjustiz_case_package(name="Neuer Fall"),
+                "application/zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["case_id"] == "brand-new-case-1"
+    assert body["case_created"] is True
+    assert body["akte_anzeigename"] == "Neuer Fall"
+    app.state.case_client.create_case.assert_called_once()
+    create_kwargs = app.state.case_client.create_case.call_args.kwargs
+    assert create_kwargs["name"] == "Neuer Fall"
+    assert create_kwargs["process_definition_id"] == 42
+    app.state.case_client.add_document_reference.assert_called_once_with(
+        "brand-new-case-1", document_id="new-doc-3", added_by="archival-service-tests"
+    )
+
+
+async def test_import_xjustiz_rejects_a_package_missing_a_referenced_content_file(client):
+    documents = [
+        {
+            "document_id": "src-doc-3",
+            "version_number": 1,
+            "content_type": "application/pdf",
+            "title": "Fehlend",
+            "package_filename": xjustiz.package_filename(
+                "Fehlend", "src-doc-3", 1, "application/pdf"
+            ),
+        }
+    ]
+    case = {"id": "src-case-2", "name": "Fall ohne Dateien"}
+    message_xml = xjustiz.build_uebermittlung_schriftgutobjekte_for_case(
+        case, documents, empfaenger_name="DMS"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("xjustiz_nachricht.xml", message_xml)
+        # Deliberately NOT writing the "dokumente/..." entry the message references.
+    incomplete_package = buffer.getvalue()
+
+    response = client.post(
+        "/xjustiz/import",
+        data={"folder_id": "root", "case_id": "case-1"},
+        files={"file": ("xjustiz.zip", incomplete_package, "application/zip")},
+    )
+
+    assert response.status_code == 422

@@ -1,15 +1,13 @@
-"""XJustiz 3.6.2 general document/case export for inter-agency handoff (14.2,
-Post-Roadmap Phase 31 Session 13c, ADR 0129) - builds and validates the
-`nachricht.gds.uebermittlungSchriftgutobjekte.0005005` message ("Übermittlung
+"""XJustiz 3.6.2 general document/case export/import for inter-agency handoff
+(14.2, Post-Roadmap Phase 31 Session 13c export, ADR 0129; Post-Roadmap Phase
+34 Session 1 import, ADR 0139) - builds/validates/parses the `nachricht.gds.
+uebermittlungSchriftgutobjekte.0005005` message ("Übermittlung
 Schriftgutobjekte", the general-purpose, cross-cutting document/file
 transmission message defined in XJustiz's own base module, used across every
 communication scenario - not tied to any single judicial process type). The
 one representative XJustiz message type this session implements, per
 ADR 0126's "first vertical slice" scoping (mirrors ADR 0029's own precedent
 of shipping exactly one XDOMEA message, not the standard's full scope).
-
-Export only (mirrors P31-S13a's XDOMEA scope) - an XJustiz IMPORT direction,
-if ever needed, is a separate future session, not attempted here.
 
 Every field here was validated against the real, vendored XJustiz 3.6.2
 schema (`xjustiz_schema/`) - not speculative, see comments at the places
@@ -21,6 +19,7 @@ codelists - `001` vs `017` - despite both meaning "Andere / Sonstige")."""
 import mimetypes
 import re
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from lxml import etree
@@ -55,6 +54,13 @@ _BESTANDTEILTYP_ORIGINAL_CODE = "001"
 
 class ValidationError(Exception):
     """The generated message violates the real XJustiz 3.6.2 schema."""
+
+
+class ParseError(Exception):
+    """The message is schema-valid XML but is missing a field
+    `parse_uebermittlung_schriftgutobjekte` needs (e.g. `xjustiz.
+    fachspezifischeDaten/datei/dateiname` on a `dokument`, same "schema-valid
+    but not round-trippable by this module" category as `xdomea.ParseError`)."""
 
 
 def _qn(tag: str) -> str:
@@ -227,3 +233,95 @@ def validate_uebermittlung_schriftgutobjekte(xml_bytes: bytes) -> None:
         _SCHEMA.assertValid(document)
     except etree.DocumentInvalid as exc:
         raise ValidationError(str(exc)) from exc
+
+
+@dataclass
+class ParsedXJustizDokument:
+    dateiname: str
+    """Matches the ZIP entry `dokumente/{dateiname}`
+    (`xjustiz.fachspezifischeDaten/datei/dateiname`). Unlike XDOMEA's
+    `Primaerdokument` (which separately carries `DateinameOriginal`/
+    `SonstigerName` for the true original filename/content type),
+    `_build_dokument` writes only this one field - there is nothing else to
+    fall back to or recover, so the package filename doubles as both the ZIP
+    lookup key and the imported document's title/filename. `content_type` is
+    deliberately not carried here at all: `document-service`'s own
+    magic-byte sniffing (`content_type_sniffer.py`) determines the real,
+    authoritative content type from the actual bytes on creation regardless
+    of what the upload's own multipart content-type hint says (confirmed via
+    `DocumentClient.create_document`, same as the XDOMEA import path) - a
+    value guessed from the file extension here would be redundant at best."""
+
+
+@dataclass
+class ParsedUebermittlungSchriftgutobjekte:
+    akte_anzeigename: str | None
+    """`None` if the package contains no `akte` at all (a standalone
+    document transmission, see `build_uebermittlung_schriftgutobjekte_for_
+    document`) - the XJustiz counterpart to `xdomea.ParsedAbgabeMessage.
+    vorgang_betreff`."""
+    akte_id: str | None
+    """The Akte's own `identifikation/id` (an XJustiz-internal UUID, see
+    `_build_dokument`'s sibling code in `build_uebermittlung_
+    schriftgutobjekte_for_case` - NOT the original `case-service` Case ID,
+    which XJustiz has no dedicated field for and which this module's own
+    export instead stashes in `aktenzeichen.freitext`, a business-data field
+    not meant for structural round-tripping). Kept purely for provenance,
+    the XJustiz counterpart to `xdomea.ParsedAbgabeMessage.
+    vorgang_xdomea_uuid`."""
+    documents: list[ParsedXJustizDokument] = field(default_factory=list)
+
+
+def _parse_dokument_element(dokument_el: "etree._Element") -> ParsedXJustizDokument:
+    dateiname_el = dokument_el.find(
+        f"./{_qn('xjustiz.fachspezifischeDaten')}/{_qn('datei')}/{_qn('dateiname')}"
+    )
+    if dateiname_el is None or not dateiname_el.text:
+        raise ParseError(
+            "Dokument ohne xjustiz.fachspezifischeDaten/datei/dateiname - Paket entspricht "
+            "nicht dem von diesem Modul erwarteten Format"
+        )
+    return ParsedXJustizDokument(dateiname=dateiname_el.text)
+
+
+def parse_uebermittlung_schriftgutobjekte(
+    xml_bytes: bytes,
+) -> ParsedUebermittlungSchriftgutobjekte:
+    """Reads a `nachricht.gds.uebermittlungSchriftgutobjekte.0005005` message
+    back (14.2, Post-Roadmap Phase 34 Session 1, ADR 0139) - the IMPORT
+    direction, the mirror of `build_uebermittlung_schriftgutobjekte_for_case`/
+    `..._for_document`. Does NOT re-validate against the schema (call
+    `validate_uebermittlung_schriftgutobjekte` first, same two-step pattern as
+    `xdomea.parse_abgabe_message`) and deliberately does not attempt to be a
+    general-purpose XJustiz reader: it looks for `dokument` elements ANYWHERE
+    under `schriftgutobjekte` (covers both a standalone top-level `dokument`
+    and an `akte`'s nested ones under `xjustiz.fachspezifischeDaten/inhalt`),
+    and reads the FIRST `akte`'s `anzeigename`/`identifikation/id` if one
+    exists - the same bounded, lenient scope `xdomea.parse_abgabe_message`
+    already established (a package with more than one top-level
+    `schriftgutobjekte` entry, which this module's own export never
+    produces but the schema permits, has all documents flattened into one
+    list rather than rejected)."""
+    root = etree.fromstring(xml_bytes)
+
+    akte_anzeigename: str | None = None
+    akte_id: str | None = None
+    for akte_el in root.findall(f".//{_qn('schriftgutobjekte')}/{_qn('akte')}"):
+        anzeigename_el = akte_el.find(
+            f"./{_qn('xjustiz.fachspezifischeDaten')}/{_qn('anzeigename')}"
+        )
+        id_el = akte_el.find(f"./{_qn('identifikation')}/{_qn('id')}")
+        akte_anzeigename = anzeigename_el.text if anzeigename_el is not None else None
+        akte_id = id_el.text if id_el is not None else None
+        break
+
+    documents = [
+        _parse_dokument_element(dokument_el)
+        for dokument_el in root.findall(f".//{_qn('schriftgutobjekte')}//{_qn('dokument')}")
+    ]
+
+    return ParsedUebermittlungSchriftgutobjekte(
+        akte_anzeigename=akte_anzeigename,
+        akte_id=akte_id,
+        documents=documents,
+    )

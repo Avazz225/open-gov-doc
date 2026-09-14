@@ -2,31 +2,38 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P33-S4 (backend gendered error messages fixed — a full, per-string-reviewed sweep of
-all 32 backend services for masculine-generic person/role nouns (same non-mechanical review method as
-ADR 0119's original frontend pass) found exactly 4 real candidates; the overwhelming majority of regex
-hits across the whole backend turned out to be role display names used as quoted identifiers, compound
-technical/field nouns, or internal-only comments/docstrings — not real issues, mirroring ADR 0119's own
-finding that most such hits are false positives on closer reading. Fixed: `auth-service`'s `GET
-/users/lookup`/`GET /users/{id}` 404s ("Nutzer X unbekannt" → "Person X unbekannt"), `reporting-service`'s
-forensic-trace anomaly string (identical pattern), `notification-service`'s unknown-recipient check
-("Unbekannter Empfänger X" → "Unbekannte empfangende Person X" — reusing this codebase's own pre-existing
-"ausführende Person" adjective+Person construction rather than inventing a new compound noun).
-No test asserted the old wording anywhere (confirmed before changing), so test counts are unchanged
-(auth-service 105, reporting-service 57, notification-service 78, all still green). Live-verified against
-the real, rebuilt running stack — see [ADR 0138](docs/adr/0138-backend-gendered-error-messages.md)), the
-fourth and final session of Phase 33 (accessibility completion). **Phase 33 complete** —
-`graphify update .` run at phase end.
+**Last completed:** P34-S1 (XJustiz import shipped — `POST /xjustiz/import`, structurally the mirror of
+`POST /xdomea/import` (ADR 0128): new `xjustiz.parse_uebermittlung_schriftgutobjekte()` (mirrors
+`parse_abgabe_message()`) and `general_import.import_uebermittlung_schriftgutobjekte_package()`, same two
+target options (attach to an existing case via `case_id`, or create a brand-new one via
+`process_definition_id`, named after the Akte's `anzeigename`). `ParsedXJustizDokument` carries only the
+package `dateiname` — unlike XDOMEA's `Primaerdokument`, `_build_dokument` never wrote a separate
+original-filename/content-type field to begin with, so there's genuinely nothing else to recover;
+`content_type` is passed as `None` on creation since `document-service`'s own magic-byte sniffing
+determines the real type regardless. Verified directly against `import_xdomea`'s own precedent (not the
+plan's own paraphrase) that a missing-referenced-file package maps to `422`, not `409` — the `409` case
+turned out to describe a different, EXPORT-side data-drift scenario. 3 of `general_import.py`'s 4
+exceptions shared verbatim between both import paths (already format-agnostic); a new
+`ProcessDefinitionWithoutAkteError` added alongside the existing XDOMEA-specific one rather than renaming
+it purely for symmetry. archival-service +14 tests (133 total: 4 pure-function round-trip tests mirroring
+`test_xdomea.py`'s existing four exactly, 10 endpoint tests mirroring the ten existing `/xdomea/import`
+tests one-for-one). Live-verified end-to-end against the real, rebuilt running stack: a real document was
+exported and imported back as a standalone document with byte-identical content; a real, freshly created
+case was exported and re-imported creating a genuine new case via a real process definition, confirmed in
+case-service with the correct name (the case's own document wasn't included in that particular export
+since it had no `snapshot_version_number` yet — a pre-existing, unrelated gate on OPEN cases, not
+something this session touches; the document-inclusion code path itself is already covered by the mocked
+case-import tests) — see
+[ADR 0139](docs/adr/0139-xjustiz-import-uebermittlung-schriftgutobjekte.md)), the first session of Phase 34
+(XDOMEA/XJustiz completion).
 
-**Next session:** **P34-S1** (Phase 34, XDOMEA/XJustiz completion — XJustiz import: mirror of P31-S13b's
-XDOMEA import for `uebermittlungSchriftgutobjekte`, a new `parse_uebermittlung_schriftgutobjekte()`
-analogous to `parse_abgabe_message()`, same target options — existing case vs. new case via
-`process_definition_id` — and the same `409` handling for data-integrity errors). See
-`IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 34 continues with P34-S2
-XJustiz frontend entry point, P34-S3 minimal case-browsing UI + XDOMEA/XJustiz case export/import frontend,
-P34-S4 import robustness for real third-party XDOMEA packages; then Phase 35 org-hierarchy/workflow
-polish, Phase 36 records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on
-cross-tenant XDOMEA federation).
+**Next session:** **P34-S2** (Phase 34 continues — XJustiz frontend entry point: at least a document-export
+button in `user-ui`, mirroring `PreviewPane.tsx`'s existing XDOMEA export button, distinctly named to avoid
+RTL ambiguity per this project's established idiom). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full
+remaining breakdown (Phase 34 continues with P34-S3 minimal case-browsing UI + XDOMEA/XJustiz case
+export/import frontend, P34-S4 import robustness for real third-party XDOMEA packages; then Phase 35
+org-hierarchy/workflow polish, Phase 36 records quarantine/output-stamping/misc completion, Phase 37
+scoping-only session on cross-tenant XDOMEA federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

@@ -158,3 +158,69 @@ def test_package_filename_sanitizes_unsafe_characters():
     assert "/" not in name
     assert "?" not in name
     assert "!" not in name
+
+
+# --- Parsing an uebermittlungSchriftgutobjekte message back (XJustiz
+# import, 14.2, Post-Roadmap Phase 34 Session 1, ADR 0139) ------------------
+
+
+def test_parse_uebermittlung_schriftgutobjekte_roundtrips_a_case_export():
+    case = {"id": "case-roundtrip-1", "name": "Testfall Roundtrip"}
+    documents = [
+        _document("doc-1", 1, "application/pdf", "Rechnung"),
+        _document("doc-2", 2, "text/plain", "Notiz"),
+    ]
+    xml_bytes = xjustiz.build_uebermittlung_schriftgutobjekte_for_case(
+        case, documents, empfaenger_name="Testgericht"
+    )
+
+    parsed = xjustiz.parse_uebermittlung_schriftgutobjekte(xml_bytes)
+
+    assert parsed.akte_anzeigename == "Testfall Roundtrip"
+    assert parsed.akte_id is not None
+    assert [d.dateiname for d in parsed.documents] == [doc["package_filename"] for doc in documents]
+
+
+def test_parse_uebermittlung_schriftgutobjekte_roundtrips_an_empty_case_export():
+    case = {"id": "case-roundtrip-2", "name": "Leerer Fall"}
+    xml_bytes = xjustiz.build_uebermittlung_schriftgutobjekte_for_case(
+        case, [], empfaenger_name="Andere Behoerde"
+    )
+
+    parsed = xjustiz.parse_uebermittlung_schriftgutobjekte(xml_bytes)
+
+    assert parsed.akte_anzeigename == "Leerer Fall"
+    assert parsed.documents == []
+
+
+def test_parse_uebermittlung_schriftgutobjekte_roundtrips_a_standalone_document_export():
+    document = _document("doc-standalone", 1, "application/pdf", "Rechnung")
+    xml_bytes = xjustiz.build_uebermittlung_schriftgutobjekte_for_document(
+        document, empfaenger_name="Andere Behoerde"
+    )
+
+    parsed = xjustiz.parse_uebermittlung_schriftgutobjekte(xml_bytes)
+
+    assert parsed.akte_anzeigename is None
+    assert parsed.akte_id is None
+    assert len(parsed.documents) == 1
+    assert parsed.documents[0].dateiname == document["package_filename"]
+
+
+def test_parse_dokument_element_raises_parse_error_without_a_dateiname():
+    """A schema-VALID but structurally-unexpected message (e.g. hand-crafted
+    or from a third-party system not following this module's own
+    `dokumente/<Dateiname>` packaging convention) - `datei`/`dateiname`
+    itself is `minOccurs="0"` per the schema chain, so a `dokument` without
+    one is not a schema violation, but this module cannot import it."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<nachricht.gds.uebermittlungSchriftgutobjekte.0005005 xmlns="http://www.xjustiz.de">
+  <schriftgutobjekte>
+    <dokument>
+      <xjustiz.fachspezifischeDaten/>
+    </dokument>
+  </schriftgutobjekte>
+</nachricht.gds.uebermittlungSchriftgutobjekte.0005005>"""
+
+    with pytest.raises(xjustiz.ParseError):
+        xjustiz.parse_uebermittlung_schriftgutobjekte(xml_bytes)

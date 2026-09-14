@@ -50,6 +50,18 @@ class XdomeaImportResultOut(BaseModel):
     document_ids: list[str]
 
 
+class XJustizImportResultOut(BaseModel):
+    """Result of `POST /xjustiz/import` (14.2, Post-Roadmap Phase 34
+    Session 1, ADR 0139) - the XJustiz counterpart to `XdomeaImportResultOut`,
+    `akte_anzeigename` instead of `vorgang_betreff` (XJustiz's own Akte
+    concept, not XDOMEA's Vorgang)."""
+
+    case_id: str | None
+    case_created: bool
+    akte_anzeigename: str | None
+    document_ids: list[str]
+
+
 class CaseArchivalTransferOut(BaseModel):
     id: str
     case_id: str
