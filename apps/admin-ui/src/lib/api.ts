@@ -1206,6 +1206,26 @@ export async function approveApprovalRequest(
   return response.json();
 }
 
+// Reject counterpart (5.4/6.1, Post-Roadmap Phase 36 Session 3) - the Query
+// Console's manipulation approvals were approve-only in the UI even though
+// permission-service has always exposed a generic reject endpoint
+// (docs/services/permission-service.md:46), same parity gap reviewer-ui's
+// ApprovalList.tsx already closed for its own approval flow.
+export async function rejectApprovalRequest(
+  token: string,
+  requestId: string,
+  rejectedBy: string,
+  reason?: string
+): Promise<ApprovalRequest> {
+  const response = await request(
+    "permission-service",
+    `approval-requests/${requestId}/reject`,
+    jsonInit({ rejected_by: rejectedBy, reason: reason ?? null }),
+    token
+  );
+  return response.json();
+}
+
 // Emergency shutdown (4.8, P6-S6) - triggering uses the same generic
 // four-eyes principle mechanism as break-glass, but here with a direct
 // execution path (see permission-service `POST /maintenance-mode/trigger`)
@@ -1429,6 +1449,12 @@ export interface ForensicTraceEntry {
 export interface ForensicTraceResult {
   entries: ForensicTraceEntry[];
   anomalies: string[];
+  // Row-level RBAC filtering transparency fields (5.4b, Post-Roadmap Phase 36
+  // Session 3) - same "N of M visible" hint pattern already established for
+  // QueryConsoleView's own QueryResult.
+  total_before_filter: number;
+  total_after_filter: number;
+  superuser: boolean;
 }
 
 export interface ForensicTraceFilters {

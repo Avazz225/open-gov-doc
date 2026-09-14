@@ -89,3 +89,11 @@ class ForensicTraceEntry(BaseModel):
 class ForensicTraceResult(BaseModel):
     entries: list[ForensicTraceEntry]
     anomalies: list[str]
+    # Row-level RBAC filtering (5.4b, Post-Roadmap Phase 36 Session 3) - same
+    # transparency fields as query-service's own `QueryResult`: `entries`
+    # only ever contains what the caller is allowed to see, but the UI
+    # still needs to know how much was hidden (or that nothing was, for the
+    # activated superuser).
+    total_before_filter: int = 0
+    total_after_filter: int = 0
+    superuser: bool = False

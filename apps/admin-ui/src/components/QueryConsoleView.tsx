@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
@@ -12,6 +12,7 @@ import {
   getManipulationModeStatus,
   listPendingManipulationApprovals,
   listQueryEvents,
+  rejectApprovalRequest,
   type ApprovalRequest,
   type DryRunResult,
   type ManipulateExecuteResult,
@@ -202,6 +203,11 @@ function ManipulationSection() {
 
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [approvalsError, setApprovalsError] = useState<string | null>(null);
+  // Reject-with-reason (Post-Roadmap Phase 36 Session 3) - same inline-form
+  // pattern as reviewer-ui's ApprovalList.tsx (no window.prompt, consistent
+  // with this app's own form style).
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const canManipulate = permissions.includes("admin.query_console.manipulate");
 
@@ -308,6 +314,36 @@ function ManipulationSection() {
     setApprovalsError(null);
     try {
       await approveApprovalRequest(accessToken, requestId, user.username);
+      await reloadPendingApprovals();
+    } catch (err) {
+      setApprovalsError(err instanceof ApiError ? err.message : t("queryConsole.loadError"));
+    }
+  }
+
+  function handleStartReject(requestId: string) {
+    setApprovalsError(null);
+    setRejectReason("");
+    setRejectingId(requestId);
+  }
+
+  function handleCancelReject() {
+    setRejectingId(null);
+    setRejectReason("");
+  }
+
+  async function handleConfirmReject(event: FormEvent, requestId: string) {
+    event.preventDefault();
+    if (!accessToken || !user) return;
+    setApprovalsError(null);
+    try {
+      await rejectApprovalRequest(
+        accessToken,
+        requestId,
+        user.username,
+        rejectReason.trim() || undefined
+      );
+      setRejectingId(null);
+      setRejectReason("");
       await reloadPendingApprovals();
     } catch (err) {
       setApprovalsError(err instanceof ApiError ? err.message : t("queryConsole.loadError"));
@@ -508,17 +544,52 @@ function ManipulationSection() {
             </thead>
             <tbody>
               {pendingApprovals.map((approval) => (
-                <tr key={approval.id}>
-                  <td>{approval.action_type}</td>
-                  <td>{approval.initiated_by}</td>
-                  <td>{new Date(approval.created_at).toLocaleString()}</td>
-                  <td>{JSON.stringify(approval.payload)}</td>
-                  <td>
-                    <button type="button" onClick={() => handleApprove(approval.id)}>
-                      {t("queryConsole.approveButton")}
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={approval.id}>
+                  <tr>
+                    <td>{approval.action_type}</td>
+                    <td>{approval.initiated_by}</td>
+                    <td>{new Date(approval.created_at).toLocaleString()}</td>
+                    <td>{JSON.stringify(approval.payload)}</td>
+                    <td>
+                      {rejectingId !== approval.id && (
+                        <div className="actions">
+                          <button type="button" onClick={() => handleApprove(approval.id)}>
+                            {t("queryConsole.approveButton")}
+                          </button>
+                          <button type="button" onClick={() => handleStartReject(approval.id)}>
+                            {t("queryConsole.rejectButton")}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {rejectingId === approval.id && (
+                    <tr className="detail-row">
+                      <td colSpan={5}>
+                        <form
+                          aria-label={t("queryConsole.rejectFormLabel")}
+                          className="form-grid"
+                          onSubmit={(e) => handleConfirmReject(e, approval.id)}
+                        >
+                          <label>
+                            {t("queryConsole.rejectReasonLabel")}
+                            <input
+                              value={rejectReason}
+                              onChange={(e) => setRejectReason(e.target.value)}
+                              placeholder={t("queryConsole.rejectReasonPlaceholder")}
+                            />
+                          </label>
+                          <div className="actions">
+                            <button type="submit">{t("queryConsole.rejectConfirm")}</button>
+                            <button type="button" onClick={handleCancelReject}>
+                              {t("queryConsole.rejectCancel")}
+                            </button>
+                          </div>
+                        </form>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -94,6 +94,52 @@ class StorageClient:
         await self._client.aclose()
 
 
+class DocumentClient:
+    """Thin HTTP client against document-service - row-level RBAC filtering
+    for the forensic trace (5.4b, Post-Roadmap Phase 36 Session 3, parity
+    with query-service's own `filtering.py`, ADR 0072): resolves a
+    `document-service` event's `subject` (a document ID) to its `folder_id`,
+    the same resolution query-service already performs for its structured
+    queries."""
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+
+    async def get_document(self, document_id: str) -> dict | None:
+        response = await self._client.get(f"/documents/{document_id}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
+class AuthServiceClient:
+    """HTTP client against auth-service - `GET /superuser/status` is the
+    only way to check "is the current caller the activated superuser" (4.6,
+    no header shortcut), 1:1 pattern from `permission-service`/
+    `query-service`. Reporting-service had no superuser-bypass concept
+    before Post-Roadmap Phase 36 Session 3 - added for parity with
+    `query-service`'s own row-level RBAC filtering, since a forensic-trace
+    investigation during an active break-glass incident should see
+    everything, the same exception the concept (6.1) already carves out for
+    structured queries."""
+
+    def __init__(self, base_url: str) -> None:
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+
+    async def get_active_superuser(self) -> tuple[bool, str | None]:
+        response = await self._client.get("/superuser/status")
+        response.raise_for_status()
+        body = response.json()
+        return body["active"], body.get("principal_id")
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
 class NotificationClient:
     """Thin HTTP client against notification-service - plain text email
     with a download link instead of an attachment (5.4a "schedulable

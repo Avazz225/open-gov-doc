@@ -20,6 +20,7 @@ const dryRunManipulationMock = vi.fn();
 const executeManipulationMock = vi.fn();
 const listPendingManipulationApprovalsMock = vi.fn();
 const approveApprovalRequestMock = vi.fn();
+const rejectApprovalRequestMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listQueryEvents: (...args: unknown[]) => listQueryEventsMock(...args),
@@ -31,6 +32,7 @@ vi.mock("@/lib/api", () => ({
   listPendingManipulationApprovals: (...args: unknown[]) =>
     listPendingManipulationApprovalsMock(...args),
   approveApprovalRequest: (...args: unknown[]) => approveApprovalRequestMock(...args),
+  rejectApprovalRequest: (...args: unknown[]) => rejectApprovalRequestMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -68,6 +70,7 @@ describe("QueryConsoleView", () => {
     executeManipulationMock.mockReset();
     listPendingManipulationApprovalsMock.mockReset();
     approveApprovalRequestMock.mockReset();
+    rejectApprovalRequestMock.mockReset();
 
     getManipulationModeStatusMock.mockResolvedValue({
       active: false,
@@ -329,6 +332,65 @@ describe("QueryConsoleView", () => {
       renderQueryConsoleView();
 
       expect(await screen.findByText("Keine ausstehenden Genehmigungen.")).toBeInTheDocument();
+    });
+
+    it("rejects a pending approval with a reason via the inline form", async () => {
+      listPendingManipulationApprovalsMock.mockResolvedValue([
+        {
+          id: "req-1",
+          action_type: "document.attribute_reset",
+          initiated_by: "alice",
+          payload: { params: { document_id: "doc-1", attribute_key: "notiz" } },
+          status: "pending",
+          approved_by: null,
+          created_at: "2026-08-01T10:00:00Z",
+        },
+      ]);
+      rejectApprovalRequestMock.mockResolvedValue({});
+      const user = userEvent.setup();
+
+      renderQueryConsoleView();
+      expect(await screen.findByText("document.attribute_reset")).toBeInTheDocument();
+
+      await user.click(screen.getByText("Ablehnen"));
+      await user.type(
+        screen.getByPlaceholderText("Grund für die Ablehnung..."),
+        "Nicht plausibel"
+      );
+      await user.click(screen.getByText("Ablehnung bestätigen"));
+
+      await waitFor(() =>
+        expect(rejectApprovalRequestMock).toHaveBeenCalledWith(
+          "token-123",
+          "req-1",
+          "query-admin",
+          "Nicht plausibel"
+        )
+      );
+    });
+
+    it("cancels the reject form without calling the API", async () => {
+      listPendingManipulationApprovalsMock.mockResolvedValue([
+        {
+          id: "req-1",
+          action_type: "document.attribute_reset",
+          initiated_by: "alice",
+          payload: { params: { document_id: "doc-1", attribute_key: "notiz" } },
+          status: "pending",
+          approved_by: null,
+          created_at: "2026-08-01T10:00:00Z",
+        },
+      ]);
+      const user = userEvent.setup();
+
+      renderQueryConsoleView();
+      expect(await screen.findByText("document.attribute_reset")).toBeInTheDocument();
+
+      await user.click(screen.getByText("Ablehnen"));
+      await user.click(screen.getByText("Abbrechen"));
+
+      expect(screen.queryByPlaceholderText("Grund für die Ablehnung...")).not.toBeInTheDocument();
+      expect(rejectApprovalRequestMock).not.toHaveBeenCalled();
     });
   });
 });

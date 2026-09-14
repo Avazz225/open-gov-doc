@@ -594,6 +594,8 @@
     "query": "Trace abfragen",
     "exportCsv": "CSV-Export",
     "exportPdf": "PDF-Export",
+    "filteredHint": "{visible} von {total} Ereignissen sichtbar (Rest durch Ihre Berechtigungen ausgeblendet).",
+    "superuserHint": "Superuser-Ansicht — ungefiltert.",
     "anomaliesHeading": "Anomalie-Hinweise",
     "occurredAt": "Zeitpunkt",
     "eventType": "Ereignistyp",
@@ -653,7 +655,13 @@
     "initiatedBy": "Angefordert von",
     "createdAt": "Angefordert am",
     "parameters": "Parameter",
-    "approveButton": "Genehmigen"
+    "approveButton": "Genehmigen",
+    "rejectButton": "Ablehnen",
+    "rejectFormLabel": "Ablehnung begründen",
+    "rejectReasonLabel": "Begründung (optional)",
+    "rejectReasonPlaceholder": "Grund für die Ablehnung...",
+    "rejectConfirm": "Ablehnung bestätigen",
+    "rejectCancel": "Abbrechen"
   },
   "auditTraceSettings": {
     "pageTitle": "Audit-Tiefe",

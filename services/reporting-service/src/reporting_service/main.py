@@ -23,8 +23,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from reporting_service import forensic, reports, repository
-from reporting_service.clients import AuditClient, NotificationClient, StorageClient, WorkflowClient
+from reporting_service.clients import (
+    AuditClient,
+    AuthServiceClient,
+    DocumentClient,
+    NotificationClient,
+    StorageClient,
+    WorkflowClient,
+)
 from reporting_service.consumer import start_consuming
+from reporting_service.filtering import filter_entries_by_permission
 from reporting_service.models import Base
 from reporting_service.schemas import (
     DocumentVolumeEntry,
@@ -184,6 +192,8 @@ async def publish_event(
 
 async def _fetch_forensic_trace(
     *,
+    principal_id: str,
+    is_superuser: bool,
     actor: str | None,
     subject: str | None,
     event_type: str | None,
@@ -191,11 +201,18 @@ async def _fetch_forensic_trace(
     since: datetime | None,
     until: datetime | None,
     limit: int,
-) -> tuple[list[ForensicTraceEntry], list[str]]:
+) -> tuple[list[ForensicTraceEntry], list[str], int]:
     """Forensic trace (5.4b, since P7-S2c): fetches the raw event list via
     audit-service's P7-S2 filter API, categorizes it client-side
-    (audit-service itself has no concept of "category") and computes
-    anomalies exclusively over the actually returned hits."""
+    (audit-service itself has no concept of "category"). Since Post-Roadmap
+    Phase 36 Session 3, additionally applies row-level RBAC filtering
+    (`filtering.filter_entries_by_permission`, parity with query-service's
+    own `filtering.py`) BEFORE anomaly detection runs - an anomaly computed
+    over events the caller isn't allowed to see would itself be an
+    information leak. Returns the post-filter entries, anomalies computed
+    only over those, and the pre-filter count (for the "N of M visible"
+    transparency the UI shows, same pattern as query-service's own
+    `QueryResult`)."""
     raw_events = await app.state.audit_client.list_events(
         actor=actor, subject=subject, event_type=event_type, since=since, until=until, limit=limit
     )
@@ -216,6 +233,14 @@ async def _fetch_forensic_trace(
                 payload=raw.get("payload") or {},
             )
         )
+    total_before_filter = len(entries)
+    entries = await filter_entries_by_permission(
+        entries,
+        principal_id=principal_id,
+        permission_client=app.state.permission_client,
+        document_client=app.state.document_client,
+        is_superuser=is_superuser,
+    )
     anomalies = forensic.detect_download_anomalies(
         [
             {"event_type": e.event_type, "actor": e.actor, "occurred_at": e.occurred_at}
@@ -224,7 +249,7 @@ async def _fetch_forensic_trace(
         threshold_count=settings.anomaly_download_threshold_count,
         threshold_minutes=settings.anomaly_download_threshold_minutes,
     )
-    return entries, anomalies
+    return entries, anomalies, total_before_filter
 
 
 async def _record_trace_query(
@@ -270,6 +295,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage_client = StorageClient(settings.storage_service_base_url)
     app.state.notification_client = NotificationClient(settings.notification_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    # Row-level RBAC filtering for the forensic trace (5.4b, Post-Roadmap
+    # Phase 36 Session 3) - parity with query-service's own filtering.py.
+    app.state.document_client = DocumentClient(settings.document_service_base_url)
+    app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -320,6 +349,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.storage_client.close()
     await app.state.notification_client.close()
     await app.state.permission_client.close()
+    await app.state.document_client.close()
+    await app.state.auth_client.close()
     await engine.dispose()
 
 
@@ -374,6 +405,17 @@ async def _require_reporting_permission(
     )
     if not allowed:
         raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
+async def _is_active_superuser(x_dms_principal: str) -> bool:
+    """Row-level RBAC filtering for the forensic trace (5.4b, Post-Roadmap
+    Phase 36 Session 3) - 1:1 pattern from `query-service`/`permission-
+    service`. The activated superuser (4.6) is exempt from the row-level
+    filter below (same concept-6.1 exception query-service's own structured
+    queries already grant), not from `_require_reporting_permission`'s
+    outer capability gate, which is unaffected."""
+    active, superuser_principal_id = await app.state.auth_client.get_active_superuser()
+    return active and bool(x_dms_principal) and superuser_principal_id == x_dms_principal
 
 
 @app.get("/reports/document-volume", response_model=list[DocumentVolumeEntry])
@@ -577,7 +619,10 @@ async def get_forensic_trace(
     await _require_reporting_permission(
         x_dms_principal, permission="reporting.forensic_trace", access_type="read"
     )
-    entries, anomalies = await _fetch_forensic_trace(
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    entries, anomalies, total_before_filter = await _fetch_forensic_trace(
+        principal_id=x_dms_principal,
+        is_superuser=is_superuser,
         actor=actor,
         subject=subject,
         event_type=event_type,
@@ -595,7 +640,13 @@ async def get_forensic_trace(
         since=since,
         until=until,
     )
-    return ForensicTraceResult(entries=entries, anomalies=anomalies)
+    return ForensicTraceResult(
+        entries=entries,
+        anomalies=anomalies,
+        total_before_filter=total_before_filter,
+        total_after_filter=len(entries),
+        superuser=is_superuser,
+    )
 
 
 @app.get("/forensic-trace/export")
@@ -613,7 +664,10 @@ async def export_forensic_trace(
     await _require_reporting_permission(
         x_dms_principal, permission="reporting.forensic_trace", access_type="read"
     )
-    entries, _ = await _fetch_forensic_trace(
+    is_superuser = await _is_active_superuser(x_dms_principal)
+    entries, _, _ = await _fetch_forensic_trace(
+        principal_id=x_dms_principal,
+        is_superuser=is_superuser,
         actor=actor,
         subject=subject,
         event_type=event_type,

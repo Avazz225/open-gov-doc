@@ -2,68 +2,76 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P36-S2 (records quarantine: closed both gaps ADR 0116 had explicitly named as its own
-follow-ups — "search-service is NOT made quarantine-aware... a quarantined document remains fully findable
-via search" and "case-service is untouched" — plus the pure documentation gap where `docs/services/
-user-ui.md` never got a real section for `RecordsQuarantinePanel.tsx`, only a stray parenthetical mention.
-`search-service` now unconditionally excludes an actively quarantined document from `/search`/facet results
-— new `records_quarantine_active` column on `SearchDocument`, denormalized via a new `DocumentServiceClient.
-has_active_quarantine()` call (the ungated per-document status endpoint, `GET /documents/{id}/has-active-
-quarantine` — deliberately NOT the gated bulk-listing `GET /records-quarantine`, since a per-document status
-check during reindexing isn't the "bulk listing" ADR 0116 reserved for the capability) during
-`reindex_document()`, triggered by extending the existing `document.>` consumer to also react to
-`document.records_quarantine.set`/`.released`/`.auto_deleted`. `.auto_deleted` needed no special-casing:
-that action performs a genuine hard delete (never publishes `document.deleted` itself, ADR 0116's own
-audit-trail rationale), and `reindex_document()`'s existing `document_client.get()` call already returns
-`404` for a hard-deleted document, which the existing "doc is None" branch already routes to the correct
-index-row deletion. `case-service` gained NO new quarantine mechanism of its own (confirmed: no
-destruction-scheduling primitive exists there to hook one into, the same "no realistic entry point"
-conclusion already reached for redaction/hand-folders) — instead `GET /cases/{id}/documents` now
-additionally resolves `has_active_quarantine` per reference via the same ungated endpoint, always live
-regardless of case/reference status (unlike `current_version_number`/`document_deleted_at`, which freeze at
-case closure — quarantine is a visibility flag that can change at any time, not part of the closure-snapshot
-concept), surfaced in `CasesPane.tsx` as a small indicator next to each reference's "added at" date. New
-`RecordsQuarantineOverviewPane.tsx` (`user-ui`) is the installation-wide cross-folder browsing view ADR
-0116's own "Consequences" named as a reasonable follow-up ("analogous to `TrashPane`'s admin/
-admin_classified scopes") — **no new backend endpoint was needed**: `GET /records-quarantine?
-active_only=true` (without a `document_id` filter) had always been able to list every active quarantine
-installation-wide, this app had simply never called it that way before (`listRecordsQuarantine`'s
-`documentId` parameter just needed to become optional). New ungated `IconRail` entry "Schriftgutquarantäne"
-(🔏), gated the same way as the per-document panel (`permissions.includes("admin.records_quarantine")`, a
-system-native capability check, not a realm role like the unrelated virus-scan "Quarantäne" entry next to
-it). Read + release only, matching `TrashPane`'s "list already-existing entries, act on them" shape —
-starting a NEW quarantine stays the per-document panel's job, since curating a reason/auto-delete date is
-most naturally done while already looking at the specific document. `search-service` +4 tests (75 total, up
-from 71), `case-service` +1 (66 total, up from 65) — a real set/release round trip against the live-running
-`document-service` confirms `GET /cases/{id}/documents` reflects the flag correctly at each stage.
-`user-ui` +6 tests (270 total, up from 264) — 5 new for the overview pane (installation-wide listing
-request, resolved title/reason/set-by, a document that can no longer be resolved, opening it, releasing and
-reloading), 1 new for `CasesPane.tsx`'s quarantine indicator. All `ruff`/`tsc`/`eslint`/`next build` gates
-clean. Live-verified end to end against the real, rebuilt running stack in an actual browser (Playwright): a
-real document quarantined via the API appeared correctly in the new overview with its real reason/set-by,
-was confirmed programmatically excluded from a real `/search` call even though its title would otherwise
-have matched, and releasing it via the UI's own button correctly cleared the list (two screenshots captured
-and visually confirmed). Throwaway Playwright spec and `test-results`/`playwright-report` directories
-deleted afterward. No new ADR — pure completion of ADR 0116's own already-established design, per Phase
-36's own Definition of Done ("no new ADR expected... no new architecture decisions").
+**Last completed:** P36-S3 (`reporting-service`: row-level RBAC filtering for the forensic trace, at parity
+with `query-service`'s own `filtering.py` — the plan text's own naming was misleading, `filtering.py`
+actually lives in `query-service`, not document-service/folder-service, confirmed by reading the real code
+before starting; same session, a reject button for the admin-ui Query Console). New `reporting_service/
+filtering.py` mirrors `query_service/filtering.py`: resolves a `document-service` event's `subject` to its
+`folder_id` via a new `DocumentClient`, a `folder-service` event uses its `subject` directly, every other
+`service_name` (workflow/case/auth/signature/notification/registry/...) hidden fail-closed. Applied to the
+forensic trace **before** `forensic.detect_download_anomalies` runs (an anomaly computed over events the
+caller can't see would itself be an information leak) and reused identically by `/forensic-trace/export`
+(no RBAC bypass via export). Also added superuser-bypass parity that this service never had before (new
+`AuthServiceClient`/`_is_active_superuser`, `GET /superuser/status`, no header shortcut — 1:1 copy of the
+`permission-service`/`query-service` pattern) — a deliberate, bounded reapplication of an already-carved-out
+exception (concept 6.1), not a new architecture decision. `ForensicTraceResult` gained the same
+`total_before_filter`/`total_after_filter`/`superuser` transparency fields `query-service`'s own
+`QueryResult` already has. Proactively avoided a predictable regression before ever running the suite:
+existing forensic-trace tests use fabricated `doc-N` subjects absent from real `document-service`, and the
+default "everyone" role doesn't grant `document.read` — fixed via a mocked `document_client` in the shared
+test fixture plus a new idempotent, fixed-name `document.read` role-grant fixture (a role name checked once
+rather than the usual per-test random-uuid throwaway pattern, since no existing seeded role carries this
+permission). Admin UI: `QueryConsoleView`'s pending-approvals table gained a Reject button + inline reason
+form, 1:1 the `rejectingId`/`rejectReason`/`handleStartReject`/`handleCancelReject`/`handleConfirmReject`
+pattern already established in `reviewer-ui`'s `ApprovalList.tsx`, calling the already-existing (just never
+wired up) `POST /approval-requests/{id}/reject`; `ForensicTraceView` gained the same "N of M
+visible"/superuser hint `QueryConsoleView` already had. `reporting-service` +12 tests (69 total; the
+previously documented "54 tests" baseline had already silently drifted to 57 before this session — the
+exact intervening change was not tracked precisely, the same kind of drift noted for other services'
+baselines elsewhere in this project), `admin-ui` +4 tests (240 total). All `ruff`/`tsc`/`eslint`/`vitest`
+gates clean.
 
-**`graphify . --update` still outstanding from the end of Phase 35** (unchanged since the P36-S1 note — not
-re-attempted this session either, P36-S2 is not a phase boundary): P35-S4's own attempt was refused by the
-shrink guard (existing `graphify-out/graph.json` at 15,708 nodes, a fresh merge only reaching 14,236 — a net
-`-1,472` far too large to be a legitimate incremental change) and deliberately not forced. Diagnosed as very
-likely a `source_file` path-convention mismatch between AST extraction (relative paths) and the semantic
-subagent (absolute paths) — the same class of pitfall already documented at P5d-S2, just larger in scale
-this time. Recovery already performed at P35-S4 (the affected files' manifest entries reverted so a future
-`--update` picks them up again; `graph.json`/`GRAPH_REPORT.md` left untouched at their last-good state).
-Remains an open point for a future dedicated graphify-maintenance session, or the next phase-completion
-point (end of Phase 36).
+Live verification surfaced two real bugs the test suite couldn't catch, since it exercises the FastAPI app
+directly and never the container's real network/scale: (1) `infra/docker-compose.yml` never set
+`DMS_DOCUMENT_SERVICE_BASE_URL`/`DMS_AUTH_SERVICE_BASE_URL` for `reporting-service` — the new clients fell
+back to unreachable `localhost` defaults inside the container, and every real `/forensic-trace` call 500'd;
+fixed by adding both env vars (same Docker-DNS pattern every other inter-service URL in that block already
+uses). (2) At this long-lived dev stack's accumulated scale (100+ unique `document-service` subjects inside
+even a 15-minute window), `filtering.py`'s unbounded `asyncio.gather`-per-unique-subject fan-out — the
+identical pattern already in `query-service`'s own `filtering.py`, faithfully mirrored, not a new design —
+exhausted `reporting-service`'s shared `httpx` connection pool badly enough that it stayed wedged
+(`PoolTimeout`/500 on every subsequent call, not just the one oversized query) until the container was
+restarted; `/forensic-trace`'s default `limit=5000` gives this pattern a considerably larger blast radius
+than `query-service`'s own `limit=100` default. Documented as a new Open Point in `docs/services/
+reporting-service.md` rather than fixed in this session (fixing it would mean diverging from the mirrored
+reference pattern, or fixing both services at once — out of this session's parity-only scope). After both
+fixes, live-verified end to end in a real browser: rejected a real pending manipulation approval with a
+reason via the new form, confirmed it left the pending list; confirmed the forensic trace's real RBAC
+filtering and "N of M visible" hint against a principal granted `document.read` on only part of a real
+document's event history ("12 von 14 Ereignissen sichtbar"). Throwaway Playwright spec and the throwaway
+role-assignments granted for verification were deleted/reverted afterward (the orphaned throwaway
+permission-service *role* itself couldn't be deleted — no `DELETE /roles` endpoint exists — same harmless,
+accepted leftover pattern as this project's `search-test-role-*` roles). No new ADR — pure completion of
+already-established patterns, per Phase 36's own Definition of Done ("no new ADR expected... no new
+architecture decisions"). **Phase 36 (Records Quarantine, Output Stamping & Misc Completion) is now fully
+complete.**
 
-**Next session:** **P36-S3** (`reporting-service`: row-level RBAC filtering for the forensic trace, at
-parity with `document-service`/`folder-service`'s existing `filtering.py`; same session, add a reject
-button to the admin-ui Query Console, today approve-only in the UI with reject only reachable via the API).
-This concludes **Phase 36**. See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown:
-Phase 37, a scoping-only session on cross-tenant XDOMEA federation, concludes the whole Phase 32+
-gap-closure plan.
+**`graphify . --update` still outstanding from the end of Phase 35** — this is now the first genuine
+phase-completion point since (Phase 36 just concluded above), so this is the point to actually attempt it,
+not defer further. P35-S4's own attempt was refused by the shrink guard (existing `graphify-out/graph.json`
+at 15,708 nodes, a fresh merge only reaching 14,236 — a net `-1,472` far too large to be a legitimate
+incremental change) and deliberately not forced. Diagnosed as very likely a `source_file` path-convention
+mismatch between AST extraction (relative paths) and the semantic subagent (absolute paths) — the same class
+of pitfall already documented at P5d-S2, just larger in scale this time. Recovery already performed at
+P35-S4 (the affected files' manifest entries reverted so a future `--update` picks them up again;
+`graph.json`/`GRAPH_REPORT.md` left untouched at their last-good state).
+
+**Next session:** **P37-S1** (scoping-only session on cross-tenant XDOMEA federation — no implementation
+commitment, concludes with a concept document/ADR clarifying the transport-layer and workflow-participation
+questions named in `IMPLEMENTATION_PLAN.md` "Phase 37", not a feature). This is the last session of the
+whole Phase 32+ gap-closure plan (`IMPLEMENTATION_PLAN.md` "Phase 32+"). Before starting it, first attempt
+the outstanding `graphify . --update` noted above (this session's completion is exactly the phase boundary
+that was being waited for).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

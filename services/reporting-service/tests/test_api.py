@@ -40,6 +40,47 @@ async def _grant_role_admin_permission():
         response.raise_for_status()
 
 
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_document_read_permission():
+    """Row-level RBAC filtering for the forensic trace (Post-Roadmap Phase
+    36 Session 3) - `document.read` is NOT part of the default "everyone"
+    grant set (unlike `reporting.*`), so `REPORTING_TEST_PRINCIPAL_ID` needs
+    an explicit grant on `root` for the existing forensic-trace tests (whose
+    fake events all resolve to `folder_id="root"` via the mocked
+    `document_client`, see the `client` fixture) to keep seeing their
+    expected entries. Idempotent via a fixed role name (not the usual
+    random-uuid throwaway pattern elsewhere in this project), since this
+    fixture is session-scoped and must survive repeated runs against the
+    same permission-service without accumulating duplicate roles."""
+    role_name = "reporting-service-test-document-read"
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role = next((r for r in roles if r["name"] == role_name), None)
+        if role is None:
+            created = await pc.post(
+                "/roles",
+                json={"name": role_name, "permissions": ["document.read"]},
+                headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
+            )
+            created.raise_for_status()
+            role = created.json()["role"]
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": REPORTING_TEST_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role["id"] for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": REPORTING_TEST_PRINCIPAL_ID,
+                "role_id": role["id"],
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture
 def client():
     """Externe Service-Clients (workflow-/audit-/storage-/notification-
@@ -53,7 +94,16 @@ def client():
     ADR 0072; die "everyone"-Gruppe gewaehrt `reporting.read`/`.write`/
     `.forensic_trace` jedem authentifizierten Principal). Einzelne Tests
     koennen den Header per `headers={"X-DMS-Principal": ""}` ueberschreiben,
-    um den Negativfall zu pruefen."""
+    um den Negativfall zu pruefen. Seit Post-Roadmap Phase 36 Session 3:
+    `document_client` gemockt (loest jede `subject` auf `folder_id="root"`
+    auf - die bereits existierenden Forensik-Trace-Tests verwenden erfundene
+    `doc-N`-IDs, die im echten document-service nicht existieren), waehrend
+    `permission_client` weiterhin echt bleibt - `REPORTING_TEST_PRINCIPAL_ID`
+    braucht dafuer ein echtes `document.read`-Grant auf `root`, siehe
+    `_grant_document_read_permission` unten (anders als `reporting.*`, ist
+    `document.read` NICHT Teil der "everyone"-Gruppe). `auth_client` bleibt
+    ebenfalls echt (ein frischer Dev-Stack hat keinen aktiven Superuser, die
+    Zeilenfilterung greift also normal)."""
     with TestClient(app, headers={"X-DMS-Principal": REPORTING_TEST_PRINCIPAL_ID}) as c:
         app.state.workflow_client = AsyncMock()
         app.state.workflow_client.list_active_instances.return_value = []
@@ -62,6 +112,8 @@ def client():
         app.state.storage_client = AsyncMock()
         app.state.storage_client.get_usage.return_value = []
         app.state.notification_client = AsyncMock()
+        app.state.document_client = AsyncMock()
+        app.state.document_client.get_document.return_value = {"folder_id": "root"}
         yield c
 
 
@@ -307,6 +359,142 @@ def test_forensic_trace_filters_by_category(client):
     entries = response.json()["entries"]
     assert len(entries) == 1
     assert entries[0]["event_type"] == "document.downloaded"
+
+
+def test_forensic_trace_reports_transparency_counts(client):
+    """Row-level RBAC filtering (Post-Roadmap Phase 36 Session 3) - the
+    response carries `total_before_filter`/`total_after_filter`/`superuser`
+    the same way query-service's own `QueryResult` already does, so the
+    admin-ui can show an "N of M visible" hint."""
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "document.downloaded",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        }
+    ]
+
+    response = client.get("/forensic-trace", params={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_before_filter"] == 1
+    assert body["total_after_filter"] == 1
+    assert body["superuser"] is False
+
+
+def test_forensic_trace_hides_entry_resolving_to_an_unreadable_folder(client):
+    """The mocked `document_client` normally resolves every subject to
+    `folder_id="root"` (which the test principal has `document.read` on,
+    see `_grant_document_read_permission`) - overriding it to a DIFFERENT,
+    never-granted folder proves the row-level filter actually excludes an
+    entry the caller isn't allowed to read, not just that root-resolved
+    entries happen to pass."""
+    app.state.document_client.get_document.return_value = {
+        "folder_id": "reporting-test-never-granted-folder"
+    }
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "document.downloaded",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        }
+    ]
+
+    response = client.get("/forensic-trace", params={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["entries"] == []
+    assert body["total_before_filter"] == 1
+    assert body["total_after_filter"] == 0
+
+
+def test_forensic_trace_hides_entry_with_unresolvable_service(client):
+    """workflow-service (and every other non-document/folder service_name)
+    has no resolvable folder resource - hidden fail-closed, same boundary
+    query-service's own filtering already draws."""
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "workflow.instance.completed",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "workflow-service",
+            "subject": "instance-1",
+            "actor": "alice",
+            "payload": {},
+        }
+    ]
+
+    response = client.get("/forensic-trace", params={})
+
+    assert response.status_code == 200
+    assert response.json()["entries"] == []
+
+
+def test_forensic_trace_active_superuser_sees_unfiltered_entries(client, monkeypatch):
+    """The activated superuser (4.6) is the only exception to row-level
+    filtering (concept 6.1) - same parity as query-service's own structured
+    queries."""
+
+    async def fake_active_superuser():
+        return True, REPORTING_TEST_PRINCIPAL_ID
+
+    monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_active_superuser)
+    app.state.document_client.get_document.return_value = {
+        "folder_id": "reporting-test-never-granted-folder"
+    }
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "document.downloaded",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        }
+    ]
+
+    response = client.get("/forensic-trace", params={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["entries"]) == 1
+    assert body["superuser"] is True
+
+
+def test_forensic_trace_export_excludes_unreadable_rows(client):
+    """The CSV/PDF export endpoint reuses the same `_fetch_forensic_trace`
+    filtering - a caller cannot bypass row-level RBAC by exporting instead
+    of viewing."""
+    app.state.document_client.get_document.return_value = {
+        "folder_id": "reporting-test-never-granted-folder"
+    }
+    app.state.audit_client.list_events.return_value = [
+        {
+            "id": 1,
+            "event_type": "document.downloaded",
+            "occurred_at": "2026-08-01T10:00:00+00:00",
+            "service_name": "document-service",
+            "subject": "doc-1",
+            "actor": "alice",
+            "payload": {},
+        }
+    ]
+
+    response = client.get("/forensic-trace/export", params={"format": "csv"})
+
+    assert response.status_code == 200
+    assert "doc-1" not in response.text
 
 
 def test_forensic_trace_reports_download_anomaly(client):

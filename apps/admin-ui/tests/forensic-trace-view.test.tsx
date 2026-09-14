@@ -70,6 +70,9 @@ describe("ForensicTraceView", () => {
         },
       ],
       anomalies: [],
+      total_before_filter: 1,
+      total_after_filter: 1,
+      superuser: false,
     });
     const user = userEvent.setup();
 
@@ -88,10 +91,19 @@ describe("ForensicTraceView", () => {
     expect(await screen.findByText("document.downloaded")).toBeInTheDocument();
     expect(screen.getByText("alice")).toBeInTheDocument();
     expect(screen.getByText("doc-1")).toBeInTheDocument();
+    expect(
+      screen.getByText("1 von 1 Ereignissen sichtbar (Rest durch Ihre Berechtigungen ausgeblendet).")
+    ).toBeInTheDocument();
   });
 
   it("shows an empty state when the query returns no entries", async () => {
-    getForensicTraceMock.mockResolvedValue({ entries: [], anomalies: [] });
+    getForensicTraceMock.mockResolvedValue({
+      entries: [],
+      anomalies: [],
+      total_before_filter: 0,
+      total_after_filter: 0,
+      superuser: false,
+    });
     const user = userEvent.setup();
 
     renderForensicTraceView();
@@ -100,10 +112,58 @@ describe("ForensicTraceView", () => {
     expect(await screen.findByText("Keine Treffer für die gewählten Filter.")).toBeInTheDocument();
   });
 
+  it("shows the filtered-count hint when entries were hidden by RBAC", async () => {
+    getForensicTraceMock.mockResolvedValue({
+      entries: [],
+      anomalies: [],
+      total_before_filter: 3,
+      total_after_filter: 0,
+      superuser: false,
+    });
+    const user = userEvent.setup();
+
+    renderForensicTraceView();
+    await user.click(screen.getByText("Trace abfragen"));
+
+    expect(
+      await screen.findByText("0 von 3 Ereignissen sichtbar (Rest durch Ihre Berechtigungen ausgeblendet).")
+    ).toBeInTheDocument();
+  });
+
+  it("shows the superuser hint instead of the filtered-count hint", async () => {
+    getForensicTraceMock.mockResolvedValue({
+      entries: [
+        {
+          id: 1,
+          event_type: "workflow.instance.completed",
+          category: "change",
+          occurred_at: "2026-08-01T10:00:00Z",
+          service_name: "workflow-service",
+          subject: "instance-1",
+          actor: "root-admin",
+          payload: {},
+        },
+      ],
+      anomalies: [],
+      total_before_filter: 1,
+      total_after_filter: 1,
+      superuser: true,
+    });
+    const user = userEvent.setup();
+
+    renderForensicTraceView();
+    await user.click(screen.getByText("Trace abfragen"));
+
+    expect(await screen.findByText("Superuser-Ansicht — ungefiltert.")).toBeInTheDocument();
+  });
+
   it("renders anomaly hints when present", async () => {
     getForensicTraceMock.mockResolvedValue({
       entries: [],
       anomalies: ["Nutzer 'alice' hat 42 Downloads innerhalb von 5 Minuten (Schwellwert: 20)."],
+      total_before_filter: 0,
+      total_after_filter: 0,
+      superuser: false,
     });
     const user = userEvent.setup();
 

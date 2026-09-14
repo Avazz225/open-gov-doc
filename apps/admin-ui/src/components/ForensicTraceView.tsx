@@ -40,6 +40,8 @@ export function ForensicTraceView() {
 
   const [entries, setEntries] = useState<ForensicTraceEntry[]>([]);
   const [anomalies, setAnomalies] = useState<string[]>([]);
+  const [totalBeforeFilter, setTotalBeforeFilter] = useState(0);
+  const [isSuperuser, setIsSuperuser] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasQueried, setHasQueried] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +66,8 @@ export function ForensicTraceView() {
       const result = await getForensicTrace(accessToken, user.username, currentFilters());
       setEntries(result.entries);
       setAnomalies(result.anomalies);
+      setTotalBeforeFilter(result.total_before_filter);
+      setIsSuperuser(result.superuser);
       setHasQueried(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("forensicTrace.loadError"));
@@ -141,6 +145,17 @@ export function ForensicTraceView() {
         {exportError && (
           <p className="error-text" role="alert">
             {exportError}
+          </p>
+        )}
+
+        {hasQueried && !error && (
+          <p className="hint">
+            {isSuperuser
+              ? t("forensicTrace.superuserHint")
+              : t("forensicTrace.filteredHint", {
+                  visible: entries.length,
+                  total: totalBeforeFilter,
+                })}
           </p>
         )}
 
