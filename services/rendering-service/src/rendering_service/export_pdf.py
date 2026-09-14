@@ -119,13 +119,28 @@ def build_document_export(
 ) -> bytes:
     """Pass A - see module docstring. `history_position` is `"before"` or
     `"after"` (document-service's `ExportConfig`/per-request override,
-    ADR 0107)."""
-    sections = (
-        [history_pdf, document_pdf] if history_position == "before" else [document_pdf, history_pdf]
-    )
-    writer = PdfWriter()
-    for section in sections:
-        writer.append(BytesIO(section))
+    ADR 0107).
+
+    Post-roadmap phase 33 session 2 (ADR 0136, PDF/UA tag preservation): the
+    writer is constructed via `PdfWriter(clone_from=<document reader>)`
+    rather than `PdfWriter().append(document_pdf)` - confirmed empirically
+    (this session's own probing, pypdf 6.14.2) that `clone_from` preserves
+    an already-present `/StructTreeRoot`, while `.append()`/`.merge()` never
+    contribute a source's own structure tree, regardless of merge order.
+    Adding further pages to an already-`clone_from`-populated writer via
+    `.merge()`/`.append()` does NOT clear its existing struct tree (also
+    confirmed empirically) - so the history page(s) are merged in
+    afterward, at the correct position for either `history_position`,
+    without disturbing a tagged document's own tags. `history_pdf` itself
+    is never tagged (rendered by `render_history_pdf`/reportlab, which
+    cannot produce a structure tree) - only the document's own tags, if
+    any, are ever at stake here."""
+    reader = PdfReader(BytesIO(document_pdf))
+    writer = PdfWriter(clone_from=reader)
+    if history_position == "before":
+        writer.merge(0, BytesIO(history_pdf))
+    else:
+        writer.append(BytesIO(history_pdf))
     buffer = BytesIO()
     writer.write(buffer)
     merged = buffer.getvalue()

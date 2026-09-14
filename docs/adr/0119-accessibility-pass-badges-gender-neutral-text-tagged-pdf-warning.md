@@ -123,10 +123,14 @@ deliverables, matching the plan's own wording exactly:
 - A fresh installation's export/download behavior is completely unchanged — the warning is purely
   additive, informational, and non-blocking; nothing about the actual export output changed in this
   session (the pipeline still doesn't preserve/produce tags — see above).
-- **The export pipeline itself still doesn't preserve tags on an already-tagged source PDF** — a real,
-  honestly-acknowledged gap this session's warning surfaces but doesn't close. Giving `export_pdf.py`'s
-  merge/stamp pass actual structure-tree preservation (or switching part of the pipeline to a library that
-  can) is a materially larger, separate effort, out of this session's scope.
+- ~~**The export pipeline itself still doesn't preserve tags on an already-tagged source PDF**~~ — **fixed
+  in Post-Roadmap Phase 33 Session 2** for single-document export ([ADR
+  0136](0136-pdf-ua-tag-preservation-on-export.md)): the actual root cause turned out to be
+  `PdfArchiveRenderer._tag_pdf`'s PDF-passthrough step, not `export_pdf.py`'s merge/stamp pass as this
+  session had assumed — `PdfWriter(clone_from=...)` preserves an existing struct tree, `PdfWriter()` +
+  `add_page()`/`.append()` never does. Folder export (`build_folder_export`, multiple documents merged into
+  one PDF) still does not preserve tags — genuinely harder (would need merging independent structure trees
+  across sources), left as a documented, deliberate limitation.
 - **No axe-core or other automated accessibility test harness was introduced** — this session's testing
   remains manual/targeted (new `aria-label`/badge-class assertions in existing Vitest suites, a real
   `is_tagged_pdf()` unit test with a manually constructed `/StructTreeRoot` catalog entry, since neither

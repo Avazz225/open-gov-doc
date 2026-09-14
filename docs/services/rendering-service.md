@@ -158,7 +158,7 @@ version constraint here.
 
 `export_pdf.py` owns the PDF export feature's actual mechanics, reusing `watermark.py`'s overlay-merge idiom for footer stamping (a small corner label instead of a diagonal stamp):
 
-- **Pass A** (`build_document_export`, per document): the converted document PDF + a reportlab-rendered export-history table (`render_history_pdf`, fed by document-service from an `audit-service` query, see [ADR 0108](../adr/0108-export-history-as-audit-service-query.md)) are concatenated in the caller-specified order, then stamped with a **local** "i/N" footer, N = this document's own page count — final and stable regardless of whether/how the document is later embedded in a folder export.
+- **Pass A** (`build_document_export`, per document): the converted document PDF + a reportlab-rendered export-history table (`render_history_pdf`, fed by document-service from an `audit-service` query, see [ADR 0108](../adr/0108-export-history-as-audit-service-query.md)) are concatenated in the caller-specified order, then stamped with a **local** "i/N" footer, N = this document's own page count — final and stable regardless of whether/how the document is later embedded in a folder export. Since **Post-Roadmap Phase 33 Session 2** ([ADR 0136](../adr/0136-pdf-ua-tag-preservation-on-export.md)): the writer is constructed via `PdfWriter(clone_from=<document reader>)` rather than an empty `PdfWriter()` fed via `.append()` — the former preserves an already-tagged document's `/StructTreeRoot`, the latter never does. See "Accessibility: Tagged-PDF Check" below.
 - **Pass B** (`build_folder_export`, folder export only): a table-of-contents section is rendered first (a throwaway probe determines its own page count before the real offsets are known), cumulative page offsets are computed from each document's already-known Pass-A page count, then a **second, independent** global "j/total" footer (different vertical position than the local one) plus a `pypdf.PdfWriter.add_outline_item()` bookmark per document are added.
 
 `POST /render/convert-to-pdf` (on-demand, no persisted `Rendition`) reuses `PdfArchiveRenderer`'s format dispatch directly rather than duplicating it — the same conversion logic the automatic pipeline uses for the `pdf_archive` rendition type. `POST /render/export/document`/`POST /render/export/folder` compose `export_pdf.py`'s functions with that same conversion step.
@@ -174,6 +174,21 @@ become a new failure mode. `POST /render/pdf-tag-check` is a thin wrapper exposi
 (see `docs/services/document-service.md` "Accessibility: Export Warning for Untagged PDFs"), which proxies it
 into the export UI. Deliberately **not** a full PDF/UA conformance check — the same documented limitation
 category as this service's existing PDF/A-without-veraPDF gap (see "Open Points" below).
+
+**Since Post-Roadmap Phase 33 Session 2** ([ADR 0136](../adr/0136-pdf-ua-tag-preservation-on-export.md)):
+a tagged source's `/StructTreeRoot` now actually survives single-document export (`POST
+/render/export/document`), closing the gap this check could previously only surface, not fix. The real
+root cause, found live during this session's own end-to-end verification, was `PdfArchiveRenderer._tag_pdf`
+(the already-PDF passthrough step of the format-conversion dispatch, unrelated despite its name to PDF/UA
+accessibility tagging — it marks `/Producer`/`/Title` metadata for the records-disposal archival-copy
+feature) — it ran BEFORE `export_pdf.py`'s own merge/stamp pass and unconditionally dropped any existing
+struct tree via `PdfWriter()` + per-page `add_page()`. Both this and `build_document_export`'s own merge
+now use `PdfWriter(clone_from=<reader>)`, which preserves an already-present struct tree (confirmed
+empirically, pypdf 6.14.2) — `.append()`/`.merge()` afterward for additional (untagged) pages does not
+clear it. `build_folder_export` (multiple documents combined into one PDF) is **unchanged and still drops
+tags** — deliberately: it would need real structure-tree merging across independent sources, which pypdf
+does not support, and a partial fix (only the first document keeping tags) would be more misleading than
+the current, consistent behavior. See ADR 0136 for the full reasoning.
 
 ## Backend Integration
 
@@ -201,8 +216,14 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests` (**93 tests** by direct count at end of session,
-  +6 since **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)):
+- `uv run pytest services/rendering-service/tests` (**98 tests**, +5 since **Post-Roadmap Phase 33
+  Session 2** ([ADR 0136](../adr/0136-pdf-ua-tag-preservation-on-export.md)): `test_export_pdf.py` (4:
+  `build_document_export` preserves a tagged source's struct tree for both `history_position` values,
+  leaves an untagged source untagged, and a regression-lock test confirming `build_folder_export` still
+  drops tags even for a single already-tagged document — deliberate, not yet another gap) and
+  `test_renderers.py` (1: `PdfArchiveRenderer` preserves a tagged source's struct tree through its
+  already-PDF passthrough step, the fix's actual real root cause) — before that 93 tests, +6 since
+  **Post-Roadmap Phase 31 Session 8** ([ADR 0119](../adr/0119-accessibility-pass-badges-gender-neutral-text-tagged-pdf-warning.md)):
   `test_export_pdf.py` (4, `is_tagged_pdf` against a real, manually-constructed `/StructTreeRoot` catalog
   entry, an untagged PDF, and malformed bytes) and `test_api.py` (2, `/render/pdf-tag-check` against an
   untagged real PDF and garbage input, both reporting `is_tagged: false` rather than an error) — the base
@@ -227,6 +248,11 @@ None yet — follows in Phase 11.
 - **Watermark endpoint deliberately minimal**: fixed diagonal stamp, no position/repetition/color configuration.
 - **`is_tagged_pdf()` is a `/StructTreeRoot`-presence check, not full PDF/UA validation** (Post-Roadmap
   Phase 31 Session 8, ADR 0119) — same documented limitation category as the PDF/A-without-veraPDF gap
-  above. The export pipeline itself also still doesn't preserve a tagged source PDF's structure tree
-  through conversion (`PdfArchiveRenderer`/`export_pdf.py` have no tag-copying capability) — the new check
-  surfaces this gap to the user but does not close it.
+  above. ~~The export pipeline itself also still doesn't preserve a tagged source PDF's structure tree
+  through conversion~~ — **fixed for single-document export in Post-Roadmap Phase 33 Session 2** ([ADR
+  0136](../adr/0136-pdf-ua-tag-preservation-on-export.md)): both `PdfArchiveRenderer._tag_pdf` and
+  `export_pdf.build_document_export` now use `PdfWriter(clone_from=...)`, which preserves an existing
+  struct tree. **Still open**: `build_folder_export` (multiple documents combined into one PDF) still
+  drops every constituent document's tags — deliberately, since preserving more than one independent
+  structure tree in a single merged PDF is a genuinely harder problem pypdf doesn't support, and a partial
+  fix would be more misleading than the current, consistent behavior.

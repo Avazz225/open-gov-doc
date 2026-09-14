@@ -7,7 +7,9 @@ from odf.table import Table, TableCell, TableRow
 from odf.text import P
 from PIL import Image
 from pptx import Presentation
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DictionaryObject, NameObject
+from rendering_service.export_pdf import is_tagged_pdf
 from rendering_service.renderers import _libreoffice, select_renderers
 from rendering_service.renderers._libreoffice import ConversionError
 from rendering_service.renderers.docx_text import DocxTextExtractionRenderer
@@ -133,6 +135,42 @@ async def test_pdf_archive_renderer_preserves_pages():
     assert output.target_content_type == "application/pdf"
     reader = PdfReader(BytesIO(output.data))
     assert len(reader.pages) == 3
+
+
+def _add_struct_tree_root(data: bytes) -> bytes:
+    """Test-only helper (no `reportlab`/`pypdf` writer feature produces a
+    real tagged PDF short of a full structure tree, same helper as
+    `test_export_pdf.py`) - adds a minimal, otherwise-empty `/StructTreeRoot`
+    dictionary directly onto the writer's document catalog."""
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(data)))
+    struct_tree_root = writer._add_object(DictionaryObject())
+    writer._root_object[NameObject("/StructTreeRoot")] = struct_tree_root
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_pdf_archive_renderer_preserves_struct_tree_of_tagged_source():
+    """PDF/UA tag preservation (post-roadmap phase 33 session 2, ADR 0136) -
+    found live during this session's own end-to-end verification: this
+    renderer's `_tag_pdf` (an already-PDF passthrough that only marks
+    `/Producer`/`/Title` metadata, unrelated to accessibility tagging
+    despite the method's name) previously rebuilt the PDF via `PdfWriter()`
+    + per-page `add_page()`, which unconditionally dropped an existing
+    `/StructTreeRoot` - the actual root cause of what `export_pdf.py`'s own
+    ADR 0119 comment had attributed to "pypdf's writer has no structure-
+    tree-copying capability at all" in general. Fixed via `clone_from`,
+    same technique as `export_pdf.build_document_export`'s own fix."""
+    renderer = PdfArchiveRenderer()
+    tagged = _add_struct_tree_root(_real_pdf(pages=2))
+    assert is_tagged_pdf(tagged) is True
+
+    output = await renderer.render(tagged, filename="akte.pdf", content_type="application/pdf")
+
+    assert is_tagged_pdf(output.data) is True
+    reader = PdfReader(BytesIO(output.data))
+    assert len(reader.pages) == 2
 
 
 @pytest.mark.asyncio

@@ -76,10 +76,26 @@ class PdfArchiveRenderer(Renderer):
         )
 
     def _tag_pdf(self, data: bytes, filename: str) -> bytes:
+        """The method name predates and is unrelated to PDF/UA accessibility
+        tagging - "tag" here means marking the PDF as an archival copy
+        (`/Producer`/`/Title` metadata), see class docstring.
+
+        Post-roadmap phase 33 session 2 (ADR 0136, PDF/UA tag preservation):
+        this was actually the real source of `export_pdf.py`'s originally
+        assumed "pypdf's writer has no structure-tree-copying capability at
+        all" (ADR 0119) - `document-service`'s export endpoint routes every
+        already-PDF source through THIS function first (`main.py`'s
+        `render_export_document`, before `export_pdf.build_document_export`
+        ever runs), and the previous `PdfWriter()` + per-page `add_page()`
+        loop dropped an existing `/StructTreeRoot` unconditionally (confirmed
+        empirically: found live during this session's own end-to-end
+        verification, after `build_document_export`'s own fix alone still
+        produced an untagged export). `PdfWriter(clone_from=reader)`
+        preserves an existing struct tree exactly like `export_pdf.py`'s own
+        fix, and `add_metadata()` afterward does not disturb it (also
+        confirmed empirically)."""
         reader = PdfReader(BytesIO(data))
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
+        writer = PdfWriter(clone_from=reader)
         writer.add_metadata(
             {
                 "/Producer": "DMS Rendering Service - PDF-Archivkopie "

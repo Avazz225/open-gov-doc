@@ -108,6 +108,58 @@ def test_build_document_export_history_before_prepends_history():
     assert "Doc 1" in reader.pages[1].extract_text()
 
 
+def test_build_document_export_preserves_struct_tree_history_after():
+    """PDF/UA tag preservation (post-roadmap phase 33 session 2, ADR 0136):
+    a tagged source document keeps its `/StructTreeRoot` through the export
+    merge - the writer is now constructed via `clone_from` (preserves an
+    existing struct tree) instead of `.append()` (never does, confirmed
+    empirically for this session)."""
+    document_pdf = _add_struct_tree_root(_real_pdf(pages=2, text="Doc"))
+    history_pdf = render_history_pdf("Doc.pdf", [])
+
+    result = build_document_export(
+        document_pdf=document_pdf, history_pdf=history_pdf, history_position="after"
+    )
+
+    assert is_tagged_pdf(result) is True
+    reader = PdfReader(BytesIO(result))
+    assert len(reader.pages) == 3
+    assert "Doc 1" in reader.pages[0].extract_text()
+    assert "No export history" in reader.pages[2].extract_text()
+
+
+def test_build_document_export_preserves_struct_tree_history_before():
+    """Same guarantee regardless of `history_position` - the history page is
+    prepended via `.merge(0, ...)`, not by making it the writer's own
+    `clone_from` source, so the document's struct tree survives either
+    way."""
+    document_pdf = _add_struct_tree_root(_real_pdf(pages=1, text="Doc"))
+    history_pdf = render_history_pdf("Doc.pdf", [])
+
+    result = build_document_export(
+        document_pdf=document_pdf, history_pdf=history_pdf, history_position="before"
+    )
+
+    assert is_tagged_pdf(result) is True
+    reader = PdfReader(BytesIO(result))
+    assert len(reader.pages) == 2
+    assert "No export history" in reader.pages[0].extract_text()
+    assert "Doc 1" in reader.pages[1].extract_text()
+
+
+def test_build_document_export_leaves_untagged_source_untagged():
+    """Regression guard: an untagged source stays untagged (no tags are
+    fabricated), same behavior as before this session."""
+    document_pdf = _real_pdf(pages=1, text="Doc")
+    history_pdf = render_history_pdf("Doc.pdf", [])
+
+    result = build_document_export(
+        document_pdf=document_pdf, history_pdf=history_pdf, history_position="after"
+    )
+
+    assert is_tagged_pdf(result) is False
+
+
 def test_build_document_export_stamps_stable_local_page_numbers():
     document_pdf = _real_pdf(pages=2, text="Doc")
     history_pdf = _real_pdf(pages=1, text="Hist")
@@ -169,3 +221,28 @@ def test_build_folder_export_has_toc_and_stable_local_numbers_plus_global_number
     assert reader.get_destination_page_number(outline[0]) == 1
     # B.pdf's bookmark points at page index 4 (1 TOC + 3 pages for A).
     assert reader.get_destination_page_number(outline[1]) == 4
+
+
+def test_build_folder_export_still_drops_struct_tree_known_limitation():
+    """Honest, deliberate limitation (ADR 0136 "Consequences"): unlike
+    `build_document_export`'s single-source `clone_from`, combining a TOC
+    plus MULTIPLE already-tagged per-document PDFs into one writer still
+    goes through `.append()` for every entry after the first, which never
+    contributes a source's own struct tree (see `build_document_export`'s
+    own docstring for the empirical basis) - preserving more than one
+    document's structure tree in a single merged PDF would need actual
+    structure-tree merging across sources, which pypdf does not support.
+    This test locks in the current, documented behavior rather than letting
+    a future refactor silently "fix" it halfway (e.g. only the first
+    document keeping its tags, which would be a worse, misleading partial
+    fix than dropping all of them consistently)."""
+    doc_a = build_document_export(
+        document_pdf=_add_struct_tree_root(_real_pdf(pages=1, text="A")),
+        history_pdf=_real_pdf(pages=1, text="AHist"),
+        history_position="after",
+    )
+    assert is_tagged_pdf(doc_a) is True
+
+    result = build_folder_export([FolderExportEntry(title="A.pdf", export_pdf=doc_a)])
+
+    assert is_tagged_pdf(result) is False
