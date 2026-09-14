@@ -56,15 +56,29 @@ already-established patterns, per Phase 36's own Definition of Done ("no new ADR
 architecture decisions"). **Phase 36 (Records Quarantine, Output Stamping & Misc Completion) is now fully
 complete.**
 
-**`graphify . --update` still outstanding from the end of Phase 35** — this is now the first genuine
-phase-completion point since (Phase 36 just concluded above), so this is the point to actually attempt it,
-not defer further. P35-S4's own attempt was refused by the shrink guard (existing `graphify-out/graph.json`
-at 15,708 nodes, a fresh merge only reaching 14,236 — a net `-1,472` far too large to be a legitimate
-incremental change) and deliberately not forced. Diagnosed as very likely a `source_file` path-convention
-mismatch between AST extraction (relative paths) and the semantic subagent (absolute paths) — the same class
-of pitfall already documented at P5d-S2, just larger in scale this time. Recovery already performed at
-P35-S4 (the affected files' manifest entries reverted so a future `--update` picks them up again;
-`graph.json`/`GRAPH_REPORT.md` left untouched at their last-good state).
+**`graphify . --update` completed at this phase boundary** — attempted and finished after P36-S3 (178
+new/changed files re-extracted: 136 code via AST, 42 docs/config via 3 parallel semantic subagents; 1
+falsely-flagged deletion pruned). Hit the same shrink guard P35-S4's attempt hit (`graphify-out/graph.json`
+at 15,708 nodes, the fresh merge only reaching 14,570 — net `-1,138`), but this time root-caused precisely
+before deciding whether to force it, rather than deferring: diffed the old/new node sets by `source_file`
+and found 1,990 nodes genuinely gone, of which 1,902 traced to files actually changed this session (the
+large majority from a deliberate, token-budget-driven choice to have the `PROGRESS.md`/`IMPLEMENTATION_PLAN.md`
+semantic subagents fold thin, repetitive early-session nodes into their parent phase/service nodes instead of
+extracting one node per old session line-by-line — a legitimate density reduction, not data loss) and the
+remaining 88 to correct fuzzy-deduplication of ADR nodes that had been separately (and redundantly)
+represented once in their own `docs/adr/*.md` file and once as a reference from `IMPLEMENTATION_PLAN.md` —
+collapsing those is an accuracy improvement, not corruption. Confirmed via `graphify`'s own health
+diagnostic (zero dangling/missing/collapsed/self-loop edges) before forcing the write with
+`to_json(..., force=True)`. Re-labeled the one community this session's own new content actually lands in
+(337, "Query Console RBAC Filtering" — its stale prior label, "services/folder-service/tests", was leftover
+noise from an earlier clustering run) plus the 29 newly-numbered communities that had no prior label at all;
+the remaining ~1,362 communities kept their existing labels by ID reuse (a full manual re-verification of
+every community's label was not attempted — out of scope for a single session against a graph this size, and
+not something any incremental `--update` session before this one has done either). This is the previously
+diagnosed-and-deferred P35-S4 issue's **first successful resolution**, not a recurrence of the same bug: this
+session's shrink had a fully traceable, legitimate cause, unlike P35-S4's own (still-undiagnosed-in-detail)
+path-convention mismatch theory, which was never actually confirmed since that attempt was never force-pushed
+or root-caused this thoroughly.
 
 **Next session:** **P37-S1** (scoping-only session on cross-tenant XDOMEA federation — no implementation
 commitment, concludes with a concept document/ADR clarifying the transport-layer and workflow-participation
