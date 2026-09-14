@@ -2,55 +2,65 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P35-S2 (a real per-case RBAC resource type for `case-service` shipped — closes the gap
-ADR 0070/0121 both explicitly left open. `case-service` now registers a real `ResourceNode` per case
-(`resource_type="case"`, `parent_id="root"`) in `permission-service`, analogous to `folder-service`'s own
-resource-tree registration. Unlike `folder-service`'s purely event-driven registration, the node is created
-SYNCHRONOUSLY via a new `POST /resources` endpoint (idempotent create-if-missing, sharing its logic with the
-existing `"*.resource.created"` event handler via a new shared `repository.create_resource_node`) — a
-purely event-driven path was found, during design, to leave a genuine race window where a freshly created
-case would be briefly unreadable by anyone (an unregistered `resource_id` denies every permission check
-outright, no fallback to root), since `case-service`'s own endpoints self-check immediately after creation
-unlike `folder-service`'s (which never self-check per-resource at all, only the gateway does). The
-`case.resource.created` event is still published too, for symmetry with `folder-service`'s contract and as
-the basis for a startup backfill loop that registers every case created before this session (self-healing,
-idempotent, re-run on every restart — live-verified against the real dev stack's 157 pre-existing cases,
-all already correctly registered by a prior container restart during this session's own test cycle). Every
-per-case endpoint (`GET`/`PATCH /cases/{id}`, document-reference endpoints, archive-request/status) now
-checks `resource_id=<case_id>` instead of `"root"`; collection-level endpoints (`POST`/`GET /cases`, the
-two config endpoints) stay at `root` unchanged. A real, distinct bug found and fixed while building this:
-reordering surfaced that all seven per-case endpoints would have started returning `403` instead of `404`
-for a genuinely unknown `case_id` (an otherwise fully authorized principal, denied only because the
-nonexistent case also has no `ResourceNode`) — fixed with a new `_get_case_or_404` helper called BEFORE the
-permission check in all seven. No new admin-ui work needed — `admin-ui`'s existing generic role-assignment
-form already has a free-text `resourceId` field, so an admin can already scope a `RoleAssignment` to a
-specific case through the existing UI. `permission-service` +2 tests (166 total, up from 164) —
-`POST /resources` creates a node with no polling needed and is idempotent. `case-service` +4 tests (65
-total, up from 61) — a case's `ResourceNode` exists the instant `POST /cases` returns, the event is also
-published, a case-scoped `RoleAssignment` genuinely restricts access to just that one case (the decisive
-proof of real value, not just plumbing), collection-level endpoints unaffected; one existing test (a case
-created via direct `repository` access, bypassing `POST /cases`'s registration) updated in place to
-register the node explicitly. `libs/dms-permission-client` +2 tests (14 total, up from 12) — the new
-`create_resource_node` method. A real event-loop bug found and fixed while writing that last test: directly
-awaiting `app.state.permission_client` from an async pytest function (not going through `TestClient`'s own
-request-handling thread) raised "bound to a different event loop" — fixed by using a plain `httpx.AsyncClient`
-instead. Live-verified end to end against the real, rebuilt running stack: created a real case and confirmed
-both its `ResourceNode` and a real `GET /cases/{id}` succeeded with zero delay; stripped `case.read` from
-the "everyone" role globally and confirmed the case (and an unrelated pre-existing one) both became
-correctly unreadable; created a case-scoped role + `RoleAssignment` at the specific case's `resource_id` and
-confirmed the scoped principal could read exactly that one case and no other; restored "everyone"'s original
-permissions afterward; confirmed `GET /cases/does-not-exist` correctly returns `404`. Test role-assignment
-cleaned up afterward; the test case itself deliberately left in place (no case delete/purge endpoint, same
-established precedent as prior sessions). See
-[ADR 0144](docs/adr/0144-case-per-case-resource-type.md)), the second session of Phase 35 (org-hierarchy &
-workflow polish).
+**Last completed:** P35-S3 (closed all three gaps ADR 0121 had explicitly named as its own deferred future
+scope — "no reassignment, no queueing, no notifications" — plus narrowed ADR 0122's "purely read-only"
+`TeamTaskList` stance. New `POST /instances/{id}/tasks/{task_id}/reassign` (`new_principal_id`) on
+`workflow-service`: `repository.reassign_task_claim()` deletes the current `TaskClaim` row and inserts a
+fresh one for the new principal rather than updating in place, so any org-hierarchy grant tied to the old
+claim does NOT silently carry over to the new assignee (it's revoked via the existing
+`_revoke_claim_grants()` first) — gated by the same `workflow.write` capability as claiming itself, no new
+"must be the supervisor" check, since no such relationship-aware authorization primitive exists anywhere in
+this project. New `_task_claim_expiry_poll_loop` (same `while True`/skip-during-maintenance/`finally: sleep`
+idiom as `_sla_poll_loop`) finds claims older than the new `claim_abandonment_threshold_hours` setting
+(default 72h — deliberately a SEPARATE setting from the same-valued `org_hierarchy_grant_max_duration_hours`
+backstop, since one is a hard access cutoff and the other a soft reminder unrelated to whether a grant was
+ever requested) that haven't already been notified (`TaskClaim.expiry_notified_at IS NULL`, same "sent once
+per deadline" dedup pattern as `DocumentLock.reminder_sent_at`), and publishes
+`workflow.task_claim.abandoned` — consumed by `notification-service`'s new `_handle_task_claim_abandoned`
+for a single in-app nudge to the claim holder, mirroring the existing `document.lock.reminder` handler
+exactly (own durable name `notification-service-task-claim-abandoned`, third subject on the `"workflow"`
+stream, own `EMAIL_TEMPLATE_USE_CASES` catalog entry). `GET /tasks`/`GET /instances/{id}/tasks` now also
+return `created_by` (the owning `ProcessInstance`'s creator) on every entry — the only attribution signal an
+UNCLAIMED task has. `reviewer-ui`'s `TeamTaskList.tsx` now also lists an unclaimed task whose instance was
+created by a direct report (not just claimed tasks as before), and gained inline assign/reassign forms (same
+`<tr>`-below-the-row idiom as `TaskList.tsx`'s existing claim/grant forms, using an explicit `React.Fragment`
+with `key` since the `<>` shorthand doesn't support one) — task **completion** deliberately remains excluded
+from this view, preserving ADR 0122's original "oversight ≠ acting on someone else's work" distinction, just
+narrowed rather than reversed. The "instance creator" attribution choice (over a richer but unbuilt "BPMN
+lane/role membership" alternative the plan's own phrasing had floated) was confirmed via `AskUserQuestion`
+before implementation. A real regression found and fixed along the way, unrelated to this session's own
+changes: P35-S1's `is_org_unit` requirement on `POST /groups` had never been retrofitted into
+`workflow-service`'s own `_create_group_with_members()` test helper (only permission-service's/admin-ui's own
+tests were fixed in P35-S1), silently breaking
+`test_org_hierarchy_grant_org_unit_of_creator_resolves_from_instance_creator` — fixed as a drive-by (the
+helper's only call site). `workflow-service` +9 tests (207 total, up from 198) — claim reassignment
+(old claim gone, no carried-over grant), the due-for-notice repository query (threshold filtering,
+already-notified claims excluded), the reassign endpoint (success + 404-if-unclaimed), `created_by` on the
+task listing, plus the drive-by fix above. `notification-service` +3 tests (81 total, up from 78) — fallback
+body without a configured template, a configured `EmailTemplate` override actually rendered, direct-link
+presence/absence. `reviewer-ui` +3 tests (44 total, up from 41) — `team-task-list.test.tsx` grew from 4 to 7:
+a new fixture distinguishing an unclaimed task from a stranger's instance (still excluded) from one from a
+direct report's instance (now included), plus assign and reassign interaction tests. Two testing gotchas hit
+and fixed along the way: the ambiguous-button-after-opening-the-inline-form issue (row action button and form
+submit button share identical visible text) needed `getAllByRole(...)[1]`, found independently in BOTH the
+assign and reassign tests; and the React `Fragment`/`key` shorthand limitation. Live-verified end to end
+against the real, rebuilt running stack: a real `workflow.task_claim.abandoned` event published directly
+against `workflow-service` and confirmed to produce a real in-app notification at `notification-service`; a
+full Playwright pass through reviewer-ui's `/team` page (after resolving a `user.sub`-vs-username mismatch
+in a throwaway `SupervisorAssignment` used for the test) confirming a claimed report task renders correctly
+and clicking "Neu zuweisen" + submitting a new principal ID actually reassigns the claim, with the row
+updating to the new claimant after reload — two screenshots captured and visually confirmed. Throwaway
+Playwright spec and scratchpad files deleted afterward; throwaway live-verification data (a `ProcessDefinition`/
+`ProcessInstance`/`TaskClaim`, a throwaway admin-role-granted principal, two `SupervisorAssignment` rows) left
+in place, same established "harmless leftover test data, no delete endpoint" precedent as prior sessions. See
+[ADR 0145](docs/adr/0145-task-claim-reassignment-expiry-notice-and-unclaimed-team-work-attribution.md)), the
+third session of Phase 35 (org-hierarchy & workflow polish).
 
-**Next session:** **P35-S3** (`TaskClaim` reassignment/notification + an "unclaimed team work" view —
-P31-S11's `TeamTaskList` only shows direct reports' claimed tasks, unclaimed team work is invisible to a
-supervisor; also add a notification when the 72h claim-abandonment window expires, today a silent,
-action-less expiry). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 35
-concludes with P35-S4 hand-folder/workmap cross-case indexing; then Phase 36 records
-quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
+**Next session:** **P35-S4** (hand folders/work trays: cross-case index + browsing UI —
+`search-service` doesn't know about `FolderDocumentReference` today, so there is no installation-wide
+search/browse across all hand folders/work trays; add indexing plus a simple overview page). See
+`IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (P35-S4 concludes Phase 35; then Phase
+36 records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
 federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.

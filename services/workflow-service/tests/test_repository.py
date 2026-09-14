@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from dms_db_base import make_session_factory
@@ -564,3 +564,94 @@ async def test_delete_business_calendar_removes_it_from_spiff_adapter_cache(sess
     friday = datetime(2026, 1, 9, 12, 0, tzinfo=UTC)
     with pytest.raises(spiff_adapter.UnknownBusinessCalendarError):
         spiff_adapter.business_days_duration(3, "de-national", start=friday)
+
+
+# --- Task-claim reassignment / abandonment notification (Post-Roadmap Phase
+# 35 Session 3, ADR 0145) ------------------------------------------------
+
+
+async def _instance_with_one_task(session, manual_task_bpmn, *, name: str):
+    definition = await repository.create_process_definition(
+        session, name=name, bpmn_xml=manual_task_bpmn, process_id=None
+    )
+    instance = await repository.start_instance(
+        session, definition.id, created_by="carla-creator", business_key=None, initial_data={}
+    )
+    task_id = (await repository.get_ready_tasks(session, instance.id))[0].id
+    return instance, task_id
+
+
+async def test_reassign_task_claim_moves_claim_to_new_principal(session, manual_task_bpmn):
+    instance, task_id = await _instance_with_one_task(
+        session, manual_task_bpmn, name="ReassignRepo1"
+    )
+    await repository.claim_task(session, instance.id, task_id, "dora-assignee")
+
+    new_claim, delegation_ids = await repository.reassign_task_claim(
+        session, instance.id, task_id, "erik-new-assignee"
+    )
+
+    assert new_claim.principal_id == "erik-new-assignee"
+    assert delegation_ids == []
+    fetched = await repository.get_task_claim(session, instance.id, task_id)
+    assert fetched.principal_id == "erik-new-assignee"
+
+
+async def test_reassign_task_claim_without_existing_claim_raises(session, manual_task_bpmn):
+    instance, task_id = await _instance_with_one_task(
+        session, manual_task_bpmn, name="ReassignRepo2"
+    )
+
+    with pytest.raises(repository.NotFoundError):
+        await repository.reassign_task_claim(session, instance.id, task_id, "erik-new-assignee")
+
+
+async def test_reassign_task_claim_does_not_carry_over_grant_kind_or_delegations(
+    session, manual_task_bpmn
+):
+    instance, task_id = await _instance_with_one_task(
+        session, manual_task_bpmn, name="ReassignRepo3"
+    )
+    claim = await repository.claim_task(session, instance.id, task_id, "dora-assignee")
+    await repository.set_claim_grant(
+        session, claim, grant_kind="supervisor", delegation_ids=["deleg-1"]
+    )
+
+    new_claim, old_delegation_ids = await repository.reassign_task_claim(
+        session, instance.id, task_id, "erik-new-assignee"
+    )
+
+    assert old_delegation_ids == ["deleg-1"]
+    assert new_claim.grant_kind is None
+    assert new_claim.granted_delegation_ids is None
+
+
+async def test_list_claims_due_for_expiry_notice_respects_threshold_and_dedup(
+    session, manual_task_bpmn
+):
+    instance, task_id = await _instance_with_one_task(session, manual_task_bpmn, name="ExpiryRepo1")
+    claim = await repository.claim_task(session, instance.id, task_id, "dora-assignee")
+    # Backdate claimed_at directly - no API exposes this, same as
+    # document-service's own DocumentLock reminder tests manipulating
+    # locked_at directly.
+    claim.claimed_at = datetime.now(UTC) - timedelta(hours=100)
+    await session.flush()
+
+    due = await repository.list_claims_due_for_expiry_notice(session, threshold_hours=72.0)
+    assert claim.id in {c.id for c in due}
+
+    claim.expiry_notified_at = datetime.now(UTC)
+    await session.flush()
+
+    due_after_notified = await repository.list_claims_due_for_expiry_notice(
+        session, threshold_hours=72.0
+    )
+    assert claim.id not in {c.id for c in due_after_notified}
+
+
+async def test_list_claims_due_for_expiry_notice_excludes_recent_claims(session, manual_task_bpmn):
+    instance, task_id = await _instance_with_one_task(session, manual_task_bpmn, name="ExpiryRepo2")
+    await repository.claim_task(session, instance.id, task_id, "dora-assignee")
+
+    due = await repository.list_claims_due_for_expiry_notice(session, threshold_hours=72.0)
+    assert due == []

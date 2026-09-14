@@ -471,6 +471,105 @@ async def test_lock_reminder_uses_configured_template(engine, settings):
     assert notifications[0].body == "Vertrag.pdf (id=doc-22) gesperrt von alice"
 
 
+async def test_task_claim_abandoned_event_creates_in_app_notification_for_the_claimant(
+    engine, settings
+):
+    """Post-Roadmap Phase 35 Session 3 (ADR 0145) - the notification half
+    of the feature ADR 0121 scoped out. Same shape as the lock-reminder
+    tests above: the claim's own `principal_id` (the person who most
+    plausibly forgot about it) is directly the in-app recipient."""
+    published = []
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        published.append((event_type, subject, payload))
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="workflow.task_claim.abandoned",
+        service_name="workflow-service",
+        subject="instance-30",
+        payload={
+            "task_id": "task-1",
+            "task_name": "Prüfung",
+            "principal_id": "bob",
+            "business_key": "case-30",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert len(notifications) == 1
+    assert notifications[0].channel == "in_app"
+    assert notifications[0].recipient == "bob"
+    assert "Prüfung" in notifications[0].body
+    assert len(published) == 1
+
+
+async def test_task_claim_abandoned_includes_a_direct_link_when_configured(engine, settings):
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    configured = settings.model_copy(
+        update={"reviewer_ui_public_base_url": "http://localhost:3005"}
+    )
+    handler = consumer.make_handler(_session_factory(engine), configured, fake_publish)
+    event = Event(
+        event_type="workflow.task_claim.abandoned",
+        service_name="workflow-service",
+        subject="instance-31",
+        payload={
+            "task_id": "task-1",
+            "task_name": "Prüfung",
+            "principal_id": "bob",
+            "business_key": "case-31",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert "http://localhost:3005/?instance=instance-31" in notifications[0].body
+
+
+async def test_task_claim_abandoned_uses_configured_template(engine, settings):
+    await _configure_template(
+        engine,
+        use_case="workflow.task_claim.abandoned",
+        recipient_domain_pattern=None,
+        subject_template="[Vorlage] {task_name}",
+        body_template="{task_name} (Vorgang {instance_id}) seit längerem bei {principal_id}",
+    )
+
+    async def fake_publish(event_type, subject, payload, actor=None):
+        pass
+
+    handler = consumer.make_handler(_session_factory(engine), settings, fake_publish)
+    event = Event(
+        event_type="workflow.task_claim.abandoned",
+        service_name="workflow-service",
+        subject="instance-32",
+        payload={
+            "task_id": "task-1",
+            "task_name": "Prüfung",
+            "principal_id": "bob",
+            "business_key": "case-32",
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        notifications = await repository.list_notifications(session)
+    assert notifications[0].subject == "[Vorlage] Prüfung"
+    assert notifications[0].body == "Prüfung (Vorgang instance-32) seit längerem bei bob"
+
+
 async def test_maintenance_mode_activated_event_creates_security_officer_email(engine, settings):
     published = []
 

@@ -61,6 +61,11 @@ class Settings(BaseServiceSettings):
         "license.limit_exceeded",
         "license.expiring_soon",
         "license.invalid",
+        # Claim-abandonment notice (14.2/8, Post-Roadmap Phase 35 Session 3,
+        # ADR 0145) - third subject on the "workflow" stream, own durable
+        # name (see `_SHARED_STREAM_DURABLE_OVERRIDES`), same reasoning as
+        # `workflow.federation.inbound_received` above.
+        "workflow.task_claim.abandoned",
     ]
 
     # Recipient of the optional security notification on break-glass

@@ -63,6 +63,7 @@ from workflow_service.schemas import (
     TaskClaimCreate,
     TaskClaimOut,
     TaskCompleteRequest,
+    TaskReassignRequest,
 )
 from workflow_service.settings import Settings
 from workflow_service.signature_client import SignatureServiceClient
@@ -191,6 +192,65 @@ async def _sla_poll_loop(
                 "SLA-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
             )
         await asyncio.sleep(settings.sla_poll_interval_seconds)
+
+
+async def _task_claim_expiry_poll_loop(
+    session_factory: async_sessionmaker[AsyncSession], permission_client: PermissionServiceClient
+) -> None:
+    """Claim-abandonment notification (14.2/8, Post-Roadmap Phase 35
+    Session 3, ADR 0145) - the notification half of the feature ADR 0121
+    scoped out ("no notifications"). Same error-isolation/maintenance-skip
+    idiom as `_sla_poll_loop` above, own (much coarser) poll interval - an
+    abandonment notice is not time-critical to the minute. A separate loop
+    rather than folded into `_sla_poll_loop`: that one is specifically
+    about BPMN boundary-timer SLA breaches, a different concern from a
+    claim that was never released/completed, even though both happen to
+    share this service's "poll instead of push" architecture (ADR 0020)."""
+    while True:
+        try:
+            if await permission_client.is_maintenance_active():
+                await asyncio.sleep(settings.task_claim_expiry_poll_interval_seconds)
+                continue
+            due_claims = []
+            async with session_factory() as session:
+                for claim in await repository.list_claims_due_for_expiry_notice(
+                    session, threshold_hours=settings.claim_abandonment_threshold_hours
+                ):
+                    instance = await repository.get_instance(session, claim.instance_id)
+                    task_name = claim.task_id
+                    for task in await repository.get_ready_tasks(session, claim.instance_id):
+                        if task.id == claim.task_id:
+                            task_name = task.name
+                            break
+                    claim.expiry_notified_at = datetime.now(UTC)
+                    due_claims.append(
+                        (
+                            claim.instance_id,
+                            claim.task_id,
+                            claim.principal_id,
+                            task_name,
+                            instance.business_key,
+                        )
+                    )
+                await session.commit()
+            for instance_id, task_id, principal_id, task_name, business_key in due_claims:
+                await publish_event(
+                    "workflow.task_claim.abandoned",
+                    subject=instance_id,
+                    payload={
+                        "task_id": task_id,
+                        "task_name": task_name,
+                        "principal_id": principal_id,
+                        "business_key": business_key,
+                    },
+                    actor="system:task-claim-expiry-poll",
+                )
+        except Exception:
+            logger.exception(
+                "Claim-Abandonment-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut "
+                "versucht."
+            )
+        await asyncio.sleep(settings.task_claim_expiry_poll_interval_seconds)
 
 
 async def _get_or_seed_federation_config(session: AsyncSession) -> FederationConfig:
@@ -342,6 +402,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await conn.execute(
             text("ALTER TABLE workflow.federation_identity DROP COLUMN IF EXISTS api_key")
         )
+        # Claim-abandonment notification (Post-Roadmap Phase 35 Session 3,
+        # ADR 0145) - same ad-hoc migration pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE workflow.task_claim "
+                "ADD COLUMN IF NOT EXISTS expiry_notified_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     # Business calendar cache (P14-S5): `business_days()` reads it
@@ -404,6 +472,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sla_poll_task = asyncio.create_task(
         _sla_poll_loop(app.state.session_factory, app.state.permission_client)
     )
+    task_claim_expiry_poll_task = asyncio.create_task(
+        _task_claim_expiry_poll_loop(app.state.session_factory, app.state.permission_client)
+    )
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -414,6 +485,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sla_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await sla_poll_task
+    task_claim_expiry_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task_claim_expiry_poll_task
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     if registration:
@@ -1187,6 +1261,7 @@ async def list_ready_tasks(
                     instance_id=instance.id,
                     process_definition_id=instance.process_definition_id,
                     business_key=instance.business_key,
+                    created_by=instance.created_by,
                 )
             )
     return tasks
@@ -1439,6 +1514,46 @@ async def release_task_claim(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     await _revoke_claim_grants(delegation_ids)
+
+
+@app.post(
+    "/instances/{instance_id}/tasks/{task_id}/reassign",
+    response_model=TaskClaimOut,
+    dependencies=[Depends(_license_gate("write"))],
+)
+async def reassign_task(
+    instance_id: str,
+    task_id: str,
+    payload: TaskReassignRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> TaskClaimOut:
+    """Reassignment (14.2/8, Post-Roadmap Phase 35 Session 3, ADR 0145) -
+    the feature ADR 0121 explicitly scoped out at the time ("no
+    reassignment... not a general task-assignment feature"), motivated by
+    `reviewer-ui`'s `TeamTaskList` (P31-S11, ADR 0122): a supervisor seeing
+    a report's stuck claim can now move it to someone else instead of only
+    being able to look at it. Same authorization posture as
+    `claim_task`/`release_task_claim` above - gated by `workflow.write`
+    like every other task action, not a new "must be the claimant's
+    supervisor" check (no such authorization primitive exists anywhere in
+    this project yet, and task-claiming itself has never been restricted
+    to a specific assignee - see `claim_task`'s own docstring: "a claim can
+    be made on someone else's behalf"). `404` if the task has no existing
+    claim - a genuinely unclaimed task is claimed directly via the existing
+    `POST .../claim`, not "reassigned" (there is nothing to reassign FROM)."""
+    await _reject_during_maintenance(x_dms_maintenance_active)
+    await _require_workflow_permission(x_dms_principal, access_type="write")
+    try:
+        new_claim, delegation_ids = await repository.reassign_task_claim(
+            session, instance_id, task_id, payload.new_principal_id
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    await _revoke_claim_grants(delegation_ids)
+    return new_claim
 
 
 @app.post(

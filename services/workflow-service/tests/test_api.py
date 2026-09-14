@@ -109,9 +109,14 @@ def _create_supervisor_assignment(
 def _create_group_with_members(
     *, name: str, member_ids: list[str], users_admin_headers: dict[str, str]
 ) -> dict:
+    """`is_org_unit: True` (Post-Roadmap Phase 35 Session 1, ADR 0143) - the
+    only caller of this helper is the `grant_kind="org_unit"` test below,
+    which needs its group to actually count as one; before ADR 0143 every
+    group counted, so this wasn't yet a distinct concern when this helper
+    was first written."""
     group = httpx.post(
         f"{PERMISSION_SERVICE_URL}/groups",
-        json={"name": name},
+        json={"name": name, "is_org_unit": True},
         headers=users_admin_headers,
         timeout=30.0,
     ).json()
@@ -834,6 +839,98 @@ def test_release_unknown_task_claim_returns_404(client, manual_task_bpmn, admin_
     task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
     response = client.delete(f"/instances/{instance['id']}/tasks/{task_id}/claim")
     assert response.status_code == 404
+
+
+def test_get_tasks_includes_created_by(client, manual_task_bpmn, admin_headers):
+    """ "Unclaimed team work" view (Post-Roadmap Phase 35 Session 3, ADR
+    0145) - the only attribution signal an UNCLAIMED task has."""
+    instance = _start_instance_with_one_task(client, manual_task_bpmn, admin_headers, name="Claim7")
+
+    tasks = [t for t in client.get("/tasks").json() if t["instance_id"] == instance["id"]]
+
+    assert tasks[0]["created_by"] == "carla-creator"
+    assert tasks[0]["claimed_by"] is None
+
+
+def test_reassign_task_moves_claim_to_new_principal(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Reassign1"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/reassign",
+        json={"new_principal_id": "erik-new-assignee"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["principal_id"] == "erik-new-assignee"
+    tasks = client.get(f"/instances/{instance['id']}/tasks").json()
+    assert tasks[0]["claimed_by"] == "erik-new-assignee"
+
+
+def test_reassign_task_without_existing_claim_returns_404(client, manual_task_bpmn, admin_headers):
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Reassign2"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/reassign",
+        json={"new_principal_id": "erik-new-assignee"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_reassign_task_revokes_the_old_org_hierarchy_grant(
+    client, manual_task_bpmn, admin_headers, users_admin_headers
+):
+    """Same discriminating-precheck pattern as
+    `test_completing_task_auto_releases_claim_and_revokes_grant` above - a
+    reassignment ends the OLD assignee's grant immediately, exactly like
+    completion/release already do (ADR 0145 extends the same "for the
+    task's duration" principle ADR 0121 established)."""
+    _create_supervisor_assignment(
+        principal_id="dora-assignee-r3",
+        supervisor_principal_id="petra-supervisor-r3",
+        users_admin_headers=users_admin_headers,
+    )
+    instance = _start_instance_with_one_task(
+        client, manual_task_bpmn, admin_headers, name="Reassign3"
+    )
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-r3"},
+    )
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "supervisor"},
+    )
+    check_params = {
+        "deputy_principal_id": "petra-supervisor-r3",
+        "delegator_principal_id": "dora-assignee-r3",
+        "process_definition_id": instance["process_definition_id"],
+    }
+    assert (
+        httpx.get(f"{PERMISSION_SERVICE_URL}/delegations/check", params=check_params).json()[
+            "allowed"
+        ]
+        is True
+    )
+
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/reassign",
+        json={"new_principal_id": "erik-new-assignee-r3"},
+    )
+
+    check = httpx.get(f"{PERMISSION_SERVICE_URL}/delegations/check", params=check_params).json()
+    assert check["allowed"] is False
 
 
 def test_org_hierarchy_grant_requires_existing_claim_returns_404(

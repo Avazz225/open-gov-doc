@@ -76,6 +76,21 @@ class Settings(BaseServiceSettings):
     # claim that is never released/completed.
     org_hierarchy_grant_max_duration_hours: float = 72.0
 
+    # Claim-abandonment notification (14.2/8, Post-Roadmap Phase 35 Session
+    # 3, ADR 0145) - genuinely independent of
+    # `org_hierarchy_grant_max_duration_hours` above (that one bounds the
+    # OPTIONAL auto-created Delegation, not the claim itself, which has no
+    # expiry concept at all in ADR 0121's own original design) - defaults
+    # to the same 72h duration only because the plan's own wording ("the
+    # 72h claim window") assumed the two were the same thing; they are two
+    # independent settings that happen to share a default.
+    claim_abandonment_threshold_hours: float = 72.0
+    # How often `_task_claim_expiry_poll_loop` checks for claims past the
+    # threshold above - much coarser than `sla_poll_interval_seconds`
+    # (30s): an abandonment notice is not time-critical to the minute the
+    # way an SLA breach is.
+    task_claim_expiry_poll_interval_seconds: int = 1800
+
     # Delegation scope resolution (4.4a, P32-S2, ADR 0130): resolves
     # `ProcessInstance.business_key` to an `object_type_id`/
     # `folder_resource_id` so a delegation's previously-dead

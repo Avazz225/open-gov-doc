@@ -24,6 +24,10 @@ _SHARED_STREAM_DURABLE_OVERRIDES: dict[str, str] = {
     "license.expiring_soon": "notification-service-license-expiring-soon",
     "license.invalid": "notification-service-license-invalid",
     "document.lock.reminder": "notification-service-lock-reminder",
+    # Third subject on the "workflow" stream (after `workflow.task.escalated`
+    # and `workflow.federation.inbound_received`), Post-Roadmap Phase 35
+    # Session 3 (ADR 0145) - same reasoning as those two above.
+    "workflow.task_claim.abandoned": "notification-service-task-claim-abandoned",
 }
 
 
@@ -61,6 +65,9 @@ def make_handler(
             return
         if event.event_type == "document.lock.reminder":
             await _handle_lock_reminder(session_factory, settings, publish_event, event)
+            return
+        if event.event_type == "workflow.task_claim.abandoned":
+            await _handle_task_claim_abandoned(session_factory, settings, publish_event, event)
             return
         if event.event_type == "license.limit_exceeded":
             await _handle_license_limit_exceeded(session_factory, settings, publish_event, event)
@@ -416,6 +423,56 @@ async def _handle_lock_reminder(
         )
         notification = await repository.create_and_send(
             session, settings, channel="in_app", recipient=locked_by, subject=subject, body=body
+        )
+        await session.commit()
+        await publish_notification_result(publish_event, notification)
+
+
+async def _handle_task_claim_abandoned(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    publish_event: Callable[[str, str, dict], Awaitable[None]],
+    event: Event,
+) -> None:
+    """Claim-abandonment notice (14.2/8, Post-Roadmap Phase 35 Session 3,
+    ADR 0145) - the notification half of the feature ADR 0121 scoped out
+    ("no notifications"). Same shape as `_handle_lock_reminder` above (the
+    closest existing precedent: a single, in-app-only nudge to the person
+    who most plausibly forgot about the thing they're holding) - `event.
+    subject` is the process instance ID here, not the claim's own resource,
+    since `TaskClaim` has no direct link/URL scheme of its own; the
+    reviewer-ui "Vorgang" detail view is the closest existing thing to
+    point at."""
+    data = event.payload
+    task_name = data.get("task_name", "?")
+    principal_id = data.get("principal_id", "?")
+    business_key = data.get("business_key")
+    fallback_subject = f"Beanspruchter Task seit längerem offen: {task_name}"
+    fallback_body = (
+        f"Der Task {task_name!r} (Vorgang {event.subject}, business_key={business_key!r}) ist "
+        f"seit längerem von {principal_id!r} beansprucht, aber nicht abgeschlossen."
+    )
+    # Authenticated direct links (post-roadmap phase 29, ADR 0109/0110) -
+    # same "instance" resource type `_handle_task_escalated` already uses.
+    link = build_resource_link(settings.reviewer_ui_public_base_url, "instance", event.subject)
+    if link:
+        fallback_body += f"\n\nVorgang öffnen: {link}"
+
+    async with session_factory() as session:
+        subject, body = await _render_or_fallback(
+            session,
+            use_case="workflow.task_claim.abandoned",
+            recipient=principal_id,
+            fallback_subject=fallback_subject,
+            fallback_body=fallback_body,
+            task_name=task_name,
+            instance_id=event.subject,
+            business_key=business_key,
+            principal_id=principal_id,
+            link=link or "",
+        )
+        notification = await repository.create_and_send(
+            session, settings, channel="in_app", recipient=principal_id, subject=subject, body=body
         )
         await session.commit()
         await publish_notification_result(publish_event, notification)

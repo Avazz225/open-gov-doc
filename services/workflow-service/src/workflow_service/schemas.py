@@ -98,6 +98,12 @@ class ReadyTaskWithInstanceOut(ReadyTaskOut):
     instance_id: str
     process_definition_id: int
     business_key: str | None
+    # "Unclaimed team work" view (Post-Roadmap Phase 35 Session 3, ADR
+    # 0145) - the only existing attribution signal an UNCLAIMED task has at
+    # all (`claimed_by` is `None`). Reused, not new: `ProcessInstance.
+    # created_by` already existed for org-unit resolution
+    # (`org_unit_of="creator"`), just never surfaced on this endpoint.
+    created_by: str
 
 
 class TaskCompleteRequest(BaseModel):
@@ -118,6 +124,15 @@ class TaskCompleteRequest(BaseModel):
 
 class TaskClaimCreate(BaseModel):
     principal_id: str
+
+
+class TaskReassignRequest(BaseModel):
+    """`POST .../tasks/{task_id}/reassign` (Post-Roadmap Phase 35 Session 3,
+    ADR 0145) - like `TaskClaimCreate`, `new_principal_id` is an explicit
+    field, not always `X-DMS-Principal`: a supervisor reassigning FROM one
+    report TO another is acting on neither person's own behalf."""
+
+    new_principal_id: str
 
 
 class TaskClaimOut(BaseModel):

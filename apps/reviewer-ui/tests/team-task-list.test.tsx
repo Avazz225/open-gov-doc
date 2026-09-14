@@ -5,10 +5,14 @@ import { I18nProvider } from "@/i18n";
 
 const listDirectReportsMock = vi.fn();
 const listReadyTasksMock = vi.fn();
+const claimTaskMock = vi.fn();
+const reassignTaskMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listDirectReports: (...args: unknown[]) => listDirectReportsMock(...args),
   listReadyTasks: (...args: unknown[]) => listReadyTasksMock(...args),
+  claimTask: (...args: unknown[]) => claimTaskMock(...args),
+  reassignTask: (...args: unknown[]) => reassignTaskMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -50,12 +54,16 @@ const REPORT_TASK = {
   instance_id: "instance-1",
   process_definition_id: 5,
   business_key: "case-42",
+  created_by: "carla-creator",
 };
 
+// Unclaimed, but its instance was NOT created by a direct report - must
+// stay excluded (same as before Post-Roadmap Phase 35 Session 3).
 const UNCLAIMED_TASK = {
   ...REPORT_TASK,
   id: "task-2",
   claimed_by: null,
+  created_by: "stranger-creator",
 };
 
 const STRANGERS_TASK = {
@@ -64,10 +72,22 @@ const STRANGERS_TASK = {
   claimed_by: "not-my-report",
 };
 
+// Unclaimed, instance created by a direct report - the new attribution
+// signal (ADR 0145) that makes an unclaimed task visible here.
+const UNCLAIMED_REPORT_TASK = {
+  ...REPORT_TASK,
+  id: "task-4",
+  name: "Antrag sichten",
+  claimed_by: null,
+  created_by: "bob",
+};
+
 describe("TeamTaskList", () => {
   beforeEach(() => {
     listDirectReportsMock.mockReset();
     listReadyTasksMock.mockReset();
+    claimTaskMock.mockReset();
+    reassignTaskMock.mockReset();
     onOpenInstanceMock.mockReset();
   });
 
@@ -82,7 +102,7 @@ describe("TeamTaskList", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows an empty state when direct reports exist but have no open claimed tasks", async () => {
+  it("shows an empty state when direct reports exist but have no attributable tasks", async () => {
     listDirectReportsMock.mockResolvedValue([
       { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
     ]);
@@ -94,7 +114,7 @@ describe("TeamTaskList", () => {
     ).toBeInTheDocument();
   });
 
-  it("lists only tasks claimed by a direct report, excluding unclaimed and non-report tasks", async () => {
+  it("lists only tasks claimed by a direct report, excluding unclaimed tasks from a stranger's instance and tasks claimed by a non-report", async () => {
     listDirectReportsMock.mockResolvedValue([
       { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
     ]);
@@ -102,10 +122,21 @@ describe("TeamTaskList", () => {
     renderList();
 
     expect(await screen.findByText("Rechnung prüfen")).toBeInTheDocument();
-    expect(screen.getByText("bob")).toBeInTheDocument();
-    // Only one row - the other two tasks (unclaimed, claimed by a
-    // non-report) must not appear.
+    expect(screen.getByText("Beansprucht von bob")).toBeInTheDocument();
+    // Only one row - the other two tasks (unclaimed from a stranger's
+    // instance, claimed by a non-report) must not appear.
     expect(screen.getAllByRole("row")).toHaveLength(2); // header + 1 data row
+  });
+
+  it("also lists an unclaimed task whose instance was created by a direct report", async () => {
+    listDirectReportsMock.mockResolvedValue([
+      { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listReadyTasksMock.mockResolvedValue([UNCLAIMED_REPORT_TASK]);
+    renderList();
+
+    expect(await screen.findByText("Antrag sichten")).toBeInTheDocument();
+    expect(screen.getByText("Unbeansprucht (Vorgang angelegt von bob)")).toBeInTheDocument();
   });
 
   it("opens the Vorgang for a listed team task", async () => {
@@ -119,5 +150,53 @@ describe("TeamTaskList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Vorgang öffnen" }));
 
     expect(onOpenInstanceMock).toHaveBeenCalledWith("instance-1");
+  });
+
+  it("assigns an unclaimed team task to a chosen principal", async () => {
+    listDirectReportsMock.mockResolvedValue([
+      { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listReadyTasksMock.mockResolvedValue([UNCLAIMED_REPORT_TASK]);
+    claimTaskMock.mockResolvedValue(undefined);
+    renderList();
+
+    await screen.findByText("Antrag sichten");
+    fireEvent.click(screen.getByRole("button", { name: "Zuweisen" }));
+    fireEvent.change(screen.getByLabelText("Zuweisen an (Nutzername/Principal-ID)"), {
+      target: { value: "dora-assignee" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Zuweisen" })[1]);
+
+    await waitFor(() =>
+      expect(claimTaskMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-4",
+        principalId: "dora-assignee",
+      })
+    );
+  });
+
+  it("reassigns a claimed team task to a chosen principal", async () => {
+    listDirectReportsMock.mockResolvedValue([
+      { id: 1, principal_id: "bob", supervisor_principal_id: "supervisor-sub", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listReadyTasksMock.mockResolvedValue([REPORT_TASK]);
+    reassignTaskMock.mockResolvedValue(undefined);
+    renderList();
+
+    await screen.findByText("Rechnung prüfen");
+    fireEvent.click(screen.getByRole("button", { name: "Neu zuweisen" }));
+    fireEvent.change(screen.getByLabelText("Neu zuweisen an (Nutzername/Principal-ID)"), {
+      target: { value: "erik-new" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Neu zuweisen" })[1]);
+
+    await waitFor(() =>
+      expect(reassignTaskMock).toHaveBeenCalledWith("token-123", {
+        instanceId: "instance-1",
+        taskId: "task-1",
+        newPrincipalId: "erik-new",
+      })
+    );
   });
 });

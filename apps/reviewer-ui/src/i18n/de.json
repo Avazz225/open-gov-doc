@@ -75,10 +75,21 @@
   },
   "teamTaskList": {
     "heading": "Team-Aufgaben",
-    "hint": "Offene Aufgaben, die von direkt unterstellten Personen beansprucht wurden (14.2, Organisations-Hierarchie). Rein lesend - zum Bearbeiten im Auftrag siehe die Zugriffsfreigabe/Stellvertretung in den Aufgaben selbst.",
+    "hint": "Offene Aufgaben, die von direkt unterstellten Personen beansprucht wurden, sowie unbeanspruchte Aufgaben auf Vorgängen, die eine direkt unterstellte Person angelegt hat (14.2, Organisations-Hierarchie). Zum Bearbeiten im Auftrag siehe die Zugriffsfreigabe/Stellvertretung in den Aufgaben selbst - hier nur Zuweisen/Neu-Zuweisen möglich, kein Abschließen.",
     "claimedByColumn": "Beansprucht von",
+    "statusColumn": "Status",
+    "statusClaimed": "Beansprucht von {principalId}",
+    "statusUnclaimed": "Unbeansprucht (Vorgang angelegt von {createdBy})",
     "empty": "Keine offenen Aufgaben bei direkt unterstellten Personen.",
-    "noDirectReports": "Keine direkt unterstellten Personen konfiguriert (Organisations-Hierarchie)."
+    "noDirectReports": "Keine direkt unterstellten Personen konfiguriert (Organisations-Hierarchie).",
+    "assignFormLabel": "Zuweisen",
+    "assignPrincipalIdLabel": "Zuweisen an (Nutzername/Principal-ID)",
+    "assignButton": "Zuweisen",
+    "assignError": "Zuweisen fehlgeschlagen",
+    "reassignFormLabel": "Neu zuweisen",
+    "reassignPrincipalIdLabel": "Neu zuweisen an (Nutzername/Principal-ID)",
+    "reassignButton": "Neu zuweisen",
+    "reassignError": "Neu-Zuweisen fehlgeschlagen"
   },
   "instanceDetail": {
     "paneLabel": "Vorgang",

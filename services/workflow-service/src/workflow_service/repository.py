@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -608,6 +608,63 @@ async def release_task_claim(session: AsyncSession, instance_id: str, task_id: s
     await session.delete(claim)
     await session.flush()
     return delegation_ids
+
+
+async def reassign_task_claim(
+    session: AsyncSession, instance_id: str, task_id: str, new_principal_id: str
+) -> tuple[TaskClaim, list[str]]:
+    """Reassignment (Post-Roadmap Phase 35 Session 3, ADR 0145) - the
+    feature ADR 0121 explicitly scoped out ("no reassignment"). Requires an
+    EXISTING claim (`404` otherwise, same as `create_task_org_hierarchy_grant`
+    - there is nothing to reassign FROM without one; a genuinely unclaimed
+    task is claimed directly via the existing `POST .../claim`, not
+    "reassigned"). Deletes the old row and inserts a fresh one rather than
+    updating `principal_id` in place - the new claim starts with a clean
+    `claimed_at`/`expiry_notified_at` (a reassigned task's new owner gets
+    their own full abandonment window, not the old owner's remaining time),
+    and `grant_kind`/`granted_delegation_ids` are NOT carried over (an
+    org-hierarchy grant was resolved FROM the old assignee, it makes no
+    sense for the new one - the caller must request a fresh one if needed).
+    Returns the new claim AND the old claim's `Delegation` IDs, so the
+    caller can revoke them at permission-service exactly like
+    `release_task_claim` already does."""
+    old_claim = await get_task_claim(session, instance_id, task_id)
+    if old_claim is None:
+        raise NotFoundError(
+            f"Kein aktiver Claim für task_id {task_id!r} bei instance_id {instance_id!r} - "
+            "ein unbeanspruchter Task wird direkt beansprucht, nicht neu zugewiesen"
+        )
+    delegation_ids = list(old_claim.granted_delegation_ids or [])
+    await session.delete(old_claim)
+    await session.flush()
+    new_claim = TaskClaim(
+        instance_id=instance_id,
+        task_id=task_id,
+        principal_id=new_principal_id,
+        claimed_at=datetime.now(UTC),
+    )
+    session.add(new_claim)
+    await session.flush()
+    return new_claim, delegation_ids
+
+
+async def list_claims_due_for_expiry_notice(
+    session: AsyncSession, *, threshold_hours: float
+) -> list[TaskClaim]:
+    """Claim-abandonment notification (Post-Roadmap Phase 35 Session 3, ADR
+    0145) - same "sent once per current deadline" dedup shape as
+    `document_service.repository.list_locks_due_for_reminder`, just keyed
+    on `claimed_at` (reset to a fresh value by `reassign_task_claim` above,
+    so a reassigned task's new owner starts a clean abandonment window)
+    instead of `DocumentLock.locked_at`."""
+    threshold = datetime.now(UTC) - timedelta(hours=threshold_hours)
+    result = await session.execute(
+        select(TaskClaim).where(
+            TaskClaim.claimed_at <= threshold,
+            TaskClaim.expiry_notified_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def retry_instance(session: AsyncSession, instance_id: str) -> ProcessInstance:

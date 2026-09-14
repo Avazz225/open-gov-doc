@@ -95,6 +95,11 @@ EMAIL_TEMPLATE_USE_CASES: list[dict[str, object]] = [
         "description": "Lizenz ungültig (9.2)",
         "placeholders": ["reason"],
     },
+    {
+        "use_case": "workflow.task_claim.abandoned",
+        "description": "Beanspruchter Task seit längerem offen (14.2/8, neu seit Phase 35)",
+        "placeholders": ["task_name", "instance_id", "business_key", "principal_id", "link"],
+    },
 ]
 
 

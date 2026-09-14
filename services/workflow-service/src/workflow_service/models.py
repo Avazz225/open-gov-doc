@@ -146,8 +146,11 @@ class TaskClaim(Base):
     ``complete_task`` already uses to address a specific task, recording
     who is currently working on it. Built as the prerequisite for the
     org-hierarchy access grant below (it needs a real assignee to resolve
-    a supervisor/org-unit FROM), not as a general task-assignment feature -
-    no reassignment, no queueing, no notifications.
+    a supervisor/org-unit FROM). ADR 0121 originally scoped this out as "not
+    a general task-assignment feature - no reassignment, no queueing, no
+    notifications" - reassignment and an abandonment notification were
+    added in Post-Roadmap Phase 35 Session 3 (ADR 0145), the "future
+    session" ADR 0121 itself deferred to.
 
     ``granted_delegation_ids``/``grant_kind`` are populated only if an
     org-hierarchy access grant (see ``permission_client.
@@ -171,6 +174,16 @@ class TaskClaim(Base):
     claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     grant_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     granted_delegation_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Claim-abandonment notification (Post-Roadmap Phase 35 Session 3, ADR
+    # 0145) - `None` until `_task_claim_expiry_poll_loop` sends the one-time
+    # notice for THIS claim (reset to `None` implicitly on reassignment,
+    # since reassignment deletes the old row and inserts a fresh one - the
+    # new claimant starts with a clean abandonment window). Same
+    # "sent once per current deadline" dedup shape as `DocumentLock.
+    # reminder_sent_at` (ADR 0111).
+    expiry_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class FederationIdentity(Base):

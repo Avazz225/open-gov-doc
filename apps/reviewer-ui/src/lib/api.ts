@@ -149,6 +149,9 @@ export interface ReadyTaskWithInstance {
   instance_id: string;
   process_definition_id: number;
   business_key: string | null;
+  // "Unclaimed team work" view (Post-Roadmap Phase 35 Session 3, ADR 0145) -
+  // the only attribution signal an UNCLAIMED task has (`claimed_by` is `null`).
+  created_by: string;
 }
 
 export async function listReadyTasks(token: string): Promise<ReadyTaskWithInstance[]> {
@@ -262,6 +265,26 @@ export async function releaseTaskClaim(
     "workflow-service",
     `instances/${params.instanceId}/tasks/${params.taskId}/claim`,
     { method: "DELETE" },
+    token
+  );
+}
+
+// Reassignment (Post-Roadmap Phase 35 Session 3, ADR 0145) - the feature
+// ADR 0121 explicitly scoped out ("no reassignment"). Requires an EXISTING
+// claim (`404` otherwise) - a genuinely unclaimed task is claimed directly
+// via `claimTask` above, not "reassigned".
+export async function reassignTask(
+  token: string,
+  params: { instanceId: string; taskId: string; newPrincipalId: string }
+): Promise<void> {
+  await request(
+    "workflow-service",
+    `instances/${params.instanceId}/tasks/${params.taskId}/reassign`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_principal_id: params.newPrincipalId }),
+    },
     token
   );
 }
