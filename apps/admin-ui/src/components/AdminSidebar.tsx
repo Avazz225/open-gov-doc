@@ -54,6 +54,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/ocr-settings/", labelKey: "nav.ocrSettings" },
       { href: "/upload-settings/", labelKey: "nav.uploadSettings" },
+      { href: "/export-settings/", labelKey: "nav.exportSettings" },
       { href: "/processing-failures/", labelKey: "nav.processingFailures" },
       { href: "/signature-config/", labelKey: "nav.signatureConfig" },
     ],

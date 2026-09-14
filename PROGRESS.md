@@ -2,69 +2,53 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P35-S4 (closed both gaps ADR 0118 had explicitly named as its own follow-up: no
-cross-installation index/search for hand folders, and no browsing UI for either hand folders or work trays
-— the final session of Phase 35, org-hierarchy & workflow polish, now fully complete. `search-service`
-gained a new cross-folder index (`search_folder_reference`, composite natural key `folder_id`+`document_id`,
-a deliberate simplification since the source table allows duplicate references and this index is a browse
-aid, not a system of record) fed by a new consumer on `folder.document_reference.added`/`.removed` (own
-durable `search-service-folder-references`, third subscription in this service, own "folder" stream). A new
-`GET /folder-references` endpoint (optional `folder_id`/`document_id` filters, the latter also closing
-ADR 0118's named "no reverse lookup" gap) lists them, permission-filtered per row against each reference's
-own `folder_id` via `folder.read` — same overfetch-then-batch-check-then-paginate shape the existing
-`/search` endpoint already uses. `folder-service`'s `folder.document_reference.added` event gained an
-`added_at` field (a one-line addition) since the one endpoint that would let a consumer reload the real
-timestamp, `GET /folders/{id}/document-references`, is itself `folder.read`-gated — the one place in this
-service the usual "reload the full state via an ungated GET" pattern doesn't carry over. The new consumer
-deliberately subscribes with `deliver_new=True`, unlike every other consumer in `search-service` (which all
-rely on JetStream's default full-history replay as a free backfill mechanism) — `folder.document_reference.*`
-has existed since ADR 0118, many sessions before this one, so a first-ever replay here would grow without
-bound as the installation ages, a real cost independent of any test artifact. Accepted, documented
-consequence: a hand-folder reference from before this session's rollout is not retroactively backfilled into
-the cross-index (the source table in `folder-service` remains fully accurate and unaffected regardless).
-Work trays got NO new index of their own — reusing ADR 0118's own "not a new entity" framing, the EXISTING
-document index (`search_document`) gained one new nullable column, `registered_at` (denormalized from
-`document-service`'s existing draft/pre-registration lifecycle, ADR 0113), and the existing `/search`
-endpoint gained a `registered=true|false` query filter powering installation-wide work-tray browsing;
-`document.registered`/`document.promoted` were added to the existing document-event trigger list so the
-filter reflects a registration/promotion promptly. New `user-ui` pane `HandFolderOverviewPane.tsx` (new
-ungated icon-rail entry "Hand-Ordner/Arbeitsvorrat", 🗂️) shows both lists — hand-folder references and
-work-tray documents — each row opening its document/folder via the same resolve-then-navigate pattern
-already used for favorites/teamspaces (`handleOpenHandFolder` mirrors the existing
-`handleOpenTeamspaceFolder` exactly). A real, non-obvious test-sequencing bug found and fixed along the way,
-confirmed unrelated to the actual consumer/production logic via a temporary handler-side debug print: the
-first version of the new "remove" consumer-integration test fired both the add and remove HTTP calls before
-starting to poll, racing the two events against the poll's own first check — on a fast run, both could
-already be fully processed (net effect: no row at all) before polling even began, so the poll's own
-`_indexed` predicate (looking for the by-then-already-gone "added" state) looped until timeout and never
-even reached the removal check; fixed by firing the remove request only once polling confirms the add was
-indexed. `search-service` +15 tests (71 total, up from 56) — `registered` filtering (3), the new
-`FolderReference` repository functions (6: upsert/dedup/delete/filter-by-folder/filter-by-document/title
-join), the consumer end-to-end against the real running `folder-service` (2), `registered_at` denormalization
-in the reindex pipeline (1), and the two new HTTP endpoints' permission filtering (3). `folder-service`'s own
-135 tests are unaffected (the `added_at` payload addition has no existing consumer to break). `user-ui` +4
-tests (264 total, up from 260) — new `hand-folder-overview-pane.test.tsx`: both empty states, a reference
-renders and opens its document, opens its folder, a work-tray document renders and confirms `searchDocuments`
-was called with `registered: false`. Live-verified end to end against the real, rebuilt running stack in an
-actual browser (Playwright): a real hand folder created with `folder.write`/`folder.read` granted on it
-specifically (not `root`), a real document referenced into it, and a real draft (unregistered) document
-uploaded — all confirmed to render correctly in the new pane, including opening the referenced document all
-the way into the document workspace (two screenshots captured and visually confirmed). Throwaway Playwright
-spec and `test-results`/`playwright-report` directories deleted afterward; the live-verification data itself
-(the throwaway folder, role, role-assignment, and two documents) left in place, same established "harmless
-leftover test data, no delete endpoint" precedent as prior sessions. See
-[ADR 0146](docs/adr/0146-hand-folder-cross-index-and-work-tray-browsing.md)).
+**Last completed:** P36-S1 (admin UI for `ExportConfig` shipped, first session of Phase 36 — closes a gap
+API-only since Phase 28 (`history_position`) and Post-Roadmap Phase 31 Session 6 (the four `stamp_*`
+fields, ADR 0117). Both field groups were already fully wired into the live PDF export pipeline (`POST
+/documents/{id}/export`, `POST /folders/{id}/export`) before this session — purely a missing configuration
+surface, no backend change needed. New `ExportSettings.tsx` follows the flat single-config load/save/
+empty-state pattern `OcrSettings.tsx` established (simpler than `RetentionSettings.tsx`'s multi-section
+shape, since `ExportConfig` has no sub-list to manage): a history-position select (before/after the
+document content), a stamp-enabled checkbox, stamp-type (text/qr/barcode) and stamp-position (diagonal-
+center/four corners) selects, and a stamp-value-template text input. Deliberately no client-side cross-
+field validation — the two server-side `422` rules (`diagonal-center` only valid for `stamp_type="text"`;
+`stamp_value_template` only accepts `{document_id}`/`{kennzeichen}`) surface via the existing generic
+error-text pattern already used by every other settings page in this app, not duplicated client-side. New
+nav entry "PDF-Export & Stempel" in the "Verarbeitung" group, deliberately ungated (no `requiresCapability`)
+— matches the backend, which checks no `X-DMS-Principal`/capability on either endpoint, same posture as
+`retention-config`/`upload-config`. `admin-ui` +4 tests (236 total, up from 232) — loading/displaying the
+configuration incl. the stamp-enabled checkbox, the unreachable state for `document-service`, saving
+changed values across all five fields, and the server-side `422` validation message surfacing correctly.
+`tsc`/`eslint`/`next build` all clean. Live-verified end to end against the real, rebuilt running stack in
+an actual browser (Playwright): loaded the real installation's export config, changed and saved the
+stamp-value template (round-tripped correctly), deliberately triggered the real `diagonal-center`/`qr`
+`422` validation error and confirmed the exact server message renders in the UI, then restored the original
+value so the live run left the real installation's export config unchanged (three screenshots captured and
+visually confirmed). Throwaway Playwright spec and `test-results`/`playwright-report` directories deleted
+afterward. No new ADR (pure completion of an already-established pattern, per Phase 36's own Definition of
+Done — both existing ADRs 0107/0117 already fully cover the underlying design).
 
-**`graphify . --update` attempted after this session (Phase 35 completion, mandatory per cadence) — refused by the shrink guard, not forced, matching established precedent.** `detect_incremental` found 156 changed/new files (116 code, 40 documents; 1 deletion, already clean). AST extraction (3526 nodes/7391 edges) plus a semantic subagent for the 15 uncached documents (25 of 40 were still validly cached, 99 nodes/... edges reused) ran cleanly; `build_merge` itself reported a plausible, small dedup (25 nodes, 10 exact + 15 fuzzy) and merged to a reported 14,236 nodes — but Step 4's own shrink guard then refused to write, since the EXISTING `graphify-out/graph.json` has 15,708 nodes (net **-1,472**, far too large to be legitimate for a 156-file change against a 35-phase-deep graph). Diagnosed as very likely the **same class of pitfall already documented at P5d-S2** ("a `source_file` path-convention mismatch between AST (relative) and subagent nodes (absolute)") recurring in a more damaging form this time: `graph.json`'s existing nodes store `source_file` as **repo-relative** paths (e.g. `apps/admin-ui/e2e/fixtures.ts`), while this run's semantic subagent — following the extraction-spec's literal instruction to copy `FILE_LIST` entries "character-for-character" — received and echoed back **absolute** paths (the `FILE_LIST` was built with `$(pwd)`-prefixed entries), and the AST extractor's own `source_file` convention under this exact combination of flags was not independently re-verified before the merge. Given `build_merge`'s "replace-on-re-extract" logic drops every node whose `source_file` matches a new chunk's `source_file` before re-adding it, a systematic convention mismatch between the old graph and this run's new extraction is the most plausible explanation for a `-1,472` swing this large (previous, correctly-diagnosed instances of this exact bug class were isolated single-node collisions, e.g. `docs/services/audit-service.md` at P7-S2b/P7-S2c — this is the same failure mode at a larger scale, not a new one). **Not fixed in this session** (P35-S4's own deliverable — code, tests, docs, ADR, live verification — is fully complete and entirely independent of this; forcing the write or hand-patching source_file conventions without careful verification risks silently corrupting the graph further, worse than leaving it one cycle stale). **Recovery performed, matching the P34-S4 precedent exactly**: since `build_merge`'s own manifest save happens before the shrink-guarded write, the 156 changed files' entries were already stamped as "seen" in `manifest.json` before the write was refused — manually reverted (all 156 entries deleted back out) and re-verified via a fresh `detect_incremental` run correctly reporting `new_total: 156` again, so a future `--update` will not silently skip them. `graphify-out/graph.json`/`GRAPH_REPORT.md` remain unchanged at their pre-session state (15,708 nodes) — all other temp files (`.graphify_extract.json`, `.graphify_ast.json`, `.graphify_semantic.json`, `.graphify_analysis.json`, `.graphify_incremental.json`, `.graphify_old.json`, chunk files) cleaned up. **Open point for a future dedicated graphify-maintenance session**: normalize `source_file` path convention consistently (pick relative-to-repo-root everywhere, verify both the AST extractor's and every semantic subagent's actual output before merging, not just before dispatching) and then perform a full rebuild.
+**`graphify . --update` still outstanding from the end of Phase 35**: P35-S4's own attempt was refused by
+the shrink guard (existing `graphify-out/graph.json` at 15,708 nodes, a fresh merge only reaching 14,236 —
+a net `-1,472` far too large to be a legitimate 156-file incremental change) and deliberately not forced,
+matching established precedent. Diagnosed as very likely a `source_file` path-convention mismatch between
+this run's AST extraction (relative paths) and its semantic subagent (absolute paths, per the extraction
+spec's literal "copy `FILE_LIST` verbatim" instruction) — the same class of pitfall already documented at
+P5d-S2, just larger in scale this time. Not forced, not re-attempted in this session (P36-S1 is not a phase
+boundary); recovery already performed at P35-S4 (the 156 files' manifest entries were reverted so a future
+`--update` picks them up again, `graph.json`/`GRAPH_REPORT.md` left untouched at their last-good state).
+Remains an open point for a future dedicated graphify-maintenance session (normalize the `source_file`
+convention consistently, verify actual subagent output before merging, then a full rebuild) or the next
+phase-completion point (end of Phase 36).
 
-**Next session:** **P36-S1** (admin UI for `ExportConfig` including stamping — API-only since Phase 28
-(`history_position`, now also `stamp_enabled`/`stamp_type`/`stamp_value_template`/`stamp_position`); new
-admin-ui page following the pattern of existing config pages like `ApprovalSettings.tsx`/
-`RetentionSettings.tsx`). This begins **Phase 36** (records quarantine, output stamping & misc completion —
-see `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown: P36-S2 records-quarantine
-cross-service integration + browsing UI, P36-S3 `reporting-service` row-level RBAC parity + a Query Console
-reject button; then Phase 37, a scoping-only session on cross-tenant XDOMEA federation, which concludes the
-whole Phase 32+ gap-closure plan).
+**Next session:** **P36-S2** (records quarantine: `search-service`/`case-service` integration + a
+cross-folder browsing UI — today document-only and visible only inside `document-service`, no case
+quarantine, no installation-wide browsing view analogous to `TrashPane`; also fix the pure documentation
+gap where `docs/services/user-ui.md` doesn't yet mention the already-existing
+`RecordsQuarantinePanel.tsx`). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown:
+P36-S3 `reporting-service` row-level RBAC parity + a Query Console reject button concludes Phase 36; then
+Phase 37, a scoping-only session on cross-tenant XDOMEA federation, concludes the whole Phase 32+
+gap-closure plan.
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

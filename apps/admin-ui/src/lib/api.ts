@@ -784,6 +784,64 @@ export async function updateRetentionConfig(
   return response.json();
 }
 
+// PDF export configuration (Post-Roadmap Phase 28, ADR 0107) plus output
+// stamping (Post-Roadmap Phase 31 Session 6, ADR 0117) - same singleton
+// get/update pattern as OcrConfig/UploadConfig, also document-service.
+// Deliberately ungated (no `requiresCapability`) - matches the backend,
+// which checks no `X-DMS-Principal` header on either endpoint, the same
+// posture as retention-config/upload-config.
+export type ExportHistoryPosition = "before" | "after";
+export type ExportStampType = "text" | "qr" | "barcode";
+export type ExportStampPosition =
+  | "diagonal-center"
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
+
+export interface ExportConfig {
+  history_position: ExportHistoryPosition;
+  stamp_enabled: boolean;
+  stamp_type: ExportStampType;
+  stamp_value_template: string;
+  stamp_position: ExportStampPosition;
+  updated_at: string;
+}
+
+export async function getExportConfig(token: string): Promise<ExportConfig> {
+  const response = await request("document-service", "export-config", {}, token);
+  return response.json();
+}
+
+export async function updateExportConfig(
+  token: string,
+  payload: {
+    historyPosition: ExportHistoryPosition;
+    stampEnabled: boolean;
+    stampType: ExportStampType;
+    stampValueTemplate: string;
+    stampPosition: ExportStampPosition;
+  }
+): Promise<ExportConfig> {
+  const response = await request(
+    "document-service",
+    "export-config",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        history_position: payload.historyPosition,
+        stamp_enabled: payload.stampEnabled,
+        stamp_type: payload.stampType,
+        stamp_value_template: payload.stampValueTemplate,
+        stamp_position: payload.stampPosition,
+      }),
+    },
+    token
+  );
+  return response.json();
+}
+
 export interface TrashConfig {
   restore_period_days: number;
   updated_at: string;
