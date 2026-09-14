@@ -2,35 +2,31 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P33-S3 (automated a11y test harness via `jest-axe` — `user-ui` (required by the plan)
-and `admin-ui` (extended, since it has a real structural fix, P33-S1's `LayoutDesigner` `aria-label` bug,
-worth a regression net) wired up: `expect.extend(toHaveNoViolations)` in each app's `tests/setup.ts`
-(`jest-axe` has no dedicated Vitest entry point, unlike `@testing-library/jest-dom/vitest`), plus a small
-local `jest-axe-vitest.d.ts` type augmentation per app (`@types/jest-axe` only augments Jest's own
-namespace, not Vitest's `Assertion` interface). `color-contrast` deliberately disabled in every axe call —
-jsdom has no real rendering engine to compute it reliably, a well-documented general limitation, not
-specific to this project. `reviewer-ui`/`migration-console` deliberately NOT extended: their P33-S1 fix was
-color-only (`--dms-accent-bg`), which axe can't verify in jsdom anyway — adding the harness there would be
-inert scaffolding with no real regression coverage. `user-ui` +4 tests (247 total: 2 existing
-`PreviewPane.test.tsx` cases extended with axe checks for the conflict/classification badges, 2 new
-standalone files `classification-panel.test.tsx`/`derived-documents-panel.test.tsx` since neither component
-had a dedicated test file before). `admin-ui` +1 (228 total, `layout-designer.test.tsx`). A real test-writing
-bug found and fixed along the way: `screen.findByText("VS-NfD")` matched BOTH the current-level badge and
-the raise-`<select>`'s own option (Testing Library's default text matcher only considers an element's direct
-text-node children, not full recursive `textContent` — the 🔒 glyph living in a sibling `<span>` meant the
-badge `<p>`'s only direct text node was exactly "VS-NfD" too) — fixed by querying the unambiguous
-`aria-label` instead. `tsc`/`eslint`/`next build` clean in both apps, no production code changed (test
-infrastructure only), so no Docker rebuild/live-verification was needed this session — see
-[ADR 0137](docs/adr/0137-axe-core-a11y-test-harness.md)), the third session of Phase 33
-(accessibility completion).
+**Last completed:** P33-S4 (backend gendered error messages fixed — a full, per-string-reviewed sweep of
+all 32 backend services for masculine-generic person/role nouns (same non-mechanical review method as
+ADR 0119's original frontend pass) found exactly 4 real candidates; the overwhelming majority of regex
+hits across the whole backend turned out to be role display names used as quoted identifiers, compound
+technical/field nouns, or internal-only comments/docstrings — not real issues, mirroring ADR 0119's own
+finding that most such hits are false positives on closer reading. Fixed: `auth-service`'s `GET
+/users/lookup`/`GET /users/{id}` 404s ("Nutzer X unbekannt" → "Person X unbekannt"), `reporting-service`'s
+forensic-trace anomaly string (identical pattern), `notification-service`'s unknown-recipient check
+("Unbekannter Empfänger X" → "Unbekannte empfangende Person X" — reusing this codebase's own pre-existing
+"ausführende Person" adjective+Person construction rather than inventing a new compound noun).
+No test asserted the old wording anywhere (confirmed before changing), so test counts are unchanged
+(auth-service 105, reporting-service 57, notification-service 78, all still green). Live-verified against
+the real, rebuilt running stack — see [ADR 0138](docs/adr/0138-backend-gendered-error-messages.md)), the
+fourth and final session of Phase 33 (accessibility completion). **Phase 33 complete** —
+`graphify update .` run at phase end.
 
-**Next session:** **P33-S4** (Phase 33 continues, and concludes it — gendered backend error messages:
-P31-S8's gender-neutral pass deliberately scoped out backend `detail=` strings that surface verbatim in the
-UI, e.g. `ClassificationPanel.tsx`'s `ApiError.message` rendering; this session reviews those across the
-backend services). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 34
-XDOMEA/XJustiz completion, Phase 35 org-hierarchy/workflow polish, Phase 36 records
-quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
-federation).
+**Next session:** **P34-S1** (Phase 34, XDOMEA/XJustiz completion — XJustiz import: mirror of P31-S13b's
+XDOMEA import for `uebermittlungSchriftgutobjekte`, a new `parse_uebermittlung_schriftgutobjekte()`
+analogous to `parse_abgabe_message()`, same target options — existing case vs. new case via
+`process_definition_id` — and the same `409` handling for data-integrity errors). See
+`IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 34 continues with P34-S2
+XJustiz frontend entry point, P34-S3 minimal case-browsing UI + XDOMEA/XJustiz case export/import frontend,
+P34-S4 import robustness for real third-party XDOMEA packages; then Phase 35 org-hierarchy/workflow
+polish, Phase 36 records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on
+cross-tenant XDOMEA federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

@@ -52,7 +52,7 @@ def detect_download_anomalies(
             max_in_window = max(max_in_window, right - left + 1)
         if max_in_window >= threshold_count:
             anomalies.append(
-                f"Nutzer {actor!r} hat {max_in_window} Downloads innerhalb von "
+                f"Person {actor!r} hat {max_in_window} Downloads innerhalb von "
                 f"{threshold_minutes} Minuten (Schwellwert: {threshold_count}) - "
                 "ungewöhnlich hohe Aktivität."
             )

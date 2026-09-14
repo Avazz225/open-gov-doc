@@ -207,7 +207,8 @@ async def create_notification(
     if not await app.state.auth_client.recipient_exists(payload.recipient, channel=payload.channel):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unbekannter Empfänger {payload.recipient!r} für Kanal {payload.channel!r}",
+            detail=f"Unbekannte empfangende Person {payload.recipient!r} für Kanal "
+            f"{payload.channel!r}",
         )
     notification = await repository.create_and_send(
         session,

@@ -587,7 +587,7 @@ async def lookup_user(username: str, user: dict = Depends(get_current_user)) -> 
     )
     match = admin_users.find_user_by_username(app.state.keycloak_admin, username)
     if match is None:
-        raise HTTPException(status_code=404, detail=f"Nutzer {username!r} unbekannt")
+        raise HTTPException(status_code=404, detail=f"Person {username!r} unbekannt")
     return match
 
 
@@ -737,7 +737,7 @@ async def get_user(user_id: str, user: dict = Depends(get_current_user)) -> dict
     )
     match = admin_users.find_user_by_id(app.state.keycloak_admin, user_id)
     if match is None:
-        raise HTTPException(status_code=404, detail=f"Nutzer {user_id!r} unbekannt")
+        raise HTTPException(status_code=404, detail=f"Person {user_id!r} unbekannt")
     return match
 
 

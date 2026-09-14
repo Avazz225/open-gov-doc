@@ -79,12 +79,13 @@ deliverables, matching the plan's own wording exactly:
   reduce the edit count. The bulk of the ~40 lines the initial regex-based research survey flagged turned
   out to be exactly this category on closer reading; the real edit count across all six apps ended up
   around 16.
-- **Deliberately excludes backend service `detail=` error strings and code comments**: some backend
+- ~~**Deliberately excludes backend service `detail=` error strings and code comments**~~ — **done in
+  Post-Roadmap Phase 33 Session 4** ([ADR 0138](0138-backend-gendered-error-messages.md)): some backend
   German error messages surface verbatim in the UI (`ApiError.message` rendered directly, e.g.
-  `ClassificationPanel.tsx`), and a handful contain gendered phrasing. Scoped out of this session — "system
-  messaging" in the plan's own wording most naturally reads as UI text, and backend error strings are a
-  materially different, larger-blast-radius surface (many services, not six frontend `de.json` files) that
-  deserves its own deliberate pass rather than incidental inclusion here.
+  `ClassificationPanel.tsx`), and a handful contained gendered phrasing. Scoped out of THIS session —
+  "system messaging" in the plan's own wording most naturally reads as UI text, and backend error strings
+  were a materially different, larger-blast-radius surface (many services, not six frontend `de.json`
+  files) that deserved its own deliberate pass rather than incidental inclusion here.
 - **`is_tagged_pdf()` checks `/StructTreeRoot` presence via `pypdf`, not full PDF/UA conformance**: this is
   the actual technical basis of a "tagged" PDF (the structure tree a screen reader/assistive technology
   reads), not merely "is this file a PDF" — the same distinction the project's existing PDF/A-without-
