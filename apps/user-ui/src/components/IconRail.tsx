@@ -17,7 +17,8 @@ export type WorkspaceView =
   | "poststelle"
   | "kontakte"
   | "aussonderung"
-  | "vorlagen";
+  | "vorlagen"
+  | "cases";
 
 // Quarantine area (2.5/10.3, P15-S2) - unlike the trash (always visible at
 // least in the personal view), the concept specifies NO generally
@@ -170,6 +171,19 @@ export function IconRail({
         onClick={() => onSelectView("vorlagen")}
       >
         <span aria-hidden="true">📐</span>
+      </button>
+      {/* Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3,
+          ADR 0141) - ungated (`case.read` is granted to "everyone" by
+          default, ADR 0070; the export/import actions within the pane are
+          individually gated on `archival.write`, not the pane itself). */}
+      <button
+        type="button"
+        className={`icon-rail-button${activeView === "cases" ? " icon-rail-active" : ""}`}
+        title={t("iconRail.cases")}
+        aria-current={activeView === "cases" ? "page" : undefined}
+        onClick={() => onSelectView("cases")}
+      >
+        <span aria-hidden="true">🗃️</span>
       </button>
       <div className="icon-rail-settings">
         <button

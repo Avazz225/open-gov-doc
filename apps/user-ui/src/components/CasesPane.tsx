@@ -1,0 +1,537 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/i18n";
+import {
+  ApiError,
+  exportCaseXdomea,
+  exportCaseXjustiz,
+  getCase,
+  getDocument,
+  importXdomeaIntoCase,
+  importXjustizIntoCase,
+  listCaseDocuments,
+  listCases,
+  type Case,
+  type CaseDocumentReference,
+  type DocumentSummary,
+} from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+
+// Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3, ADR
+// 0141) - the first place in `user-ui` a `case-service` Case can be browsed
+// at all (previously API-only from this app's perspective). List view here,
+// detail view in `CaseDetail` below (this app's first genuine list->detail
+// drill-down - every other pane is a flat list with inline row actions, see
+// ADR 0141 "Rationale" for why this one is different). Wires all four
+// case-level XDOMEA/XJustiz export/import actions (ADR 0126/0128/0129/0139)
+// onto the detail view.
+function formatDate(value: string | null, locale: string): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleString(locale);
+}
+
+function triggerBrowserDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export function CasesPane({
+  token,
+  onOpenDocument,
+}: {
+  token: string;
+  onOpenDocument: (doc: DocumentSummary) => void;
+}) {
+  const { t, locale } = useI18n();
+  const { permissions } = useAuth();
+  // Export/import are archival actions (ADR 0126/0128/0129/0139), gated
+  // server-side on `archival.write` - hidden client-side too so a principal
+  // without it doesn't see buttons that would just 403, same idiom as
+  // `RecordsQuarantinePanel`'s `admin.records_quarantine` check. Browsing
+  // itself stays ungated, matching `case.read`'s "everyone" default
+  // (ADR 0070) - this pane's own list/detail view is not an archival
+  // action.
+  const canArchive = permissions.includes("archival.write");
+
+  const [cases, setCases] = useState<Case[]>([]);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!token) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      setCases(await listCases(token, statusFilter || undefined));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("cases.loadError"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [token, statusFilter, t]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  if (selectedCaseId) {
+    return (
+      <CaseDetail
+        token={token}
+        caseId={selectedCaseId}
+        canArchive={canArchive}
+        onBack={() => setSelectedCaseId(null)}
+        onOpenDocument={onOpenDocument}
+      />
+    );
+  }
+
+  return (
+    <section className="cases-pane" aria-label={t("cases.paneLabel")}>
+      <h2 className="pane-heading">{t("cases.heading")}</h2>
+      <p className="hint">{t("cases.hint")}</p>
+
+      <label>
+        {t("cases.statusFilterLabel")}
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">{t("cases.statusAll")}</option>
+          <option value="open">{t("cases.statusOpen")}</option>
+          <option value="closed">{t("cases.statusClosed")}</option>
+        </select>
+      </label>
+
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+
+      {isLoading ? (
+        <p>{t("common.loading")}</p>
+      ) : cases.length === 0 ? (
+        <p className="empty-state">{t("cases.empty")}</p>
+      ) : (
+        <ul className="entry-list">
+          {cases.map((c) => (
+            <li className="entry-row" key={c.id}>
+              <button
+                type="button"
+                className="entry-name"
+                onClick={() => setSelectedCaseId(c.id)}
+              >
+                {c.name}
+                {c.vorgangsnummer ? ` (${c.vorgangsnummer})` : ""}
+              </button>
+              <span className="entry-meta">
+                {c.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}
+                {" · "}
+                {t("cases.createdAt", { date: formatDate(c.created_at, locale) })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CaseDetail({
+  token,
+  caseId,
+  canArchive,
+  onBack,
+  onOpenDocument,
+}: {
+  token: string;
+  caseId: string;
+  canArchive: boolean;
+  onBack: () => void;
+  onOpenDocument: (doc: DocumentSummary) => void;
+}) {
+  const { t, locale } = useI18n();
+
+  const [activeCase, setActiveCase] = useState<Case | null>(null);
+  const [documents, setDocuments] = useState<CaseDocumentReference[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const [xdomeaExportOpen, setXdomeaExportOpen] = useState(false);
+  const [xdomeaLeserName, setXdomeaLeserName] = useState("");
+  const [xdomeaExporting, setXdomeaExporting] = useState(false);
+  const [xdomeaExportError, setXdomeaExportError] = useState<string | null>(null);
+
+  const [xjustizExportOpen, setXjustizExportOpen] = useState(false);
+  const [xjustizEmpfaengerName, setXjustizEmpfaengerName] = useState("");
+  const [xjustizExporting, setXjustizExporting] = useState(false);
+  const [xjustizExportError, setXjustizExportError] = useState<string | null>(null);
+
+  const [xdomeaImportOpen, setXdomeaImportOpen] = useState(false);
+  const [xdomeaImportFile, setXdomeaImportFile] = useState<File | null>(null);
+  const [xdomeaImportFolderId, setXdomeaImportFolderId] = useState("root");
+  const [xdomeaImporting, setXdomeaImporting] = useState(false);
+  const [xdomeaImportError, setXdomeaImportError] = useState<string | null>(null);
+  const [xdomeaImportSuccess, setXdomeaImportSuccess] = useState<string | null>(null);
+
+  const [xjustizImportOpen, setXjustizImportOpen] = useState(false);
+  const [xjustizImportFile, setXjustizImportFile] = useState<File | null>(null);
+  const [xjustizImportFolderId, setXjustizImportFolderId] = useState("root");
+  const [xjustizImporting, setXjustizImporting] = useState(false);
+  const [xjustizImportError, setXjustizImportError] = useState<string | null>(null);
+  const [xjustizImportSuccess, setXjustizImportSuccess] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!token) return;
+    setError(null);
+    try {
+      const [loadedCase, loadedDocuments] = await Promise.all([
+        getCase(token, caseId),
+        listCaseDocuments(token, caseId),
+      ]);
+      setActiveCase(loadedCase);
+      setDocuments(loadedDocuments);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("cases.loadError"));
+    }
+  }, [token, caseId, t]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function handleOpenCaseDocument(ref: CaseDocumentReference) {
+    if (!token) return;
+    try {
+      onOpenDocument(await getDocument(token, ref.document_id));
+    } catch {
+      // 404 (deleted since the reference was added) - `document_deleted_at`
+      // already reflects this in the list, nothing to open.
+    }
+  }
+
+  async function handleXdomeaExport() {
+    if (!token || !xdomeaLeserName.trim()) return;
+    setXdomeaExportError(null);
+    setXdomeaExporting(true);
+    try {
+      const blob = await exportCaseXdomea(token, caseId, xdomeaLeserName.trim());
+      triggerBrowserDownload(blob, `${activeCase?.name ?? caseId}-abgabe.zip`);
+      setXdomeaExportOpen(false);
+      setXdomeaLeserName("");
+    } catch {
+      setXdomeaExportError(t("cases.xdomeaExportErrorGeneric"));
+    } finally {
+      setXdomeaExporting(false);
+    }
+  }
+
+  async function handleXjustizExport() {
+    if (!token || !xjustizEmpfaengerName.trim()) return;
+    setXjustizExportError(null);
+    setXjustizExporting(true);
+    try {
+      const blob = await exportCaseXjustiz(token, caseId, xjustizEmpfaengerName.trim());
+      triggerBrowserDownload(blob, `${activeCase?.name ?? caseId}-xjustiz.zip`);
+      setXjustizExportOpen(false);
+      setXjustizEmpfaengerName("");
+    } catch {
+      setXjustizExportError(t("cases.xjustizExportErrorGeneric"));
+    } finally {
+      setXjustizExporting(false);
+    }
+  }
+
+  async function handleXdomeaImport() {
+    if (!token || !xdomeaImportFile || !xdomeaImportFolderId.trim()) return;
+    setXdomeaImportError(null);
+    setXdomeaImportSuccess(null);
+    setXdomeaImporting(true);
+    try {
+      const result = await importXdomeaIntoCase(token, {
+        file: xdomeaImportFile,
+        folderId: xdomeaImportFolderId.trim(),
+        caseId,
+      });
+      setXdomeaImportSuccess(t("cases.importSuccess", { count: result.document_ids.length }));
+      setXdomeaImportOpen(false);
+      setXdomeaImportFile(null);
+      await reload();
+    } catch (err) {
+      setXdomeaImportError(
+        err instanceof ApiError ? err.message : t("cases.xdomeaImportErrorGeneric")
+      );
+    } finally {
+      setXdomeaImporting(false);
+    }
+  }
+
+  async function handleXjustizImport() {
+    if (!token || !xjustizImportFile || !xjustizImportFolderId.trim()) return;
+    setXjustizImportError(null);
+    setXjustizImportSuccess(null);
+    setXjustizImporting(true);
+    try {
+      const result = await importXjustizIntoCase(token, {
+        file: xjustizImportFile,
+        folderId: xjustizImportFolderId.trim(),
+        caseId,
+      });
+      setXjustizImportSuccess(t("cases.importSuccess", { count: result.document_ids.length }));
+      setXjustizImportOpen(false);
+      setXjustizImportFile(null);
+      await reload();
+    } catch (err) {
+      setXjustizImportError(
+        err instanceof ApiError ? err.message : t("cases.xjustizImportErrorGeneric")
+      );
+    } finally {
+      setXjustizImporting(false);
+    }
+  }
+
+  if (!activeCase) {
+    return (
+      <section className="cases-pane" aria-label={t("cases.paneLabel")}>
+        <button type="button" onClick={onBack}>
+          {t("cases.backToList")}
+        </button>
+        {error ? (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        ) : (
+          <p>{t("common.loading")}</p>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="cases-pane" aria-label={t("cases.paneLabel")}>
+      <button type="button" onClick={onBack}>
+        {t("cases.backToList")}
+      </button>
+      <h2 className="pane-heading">{activeCase.name}</h2>
+      <p className="hint">
+        {activeCase.vorgangsnummer ? `${activeCase.vorgangsnummer} · ` : ""}
+        {activeCase.status === "open" ? t("cases.statusOpen") : t("cases.statusClosed")}
+        {" · "}
+        {t("cases.createdAt", { date: formatDate(activeCase.created_at, locale) })}
+        {activeCase.closed_at
+          ? ` · ${t("cases.closedAt", { date: formatDate(activeCase.closed_at, locale) })}`
+          : ""}
+      </p>
+
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+
+      <h3>{t("cases.documentsHeading")}</h3>
+      {documents.length === 0 ? (
+        <p className="empty-state">{t("cases.documentsEmpty")}</p>
+      ) : (
+        <ul className="entry-list">
+          {documents.map((ref) => (
+            <li className="entry-row" key={ref.document_id}>
+              {ref.document_deleted_at ? (
+                <span className="entry-name">{t("cases.documentDeleted")}</span>
+              ) : (
+                <button
+                  type="button"
+                  className="entry-name"
+                  onClick={() => handleOpenCaseDocument(ref)}
+                >
+                  {ref.document_id}
+                </button>
+              )}
+              <span className="entry-meta">
+                {t("cases.documentAddedAt", { date: formatDate(ref.added_at, locale) })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canArchive && (
+        <>
+          <h3>{t("cases.exportHeading")}</h3>
+          {/* Case-level XDOMEA export (ADR 0126) - same inline-form shape
+              as PreviewPane.tsx's document-level export button. */}
+          <button type="button" onClick={() => setXdomeaExportOpen((prev) => !prev)}>
+            {t("cases.xdomeaExport")}
+          </button>
+          {xdomeaExportOpen && (
+            <div className="inline-form">
+              <label>
+                {t("cases.xdomeaExportLeserLabel")}
+                <input
+                  type="text"
+                  value={xdomeaLeserName}
+                  onChange={(e) => setXdomeaLeserName(e.target.value)}
+                  placeholder={t("cases.xdomeaExportLeserPlaceholder")}
+                />
+              </label>
+              <span className="actions">
+                <button
+                  type="button"
+                  disabled={xdomeaExporting || !xdomeaLeserName.trim()}
+                  onClick={handleXdomeaExport}
+                >
+                  {xdomeaExporting ? t("cases.exporting") : t("cases.exportSubmit")}
+                </button>
+                <button type="button" onClick={() => setXdomeaExportOpen(false)}>
+                  {t("common.cancel")}
+                </button>
+              </span>
+            </div>
+          )}
+          {xdomeaExportError && (
+            <p className="error-text" role="alert">
+              {xdomeaExportError}
+            </p>
+          )}
+
+          {/* Case-level XJustiz export (ADR 0129) */}
+          <button type="button" onClick={() => setXjustizExportOpen((prev) => !prev)}>
+            {t("cases.xjustizExport")}
+          </button>
+          {xjustizExportOpen && (
+            <div className="inline-form">
+              <label>
+                {t("cases.xjustizExportEmpfaengerLabel")}
+                <input
+                  type="text"
+                  value={xjustizEmpfaengerName}
+                  onChange={(e) => setXjustizEmpfaengerName(e.target.value)}
+                  placeholder={t("cases.xjustizExportEmpfaengerPlaceholder")}
+                />
+              </label>
+              <span className="actions">
+                <button
+                  type="button"
+                  disabled={xjustizExporting || !xjustizEmpfaengerName.trim()}
+                  onClick={handleXjustizExport}
+                >
+                  {xjustizExporting ? t("cases.exporting") : t("cases.xjustizExportSubmit")}
+                </button>
+                <button type="button" onClick={() => setXjustizExportOpen(false)}>
+                  {t("common.cancel")}
+                </button>
+              </span>
+            </div>
+          )}
+          {xjustizExportError && (
+            <p className="error-text" role="alert">
+              {xjustizExportError}
+            </p>
+          )}
+
+          <h3>{t("cases.importHeading")}</h3>
+          <p className="hint">{t("cases.importHint")}</p>
+          {/* Case-level XDOMEA import (ADR 0128/0139) - deliberately always
+              attaches to THIS case (`case_id`), never creates a new one
+              (`process_definition_id`) - see ADR 0141 "Rationale". */}
+          <button type="button" onClick={() => setXdomeaImportOpen((prev) => !prev)}>
+            {t("cases.xdomeaImport")}
+          </button>
+          {xdomeaImportOpen && (
+            <div className="inline-form">
+              <label>
+                {t("cases.importFileLabel")}
+                <input
+                  type="file"
+                  onChange={(e) => setXdomeaImportFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label>
+                {t("cases.importFolderLabel")}
+                <input
+                  type="text"
+                  value={xdomeaImportFolderId}
+                  onChange={(e) => setXdomeaImportFolderId(e.target.value)}
+                />
+              </label>
+              <span className="actions">
+                <button
+                  type="button"
+                  disabled={xdomeaImporting || !xdomeaImportFile || !xdomeaImportFolderId.trim()}
+                  onClick={handleXdomeaImport}
+                >
+                  {xdomeaImporting ? t("cases.importing") : t("cases.importSubmit")}
+                </button>
+                <button type="button" onClick={() => setXdomeaImportOpen(false)}>
+                  {t("common.cancel")}
+                </button>
+              </span>
+            </div>
+          )}
+          {xdomeaImportError && (
+            <p className="error-text" role="alert">
+              {xdomeaImportError}
+            </p>
+          )}
+          {xdomeaImportSuccess && (
+            <p className="hint" role="status">
+              {xdomeaImportSuccess}
+            </p>
+          )}
+
+          {/* Case-level XJustiz import (ADR 0139) */}
+          <button type="button" onClick={() => setXjustizImportOpen((prev) => !prev)}>
+            {t("cases.xjustizImport")}
+          </button>
+          {xjustizImportOpen && (
+            <div className="inline-form">
+              <label>
+                {t("cases.importFileLabel")}
+                <input
+                  type="file"
+                  onChange={(e) => setXjustizImportFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <label>
+                {t("cases.importFolderLabel")}
+                <input
+                  type="text"
+                  value={xjustizImportFolderId}
+                  onChange={(e) => setXjustizImportFolderId(e.target.value)}
+                />
+              </label>
+              <span className="actions">
+                <button
+                  type="button"
+                  disabled={
+                    xjustizImporting || !xjustizImportFile || !xjustizImportFolderId.trim()
+                  }
+                  onClick={handleXjustizImport}
+                >
+                  {xjustizImporting ? t("cases.importing") : t("cases.importSubmit")}
+                </button>
+                <button type="button" onClick={() => setXjustizImportOpen(false)}>
+                  {t("common.cancel")}
+                </button>
+              </span>
+            </div>
+          )}
+          {xjustizImportError && (
+            <p className="error-text" role="alert">
+              {xjustizImportError}
+            </p>
+          )}
+          {xjustizImportSuccess && (
+            <p className="hint" role="status">
+              {xjustizImportSuccess}
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}

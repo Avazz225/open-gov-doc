@@ -2,34 +2,49 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P34-S2 (XJustiz frontend entry point shipped — a document-export button in `user-ui`'s
-`PreviewPane.tsx`, "Export für Justizübergabe", the exact mirror of the existing XDOMEA button's
-interaction shape (toggle → inline form → submit → ZIP download). Deliberately worded distinctly from the
-XDOMEA button ("Justizübergabe"/"Justizbehörde"/"Justiz-Paket exportieren" vs. "Behördenübergabe"/
-"Behörde"/"Paket exportieren") so the two now-adjacent buttons aren't ambiguous — the plan's own "RTL"
-wording turned out, on verification, not to be an established term anywhere in this project (confirmed via
-grep across the whole codebase); read as a plain "avoid ambiguity between the two buttons" instruction
-instead, satisfied by the distinct wording. `Empfangende Justizbehörde` reuses the existing gender-neutral
-"Empfangende X" construction (already used for the XDOMEA field) rather than inventing a new pattern. New
-`exportDocumentXjustiz()` in `api.ts`. user-ui +3 tests (250 total), the exact three-test shape already
-established for the XDOMEA button. Live-verified in a REAL BROWSER (not just curl/mocked tests) using this
-project's existing Playwright E2E infrastructure (`e2e/fixtures.ts`) as a one-off script — not committed as
-a permanent E2E spec, same precedent as the XDOMEA button itself never getting one; found and fixed two
-real bugs while writing the script (a missing `Authorization` header on the upload/cleanup requests, and an
-ambiguous `getByText` locator matching both the tab title and the heading) before it passed, confirming
-via screenshot that both export buttons render side by side with clearly distinct labels and that
-submitting the form triggers a real `<title>-xjustiz.zip` download — see
-[ADR 0140](docs/adr/0140-xjustiz-frontend-export-entry-point.md)), the second session of Phase 34
-(XDOMEA/XJustiz completion).
+**Last completed:** P34-S3 (minimal case-browsing UI shipped in `user-ui`: new "Umlaufmappen" icon-rail
+entry, ungated (`case.read` defaults to "everyone", ADR 0070), opening `CasesPane.tsx` — a flat,
+status-filterable case list; clicking a row opens a detail view with the case's fields and document
+references (a reference whose document was deleted renders a non-clickable "Dokument gelöscht" placeholder
+instead of a button). The plan's own suggested precedent — Phase 29's "Vorgang" detail-view pattern in
+`reviewer-ui` — was verified against the actual code first and found NOT to transfer: `InstanceDetail.tsx`
+renders `workflow-service`'s `ProcessInstance`, an unrelated concept to `case-service`'s `Case` (ADR 0110's
+own correction note says so explicitly). With the suggested precedent disproven, the choice was put to the
+user directly via `AskUserQuestion` (three options: user-ui flat list, user-ui list+detail, reviewer-ui
+list+detail) rather than guessed — the user picked **user-ui, list+detail**. "Umlaufmappe"/"Umlaufmappen"
+(not "Fälle"/"Fall", an initial wrong guess corrected via grep of `AussonderungPane.tsx`'s existing
+`kindCase` key) is this project's established term for the concept. Four `archival.write`-gated action
+buttons wired onto the detail view (pane itself ungated, only these four buttons check the capability —
+matches the existing document-level XDOMEA/XJustiz buttons' own gate): XDOMEA case export, XJustiz case
+export, XDOMEA import, XJustiz import — both imports always attach resulting documents to the
+currently-open case, never create a new one, since no process-definition-picker UI exists anywhere in this
+project to support that backend-supported alternative. New `Case`/`CaseDocumentReference` types +
+`listCases`/`getCase`/`listCaseDocuments`/`exportCaseXdomea`/`exportCaseXjustiz`/`importXdomeaIntoCase`/
+`importXjustizIntoCase` in `api.ts`. user-ui +10 tests (260 total, up from 250) — new standalone
+`cases-pane.test.tsx` covering the empty state, list→detail navigation, the back button, the
+deleted-document placeholder, opening a document via the list, all four buttons hidden without
+`archival.write`, both exports, and both imports. `typecheck`/`lint`/`build` all clean, Docker image
+rebuilt and the `user-ui` container restarted healthy. Live-verified in a REAL BROWSER against the real,
+rebuilt running stack: created a real case and a real case-document reference via the API, logged in,
+opened the new "Umlaufmappen" pane, clicked into the case, confirmed the detail view (screenshot),
+triggered real XDOMEA and XJustiz export downloads, then fed the saved XDOMEA export ZIP into the XDOMEA
+import form and confirmed the expected "0 Dokument(e) importiert." result (correct — the case's only
+document reference had no `snapshot_version_number` yet, the same pre-existing OPEN-case
+export-exclusion gate already found and documented during P34-S1's own live check, not a bug in this
+session). XJustiz import was not separately exercised live — it shares the exact same form component and
+code path as the already-proven XDOMEA import and has its own full unit-test coverage. Throwaway
+Playwright script deleted after use, same established precedent as prior sessions (no permanent E2E spec
+added). The test case itself (`case-service` has no delete/purge endpoint, per P34-S1 precedent) was
+deliberately left in place. See [ADR 0141](docs/adr/0141-case-browsing-ui-user-ui-list-detail.md)), the
+third session of Phase 34 (XDOMEA/XJustiz completion).
 
-**Next session:** **P34-S3** (Phase 34 continues — minimal case-browsing UI + XDOMEA/XJustiz case
-export/import frontend: since neither format's case-level export/import has any UI today, build the
-smallest viable case list/detail view — session decides `reviewer-ui` vs. `user-ui`, likely `reviewer-ui`
-per the Phase 29 "Vorgang" detail-view precedent — then wire all four case-level export/import buttons
-onto it). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 34 continues
-with P34-S4 import robustness for real third-party XDOMEA packages; then Phase 35 org-hierarchy/workflow
-polish, Phase 36 records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on
-cross-tenant XDOMEA federation).
+**Next session:** **P34-S4** (Phase 34 concludes — import robustness for genuine third-party XDOMEA
+packages: `parse_abgabe_message` currently only round-trips this system's own export shape
+(`dokumente/<filename>` convention, single top-level `Schriftgutobjekt`) — harden for at least
+multi-`Vorgang` packages and more tolerant structure detection). See `IMPLEMENTATION_PLAN.md` "Phase 32+"
+for the full remaining breakdown (Phase 35 org-hierarchy/workflow polish, Phase 36 records
+quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
+federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

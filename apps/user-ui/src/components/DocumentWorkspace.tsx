@@ -25,6 +25,7 @@ import { SearchPane } from "./SearchPane";
 import { DelegationsPane } from "./DelegationsPane";
 import { TeamspacesPane } from "./TeamspacesPane";
 import { AussonderungPane } from "./AussonderungPane";
+import { CasesPane } from "./CasesPane";
 import { KontaktePane } from "./KontaktePane";
 import { PoststellePane } from "./PoststellePane";
 import { QuarantinePane } from "./QuarantinePane";
@@ -382,6 +383,8 @@ export function DocumentWorkspace() {
               <AussonderungPane token={accessToken ?? ""} />
             ) : view === "vorlagen" ? (
               <VorlagenPane token={accessToken ?? ""} createdBy={user?.username ?? ""} />
+            ) : view === "cases" ? (
+              <CasesPane token={accessToken ?? ""} onOpenDocument={openDocumentTab} />
             ) : (
               <KontaktePane token={accessToken ?? ""} />
             )}

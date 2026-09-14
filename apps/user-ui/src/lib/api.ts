@@ -2575,6 +2575,158 @@ export async function exportDocumentXjustiz(
   return response.blob();
 }
 
+// Minimal case-browsing UI (14.2, post-roadmap phase 34 session 3, ADR
+// 0141) - the first `case-service` consumer in `user-ui` (previously only
+// `admin-ui`, for `case-archival-config`). `Case`/`CaseDocumentReference`
+// mirror `case-service`'s own `CaseOut`/`CaseDocumentReferenceOut` shapes
+// verbatim (field-for-field, see `services/case-service/src/case_service/
+// schemas.py`) - no client-side renaming/reshaping.
+export interface Case {
+  id: string;
+  name: string;
+  object_type_id: number | null;
+  attributes: Record<string, string>;
+  status: string;
+  process_definition_id: number;
+  process_instance_id: string | null;
+  created_by: string;
+  created_at: string;
+  closed_at: string | null;
+  archive_after: string | null;
+  archived_at: string | null;
+  vorgangsnummer: string | null;
+  registered_at: string | null;
+}
+
+export interface CaseDocumentReference {
+  document_id: string;
+  added_by: string;
+  added_at: string;
+  removed_by: string | null;
+  removed_at: string | null;
+  snapshot_version_number: number | null;
+  current_version_number: number | null;
+  document_deleted_at: string | null;
+}
+
+export async function listCases(token: string, status?: string): Promise<Case[]> {
+  const path = status ? `cases?status=${encodeURIComponent(status)}` : "cases";
+  const response = await request("case-service", path, {}, token);
+  return response.json();
+}
+
+export async function getCase(token: string, caseId: string): Promise<Case> {
+  const response = await request(
+    "case-service",
+    `cases/${encodeURIComponent(caseId)}`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+export async function listCaseDocuments(
+  token: string,
+  caseId: string
+): Promise<CaseDocumentReference[]> {
+  const response = await request(
+    "case-service",
+    `cases/${encodeURIComponent(caseId)}/documents`,
+    {},
+    token
+  );
+  return response.json();
+}
+
+// Case-level XDOMEA/XJustiz export - the case counterpart to
+// `exportDocumentXdomea`/`exportDocumentXjustiz` above, same synchronous
+// download shape, `archival-service`'s `.../cases/{id}` endpoints instead
+// of `.../documents/{id}`.
+export async function exportCaseXdomea(
+  token: string,
+  caseId: string,
+  leserName: string
+): Promise<Blob> {
+  const response = await request(
+    "archival-service",
+    `xdomea/export/cases/${encodeURIComponent(caseId)}?leser_name=${encodeURIComponent(
+      leserName
+    )}`,
+    { method: "POST" },
+    token
+  );
+  return response.blob();
+}
+
+export async function exportCaseXjustiz(
+  token: string,
+  caseId: string,
+  empfaengerName: string
+): Promise<Blob> {
+  const response = await request(
+    "archival-service",
+    `xjustiz/export/cases/${encodeURIComponent(caseId)}?empfaenger_name=${encodeURIComponent(
+      empfaengerName
+    )}`,
+    { method: "POST" },
+    token
+  );
+  return response.blob();
+}
+
+// Case-level XDOMEA/XJustiz import (ADR 0139/ADR 0141) - deliberately
+// ALWAYS attaches to the case whose detail view the import form lives on
+// (`case_id` always set), never `process_definition_id` ("create a new
+// case from an import package" has no UI entry point in this session - see
+// ADR 0141 "Rationale"; the backend still supports it, unused by this UI).
+export interface XdomeaImportResult {
+  case_id: string | null;
+  case_created: boolean;
+  vorgang_betreff: string | null;
+  document_ids: string[];
+}
+
+export interface XJustizImportResult {
+  case_id: string | null;
+  case_created: boolean;
+  akte_anzeigename: string | null;
+  document_ids: string[];
+}
+
+export async function importXdomeaIntoCase(
+  token: string,
+  params: { file: File; folderId: string; caseId: string }
+): Promise<XdomeaImportResult> {
+  const formData = new FormData();
+  formData.append("file", params.file);
+  formData.append("folder_id", params.folderId);
+  formData.append("case_id", params.caseId);
+  const response = await request(
+    "archival-service",
+    "xdomea/import",
+    { method: "POST", body: formData },
+    token
+  );
+  return response.json();
+}
+
+export async function importXjustizIntoCase(
+  token: string,
+  params: { file: File; folderId: string; caseId: string }
+): Promise<XJustizImportResult> {
+  const formData = new FormData();
+  formData.append("file", params.file);
+  formData.append("folder_id", params.folderId);
+  formData.append("case_id", params.caseId);
+  const response = await request(
+    "archival-service",
+    "xjustiz/import",
+    { method: "POST", body: formData },
+    token
+  );
+  return response.json();
+}
+
 // Structure templates (2.5/7.3, P15-S6) - a folder subtree as a named,
 // reusable template (e.g. a file-plan skeleton).
 export interface FolderTemplate {
