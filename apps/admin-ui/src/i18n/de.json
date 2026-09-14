@@ -11,7 +11,9 @@
     "refresh": "Aktualisieren",
     "save": "Speichern",
     "loadError": "Laden fehlgeschlagen",
-    "deleteError": "Löschen fehlgeschlagen"
+    "deleteError": "Löschen fehlgeschlagen",
+    "yes": "Ja",
+    "no": "Nein"
   },
   "theme": {
     "label": "Design",
@@ -102,9 +104,12 @@
     "formLabel": "Gruppe anlegen",
     "name": "Name",
     "description": "Beschreibung",
+    "isOrgUnit": "Organisationseinheit",
+    "isOrgUnitHint": "Markiert diese Gruppe als Organisationseinheit (14.2) - nur so geflaggte Gruppen zählen bei einer dynamischen Zugriffsfreigabe \"an die Organisationseinheit\" (Vier-Augen-Vertretung während Abwesenheit, ausgelöst von workflow-service). Ohne Markierung zählt keine Gruppe, unabhängig von der Mitgliedschaft.",
     "empty": "Keine Gruppen.",
     "createError": "Gruppe anlegen fehlgeschlagen",
     "deleteError": "Gruppe löschen fehlgeschlagen",
+    "orgUnitToggleError": "Ändern der Organisationseinheit-Markierung fehlgeschlagen",
     "membersToggleShow": "Mitglieder anzeigen",
     "membersToggleHide": "Mitglieder ausblenden",
     "membersEmpty": "Noch keine Mitglieder.",
@@ -392,7 +397,13 @@
     "statusRevoked": "Widerrufen",
     "revoke": "Widerrufen",
     "revokeConfirm": "Diese Stellvertretung wirklich widerrufen?",
-    "revokeError": "Widerrufen fehlgeschlagen"
+    "revokeError": "Widerrufen fehlgeschlagen",
+    "origin": "Herkunft",
+    "originSelfService": "Selbstverwaltet",
+    "originSupervisor": "Org-Hierarchie: Vorgesetzte/r",
+    "originSupervisorChain": "Org-Hierarchie: Vorgesetztenkette",
+    "originOrgUnit": "Org-Hierarchie: Organisationseinheit",
+    "filterOrgHierarchyOnly": "Nur automatisch erzeugte Org-Hierarchie-Freigaben anzeigen"
   },
   "shareLinkSettings": {
     "pageTitle": "Öffentlicher Freigabelink",

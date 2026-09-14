@@ -73,6 +73,9 @@ class RoleAssignmentActionResult(BaseModel):
 class GroupCreate(BaseModel):
     name: str
     description: str = ""
+    # Post-Roadmap Phase 35 Session 1 (ADR 0143) - see `Group.is_org_unit`'s
+    # own docstring in `models.py`. Defaults `False`, same as the column.
+    is_org_unit: bool = False
 
 
 class GroupOut(BaseModel):
@@ -80,8 +83,17 @@ class GroupOut(BaseModel):
     name: str
     description: str
     created_at: datetime
+    is_org_unit: bool
 
     model_config = {"from_attributes": True}
+
+
+class GroupOrgUnitUpdate(BaseModel):
+    """`PATCH /groups/{id}`'s body (Post-Roadmap Phase 35 Session 1, ADR
+    0143) - the only field of an existing `Group` made editable; groups had
+    no update endpoint at all before this session."""
+
+    is_org_unit: bool
 
 
 class GroupMemberCreate(BaseModel):
@@ -279,6 +291,12 @@ class DelegationOut(BaseModel):
     created_at: datetime
     revoked_at: datetime | None
     revoked_by: str | None
+    # `None` for a self-service delegation; one of the three
+    # `OrgHierarchyGrantCreate.grant_kind` values for a row auto-created by
+    # `POST /org-hierarchy-grants` (Post-Roadmap Phase 35 Session 1, ADR
+    # 0143) - lets `GET /delegations` (and its admin-ui consumer) tell the
+    # two apart, previously indistinguishable (ADR 0121 "Consequences").
+    grant_kind: Literal["supervisor", "supervisor_chain", "org_unit"] | None
 
     model_config = {"from_attributes": True}
 

@@ -2,39 +2,45 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P34-S4 (import robustness for genuine third-party XDOMEA packages shipped —
-`xdomea.parse_abgabe_message` hardened for three real, schema-verified gaps found by re-reading the
-vendored XDOMEA 4.0.0 schema: a `Schriftgutobjekt/Akte`-wrapped `Vorgang` hierarchy is now recognized (the
-Akte's own Betreff/UUID names the case, its nested Vorgang's documents — previously invisible to a
-direct-child-only XPath — are found); more than one top-level `Vorgang` has its Betreffe combined instead
-of silently keeping only the first; a `Dokument` with no retrievable primary content (schema-legal,
-`Version` is `minOccurs="0"`) is now SKIPPED — reported via a new `skipped_document_count` field threaded
-through `ImportResult`/`XdomeaImportResultOut`/the `/xdomea/import` response — rather than rejecting the
-entire package. Related tolerance fix: among several `Version` entries, the latest (not blindly the first)
-now wins. `Teilvorgang`/`Teilakte` nesting and the `DokumentMitSchriftstueck` choice member remain
-deliberately out of scope (a documented boundary, not a silent drop — their nested documents are still
-found via the unconditional descendant search). `archival-service` +5 tests (138 total, up from 133): 4
-new in `test_xdomea.py`, 1 new end-to-end in `test_api.py`; one existing test rewritten from asserting a
-raised `ParseError` to asserting the new skip-not-reject behavior. Live-verified against the real, rebuilt
-container: a hand-crafted third-party-shaped package (a `Vorgang` moved inside a real `Akte` element this
-module's own export never produces, plus a second, metadata-only `Dokument` with no `Version` at all) was
-POSTed directly to `POST /xdomea/import` — a real new case was created via a real `process_definition_id`,
-correctly named after the Akte's own Betreff (not the nested Vorgang's own, different Betreff), exactly
-one real document was created (the metadata-only one correctly absent), response reported
-`"skipped_document_count": 1`. Backend-only, no frontend change (existing `user-ui` XDOMEA import form
-benefits automatically). See [ADR 0142](docs/adr/0142-xdomea-import-third-party-package-hardening.md)),
-the fourth and last session of Phase 34 (XDOMEA/XJustiz completion) — **Phase 34 is thereby fully
-complete**. `graphify dms/ --update` was attempted at this phase boundary (mandatory per
-`IMPLEMENTATION_PLAN.md`) but the shrink guard correctly refused the write (14,208 vs. the existing 15,708
-nodes) — see "Tooling & Testing" below for the full finding and the manifest-corruption fix applied;
-`graphify-out/graph.json` deliberately remains at its P33-end state, deferred to a future phase boundary.
+**Last completed:** P35-S1 (`Group.is_org_unit` marker + admin visibility for org-hierarchy grants shipped
+— closes two gaps ADR 0120/0121 named by their exact intended field names one and two sessions earlier.
+`Group` gains `is_org_unit: bool` (default `false`, no existing group auto-promoted) settable via a new
+`PATCH /groups/{id}` (the first update endpoint a `Group` has ever had). `create_org_hierarchy_grant`'s
+`grant_kind="org_unit"` branch now resolves the deputy set from only `is_org_unit=True` group membership —
+previously EVERY group the principal belonged to, unioned, an explicitly acknowledged pragmatic stand-in;
+a principal in no flagged group now correctly yields zero deputies instead of granting through whichever
+unrelated groups happened to exist. Separately, every `Delegation` row `create_org_hierarchy_grant` creates
+is now stamped with `grant_kind` (`"supervisor"`/`"supervisor_chain"`/`"org_unit"`, `null` for self-service)
+— previously indistinguishable from a self-service delegation except by inspecting
+`scope_process_definition_ids`' shape. `admin-ui`'s `UserManagement` Groups section gained a checkbox
+(creation) + a badge-button toggle (existing groups) for the flag; `DelegationsAdmin` gained a new
+"Herkunft" origin column + a client-side filter checkbox (no new backend query parameter — the page
+already loads every delegation unfiltered). `permission-service` +6 tests (164 total, up from 158):
+membership in an unflagged group correctly yields zero deputies (the actual behavior-change regression
+guard), `PATCH /groups/{id}` toggle + auth/403/404 cases, a self-service delegation's `grant_kind` is
+`null`; one existing `org_unit`-grant test rewritten to flag its group first (the old "every group counts"
+default no longer applies). `admin-ui` +4 tests (232 total, up from 228). A real CSS bug found and fixed
+via live-browser screenshot verification (not caught by any component test, jsdom has no real layout
+engine): a `.hint` placed directly inside a `.form-grid` landed in the wrong grid cell under the existing
+`auto-fit` column layout — fixed with a new `.form-grid > .hint { grid-column: 1 / -1; }` rule, the same
+full-width technique `.deletion-reason-catalog` already established. Live-verified end to end in a REAL
+BROWSER against the real, rebuilt running stack: flagged a real group as an org unit through the UI,
+confirmed the "Ja"/"Nein" toggle round-trips through a reload (screenshot); separately seeded a REAL
+org-hierarchy grant (a real `SupervisorAssignment` + a real `POST /org-hierarchy-grants` call against the
+running service) and confirmed `DelegationsAdmin` correctly labeled it "Org-Hierarchie: Vorgesetzte/r"
+alongside existing "Selbstverwaltet" rows, and that the filter checkbox correctly hid the self-service rows
+while keeping it visible (screenshot). Test artifacts cleaned up (seeded `SupervisorAssignment` deleted;
+the seeded `Delegation` left to expire on its own 4-hour window rather than provision a `dms-admin`-role
+account purely for cleanup). See [ADR 0143](docs/adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)),
+the first session of Phase 35 (org-hierarchy & workflow polish).
 
-**Next session:** **Phase 35** (org-hierarchy & workflow polish — P35-S1 `is_org_unit` marker + admin
-visibility for active grants, P35-S2 a real per-case RBAC resource type for `case-service`, P35-S3
-`TaskClaim` reassignment/notification + an "unclaimed team work" view, P35-S4 hand-folder/workmap
-cross-case indexing). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining breakdown (Phase 36
-records quarantine/output-stamping/misc completion, Phase 37 scoping-only session on cross-tenant XDOMEA
-federation).
+**Next session:** **P35-S2** (a real per-case RBAC resource type for `case-service` — today the missing
+resource type is worked around via `Delegation` scoping from P31-S9/S10, replace with a genuine
+`permission-service` resource type mirroring documents/folders so future case features can build on it
+instead of extending the workaround). See `IMPLEMENTATION_PLAN.md` "Phase 32+" for the full remaining
+breakdown (Phase 35 continues with P35-S3 `TaskClaim` reassignment/notification + an "unclaimed team work"
+view, P35-S4 hand-folder/workmap cross-case indexing; then Phase 36 records quarantine/output-stamping/misc
+completion, Phase 37 scoping-only session on cross-tenant XDOMEA federation).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

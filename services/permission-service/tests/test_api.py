@@ -1439,8 +1439,13 @@ def test_org_hierarchy_grant_supervisor_chain_unions_diamond_dag(client, role_ma
 def test_org_hierarchy_grant_org_unit_grants_every_group_member_except_self(
     client, role_management_headers
 ):
+    """Seit Post-Roadmap Phase 35 Session 1 (ADR 0143) zählt nur eine
+    `is_org_unit=True`-geflaggte Gruppe - vorher (ADR 0120/0121) jede
+    Gruppe, unioned, ungeachtet eines Flags, das es noch nicht gab."""
     group = client.post(
-        "/groups", json={"name": "OrgUnitP10"}, headers=role_management_headers
+        "/groups",
+        json={"name": "OrgUnitP10", "is_org_unit": True},
+        headers=role_management_headers,
     ).json()
     for principal_id in ("viktor-p10", "wanda-p10", "xaver-p10"):
         client.post(
@@ -1463,6 +1468,94 @@ def test_org_hierarchy_grant_org_unit_grants_every_group_member_except_self(
     body = response.json()
     # viktor-p10 selbst ist ausgeschlossen - eine Delegation an sich selbst wäre sinnlos.
     assert set(body["deputy_principal_ids"]) == {"wanda-p10", "xaver-p10"}
+
+    delegations = client.get("/delegations", params={"delegator_principal_id": "viktor-p10"}).json()
+    assert all(d["grant_kind"] == "org_unit" for d in delegations)
+
+
+def test_org_hierarchy_grant_org_unit_ignores_membership_in_an_unflagged_group(
+    client, role_management_headers
+):
+    """Die Vorher-Semantik ("jede Gruppe zählt") darf nicht mehr gelten -
+    eine Gruppe ohne `is_org_unit=True` liefert keine Deputies, auch wenn
+    das Zielprinzipal echte Mitglieder in ihr hat."""
+    group = client.post(
+        "/groups", json={"name": "NotAnOrgUnitP35"}, headers=role_management_headers
+    ).json()
+    assert group["is_org_unit"] is False
+    for principal_id in ("noa-p35", "otto-p35"):
+        client.post(
+            f"/groups/{group['id']}/members",
+            json={"principal_id": principal_id},
+            headers=role_management_headers,
+        )
+
+    response = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "noa-p35",
+            "grant_kind": "org_unit",
+            "process_definition_id": 30,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {"delegation_ids": [], "deputy_principal_ids": []}
+
+
+def test_group_patch_toggles_is_org_unit(client, role_management_headers):
+    group = client.post(
+        "/groups", json={"name": "TogglableP35"}, headers=role_management_headers
+    ).json()
+    assert group["is_org_unit"] is False
+
+    response = client.patch(
+        f"/groups/{group['id']}",
+        json={"is_org_unit": True},
+        headers=role_management_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["is_org_unit"] is True
+
+    listed = next(g for g in client.get("/groups").json() if g["id"] == group["id"])
+    assert listed["is_org_unit"] is True
+
+
+def test_group_patch_requires_authentication(client):
+    response = client.patch("/groups/does-not-exist", json={"is_org_unit": True}, headers={})
+    assert response.status_code == 401
+
+
+def test_group_patch_returns_403_without_permission(client):
+    response = client.patch(
+        "/groups/does-not-exist",
+        json={"is_org_unit": True},
+        headers={"X-DMS-Principal": "someone-without-role-admin"},
+    )
+    assert response.status_code == 403
+
+
+def test_group_patch_unknown_id_returns_404(client, role_management_headers):
+    response = client.patch(
+        "/groups/does-not-exist",
+        json={"is_org_unit": True},
+        headers=role_management_headers,
+    )
+    assert response.status_code == 404
+
+
+def test_self_service_delegation_has_no_grant_kind(client):
+    """Reine Abgrenzung: eine über `POST /delegations` selbst angelegte
+    Delegation trägt `grant_kind: null`, nur eine über
+    `POST /org-hierarchy-grants` automatisch erzeugte trägt einen Wert."""
+    response = client.post(
+        "/delegations",
+        json={"deputy_principal_id": "self-service-deputy-p35", **_delegation_window()},
+        headers={"X-DMS-Principal": "self-service-delegator-p35"},
+    )
+    assert response.status_code == 201
+    assert response.json()["grant_kind"] is None
 
 
 def test_org_hierarchy_grant_returns_empty_result_without_error_for_unconfigured_principal(client):

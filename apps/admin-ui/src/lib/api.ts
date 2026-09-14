@@ -250,6 +250,10 @@ export interface Group {
   name: string;
   description: string;
   created_at: string;
+  // Post-Roadmap Phase 35 Session 1 (ADR 0143) - replaces the previous
+  // pragmatic "every group the principal belongs to counts as their org
+  // unit" stand-in (ADR 0120/0121) with a real, admin-settable marker.
+  is_org_unit: boolean;
 }
 
 export interface GroupMember {
@@ -265,7 +269,7 @@ export async function listGroups(token: string): Promise<Group[]> {
 
 export async function createGroup(
   token: string,
-  params: { name: string; description: string }
+  params: { name: string; description: string; is_org_unit?: boolean }
 ): Promise<Group> {
   const response = await request("permission-service", "groups", jsonInit(params), token);
   return response.json();
@@ -278,6 +282,26 @@ export async function deleteGroup(token: string, groupId: string): Promise<void>
     { method: "DELETE" },
     token
   );
+}
+
+// Post-Roadmap Phase 35 Session 1 (ADR 0143) - the first update endpoint
+// `Group` has ever had (previously create/list/delete/members only).
+export async function setGroupOrgUnit(
+  token: string,
+  groupId: string,
+  isOrgUnit: boolean
+): Promise<Group> {
+  const response = await request(
+    "permission-service",
+    `groups/${encodeURIComponent(groupId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_org_unit: isOrgUnit }),
+    },
+    token
+  );
+  return response.json();
 }
 
 export async function listGroupMembers(token: string, groupId: string): Promise<GroupMember[]> {
@@ -2049,6 +2073,11 @@ export interface Delegation {
   created_at: string;
   revoked_at: string | null;
   revoked_by: string | null;
+  // `null` for a self-service delegation; "supervisor"/"supervisor_chain"/
+  // "org_unit" for a row auto-created by `POST /org-hierarchy-grants`
+  // (Post-Roadmap Phase 35 Session 1, ADR 0143) - previously
+  // indistinguishable from a self-service delegation.
+  grant_kind: "supervisor" | "supervisor_chain" | "org_unit" | null;
 }
 
 export async function listAllDelegations(token: string): Promise<Delegation[]> {

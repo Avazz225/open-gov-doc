@@ -260,6 +260,14 @@ body {
   gap: 0.25rem;
 }
 
+/* A `.hint` placed directly inside a `.form-grid` (e.g. explaining a
+   checkbox field, Post-Roadmap Phase 35 Session 1) must span the full
+   width like `.deletion-reason-catalog` below, not become its own narrow
+   grid cell wherever the auto-fit layout happens to place it. */
+.form-grid > .hint {
+  grid-column: 1 / -1;
+}
+
 /* Deletion-reason catalog editor (post-roadmap phase 31 session 1, ADR
    0112) - spans the full form-grid width instead of becoming a single
    narrow grid cell, since it holds a list plus an add-row, not one field. */

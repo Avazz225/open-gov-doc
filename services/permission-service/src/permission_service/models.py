@@ -167,6 +167,13 @@ class Delegation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # `None` for a self-service delegation (ADR 0048); one of "supervisor"/
+    # "supervisor_chain"/"org_unit" for a row auto-created by
+    # `create_org_hierarchy_grant` (ADR 0121) - added in Post-Roadmap Phase
+    # 35 Session 1 (ADR 0143) so an admin can actually tell the two apart
+    # (previously indistinguishable except by inspecting `scope_*_ids`'
+    # shape, see ADR 0121's own "Consequences").
+    grant_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class Group(Base):
@@ -187,6 +194,14 @@ class Group(Base):
     name: Mapped[str] = mapped_column(String(128), unique=True)
     description: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Post-Roadmap Phase 35 Session 1 (ADR 0143) - replaces the previous,
+    # explicitly acknowledged (ADR 0120/0121) pragmatic stand-in for "the
+    # organizational unit a principal belongs to" ("every group the
+    # principal is in, unioned") with a real, admin-settable marker.
+    # Default `False`: an existing installation's groups are all
+    # general-purpose until an admin deliberately flags one, not implicitly
+    # promoted.
+    is_org_unit: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class GroupMembership(Base):

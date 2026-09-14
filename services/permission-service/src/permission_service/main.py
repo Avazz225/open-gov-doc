@@ -38,6 +38,7 @@ from permission_service.schemas import (
     GroupCreate,
     GroupMemberCreate,
     GroupMemberOut,
+    GroupOrgUnitUpdate,
     GroupOut,
     MaintenanceModeActionResult,
     MaintenanceModeLift,
@@ -83,6 +84,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             text(
                 "ALTER TABLE permission.approval_action_config "
                 "ADD COLUMN IF NOT EXISTS required_permission VARCHAR(128)"
+            )
+        )
+        # Post-Roadmap Phase 35 Session 1 (ADR 0143) - same ad-hoc pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.group "
+                "ADD COLUMN IF NOT EXISTS is_org_unit BOOLEAN NOT NULL DEFAULT false"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.delegation ADD COLUMN IF NOT EXISTS grant_kind VARCHAR(32)"
             )
         )
     app.state.engine = engine
@@ -305,7 +318,9 @@ async def create_group(
     self-gating as `POST /roles` (`admin.user_management`), see
     `_require_role_management`."""
     await _require_role_management(session, x_dms_principal)
-    group = await repository.create_group(session, payload.name, payload.description)
+    group = await repository.create_group(
+        session, payload.name, payload.description, is_org_unit=payload.is_org_unit
+    )
     await session.commit()
     return group
 
@@ -313,6 +328,25 @@ async def create_group(
 @app.get("/groups", response_model=list[GroupOut])
 async def list_groups(session: AsyncSession = Depends(get_session)) -> list[GroupOut]:
     return await repository.list_groups(session)
+
+
+@app.patch("/groups/{group_id}", response_model=GroupOut)
+async def update_group_org_unit(
+    group_id: str,
+    payload: GroupOrgUnitUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> GroupOut:
+    """Post-Roadmap Phase 35 Session 1 (ADR 0143) - the first update
+    endpoint `Group` has ever had (previously create/list/delete/members
+    only). Same self-gating as `create_group`/`delete_group`."""
+    await _require_role_management(session, x_dms_principal)
+    try:
+        group = await repository.set_group_org_unit_flag(session, group_id, payload.is_org_unit)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return group
 
 
 @app.delete("/groups/{group_id}", status_code=204)

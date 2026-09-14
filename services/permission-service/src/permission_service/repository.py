@@ -304,9 +304,15 @@ async def ensure_everyone_role(session: AsyncSession) -> None:
 # gating as roles themselves (``_require_role_management`` in ``main.py``,
 # `admin.user_management`), since a group is ultimately just another
 # building block of permission management.
-async def create_group(session: AsyncSession, name: str, description: str) -> Group:
+async def create_group(
+    session: AsyncSession, name: str, description: str, *, is_org_unit: bool = False
+) -> Group:
     group = Group(
-        id=str(uuid.uuid4()), name=name, description=description, created_at=datetime.now(UTC)
+        id=str(uuid.uuid4()),
+        name=name,
+        description=description,
+        created_at=datetime.now(UTC),
+        is_org_unit=is_org_unit,
     )
     session.add(group)
     await session.flush()
@@ -316,6 +322,19 @@ async def create_group(session: AsyncSession, name: str, description: str) -> Gr
 async def list_groups(session: AsyncSession) -> list[Group]:
     result = await session.execute(select(Group))
     return list(result.scalars().all())
+
+
+async def set_group_org_unit_flag(session: AsyncSession, group_id: str, is_org_unit: bool) -> Group:
+    """Post-Roadmap Phase 35 Session 1 (ADR 0143) - the only field of an
+    existing `Group` that can be changed after creation; groups had no
+    update endpoint at all before this session (create/list/delete/members
+    only)."""
+    group = await session.get(Group, group_id)
+    if group is None:
+        raise NotFoundError(f"group_id {group_id!r} unbekannt")
+    group.is_org_unit = is_org_unit
+    await session.flush()
+    return group
 
 
 async def delete_group(session: AsyncSession, group_id: str) -> None:
@@ -467,6 +486,22 @@ async def get_supervisor_chain(session: AsyncSession, principal_id: str) -> set[
 async def _group_ids_for_principal(session: AsyncSession, principal_id: str) -> set[str]:
     result = await session.execute(
         select(GroupMembership.group_id).where(GroupMembership.principal_id == principal_id)
+    )
+    return set(result.scalars().all())
+
+
+async def _org_unit_group_ids_for_principal(session: AsyncSession, principal_id: str) -> set[str]:
+    """Post-Roadmap Phase 35 Session 1 (ADR 0143) - the `is_org_unit`-flagged
+    subset of `_group_ids_for_principal`'s result, used by
+    `create_org_hierarchy_grant`'s `"org_unit"` branch. Deliberately a
+    separate function rather than a parameter on `_group_ids_for_principal`
+    itself - that helper has one other caller (`create_delegation`'s
+    scope-resolution family is unrelated) that must keep seeing every group,
+    not just org units."""
+    result = await session.execute(
+        select(GroupMembership.group_id)
+        .join(Group, Group.id == GroupMembership.group_id)
+        .where(GroupMembership.principal_id == principal_id, Group.is_org_unit.is_(True))
     )
     return set(result.scalars().all())
 
@@ -894,6 +929,7 @@ async def create_delegation(
     scope_object_type_ids: list[int] | None,
     scope_process_definition_ids: list[int] | None,
     scope_folder_resource_ids: list[str] | None,
+    grant_kind: str | None = None,
 ) -> Delegation:
     delegation = Delegation(
         id=str(uuid.uuid4()),
@@ -905,6 +941,7 @@ async def create_delegation(
         scope_process_definition_ids=scope_process_definition_ids,
         scope_folder_resource_ids=scope_folder_resource_ids,
         created_at=datetime.now(UTC),
+        grant_kind=grant_kind,
     )
     session.add(delegation)
     await session.flush()
@@ -1035,9 +1072,18 @@ async def create_org_hierarchy_grant(
     its defaults.
 
     Deliberately no error for an empty resolved deputy set (e.g. a
-    principal with no configured supervisor, or no group membership) - a
-    graceful zero-delegations result, not a failure, same posture as
-    `get_supervisor_chain` for a principal with none."""
+    principal with no configured supervisor, no `is_org_unit`-flagged group
+    membership, or no group membership at all) - a graceful zero-delegations
+    result, not a failure, same posture as `get_supervisor_chain` for a
+    principal with none. Since Post-Roadmap Phase 35 Session 1 (ADR 0143),
+    `"org_unit"` resolves to only the principal's `is_org_unit=True` group
+    membership(s) - previously EVERY group the principal belonged to,
+    unioned (an explicitly acknowledged pragmatic stand-in, ADR 0120/0121);
+    a principal in no flagged group now yields an empty set rather than
+    silently granting through an unrelated group. Each created `Delegation`
+    row is stamped with `grant_kind` for admin traceability (previously
+    indistinguishable from a self-service delegation, ADR 0121
+    "Consequences")."""
     if grant_kind == "supervisor":
         assignments = await list_supervisor_assignments(session, principal_id=principal_id)
         deputy_ids = {a.supervisor_principal_id for a in assignments}
@@ -1045,7 +1091,7 @@ async def create_org_hierarchy_grant(
         deputy_ids = await get_supervisor_chain(session, principal_id)
     elif grant_kind == "org_unit":
         deputy_ids = set()
-        for group_id in await _group_ids_for_principal(session, principal_id):
+        for group_id in await _org_unit_group_ids_for_principal(session, principal_id):
             members = await list_group_members(session, group_id)
             deputy_ids.update(m.principal_id for m in members)
         deputy_ids.discard(principal_id)
@@ -1065,6 +1111,7 @@ async def create_org_hierarchy_grant(
                 scope_object_type_ids=None,
                 scope_process_definition_ids=[process_definition_id],
                 scope_folder_resource_ids=None,
+                grant_kind=grant_kind,
             )
         )
     return delegations

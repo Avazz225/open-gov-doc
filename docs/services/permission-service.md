@@ -12,8 +12,9 @@
 | `POST` | `/roles` | Create a role — since P19-S6 gated: `X-DMS-Principal` must hold `admin.user_management` ([ADR 0071](../adr/0071-permission-service-self-gating.md)), otherwise `401`/`403`. Since Post-Roadmap Phase 32 Session 1 ([ADR 0130](../adr/0130-approval-config-self-gated-role-creation-four-eyes.md)) also optionally gated via the generic four-eyes mechanism (`permission.role.create`) — response `{status: "created"\|"pending_approval", role, approval_request_id}`, `201` |
 | `GET` | `/roles` | All roles — deliberately still ungated, see ADR 0071 "Rationale" |
 | `PUT` | `/roles/{role_id}` | Update description/permissions (`name` immutable) — since P12-S3, the basis for `config-service`'s role upsert by name (7.3); since P19-S6 also gated by `admin.user_management` |
-| `POST` | `/groups` | Create a group (Post-Roadmap Phase 22 Session 1) — gated by `admin.user_management` like `POST /roles` |
+| `POST` | `/groups` | Create a group (Post-Roadmap Phase 22 Session 1) — gated by `admin.user_management` like `POST /roles`; since Post-Roadmap Phase 35 Session 1 ([ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)) accepts `is_org_unit` (default `false`) |
 | `GET` | `/groups` | All groups — deliberately still ungated, same rationale as `GET /roles` |
+| `PATCH` | `/groups/{id}` | Set `is_org_unit` (Post-Roadmap Phase 35 Session 1, ADR 0143) — the only editable field, gated like `POST /groups`, `404` on unknown ID |
 | `DELETE` | `/groups/{id}` | Delete a group including memberships (`404` on unknown ID) — gated |
 | `GET` | `/groups/{id}/members` | List a group's members — ungated |
 | `POST` | `/groups/{id}/members` | Add a member (`principal_id`) — idempotent, `404` on unknown group, gated |
@@ -64,8 +65,8 @@
 - `approval_action_config` (4.3, since P6-S4): `action_type` (PK, free-form string), `requires_approval` (bool, default `false`), `required_permission` (nullable string, since **P6-S5**, 4.6), `updated_at`. If a row is missing for an action type, `requires_approval=false`/`required_permission=null` applies implicitly (a transient default object, not persisted).
 - `approval_request` (4.3, since P6-S4): `id` (UUID str), `action_type`, `initiated_by`, `payload` (JSON — enough information to execute the action later), `status` (`pending`|`approved`|`rejected`), `approved_by`/`rejected_by`/`reason` (nullable), `created_at`, `decided_at` (nullable).
 - `system_maintenance_mode` (4.8, since P6-S6): a singleton (`id=1`, fixed, same pattern as `OcrConfig`/`GuardConfig`), `active` (bool), `reason` (nullable), `triggered_by` (nullable), `activated_at` (nullable), `lifted_by`/`lifted_at` (nullable) — on reactivation after a lift, `lifted_by`/`lifted_at` are reset.
-- `delegation` (4.4a, since P14-S11): `id` (UUID str, PK), `delegator_principal_id`/`deputy_principal_id`, `starts_at`/`ends_at` (both required), `scope_object_type_ids`/`scope_process_definition_ids`/`scope_folder_resource_ids` (each a JSON list, `null` = unrestricted on that dimension), `created_at`, `revoked_at`/`revoked_by` (nullable) — never hard-deleted, same pattern as `scope_lock` above.
-- `group`/`group_membership` (Post-Roadmap Phase 22 Session 2): `group` — `id` (UUID str, PK), `name` (unique), `description`, `created_at`. `group_membership` — `id` (PK), `group_id` (FK), `principal_id`, unique on `(group_id, principal_id)`. See "Admin-Creatable Groups" below.
+- `delegation` (4.4a, since P14-S11): `id` (UUID str, PK), `delegator_principal_id`/`deputy_principal_id`, `starts_at`/`ends_at` (both required), `scope_object_type_ids`/`scope_process_definition_ids`/`scope_folder_resource_ids` (each a JSON list, `null` = unrestricted on that dimension), `created_at`, `revoked_at`/`revoked_by` (nullable), `grant_kind` (nullable string, since Post-Roadmap Phase 35 Session 1, ADR 0143 — `null` for self-service, else `"supervisor"`/`"supervisor_chain"`/`"org_unit"`) — never hard-deleted, same pattern as `scope_lock` above.
+- `group`/`group_membership` (Post-Roadmap Phase 22 Session 2): `group` — `id` (UUID str, PK), `name` (unique), `description`, `created_at`, `is_org_unit` (bool, default `false`, since Post-Roadmap Phase 35 Session 1, ADR 0143). `group_membership` — `id` (PK), `group_id` (FK), `principal_id`, unique on `(group_id, principal_id)`. See "Admin-Creatable Groups" below.
 
 ## Scope Locks (4.7, since P3-S4)
 
@@ -199,6 +200,10 @@ principal, no own data row), every group created via `POST /groups` needs explic
   next independent cache clear.
 - **Admin UI integration**: `apps/admin-ui`'s `UserManagement` page got a new section
   "Groups" (see `docs/services/admin-ui.md`).
+- **`is_org_unit` marker** (Post-Roadmap Phase 35 Session 1, [ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)):
+  a `Group` can now be flagged as an organizational unit — see "Org-Hierarchy Foundation Put to Use"
+  below for what this changes. `PATCH /groups/{id}` (new, same self-gating) is the first update endpoint
+  `Group` has ever had; `name`/`description` remain immutable after creation.
 
 ## Org-Hierarchy Foundation (14.2, Post-Roadmap Phase 31 Session 9, [ADR 0120](../adr/0120-org-hierarchy-supervisor-dag-groups-as-org-units.md))
 
@@ -229,7 +234,8 @@ see ADR 0120 for the full reasoning.
 - **Org units are deliberately NOT a new concept here** — by explicit user decision, P31-S10 will resolve
   "the assignee's/creator's org unit" via the existing `Group`/`GroupMembership` rather than a second,
   competing grouping mechanism (see ADR 0120 "Consequences" for the open question this leaves for that
-  session: how to pick *which* group counts as "the" org unit for a principal in several).
+  session: how to pick *which* group counts as "the" org unit for a principal in several — resolved in
+  Post-Roadmap Phase 35 Session 1 via `Group.is_org_unit`, [ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)).
 - **Admin UI integration**: `apps/admin-ui`'s `UserManagement` page got a new section
   "Organisations-Hierarchie" (see `docs/services/admin-ui.md`) — create/list/delete assignments plus a
   chain-lookup tool, same page and pattern as Groups.
@@ -255,7 +261,7 @@ Time-limited, scope-restricted transfer of task handling from an absent person (
 - **`POST /delegations`** is a self-service endpoint — `delegator_principal_id` always comes from `X-DMS-Principal`; no one can create a delegation on behalf of a third person.
 - **`GET /delegations/check`** is the only real enforcement point — `workflow-service`'s `POST .../tasks/{id}/complete` calls it whenever a completion includes `on_behalf_of_principal_id` (see `docs/services/workflow-service.md`).
 - **Revocation** (`DELETE /delegations/{id}`) only by the deputized person or `X-DMS-Roles: dms-admin` (configurable, `delegation_revoke_admin_role`) — NOT by the deputy themselves.
-- `admin-ui` (`/delegations/`) offers a pure installation-wide overview + admin revocation; creation remains purely self-service (`user-ui`'s `DelegationsPane`).
+- `admin-ui` (`/delegations/`) offers a pure installation-wide overview + admin revocation; creation remains purely self-service (`user-ui`'s `DelegationsPane`). Since Post-Roadmap Phase 35 Session 1 ([ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)), an "Origin" column and a filter distinguish self-service delegations from org-hierarchy-derived grants — see "Org-Hierarchy Foundation Put to Use" below.
 
 ## Org-Hierarchy Foundation Put to Use: Dynamic Access Grants (14.2, Post-Roadmap Phase 31 Session 10, [ADR 0121](../adr/0121-dynamic-org-hierarchy-access-grants-task-claim-and-delegation-reuse.md))
 
@@ -269,13 +275,19 @@ the existing `create_delegation` — no parallel creation path, no new table.
 - **`grant_kind="supervisor_chain"`**: the full transitive union (`get_supervisor_chain`) — everyone
   reachable upward, deduplicated across reconverging paths (a diamond shape contributes its shared
   ancestor only once).
-- **`grant_kind="org_unit"`**: every member of every group the principal belongs to
-  (`_group_ids_for_principal` + `list_group_members`, the same helper `_collect_effective_roles` already
-  uses), minus the principal itself (a self-delegation would be meaningless). No `is_org_unit` marker
-  exists on `Group` (a deliberate P31-S9 decision, ADR 0120) — "the" org unit is every group, unioned, not
-  a single picked one.
+- **`grant_kind="org_unit"`**: every member of every `is_org_unit=True` group the principal belongs to
+  (`_org_unit_group_ids_for_principal` + `list_group_members`), minus the principal itself (a
+  self-delegation would be meaningless). Until Post-Roadmap Phase 35 Session 1
+  ([ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)), no `is_org_unit`
+  marker existed on `Group` (a deliberate P31-S9 decision, ADR 0120) and EVERY group the principal
+  belonged to counted, unioned — a principal in no flagged group now yields an empty deputy set, whereas
+  it previously granted through whichever unrelated groups happened to exist.
 - **An empty resolved deputy set is a graceful, successful empty result**, not an error — same posture as
   `get_supervisor_chain` for a principal with no configured supervisor.
+- **Every created `Delegation` row is stamped with `grant_kind`** (Post-Roadmap Phase 35 Session 1, ADR
+  0143) — `"supervisor"`/`"supervisor_chain"`/`"org_unit"`, `null` for a self-service delegation. Makes
+  `GET /delegations` (and `admin-ui`'s consumer of it) able to tell an org-hierarchy-derived row apart
+  from a self-service one, previously only guessable from `scope_process_definition_ids`' shape.
 - **Called exclusively by `workflow-service`**, never a browser directly — `POST /instances/{id}/tasks/
   {task_id}/org-hierarchy-grant` there requires an existing task claim first (see
   `docs/services/workflow-service.md` "Task Claim & Dynamic Org-Hierarchy Access Grants"), resolves the
@@ -331,3 +343,4 @@ None yet — follows in Phase 11.
 - **Federation Hub (7.4) and plugin instances (3.8) do not exist** (4.8, since P6-S6): maintenance mode can therefore neither "pause federation operations" nor "halt plugin instances" — both effects from 4.8 remain unimplemented, see [ADR 0024](../adr/0024-not-shutdown-gateway-enforced.md).
 - **No system-wide write prohibition beyond the gateway** (4.8, since P6-S6): direct service-to-service write calls bypassing the gateway remain possible during maintenance mode, see ADR 0024.
 - **No elevated audit priority for emergency-shutdown events** (4.8, since P6-S6): `AuditEvent` still has no priority field, see ADR 0023/0024.
+- ~~No `is_org_unit` marker on `Group` / no admin visibility for active org-hierarchy grants beyond raw `GET /delegations`~~ — **fixed in Post-Roadmap Phase 35 Session 1** ([ADR 0143](../adr/0143-org-unit-marker-and-org-hierarchy-grant-admin-visibility.md)): see "Admin-Creatable Groups"/"Org-Hierarchy Foundation Put to Use" above.

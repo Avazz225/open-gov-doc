@@ -54,6 +54,7 @@ const ACTIVE_DELEGATION = {
   created_at: new Date(now - 3600_000).toISOString(),
   revoked_at: null,
   revoked_by: null,
+  grant_kind: null,
 };
 
 const REVOKED_DELEGATION = {
@@ -63,6 +64,15 @@ const REVOKED_DELEGATION = {
   deputy_principal_id: "carol-sub",
   revoked_at: new Date(now - 1800_000).toISOString(),
   revoked_by: "dave-sub",
+};
+
+const ORG_HIERARCHY_DELEGATION = {
+  ...ACTIVE_DELEGATION,
+  id: "d3",
+  delegator_principal_id: "erik-sub",
+  deputy_principal_id: "frida-sub",
+  scope_process_definition_ids: [7],
+  grant_kind: "org_unit",
 };
 
 describe("DelegationsAdmin", () => {
@@ -126,5 +136,29 @@ describe("DelegationsAdmin", () => {
     fireEvent.click(screen.getByRole("button", { name: "Widerrufen" }));
 
     expect(revokeDelegationAsAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the origin of a self-service delegation and an org-hierarchy-derived one", async () => {
+    listAllDelegationsMock.mockResolvedValue([ACTIVE_DELEGATION, ORG_HIERARCHY_DELEGATION]);
+    renderView();
+
+    await screen.findByText("alice-sub");
+    expect(screen.getByText("Selbstverwaltet")).toBeInTheDocument();
+    expect(screen.getByText("Org-Hierarchie: Organisationseinheit")).toBeInTheDocument();
+  });
+
+  it("filters to only org-hierarchy-derived grants when the checkbox is checked", async () => {
+    listAllDelegationsMock.mockResolvedValue([ACTIVE_DELEGATION, ORG_HIERARCHY_DELEGATION]);
+    renderView();
+
+    await screen.findByText("alice-sub");
+    expect(screen.getByText("frida-sub")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByLabelText("Nur automatisch erzeugte Org-Hierarchie-Freigaben anzeigen")
+    );
+
+    expect(screen.queryByText("alice-sub")).not.toBeInTheDocument();
+    expect(screen.getByText("frida-sub")).toBeInTheDocument();
   });
 });

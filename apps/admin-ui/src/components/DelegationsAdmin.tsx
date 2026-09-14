@@ -21,6 +21,22 @@ function statusLabel(t: (path: string) => string, delegation: Delegation): strin
   return t("delegationsAdmin.statusPending");
 }
 
+// Post-Roadmap Phase 35 Session 1 (ADR 0143) - `grant_kind` distinguishes a
+// row auto-created by `POST /org-hierarchy-grants` from a self-service one,
+// previously impossible from this data alone (ADR 0121 "Consequences").
+function originLabel(t: (path: string) => string, delegation: Delegation): string {
+  switch (delegation.grant_kind) {
+    case "supervisor":
+      return t("delegationsAdmin.originSupervisor");
+    case "supervisor_chain":
+      return t("delegationsAdmin.originSupervisorChain");
+    case "org_unit":
+      return t("delegationsAdmin.originOrgUnit");
+    default:
+      return t("delegationsAdmin.originSelfService");
+  }
+}
+
 // Delegation during absence (4.4a, P14-S11) - a pure admin overview of ALL
 // delegations recorded installation-wide (`GET /delegations` without a
 // filter), with a revoke option for an authorized admin role
@@ -36,6 +52,7 @@ export function DelegationsAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [orgHierarchyOnly, setOrgHierarchyOnly] = useState(false);
 
   const reload = useCallback(async () => {
     if (!accessToken) return;
@@ -77,6 +94,10 @@ export function DelegationsAdmin() {
   if (isLoading) return <p>{t("common.loading")}</p>;
   if (unreachable) return <p className="empty-state">{t("delegationsAdmin.unreachable")}</p>;
 
+  const visibleDelegations = orgHierarchyOnly
+    ? delegations.filter((d) => d.grant_kind !== null)
+    : delegations;
+
   return (
     <div className="card">
       <p className="hint">{t("delegationsAdmin.hint")}</p>
@@ -87,7 +108,16 @@ export function DelegationsAdmin() {
         </p>
       )}
 
-      {delegations.length === 0 ? (
+      <label>
+        <input
+          type="checkbox"
+          checked={orgHierarchyOnly}
+          onChange={(e) => setOrgHierarchyOnly(e.target.checked)}
+        />{" "}
+        {t("delegationsAdmin.filterOrgHierarchyOnly")}
+      </label>
+
+      {visibleDelegations.length === 0 ? (
         <p className="empty-state">{t("delegationsAdmin.empty")}</p>
       ) : (
         <table className="data-table">
@@ -95,6 +125,7 @@ export function DelegationsAdmin() {
             <tr>
               <th>{t("delegationsAdmin.delegator")}</th>
               <th>{t("delegationsAdmin.deputy")}</th>
+              <th>{t("delegationsAdmin.origin")}</th>
               <th>{t("delegationsAdmin.startsAt")}</th>
               <th>{t("delegationsAdmin.endsAt")}</th>
               <th>{t("delegationsAdmin.status")}</th>
@@ -102,10 +133,11 @@ export function DelegationsAdmin() {
             </tr>
           </thead>
           <tbody>
-            {delegations.map((delegation) => (
+            {visibleDelegations.map((delegation) => (
               <tr key={delegation.id}>
                 <td>{delegation.delegator_principal_id}</td>
                 <td>{delegation.deputy_principal_id}</td>
+                <td>{originLabel(t, delegation)}</td>
                 <td>{new Date(delegation.starts_at).toLocaleString()}</td>
                 <td>{new Date(delegation.ends_at).toLocaleString()}</td>
                 <td>

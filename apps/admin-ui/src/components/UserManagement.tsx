@@ -29,6 +29,7 @@ import {
   listSupervisorAssignments,
   listUsers,
   removeGroupMember,
+  setGroupOrgUnit,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -45,7 +46,8 @@ export function UserManagement() {
   const [assignmentPending, setAssignmentPending] = useState(false);
   const [rolePending, setRolePending] = useState(false);
 
-  const [newGroup, setNewGroup] = useState({ name: "", description: "" });
+  const [newGroup, setNewGroup] = useState({ name: "", description: "", isOrgUnit: false });
+  const [orgUnitTogglingId, setOrgUnitTogglingId] = useState<string | null>(null);
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [membersByGroup, setMembersByGroup] = useState<Record<string, GroupMember[]>>({});
   const [newMemberPrincipalId, setNewMemberPrincipalId] = useState("");
@@ -186,11 +188,30 @@ export function UserManagement() {
     event.preventDefault();
     if (!accessToken || !newGroup.name.trim()) return;
     try {
-      await createGroup(accessToken, { name: newGroup.name.trim(), description: newGroup.description });
-      setNewGroup({ name: "", description: "" });
+      await createGroup(accessToken, {
+        name: newGroup.name.trim(),
+        description: newGroup.description,
+        is_org_unit: newGroup.isOrgUnit,
+      });
+      setNewGroup({ name: "", description: "", isOrgUnit: false });
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("groups.createError"));
+    }
+  }
+
+  // Post-Roadmap Phase 35 Session 1 (ADR 0143) - the first editable field
+  // an existing Group has ever had.
+  async function handleToggleOrgUnit(group: Group) {
+    if (!accessToken) return;
+    setOrgUnitTogglingId(group.id);
+    try {
+      await setGroupOrgUnit(accessToken, group.id, !group.is_org_unit);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("groups.orgUnitToggleError"));
+    } finally {
+      setOrgUnitTogglingId(null);
     }
   }
 
@@ -442,6 +463,15 @@ export function UserManagement() {
               onChange={(e) => setNewGroup({ ...newGroup, description: e.target.value })}
             />
           </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={newGroup.isOrgUnit}
+              onChange={(e) => setNewGroup({ ...newGroup, isOrgUnit: e.target.checked })}
+            />{" "}
+            {t("groups.isOrgUnit")}
+          </label>
+          <p className="hint">{t("groups.isOrgUnitHint")}</p>
           <button type="submit">{t("common.create")}</button>
         </form>
 
@@ -450,6 +480,7 @@ export function UserManagement() {
             <tr>
               <th>{t("groups.name")}</th>
               <th>{t("groups.description")}</th>
+              <th>{t("groups.isOrgUnit")}</th>
               <th />
             </tr>
           </thead>
@@ -459,6 +490,22 @@ export function UserManagement() {
                 <tr>
                   <td>{g.name}</td>
                   <td>{g.description || "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleOrgUnit(g)}
+                      disabled={orgUnitTogglingId !== null}
+                      aria-pressed={g.is_org_unit}
+                    >
+                      {orgUnitTogglingId === g.id ? (
+                        t("common.loading")
+                      ) : (
+                        <span className={`badge ${g.is_org_unit ? "ok" : "down"}`}>
+                          {g.is_org_unit ? t("common.yes") : t("common.no")}
+                        </span>
+                      )}
+                    </button>
+                  </td>
                   <td>
                     <button type="button" onClick={() => toggleGroupExpand(g.id)}>
                       {expandedGroupId === g.id
@@ -472,7 +519,7 @@ export function UserManagement() {
                 </tr>
                 {expandedGroupId === g.id && (
                   <tr>
-                    <td colSpan={3}>
+                    <td colSpan={4}>
                       <form
                         aria-label={t("groups.addMemberFormLabel")}
                         className="form-grid"

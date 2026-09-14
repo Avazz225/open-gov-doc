@@ -22,6 +22,7 @@ const deleteRoleAssignmentMock = vi.fn();
 const listGroupsMock = vi.fn();
 const createGroupMock = vi.fn();
 const deleteGroupMock = vi.fn();
+const setGroupOrgUnitMock = vi.fn();
 const listGroupMembersMock = vi.fn();
 const addGroupMemberMock = vi.fn();
 const removeGroupMemberMock = vi.fn();
@@ -42,6 +43,7 @@ vi.mock("@/lib/api", () => ({
   listGroups: (...args: unknown[]) => listGroupsMock(...args),
   createGroup: (...args: unknown[]) => createGroupMock(...args),
   deleteGroup: (...args: unknown[]) => deleteGroupMock(...args),
+  setGroupOrgUnit: (...args: unknown[]) => setGroupOrgUnitMock(...args),
   listGroupMembers: (...args: unknown[]) => listGroupMembersMock(...args),
   addGroupMember: (...args: unknown[]) => addGroupMemberMock(...args),
   removeGroupMember: (...args: unknown[]) => removeGroupMemberMock(...args),
@@ -86,6 +88,7 @@ describe("UserManagement", () => {
     listGroupsMock.mockReset();
     createGroupMock.mockReset();
     deleteGroupMock.mockReset();
+    setGroupOrgUnitMock.mockReset();
     listGroupMembersMock.mockReset();
     addGroupMemberMock.mockReset();
     removeGroupMemberMock.mockReset();
@@ -273,6 +276,7 @@ describe("UserManagement", () => {
       name: "Reviewers",
       description: "Vier-Augen-Prüfer",
       created_at: "2026-01-01T00:00:00Z",
+      is_org_unit: false,
     });
     renderUserManagement();
     await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(1));
@@ -288,7 +292,61 @@ describe("UserManagement", () => {
       expect(createGroupMock).toHaveBeenCalledWith("token-123", {
         name: "Reviewers",
         description: "Vier-Augen-Prüfer",
+        is_org_unit: false,
       })
+    );
+    await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("creates a group flagged as an organizational unit", async () => {
+    createGroupMock.mockResolvedValue({
+      id: "g2",
+      name: "OrgUnitA",
+      description: "",
+      created_at: "2026-01-01T00:00:00Z",
+      is_org_unit: true,
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(1));
+
+    const form = screen.getByRole("form", { name: "Gruppe anlegen" });
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "OrgUnitA" } });
+    fireEvent.click(within(form).getByLabelText("Organisationseinheit"));
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(createGroupMock).toHaveBeenCalledWith("token-123", {
+        name: "OrgUnitA",
+        description: "",
+        is_org_unit: true,
+      })
+    );
+  });
+
+  it("toggles a group's is_org_unit flag", async () => {
+    listGroupsMock.mockResolvedValue([
+      {
+        id: "g3",
+        name: "Reviewers",
+        description: "",
+        created_at: "2026-01-01T00:00:00Z",
+        is_org_unit: false,
+      },
+    ]);
+    setGroupOrgUnitMock.mockResolvedValue({
+      id: "g3",
+      name: "Reviewers",
+      description: "",
+      created_at: "2026-01-01T00:00:00Z",
+      is_org_unit: true,
+    });
+    renderUserManagement();
+    await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByText("Nein"));
+
+    await waitFor(() =>
+      expect(setGroupOrgUnitMock).toHaveBeenCalledWith("token-123", "g3", true)
     );
     await waitFor(() => expect(listGroupsMock).toHaveBeenCalledTimes(2));
   });
