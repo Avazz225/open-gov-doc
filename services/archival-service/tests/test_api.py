@@ -11,6 +11,7 @@ from archival_service import crypto, repository, xdomea, xjustiz
 from archival_service.keystore import EnvKeyStore
 from archival_service.main import app
 from fastapi.testclient import TestClient
+from lxml import etree
 
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
 
@@ -690,6 +691,7 @@ async def test_import_xdomea_standalone_document_creates_it_in_the_target_folder
         "case_created": False,
         "vorgang_betreff": None,
         "document_ids": ["new-doc-1"],
+        "skipped_document_count": 0,
     }
     app.state.document_client.create_document.assert_called_once()
     call_kwargs = app.state.document_client.create_document.call_args.kwargs
@@ -768,6 +770,64 @@ async def test_import_xdomea_rejects_a_package_missing_a_referenced_content_file
     )
 
     assert response.status_code == 422
+
+
+async def test_import_xdomea_skips_a_document_with_no_retrievable_content(client):
+    """Post-Roadmap Phase 34 Session 4 (ADR 0142) - a genuine third-party
+    package can legitimately mix a normal document with a metadata-only
+    `Dokument` reference (no `Version` at all, schema-legal per
+    `DokumentType.Version`'s own `minOccurs="0"`). The import must still
+    succeed for the importable document instead of rejecting the whole
+    package, and report the skip via `skipped_document_count`."""
+    documents = [
+        {
+            "document_id": "src-doc-4",
+            "version_number": 1,
+            "content_type": "application/pdf",
+            "original_filename": "schreiben.pdf",
+            "package_filename": xdomea.package_filename("src-doc-4", 1, "application/pdf"),
+        },
+        {
+            "document_id": "src-doc-5",
+            "version_number": 1,
+            "content_type": "application/pdf",
+            "original_filename": "physisch.pdf",
+            "package_filename": xdomea.package_filename("src-doc-5", 1, "application/pdf"),
+        },
+    ]
+    case = {"id": "src-case-3", "name": "Gemischtes Paket"}
+    message_xml = xdomea.build_abgabe_message_for_case(case, documents, leser_name="DMS")
+    root = etree.fromstring(message_xml)
+    ns = {"xdomea": xdomea.XDOMEA_NS}
+    # Strip the SECOND Dokument's Version entirely (schema-legal, a
+    # metadata-only reference) - the resulting message must stay schema-valid
+    # (`validate_abgabe_message` runs before parsing) since `Version` is
+    # `minOccurs="0"`.
+    second_dokument = root.findall(".//xdomea:Dokument", ns)[1]
+    version_el = second_dokument.find("./xdomea:Version", ns)
+    second_dokument.remove(version_el)
+    stripped_message_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+    xdomea.validate_abgabe_message(stripped_message_xml)  # sanity check the fixture itself
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("abgabe.xml", stripped_message_xml)
+        archive.writestr(f"dokumente/{documents[0]['package_filename']}", b"%PDF-fake-content")
+    package = buffer.getvalue()
+
+    app.state.document_client.create_document.return_value = {"id": "new-doc-4"}
+
+    response = client.post(
+        "/xdomea/import",
+        data={"folder_id": "target-folder", "case_id": "existing-case-2"},
+        files={"file": ("abgabe.zip", package, "application/zip")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_ids"] == ["new-doc-4"]
+    assert body["skipped_document_count"] == 1
+    app.state.document_client.create_document.assert_called_once()
 
 
 # --- General XJustiz export (14.2, Post-Roadmap Phase 31 Session 13c, ADR 0129) --

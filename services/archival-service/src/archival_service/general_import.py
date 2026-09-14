@@ -62,6 +62,11 @@ class ImportResult:
     case_created: bool
     vorgang_betreff: str | None
     document_ids: list[str] = field(default_factory=list)
+    skipped_document_count: int = 0
+    """Documents present in the package but with no retrievable primary
+    content, skipped rather than failing the import (Post-Roadmap Phase 34
+    Session 4, see `xdomea.ParsedAbgabeMessage.skipped_document_count` and
+    ADR 0142)."""
 
 
 @dataclass
@@ -165,6 +170,7 @@ async def import_abgabe_package(
         case_created=case_created,
         vorgang_betreff=parsed.vorgang_betreff,
         document_ids=document_ids,
+        skipped_document_count=parsed.skipped_document_count,
     )
 
 

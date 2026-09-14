@@ -601,6 +601,7 @@ async def import_xdomea(
         case_created=result.case_created,
         vorgang_betreff=result.vorgang_betreff,
         document_ids=result.document_ids,
+        skipped_document_count=result.skipped_document_count,
     )
 
 

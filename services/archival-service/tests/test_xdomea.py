@@ -251,12 +251,16 @@ def test_parse_abgabe_message_roundtrips_a_standalone_document_export():
     assert parsed.documents[0].original_filename == "Rechnung.pdf"
 
 
-def test_parse_dokument_element_raises_parse_error_without_a_dateiname():
+def test_parse_dokument_element_skips_a_document_without_a_dateiname():
     """A schema-VALID but structurally-unexpected message (e.g. hand-crafted
     or from a third-party system not following this module's own
     `dokumente/<Dateiname>` packaging convention) - `Primaerdokument` itself
     is `minOccurs="0"` per the schema, so a `Dokument` without one is not a
-    schema violation, but this module cannot import it."""
+    schema violation. Post-Roadmap Phase 34 Session 4 (ADR 0142) changed this
+    from a `ParseError` that rejected the WHOLE package to a per-document
+    skip - a real third-party package can legitimately mix documents that do
+    and don't carry attached content (e.g. a metadata-only reference to a
+    physical record)."""
     xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
 <xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
   <xdomea:Schriftgutobjekt>
@@ -270,5 +274,171 @@ def test_parse_dokument_element_raises_parse_error_without_a_dateiname():
   </xdomea:Schriftgutobjekt>
 </xdomea:Abgabe.Abgabe.0401>"""
 
-    with pytest.raises(xdomea.ParseError):
-        xdomea.parse_abgabe_message(xml_bytes)
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.documents == []
+    assert parsed.skipped_document_count == 1
+
+
+def test_parse_dokument_element_skips_a_document_with_no_version_at_all():
+    """`DokumentType.Version` is `minOccurs="0"` - a schema-legal, pure
+    metadata-only `Dokument` reference with no version history at all
+    (e.g. a physical record never digitized)."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:DokumentOderDokumentMitSchriftstueck>
+      <xdomea:Dokument/>
+    </xdomea:DokumentOderDokumentMitSchriftstueck>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.documents == []
+    assert parsed.skipped_document_count == 1
+
+
+def test_parse_abgabe_message_picks_the_latest_of_several_versions():
+    """A genuine third-party version history (`DokumentType.Version` is
+    `maxOccurs="unbounded"`) - the latest (last by document order), not the
+    first, must win."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:DokumentOderDokumentMitSchriftstueck>
+      <xdomea:Dokument>
+        <xdomea:Version>
+          <xdomea:Nummer>1.0</xdomea:Nummer>
+          <xdomea:Format>
+            <xdomea:Primaerdokument>
+              <xdomea:Dateiname>alt.pdf</xdomea:Dateiname>
+            </xdomea:Primaerdokument>
+          </xdomea:Format>
+        </xdomea:Version>
+        <xdomea:Version>
+          <xdomea:Nummer>2.0</xdomea:Nummer>
+          <xdomea:Format>
+            <xdomea:Primaerdokument>
+              <xdomea:Dateiname>neu.pdf</xdomea:Dateiname>
+            </xdomea:Primaerdokument>
+          </xdomea:Format>
+        </xdomea:Version>
+      </xdomea:Dokument>
+    </xdomea:DokumentOderDokumentMitSchriftstueck>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert [d.dateiname for d in parsed.documents] == ["neu.pdf"]
+    assert parsed.skipped_document_count == 0
+
+
+def test_parse_abgabe_message_reads_betreff_from_an_akte_wrapped_vorgang():
+    """A genuine third-party 0401 export CAN wrap its `Vorgang`(e) inside an
+    `Akte` (`Schriftgutobjekt` is a choice of `Akte`|`Vorgang`|`Dokument`,
+    this module's own export never produces the `Akte` variant) - the
+    Akte's own Betreff/UUID must be used as the case-name candidate, and its
+    nested Vorgang's documents (previously invisible to the direct-child-only
+    XPath) must still be found."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:Akte>
+      <xdomea:Identifikation>
+        <xdomea:xdomeaUUID>11111111-1111-1111-1111-111111111111</xdomea:xdomeaUUID>
+      </xdomea:Identifikation>
+      <xdomea:AllgemeineMetadaten>
+        <xdomea:Betreff>Drittanbieter-Akte</xdomea:Betreff>
+      </xdomea:AllgemeineMetadaten>
+      <xdomea:Akteninhalt>
+        <xdomea:Vorgang>
+          <xdomea:Identifikation>
+            <xdomea:xdomeaUUID>22222222-2222-2222-2222-222222222222</xdomea:xdomeaUUID>
+          </xdomea:Identifikation>
+          <xdomea:AllgemeineMetadaten>
+            <xdomea:Betreff>Verschachtelter Vorgang</xdomea:Betreff>
+          </xdomea:AllgemeineMetadaten>
+          <xdomea:DokumentOderDokumentMitSchriftstueck>
+            <xdomea:Dokument>
+              <xdomea:Version>
+                <xdomea:Format>
+                  <xdomea:Primaerdokument>
+                    <xdomea:Dateiname>verschachtelt.pdf</xdomea:Dateiname>
+                  </xdomea:Primaerdokument>
+                </xdomea:Format>
+              </xdomea:Version>
+            </xdomea:Dokument>
+          </xdomea:DokumentOderDokumentMitSchriftstueck>
+        </xdomea:Vorgang>
+      </xdomea:Akteninhalt>
+    </xdomea:Akte>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff == "Drittanbieter-Akte"
+    assert parsed.vorgang_xdomea_uuid == "11111111-1111-1111-1111-111111111111"
+    assert [d.dateiname for d in parsed.documents] == ["verschachtelt.pdf"]
+
+
+def test_parse_abgabe_message_combines_betreffe_of_several_top_level_vorgaenge():
+    """`Schriftgutobjekt` is `maxOccurs="unbounded"` - a real 0401 export
+    can legitimately carry more than one, each with its own bare `Vorgang`
+    and no enclosing `Akte`. All documents must still be collected
+    (previously already true), and the Betreffe are combined into one
+    display name rather than silently keeping only the first (previous
+    behavior) - no single UUID can represent several distinct Vorgänge."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:Vorgang>
+      <xdomea:Identifikation>
+        <xdomea:xdomeaUUID>33333333-3333-3333-3333-333333333333</xdomea:xdomeaUUID>
+      </xdomea:Identifikation>
+      <xdomea:AllgemeineMetadaten>
+        <xdomea:Betreff>Erster Vorgang</xdomea:Betreff>
+      </xdomea:AllgemeineMetadaten>
+      <xdomea:DokumentOderDokumentMitSchriftstueck>
+        <xdomea:Dokument>
+          <xdomea:Version>
+            <xdomea:Format>
+              <xdomea:Primaerdokument>
+                <xdomea:Dateiname>eins.pdf</xdomea:Dateiname>
+              </xdomea:Primaerdokument>
+            </xdomea:Format>
+          </xdomea:Version>
+        </xdomea:Dokument>
+      </xdomea:DokumentOderDokumentMitSchriftstueck>
+    </xdomea:Vorgang>
+  </xdomea:Schriftgutobjekt>
+  <xdomea:Schriftgutobjekt>
+    <xdomea:Vorgang>
+      <xdomea:Identifikation>
+        <xdomea:xdomeaUUID>44444444-4444-4444-4444-444444444444</xdomea:xdomeaUUID>
+      </xdomea:Identifikation>
+      <xdomea:AllgemeineMetadaten>
+        <xdomea:Betreff>Zweiter Vorgang</xdomea:Betreff>
+      </xdomea:AllgemeineMetadaten>
+      <xdomea:DokumentOderDokumentMitSchriftstueck>
+        <xdomea:Dokument>
+          <xdomea:Version>
+            <xdomea:Format>
+              <xdomea:Primaerdokument>
+                <xdomea:Dateiname>zwei.pdf</xdomea:Dateiname>
+              </xdomea:Primaerdokument>
+            </xdomea:Format>
+          </xdomea:Version>
+        </xdomea:Dokument>
+      </xdomea:DokumentOderDokumentMitSchriftstueck>
+    </xdomea:Vorgang>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff == "Erster Vorgang; Zweiter Vorgang"
+    assert parsed.vorgang_xdomea_uuid is None
+    assert sorted(d.dateiname for d in parsed.documents) == ["eins.pdf", "zwei.pdf"]

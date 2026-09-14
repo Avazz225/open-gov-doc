@@ -18,10 +18,15 @@
   document (no case) needs. Only the 0401 message itself is built/emitted,
   not the 0402/0403 import-confirmation counterparts. Since Session 13b,
   `parse_abgabe_message` reads a 0401 message back (the IMPORT direction) -
-  deliberately scoped to the exact package shape THIS module's own export
+  originally scoped to the exact package shape THIS module's own export
   produces (one `dokumente/<Dateiname>` ZIP entry per `Primaerdokument`,
-  `Schriftgutobjekt` containing at most one `Vorgang`), not arbitrary
-  third-party XDOMEA packaging conventions (see that function's docstring).
+  `Schriftgutobjekt` containing at most one `Vorgang`), hardened in
+  Post-Roadmap Phase 34 Session 4 (ADR 0142) for genuine third-party
+  packages: an `Akte`-wrapped `Vorgang` hierarchy, more than one top-level
+  `Vorgang`, a document's version history (picks the latest, not the
+  first), and a `Dokument` with no attached primary-document content
+  (skipped, not a rejected whole-package import) - see that function's and
+  `ParsedAbgabeMessage`'s own docstrings for the exact, still bounded scope.
 
 Every field here was validated against the real XDOMEA 4.0.0 schema vendored
 in `xdomea_schema/` (not speculative - see comments at the places where the
@@ -352,10 +357,8 @@ def validate_abgabe_message(xml_bytes: bytes) -> None:
 
 
 class ParseError(Exception):
-    """The message is schema-valid XML but is missing a field
-    `parse_abgabe_message` needs (e.g. `Primaerdokument/Dateiname` on a
-    `Dokument`, technically optional per the schema's own `minOccurs`, but
-    required for THIS module's own round-trip)."""
+    """The message is schema-valid XML but is structurally unreadable in a
+    way `parse_abgabe_message` cannot route around."""
 
 
 @dataclass
@@ -369,29 +372,84 @@ class ParsedAbgabeDocument:
 @dataclass
 class ParsedAbgabeMessage:
     vorgang_betreff: str | None
-    """`None` if the package contains no `Vorgang` at all (a standalone
-    document export, see `build_abgabe_message_for_document`)."""
+    """`None` if the package contains no `Vorgang`/`Akte` at all (a
+    standalone document export, see `build_abgabe_message_for_document`).
+    Populated from, in priority order (Post-Roadmap Phase 34 Session 4, see
+    ADR 0142): (1) a top-level `Akte`'s own `AllgemeineMetadaten/Betreff` -
+    this module's own export never produces an `Akte` `Schriftgutobjekt`
+    (see the module docstring), but the schema's own
+    `Schriftgutobjekt`-choice (`Akte` | `Vorgang` | `Dokument`) means a real
+    third-party 0401 export legitimately can, nesting its `Vorgang`s inside
+    `Akteninhalt`; (2) a single `Vorgang`'s own Betreff, found ANYWHERE under
+    a `Schriftgutobjekt` (not just as its direct child - also covers a
+    `Vorgang` nested inside an `Akte`'s `Akteninhalt`, the previous
+    direct-child-only XPath missed this entirely); (3) for more than one
+    `Vorgang` and no enclosing `Akte`, every found Betreff joined with
+    `"; "` - this project's Case model maps 1:1 to a single Vorgang, so
+    several structurally-independent Vorgänge collapse into one combined
+    display name instead of either silently keeping only the first
+    (previous behavior) or rejecting the whole package outright (a real
+    0401 export can carry more than one `Schriftgutobjekt`, each with its
+    own `Vorgang` - `xdomea-Nachrichten-AbgabeDurchfuehren.xsd`'s own
+    `Schriftgutobjekt` is `maxOccurs="unbounded"`)."""
     vorgang_xdomea_uuid: str | None
+    """`None` whenever `vorgang_betreff` was built from more than one
+    `Vorgang` (case 3 above) - no single UUID can represent several
+    structurally-independent Vorgänge."""
     documents: list[ParsedAbgabeDocument] = field(default_factory=list)
+    skipped_document_count: int = 0
+    """`Dokument` elements found under a `Schriftgutobjekt` that were
+    structurally present but had no retrievable primary-document content (no
+    `Version` at all, or none of its `Version` entries carry a `Format` with
+    a `Primaerdokument`/`Dateiname`) - schema-legal (`DokumentType.Version`
+    is `minOccurs="0"`, e.g. a metadata-only reference to a physical record
+    that was never digitized), so these are SKIPPED rather than failing the
+    whole package import (Post-Roadmap Phase 34 Session 4, see ADR 0142) -
+    the previous behavior raised `ParseError` (surfaced as a `422`) and
+    rejected an entire genuine third-party package over a single such
+    document. `DokumentMitSchriftstueck` (the schema's other
+    `DokumentOderDokumentMitSchriftstueck` choice member, a document with
+    nested physical-page/Schriftstück scans) remains entirely unsupported -
+    genuinely out of this session's bounded scope, not counted here either."""
 
 
-def _parse_dokument_element(dokument_el: "etree._Element") -> ParsedAbgabeDocument:
+def _vorgang_name(el: "etree._Element", ns: dict) -> tuple[str | None, str | None]:
+    """Betreff/xdomeaUUID of a `Vorgang` OR `Akte` element - both types share
+    the identical `AllgemeineMetadaten`/`Identifikation` substructure."""
+    betreff_el = el.find("./xdomea:AllgemeineMetadaten/xdomea:Betreff", ns)
+    uuid_el = el.find("./xdomea:Identifikation/xdomea:xdomeaUUID", ns)
+    return (
+        betreff_el.text if betreff_el is not None else None,
+        uuid_el.text if uuid_el is not None else None,
+    )
+
+
+def _parse_dokument_element(dokument_el: "etree._Element") -> ParsedAbgabeDocument | None:
+    """Returns `None` (not `ParseError`) for a schema-legal `Dokument` with
+    no retrievable primary-document content - see
+    `ParsedAbgabeMessage.skipped_document_count`'s docstring. Among multiple
+    `Version` entries (a genuine version history, `DokumentType.Version` is
+    `maxOccurs="unbounded"`), picks the LAST one (by document order) that
+    carries a `Format`/`Primaerdokument` - the previous code blindly used a
+    single `find()` on the FIRST `Version`/`Format`, silently importing a
+    document's oldest content instead of its most recent whenever a real
+    third-party package actually carried version history."""
     ns = {"xdomea": XDOMEA_NS}
-    primaerdokument_el = dokument_el.find(
-        "./xdomea:Version/xdomea:Format/xdomea:Primaerdokument", ns
-    )
-    dateiname_el = (
-        primaerdokument_el.find("./xdomea:Dateiname", ns)
-        if primaerdokument_el is not None
-        else None
-    )
+    format_el = None
+    for version_el in reversed(dokument_el.findall("./xdomea:Version", ns)):
+        format_el = version_el.find("./xdomea:Format", ns)
+        if format_el is not None:
+            break
+    if format_el is None:
+        return None
+    primaerdokument_el = format_el.find("./xdomea:Primaerdokument", ns)
+    if primaerdokument_el is None:
+        return None
+    dateiname_el = primaerdokument_el.find("./xdomea:Dateiname", ns)
     if dateiname_el is None or not dateiname_el.text:
-        raise ParseError(
-            "Dokument ohne Primaerdokument/Dateiname - Paket entspricht nicht dem von "
-            "diesem Modul erwarteten Format"
-        )
+        return None
     original_el = primaerdokument_el.find("./xdomea:DateinameOriginal", ns)
-    sonstiger_name_el = dokument_el.find("./xdomea:Version/xdomea:Format/xdomea:SonstigerName", ns)
+    sonstiger_name_el = format_el.find("./xdomea:SonstigerName", ns)
     return ParsedAbgabeDocument(
         dateiname=dateiname_el.text,
         original_filename=(
@@ -403,40 +461,59 @@ def _parse_dokument_element(dokument_el: "etree._Element") -> ParsedAbgabeDocume
 
 def parse_abgabe_message(xml_bytes: bytes) -> ParsedAbgabeMessage:
     """Reads an `Abgabe.Abgabe.0401` message back (14.2, Post-Roadmap Phase
-    31 Session 13b) - the IMPORT direction, the mirror of
+    31 Session 13b, hardened for genuine third-party packages in Post-Roadmap
+    Phase 34 Session 4, ADR 0142) - the IMPORT direction, the mirror of
     `build_abgabe_message_for_case`/`build_abgabe_message_for_document`.
     Does NOT re-validate against the schema (call `validate_abgabe_message`
     first, same two-step pattern as `general_export.py`'s own build/validate
     calls) and deliberately does not attempt to be a general-purpose XDOMEA
     reader: it looks for `Dokument` elements ANYWHERE under a
-    `Schriftgutobjekt` (covers both a `Vorgang`'s nested documents and a
-    standalone top-level `Dokument`, but deliberately excludes the optional
-    `Anschreiben` cover-letter element, a sibling of `Schriftgutobjekt`, not
-    a descendant), and reads the FIRST `Vorgang`'s `Betreff`/`xdomeaUUID` if
-    one exists. A package with more than one top-level `Schriftgutobjekt`
-    (this module's own export never produces more than one, but the schema
-    permits `maxOccurs="unbounded"`) has all of its documents flattened into
-    one list rather than rejected - a deliberately lenient, bounded scope,
-    not a claim of full third-party-XDOMEA-package generality."""
+    `Schriftgutobjekt` (covers a `Vorgang`'s nested documents, an `Akte`'s
+    nested documents/Vorgänge's documents, and a standalone top-level
+    `Dokument`, but deliberately excludes the optional `Anschreiben`
+    cover-letter element, a sibling of `Schriftgutobjekt`, not a descendant).
+    See `ParsedAbgabeMessage.vorgang_betreff`'s docstring for the
+    Akte/multi-Vorgang naming priority and
+    `ParsedAbgabeMessage.skipped_document_count`'s for the tolerant
+    per-document handling. Still deliberately bounded, not a claim of full
+    third-party-XDOMEA-package generality: `Teilvorgang`/`Teilakte` (nested
+    sub-Vorgänge/sub-Akten, a distinct element name from `Vorgang`/`Akte`
+    even though they share the same type) are not walked for their OWN
+    Betreff/UUID - only their nested `Dokument` elements are still picked up
+    via the unconditional `//Dokument` descendant search above, so no
+    document is silently dropped, but a package whose ONLY Vorgang-like
+    content lives inside a `Teilvorgang` gets no case name candidate from it."""
     root = etree.fromstring(xml_bytes)
     ns = {"xdomea": XDOMEA_NS}
 
+    akte_els = root.findall(".//xdomea:Schriftgutobjekt/xdomea:Akte", ns)
+    vorgang_els = root.findall(".//xdomea:Schriftgutobjekt//xdomea:Vorgang", ns)
+
     vorgang_betreff: str | None = None
     vorgang_xdomea_uuid: str | None = None
-    for vorgang_el in root.findall(".//xdomea:Schriftgutobjekt/xdomea:Vorgang", ns):
-        betreff_el = vorgang_el.find("./xdomea:AllgemeineMetadaten/xdomea:Betreff", ns)
-        uuid_el = vorgang_el.find("./xdomea:Identifikation/xdomea:xdomeaUUID", ns)
-        vorgang_betreff = betreff_el.text if betreff_el is not None else None
-        vorgang_xdomea_uuid = uuid_el.text if uuid_el is not None else None
-        break
+    if akte_els:
+        vorgang_betreff, vorgang_xdomea_uuid = _vorgang_name(akte_els[0], ns)
+    elif len(vorgang_els) == 1:
+        vorgang_betreff, vorgang_xdomea_uuid = _vorgang_name(vorgang_els[0], ns)
+    elif vorgang_els:
+        betreffe = [
+            betreff for betreff, _ in (_vorgang_name(el, ns) for el in vorgang_els) if betreff
+        ]
+        vorgang_betreff = "; ".join(betreffe) if betreffe else None
+        vorgang_xdomea_uuid = None
 
-    documents = [
-        _parse_dokument_element(dokument_el)
-        for dokument_el in root.findall(".//xdomea:Schriftgutobjekt//xdomea:Dokument", ns)
-    ]
+    documents: list[ParsedAbgabeDocument] = []
+    skipped_document_count = 0
+    for dokument_el in root.findall(".//xdomea:Schriftgutobjekt//xdomea:Dokument", ns):
+        parsed_document = _parse_dokument_element(dokument_el)
+        if parsed_document is None:
+            skipped_document_count += 1
+        else:
+            documents.append(parsed_document)
 
     return ParsedAbgabeMessage(
         vorgang_betreff=vorgang_betreff,
         vorgang_xdomea_uuid=vorgang_xdomea_uuid,
         documents=documents,
+        skipped_document_count=skipped_document_count,
     )
