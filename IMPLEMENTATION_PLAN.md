@@ -712,8 +712,8 @@ expected beyond docs; `PROGRESS.md` explicitly marks this session "Scoping, not 
 
 ### Deliberately not carried into this plan (still deferred)
 
-- **AD group→role automatic sync** — referenced as a "future session" since Phase 24, never scheduled; no new trigger found since Phase 31.
-- **`mail-connector`: a real IMAP backend instead of the `imaplib` mock** — production IMAP integration, no installation need identified.
+- ~~**AD group→role automatic sync** — referenced as a "future session" since Phase 24, never scheduled; no new trigger found since Phase 31.~~ **Corrected in the Phase 38+ re-analysis below**: this framing was stale — a real mechanism has existed since P24-S2 (ADR 0093); the actual remaining gap is now scoped as P39-S3.
+- ~~**`mail-connector`: a real IMAP backend instead of the `imaplib` mock** — production IMAP integration, no installation need identified.~~ **Corrected in the Phase 38+ re-analysis below**: this framing misdescribed the current state — a real, production-grade `ImapBackend` already exists; only the unit-test suite mocks `imaplib` (ADR 0095, a test-infra limitation). The actual gap (Microsoft Graph/O365) is now scoped as P43-S3.
 - **Azure storage backend: real WORM/Object Lock** — blocked by Azurite's lack of WORM support in the test environment; app-layer guard only. Deferred until a real Azure test environment is available.
 - **Third-party long-term archive integration, Java 11 runtime/SBOM/multi-solution coexistence, UI-parity convenience fixes** — unchanged from the original gap analysis, no new triggers found.
 
@@ -721,6 +721,182 @@ expected beyond docs; `PROGRESS.md` explicitly marks this session "Scoping, not 
 ADR for non-trivial decisions, `PROGRESS.md` updated, `graphify update .` at phase end, backend
 regression (`scripts/run-tests.sh --build`) + frontend regression (`tsc`/`eslint`/`vitest`/`next
 build`) before completion.
+
+## Phase 38+: New Gap Re-Analysis after Phase 37 Completed
+
+User request after P37-S1 (the last session of the whole Phase 32+ plan): a fresh gap analysis, with a
+new plan starting at Phase 38 if any real gaps turn up. Same methodology as after P31-S13: **four parallel
+research agents** — (1) a sweep of all 147 ADRs (`docs/adr/0001`–`0147`) for follow-up scope their own
+"Consequences" sections honestly named but never picked up; (2) a sweep of all ~50
+`docs/services/*.md` files for still-open (not struck-through) "Open Points"; (3) a comparison of
+`Business__DMS-Konzept.md` (the original concept document, all ~14 top-level sections) against actual
+implementation coverage; (4) a re-evaluation of the items already listed above as "deliberately not
+carried into this plan" — is the stated blocking reasoning still accurate?
+
+**Result**: the system overall is very mature — the large majority of initially-suspected gaps turned out,
+on closer inspection, to already be cleanly implemented or correctly and still-deliberately deferred. But
+the research surfaced a real, non-trivial number of gaps, several of them security-relevant, including:
+- a **live-verified, actually exploitable bug** in `folder-service` (a forced 2-node cycle A→B→A
+  permanently makes both folders undeletable — reproduced via `curl` against the real running stack, not
+  merely inferred from docs);
+- an **operational incident that has already happened**: `storage-service` has no way to cleanly
+  decommission a storage target — this has already caused 30,410 orphaned rows that had to be manually
+  cleaned up via SQL (see `docs/services/storage-service.md`);
+- several **real authorization gaps**: `audit-service`'s `GET /events`/`.../verify` has no role check at
+  all (readable by anyone with network access), `notification-service`'s `POST /notifications` has no
+  caller-side permission check (any authenticated principal can send a notification to any known user — a
+  spam/abuse vector), `virus-scan-service`'s `/scan`/`GET /scans/*` have no real authorization beyond
+  token validity (AND the actual AV engine, `ClamdEngine`, isn't wired into the compose stack at all — no
+  `clamd` container), `user-ui`'s `RetentionPanel`/`FolderRetentionModal` have no role restriction
+  whatsoever (any logged-in user can set/release a legal hold), plus a **systemic** pattern: teamspace
+  membership is not actually enforced anywhere except `search-service` — direct access via
+  `folder-service`/`document-service` bypasses it entirely (confirmed by `folder-service`'s own docs);
+- two **completely unbuilt concept requirements** that no session ever picked up: concept **5.5**
+  (fine-grained session/device tracking for privileged accounts) and concept **5.2**'s specific
+  requirement for real **attribute-level pseudonymization** (distinct from the document-content redaction
+  already built in ADR 0115);
+- a **correction of two items** previously listed as "deliberately not carried forward" above, whose
+  stated reasoning turned out to be stale (see its own subsection below) — both are removed from that old
+  list and reframed more precisely.
+
+One item from the ADR sweep was found to be a false positive and dropped: ADR 0116's own text names
+"`search-service` is NOT made quarantine-aware" as an open point — this was actually closed in
+**Post-Roadmap Phase 36 Session 2** (later in this same overall effort than ADR 0116 itself); the
+research agent only had the ADR text, not the intervening session history. Not carried into this plan.
+
+**Numbering**: the last phase in this plan is Phase 37, the highest ADR number is 0147 — this plan starts
+at **Phase 38** / **ADR 0148**.
+
+**Ordering principle**: real security/correctness bugs first (cheapest, highest value, some already
+demonstrably harmful), then RBAC completion (several are direct follow-ups of already-shipped ADRs, e.g.
+0130/0144), then operational reliability (the storage decommissioning gap has already caused real pain),
+then the two genuine compliance gaps from the concept document, then remaining functional completion,
+then two pure scoping sessions for the largest not-yet-design-ready topics. The DMS-to-DMS XDOMEA handoff
+from ADR 0147/P37-S1 is already fully scoped — it appears here directly as a build session, not another
+scoping pass.
+
+### Phase 38 — Security and Correctness Bugfixes (highest priority)
+
+| Session | Deliverable |
+|---|---|
+| P38-S1 | `folder-service` move-cycle bug (live-verified: a forced A→B→A cycle permanently makes both folders undeletable — only the direct parent is checked, no ancestor-chain cycle detection) plus the same bug class in `document-service` (`allowedParentTypes` has no cycle detection at all) and `object-type-service` (`allowed_parent_types` has neither a retroactive check nor cycle detection) — one reusable ancestor-chain-walk fix applied at all three sites. |
+| P38-S2 | Ungated/weakly-gated endpoints, round 1: `audit-service`'s `GET /events`/`.../verify` gets a real role check (currently fully ungated); `virus-scan-service`'s `/scan`/`GET /scans/*` get real authorization beyond token validity; `notification-service`'s `POST /notifications` gets a caller-permission check plus simple rate limiting against repeated abuse; `document-service`'s internal disposal callbacks (`PUT .../archived` etc.) get a real caller check instead of relying purely on network topology. |
+| P38-S3 | Ungated/weakly-gated endpoints, round 2 (frontend): `user-ui`'s `RetentionPanel`/`FolderRetentionModal` get a real role restriction (currently any logged-in user can set/release a legal hold); `admin-ui`'s inconsistent authorization surface is audited and aligned (currently only `/users/` has client-side gating, every other admin area relies purely on the backend's `403` — not wrong, but inconsistent and a worse UX on missing permission). |
+| P38-S4 | Teamspace permission anchoring (genuine architecture decision, new ADR): teamspace membership is currently enforced nowhere except `search-service` — direct access via `folder-service`/`document-service` bypasses it entirely. Session designs and builds how teamspace membership actually anchors into the existing `permission-service` resource-tree RBAC (likely: a teamspace folder automatically gets a `permission-service` role assignment per member at creation, instead of a separate, parallel check). |
+
+**Definition of Done**: a regression test per fix (in particular one that proves the previously
+reproduced cycle bug is now actually closed); new ADR for P38-S4; docs and `PROGRESS.md` updated per
+session.
+
+### Phase 39 — RBAC Completion
+
+| Session | Deliverable |
+|---|---|
+| P39-S1 | Domain-admin roles without a technical account: 5 of 7 (`domain-admin-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs`) exist only as a `Role` row with no technical account and no enforcing endpoint (confirmed in both `auth-service.md` and `permission-service.md`). Session decides per role whether it's actually needed (same pattern as `domain-admin-query-console`, enforced directly via role-assignment lookup with no dedicated account needed) or should be removed as dead scaffolding. |
+| P39-S2 | Remaining four-eyes/validation gaps: `PUT /roles/{id}` (role **update**) gets four-eyes analogous to create/assign (ADR 0130 deliberately built only those two); `GET /check` doesn't server-side-validate `access_type` against a permission→access_type mapping (a caller could pass a wrong `access_type`); maintenance mode only blocks gateway writes, not direct service-to-service writes. |
+| P39-S3 | AD group→role mapping, the precise remaining gap: the old framing ("fully blocked, no foundation") is stale (see the correction subsection below) — a real mechanism has existed since P24-S2 (ADR 0093). This session builds what's actually still missing: composite rules (multiple groups via AND logic → one role), a configurable default for unmapped groups (currently hardcoded "no role"), four-eyes on mapping changes, and inclusion of mappings in config export/import (7.3). |
+| P39-S4 | Document/case RBAC polish: documents get a real per-document resource-tree entry (like cases got since ADR 0144) instead of the coarse `resource_id="root"` fallback; `GET /cases` gets row-level RBAC filtering (currently all-or-nothing); org-hierarchy grants (ADR 0121) narrow onto the new case resource type instead of scoping only by `process_definition_id`. |
+
+**Definition of Done**: tests per fix; new ADR for P39-S1 (per-role decision: build vs. remove) and
+P39-S4 (genuine architecture decision: new resource type); docs and `PROGRESS.md` updated per session.
+
+### Phase 40 — Operational Reliability
+
+| Session | Deliverable |
+|---|---|
+| P40-S1 | Storage target decommissioning plus related gaps: a mechanism to cleanly remove a storage target from the target set (has already caused a real incident — 30,410 orphaned rows, see `docs/services/storage-service.md`) — highest priority of this phase. Same session: `quorum_count` is re-validated when a target's role toggles (active↔archive) instead of silently allowing a potentially unsatisfiable quorum combination; a bulk fixity-verify cronjob complements the existing single-object check (`GET /object-verify/{key}/all`) with a periodic full sweep (concept 3.6, "regular fixity check"). |
+| P40-S2 | `reporting-service`/`query-service`: unbounded concurrency fan-out. The Open Point already documented (and actually reproduced) in P36-S3 — the `asyncio.gather` fan-out to `document-service` exhausts the shared `httpx` connection pool at scale — gets an actual fix now: a bounded-concurrency semaphore or a lower default `limit`, addressed for both services together since both independently implemented the identical `filtering.py` pattern. |
+| P40-S3 | `federation-hub-service` reliability: API key/certificate rotation and revocation without a full de-/re-registration; retry logic for the return path (`POST /handovers/{id}/result`), mirroring the existing outbound retry logic (ADR 0081 deliberately left the return path out of scope); admin UI visibility + manual restart for failed handovers (matching `archival-service`/`notification-service`/`rendering-service`/`ocr-service`, which all already have this). |
+| P40-S4 | Targeted sensor retrofit: Phase 11 (sensor/monitoring infrastructure) shipped long ago, but `federation-hub-service` and `plugin-orchestration-service` still literally carry "follows in Phase 11" in their own Open Points. Add two concrete, high-value sensors (not a blanket retrofit across all ~25 services): `federation-hub-service`'s retry-cache depth/pending count (directly relevant to the memory-pressure risk ADR 0147 flagged for large payloads) and `storage-service`'s replication backlog (`ObjectCopy` rows in `failed`/pending-retry); migrate `plugin-orchestration-service` off its transitional `psutil` snapshot onto the real sensor infrastructure that has existed since Phase 11. |
+
+**Definition of Done**: tests per fix, in particular a regression test for P40-S1 proving a
+decommissioned target no longer produces new orphaned rows; no new ADR expected (pure completion/
+hardening of already-established patterns); docs and `PROGRESS.md` updated per session.
+
+### Phase 41 — Compliance Gaps from the Concept Document
+
+| Session | Deliverable |
+|---|---|
+| P41-S1 | PAdES-B-LTA (long-term signature archiving): concept 3.10 explicitly requires B-LTA for the disposal use case (5.6) — `signature-service` has only implemented B-B so far (see its own Open Points). Session builds B-LTA (a timestamp authority is needed — research at session start on whether a real TSA is wired in or an internal timestamp solution suffices) AND closes the currently-missing doc cross-reference: `archival-service.md` (which actually owns the 5.6 use case) doesn't mention this dependency at all today — anyone checking 5.6 coverage via `archival-service` alone would never discover this gap. |
+| P41-S2 | Concept 5.2: real attribute-level pseudonymization. The concept resolves the retention-vs-deletion GDPR tension via targeted pseudonymization/redaction of *individual personal-data attributes* — distinct from the document-content redaction already built (ADR 0115, PyMuPDF burn-in for PDF content, a different use case). This session builds the attribute-level mechanism from scratch. |
+| P41-S3 | Concept 5.5: fine-grained user tracking for privileged accounts. An optional, per-user-toggleable tracking layer (device/browser fingerprint, client IP, auth method, session duration, network/location info), default-on for the activated superuser (4.6), individually toggleable for other privileged accounts, with its own short retention period (concept names 7 days) separate from the regular audit log (5.3). Never picked up anywhere in the project so far — entirely new. |
+
+**Definition of Done**: tests per fix; new ADR per session (all three are genuine, new architecture
+decisions: TSA choice for B-LTA, pseudonymization mechanism, tracking storage/retention design); docs and
+`PROGRESS.md` updated per session; live verification for P41-S3 (session tracking is inherently a
+frontend/auth-flow concern).
+
+### Phase 42 — Remaining Functional Completion
+
+| Session | Deliverable |
+|---|---|
+| P42-S1 | XDOMEA import hardening + missing UI: real third-party packages with nested `Teilvorgang`/`Teilakte` hierarchies and physical `Schriftstück` structures remain only partially supported after ADR 0142 — close the remaining gap if reasonably scoped (re-assess at session start, since full XDOMEA interop coverage could balloon). Same session: a minimal UI for "import creates a new case" (currently API-only, since no process-definition picker exists anywhere in the project — find the smallest sensible solution, e.g. a dropdown of process-definition names rather than a full picker). |
+| P42-S2 | `license-service`: complete usage-limit enforcement. Currently only document count actively blocks on overage; storage/user limits are display-only. Bring them to parity. |
+| P42-S3 | `object-type-service`: a server-side resolved-display endpoint for the Kennzeichen (reference number) config. Currently at least 3 frontends duplicate their own client-side resolution logic for `kennzeichen_display_override`/format — a new, central "resolved display" endpoint removes the duplication and the inconsistency risk. |
+| P42-S4 | `rendering-service`: preserve PDF/UA tags on multi-document export. Single-document export was already fixed (see `is_tagged_pdf()`/the Phase 33 accessibility work); multi-document folder export (`build_folder_export`) still unconditionally strips every constituent document's structure tags — a real, still-open accessibility compliance gap. |
+
+**Definition of Done**: tests per fix; no new ADR expected (pure functional completion of already-
+established patterns); docs and `PROGRESS.md` updated per session.
+
+### Phase 43 — Build and Scoping Sessions for Larger Topics
+
+| Session | Deliverable |
+|---|---|
+| P43-S1 | DMS-to-DMS XDOMEA handoff, the actual build: already fully scoped in [ADR 0147](docs/adr/0147-cross-installation-xdomea-handoff-scoping.md)/P37-S1 (base64-in-envelope transport, extending `taskType=federated` with a reserved `process_type`) — this session actually builds it, no further scoping needed. Must account for the memory-pressure risk ADR 0147 itself flagged (now at least observable given P40-S4's new retry-cache sensor). |
+| P43-S2 | Scoping only: teamspace group invitation. The old blocking reasoning ("waiting on AD/Keycloak group integration") is stale — that integration has existed since P24-S2 (ADR 0093). Session checks whether the blocker is actually gone and what a real build would still need (likely: an invitation UI + a mapping mechanism between AD group and teamspace membership) — result is a build recommendation for a later phase, not an implementation. |
+| P43-S3 | Scoping only: a Microsoft Graph/O365 mailbox backend for `mail-connector`. A genuine external OAuth2/Graph API dependency (app registration, consent flow, token refresh) — deserves its own research before a build session, same approach as P37-S1. |
+
+**Definition of Done**: P43-S1 with the full test/docs/live-verification cycle like any regular build
+session; P43-S2/S3 like P37-S1 — new ADR with a clear recommendation, no code diff expected,
+`PROGRESS.md` explicitly marks them "Scoping, not a feature."
+
+### Correction of two previously "deferred" items
+
+The re-evaluation research (agent 4 of this round) found two entries in the "Deliberately not carried
+into this plan" list above (Phase 32+) to be **based on stale reasoning**:
+
+- **"AD group→role automatic sync"** — the old framing ("never scheduled, no foundation") is wrong: a
+  real mechanism has existed since **P24-S2** ([ADR 0093](docs/adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md))
+  — a Keycloak group-claim mapper plus an `ad_group_role_mapping` table, resolved live on every `GET /me`
+  (no caching, so it already reflects a group change automatically). What's actually still missing is
+  much narrower and is now scheduled as **P39-S3** above, instead of remaining broadly deferred.
+- **"`mail-connector`: a real IMAP backend instead of the `imaplib` mock"** — this framing misdescribes
+  the current state: a real, production-grade `ImapBackend` already exists, live-verified against a real
+  `greenmail` IMAP container. Only the **unit test suite** mocks at the `imaplib` boundary (ADR 0095,
+  because `mailpit` itself has no IMAP support — a test-infrastructure limitation, not a production gap).
+  What's actually missing is a **Microsoft Graph/O365 backend** — now scoped more precisely as **P43-S3**.
+
+### Deliberately not carried into this plan (from this round's research)
+
+- **Pure UI polish** (missing breadcrumbs/context menus in individual frontend views, missing i18n second
+  language, missing multi-column drag-and-drop in the layout designer, dozens of smaller "would be nicer"
+  items scattered across all six frontend apps) — low individual value, picked up only opportunistically
+  alongside related future work.
+- **QES (qualified electronic signature)** — needs a real external QTSP relationship, no installation
+  need identified.
+- **PKCS#11/HSM support for `signature-service`** — pure production hardening for a real PKI, no need
+  identified unless a concrete operator requests it.
+- **OCSP/CRL revocation checking** for the internal signature CA — the practical ceiling of a self-signed
+  internal CA, accepted.
+- **CheckMK integration** — already explicitly declined by the user in an earlier session.
+- **XAdES/CAdES signature formats** (PAdES/PDF only), **SAML 2.0** for legacy ADFS, **Excel/PowerPoint/
+  Outlook** support for `office-addin` (Word only), **Calc/Impress** for `libreoffice-addin` (Writer
+  only) — deliberate, documented scope boundaries with no current trigger.
+- **`plugin-orchestration-service`: real container automation** instead of the current recommendation-
+  only approach — a large, standalone topic with no current trigger.
+- **`workflow-service`: a distributed lock across multiple replicas** (timers could double-fire under
+  horizontal scaling) — only relevant once `workflow-service` is actually run horizontally scaled, not
+  the case today.
+- Various smaller polish items individually named in this round's research (e.g. `config-service`'s
+  missing deep diff of nested structures, `search-service`'s two-word proximity-search cap,
+  `registry-service`'s missing cleanup of permanently unreachable instances) — individually too low-value
+  for their own session, not forgotten but not scheduled.
+
+**Definition of Done for Phases 38–43** (unchanged, `CONTRIBUTING.md`): tests green per session, new ADR
+for non-trivial decisions (see per phase above which ones), `PROGRESS.md` updated, `graphify update .` at
+phase end, backend regression (`scripts/run-tests.sh --build`) + frontend regression
+(`tsc`/`eslint`/`vitest`/`next build`) before completion, live verification in a real browser for every
+UI change.
 
 ## PROGRESS.md — Resume Mechanism
 

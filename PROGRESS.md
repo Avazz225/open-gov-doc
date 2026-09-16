@@ -37,14 +37,27 @@ each gained a short cross-reference pointing at it. The recommended DMS-to-DMS h
 **scoped, not scheduled** — no session number assigned, awaiting a future phase if this gap is ever
 prioritized for an actual build.
 
-**Next session:** none currently scheduled. This concludes the entire Phase 32+ gap-closure plan
-(`IMPLEMENTATION_PLAN.md` "Phase 32+", spanning Phases 32–37) that followed the P31-S13 gap re-analysis —
-every phase in it (32 Security/RBAC hardening, 33 Accessibility, 34 XDOMEA/XJustiz completion, 35 Org-
-hierarchy/workflow polish, 36 Records quarantine/output stamping/misc, 37 this scoping session) is now
-either fully implemented or, for 37 specifically, deliberately scoped-but-deferred by its own design. Same
-pattern as after Phase 26 completed (see below) — the next concrete work item awaits the user's own
-direction, whether that's building P37-S1's recommended DMS-to-DMS handoff feature, a fresh gap re-analysis
-against the current codebase, or an entirely new feature request.
+**Next session:** **P38-S1** (`folder-service` move-cycle bugfix + the same bug class in
+`document-service`/`object-type-service`). Immediately after P37-S1 concluded the entire Phase 32+
+gap-closure plan (spanning Phases 32–37), the user requested a fresh gap re-analysis — same methodology
+as after P31-S13: four parallel research agents (ADR-Consequences sweep across all 147 ADRs,
+`docs/services/*.md` Open-Points sweep, `Business__DMS-Konzept.md`-vs-implementation coverage check,
+re-evaluation of previously-deferred items). Result: the system is very mature overall, but the research
+found a real, non-trivial list of gaps — including a **live-verified, actually exploitable bug**
+(`folder-service`'s move endpoint permits a 2-node cycle that makes both folders permanently
+undeletable) and an **operational incident that already happened** (`storage-service` has no way to
+decommission a storage target, which has already produced 30,410 orphaned rows requiring manual SQL
+cleanup) — plus several real authorization gaps (`audit-service`/`notification-service`/
+`virus-scan-service` endpoints, `user-ui`'s legal-hold panels, and a systemic one: teamspace membership
+is enforced nowhere except `search-service`), two completely unbuilt concept requirements (5.5
+fine-grained session tracking, 5.2's attribute-level pseudonymization, both distinct from features
+already built), and a correction of two previously-deferred items (AD group→role sync, `mail-connector`
+IMAP) whose blocking reasoning turned out to be stale. This produced a new plan, **Phases 38–43**, added
+to `IMPLEMENTATION_PLAN.md` right after Phase 37 (security/correctness bugfixes → RBAC completion →
+operational reliability → concept compliance gaps → remaining functional completion → build/scoping for
+the largest remaining topics), approved via the same plan-mode flow as Phase 32+ itself (plan file:
+`~/.claude/plans/ich-habe-hier-ein-calm-thacker.md`, now containing both plans). See
+`IMPLEMENTATION_PLAN.md` "Phase 38+" for the full breakdown and reasoning per session.
 
 Immediately before P37-S1: **P36-S3** (`reporting-service`: row-level RBAC filtering for the forensic trace,
 at parity with `query-service`'s own `filtering.py` — the plan text's own naming was misleading,
