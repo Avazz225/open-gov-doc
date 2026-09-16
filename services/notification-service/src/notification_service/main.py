@@ -13,8 +13,9 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from notification_service import repository
 from notification_service.auth_client import AuthServiceClient
 from notification_service.consumer import publish_notification_result, start_consuming
 from notification_service.models import Base, Notification
+from notification_service.rate_limiter import RecipientRateLimiter
 from notification_service.schemas import (
     EmailTemplateIn,
     EmailTemplateOut,
@@ -102,6 +104,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         admin_username=settings.auth_service_admin_username,
         admin_password=settings.auth_service_admin_password,
     )
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.notification_rate_limiter = RecipientRateLimiter(settings)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -151,6 +155,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await consumer.close()
     await producer.close()
     await app.state.auth_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -194,21 +199,58 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+async def _require_notification_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 2) - `POST /notifications`
+    previously checked recipient existence but not caller permission at
+    all: any authenticated principal could trigger a notification to any
+    known user (a spam/abuse vector), see docs/services/
+    notification-service.md "Open Points". Deliberately NOT part of the
+    "everyone" group (unlike audit.read/virus_scan.*, same session) -
+    `reporting-service`'s scheduled-report emails are, per the actual code
+    search, the ONLY real caller of this HTTP endpoint today (every other
+    producer - SLA/break-glass/emergency-shutdown - calls
+    `repository.create_and_send` directly from the internal event
+    consumer, bypassing this endpoint entirely); this was never a
+    de-facto-open-to-everyone feature that merely needed preserving, same
+    reasoning as virus-scan-service's `admin.quarantine`."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission="notification.write",
+        access_type="write",
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Fehlende Berechtigung 'notification.write'")
+
+
 @app.post("/notifications", response_model=NotificationOut, status_code=status.HTTP_201_CREATED)
 async def create_notification(
-    payload: NotificationCreate, session: AsyncSession = Depends(get_session)
+    payload: NotificationCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> NotificationOut:
     """Retrofit P6-S6 (call authorization): since this session, the public
     endpoint checks that `recipient` for `channel in {"email","in_app"}` is
     a real `auth-service` account, instead of accepting it blindly -
     `channel="webhook"` remains unchecked (the target is a URL, not an identity).
     The internal alerting path (SLA/break-glass/emergency-shutdown) never runs
-    through this endpoint, see `auth_client.py`."""
+    through this endpoint, see `auth_client.py`. Post-Roadmap Phase 38
+    Session 2: caller permission (`_require_notification_permission`) and a
+    per-recipient rate limit, defense in depth against a misconfigured/
+    fast-cycling caller."""
+    await _require_notification_permission(x_dms_principal)
     if not await app.state.auth_client.recipient_exists(payload.recipient, channel=payload.channel):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unbekannte empfangende Person {payload.recipient!r} für Kanal "
             f"{payload.channel!r}",
+        )
+    if not app.state.notification_rate_limiter.allow(payload.recipient):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit für Empfänger {payload.recipient!r} überschritten",
         )
     notification = await repository.create_and_send(
         session,

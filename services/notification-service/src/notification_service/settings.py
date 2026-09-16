@@ -89,6 +89,23 @@ class Settings(BaseServiceSettings):
 
     monitoring_service_base_url: str = "http://localhost:8026"
 
+    # RBAC (Post-Roadmap Phase 38 Session 2) - `POST /notifications`
+    # previously checked recipient existence but not caller permission at
+    # all: any authenticated principal could trigger a notification to any
+    # known user (a spam/abuse vector), see
+    # docs/services/notification-service.md "Open Points".
+    permission_service_base_url: str = "http://localhost:8004"
+
+    # Rate limiting (Post-Roadmap Phase 38 Session 2, same session as the
+    # RBAC fix above) - defense in depth against a misconfigured/fast-
+    # cycling caller repeatedly notifying the same recipient, even after
+    # the RBAC fix restricts callers to `notification.write` holders.
+    # In-process (not Redis-backed like gateway-service's, ADR 0097) since
+    # this service runs as a single instance, same rationale as
+    # gateway-service's own pre-ADR-0097 design (ADR 0005).
+    notification_rate_limit_max_per_recipient: int = 20
+    notification_rate_limit_window_seconds: float = 60.0
+
     # Direct links (post-roadmap feature, Phase 27, ADR 0105): base URLs of
     # the frontend apps reachable from the BROWSER, so notification emails
     # can embed a clickable link straight to a resource. Same rationale as

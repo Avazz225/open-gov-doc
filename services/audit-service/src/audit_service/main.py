@@ -14,8 +14,9 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +75,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sensor_config_client = sensor_config_client
     app.state.sensor_registry = sensor_registry
 
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+
     event_bus = NatsEventBusClient(settings.nats_url, ensure_stream=False)
     await event_bus.connect()
     app.state.event_bus = event_bus
@@ -100,6 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
+    await app.state.permission_client.close()
     if registration:
         await registration.stop()
     await event_bus.close()
@@ -133,6 +137,33 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+async def _require_audit_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 2) - `GET /events`/`.../verify`
+    previously had NO permission check at all, not even "must be an
+    authenticated principal" - readable by anyone with plain network access
+    (see docs/services/audit-service.md "Open Points"). Same precedent as
+    ADR 0072/0073/0074 (reporting-service/archival-service/ocr-service/
+    rendering-service/workflow-service, all "previously had NO RBAC check
+    whatsoever"): checked against the root resource (`audit-service` does
+    not register its own resource tree), and `audit.read` is added to the
+    "everyone" default role so this preserves the previous de-facto-open
+    behavior for already-authenticated principals while closing the actual
+    gap (direct, unauthenticated network access) and making the permission
+    admin-editable going forward. `permission_client.check` already
+    resolves the activated superuser (4.6) bypass internally - no separate
+    check needed here."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission="audit.read",
+        access_type="read",
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Fehlende Berechtigung 'audit.read'")
+
+
 @app.get("/events", response_model=list[AuditEventOut])
 async def list_events(
     limit: int = 100,
@@ -142,8 +173,10 @@ async def list_events(
     event_type: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[AuditEventOut]:
+    await _require_audit_permission(x_dms_principal)
     return await repository.list_events(
         session,
         limit=limit,
@@ -157,7 +190,10 @@ async def list_events(
 
 
 @app.get("/events/verify", response_model=ChainVerificationOut)
-async def verify_chain(session: AsyncSession = Depends(get_session)) -> ChainVerificationOut:
+async def verify_chain(
+    x_dms_principal: str = Header(default=""), session: AsyncSession = Depends(get_session)
+) -> ChainVerificationOut:
+    await _require_audit_permission(x_dms_principal)
     result = await repository.verify_chain(session)
     return ChainVerificationOut(
         ok=result.ok, checked=result.checked, broken_at_id=result.broken_at_id

@@ -144,18 +144,53 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+async def _require_scan_permission(
+    x_dms_principal: str, *, permission: str, access_type: str
+) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 2) - `POST /scan`/`GET /scans/
+    {id}`/`GET /scans` (without `status=infected`, gated separately since
+    ADR 0073 via `_require_quarantine_permission`) previously had NO
+    permission check at all - deliberately deferred back at ADR 0073
+    itself ("no full retrofit of the remaining endpoints"), now closed.
+    Same precedent as `ocr.read`/`.write`/`rendering.read`/`.write` (ADR
+    0073, same session): "everyone" grants `virus_scan.read`/`.write` to
+    every authenticated principal, preserving the previous de-facto-open
+    behavior while making it admin-editable."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=PermissionServiceClient.ROOT_RESOURCE_ID,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
+
+
 @app.post("/scan", response_model=ScanResultOut, status_code=201)
 async def scan_upload(
     file: UploadFile = File(...),
     document_id: str | None = Form(None),
     created_by: str | None = Form(None),
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> ScanResultOut:
     """Mandatory scan before an upload is released (10.3, ADR 0010) - the
     Document Service calls this synchronously *before* persisting content/
     metadata. `document_id` is not yet known at the initial upload (the
     document only exists after a clean scan) and is therefore optional.
-    """
+    Post-Roadmap Phase 38 Session 2: `document-service`'s own `POST
+    /documents` has no per-request principal to forward (a separate,
+    larger, out-of-scope gap - see docs/services/virus-scan-service.md
+    "Open Points") - its `VirusScanClient` instead asserts a fixed service
+    identity, sufficient here since `virus_scan.write` is granted to
+    "everyone" regardless of whether the principal string identifies a
+    real registered account (same reasoning as reporting-service's
+    scheduler principal, same session)."""
+    await _require_scan_permission(
+        x_dms_principal, permission="virus_scan.write", access_type="write"
+    )
     data = await file.read()
     verdict = await app.state.scan_engine.scan(data)
 
@@ -199,7 +234,14 @@ async def scan_upload(
 
 
 @app.get("/scans/{scan_id}", response_model=ScanResultOut)
-async def get_scan(scan_id: str, session: AsyncSession = Depends(get_session)) -> ScanResultOut:
+async def get_scan(
+    scan_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> ScanResultOut:
+    await _require_scan_permission(
+        x_dms_principal, permission="virus_scan.read", access_type="read"
+    )
     try:
         return await repository.get_scan_result(session, scan_id)
     except repository.NotFoundError as exc:
@@ -232,15 +274,18 @@ async def list_scans(
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[ScanResultOut]:
-    """Without `status`, or with `status != "infected"`, unchanged behavior
-    (no auth check) - existing callers (e.g. a scan status display in a
-    document context) remain unaffected. `status="infected"` is the
-    quarantine view (2.5, P15-S2, concept verbatim: "a dedicated, narrowly
-    scoped role may view a quarantine case") and is therefore role-gated,
-    additive like the trash family (P15-S1)."""
+    """`status="infected"` is the quarantine view (2.5, P15-S2, concept
+    verbatim: "a dedicated, narrowly scoped role may view a quarantine
+    case") and is therefore role-gated with the narrower `admin.quarantine`
+    (since Post-Roadmap Phase 19 Session 8, ADR 0073), additive like the
+    trash family (P15-S1). Every other call (no `status`, or `status !=
+    "infected"`) now additionally requires the baseline `virus_scan.read`
+    (Post-Roadmap Phase 38 Session 2, see `_require_scan_permission`) -
+    previously no auth check at all."""
+    await _require_scan_permission(
+        x_dms_principal, permission="virus_scan.read", access_type="read"
+    )
     if status == "infected":
-        if not x_dms_principal:
-            raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
         await _require_quarantine_permission(x_dms_principal)
     return await repository.list_scan_results(session, document_id=document_id, status=status)
 

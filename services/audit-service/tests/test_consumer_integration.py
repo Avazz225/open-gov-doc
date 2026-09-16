@@ -12,7 +12,10 @@ NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    # RBAC (Post-Roadmap Phase 38 Session 2, see test_api.py) - `GET
+    # /events`/`.../verify` now require `X-DMS-Principal` + `audit.read`
+    # ("everyone" grants the latter to any authenticated principal).
+    with TestClient(app, headers={"X-DMS-Principal": "audit-service-consumer-tests"}) as c:
         yield c
 
 

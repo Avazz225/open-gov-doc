@@ -15,6 +15,7 @@ class AuditClient:
     async def list_events(
         self,
         *,
+        principal_id: str,
         actor: str | None = None,
         subject: str | None = None,
         event_type: str | None = None,
@@ -33,7 +34,14 @@ class AuditClient:
             params["since"] = since.isoformat()
         if until is not None:
             params["until"] = until.isoformat()
-        response = await self._client.get("/events", params=params)
+        # Post-Roadmap Phase 38 Session 2: audit-service now requires
+        # `X-DMS-Principal` + `audit.read` (previously fully ungated) -
+        # forwards the ALREADY-authenticated calling principal whose own
+        # `admin.query_console` gate already ran, one level up in
+        # `main.py`, rather than asserting a separate service identity.
+        response = await self._client.get(
+            "/events", params=params, headers={"X-DMS-Principal": principal_id}
+        )
         response.raise_for_status()
         return response.json()
 

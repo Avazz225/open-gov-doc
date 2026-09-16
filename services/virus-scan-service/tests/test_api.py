@@ -14,6 +14,13 @@ PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://l
 # jeder Principal OHNE explizite Zuweisung ist automatisch der Negativfall,
 # kein `everyone_role_without`-Fixture nötig.
 QUARANTINE_ADMIN_PRINCIPAL_ID = "virus-scan-service-test-quarantine-admin"
+# Post-Roadmap Phase 38 Session 2: `PUT /roles/{id}` requires
+# `admin.user_management` since Post-Roadmap Phase 19 Session 6 (ADR 0071) -
+# separate test principal for `everyone_role_without` below, same pattern
+# as archival-service/audit-service (`QUARANTINE_ADMIN_PRINCIPAL_ID` only
+# carries `domain-admin-virus-scan`/`admin.quarantine`, not
+# `admin.user_management`).
+ROLE_ADMIN_PRINCIPAL_ID = "virus-scan-service-test-role-admin"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -40,15 +47,79 @@ async def _grant_quarantine_permission():
         response.raise_for_status()
 
 
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_role_admin_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-users")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": ROLE_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ROLE_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+SCAN_TEST_PRINCIPAL_ID = "virus-scan-service-tests"
+
+
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """`permission_client` stays UNMOCKED (a real call against the running
+    permission-service) - the `TestClient` therefore carries a
+    `X-DMS-Principal` header by default (RBAC since Post-Roadmap Phase 38
+    Session 2; "everyone" grants `virus_scan.read`/`.write` to every
+    authenticated principal, no role setup needed for the positive case).
+    Individual tests can override the header via `headers={"X-DMS-
+    Principal": ""}` to exercise the negative case, same pattern as
+    reporting-service/archival-service."""
+    with TestClient(app, headers={"X-DMS-Principal": SCAN_TEST_PRINCIPAL_ID}) as c:
         yield c
 
 
-def scan(client, *, content=b"Hallo Welt", filename="vertrag.pdf", **extra):
+@pytest.fixture
+def everyone_role_without():
+    """Temporarily removes one permission from the seeded "everyone" role to
+    prove the negative path (missing permission -> 403) - same pattern as
+    archival-service/reporting-service/audit-service (duplicated, not
+    shared - project convention)."""
+    role_management_headers = {"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID}
+    with httpx.Client(base_url=PERMISSION_SERVICE_URL, timeout=10.0) as pc:
+        roles = pc.get("/roles").json()
+        everyone = next(r for r in roles if r["name"] == "everyone")
+        original_permissions = list(everyone["permissions"])
+
+        def _remove(permission: str) -> None:
+            pc.put(
+                f"/roles/{everyone['id']}",
+                json={
+                    "description": everyone["description"],
+                    "permissions": [p for p in original_permissions if p != permission],
+                },
+                headers=role_management_headers,
+            ).raise_for_status()
+
+        yield _remove
+
+        pc.put(
+            f"/roles/{everyone['id']}",
+            json={"description": everyone["description"], "permissions": original_permissions},
+            headers=role_management_headers,
+        ).raise_for_status()
+
+
+def scan(client, *, content=b"Hallo Welt", filename="vertrag.pdf", headers=None, **extra):
     files = {"file": (filename, content, "application/pdf")}
-    return client.post("/scan", data=extra, files=files)
+    return client.post("/scan", data=extra, files=files, headers=headers)
 
 
 def test_healthz(client):
@@ -116,7 +187,10 @@ NO_PERMISSION_HEADERS = {"X-DMS-Principal": "no-quarantine-permission-user"}
 def test_list_infected_scans_requires_principal(client):
     scan(client, content=EICAR_SIGNATURE)
 
-    response = client.get("/scans", params={"status": "infected"})
+    # Post-Roadmap Phase 38 Session 2: `client` now carries a default
+    # `X-DMS-Principal` (see the `client` fixture) - must be explicitly
+    # cleared here to exercise the true "no principal at all" case.
+    response = client.get("/scans", params={"status": "infected"}, headers={"X-DMS-Principal": ""})
 
     assert response.status_code == 401
 
@@ -140,12 +214,53 @@ def test_list_infected_scans_with_role_returns_only_infected(client):
     assert len(response.json()) == 1
 
 
-def test_list_scans_without_status_stays_ungated(client):
+def test_list_scans_without_status_requires_everyone_permission(client):
+    """Regression test (Post-Roadmap Phase 38 Session 2): `GET /scans`
+    without `status` used to be entirely ungated - now requires
+    `virus_scan.read`, granted to "everyone" by default, so an ordinary
+    authenticated principal still sees 200 (the previous de-facto-open
+    behavior for regular use, unlike the `status="infected"` quarantine
+    view above, is preserved)."""
     scan(client, content=EICAR_SIGNATURE)
 
     response = client.get("/scans")
 
     assert response.status_code == 200
+
+
+def test_scan_without_principal_header_is_401(client):
+    response = scan(client, headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_scan_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("virus_scan.write")
+    response = scan(client)
+    assert response.status_code == 403
+
+
+def test_get_scan_without_principal_header_is_401(client):
+    created = scan(client).json()
+    response = client.get(f"/scans/{created['id']}", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_get_scan_without_everyone_permission_is_403(client, everyone_role_without):
+    created = scan(client).json()
+    everyone_role_without("virus_scan.read")
+    response = client.get(f"/scans/{created['id']}")
+    assert response.status_code == 403
+
+
+def test_list_scans_without_principal_header_is_401(client):
+    response = client.get("/scans", headers={"X-DMS-Principal": ""})
+    assert response.status_code == 401
+
+
+def test_list_scans_without_everyone_permission_is_403(client, everyone_role_without):
+    everyone_role_without("virus_scan.read")
+    response = client.get("/scans")
+    assert response.status_code == 403
 
 
 def test_release_unknown_scan_returns_404(client):

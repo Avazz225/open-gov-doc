@@ -53,6 +53,13 @@ settings = Settings()
 configure_logging(settings)
 logger = logging.getLogger(__name__)
 
+# Post-Roadmap Phase 38 Session 2: fixed principal for the report-schedule
+# poll loop's own audit-service calls - `ReportSchedule` has no
+# creator/initiator field to attribute a background tick to a real human,
+# and `audit.read` being granted to "everyone" means any principal string
+# works regardless of whether it identifies a real registered account.
+_SCHEDULED_REPORT_PRINCIPAL = "reporting-service-scheduler"
+
 
 async def _run_due_schedules(session_factory) -> None:
     """A single poll tick, extracted from `_report_schedule_poll_loop` for
@@ -65,7 +72,18 @@ async def _run_due_schedules(session_factory) -> None:
         for schedule in due:
             try:
                 content, content_type = await _generate_report(
-                    session, schedule.report_type, schedule.format, schedule.filters
+                    session,
+                    schedule.report_type,
+                    schedule.format,
+                    schedule.filters,
+                    # `ReportSchedule` has no creator/initiator field to
+                    # attribute this background tick to a real human (5.4a,
+                    # unchanged since P7-S2b) - a fixed system principal is
+                    # safe here since `audit.read` is granted to "everyone"
+                    # (Post-Roadmap Phase 38 Session 2), which applies
+                    # regardless of whether the principal string identifies
+                    # a real registered account.
+                    principal_id=_SCHEDULED_REPORT_PRINCIPAL,
                 )
             except Exception:
                 logger.exception(
@@ -119,7 +137,7 @@ async def _report_schedule_poll_loop(session_factory) -> None:
 
 
 async def _generate_report(
-    session: AsyncSession, report_type: str, format: str, filters: dict
+    session: AsyncSession, report_type: str, format: str, filters: dict, *, principal_id: str
 ) -> tuple[bytes, str]:
     if report_type == "document_volume":
         entries = await reports.document_volume(
@@ -159,6 +177,7 @@ async def _generate_report(
     elif report_type == "user_activity":
         entries = await reports.user_activity(
             app.state.audit_client,
+            principal_id=principal_id,
             actor=filters.get("actor"),
             since=_parse_dt(filters.get("since")),
             until=_parse_dt(filters.get("until")),
@@ -214,7 +233,13 @@ async def _fetch_forensic_trace(
     transparency the UI shows, same pattern as query-service's own
     `QueryResult`)."""
     raw_events = await app.state.audit_client.list_events(
-        actor=actor, subject=subject, event_type=event_type, since=since, until=until, limit=limit
+        principal_id=principal_id,
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        since=since,
+        until=until,
+        limit=limit,
     )
     entries: list[ForensicTraceEntry] = []
     for raw in raw_events:
@@ -454,7 +479,9 @@ async def export_document_volume_report(
         "group_by": group_by,
     }
     async with app.state.session_factory() as session:
-        content, content_type = await _generate_report(session, "document_volume", format, filters)
+        content, content_type = await _generate_report(
+            session, "document_volume", format, filters, principal_id=x_dms_principal
+        )
     return Response(content=content, media_type=content_type)
 
 
@@ -476,7 +503,9 @@ async def export_open_workflow_tasks_report(
         x_dms_principal, permission="reporting.read", access_type="read"
     )
     async with app.state.session_factory() as session:
-        content, content_type = await _generate_report(session, "open_workflow_tasks", format, {})
+        content, content_type = await _generate_report(
+            session, "open_workflow_tasks", format, {}, principal_id=x_dms_principal
+        )
     return Response(content=content, media_type=content_type)
 
 
@@ -498,7 +527,9 @@ async def export_storage_usage_report(
         x_dms_principal, permission="reporting.read", access_type="read"
     )
     async with app.state.session_factory() as session:
-        content, content_type = await _generate_report(session, "storage_usage", format, {})
+        content, content_type = await _generate_report(
+            session, "storage_usage", format, {}, principal_id=x_dms_principal
+        )
     return Response(content=content, media_type=content_type)
 
 
@@ -513,7 +544,11 @@ async def get_user_activity_report(
         x_dms_principal, permission="reporting.read", access_type="read"
     )
     return await reports.user_activity(
-        app.state.audit_client, actor=actor, since=since, until=until
+        app.state.audit_client,
+        principal_id=x_dms_principal,
+        actor=actor,
+        since=since,
+        until=until,
     )
 
 
@@ -534,7 +569,9 @@ async def export_user_activity_report(
         "until": until.isoformat() if until else None,
     }
     async with app.state.session_factory() as session:
-        content, content_type = await _generate_report(session, "user_activity", format, filters)
+        content, content_type = await _generate_report(
+            session, "user_activity", format, filters, principal_id=x_dms_principal
+        )
     return Response(content=content, media_type=content_type)
 
 

@@ -37,7 +37,20 @@ class VirusScanClient:
             form["document_id"] = document_id
 
         try:
-            response = await self._client.post("/scan", data=form, files=files)
+            # Post-Roadmap Phase 38 Session 2: `POST /scan` now requires
+            # `X-DMS-Principal` + `virus_scan.write` (previously fully
+            # ungated) - `create_document` itself has no per-request
+            # principal to forward (a separate, larger, out-of-scope gap,
+            # see docs/services/virus-scan-service.md "Open Points"), so a
+            # fixed service identity is asserted instead; sufficient since
+            # `virus_scan.write` is granted to "everyone" regardless of
+            # whether the principal string identifies a real account.
+            response = await self._client.post(
+                "/scan",
+                data=form,
+                files=files,
+                headers={"X-DMS-Principal": "document-service"},
+            )
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise ScanUnavailableError(str(exc)) from exc

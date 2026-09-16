@@ -61,19 +61,33 @@ class DocumentClient:
         return response.json()["has_active_hold"]
 
     async def mark_archived(self, document_id: str, *, archive_format: str) -> dict:
+        # Post-Roadmap Phase 38 Session 2: these three callbacks now require
+        # `X-DMS-Principal` + `document.disposal_callback` (previously fully
+        # ungated) - asserts a fixed service identity, granted the
+        # capability via a dedicated role (deliberately NOT part of
+        # "everyone", see document-service's
+        # `_require_disposal_callback_permission`).
         response = await self._client.put(
-            f"/documents/{document_id}/archived", json={"archive_format": archive_format}
+            f"/documents/{document_id}/archived",
+            json={"archive_format": archive_format},
+            headers={"X-DMS-Principal": "archival-service"},
         )
         response.raise_for_status()
         return response.json()
 
     async def mark_dehydrated(self, document_id: str) -> dict:
-        response = await self._client.put(f"/documents/{document_id}/dehydrated")
+        response = await self._client.put(
+            f"/documents/{document_id}/dehydrated",
+            headers={"X-DMS-Principal": "archival-service"},
+        )
         response.raise_for_status()
         return response.json()
 
     async def mark_rehydrated(self, document_id: str) -> dict:
-        response = await self._client.put(f"/documents/{document_id}/rehydrated")
+        response = await self._client.put(
+            f"/documents/{document_id}/rehydrated",
+            headers={"X-DMS-Principal": "archival-service"},
+        )
         response.raise_for_status()
         return response.json()
 

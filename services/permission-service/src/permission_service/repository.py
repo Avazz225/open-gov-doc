@@ -225,6 +225,25 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Schriftgutquarantäne-Verwaltung",
         ["admin.records_quarantine"],
     ),
+    # Post-Roadmap Phase 38 Session 2: `document-service`'s three disposal
+    # callbacks (`PUT /documents/{id}/archived`/`dehydrated`/`rehydrated`)
+    # previously had NO caller check at all, relying purely on network
+    # topology - `archival-service` is the one legitimate caller and has no
+    # natural per-request human principal, so it asserts the fixed service
+    # identity `X-DMS-Principal: archival-service`. Deliberately not named
+    # "domain-admin-..." like the other entries in this list - this is a
+    # machine-to-machine service capability, not a human-administered
+    # domain, but reuses the same seeded-role mechanism (auto-created on
+    # every fresh installation via `ensure_domain_admin_roles`, no manual
+    # per-installation grant needed) rather than the ad-hoc throwaway-role
+    # pattern used for `notification-service`'s `reporting-service-
+    # scheduler` (that one had no existing seeded-role convention to join;
+    # document-service already had one).
+    (
+        "archival-service-callback",
+        "Aussonderungs-Callback (archival-service)",
+        ["document.disposal_callback"],
+    ),
 ]
 
 
@@ -290,6 +309,29 @@ EVERYONE_ROLE_PERMISSIONS: list[str] = [
     # "open to every authenticated principal" decision (P6-S6) - "everyone"
     # preserves this behavior but makes it admin-editable.
     "workflow.write",
+    # Post-Roadmap Phase 38 Session 2: virus-scan-service's `POST /scan`/
+    # `GET /scans/{id}`/`GET /scans` (without `status=infected`, which
+    # already had its own narrower `admin.quarantine` gate since ADR 0073)
+    # had NO permission check at all - deliberately deferred back at ADR
+    # 0073 itself ("no full retrofit of the remaining endpoints"), now
+    # closed. Same precedent as ocr.read/write and rendering.read/write
+    # (ADR 0073, same session) - "everyone" preserves the previous
+    # de-facto-open behavior (no frontend currently calls these two
+    # endpoints with any expectation of a permission wall) while making it
+    # admin-editable.
+    "virus_scan.read",
+    "virus_scan.write",
+    # Post-Roadmap Phase 38 Session 2: audit-service's GET /events/.../verify
+    # previously had NO RBAC check whatsoever (not even "must be an
+    # authenticated principal" - readable by anyone with plain network
+    # access). Same precedent as ADR 0072/0073/0074 above: "everyone"
+    # preserves the previous de-facto-open-to-any-logged-in-user behavior
+    # (already the case in practice, since reporting-service's own
+    # forensic trace surfaces materially the same underlying event data via
+    # the already-everyone-granted `reporting.forensic_trace`) while closing
+    # the actual gap (direct, unauthenticated network access) and making the
+    # permission admin-editable going forward.
+    "audit.read",
 ]
 
 

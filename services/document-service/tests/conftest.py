@@ -166,6 +166,38 @@ async def _grant_records_quarantine_permission():
         response.raise_for_status()
 
 
+ARCHIVAL_SERVICE_PRINCIPAL_ID = "archival-service"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_disposal_callback_permission():
+    """Post-Roadmap Phase 38 Session 2: `PUT /documents/{id}/archived`/
+    `dehydrated`/`rehydrated` require `document.disposal_callback`. Grants
+    the SAME fixed principal id archival-service asserts in production
+    (`archival_service.clients.DocumentClient`), not a separate test-only
+    principal - so these tests exercise the exact real caller identity."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "archival-service-callback")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": ARCHIVAL_SERVICE_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": ARCHIVAL_SERVICE_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 @pytest.fixture(autouse=True)
 def _default_no_license_limit_exceeded(monkeypatch):
     """Lizenz-Limit-Blockade (Konzept 9.3, P9-S2) greift real gegen den

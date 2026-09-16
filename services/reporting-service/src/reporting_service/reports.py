@@ -60,6 +60,7 @@ async def storage_usage(storage_client: StorageClient) -> list[StorageUsageEntry
 async def user_activity(
     audit_client: AuditClient,
     *,
+    principal_id: str,
     actor: str | None,
     since: datetime | None,
     until: datetime | None,
@@ -67,7 +68,9 @@ async def user_activity(
     """Aggregiert die rohen Audit-Events client-seitig nach Akteur+Aktions-
     typ - audit-service selbst liefert nur die Rohliste (P7-S2-Filter-API),
     keine Aggregation; das ist bewusst reporting-services eigene Aufgabe."""
-    events = await audit_client.list_events(actor=actor, since=since, until=until)
+    events = await audit_client.list_events(
+        principal_id=principal_id, actor=actor, since=since, until=until
+    )
     counts: Counter[tuple[str, str]] = Counter()
     for event in events:
         event_actor = event.get("actor")

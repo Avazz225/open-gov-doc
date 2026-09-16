@@ -28,7 +28,9 @@ class FakeAuditClient:
     def __init__(self, events):
         self._events = events
 
-    async def list_events(self, *, actor=None, since=None, until=None, limit=5000):
+    async def list_events(
+        self, *, principal_id=None, actor=None, since=None, until=None, limit=5000
+    ):
         return self._events
 
 
@@ -92,7 +94,9 @@ async def test_user_activity_aggregates_by_actor_and_event_type():
         ]
     )
 
-    entries = await reports.user_activity(client, actor=None, since=None, until=None)
+    entries = await reports.user_activity(
+        client, principal_id="alice", actor=None, since=None, until=None
+    )
 
     by_key = {(e.actor, e.event_type): e.count for e in entries}
     assert by_key[("alice", "document.created")] == 2

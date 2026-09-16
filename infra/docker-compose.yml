@@ -307,6 +307,9 @@ services:
       # under which other containers reach this service.
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://audit-service:8000
+      # RBAC (Post-Roadmap Phase 38 Session 2) - `GET /events`/`.../verify`
+      # previously had NO permission check at all.
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     volumes:
       # Deletion register ledger (10.4, P11-S4) - own volume, deliberately
       # separated from the shared Postgres instance, so a DB restore
@@ -319,6 +322,8 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      permission-service:
+        condition: service_started
     networks:
       - dms-net
 
@@ -732,6 +737,9 @@ services:
       DMS_SMTP_HOST: mailpit
       DMS_SMTP_PORT: "1025"
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
+      # RBAC (Post-Roadmap Phase 38 Session 2) - `POST /notifications`
+      # previously checked recipient existence but not caller permission.
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
       # Direct links (post-roadmap feature, Phase 27, ADR 0105): browser-reachable
       # frontend URLs for notification email deep links, same rationale as
       # auth-service's DMS_KEYCLOAK_PUBLIC_BASE_URL (line ~331).
@@ -748,6 +756,8 @@ services:
       mailpit:
         condition: service_started
       auth-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net

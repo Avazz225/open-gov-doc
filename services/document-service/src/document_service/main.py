@@ -1065,12 +1065,48 @@ async def get_document_has_active_quarantine(
     )
 
 
+async def _require_disposal_callback_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 2) - the three disposal callbacks
+    below previously had NO caller check at all, relying purely on network
+    topology (only `archival-service` is expected to reach them). Checks the
+    new capability `document.disposal_callback` (role "domain-archival-
+    service") - deliberately NOT in the "everyone" group, same rationale as
+    `_require_legal_hold_permission` above: this is a machine-to-machine
+    callback with exactly one legitimate caller, not a regular business
+    action. `archival-service` asserts a fixed service identity
+    (`X-DMS-Principal: archival-service`, see `DocumentClient` there) since
+    these calls have no natural per-request human principal, same pattern
+    already used for `notification-service`'s `reporting-service-scheduler`
+    and `virus-scan-service`'s `document-service` identity in this same
+    session. NOTE: `case-service`'s analogous `PUT /cases/{id}/archived`
+    callback was examined against this same finding and deliberately left
+    ungated - it already has its own explicit architecture decision (ADR
+    0070) with the identical "pure machine-to-machine, network topology is
+    the trust boundary" rationale this session is otherwise moving away
+    from; revisiting that decision is a separate scope question, not
+    silently folded into this fix."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "document.disposal_callback"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Berechtigung 'Aussonderungs-Callback'",
+        )
+
+
 @app.put("/documents/{document_id}/archived", response_model=DocumentOut)
 async def mark_document_archived(
-    document_id: str, payload: MarkArchivedRequest, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: MarkArchivedRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Callback from `archival-service` once the archive copy has been
-    verified (5.6)."""
+    verified (5.6). Gated since Post-Roadmap Phase 38 Session 2, see
+    `_require_disposal_callback_permission`."""
+    await _require_disposal_callback_permission(x_dms_principal)
     try:
         document = await repository.mark_archived(
             session, document_id, archive_format=payload.archive_format
@@ -1089,10 +1125,15 @@ async def mark_document_archived(
 
 @app.put("/documents/{document_id}/dehydrated", response_model=DocumentOut)
 async def mark_document_dehydrated(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Callback from `archival-service` after the live storage copy was
-    removed once the transition period expired (5.6)."""
+    removed once the transition period expired (5.6). Gated since
+    Post-Roadmap Phase 38 Session 2, see
+    `_require_disposal_callback_permission`."""
+    await _require_disposal_callback_permission(x_dms_principal)
     try:
         document = await repository.mark_dehydrated(session, document_id)
     except repository.NotFoundError as exc:
@@ -1104,9 +1145,14 @@ async def mark_document_dehydrated(
 
 @app.put("/documents/{document_id}/rehydrated", response_model=DocumentOut)
 async def mark_document_rehydrated(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
-    """Callback from `archival-service` after successful retrieval (5.6)."""
+    """Callback from `archival-service` after successful retrieval (5.6).
+    Gated since Post-Roadmap Phase 38 Session 2, see
+    `_require_disposal_callback_permission`."""
+    await _require_disposal_callback_permission(x_dms_principal)
     try:
         document = await repository.mark_rehydrated(session, document_id)
     except repository.NotFoundError as exc:

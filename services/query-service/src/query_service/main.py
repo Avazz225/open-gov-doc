@@ -160,7 +160,13 @@ async def _run_query(
     limit: int,
 ) -> QueryResult:
     events = await app.state.audit_client.list_events(
-        actor=actor, subject=subject, event_type=event_type, since=since, until=until, limit=limit
+        principal_id=principal_id,
+        actor=actor,
+        subject=subject,
+        event_type=event_type,
+        since=since,
+        until=until,
+        limit=limit,
     )
     filtered = await filter_events_by_permission(
         events,

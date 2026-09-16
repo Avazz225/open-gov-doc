@@ -2,41 +2,72 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P38-S1 (`folder-service` move-cycle bugfix — first session of the new Phase 38+
-gap-closure plan). Fixed the live-verified bug named in the new plan: `repository.update_folder` only
-ever checked "not its own direct parent" (`new_parent_id == folder_id`), so moving a folder under one of
-its own deeper descendants (e.g. `A` under its own child `B`, having previously moved `B` under `A`) went
-through unchecked, permanently making every folder in the cycle undeletable (the not-empty check before
-deletion sees the other as a child either way). Already found and documented live at P23-S4 but
-deliberately left unfixed there (out of that session's frontend-only scope). Fix: before applying a move,
-`update_folder` now checks whether the intended new parent lies inside the folder's own active subtree,
-reusing the already-existing `list_active_subtree_ids` (the same helper the trash cascade already uses) —
-since a folder is always the first element of its own subtree, this one check also subsumes the old,
-narrower self-parent guard, so the previous check was removed rather than kept alongside the new one.
-Re-verified live against the real running stack with the exact A→B→A reproduction the gap-analysis
-research had used: now rejected with `400` instead of silently succeeding, and both folders remain
-cleanly deletable afterward.
+**Last completed:** P38-S2 (ungated/weakly-gated endpoints, round 1 — second session of the Phase 38+
+gap-closure plan). Closed all four findings named in the plan, all real authorization gaps with no
+existing check beyond plain token validity:
 
-**Scope correction found during implementation**: the plan's own premise that `document-service`/
-`object-type-service` have "the same bug class" did not survive code-level inspection, so neither was
-touched — `allowedParentTypes` doesn't exist in `document-service` at all (it's exclusively an
-`object-type-service` field), and `object-type-service`'s own placement check (`validate_against_object_type`)
-only ever compares one level (the immediate intended parent's type name) — it never walks a chain, so it
-cannot loop indefinitely or produce an undeletable instance the way an unchecked `parent_id` chain could.
-[ADR 0013](docs/adr/0013-object-hierarchy-parent-type-constraints.md) itself already reasoned through
-exactly this scenario and deliberately chose not to build type-graph cycle detection ("a full reachability
-check up to the root would be overengineering... a broken configuration surfaces at the latest at the
-first failed placement attempt, no silent failure state") — re-confirmed still correct, left alone, and
-`docs/services/object-type-service.md`'s own Open Point gained a note explaining this distinction so a
-future reader doesn't rediscover the same false equivalence. `folder-service` +2 tests (137 total, both
-reproducing the exact live-verified scenario at the repository and API level), `ruff check`/`ruff format`
-clean. No new ADR (a bugfix, not an architecture decision, per Phase 38's own Definition of Done).
+- **`audit-service`**: `GET /events`/`.../verify` had no role check whatsoever (readable by anyone with
+  network access to the gateway). New capability `audit.read`, added to the "everyone" group — several
+  existing internal callers (`query-service`'s `_run_query`, `reporting-service`'s forensic trace/
+  scheduled reports) had zero auth before, so rather than requiring each to be individually re-granted,
+  they now forward their OWN already-authenticated calling principal (`AuditClient.list_events` in both
+  services gained a required `principal_id` kwarg). This service had no `test_api.py` at all before this
+  session — 37 new tests.
+- **`virus-scan-service`**: `/scan`/`GET /scans/{id}`/`GET /scans` (without `status=infected`, which
+  already had its own narrower `admin.quarantine` gate since ADR 0073) had no check at all. New
+  capabilities `virus_scan.write`/`virus_scan.read`, also added to "everyone" — the only real `/scan`
+  caller, `document-service`'s `create_document`, has no per-request human principal of its own (a
+  separate, larger, deliberately out-of-scope gap), so it asserts a fixed `X-DMS-Principal:
+  document-service` identity instead of requiring that bigger fix first. 38 tests (was 32, +6).
+- **`notification-service`**: `POST /notifications` had no permission check of the *caller* at all (only
+  a recipient-existence check) — any authenticated principal could notify any known user, a spam/abuse
+  vector. New capability `notification.write`, deliberately **not** added to "everyone" (genuinely one
+  real caller today) — instead a dedicated role grant for the fixed principal
+  `reporting-service-scheduler` (reused from the audit-service fix above). Also added: an in-process
+  per-recipient sliding-window rate limiter (`RecipientRateLimiter`, new `rate_limiter.py`) as defense in
+  depth on top of the RBAC fix. 84 tests (was 81, +3).
+- **`document-service`**: the three disposal callbacks (`PUT .../archived`/`.../dehydrated`/
+  `.../rehydrated`) relied purely on network topology. New capability `document.disposal_callback`,
+  seeded as its own dedicated role (`archival-service-callback`, auto-created on every fresh installation
+  via `ensure_domain_admin_roles`) — **not** part of "everyone", a machine-to-machine callback with
+  exactly one legitimate caller. `archival-service`'s `DocumentClient` now asserts a fixed
+  `X-DMS-Principal: archival-service` identity. Live-verified end-to-end against the real running stack:
+  `curl` without a header → `401`, with an unrelated authenticated principal → `403`, with the
+  `archival-service` identity → `200`.
 
-**Next session:** **P38-S2** (ungated/weakly-gated endpoints, round 1: `audit-service`'s `GET /events`/
-`.../verify` gets a real role check; `virus-scan-service`'s `/scan`/`GET /scans/*` get real authorization
-beyond token validity; `notification-service`'s `POST /notifications` gets a caller-permission check plus
-simple rate limiting; `document-service`'s internal disposal callbacks get a real caller check). See
+**Scope decision made during implementation**: `case-service`'s analogous `PUT /cases/{id}/archived`
+callback was examined against this same finding and deliberately left ungated — it already carries its
+own explicit architecture decision ([ADR 0070](docs/adr/0070-case-service-rbac.md)) with the identical
+"pure machine-to-machine callback, network topology is the trust boundary" rationale this session was
+otherwise moving away from. Revisiting that decision was judged a separate scope question (the plan's own
+wording named only `document-service`), not silently folded into this fix — noted in
+`docs/services/document-service.md` "Open Points" for a future session to pick up explicitly if desired.
+
+Also found and fixed in passing (same bug class as P37-S1): `infra/docker-compose.yml` was missing
+`DMS_PERMISSION_SERVICE_BASE_URL`/the `permission-service` `depends_on` entry for `audit-service` and
+`notification-service` — a newly added `permission_service_base_url` setting silently falls back to an
+unreachable `localhost` default without both. `document-service`/`archival-service` test suites (352/138
+tests) all green, `ruff check`/`ruff format` clean (pre-existing, unrelated findings remain in
+`loadtest/notebook/analysis.ipynb` and `federation-hub-service`). No new ADR (a bugfix/hardening session,
+per Phase 38's own Definition of Done — only P38-S4 expects one).
+
+**Next session:** **P38-S3** (ungated/weakly-gated endpoints, round 2, frontend: `user-ui`'s
+`RetentionPanel`/`FolderRetentionModal` get a real role restriction — currently any logged-in user can
+set/release a legal hold; `admin-ui`'s inconsistent authorization surface is audited and aligned). See
 `IMPLEMENTATION_PLAN.md` "Phase 38" for the full session breakdown.
+
+Immediately before P38-S2: **P38-S1** (`folder-service` move-cycle bugfix — first session of the Phase
+38+ gap-closure plan). Fixed the live-verified bug named in the plan: `repository.update_folder` only
+ever checked "not its own direct parent", so moving a folder under one of its own deeper descendants went
+through unchecked, permanently making every folder in the cycle undeletable. Fix: before applying a move,
+`update_folder` now checks whether the intended new parent lies inside the folder's own active subtree
+(`list_active_subtree_ids`), re-verified live against the real running stack with the exact A→B→A
+reproduction — now rejected with `400`. **Scope correction found during implementation**: the plan's own
+premise that `document-service`/`object-type-service` have "the same bug class" did not survive
+code-level inspection, so neither was touched — `allowedParentTypes` doesn't exist in `document-service`
+at all, and `object-type-service`'s own placement check never walks a chain, so it cannot loop
+indefinitely the way an unchecked `parent_id` chain could ([ADR 0013](docs/adr/0013-object-hierarchy-parent-type-constraints.md)
+re-confirmed still correct). `folder-service` +2 tests (137 total), no new ADR.
 
 Immediately before P38-S1: **P37-S1** (scoping-only, concludes the whole Phase 32+ gap-closure plan — no
 code changed, no tests to run, no Docker rebuild, no live verification, per this session's own Definition

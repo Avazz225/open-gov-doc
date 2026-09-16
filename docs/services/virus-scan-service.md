@@ -8,10 +8,10 @@
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/scan` | Multipart (`file`, optional `document_id`/`created_by`) → performs the scan, on a hit stores a quarantine copy in the Storage Service, persists and returns the result (`ScanResultOut`) |
-| `GET` | `/scans/{id}` | Single scan result — 404 for unknown `id` |
-| `GET` | `/scans?document_id=...` | All scans for a document (newest first) — ungated |
-| `GET` | `/scans?status=infected` | Quarantine view (2.5, P15-S2) — requires `X-DMS-Principal` (401 without) and, since **Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)), the real permission-service permission `admin.quarantine` (403 without, role `domain-admin-virus-scan`) — replaces the previous plain `X-DMS-Roles` string-equality gate. Any other/no `status` value remains ungated (additive, breaks no existing callers). |
+| `POST` | `/scan` | Multipart (`file`, optional `document_id`/`created_by`) → performs the scan, on a hit stores a quarantine copy in the Storage Service, persists and returns the result (`ScanResultOut`). Requires `X-DMS-Principal` + `virus_scan.write` since **Post-Roadmap Phase 38 Session 2**, see "Authorization" below. |
+| `GET` | `/scans/{id}` | Single scan result — 404 for unknown `id`. Requires `X-DMS-Principal` + `virus_scan.read` since **Post-Roadmap Phase 38 Session 2**. |
+| `GET` | `/scans?document_id=...` | All scans for a document (newest first). Requires `X-DMS-Principal` + `virus_scan.read` since **Post-Roadmap Phase 38 Session 2**. |
+| `GET` | `/scans?status=infected` | Quarantine view (2.5, P15-S2) — requires `X-DMS-Principal` (401 without), `virus_scan.read` (since Post-Roadmap Phase 38 Session 2, see above) AND, since **Post-Roadmap Phase 19 Session 8** ([ADR 0073](../adr/0073-ocr-rendering-virus-scan-rbac.md)), the real permission-service permission `admin.quarantine` (403 without, role `domain-admin-virus-scan`) — replaces the previous plain `X-DMS-Roles` string-equality gate. |
 | `POST` | `/scans/{id}/release` | Release after clarifying a false positive (2.5, P15-S2) — JSON body `{title, folder_id?, object_type_id?, attributes?}`, creates a real document from the quarantined bytes via `document-service`'s internal creation path (no re-scan, see ADR 0052), then deletes the quarantine copy. 401/403 as above, 404 unknown, 409 if not `status="infected"`. |
 | `POST` | `/scans/{id}/purge` | Permanent deletion of a quarantine case (2.5) — removes only the quarantined bytes, the `ScanResult` row remains with `status="purged"` as evidence. 401/403/404/409 as above. |
 | `GET` | `/healthz` | Health check |
@@ -57,15 +57,19 @@ Registers itself with the registry via `dms-registry-client` at startup — opt-
 
 None yet — follows in Phase 11.
 
+## Authorization (Post-Roadmap Phase 38 Session 2)
+
+`/scan`/`GET /scans/{id}`/`GET /scans` previously had no authorization beyond plain token validity (the gateway only checked the token was valid). All three now require `X-DMS-Principal` (401 without) and, respectively, `virus_scan.write` (`/scan`) or `virus_scan.read` (the two `GET` endpoints) — 403 without. Both new capabilities were added to the "everyone" group (any authenticated principal): the only real caller of `POST /scan` is `document-service`'s `create_document`, which itself has no per-request human principal to forward (a separate, larger, deliberately out-of-scope gap — see `docs/services/document-service.md` "Open Points"), so it asserts a fixed service identity (`X-DMS-Principal: document-service`) — this only closes the actual gap (literally anyone with network access) rather than requiring a bigger unrelated fix. The pre-existing `?status=infected` quarantine gate (`admin.quarantine`, ADR 0073) is unchanged and still additionally required for that one query.
+
 ## Tests
 
-- `uv run pytest services/virus-scan-service/tests` (32 tests): engine behavior (EICAR detection incl. embedded signature, factory selection, `ClamdEngine` throws instead of falsely reporting "clean" when the daemon is unreachable), repository (CRUD, filter by `document_id`/`status`, `mark_resolved` for release/deletion), API (`/scan` clean/infected incl. quarantine key, `/scans` endpoints incl. role-gated `status=infected` view, `/scans/{id}/release`/`/purge` incl. role/404/409 cases) — runs against real Postgres/the real Storage Service AND (since P15-S2) the real Document Service, no mocks (same rationale as the other backend services).
+- `uv run pytest services/virus-scan-service/tests` (**38 tests**, previously 32, +6 since **Post-Roadmap Phase 38 Session 2**: 401/403 cases for `/scan`, `GET /scans/{id}`, and `GET /scans` without `status`): engine behavior (EICAR detection incl. embedded signature, factory selection, `ClamdEngine` throws instead of falsely reporting "clean" when the daemon is unreachable), repository (CRUD, filter by `document_id`/`status`, `mark_resolved` for release/deletion), API (`/scan` clean/infected incl. quarantine key, `/scans` endpoints incl. role-gated `status=infected` view, `/scans/{id}/release`/`/purge` incl. role/404/409 cases) — runs against real Postgres/the real Storage Service AND (since P15-S2) the real Document Service, no mocks (same rationale as the other backend services).
 - Document Service tests cover the integration (`test_create_document_rejects_infected_upload`, `test_checkin_rejects_infected_version_without_creating_it`) — an upload with EICAR content is rejected with `422`, no (further) version is created. Since P15-S2, additionally `test_quarantine_release_*` — the internal creation path deliberately accepts the same EICAR content (no re-scan).
 
 ## Open Points
 
 - **`ClamdEngine` not wired up in production**: code exists and is activatable via `DMS_SCAN_ENGINE=clamd`, but no `clamd` container is part of `infra/docker-compose.yml` (rationale: see above/ADR 0010). To be added once an environment with reliable access to the ClamAV signature database is available.
 - **No notification of the uploader on a hit**: the Notification Service only exists from P6-S2 onward; `virus_scan.completed` is already published and can be consumed there without any change to this service.
-- **No authorization on `/scan`/`GET /scans/{id}`/`GET /scans?document_id=`** (as with all services so far): the gateway only checks token validity, no role check. Since P15-S2 the quarantine area itself (`?status=infected`, `/release`, `/purge`) IS gated (see above, since **Post-Roadmap Phase 19 Session 8** real permission-service RBAC instead of a plain `X-DMS-Roles` comparison) — deliberately limited to exactly the three actions named in Concept §2.5, no full retrofit of the remaining endpoints.
+- ~~No authorization on `/scan`/`GET /scans/{id}`/`GET /scans?document_id=`~~ — **resolved in Post-Roadmap Phase 38 Session 2**, see "Authorization" above.
 - **Scan latency increases upload latency** (ADR 0010) — negligible with `EicarSignatureEngine`, potentially noticeable with `clamd`/large files.
 - **Release requires manual entry of `folder_id`/`object_type_id`/`attributes`** — none of these values were known at the originally failed upload. See [ADR 0052](../adr/0052-quarantaene-bereich-internal-creation-endpoint-bypasses-rescan.md) for the rationale.

@@ -34,6 +34,10 @@ RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantin
 RECORDS_QUARANTINE_ADMIN_HEADERS = {"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
 CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-classified-deletion-admin"
 CLASSIFIED_DELETION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID}
+# Post-Roadmap Phase 38 Session 2: the fixed principal `archival-service`
+# itself asserts in production (see conftest.py's
+# `_grant_disposal_callback_permission`), not a separate test-only identity.
+ARCHIVAL_SERVICE_HEADERS = {"X-DMS-Principal": "archival-service"}
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
@@ -269,7 +273,9 @@ def test_download_content_returns_409_if_dehydrated(client):
     Storage-Aufruf."""
     document_id = upload(client, content=b"wird ausgesondert").json()["id"]
 
-    dehydrated = client.put(f"/documents/{document_id}/dehydrated")
+    dehydrated = client.put(
+        f"/documents/{document_id}/dehydrated", headers=ARCHIVAL_SERVICE_HEADERS
+    )
     assert dehydrated.status_code == 200
 
     response = client.get(f"/documents/{document_id}/content")
@@ -278,7 +284,9 @@ def test_download_content_returns_409_if_dehydrated(client):
     response_by_version = client.get(f"/documents/{document_id}/versions/1/content")
     assert response_by_version.status_code == 409
 
-    rehydrated = client.put(f"/documents/{document_id}/rehydrated")
+    rehydrated = client.put(
+        f"/documents/{document_id}/rehydrated", headers=ARCHIVAL_SERVICE_HEADERS
+    )
     assert rehydrated.status_code == 200
 
     response_after_rehydrate = client.get(f"/documents/{document_id}/content")
@@ -1974,16 +1982,24 @@ def test_mark_archived_dehydrated_rehydrated_lifecycle(client):
     body = upload(client).json()
     document_id = body["id"]
 
-    archived = client.put(f"/documents/{document_id}/archived", json={"archive_format": "pdf_a"})
+    archived = client.put(
+        f"/documents/{document_id}/archived",
+        json={"archive_format": "pdf_a"},
+        headers=ARCHIVAL_SERVICE_HEADERS,
+    )
     assert archived.status_code == 200
     assert archived.json()["archive_format"] == "pdf_a"
     assert archived.json()["archived_at"] is not None
 
-    dehydrated = client.put(f"/documents/{document_id}/dehydrated")
+    dehydrated = client.put(
+        f"/documents/{document_id}/dehydrated", headers=ARCHIVAL_SERVICE_HEADERS
+    )
     assert dehydrated.status_code == 200
     assert dehydrated.json()["dehydrated_at"] is not None
 
-    rehydrated = client.put(f"/documents/{document_id}/rehydrated")
+    rehydrated = client.put(
+        f"/documents/{document_id}/rehydrated", headers=ARCHIVAL_SERVICE_HEADERS
+    )
     assert rehydrated.status_code == 200
     assert rehydrated.json()["dehydrated_at"] is None
 
@@ -2396,12 +2412,46 @@ def test_archive_endpoints_return_404_for_unknown_document(client):
     assert client.get("/documents/does-not-exist/archive-status").status_code == 404
     assert (
         client.put(
-            "/documents/does-not-exist/archived", json={"archive_format": "pdf_a"}
+            "/documents/does-not-exist/archived",
+            json={"archive_format": "pdf_a"},
+            headers=ARCHIVAL_SERVICE_HEADERS,
         ).status_code
         == 404
     )
-    assert client.put("/documents/does-not-exist/dehydrated").status_code == 404
-    assert client.put("/documents/does-not-exist/rehydrated").status_code == 404
+    assert (
+        client.put(
+            "/documents/does-not-exist/dehydrated", headers=ARCHIVAL_SERVICE_HEADERS
+        ).status_code
+        == 404
+    )
+    assert (
+        client.put(
+            "/documents/does-not-exist/rehydrated", headers=ARCHIVAL_SERVICE_HEADERS
+        ).status_code
+        == 404
+    )
+
+
+def test_mark_archived_without_principal_header_is_401(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(f"/documents/{document_id}/archived", json={"archive_format": "pdf_a"})
+    assert response.status_code == 401
+
+
+def test_mark_archived_without_disposal_callback_permission_is_403(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(
+        f"/documents/{document_id}/archived",
+        json={"archive_format": "pdf_a"},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_mark_dehydrated_and_rehydrated_without_principal_header_is_401(client):
+    document_id = upload(client).json()["id"]
+    assert client.put(f"/documents/{document_id}/dehydrated").status_code == 401
+    assert client.put(f"/documents/{document_id}/rehydrated").status_code == 401
 
 
 def test_has_active_hold_reflects_legal_hold_state(client):

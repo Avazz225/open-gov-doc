@@ -89,3 +89,9 @@ class Settings(BaseServiceSettings):
     deletion_ledger_path: str = "/deletion-ledger/deletion-register.jsonl"
 
     monitoring_service_base_url: str = "http://localhost:8026"
+
+    # RBAC (Post-Roadmap Phase 38 Session 2) - `GET /events`/`.../verify`
+    # previously had NO permission check at all, not even "must be an
+    # authenticated principal" - readable by anyone with plain network
+    # access, see docs/services/audit-service.md "Open Points".
+    permission_service_base_url: str = "http://localhost:8004"
