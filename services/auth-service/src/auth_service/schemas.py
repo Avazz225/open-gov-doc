@@ -143,6 +143,84 @@ class AdGroupRoleMappingOut(AdGroupRoleMappingIn):
     created_by: str | None = None
 
 
+class AdGroupRoleMappingActionResult(BaseModel):
+    """Response envelope for `POST /ad-group-mappings` since Post-Roadmap
+    Phase 39 Session 3 (ADR 0153, four-eyes retrofit) - same "always
+    wrapped, regardless of whether approval is configured" convention as
+    `permission_service.schemas.RoleActionResult`."""
+
+    status: Literal["created", "pending_approval"]
+    mapping: AdGroupRoleMappingOut | None = None
+    approval_request_id: str | None = None
+
+
+class AdGroupMappingApprovalStatus(BaseModel):
+    """Shared response envelope for the delete endpoints of both mapping
+    kinds (simple/composite) since Post-Roadmap Phase 39 Session 3 (ADR
+    0153) - no resource-specific payload needed on a delete beyond the
+    approval outcome itself, unlike the create envelopes above/below."""
+
+    status: Literal["deleted", "pending_approval"]
+    approval_request_id: str | None = None
+
+
+class AdGroupCompositeRuleIn(BaseModel):
+    """Payload for `POST /ad-group-composite-rules` (4.4, Post-Roadmap
+    Phase 39 Session 3, ADR 0153) - AND-composite counterpart of
+    `AdGroupRoleMappingIn`, see `models.AdGroupRoleCompositeRule`."""
+
+    role_name: str
+    ad_group_names: list[str]
+
+
+class AdGroupCompositeRuleOut(BaseModel):
+    id: int
+    role_name: str
+    ad_group_names: list[str]
+    created_at: datetime
+    created_by: str | None = None
+
+
+class AdGroupCompositeRuleActionResult(BaseModel):
+    status: Literal["created", "pending_approval"]
+    rule: AdGroupCompositeRuleOut | None = None
+    approval_request_id: str | None = None
+
+
+class AdGroupMappingDefaultRoleIn(BaseModel):
+    """Payload for `PUT /ad-group-mappings/default-role` (4.4, Post-Roadmap
+    Phase 39 Session 3, ADR 0153) - `None`/omitted resets to "no default"
+    (the previous hardcoded behavior)."""
+
+    default_role_name: str | None = None
+
+
+class AdGroupMappingDefaultRoleOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    default_role_name: str | None
+    updated_at: datetime
+    updated_by: str | None = None
+
+
+class AdGroupMappingConfigBundle(BaseModel):
+    """`GET`/`POST /ad-group-mapping-config` (4.4/7.3, Post-Roadmap Phase
+    39 Session 3, ADR 0153) - the config-service export/import shape for
+    ALL of this session's AD-group-mapping state in one bundle (simple
+    mappings, composite rules, the default role), service-to-service-
+    gated (`X-DMS-Principal`/`_require_service_user_management`) like
+    `POST /realm-roles`, not the bearer-token admin CRUD endpoints above -
+    see ADR 0153 "Rationale" for why. Import is idempotent (skips an
+    exact existing mapping/rule instead of erroring, unconditionally
+    overwrites `default_role_name`) and does NOT go through the four-eyes
+    checks of the admin CRUD endpoints, the same pre-existing precedent as
+    `POST /realm-roles`."""
+
+    mappings: list[AdGroupRoleMappingIn] = []
+    composite_rules: list[AdGroupCompositeRuleIn] = []
+    default_role_name: str | None = None
+
+
 class SuperuserStatus(BaseModel):
     active: bool
     expires_at: str | None = None

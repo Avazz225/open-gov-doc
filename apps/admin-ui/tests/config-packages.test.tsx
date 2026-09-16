@@ -27,6 +27,7 @@ vi.mock("@/lib/api", () => ({
     "sensor_config",
     "federation_config",
     "realm_roles",
+    "ad_group_mappings",
   ],
   exportConfig: (...args: unknown[]) => exportConfigMock(...args),
   compareConfig: (...args: unknown[]) => compareConfigMock(...args),

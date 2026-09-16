@@ -2,7 +2,66 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P39-S2 (remaining four-eyes/validation gaps — second session of Phase 39, "RBAC
+**Last completed:** P39-S3 (AD group→role mapping, precise remaining gap — third session of Phase 39,
+"RBAC completion"). A research pass ahead of implementation (per the now very strong pattern from
+P38/P39-S1/P39-S2 of stale plan premises) verified all four items named by the plan against the actual
+current code and against [ADR 0093](docs/adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md)'s own
+"Consequences" — **unlike almost every prior session, all four were confirmed still real and accurately
+described**, so all four were built directly this session, no scoping-only sub-deliverable needed:
+
+1. **Composite (AND) rules** — new, ADDITIVE tables `AdGroupRoleCompositeRule`/
+   `AdGroupRoleCompositeRuleGroup` (a rule grants a role only if a principal belongs to EVERY linked
+   group, at least 2 required or `422`), unioned with the pre-existing simple 1:1 table in
+   `resolve_roles_for_groups` — the simple mechanism keeps working completely unchanged, no data
+   migration.
+2. **Configurable default role for unmapped groups** — new singleton `AdGroupMappingDefaultRole`
+   (same pattern as `SsoConfig`), applied only when the principal has at least one AD group claim AND
+   nothing matched — deliberately NOT applied to a principal with no AD group claim at all (a narrower,
+   more conservative reading than "any unmapped principal").
+3. **Four-eyes on mapping/rule changes** — OPTIONAL, per-action-type-configurable (mirroring ADR
+   0130/0151's dominant pattern in this project, not break-glass's mandatory one). `auth-service`'s
+   `PermissionServiceClient` gained its first REMOTE `requires_approval()`/`request_approval()` calls
+   against `permission-service`'s approval-config API (the config lives in a different service's
+   database than the action executes in). `consumer.py` gained matching execution branches. Response
+   shapes changed to wrapped envelopes (mirroring ADR 0151's identical `PUT /roles/{id}` precedent) —
+   verified zero real callers affected (no frontend anywhere in this project calls this API at all,
+   confirmed by exhaustive grep before implementing).
+4. **Config export/import inclusion (7.3)** — new `ad_group_mappings` category in `config-service`
+   (now ten categories), new `GET`/`POST /ad-group-mapping-config`(`/import`) in `auth-service`
+   (service-to-service-gated like the pre-existing `realm_roles` category, not the bearer-token admin
+   CRUD endpoints), idempotent per item, deliberately bypasses four-eyes (same existing precedent as
+   `realm_roles`). `admin-ui`'s `CONFIG_CATEGORIES` constant extended — the only frontend touch this
+   session (the export/import page renders categories generically, no per-category UI logic).
+
+No admin-UI CRUD surface was built for the mapping/rule/default-role management itself — verified no
+such UI existed before this session either (backend-only since ADR 0093), and the plan's own text names
+only the four backend deliverables above, not a UI; building one would have been unrequested scope
+growth. Closed via [ADR 0153](docs/adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md).
+
+**Tests**: auth-service 120 passed (up from 105 — 15 new: composite-rule create/list/delete incl. `422`
+for a single group, AND-only-with-both-groups resolution against real Keycloak groups, default-role
+get/set/reset and its three resolution behaviors, four-eyes `pending_approval` deferral for mapping and
+composite-rule creation, plus matching consumer-execution tests), config-service 48 passed (unchanged
+count — no new test needed, existing category-agnostic import/export tests already exercise the new
+category structurally). `ruff check`/`ruff format` clean (one truncate-ordering bug in the test fixture
+and one long line found and fixed along the way), `tsc`/`eslint` clean for the `admin-ui` mock/constant
+update, `8/8` `config-packages.test.tsx` vitest passing. **Live-verified**: rebuilt and restarted the
+real `auth-service`/`config-service`/`admin-ui` containers, then `curl` against them — composite-rule
+`422`/`201`, default-role get/set/get/reset, the full mapping four-eyes round trip end-to-end (ungated →
+immediate creation; gated → `pending_approval` → correctly rejected self-approval → accepted
+distinct-principal approval → consumer applies the change), and a config export/re-import round trip
+proving idempotency (no duplicate rows after re-importing the same bundle). A dispatched Playwright
+agent additionally verified the `admin-ui` Configuration Packages page live in a real browser: logged in
+as `config-admin`, confirmed the new `ad_group_mappings` category actually appears in the real export
+response (`GET /api/config-service/config/export`, `200`, all 10 keys present) and in the import-preview
+list — correcting an assumption in the verification brief (the page has no per-category checkboxes at
+all, before or after this change; categories are shown as a plain list after loading a package file,
+selection is all-or-nothing via a single export button). The agent also flagged an **unrelated**,
+pre-existing live-stack issue for awareness: `GET /me/preferences` on `auth-service` returns `500` — not
+touched by this session's changes, not investigated further here. All test role-assignments/approval-
+config/mapping/rule/default-role state created during verification cleaned up afterward.
+
+Immediately before P39-S3: **P39-S2** (remaining four-eyes/validation gaps — second session of Phase 39, "RBAC
 completion"). Research (Explore agent, before any implementation, per the now very strong pattern of
 stale plan premises across P38/P39-S1) found all three named items genuinely real, but of different
 weight:
@@ -221,9 +280,11 @@ permission grant (with the independent legal-hold button staying disabled throug
 (the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
 "only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
 
-**Next session:** **P39-S3** (Phase 39, RBAC completion — AD group→role mapping, precise remaining gap:
-combined-rule mapping via AND logic across multiple groups, a configurable default for unmapped groups,
-four-eyes on mapping changes, inclusion in config export/import). See `IMPLEMENTATION_PLAN.md`
+**Next session:** **P39-S4** (Phase 39, RBAC completion — document/case RBAC polish: documents get a
+real per-document resource-tree entry like cases got since ADR 0144, instead of the coarse
+`resource_id="root"` fallback; `GET /cases` gets row-level RBAC filtering (currently all-or-nothing);
+org-hierarchy grants (ADR 0121) narrow onto the case resource type instead of scoping only by
+`process_definition_id`). This is Phase 39's last planned session. See `IMPLEMENTATION_PLAN.md`
 "Phase 39" for the full session breakdown.
 
 Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the

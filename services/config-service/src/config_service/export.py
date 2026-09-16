@@ -11,6 +11,7 @@ from config_service.clients import (
     WorkflowServiceClient,
 )
 from config_service.schemas import (
+    AdGroupMappingsExport,
     ApprovalConfigExport,
     BusinessCalendarExport,
     ConfigDocument,
@@ -139,6 +140,15 @@ async def export_realm_roles(client: AuthServiceClient) -> list[str]:
     return await client.list_realm_roles()
 
 
+async def export_ad_group_mappings(client: AuthServiceClient) -> AdGroupMappingsExport:
+    bundle = await client.get_ad_group_mapping_config()
+    return AdGroupMappingsExport(
+        mappings=bundle["mappings"],
+        composite_rules=bundle["composite_rules"],
+        default_role_name=bundle["default_role_name"],
+    )
+
+
 async def build_export(
     *,
     categories: set[str],
@@ -167,4 +177,6 @@ async def build_export(
         doc.federation_config = await export_federation_config(workflow_client)
     if "realm_roles" in categories:
         doc.realm_roles = await export_realm_roles(auth_client)
+    if "ad_group_mappings" in categories:
+        doc.ad_group_mappings = await export_ad_group_mappings(auth_client)
     return doc

@@ -200,6 +200,28 @@ async def apply_realm_roles(client: AuthServiceClient, names: list[str]) -> Cate
     return result
 
 
+async def apply_ad_group_mappings(client: AuthServiceClient, entry) -> CategoryResult:
+    """For the `ad_group_mappings` category (4.4/7.3, Post-Roadmap Phase
+    39 Session 3, ADR 0153) - a single bundle call, like
+    `apply_federation_config`/`apply_sensor_config` above, since
+    `auth-service`'s `POST /ad-group-mapping-config/import` is itself
+    already idempotent per item (`ad_group_mapping.mapping_exists`/
+    `composite_rule_exists`) and applies the whole bundle atomically."""
+    result = CategoryResult()
+    try:
+        await client.import_ad_group_mapping_config(
+            {
+                "mappings": [m.model_dump() for m in entry.mappings],
+                "composite_rules": [r.model_dump() for r in entry.composite_rules],
+                "default_role_name": entry.default_role_name,
+            }
+        )
+        result.updated += len(entry.mappings) + len(entry.composite_rules) + 1
+    except Exception as exc:  # noqa: BLE001
+        result.errors.append(str(exc))
+    return result
+
+
 async def apply_import(
     doc: ConfigDocument,
     *,
@@ -242,4 +264,8 @@ async def apply_import(
         )
     if "realm_roles" in categories and doc.realm_roles is not None:
         results["realm_roles"] = await apply_realm_roles(auth_client, doc.realm_roles)
+    if "ad_group_mappings" in categories and doc.ad_group_mappings is not None:
+        results["ad_group_mappings"] = await apply_ad_group_mappings(
+            auth_client, doc.ad_group_mappings
+        )
     return results

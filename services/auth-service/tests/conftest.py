@@ -1,6 +1,7 @@
 import asyncio
 import os
 import uuid
+from contextlib import contextmanager
 
 import httpx
 import pytest
@@ -111,6 +112,17 @@ async def _clean_tables():
         await conn.execute(text("TRUNCATE auth.sso_config"))
         await conn.execute(text("TRUNCATE auth.local_signing_key"))
         await conn.execute(text("TRUNCATE auth.ad_group_role_mapping"))
+        # Post-Roadmap Phase 39 Session 3 (ADR 0153): `..._rule_group` has a
+        # FK onto `..._rule` - Postgres refuses to `TRUNCATE` either alone
+        # ("cannot truncate a table referenced in a foreign key
+        # constraint"), so both must be listed in the SAME statement.
+        await conn.execute(
+            text(
+                "TRUNCATE auth.ad_group_role_composite_rule_group, "
+                "auth.ad_group_role_composite_rule"
+            )
+        )
+        await conn.execute(text("TRUNCATE auth.ad_group_mapping_default_role"))
         # Nur Nicht-Domain-Admin-Konten (aktuell also der Superuser) werden
         # pro Test zurückgesetzt - Domain-Admin-Zeilen bleiben bewusst über
         # die gesamte Session stabil, siehe
@@ -200,6 +212,50 @@ def role_assignment_immediate():
                 json={"requires_approval": True},
                 headers=admin_headers,
             )
+
+
+@pytest.fixture
+def approval_config_override():
+    """Generic version of `role_assignment_immediate` above for an
+    arbitrary action type (Post-Roadmap Phase 39 Session 3, ADR 0153,
+    added for the new `auth.ad_group_role_mapping.*`/
+    `auth.ad_group_role_composite_rule.*` action types) - same
+    "temporarily override, restore the original value afterward"
+    isolation reasoning, but as a reusable context-manager factory
+    instead of one fixture per action type. Yields a callable
+    `override(action_type, requires_approval=...)`."""
+
+    async def _get_account_id() -> str:
+        eng = build_engine(DSN)
+        try:
+            return await domain_admins.get_technical_account_id(
+                make_session_factory(eng), DOMAIN_ADMIN_USERS_USERNAME
+            )
+        finally:
+            await eng.dispose()
+
+    admin_headers = {"X-DMS-Principal": asyncio.run(_get_account_id())}
+
+    @contextmanager
+    def _override(action_type: str, *, requires_approval: bool):
+        with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
+            config = pc.get(f"/approval-config/{action_type}")
+            originally_required = config.status_code == 200 and config.json()["requires_approval"]
+            pc.put(
+                f"/approval-config/{action_type}",
+                json={"requires_approval": requires_approval},
+                headers=admin_headers,
+            )
+            try:
+                yield
+            finally:
+                pc.put(
+                    f"/approval-config/{action_type}",
+                    json={"requires_approval": originally_required},
+                    headers=admin_headers,
+                )
+
+    yield _override
 
 
 @pytest.fixture

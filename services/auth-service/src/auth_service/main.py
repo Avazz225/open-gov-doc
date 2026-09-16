@@ -52,6 +52,14 @@ from auth_service.models import (
 )
 from auth_service.permission_client import PermissionServiceClient
 from auth_service.schemas import (
+    AdGroupCompositeRuleActionResult,
+    AdGroupCompositeRuleIn,
+    AdGroupCompositeRuleOut,
+    AdGroupMappingApprovalStatus,
+    AdGroupMappingConfigBundle,
+    AdGroupMappingDefaultRoleIn,
+    AdGroupMappingDefaultRoleOut,
+    AdGroupRoleMappingActionResult,
     AdGroupRoleMappingIn,
     AdGroupRoleMappingOut,
     DirectoryEntryOut,
@@ -808,6 +816,24 @@ async def ensure_realm_roles(
         app.state.keycloak_admin.create_realm_role(payload={"name": name}, skip_exists=True)
 
 
+async def _maybe_defer_to_approval(
+    *, action_type: str, initiated_by: str, payload: dict
+) -> str | None:
+    """Post-Roadmap Phase 39 Session 3 (ADR 0153) - shared four-eyes gate
+    for the AD-group-mapping admin endpoints below, mirroring
+    `permission-service`'s own `get_approval_config`/`_request_approval`
+    pattern (ADR 0130/0151) but via the remote calls added to
+    `PermissionServiceClient` for this session, since the approval-config
+    itself lives in `permission-service`'s database, not this service's.
+    Returns the new pending request's id if the action is gated, `None` if
+    it should proceed immediately."""
+    if not await app.state.permission_client.requires_approval(action_type):
+        return None
+    return await app.state.permission_client.request_approval(
+        action_type=action_type, initiated_by=initiated_by, payload=payload
+    )
+
+
 @app.get("/ad-group-mappings", response_model=list[AdGroupRoleMappingOut])
 async def list_ad_group_mappings(
     user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
@@ -820,28 +846,39 @@ async def list_ad_group_mappings(
     return await ad_group_mapping.list_mappings(session)
 
 
-@app.post(
-    "/ad-group-mappings",
-    response_model=AdGroupRoleMappingOut,
-    status_code=status.HTTP_201_CREATED,
-)
+@app.post("/ad-group-mappings", response_model=AdGroupRoleMappingActionResult, status_code=201)
 async def create_ad_group_mapping(
     payload: AdGroupRoleMappingIn,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> AdGroupRoleMapping:
+) -> AdGroupRoleMappingActionResult:
     """Creates a new mapping - takes effect starting with the next `GET
     /me` resolution (no caching delay, see
-    `ad_group_mapping.resolve_roles_for_groups`). Audited via
+    `ad_group_mapping.resolve_roles_for_groups`). Since Post-Roadmap Phase
+    39 Session 3 (ADR 0153), optionally gated via the generic four-eyes
+    mechanism (`auth.ad_group_role_mapping.create`) - response shape
+    changes from a bare `AdGroupRoleMappingOut` to this wrapper regardless
+    of whether approval is configured, same convention as
+    `permission_service.schemas.RoleActionResult`. Audited via
     `auth.ad_group_role_mapping.created` (`audit-service` already consumes
     `auth.>`, no new audit mechanism needed) as well as `created_by`/
     `created_at` directly on the row."""
     await _require_user_management(user)
+    principal_id = user.get("sub")
+    request_id = await _maybe_defer_to_approval(
+        action_type="auth.ad_group_role_mapping.create",
+        initiated_by=principal_id,
+        payload={"ad_group_name": payload.ad_group_name, "role_name": payload.role_name},
+    )
+    if request_id is not None:
+        return AdGroupRoleMappingActionResult(
+            status="pending_approval", approval_request_id=request_id
+        )
     mapping = await ad_group_mapping.create_mapping(
         session,
         ad_group_name=payload.ad_group_name,
         role_name=payload.role_name,
-        created_by=user.get("preferred_username") or user.get("sub"),
+        created_by=user.get("preferred_username") or principal_id,
     )
     await session.commit()
     await publish_event(
@@ -851,20 +888,36 @@ async def create_ad_group_mapping(
             "ad_group_name": mapping.ad_group_name,
             "role_name": mapping.role_name,
         },
-        actor=user.get("sub"),
+        actor=principal_id,
     )
-    return mapping
+    return AdGroupRoleMappingActionResult(status="created", mapping=mapping)
 
 
-@app.delete("/ad-group-mappings/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/ad-group-mappings/{mapping_id}", response_model=AdGroupMappingApprovalStatus)
 async def delete_ad_group_mapping(
     mapping_id: int,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> None:
+) -> AdGroupMappingApprovalStatus:
     """Deletes a mapping - takes effect the same way as creation, starting
-    with the next `GET /me` resolution. `404` for an unknown `mapping_id`."""
+    with the next `GET /me` resolution. `404` for an unknown `mapping_id`.
+    Since Post-Roadmap Phase 39 Session 3 (ADR 0153), optionally gated via
+    the generic four-eyes mechanism (`auth.ad_group_role_mapping.delete`) -
+    response changes from `204 No Content` to `200` with a body regardless
+    of whether approval is configured (no frontend caller existed before
+    this session to break, see ADR 0153 "Consequences"), mirroring ADR
+    0151's identical `PUT /roles/{id}` precedent."""
     await _require_user_management(user)
+    principal_id = user.get("sub")
+    request_id = await _maybe_defer_to_approval(
+        action_type="auth.ad_group_role_mapping.delete",
+        initiated_by=principal_id,
+        payload={"mapping_id": mapping_id},
+    )
+    if request_id is not None:
+        return AdGroupMappingApprovalStatus(
+            status="pending_approval", approval_request_id=request_id
+        )
     try:
         mapping = await ad_group_mapping.delete_mapping(session, mapping_id)
     except ad_group_mapping.MappingNotFoundError as exc:
@@ -877,8 +930,214 @@ async def delete_ad_group_mapping(
             "ad_group_name": mapping.ad_group_name,
             "role_name": mapping.role_name,
         },
+        actor=principal_id,
+    )
+    return AdGroupMappingApprovalStatus(status="deleted")
+
+
+@app.get("/ad-group-composite-rules", response_model=list[AdGroupCompositeRuleOut])
+async def list_ad_group_composite_rules(
+    user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+) -> list[dict]:
+    """AND-composite counterpart of `GET /ad-group-mappings` (4.4,
+    Post-Roadmap Phase 39 Session 3, ADR 0153) - same gate, same domain."""
+    await _require_user_management(user)
+    return await ad_group_mapping.list_composite_rules(session)
+
+
+@app.post(
+    "/ad-group-composite-rules", response_model=AdGroupCompositeRuleActionResult, status_code=201
+)
+async def create_ad_group_composite_rule(
+    payload: AdGroupCompositeRuleIn,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> AdGroupCompositeRuleActionResult:
+    """Creates an AND-composite rule (4.4, Post-Roadmap Phase 39 Session 3,
+    ADR 0153) - a principal must belong to EVERY group in
+    `payload.ad_group_names` (at least 2, `422` otherwise) to receive
+    `payload.role_name`, as opposed to `POST /ad-group-mappings`'s
+    OR-across-rows semantics. Same optional four-eyes wiring
+    (`auth.ad_group_role_composite_rule.create`) as the simple mapping
+    endpoint above."""
+    await _require_user_management(user)
+    if len(dict.fromkeys(payload.ad_group_names)) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Eine Verbund-Regel braucht mindestens 2 unterschiedliche Gruppen (AND-Logik) - "
+                "fuer eine einzelne Gruppe die einfache Zuordnung verwenden"
+            ),
+        )
+    principal_id = user.get("sub")
+    request_id = await _maybe_defer_to_approval(
+        action_type="auth.ad_group_role_composite_rule.create",
+        initiated_by=principal_id,
+        payload={"role_name": payload.role_name, "ad_group_names": payload.ad_group_names},
+    )
+    if request_id is not None:
+        return AdGroupCompositeRuleActionResult(
+            status="pending_approval", approval_request_id=request_id
+        )
+    rule = await ad_group_mapping.create_composite_rule(
+        session,
+        role_name=payload.role_name,
+        ad_group_names=payload.ad_group_names,
+        created_by=user.get("preferred_username") or principal_id,
+    )
+    await session.commit()
+    await publish_event("auth.ad_group_role_composite_rule.created", rule, actor=principal_id)
+    return AdGroupCompositeRuleActionResult(status="created", rule=AdGroupCompositeRuleOut(**rule))
+
+
+@app.delete("/ad-group-composite-rules/{rule_id}", response_model=AdGroupMappingApprovalStatus)
+async def delete_ad_group_composite_rule(
+    rule_id: int,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> AdGroupMappingApprovalStatus:
+    """Deletes a composite rule (4.4, Post-Roadmap Phase 39 Session 3,
+    ADR 0153) - `404` for an unknown `rule_id`, same optional four-eyes
+    wiring as the other three mutating endpoints on this admin surface."""
+    await _require_user_management(user)
+    principal_id = user.get("sub")
+    request_id = await _maybe_defer_to_approval(
+        action_type="auth.ad_group_role_composite_rule.delete",
+        initiated_by=principal_id,
+        payload={"rule_id": rule_id},
+    )
+    if request_id is not None:
+        return AdGroupMappingApprovalStatus(
+            status="pending_approval", approval_request_id=request_id
+        )
+    try:
+        rule = await ad_group_mapping.delete_composite_rule(session, rule_id)
+    except ad_group_mapping.CompositeRuleNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event("auth.ad_group_role_composite_rule.deleted", rule, actor=principal_id)
+    return AdGroupMappingApprovalStatus(status="deleted")
+
+
+@app.get("/ad-group-mappings/default-role", response_model=AdGroupMappingDefaultRoleOut)
+async def get_ad_group_mapping_default_role(
+    user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+) -> AdGroupMappingDefaultRoleOut:
+    """Configurable default role for AD groups matching neither a simple
+    mapping nor a composite rule (4.4, Post-Roadmap Phase 39 Session 3,
+    ADR 0153 - the other named scope cut from ADR 0093). Deliberately
+    plain-gated like the rest of this admin surface, no four-eyes - the
+    plan's "four-eyes on mapping changes" deliverable names mapping/rule
+    CRUD specifically, and this is a single scalar setting, not a mapping
+    row (see ADR 0153 "Rationale" for the full reasoning)."""
+    await _require_user_management(user)
+    existing = await ad_group_mapping.get_default_role_config(session)
+    return AdGroupMappingDefaultRoleOut(
+        default_role_name=existing.default_role_name if existing else None,
+        updated_at=existing.updated_at if existing else datetime.now(UTC),
+        updated_by=existing.updated_by if existing else None,
+    )
+
+
+@app.put("/ad-group-mappings/default-role", response_model=AdGroupMappingDefaultRoleOut)
+async def set_ad_group_mapping_default_role(
+    payload: AdGroupMappingDefaultRoleIn,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> AdGroupMappingDefaultRoleOut:
+    """Sets/resets (`default_role_name=null`) the default role above."""
+    await _require_user_management(user)
+    config = await ad_group_mapping.set_default_role(
+        session,
+        default_role_name=payload.default_role_name,
+        updated_by=user.get("preferred_username") or user.get("sub"),
+    )
+    await session.commit()
+    await publish_event(
+        "auth.ad_group_mapping.default_role_set",
+        {"default_role_name": config.default_role_name},
         actor=user.get("sub"),
     )
+    return AdGroupMappingDefaultRoleOut(
+        default_role_name=config.default_role_name,
+        updated_at=config.updated_at,
+        updated_by=config.updated_by,
+    )
+
+
+@app.get("/ad-group-mapping-config", response_model=AdGroupMappingConfigBundle)
+async def export_ad_group_mapping_config(
+    x_dms_principal: str = Header(default=""), session: AsyncSession = Depends(get_session)
+) -> AdGroupMappingConfigBundle:
+    """`config-service`'s export target for the new `ad_group_mappings`
+    category (7.3, Post-Roadmap Phase 39 Session 3, ADR 0153) - service-
+    to-service-gated (`X-DMS-Principal`/`_require_service_user_management`)
+    like `GET`/`POST /realm-roles`, not the bearer-token admin CRUD
+    endpoints above (see `schemas.AdGroupMappingConfigBundle`'s docstring
+    for why)."""
+    await _require_service_user_management(x_dms_principal)
+    mappings = await ad_group_mapping.list_mappings(session)
+    rules = await ad_group_mapping.list_composite_rules(session)
+    default_role_name = await ad_group_mapping.get_default_role(session)
+    return AdGroupMappingConfigBundle(
+        mappings=[
+            AdGroupRoleMappingIn(ad_group_name=m.ad_group_name, role_name=m.role_name)
+            for m in mappings
+        ],
+        composite_rules=[
+            AdGroupCompositeRuleIn(role_name=r["role_name"], ad_group_names=r["ad_group_names"])
+            for r in rules
+        ],
+        default_role_name=default_role_name,
+    )
+
+
+@app.post("/ad-group-mapping-config/import", status_code=status.HTTP_204_NO_CONTENT)
+async def import_ad_group_mapping_config(
+    payload: AdGroupMappingConfigBundle,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """`config-service`'s import target for the `ad_group_mappings`
+    category. Idempotent per item (skips an exact existing mapping/rule
+    instead of erroring, same `skip_exists` reasoning as `POST
+    /realm-roles`) and unconditionally overwrites `default_role_name`
+    (matching how every other singleton-config category in this project's
+    config-import behaves, e.g. `apply_sso_config`). Deliberately bypasses
+    the four-eyes checks of the admin CRUD endpoints - the same
+    pre-existing precedent as `POST /realm-roles`, not a new gap
+    introduced by this session (see ADR 0153 "Rationale")."""
+    await _require_service_user_management(x_dms_principal)
+    for mapping in payload.mappings:
+        if not await ad_group_mapping.mapping_exists(
+            session, ad_group_name=mapping.ad_group_name, role_name=mapping.role_name
+        ):
+            await ad_group_mapping.create_mapping(
+                session,
+                ad_group_name=mapping.ad_group_name,
+                role_name=mapping.role_name,
+                created_by=x_dms_principal,
+            )
+    for rule in payload.composite_rules:
+        if not await ad_group_mapping.composite_rule_exists(
+            session, role_name=rule.role_name, ad_group_names=rule.ad_group_names
+        ):
+            await ad_group_mapping.create_composite_rule(
+                session,
+                role_name=rule.role_name,
+                ad_group_names=rule.ad_group_names,
+                created_by=x_dms_principal,
+            )
+    # Unconditional, including `None` (explicit reset) - the category is
+    # only ever passed here when it was actually part of the import
+    # package (`config_service.imports.apply_import`'s own `is not None`
+    # guard on the OUTER `doc.ad_group_mappings`), so `None` here means
+    # the SOURCE environment's default role genuinely was unset, not "no
+    # opinion" the way an absent category would be.
+    await ad_group_mapping.set_default_role(
+        session, default_role_name=payload.default_role_name, updated_by=x_dms_principal
+    )
+    await session.commit()
 
 
 @app.get("/superuser/status", response_model=SuperuserStatus)

@@ -71,6 +71,35 @@ class PermissionServiceClient:
         response.raise_for_status()
         return permission in response.json()["permissions"]
 
+    async def requires_approval(self, action_type: str) -> bool:
+        """Post-Roadmap Phase 39 Session 3 (ADR 0153) - `auth-service`'s
+        first REMOTE check of `permission-service`'s approval-config, as
+        opposed to `permission-service`'s own gated endpoints (e.g. `POST
+        /roles`, ADR 0130/0151) which read `ApprovalActionConfig` directly
+        from their own database. Cross-service four-eyes retrofits before
+        this session (`auth.superuser.activate`, ADR 0023/0024) never had
+        this check at all - there is no direct/bypass endpoint for
+        superuser activation, so approval is unconditionally mandatory for
+        it. AD-group-mapping changes are meaningfully less sensitive, so
+        this mirrors the OPTIONAL, per-action-type-configurable pattern
+        used everywhere else in this project instead."""
+        response = await self._client.get(f"/approval-config/{action_type}")
+        response.raise_for_status()
+        return bool(response.json()["requires_approval"])
+
+    async def request_approval(self, *, action_type: str, initiated_by: str, payload: dict) -> str:
+        """Creates a pending approval request on `permission-service` via
+        its existing generic `POST /approval-requests` endpoint (unlike
+        `permission-service`'s own gated endpoints, which call their
+        internal `_request_approval` directly) - returns the new request's
+        id."""
+        response = await self._client.post(
+            "/approval-requests",
+            json={"action_type": action_type, "initiated_by": initiated_by, "payload": payload},
+        )
+        response.raise_for_status()
+        return str(response.json()["id"])
+
     async def close(self) -> None:
         await self._client.aclose()
 

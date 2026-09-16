@@ -19,6 +19,7 @@ CATEGORIES = (
     "sensor_config",
     "federation_config",
     "realm_roles",
+    "ad_group_mappings",
 )
 
 
@@ -103,6 +104,29 @@ class FederationConfigExport(BaseModel):
     min_compatible_peer_version: str
 
 
+class AdGroupRoleMappingExport(BaseModel):
+    ad_group_name: str
+    role_name: str
+
+
+class AdGroupCompositeRuleExport(BaseModel):
+    role_name: str
+    ad_group_names: list[str]
+
+
+class AdGroupMappingsExport(BaseModel):
+    """AD/Keycloak group -> role mapping config (4.4/7.3, Post-Roadmap
+    Phase 39 Session 3, ADR 0153) - the other named scope cut from ADR
+    0093 ("not part of config-service's export bundle"), closed this
+    session. Mirrors `auth_service.schemas.AdGroupMappingConfigBundle`
+    exactly (own copies here since `config-service` never imports another
+    service's Pydantic models, same convention as every other category)."""
+
+    mappings: list[AdGroupRoleMappingExport] = []
+    composite_rules: list[AdGroupCompositeRuleExport] = []
+    default_role_name: str | None = None
+
+
 class PackageManifest(BaseModel):
     """Turns a raw `ConfigDocument` into a named, versioned
     **configuration package** (14.1, P17-S1) - e.g. the eGov configuration package
@@ -143,6 +167,7 @@ class ConfigDocument(BaseModel):
     # description/permission list in this project so far (see
     # `bootstrap._ensure_dms_admin_role`).
     realm_roles: list[str] | None = None
+    ad_group_mappings: AdGroupMappingsExport | None = None
 
 
 class CategoryResult(BaseModel):

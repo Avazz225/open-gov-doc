@@ -3,7 +3,9 @@
 **Responsibility:** Thin OIDC broker in front of Keycloak — holds the client secret and admin access, callers only see login/refresh/token validation (Concept 4.4). No own IAM logic, no own user table.
 
 **Concept Reference:** 4.4/2.5 (contacts, since P15-S4)/7.4 (federated contact search, since P15-S4)/14.1 (realm roles for configuration packages, since P17-S1)
-**Own Postgres Schema:** `auth` (since P15-S4, `federation_identity` — a singleton row for the optional federated contact search; since the ad-hoc post-roadmap SSO feature additionally `sso_config`, also a singleton row; since Phase 18 additionally `local_signing_key` (singleton) and `technical_account`, see "Auth Decoupling from Keycloak" below; since **P24-S2** additionally `ad_group_role_mapping`, see "AD Group→Role Mapping" below). Until P15-S4 the service was fully stateless; Keycloak itself continues to manage its own data in its own schema `keycloak` (see `infra/postgres-init/001-schemas.sql`).
+**Own Postgres Schema:** `auth` (since P15-S4, `federation_identity` — a singleton row for the optional federated contact search; since the ad-hoc post-roadmap SSO feature additionally `sso_config`, also a singleton row; since Phase 18 additionally `local_signing_key` (singleton) and `technical_account`, see "Auth Decoupling from Keycloak" below; since **P24-S2** additionally `ad_group_role_mapping`, see "AD Group→Role Mapping" below; since
+**Post-Roadmap Phase 39 Session 3** additionally `ad_group_role_composite_rule`,
+`ad_group_role_composite_rule_group`, and the singleton `ad_group_mapping_default_role`, ADR 0153). Until P15-S4 the service was fully stateless; Keycloak itself continues to manage its own data in its own schema `keycloak` (see `infra/postgres-init/001-schemas.sql`).
 
 ## API
 
@@ -37,8 +39,11 @@
 | `PUT` | `/sso-config` | Set `{enabled}` — gated on `admin.user_management`, same domain as user management |
 | `POST` | `/logout` | `{refresh_token}` → actually ends the session on the Keycloak side (`.../protocol/openid-connect/logout`) — previously there was no server-side logout mechanism |
 | `GET` | `/ad-group-mappings` | **Since P24-S2** (4.4): all configured AD group→role mappings (`{id, ad_group_name, role_name, created_at, created_by}`). Gated on `admin.user_management`, same domain as `GET /users` |
-| `POST` | `/ad-group-mappings` | **Since P24-S2**: creates a new mapping (`{ad_group_name, role_name}`), `201`. Audited via `auth.ad_group_role_mapping.created`. Takes effect from the next `GET /me` resolution onward. Gated like `GET /ad-group-mappings` |
-| `DELETE` | `/ad-group-mappings/{id}` | **Since P24-S2**: deletes a mapping, `404` for an unknown `id`. Audited via `auth.ad_group_role_mapping.deleted`. Gated like `GET /ad-group-mappings` |
+| `POST` | `/ad-group-mappings` | **Since P24-S2**: creates a new mapping (`{ad_group_name, role_name}`). Takes effect from the next `GET /me` resolution onward. Gated like `GET /ad-group-mappings`. **Since Post-Roadmap Phase 39 Session 3** ([ADR 0153](../adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md)) also optionally gated via the generic four-eyes mechanism (`auth.ad_group_role_mapping.create`) — response `{status: "created"\|"pending_approval", mapping, approval_request_id}` (bare object before this session), `201`. Audited via `auth.ad_group_role_mapping.created` |
+| `DELETE` | `/ad-group-mappings/{id}` | **Since P24-S2**: deletes a mapping, `404` for an unknown `id`. Audited via `auth.ad_group_role_mapping.deleted`. Gated like `GET /ad-group-mappings`. **Since Post-Roadmap Phase 39 Session 3** (ADR 0153) also optionally four-eyes-gated (`auth.ad_group_role_mapping.delete`) — response `{status: "deleted"\|"pending_approval", approval_request_id}`, `200` (was `204` before this session) |
+| `GET`/`POST`/`DELETE` | `/ad-group-composite-rules`(`/{id}`) | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): AND-composite counterpart of the three endpoints above (`{role_name, ad_group_names}`, at least 2 groups or `422`) — same gate/four-eyes/audit pattern, action types `auth.ad_group_role_composite_rule.create`/`.delete` |
+| `GET`/`PUT` | `/ad-group-mappings/default-role` | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): the configurable default role for genuinely unmapped groups (`{default_role_name, updated_at, updated_by}`) — gated on `admin.user_management`, deliberately no four-eyes |
+| `GET`/`POST` | `/ad-group-mapping-config`(`/import`) | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): `config-service`'s export/import target for the whole AD-group-mapping bundle (mappings + composite rules + default role) — service-to-service-gated (`X-DMS-Principal`/`_require_service_user_management`) like `POST /realm-roles`, not the bearer-token endpoints above; import is idempotent per item and deliberately bypasses four-eyes, same precedent as `POST /realm-roles` |
 
 ## Realm/Client Bootstrap
 
@@ -157,7 +162,7 @@ Optional, enabled installation-wide via `GET/PUT /sso-config` (singleton row, sa
 
 ## Events
 
-**Publishes** (`stream="auth"`, since P6-S5): `auth.superuser.activated` (`{request_id, expires_at}`), `auth.superuser.deactivated` (`{reason}`, `"expired"`|`"manual"`). **Since P24-S2**: `auth.ad_group_role_mapping.created`/`.deleted` (`{id, ad_group_name, role_name}`, `actor=`calling principal) — audit trail for changes to the AD group→role mapping, see above.
+**Publishes** (`stream="auth"`, since P6-S5): `auth.superuser.activated` (`{request_id, expires_at}`), `auth.superuser.deactivated` (`{reason}`, `"expired"`|`"manual"`). **Since P24-S2**: `auth.ad_group_role_mapping.created`/`.deleted` (`{id, ad_group_name, role_name}`, `actor=`calling principal) — audit trail for changes to the AD group→role mapping, see above. **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): `auth.ad_group_role_composite_rule.created`/`.deleted` (`{id, role_name, ad_group_names, created_at, created_by}`) and `auth.ad_group_mapping.default_role_set` (`{default_role_name}`) — same subject/consumption mechanism, no new audit path needed.
 
 **Consumes** (`durable="auth-service"`, since P6-S5, first consumer of this service): `permission.approval.approved`, filtered to `action_type="auth.superuser.activate"` — every other action type is ignored (belongs to another service, same principle as described in ADR 0022).
 
@@ -185,10 +190,34 @@ session there was no translation layer at all for this, `/me` returned only Keyc
   a different, independent function from mapping EXTERNAL
   Keycloak/AD group claims here. `UniqueConstraint(ad_group_name, role_name)` only prevents exactly
   duplicate rows — an AD group name can map to multiple roles (multiple rows).
-- **Deliberate scope cut relative to Concept 4.4**: only simple 1:1 mapping (one AD group → one
-  role). Composite rules ("group X **and** attribute Y → role Z", "multiple groups → one
-  shared role") are, per Concept 4.4, envisioned as the full target state, but explicitly NOT
-  part of this session — see "Open Points" below and ADR 0093.
+- **Composite (AND) rules, added Post-Roadmap Phase 39 Session 3** ([ADR 0153](../adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md)):
+  `AdGroupRoleCompositeRule` (`id`, `role_name`, `created_at`, `created_by`) plus
+  `AdGroupRoleCompositeRuleGroup` (`id`, `rule_id` FK, `ad_group_name`) - a rule grants `role_name`
+  only if a principal belongs to EVERY linked group (AND logic), as opposed to the simple table's
+  OR-across-rows semantics. Deliberately ADDITIVE, not a replacement - both mechanisms are unioned in
+  `resolve_roles_for_groups`, so every pre-existing simple mapping keeps working unchanged. At least 2
+  distinct groups per rule (`422` otherwise, a 1-group rule would duplicate the simple mechanism).
+  `GET`/`POST`/`DELETE /ad-group-composite-rules` (see API table above), same gate/four-eyes pattern as
+  the simple mapping endpoints.
+- **Configurable default role for genuinely unmapped groups, added Post-Roadmap Phase 39 Session 3**
+  (ADR 0153): singleton `AdGroupMappingDefaultRole` (`id=1`, `default_role_name`, `updated_at`,
+  `updated_by`, same pattern as `SsoConfig`). Applied only when the principal has at least one AD group
+  claim AND neither the simple table nor any composite rule matched - deliberately NOT applied to a
+  principal with no AD group claim at all, a narrower reading than "any unmapped principal" to avoid an
+  unintended broad grant. `GET`/`PUT /ad-group-mappings/default-role`, gated on `admin.user_management`
+  like the rest of this surface, deliberately WITHOUT four-eyes (a single scalar setting, not a mapping
+  row - see ADR 0153 "Rationale").
+- **Optional four-eyes on all four mutating mapping/rule endpoints, added Post-Roadmap Phase 39
+  Session 3** (ADR 0153): mirrors `permission-service`'s own OPTIONAL, per-action-type-configurable
+  pattern (ADR 0130/0151), not break-glass's mandatory one. `PermissionServiceClient` gained
+  `requires_approval()`/`request_approval()` - `auth-service`'s first REMOTE check of
+  `permission-service`'s approval-config (the config lives in a different service's database, unlike
+  `permission-service`'s own gated endpoints). `consumer.py` gained matching execution branches for
+  `auth.ad_group_role_mapping.create`/`.delete`/`auth.ad_group_role_composite_rule.create`/`.delete`.
+  Response shapes changed from bare objects/`204` to wrapped envelopes (`status`/resource/
+  `approval_request_id`, `200` on delete) regardless of whether approval is configured - verified zero
+  real callers affected (no frontend anywhere in this project calls this API, confirmed by exhaustive
+  grep ahead of this session).
 - **`groups` JWT claim**: Keycloak does not automatically include group memberships in the access
   token — `bootstrap._ensure_groups_mapper` (runs on every start, see "Realm/Client Bootstrap"
   above) adds an `oidc-group-membership-mapper` (`full.path=false`, i.e. only the bare group name,
@@ -229,7 +258,14 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/auth-service/tests` (**105 tests**, of which 9 new since **P24-S2**,
+`uv run pytest services/auth-service/tests` (**120 tests**, of which 15 new since **Post-Roadmap Phase
+39 Session 3** (ADR 0153): composite-rule create/list/delete (`422` for a single-group rule),
+AND-only-with-both-groups resolution against real Keycloak groups (re-logging in after each membership
+change, since the `groups` claim is baked into the token at login time, not re-evaluated live), default-
+role get/set/reset, default-role resolution (granted when groups are unmapped, withheld with no groups
+at all, overridden by an actual match), and four-eyes `pending_approval` deferral for both mapping and
+composite-rule creation (`test_ad_group_mapping.py`) plus the matching consumer-execution tests
+(`test_consumer.py`). Before that 105 tests, of which 9 new since **P24-S2**,
 `test_ad_group_mapping.py`: CRUD (`GET`/`POST`/`DELETE /ad-group-mappings`, without a bearer token → `401`,
 with an authenticated but not `admin.user_management`-permitted user → `403`, unknown `id`
 on delete → `404`) as well as the role resolution itself against real Keycloak groups (`keycloak_group`
@@ -246,24 +282,26 @@ new role idempotently — a second call with the same name does not fail, same
 
 ## Open Points
 
-- **AD group → internal role mapping — partially solved since P24-S2**: simple 1:1 mapping
-  (`ad_group_role_mapping`, `GET`/`POST`/`DELETE /ad-group-mappings`, see "AD Group→Role Mapping"
-  above, ADR 0093) is implemented. Still open, envisioned per Concept 4.4, but a deliberate
-  scope cut for this session:
-  - **Composite rules** (group X **and** attribute Y → role Z; multiple groups → one
-    shared role via AND logic) — no generic rule DSL, only direct 1:1 name mapping.
-  - **Configurable default behavior for unmapped groups** ("assign no role vs.
-    a defined default role") — currently fixed to "no role", no setting for this.
-  - **Explicit release/save before taking effect** ("no live editing with immediate
-    broad impact without control") — every change takes effect immediately, no additional
-    four-eyes/approval step like `permission.role_assignment.create` (ADR 0060).
-  - **No AD synchronization interval/no user/group synchronization** — group memberships
-    are read exclusively from the `groups` JWT claim at token-acquisition time, no
-    periodic reconciliation.
-  - **No JSON configuration export** (7.3) — `ad_group_role_mapping` rows are not part of
-    `config-service`'s configuration packages, so cannot be transferred between installations.
-  Role assignment/evaluation in the narrower sense remains the task of the Permission Service (4.1,
-  P2-S2) — `auth-service` only supplies the role names, no permission check of its own.
+- ~~**AD group → internal role mapping — partially solved since P24-S2**: simple 1:1 mapping
+  is implemented. Still open, envisioned per Concept 4.4: composite rules, configurable default for
+  unmapped groups, four-eyes before taking effect, no config export~~ — **three of the four closed in
+  Post-Roadmap Phase 39 Session 3** ([ADR 0153](../adr/0153-ad-group-mapping-composite-rules-default-role-four-eyes-export.md)):
+  composite (AND) rules (new, additive `AdGroupRoleCompositeRule`/`AdGroupRoleCompositeRuleGroup`
+  tables, `GET`/`POST`/`DELETE /ad-group-composite-rules`), a configurable default role for genuinely
+  unmapped groups (new singleton `AdGroupMappingDefaultRole`, `GET`/`PUT /ad-group-mappings/
+  default-role`), and optional per-action-type four-eyes on all four mutating mapping/rule endpoints
+  (`auth.ad_group_role_mapping.create`/`.delete`/`auth.ad_group_role_composite_rule.create`/`.delete`,
+  mirroring the same OPTIONAL pattern as `permission.role.create`/`.update`, ADR 0130/0151 - NOT
+  break-glass's mandatory pattern). Config export/import also closed - see "Configuration Packages"
+  below. Still genuinely open: **no AD synchronization interval/no user/group synchronization** — group
+  memberships are read exclusively from the `groups` JWT claim at token-acquisition time, no periodic
+  reconciliation (not part of ADR 0153's scope; concept 4.4 itself does not call for one). **No admin-UI
+  CRUD surface** for any of this — remains API/curl-only, same as before this session (deliberately not
+  built, ADR 0153 "Rationale": no such UI existed before, and building one was beyond the four named
+  deliverables). The default-role setting itself has no four-eyes protection, unlike the per-row CRUD —
+  see ADR 0153 "Consequences". Role assignment/evaluation in the narrower sense remains the task of the
+  Permission Service (4.1, P2-S2) — `auth-service` only supplies the role names, no permission check of
+  its own.
 - **Issuer hostname consistency — partially solved since the ad-hoc post-roadmap SSO feature**: the Auth Service addresses Keycloak internally via `DMS_KEYCLOAK_BASE_URL` (`http://keycloak:8080` inside the compose network); issued tokens accordingly carry `iss=http://keycloak:8080/realms/dms`. With the new browser-based redirect flow (`standardFlowEnabled`, since the SSO feature), exactly the consequence predicted here became real: `GET /oidc/authorize` returns a URL to which the browser navigates — with the internal `http://keycloak:8080` this would not have been resolvable for the browser. Fixed via a new, separate `keycloak_public_base_url` setting (`DMS_KEYCLOAK_PUBLIC_BASE_URL`, `http://localhost:8080` in the compose stack), used only by `_authorization_endpoint` (in `keycloak_client.py`) — token/logout endpoints remain on the internal URL, since they are called exclusively server-side from within `auth-service`. `iss` in the token itself remains the internal URL (Keycloak's own `frontendUrl` configuration would be the complete fix for this, deliberately not touched here, since `TokenValidator` already consistently checks against the same internal issuer).
 - **SAML 2.0** (Concept 4.4, for legacy ADFS federations) not part of this session.
 - **`/users` endpoints gated since P6-S5** (see above) — resolves the former open point for this service. Assigning `admin.user_management` to *additional* principals (e.g. real humans in addition to the technical `users-admin` account) runs via the now itself gated user/permission-management Admin UI page (`POST /role-assignments` against `permission-service`).

@@ -2183,9 +2183,10 @@ export async function revokeDelegationAsAdmin(token: string, delegationId: strin
 // P12-S3) with an optional, purely descriptive `manifest`. The document
 // content itself remains deliberately loosely typed here
 // (`Record<string, unknown>` per category) rather than modeling each of the
-// nine categories 1:1 - this page reads in a JSON document uploaded by the
+// ten categories 1:1 - this page reads in a JSON document uploaded by the
 // user and passes it through unchanged to config-service (preview/apply),
-// it does not interpret its field contents itself.
+// it does not interpret its field contents itself. `ad_group_mappings`
+// added Post-Roadmap Phase 39 Session 3 (ADR 0153).
 export const CONFIG_CATEGORIES = [
   "object_types",
   "workflows",
@@ -2196,6 +2197,7 @@ export const CONFIG_CATEGORIES = [
   "sensor_config",
   "federation_config",
   "realm_roles",
+  "ad_group_mappings",
 ] as const;
 export type ConfigCategory = (typeof CONFIG_CATEGORIES)[number];
 

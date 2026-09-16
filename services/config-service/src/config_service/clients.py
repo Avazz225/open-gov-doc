@@ -237,6 +237,18 @@ class AuthServiceClient:
         response = await self._client.post("/realm-roles", json={"names": names})
         response.raise_for_status()
 
+    async def get_ad_group_mapping_config(self) -> dict:
+        """For the `ad_group_mappings` category (4.4/7.3, Post-Roadmap
+        Phase 39 Session 3, ADR 0153) - closes ADR 0093's other named
+        scope cut."""
+        response = await self._client.get("/ad-group-mapping-config")
+        response.raise_for_status()
+        return response.json()
+
+    async def import_ad_group_mapping_config(self, bundle: dict) -> None:
+        response = await self._client.post("/ad-group-mapping-config/import", json=bundle)
+        response.raise_for_status()
+
 
 class MonitoringServiceClient:
     _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"

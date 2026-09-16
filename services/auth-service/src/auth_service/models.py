@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import Boolean, DateTime, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("auth")
@@ -123,3 +123,62 @@ class AdGroupRoleMapping(Base):
     role_name: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class AdGroupRoleCompositeRule(Base):
+    """AND-composite AD group -> role mapping rule (4.4, Post-Roadmap Phase
+    39 Session 3, ADR 0153) - the "composite rules (group AND attribute,
+    multiple groups -> one role)" half of `AdGroupRoleMapping`'s own
+    documented scope cut (see its docstring above, and ADR 0093). A
+    principal only receives `role_name` if their `groups` claim contains
+    EVERY group linked to this rule via `AdGroupRoleCompositeRuleGroup`
+    (AND logic), as opposed to `AdGroupRoleMapping`'s OR-across-rows
+    semantics. Deliberately its OWN, ADDITIVE table rather than a
+    replacement of `AdGroupRoleMapping` - the two mechanisms are resolved
+    independently and unioned in `ad_group_mapping.resolve_roles_for_groups`,
+    so every pre-existing simple 1:1 mapping keeps working completely
+    unchanged (no data migration of existing rows needed at all)."""
+
+    __tablename__ = "ad_group_role_composite_rule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role_name: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class AdGroupRoleCompositeRuleGroup(Base):
+    """One AD group required by a composite rule (see
+    `AdGroupRoleCompositeRule`) - at least two rows per `rule_id` (enforced
+    in `ad_group_mapping.create_composite_rule`, not here, since a
+    single-group rule would be a redundant duplicate of the plain
+    `AdGroupRoleMapping` mechanism)."""
+
+    __tablename__ = "ad_group_role_composite_rule_group"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "ad_group_name", name="uq_ad_group_role_composite_rule_group"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("auth.ad_group_role_composite_rule.id", ondelete="CASCADE"), index=True
+    )
+    ad_group_name: Mapped[str] = mapped_column(String(255), index=True)
+
+
+class AdGroupMappingDefaultRole(Base):
+    """Singleton (`id=1`) configurable default role granted when a
+    principal's `groups` claim matches neither a simple `AdGroupRoleMapping`
+    row nor a satisfied `AdGroupRoleCompositeRule` (4.4, Post-Roadmap Phase
+    39 Session 3, ADR 0153) - the other named scope cut from ADR 0093
+    ("no configurable default for unmapped groups, hardcoded 'no role'").
+    `default_role_name=None` (the initial/reset state) reproduces the
+    previous hardcoded behavior exactly - same singleton-row pattern as
+    `SsoConfig` elsewhere in this service."""
+
+    __tablename__ = "ad_group_mapping_default_role"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    default_role_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
