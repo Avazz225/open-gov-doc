@@ -2,10 +2,46 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P37-S1 (scoping-only, concludes the whole Phase 32+ gap-closure plan — no code changed,
-no tests to run, no Docker rebuild, no live verification, per this session's own Definition of Done).
-Resolved the two questions `IMPLEMENTATION_PLAN.md` "Phase 37" and ADR 0126 both left open before "cross-
-tenant/cross-authority workflow participation via xdomea" could be sensibly build-planned:
+**Last completed:** P38-S1 (`folder-service` move-cycle bugfix — first session of the new Phase 38+
+gap-closure plan). Fixed the live-verified bug named in the new plan: `repository.update_folder` only
+ever checked "not its own direct parent" (`new_parent_id == folder_id`), so moving a folder under one of
+its own deeper descendants (e.g. `A` under its own child `B`, having previously moved `B` under `A`) went
+through unchecked, permanently making every folder in the cycle undeletable (the not-empty check before
+deletion sees the other as a child either way). Already found and documented live at P23-S4 but
+deliberately left unfixed there (out of that session's frontend-only scope). Fix: before applying a move,
+`update_folder` now checks whether the intended new parent lies inside the folder's own active subtree,
+reusing the already-existing `list_active_subtree_ids` (the same helper the trash cascade already uses) —
+since a folder is always the first element of its own subtree, this one check also subsumes the old,
+narrower self-parent guard, so the previous check was removed rather than kept alongside the new one.
+Re-verified live against the real running stack with the exact A→B→A reproduction the gap-analysis
+research had used: now rejected with `400` instead of silently succeeding, and both folders remain
+cleanly deletable afterward.
+
+**Scope correction found during implementation**: the plan's own premise that `document-service`/
+`object-type-service` have "the same bug class" did not survive code-level inspection, so neither was
+touched — `allowedParentTypes` doesn't exist in `document-service` at all (it's exclusively an
+`object-type-service` field), and `object-type-service`'s own placement check (`validate_against_object_type`)
+only ever compares one level (the immediate intended parent's type name) — it never walks a chain, so it
+cannot loop indefinitely or produce an undeletable instance the way an unchecked `parent_id` chain could.
+[ADR 0013](docs/adr/0013-object-hierarchy-parent-type-constraints.md) itself already reasoned through
+exactly this scenario and deliberately chose not to build type-graph cycle detection ("a full reachability
+check up to the root would be overengineering... a broken configuration surfaces at the latest at the
+first failed placement attempt, no silent failure state") — re-confirmed still correct, left alone, and
+`docs/services/object-type-service.md`'s own Open Point gained a note explaining this distinction so a
+future reader doesn't rediscover the same false equivalence. `folder-service` +2 tests (137 total, both
+reproducing the exact live-verified scenario at the repository and API level), `ruff check`/`ruff format`
+clean. No new ADR (a bugfix, not an architecture decision, per Phase 38's own Definition of Done).
+
+**Next session:** **P38-S2** (ungated/weakly-gated endpoints, round 1: `audit-service`'s `GET /events`/
+`.../verify` gets a real role check; `virus-scan-service`'s `/scan`/`GET /scans/*` get real authorization
+beyond token validity; `notification-service`'s `POST /notifications` gets a caller-permission check plus
+simple rate limiting; `document-service`'s internal disposal callbacks get a real caller check). See
+`IMPLEMENTATION_PLAN.md` "Phase 38" for the full session breakdown.
+
+Immediately before P38-S1: **P37-S1** (scoping-only, concludes the whole Phase 32+ gap-closure plan — no
+code changed, no tests to run, no Docker rebuild, no live verification, per this session's own Definition
+of Done). Resolved the two questions `IMPLEMENTATION_PLAN.md` "Phase 37" and ADR 0126 both left open
+before "cross-tenant/cross-authority workflow participation via xdomea" could be sensibly build-planned:
 
 - **(a) Transport**: no protocol change needed at all. `workflow_service.federation_crypto.encrypt_for()`
   already JSON-serializes an arbitrary dict before hybrid-encrypting it, and `federation-hub-service`'s
@@ -37,26 +73,23 @@ each gained a short cross-reference pointing at it. The recommended DMS-to-DMS h
 **scoped, not scheduled** — no session number assigned, awaiting a future phase if this gap is ever
 prioritized for an actual build.
 
-**Next session:** **P38-S1** (`folder-service` move-cycle bugfix + the same bug class in
-`document-service`/`object-type-service`). Immediately after P37-S1 concluded the entire Phase 32+
-gap-closure plan (spanning Phases 32–37), the user requested a fresh gap re-analysis — same methodology
-as after P31-S13: four parallel research agents (ADR-Consequences sweep across all 147 ADRs,
-`docs/services/*.md` Open-Points sweep, `Business__DMS-Konzept.md`-vs-implementation coverage check,
-re-evaluation of previously-deferred items). Result: the system is very mature overall, but the research
-found a real, non-trivial list of gaps — including a **live-verified, actually exploitable bug**
-(`folder-service`'s move endpoint permits a 2-node cycle that makes both folders permanently
-undeletable) and an **operational incident that already happened** (`storage-service` has no way to
-decommission a storage target, which has already produced 30,410 orphaned rows requiring manual SQL
-cleanup) — plus several real authorization gaps (`audit-service`/`notification-service`/
-`virus-scan-service` endpoints, `user-ui`'s legal-hold panels, and a systemic one: teamspace membership
-is enforced nowhere except `search-service`), two completely unbuilt concept requirements (5.5
-fine-grained session tracking, 5.2's attribute-level pseudonymization, both distinct from features
-already built), and a correction of two previously-deferred items (AD group→role sync, `mail-connector`
-IMAP) whose blocking reasoning turned out to be stale. This produced a new plan, **Phases 38–43**, added
-to `IMPLEMENTATION_PLAN.md` right after Phase 37 (security/correctness bugfixes → RBAC completion →
-operational reliability → concept compliance gaps → remaining functional completion → build/scoping for
-the largest remaining topics), approved via the same plan-mode flow as Phase 32+ itself (plan file:
-`~/.claude/plans/ich-habe-hier-ein-calm-thacker.md`, now containing both plans). See
+Immediately after P37-S1 concluded the entire Phase 32+ gap-closure plan (spanning Phases 32–37), the user
+requested a fresh gap re-analysis — same methodology as after P31-S13: four parallel research agents
+(ADR-Consequences sweep across all 147 ADRs, `docs/services/*.md` Open-Points sweep,
+`Business__DMS-Konzept.md`-vs-implementation coverage check, re-evaluation of previously-deferred items).
+Result: the system is very mature overall, but the research found a real, non-trivial list of gaps —
+including the `folder-service` move-cycle bug fixed above, an **operational incident that already
+happened** (`storage-service` has no way to decommission a storage target, which has already produced
+30,410 orphaned rows requiring manual SQL cleanup) — plus several real authorization gaps
+(`audit-service`/`notification-service`/`virus-scan-service` endpoints, `user-ui`'s legal-hold panels, and
+a systemic one: teamspace membership is enforced nowhere except `search-service`), two completely unbuilt
+concept requirements (5.5 fine-grained session tracking, 5.2's attribute-level pseudonymization, both
+distinct from features already built), and a correction of two previously-deferred items (AD group→role
+sync, `mail-connector` IMAP) whose blocking reasoning turned out to be stale. This produced a new plan,
+**Phases 38–43**, added to `IMPLEMENTATION_PLAN.md` right after Phase 37 (security/correctness bugfixes →
+RBAC completion → operational reliability → concept compliance gaps → remaining functional completion →
+build/scoping for the largest remaining topics), approved via the same plan-mode flow as Phase 32+ itself
+(plan file: `~/.claude/plans/ich-habe-hier-ein-calm-thacker.md`, now containing both plans). See
 `IMPLEMENTATION_PLAN.md` "Phase 38+" for the full breakdown and reasoning per session.
 
 Immediately before P37-S1: **P36-S3** (`reporting-service`: row-level RBAC filtering for the forensic trace,

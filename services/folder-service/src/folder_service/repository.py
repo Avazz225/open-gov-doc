@@ -168,8 +168,23 @@ async def update_folder(
     moved = False
 
     if new_parent_id is not None and new_parent_id != folder.parent_id:
-        if new_parent_id == folder_id:
-            raise ValueError("Ein Ordner kann nicht sein eigener Elternordner sein")
+        # Bugfix (Post-Roadmap Phase 38 Session 1): the old check only caught the
+        # direct self-parent case (`new_parent_id == folder_id`) - moving a folder
+        # under one of its own DEEPER descendants (e.g. A -> B -> A) was not
+        # rejected at all, silently creating a cycle that makes every folder in it
+        # permanently undeletable (`delete_folder`'s emptiness check walks
+        # `parent_id` links that now loop forever) and unreachable via any
+        # root-anchored tree walk. `list_active_subtree_ids` already computes
+        # `folder_id` plus every active descendant - reused here instead of a new,
+        # separate ancestor-walk, since checking "is the target already inside my
+        # own subtree" is equivalent and the helper already exists for the trash
+        # cascade. Includes `folder_id` itself as the first element, so this one
+        # check also subsumes the old self-parent case.
+        if new_parent_id in await list_active_subtree_ids(session, folder_id):
+            raise ValueError(
+                f"Ordner {folder_id!r} kann nicht nach {new_parent_id!r} verschoben werden - "
+                "das Ziel ist der Ordner selbst oder einer seiner eigenen Unterordner (Zyklus)"
+            )
         await get_folder(session, new_parent_id)
         folder.parent_id = new_parent_id
         moved = True

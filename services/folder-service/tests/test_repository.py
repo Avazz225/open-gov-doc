@@ -84,6 +84,34 @@ async def test_update_move_reports_moved(session):
     assert updated.parent_id == parent_b.id
 
 
+async def test_update_move_into_own_descendant_raises(session):
+    """Regression test (Post-Roadmap Phase 38 Session 1): moving a folder under
+    one of its own deeper descendants (A -> B -> A) previously succeeded
+    silently, creating a cycle that makes every folder in it permanently
+    undeletable - live-reproduced against the real running stack before this
+    fix. Only the direct self-parent case was caught before."""
+    parent = await repository.create_folder(
+        session,
+        name="A",
+        parent_id=ROOT_FOLDER_ID,
+        object_type_id=None,
+        attributes={},
+        created_by="alice",
+    )
+    child = await repository.create_folder(
+        session,
+        name="B",
+        parent_id=parent.id,
+        object_type_id=None,
+        attributes={},
+        created_by="alice",
+    )
+    with pytest.raises(ValueError):
+        await repository.update_folder(
+            session, parent.id, name=None, new_parent_id=child.id, attributes=None
+        )
+
+
 async def test_update_move_to_self_raises(session):
     folder = await repository.create_folder(
         session,

@@ -188,6 +188,20 @@ def test_move_to_self_returns_400(client):
     assert response.status_code == 400
 
 
+def test_move_into_own_descendant_returns_400(client):
+    """Regression test (Post-Roadmap Phase 38 Session 1) for a live-verified
+    bug: moving a folder under one of its own deeper descendants (A -> B ->
+    A) previously succeeded with 200, creating a cycle that makes both
+    folders permanently undeletable."""
+    parent = client.post("/folders", json={"name": "A", "created_by": "alice"}).json()
+    child = client.post(
+        "/folders", json={"name": "B", "parent_id": parent["id"], "created_by": "alice"}
+    ).json()
+
+    response = client.patch(f"/folders/{parent['id']}", json={"parent_id": child["id"]})
+    assert response.status_code == 400
+
+
 def test_delete_non_empty_folder_returns_409(client):
     parent = client.post("/folders", json={"name": "Parent", "created_by": "alice"}).json()
     client.post(
