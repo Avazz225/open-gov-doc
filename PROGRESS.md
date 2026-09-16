@@ -2,34 +2,78 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P36-S3 (`reporting-service`: row-level RBAC filtering for the forensic trace, at parity
-with `query-service`'s own `filtering.py` — the plan text's own naming was misleading, `filtering.py`
-actually lives in `query-service`, not document-service/folder-service, confirmed by reading the real code
-before starting; same session, a reject button for the admin-ui Query Console). New `reporting_service/
-filtering.py` mirrors `query_service/filtering.py`: resolves a `document-service` event's `subject` to its
-`folder_id` via a new `DocumentClient`, a `folder-service` event uses its `subject` directly, every other
-`service_name` (workflow/case/auth/signature/notification/registry/...) hidden fail-closed. Applied to the
-forensic trace **before** `forensic.detect_download_anomalies` runs (an anomaly computed over events the
-caller can't see would itself be an information leak) and reused identically by `/forensic-trace/export`
-(no RBAC bypass via export). Also added superuser-bypass parity that this service never had before (new
-`AuthServiceClient`/`_is_active_superuser`, `GET /superuser/status`, no header shortcut — 1:1 copy of the
-`permission-service`/`query-service` pattern) — a deliberate, bounded reapplication of an already-carved-out
-exception (concept 6.1), not a new architecture decision. `ForensicTraceResult` gained the same
-`total_before_filter`/`total_after_filter`/`superuser` transparency fields `query-service`'s own
-`QueryResult` already has. Proactively avoided a predictable regression before ever running the suite:
-existing forensic-trace tests use fabricated `doc-N` subjects absent from real `document-service`, and the
-default "everyone" role doesn't grant `document.read` — fixed via a mocked `document_client` in the shared
-test fixture plus a new idempotent, fixed-name `document.read` role-grant fixture (a role name checked once
-rather than the usual per-test random-uuid throwaway pattern, since no existing seeded role carries this
-permission). Admin UI: `QueryConsoleView`'s pending-approvals table gained a Reject button + inline reason
-form, 1:1 the `rejectingId`/`rejectReason`/`handleStartReject`/`handleCancelReject`/`handleConfirmReject`
-pattern already established in `reviewer-ui`'s `ApprovalList.tsx`, calling the already-existing (just never
-wired up) `POST /approval-requests/{id}/reject`; `ForensicTraceView` gained the same "N of M
-visible"/superuser hint `QueryConsoleView` already had. `reporting-service` +12 tests (69 total; the
-previously documented "54 tests" baseline had already silently drifted to 57 before this session — the
-exact intervening change was not tracked precisely, the same kind of drift noted for other services'
-baselines elsewhere in this project), `admin-ui` +4 tests (240 total). All `ruff`/`tsc`/`eslint`/`vitest`
-gates clean.
+**Last completed:** P37-S1 (scoping-only, concludes the whole Phase 32+ gap-closure plan — no code changed,
+no tests to run, no Docker rebuild, no live verification, per this session's own Definition of Done).
+Resolved the two questions `IMPLEMENTATION_PLAN.md` "Phase 37" and ADR 0126 both left open before "cross-
+tenant/cross-authority workflow participation via xdomea" could be sensibly build-planned:
+
+- **(a) Transport**: no protocol change needed at all. `workflow_service.federation_crypto.encrypt_for()`
+  already JSON-serializes an arbitrary dict before hybrid-encrypting it, and `federation-hub-service`'s
+  `encrypted_payload` field is already an unbounded, fully opaque string (ADR 0028's "hub cannot inspect
+  content" already covers arbitrary content, not just small BPMN task data). A binary XDOMEA/XJustiz ZIP can
+  travel today as a base64 string under a new key in that same dict — no hub schema change, no trust-model
+  change (ADR 0028/0039 both confirmed to need nothing new). One real, previously undocumented risk found
+  while confirming this is actually workable: the hub's retry design (ADR 0081) keeps in-flight payloads
+  only in process memory, sized around small JSON task data — several large, concurrently-retrying handovers
+  is a genuine, unresolved memory-pressure question, now a documented Open Point rather than a silent
+  assumption a future build session would have discovered the hard way.
+- **(b) "Cross-installation workflow participation"** turned out to conflate two different things under one
+  heading, only one of which is actually buildable: handoff to a genuinely **foreign, non-DMS** system can
+  only ever be a file handoff — no shared task-orchestration protocol exists for XDOMEA/XJustiz (document
+  interchange *formats*, not orchestration protocols) to carry, and the existing `taskType=federated`
+  mechanism only works because *both* sides already run this exact software and share a
+  `federation_process_type_map` convention. This half is **already closed** by ADR 0126's download/upload
+  flow — reclassified from "deferred" to "closed, no further action possible" in
+  `docs/egov-feature-gap-analysis.md`, correcting the original gap wording rather than leaving it looking
+  still-open. Automatic package handoff **between two installations of this DMS software specifically** is
+  the one genuinely buildable half: recommended design extends `taskType=federated` with a reserved
+  `process_type` so `POST /federation/inbound` calls `archival-service`'s already-existing general-import
+  path directly instead of a human uploading a file — reusing the hub's entire existing trust/retry/
+  idempotency machinery unchanged, no new federation primitive.
+
+New [ADR 0147](docs/adr/0147-cross-installation-xdomea-handoff-scoping.md) records the full reasoning and
+both recommendations. `docs/services/archival-service.md`/`federation-hub-service.md`/`workflow-service.md`
+each gained a short cross-reference pointing at it. The recommended DMS-to-DMS handoff feature itself is
+**scoped, not scheduled** — no session number assigned, awaiting a future phase if this gap is ever
+prioritized for an actual build.
+
+**Next session:** none currently scheduled. This concludes the entire Phase 32+ gap-closure plan
+(`IMPLEMENTATION_PLAN.md` "Phase 32+", spanning Phases 32–37) that followed the P31-S13 gap re-analysis —
+every phase in it (32 Security/RBAC hardening, 33 Accessibility, 34 XDOMEA/XJustiz completion, 35 Org-
+hierarchy/workflow polish, 36 Records quarantine/output stamping/misc, 37 this scoping session) is now
+either fully implemented or, for 37 specifically, deliberately scoped-but-deferred by its own design. Same
+pattern as after Phase 26 completed (see below) — the next concrete work item awaits the user's own
+direction, whether that's building P37-S1's recommended DMS-to-DMS handoff feature, a fresh gap re-analysis
+against the current codebase, or an entirely new feature request.
+
+Immediately before P37-S1: **P36-S3** (`reporting-service`: row-level RBAC filtering for the forensic trace,
+at parity with `query-service`'s own `filtering.py` — the plan text's own naming was misleading,
+`filtering.py` actually lives in `query-service`, not document-service/folder-service, confirmed by reading
+the real code before starting; same session, a reject button for the admin-ui Query Console). New
+`reporting_service/filtering.py` mirrors `query_service/filtering.py`: resolves a `document-service` event's
+`subject` to its `folder_id` via a new `DocumentClient`, a `folder-service` event uses its `subject`
+directly, every other `service_name` (workflow/case/auth/signature/notification/registry/...) hidden
+fail-closed. Applied to the forensic trace **before** `forensic.detect_download_anomalies` runs (an anomaly
+computed over events the caller can't see would itself be an information leak) and reused identically by
+`/forensic-trace/export` (no RBAC bypass via export). Also added superuser-bypass parity that this service
+never had before (new `AuthServiceClient`/`_is_active_superuser`, `GET /superuser/status`, no header
+shortcut — 1:1 copy of the `permission-service`/`query-service` pattern) — a deliberate, bounded
+reapplication of an already-carved-out exception (concept 6.1), not a new architecture decision.
+`ForensicTraceResult` gained the same `total_before_filter`/`total_after_filter`/`superuser` transparency
+fields `query-service`'s own `QueryResult` already has. Proactively avoided a predictable regression before
+ever running the suite: existing forensic-trace tests use fabricated `doc-N` subjects absent from real
+`document-service`, and the default "everyone" role doesn't grant `document.read` — fixed via a mocked
+`document_client` in the shared test fixture plus a new idempotent, fixed-name `document.read` role-grant
+fixture (a role name checked once rather than the usual per-test random-uuid throwaway pattern, since no
+existing seeded role carries this permission). Admin UI: `QueryConsoleView`'s pending-approvals table gained
+a Reject button + inline reason form, 1:1 the
+`rejectingId`/`rejectReason`/`handleStartReject`/`handleCancelReject`/`handleConfirmReject` pattern already
+established in `reviewer-ui`'s `ApprovalList.tsx`, calling the already-existing (just never wired up) `POST
+/approval-requests/{id}/reject`; `ForensicTraceView` gained the same "N of M visible"/superuser hint
+`QueryConsoleView` already had. `reporting-service` +12 tests (69 total; the previously documented "54
+tests" baseline had already silently drifted to 57 before this session — the exact intervening change was
+not tracked precisely, the same kind of drift noted for other services' baselines elsewhere in this
+project), `admin-ui` +4 tests (240 total). All `ruff`/`tsc`/`eslint`/`vitest` gates clean.
 
 Live verification surfaced two real bugs the test suite couldn't catch, since it exercises the FastAPI app
 directly and never the container's real network/scale: (1) `infra/docker-compose.yml` never set
@@ -56,7 +100,7 @@ already-established patterns, per Phase 36's own Definition of Done ("no new ADR
 architecture decisions"). **Phase 36 (Records Quarantine, Output Stamping & Misc Completion) is now fully
 complete.**
 
-**`graphify . --update` completed at this phase boundary** — attempted and finished after P36-S3 (178
+`graphify . --update` completed at this phase boundary — attempted and finished after P36-S3 (178
 new/changed files re-extracted: 136 code via AST, 42 docs/config via 3 parallel semantic subagents; 1
 falsely-flagged deletion pruned). Hit the same shrink guard P35-S4's attempt hit (`graphify-out/graph.json`
 at 15,708 nodes, the fresh merge only reaching 14,570 — net `-1,138`), but this time root-caused precisely
@@ -79,13 +123,6 @@ diagnosed-and-deferred P35-S4 issue's **first successful resolution**, not a rec
 session's shrink had a fully traceable, legitimate cause, unlike P35-S4's own (still-undiagnosed-in-detail)
 path-convention mismatch theory, which was never actually confirmed since that attempt was never force-pushed
 or root-caused this thoroughly.
-
-**Next session:** **P37-S1** (scoping-only session on cross-tenant XDOMEA federation — no implementation
-commitment, concludes with a concept document/ADR clarifying the transport-layer and workflow-participation
-questions named in `IMPLEMENTATION_PLAN.md` "Phase 37", not a feature). This is the last session of the
-whole Phase 32+ gap-closure plan (`IMPLEMENTATION_PLAN.md` "Phase 32+"). Before starting it, first attempt
-the outstanding `graphify . --update` noted above (this session's completion is exactly the phase boundary
-that was being waited for).
 
 Phases 0–26 (the original 107-session roadmap plus the post-triage Phase 18–26 continuation) are fully complete — see below under "Phase 26 — Helm charts for k8s/OCP" for that milestone's own summary. After Phase 26 completed, the user requested three new, mostly independent features (PDF export, direct links, configurable email templates), grounded via Explore/Plan agents against the real codebase and broken into **Phase 27–30** in `IMPLEMENTATION_PLAN.md`.
 

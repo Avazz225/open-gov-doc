@@ -45,9 +45,19 @@ Consistent with this project's established triage discipline (see the Phase 18�
 Roadmap" precedent), the following reference-system capabilities are deliberately **not** proposed for
 Phase 31, with reasoning:
 
-- **Cross-tenant/cross-authority workflow participation via xdomea** (one installation's process handing
-  a task to another installation's system) — depends entirely on gap #12 (general xdomea) being built
-  first; premature to design before that foundation exists.
+- ~~**Cross-tenant/cross-authority workflow participation via xdomea**~~ — gap #12 (general xdomea) is now
+  built (Phase 31/34); **scoped in Post-Roadmap Phase 37 Session 1**
+  ([ADR 0147](adr/0147-cross-installation-xdomea-handoff-scoping.md)), which found this item was really two
+  different things conflated under one heading: **(a) handoff to a genuinely foreign, non-DMS system** —
+  already closed, structurally cannot be more than a file handoff (no shared task-orchestration protocol
+  exists for XDOMEA/XJustiz to carry), which [ADR 0126](adr/0126-xdomea-general-exchange-split-download-upload-not-federation-hub.md)'s
+  download/upload flow already delivers; no further action planned. **(b) automatic package handoff between
+  two installations of this DMS software** — a genuine, buildable gap, scoped but not yet implemented or
+  scheduled: extend `taskType=federated` with a package payload (base64 in the existing encrypted envelope,
+  no trust-model change needed) so the receiving installation's `archival-service` import path runs
+  automatically instead of a human downloading/uploading the file, see ADR 0147 for the full design
+  reasoning and the one open engineering question it flags (payload-size interaction with
+  `federation-hub-service`'s in-memory retry cache).
 - **Third-party municipal long-term archive integration (a specific external archival system)** —
   vendor-specific integration target with no equivalent need identified for this project yet; revisit if
   a concrete installation requests it.
