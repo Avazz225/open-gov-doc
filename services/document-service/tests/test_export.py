@@ -21,6 +21,10 @@ STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localho
 RENDERING_SERVICE_URL = os.environ.get("TEST_RENDERING_SERVICE_URL", "http://localhost:8011")
 AUDIT_SERVICE_URL = os.environ.get("TEST_AUDIT_SERVICE_URL", "http://localhost:8002")
 ROLE_ADMIN_PRINCIPAL_ID = "document-service-test-role-admin"
+# Post-Roadmap Phase 38 Session 3: `PUT /export-config` requires
+# `admin.document_config` - must match
+# conftest.py::DOCUMENT_CONFIG_ADMIN_PRINCIPAL_ID.
+DOCUMENT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-document-config-admin"}
 
 
 @pytest.fixture
@@ -211,6 +215,7 @@ def test_get_and_update_export_config(client):
             "stamp_value_template": "{document_id}",
             "stamp_position": "top-left",
         },
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert response.status_code == 200
     body = response.json()
@@ -232,6 +237,7 @@ def test_update_export_config_rejects_diagonal_center_for_non_text_stamp(client)
     response = client.put(
         "/export-config",
         json={"stamp_type": "qr", "stamp_position": "diagonal-center"},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert response.status_code == 422
 
@@ -240,12 +246,17 @@ def test_update_export_config_rejects_unknown_template_placeholder(client):
     response = client.put(
         "/export-config",
         json={"stamp_value_template": "{unbekannt}"},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert response.status_code == 422
 
 
 def test_update_export_config_rejects_invalid_stamp_type(client):
-    response = client.put("/export-config", json={"stamp_type": "hologram"})
+    response = client.put(
+        "/export-config",
+        json={"stamp_type": "hologram"},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
     assert response.status_code == 422
 
 
@@ -273,6 +284,7 @@ def test_export_document_applies_configured_stamp_when_enabled(client):
             "stamp_value_template": "{document_id}",
             "stamp_position": "bottom-right",
         },
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert config_response.status_code == 200
 
@@ -440,6 +452,7 @@ async def test_folder_export_tick_applies_configured_stamp_per_document(
             "stamp_value_template": "{document_id}",
             "stamp_position": "top-right",
         },
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert config_response.status_code == 200
 

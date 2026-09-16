@@ -2,6 +2,12 @@ import pytest
 from fastapi.testclient import TestClient
 from signature_service.main import app
 
+# Muss mit conftest.py::SIGNATURE_CONFIG_ADMIN_PRINCIPAL_ID übereinstimmen
+# (dort per `_grant_signature_config_permission`-Fixture berechtigt) - kein
+# Cross-File-Import von Test-Konstanten, gleiche Projektkonvention wie
+# andernorts.
+SIGNATURE_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "signature-service-tests"}
+
 
 @pytest.fixture
 def client():
@@ -113,12 +119,20 @@ def test_put_signature_config_rejects_unknown_provider(client):
     """'Nur bestehende Einträge bearbeiten' (Sessionsvorgabe) - eine
     unbekannte Connector-`id` wird abgelehnt statt sie stillschweigend
     anzulegen."""
-    response = client.put("/signature-config", json=[{"id": "does-not-exist", "levels": ["ses"]}])
+    response = client.put(
+        "/signature-config",
+        json=[{"id": "does-not-exist", "levels": ["ses"]}],
+        headers=SIGNATURE_CONFIG_ADMIN_HEADERS,
+    )
     assert response.status_code == 422
 
 
 def test_put_signature_config_rejects_empty_levels(client):
-    response = client.put("/signature-config", json=[{"id": "internal", "levels": []}])
+    response = client.put(
+        "/signature-config",
+        json=[{"id": "internal", "levels": []}],
+        headers=SIGNATURE_CONFIG_ADMIN_HEADERS,
+    )
     assert response.status_code == 422
 
 
@@ -126,8 +140,30 @@ def test_put_signature_config_rejects_qes_for_internal_type(client):
     """Dieselbe Validierung wie `SignatureProviderConfig._check_levels`
     (Settings-Schema) - `type=internal` kann kein QES ausstellen, jetzt zur
     Laufzeit statt nur beim Start geprüft."""
-    response = client.put("/signature-config", json=[{"id": "internal", "levels": ["qes"]}])
+    response = client.put(
+        "/signature-config",
+        json=[{"id": "internal", "levels": ["qes"]}],
+        headers=SIGNATURE_CONFIG_ADMIN_HEADERS,
+    )
     assert response.status_code == 422
+
+
+def test_put_signature_config_without_principal_header_is_401(client):
+    response = client.put(
+        "/signature-config",
+        json=[{"id": "internal", "levels": ["ses"]}],
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_put_signature_config_without_permission_is_403(client):
+    response = client.put(
+        "/signature-config",
+        json=[{"id": "internal", "levels": ["ses"]}],
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
 
 
 def test_put_signature_config_takes_effect_without_restart(client, pdf_document, real_signer):
@@ -137,7 +173,11 @@ def test_put_signature_config_takes_effect_without_restart(client, pdf_document,
     zwischen PUT und dem nachfolgenden Signaturversuch."""
     document_id, _version = pdf_document
 
-    put_response = client.put("/signature-config", json=[{"id": "internal", "levels": ["ses"]}])
+    put_response = client.put(
+        "/signature-config",
+        json=[{"id": "internal", "levels": ["ses"]}],
+        headers=SIGNATURE_CONFIG_ADMIN_HEADERS,
+    )
     assert put_response.status_code == 200
     assert put_response.json() == [{"id": "internal", "type": "internal", "levels": ["ses"]}]
 

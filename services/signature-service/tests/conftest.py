@@ -27,6 +27,56 @@ os.environ["DMS_AUTH_SERVICE_BASE_URL"] = AUTH_SERVICE_URL
 
 SAMPLE_PDF_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "sample.pdf")
 
+PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
+# Post-Roadmap Phase 38 Session 3: `PUT /signature-config` now requires
+# `admin.signature_config`.
+SIGNATURE_CONFIG_ADMIN_PRINCIPAL_ID = "signature-service-tests"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_signature_config_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-signature")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": SIGNATURE_CONFIG_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": SIGNATURE_CONFIG_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_object_config_permission_for_test_setup():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-config")
+        principal_id = "signature-service-test-object-config-admin"
+        existing = (await pc.get("/role-assignments", params={"principal_id": principal_id})).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": principal_id,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
 
 @pytest.fixture(autouse=True)
 async def _clean_tables():
@@ -130,8 +180,18 @@ async def real_signer():
 @pytest.fixture
 async def aes_required_object_type():
     """Echter Objekttyp mit `required_signature_level="aes"` (3.10, P6-S7) -
-    liefert die `object_type_id`, Teardown löscht ihn wieder."""
-    async with httpx.AsyncClient(base_url=OBJECT_TYPE_SERVICE_URL) as client:
+    liefert die `object_type_id`, Teardown löscht ihn wieder. Post-Roadmap
+    Phase 38 Session 3: `object-type-service`'s `POST`/`DELETE /object-
+    types` now require `admin.object_config` too, a cross-service test
+    dependency (not this service's own gate) - reuses this service's own
+    `SIGNATURE_CONFIG_ADMIN_PRINCIPAL_ID`, which is granted only `admin.
+    signature_config` for this service's OWN gate; a second, dedicated
+    principal is used here instead to keep the two grants conceptually
+    separate."""
+    async with httpx.AsyncClient(
+        base_url=OBJECT_TYPE_SERVICE_URL,
+        headers={"X-DMS-Principal": "signature-service-test-object-config-admin"},
+    ) as client:
         response = await client.post(
             "/object-types",
             json={

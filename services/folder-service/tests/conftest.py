@@ -27,6 +27,14 @@ LEGAL_HOLD_ADMIN_PRINCIPAL_ID = "folder-service-test-legal-hold-admin"
 # `admin.user_management`) - same pattern as document-service's
 # `ROLE_ADMIN_PRINCIPAL_ID`/`_grant_role_admin_permission`.
 ROLE_ADMIN_PRINCIPAL_ID = "folder-service-test-role-admin"
+# Post-Roadmap Phase 38 Session 3: `PUT /folders/{id}/retention`/`PUT
+# /retention-config`/`PUT /trash-config` now require `admin.retention`.
+RETENTION_ADMIN_PRINCIPAL_ID = "folder-service-test-retention-admin"
+# Same session: `test_object_type_validation.py` creates/deletes real
+# object types against the live `object-type-service` as test setup - that
+# service's `POST`/`DELETE /object-types` now require `admin.object_config`
+# too, a cross-service test dependency (not this service's own gate).
+OBJECT_CONFIG_ADMIN_PRINCIPAL_ID = "folder-service-test-object-config-admin"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -68,6 +76,52 @@ async def _grant_legal_hold_permission():
             json={
                 "principal_type": "user",
                 "principal_id": LEGAL_HOLD_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_retention_permission():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-retention")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": RETENTION_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": RETENTION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_object_config_permission_for_test_setup():
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-config")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": OBJECT_CONFIG_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": OBJECT_CONFIG_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

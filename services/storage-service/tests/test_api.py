@@ -9,10 +9,21 @@ from storage_service.backends.local_backend import LocalFilesystemBackend
 from storage_service.main import app
 from storage_service.settings import BackendTargetConfig
 
+# Muss mit conftest.py::STORAGE_ADMIN_PRINCIPAL_ID übereinstimmen (dort per
+# `_grant_storage_permission`-Fixture berechtigt) - kein Cross-File-Import
+# von Test-Konstanten, gleiche Projektkonvention wie andernorts.
+STORAGE_ADMIN_PRINCIPAL_ID = "storage-service-tests"
+
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """`permission_client` stays UNMOCKED (a real call against the running
+    permission-service) - the `TestClient` therefore carries a
+    `X-DMS-Principal` header by default (RBAC since Post-Roadmap Phase 38
+    Session 3). Individual tests can override the header via
+    `headers={"X-DMS-Principal": ""}`/a random identity to exercise the
+    negative cases, same pattern as other services."""
+    with TestClient(app, headers={"X-DMS-Principal": STORAGE_ADMIN_PRINCIPAL_ID}) as c:
         yield c
 
 
@@ -276,6 +287,22 @@ def test_put_guard_config_updates_and_persists(client):
 
     get_response = client.get("/guard-config")
     assert get_response.json()["allow_degraded_start"] is True
+
+
+def test_put_guard_config_without_principal_header_is_401(client):
+    response = client.put(
+        "/guard-config", json={"allow_degraded_start": True}, headers={"X-DMS-Principal": ""}
+    )
+    assert response.status_code == 401
+
+
+def test_put_guard_config_without_storage_permission_is_403(client):
+    response = client.put(
+        "/guard-config",
+        json={"allow_degraded_start": True},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
 
 
 _DEFAULT_OPERATIONAL_CONFIG = {

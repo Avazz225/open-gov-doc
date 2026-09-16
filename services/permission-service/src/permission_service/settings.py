@@ -29,10 +29,3 @@ class Settings(BaseServiceSettings):
     auth_service_base_url: str = "http://localhost:8003"
 
     monitoring_service_base_url: str = "http://localhost:8026"
-
-    # Delegation (4.4a, P14-S11): who may revoke a delegation early without
-    # being the delegating person themself - same independently configurable
-    # role-setting pattern as document-service's
-    # `share_link_revoke_admin_role` (P14-S10), even though the default is
-    # identical.
-    delegation_revoke_admin_role: str = "dms-admin"

@@ -939,10 +939,44 @@ async def get_upload_config(session: AsyncSession = Depends(get_session)) -> Upl
     return config
 
 
+async def _require_document_config_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - this service's own settings
+    pages (`upload-config`/`export-config`/`audit-trace-config`/`audit-
+    trace-role-overrides`/`share-link-config`) previously had NO permission
+    check of any kind - anyone with network access to the gateway could
+    change them. One shared capability `admin.document_config` (role
+    "domain-admin-document-config") covers all of them, rather than one
+    capability per settings page - these are all installation-wide
+    configuration knobs owned by this one service, the same "one capability
+    per owning service/domain, not per page" principle already established
+    by `admin.object_config` (workflow-service's process definitions AND,
+    since this same session, object-type-service's own object types/
+    layouts/kennzeichen-config, see `docs/services/object-type-service.md`).
+    Deliberately a NEW, separate domain from `admin.retention` (see
+    `_require_retention_permission` below) - retention/disposal policy is a
+    materially different, more legally significant concern than upload/
+    export/audit-trace/share-link technical settings, matching this
+    project's own precedent for splitting rather than lumping domains
+    (e.g. `admin.legal_hold` vs. `admin.deletion` vs. `admin.records_
+    quarantine`, all separately gated)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.document_config"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Dokumentendienst-Konfiguration'",
+        )
+
+
 @app.put("/upload-config", response_model=UploadConfigOut)
 async def put_upload_config(
-    body: UploadConfigIn, session: AsyncSession = Depends(get_session)
+    body: UploadConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> UploadConfigOut:
+    await _require_document_config_permission(x_dms_principal)
     config = await repository.update_upload_config(
         session, allowed_content_types=body.allowed_content_types
     )
@@ -961,8 +995,11 @@ async def get_audit_trace_config(
 
 @app.put("/audit-trace-config", response_model=AuditTraceConfigOut)
 async def put_audit_trace_config(
-    body: AuditTraceConfigIn, session: AsyncSession = Depends(get_session)
+    body: AuditTraceConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> AuditTraceConfigOut:
+    await _require_document_config_permission(x_dms_principal)
     config = await repository.update_audit_trace_config(
         session, log_viewed=body.log_viewed, log_downloaded=body.log_downloaded
     )
@@ -981,8 +1018,12 @@ async def list_audit_trace_role_overrides(
 
 @app.put("/audit-trace-role-overrides/{role}", response_model=AuditTraceRoleOverrideOut)
 async def put_audit_trace_role_override(
-    role: str, body: AuditTraceRoleOverrideIn, session: AsyncSession = Depends(get_session)
+    role: str,
+    body: AuditTraceRoleOverrideIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> AuditTraceRoleOverrideOut:
+    await _require_document_config_permission(x_dms_principal)
     override = await repository.upsert_role_override(
         session, role, log_viewed=body.log_viewed, log_downloaded=body.log_downloaded
     )
@@ -992,8 +1033,11 @@ async def put_audit_trace_role_override(
 
 @app.delete("/audit-trace-role-overrides/{role}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_audit_trace_role_override(
-    role: str, session: AsyncSession = Depends(get_session)
+    role: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _require_document_config_permission(x_dms_principal)
     try:
         await repository.delete_role_override(session, role)
         await session.commit()
@@ -2251,13 +2295,44 @@ async def restore_document(
     return document
 
 
+async def _require_retention_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - scheduling/changing a
+    document's retention deadline or forced-deletion flag previously had NO
+    permission check of any kind, a real, currently-open gap distinct from
+    (and adjacent to) legal hold: `user-ui`'s `RetentionPanel` already
+    gated the LEGAL HOLD set/release buttons on `admin.legal_hold` since
+    ADR 0075 (P19-S10) - the plan's original premise that this was still
+    missing was stale - but the SAME component's "Save" button for
+    `retention_until`/`full_deletion`/reason called this endpoint with no
+    gate at all, client or server side. New capability `admin.retention`
+    (role "domain-admin-retention") also covers the installation-wide
+    `PUT /retention-config`/`PUT /trash-config` below - a deliberately
+    separate domain from `admin.legal_hold` (a hold PREVENTS deletion,
+    retention administration SCHEDULES it - conceptually opposite actions,
+    same reasoning ADR 0075 itself already used to justify not reusing
+    `admin.deletion` for legal hold)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.retention"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Aufbewahrungsverwaltung'",
+        )
+
+
 @app.put("/documents/{document_id}/retention", response_model=DocumentOut)
 async def put_retention(
-    document_id: str, payload: RetentionUpdate, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: RetentionUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Schedule retention/forced deletion (5.2/5.2a, since P7-S1) - the
     actual enforcement happens asynchronously via `_retention_poll_loop`,
-    once `retention_until` is reached (see main.py)."""
+    once `retention_until` is reached (see main.py). Gated by
+    `admin.retention` since Post-Roadmap Phase 38 Session 3, see
+    `_require_retention_permission`."""
+    await _require_retention_permission(x_dms_principal)
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -2553,8 +2628,11 @@ async def get_retention_config(session: AsyncSession = Depends(get_session)) -> 
 
 @app.put("/retention-config", response_model=RetentionConfigOut)
 async def put_retention_config(
-    body: RetentionConfigIn, session: AsyncSession = Depends(get_session)
+    body: RetentionConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> RetentionConfigOut:
+    await _require_retention_permission(x_dms_principal)
     config = await repository.update_retention_config(
         session,
         deletion_reason_required=body.deletion_reason_required,
@@ -2574,8 +2652,11 @@ async def get_trash_config(session: AsyncSession = Depends(get_session)) -> Tras
 
 @app.put("/trash-config", response_model=TrashConfigOut)
 async def put_trash_config(
-    body: TrashConfigIn, session: AsyncSession = Depends(get_session)
+    body: TrashConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> TrashConfigOut:
+    await _require_retention_permission(x_dms_principal)
     config = await repository.update_trash_config(
         session, restore_period_days=body.restore_period_days
     )
@@ -2597,8 +2678,11 @@ async def get_share_link_config(session: AsyncSession = Depends(get_session)) ->
 
 @app.put("/share-link-config", response_model=ShareLinkConfigOut)
 async def put_share_link_config(
-    body: ShareLinkConfigIn, session: AsyncSession = Depends(get_session)
+    body: ShareLinkConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> ShareLinkConfigOut:
+    await _require_document_config_permission(x_dms_principal)
     config = await repository.update_share_link_config(
         session, enabled=body.enabled, max_validity_days=body.max_validity_days
     )
@@ -3162,14 +3246,19 @@ async def get_export_config(session: AsyncSession = Depends(get_session)) -> Exp
 
 @app.put("/export-config", response_model=ExportConfigOut)
 async def update_export_config(
-    body: ExportConfigIn, session: AsyncSession = Depends(get_session)
+    body: ExportConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> ExportConfigOut:
     """`stamp_*` (post-roadmap phase 31 session 6, ADR 0117): validated once
     here at config-write time (`stamp_type`/`stamp_position` are already
     `Literal`-typed by the schema; the cross-field "diagonal-center only for
     text" rule and the template's placeholder names aren't expressible as a
     single field's type, so both are checked explicitly), not re-checked on
-    every export."""
+    every export. Gated by `admin.document_config` since Post-Roadmap Phase
+    38 Session 3 (previously deliberately ungated, see `docs/services/
+    document-service.md` "Open Points" pre-this-session)."""
+    await _require_document_config_permission(x_dms_principal)
     if body.stamp_type != "text" and body.stamp_position == "diagonal-center":
         raise HTTPException(
             status_code=422,

@@ -36,6 +36,35 @@ async def _grant_role_admin_permission():
 
 
 @pytest.fixture(scope="session", autouse=True)
+async def _grant_notification_config_permission():
+    """Post-Roadmap Phase 38 Session 3: `PUT /email-templates/{use_case}`/
+    `.../by-domain/{domain}`/`DELETE /email-templates/{id}` require
+    `admin.notification_config` - unlike `notification.write` below, this
+    is an EXISTING seeded domain-admin role (`domain-admin-notification`),
+    granted directly to the default `client` fixture's own test principal."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-notification")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": NOTIFICATION_TEST_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": NOTIFICATION_TEST_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
 async def _grant_notification_write_permission():
     """`notification.write` is deliberately NOT part of the "everyone"
     group (Post-Roadmap Phase 38 Session 2, see `main.py`
@@ -295,3 +324,54 @@ def test_create_notification_rate_limited_per_recipient(client, real_recipient):
         assert response.status_code == 429
     finally:
         settings.notification_rate_limit_max_per_recipient = original_max
+
+
+def test_put_email_template_default_persists(client):
+    response = client.put(
+        "/email-templates/workflow.task.escalated",
+        json={"subject_template": "Test-Betreff", "body_template": "Test-Text {task_name}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["use_case"] == "workflow.task.escalated"
+    assert body["recipient_domain_pattern"] is None
+    assert body["subject_template"] == "Test-Betreff"
+
+
+def test_put_email_template_default_without_principal_header_is_401(client):
+    response = client.put(
+        "/email-templates/workflow.task.escalated",
+        json={"subject_template": "x", "body_template": "y"},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_put_email_template_default_without_notification_config_permission_is_403(client):
+    response = client.put(
+        "/email-templates/workflow.task.escalated",
+        json={"subject_template": "x", "body_template": "y"},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_put_email_template_for_domain_without_permission_is_403(client):
+    response = client.put(
+        "/email-templates/workflow.task.escalated/by-domain/example.com",
+        json={"subject_template": "x", "body_template": "y"},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_delete_email_template_without_permission_is_403(client):
+    created = client.put(
+        "/email-templates/workflow.task.escalated",
+        json={"subject_template": "x", "body_template": "y"},
+    ).json()
+    response = client.delete(
+        f"/email-templates/{created['id']}",
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403

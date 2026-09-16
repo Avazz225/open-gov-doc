@@ -244,6 +244,35 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Aussonderungs-Callback (archival-service)",
         ["document.disposal_callback"],
     ),
+    # Post-Roadmap Phase 38 Session 3: `PUT /documents/{id}/retention`/
+    # `PUT /retention-config`/`PUT /trash-config` on document-service AND
+    # the identical three endpoints on folder-service previously had NO
+    # permission check at all - one shared domain across both services
+    # (the same retention/disposal-policy concern for documents and
+    # folders), separate from `admin.legal_hold` (a hold PREVENTS deletion,
+    # retention administration SCHEDULES it - conceptually opposite
+    # actions, same reasoning ADR 0075 itself already used).
+    ("domain-admin-retention", "Aufbewahrungsverwaltung", ["admin.retention"]),
+    # Same session: document-service's remaining settings pages (`upload-
+    # config`/`export-config`/`audit-trace-config`/`audit-trace-role-
+    # overrides`/`share-link-config`) previously had NO permission check
+    # either - one shared capability across all of them (all installation-
+    # wide configuration knobs owned by this one service), rather than one
+    # capability per settings page.
+    ("domain-admin-document-config", "Dokumentendienst-Konfiguration", ["admin.document_config"]),
+    # Same session: signature-service's `PUT /signature-config` previously
+    # had NO permission check - a dedicated domain rather than reusing
+    # `admin.object_config`/`admin.storage`, since electronic-signature
+    # provider configuration (3.10) is a materially different, more
+    # specialized concern than either object-type schema or storage-backend
+    # administration.
+    ("domain-admin-signature", "Signatur-Konfiguration", ["admin.signature_config"]),
+    # Same session: notification-service's `EmailTemplate` CRUD previously
+    # had NO permission check - deliberately a separate domain from P38-S2's
+    # own `notification.write` (that one governs who may TRIGGER a
+    # notification, this one governs who may change the wording every
+    # future notification is sent with).
+    ("domain-admin-notification", "Notification-Konfiguration", ["admin.notification_config"]),
 ]
 
 

@@ -28,8 +28,16 @@ const GROUPS: NavGroup[] = [
     labelKey: "nav.groupManagement",
     items: [
       { href: "/users/", labelKey: "nav.users", requiresCapability: "admin.user_management" },
-      { href: "/object-types/", labelKey: "nav.objectTypes" },
-      { href: "/kennzeichen-settings/", labelKey: "nav.kennzeichenSettings" },
+      {
+        href: "/object-types/",
+        labelKey: "nav.objectTypes",
+        requiresCapability: "admin.object_config",
+      },
+      {
+        href: "/kennzeichen-settings/",
+        labelKey: "nav.kennzeichenSettings",
+        requiresCapability: "admin.object_config",
+      },
       {
         href: "/config-packages/",
         labelKey: "nav.configPackages",
@@ -53,25 +61,45 @@ const GROUPS: NavGroup[] = [
     labelKey: "nav.groupProcessing",
     items: [
       { href: "/ocr-settings/", labelKey: "nav.ocrSettings" },
-      { href: "/upload-settings/", labelKey: "nav.uploadSettings" },
-      { href: "/export-settings/", labelKey: "nav.exportSettings" },
+      {
+        href: "/upload-settings/",
+        labelKey: "nav.uploadSettings",
+        requiresCapability: "admin.document_config",
+      },
+      {
+        href: "/export-settings/",
+        labelKey: "nav.exportSettings",
+        requiresCapability: "admin.document_config",
+      },
       { href: "/processing-failures/", labelKey: "nav.processingFailures" },
-      { href: "/signature-config/", labelKey: "nav.signatureConfig" },
+      {
+        href: "/signature-config/",
+        labelKey: "nav.signatureConfig",
+        requiresCapability: "admin.signature_config",
+      },
     ],
   },
   {
     id: "storage",
     labelKey: "nav.groupStorage",
     items: [
-      { href: "/storage-guard/", labelKey: "nav.storageGuard" },
-      { href: "/storage-operational-config/", labelKey: "nav.storageOperationalConfig" },
+      { href: "/storage-guard/", labelKey: "nav.storageGuard", requiresCapability: "admin.storage" },
+      {
+        href: "/storage-operational-config/",
+        labelKey: "nav.storageOperationalConfig",
+        requiresCapability: "admin.storage",
+      },
     ],
   },
   {
     id: "compliance",
     labelKey: "nav.groupCompliance",
     items: [
-      { href: "/retention-settings/", labelKey: "nav.retentionSettings" },
+      {
+        href: "/retention-settings/",
+        labelKey: "nav.retentionSettings",
+        requiresCapability: "admin.retention",
+      },
       { href: "/deletion-register/", labelKey: "nav.deletionRegister" },
       { href: "/archival-transfers/", labelKey: "nav.archivalTransfers" },
     ],
@@ -82,11 +110,31 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/superuser/", labelKey: "nav.superuser" },
       { href: "/forensic-trace/", labelKey: "nav.forensicTrace" },
-      { href: "/audit-trace-settings/", labelKey: "nav.auditTraceSettings" },
-      { href: "/share-link-settings/", labelKey: "nav.shareLinkSettings" },
-      { href: "/delegations/", labelKey: "nav.delegations" },
-      { href: "/approval-settings/", labelKey: "nav.approvalSettings" },
-      { href: "/email-templates/", labelKey: "nav.emailTemplates" },
+      {
+        href: "/audit-trace-settings/",
+        labelKey: "nav.auditTraceSettings",
+        requiresCapability: "admin.document_config",
+      },
+      {
+        href: "/share-link-settings/",
+        labelKey: "nav.shareLinkSettings",
+        requiresCapability: "admin.document_config",
+      },
+      {
+        href: "/delegations/",
+        labelKey: "nav.delegations",
+        requiresCapability: "admin.user_management",
+      },
+      {
+        href: "/approval-settings/",
+        labelKey: "nav.approvalSettings",
+        requiresCapability: "admin.user_management",
+      },
+      {
+        href: "/email-templates/",
+        labelKey: "nav.emailTemplates",
+        requiresCapability: "admin.notification_config",
+      },
     ],
   },
   {

@@ -13,8 +13,9 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         admin_username=settings.auth_service_admin_username,
         admin_password=settings.auth_service_admin_password,
     )
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -100,6 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.document_client.close()
     await app.state.object_type_client.close()
     await app.state.auth_client.close()
+    await app.state.permission_client.close()
     await engine.dispose()
 
 
@@ -278,15 +281,40 @@ async def get_signature_config(
     return [SignatureProviderStatusOut(id=p.id, type=p.type, levels=p.levels) for p in providers]
 
 
+async def _require_signature_config_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - `PUT /signature-config`
+    previously had NO permission check at all. New capability
+    `admin.signature_config` (role "domain-admin-signature") - a dedicated
+    domain rather than reusing `admin.object_config`/`admin.storage`,
+    since electronic-signature provider configuration (3.10) is a
+    materially different, more specialized concern (which levels an
+    installation's connectors may issue) than either object-type schema
+    or storage-backend administration."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.signature_config"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Signatur-Konfiguration'",
+        )
+
+
 @app.put("/signature-config", response_model=list[SignatureProviderStatusOut])
 async def put_signature_config(
-    body: list[SignatureProviderLevelsIn], session: AsyncSession = Depends(get_session)
+    body: list[SignatureProviderLevelsIn],
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[SignatureProviderStatusOut]:
     """Connector levels (post-roadmap phase 22 session 6, ADR 0091) - `id`/
     `type` still come structurally from `Settings.signature_providers`
     ("only edit existing entries"), only `levels` is editable. Same
     validation as `SignatureProviderConfig._check_levels` (settings
-    schema), here at runtime instead of at startup."""
+    schema), here at runtime instead of at startup. Gated by
+    `admin.signature_config` since Post-Roadmap Phase 38 Session 3, see
+    `_require_signature_config_permission`."""
+    await _require_signature_config_permission(x_dms_principal)
     known_provider_types = {p.id: p.type for p in settings.signature_providers}
     try:
         await repository.update_signature_config(

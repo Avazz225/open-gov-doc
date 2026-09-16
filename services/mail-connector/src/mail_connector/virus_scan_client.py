@@ -22,10 +22,19 @@ class VirusScanClient:
     async def scan(
         self, *, data: bytes, filename: str, content_type: str | None, created_by: str
     ) -> ScanOutcome:
+        # Post-Roadmap Phase 38 Session 2: `POST /scan` now requires
+        # `X-DMS-Principal` + `virus_scan.write` (previously fully
+        # ungated) - `virus_scan.write` was added to the "everyone" group
+        # for exactly this kind of caller (no per-request human principal
+        # for an inbound mail attachment), same fixed-identity pattern
+        # already used by `document_service.virus_scan_client`. Missed for
+        # this service in that session, found live in P38-S3's full test
+        # suite run.
         response = await self._client.post(
             "/scan",
             data={"created_by": created_by},
             files={"file": (filename, data, content_type or "application/octet-stream")},
+            headers={"X-DMS-Principal": "mail-connector"},
         )
         response.raise_for_status()
         body = response.json()

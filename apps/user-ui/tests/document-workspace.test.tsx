@@ -1484,6 +1484,9 @@ describe("DocumentWorkspace", () => {
     ]);
     listDocumentsInFolderMock.mockResolvedValue([]);
     putFolderRetentionMock.mockResolvedValue({});
+    // RBAC (Post-Roadmap Phase 38 Session 3): the modal's "Save" button is
+    // only active for principals with `admin.retention`.
+    authState.permissions = ["admin.retention"];
 
     const user = userEvent.setup();
     renderWorkspace();

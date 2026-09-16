@@ -336,13 +336,42 @@ async def list_email_templates(
     return await repository.list_email_templates(session, use_case=use_case)
 
 
+async def _require_notification_config_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - editing/deleting configured
+    `EmailTemplate` rows previously had NO permission check at all. New
+    capability `admin.notification_config` (role "domain-admin-
+    notification") - deliberately a separate domain from `notification.
+    write` (P38-S2's own new capability, see `_require_notification_
+    permission` above): that one governs who may TRIGGER a notification,
+    this one governs who may change the wording every future notification
+    of a given use case is sent with - materially different concerns
+    (one-off action vs. installation-wide configuration), same "who may
+    use vs. who may configure" distinction this project draws elsewhere
+    (e.g. `admin.legal_hold` vs. `admin.retention`)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.notification_config"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Notification-Konfiguration'",
+        )
+
+
 @app.put("/email-templates/{use_case}", response_model=EmailTemplateOut)
 async def put_email_template_default(
-    use_case: str, payload: EmailTemplateIn, session: AsyncSession = Depends(get_session)
+    use_case: str,
+    payload: EmailTemplateIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> EmailTemplateOut:
     """Upserts the catch-all row (`recipient_domain_pattern IS NULL`) for
     `use_case` - applies to a recipient of any domain not more specifically
-    matched by `PUT .../by-domain/{domain}`."""
+    matched by `PUT .../by-domain/{domain}`. Gated by `admin.notification_
+    config` since Post-Roadmap Phase 38 Session 3, see `_require_
+    notification_config_permission`."""
+    await _require_notification_config_permission(x_dms_principal)
     template = await repository.upsert_email_template(
         session,
         use_case=use_case,
@@ -359,8 +388,10 @@ async def put_email_template_for_domain(
     use_case: str,
     domain: str,
     payload: EmailTemplateIn,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> EmailTemplateOut:
+    await _require_notification_config_permission(x_dms_principal)
     template = await repository.upsert_email_template(
         session,
         use_case=use_case,
@@ -374,12 +405,17 @@ async def put_email_template_for_domain(
 
 @app.delete("/email-templates/{template_id}", status_code=204)
 async def delete_email_template(
-    template_id: int, session: AsyncSession = Depends(get_session)
+    template_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
     """Removes a configured row - the affected `(use_case, domain)`
     combination falls back to the existing hardcoded default in
     `consumer.py` again (see `resolve_template`), same "no row = fallback"
-    principle as `ApprovalActionConfig`."""
+    principle as `ApprovalActionConfig`. Gated by `admin.notification_
+    config` since Post-Roadmap Phase 38 Session 3, see `_require_
+    notification_config_permission`."""
+    await _require_notification_config_permission(x_dms_principal)
     try:
         await repository.delete_email_template(session, template_id)
     except repository.NotFoundError as exc:

@@ -2,59 +2,85 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P38-S2 (ungated/weakly-gated endpoints, round 1 — second session of the Phase 38+
-gap-closure plan). Closed all four findings named in the plan, all real authorization gaps with no
-existing check beyond plain token validity:
+**Last completed:** P38-S3 (ungated/weakly-gated endpoints, round 2 — third session of the Phase 38+
+gap-closure plan). Both plan-text premises turned out understated once checked against the real code
+(surfaced via research, confirmed with the user via `AskUserQuestion` before implementing):
 
-- **`audit-service`**: `GET /events`/`.../verify` had no role check whatsoever (readable by anyone with
-  network access to the gateway). New capability `audit.read`, added to the "everyone" group — several
-  existing internal callers (`query-service`'s `_run_query`, `reporting-service`'s forensic trace/
-  scheduled reports) had zero auth before, so rather than requiring each to be individually re-granted,
-  they now forward their OWN already-authenticated calling principal (`AuditClient.list_events` in both
-  services gained a required `principal_id` kwarg). This service had no `test_api.py` at all before this
-  session — 37 new tests.
-- **`virus-scan-service`**: `/scan`/`GET /scans/{id}`/`GET /scans` (without `status=infected`, which
-  already had its own narrower `admin.quarantine` gate since ADR 0073) had no check at all. New
-  capabilities `virus_scan.write`/`virus_scan.read`, also added to "everyone" — the only real `/scan`
-  caller, `document-service`'s `create_document`, has no per-request human principal of its own (a
-  separate, larger, deliberately out-of-scope gap), so it asserts a fixed `X-DMS-Principal:
-  document-service` identity instead of requiring that bigger fix first. 38 tests (was 32, +6).
-- **`notification-service`**: `POST /notifications` had no permission check of the *caller* at all (only
-  a recipient-existence check) — any authenticated principal could notify any known user, a spam/abuse
-  vector. New capability `notification.write`, deliberately **not** added to "everyone" (genuinely one
-  real caller today) — instead a dedicated role grant for the fixed principal
-  `reporting-service-scheduler` (reused from the audit-service fix above). Also added: an in-process
-  per-recipient sliding-window rate limiter (`RecipientRateLimiter`, new `rate_limiter.py`) as defense in
-  depth on top of the RBAC fix. 84 tests (was 81, +3).
-- **`document-service`**: the three disposal callbacks (`PUT .../archived`/`.../dehydrated`/
-  `.../rehydrated`) relied purely on network topology. New capability `document.disposal_callback`,
-  seeded as its own dedicated role (`archival-service-callback`, auto-created on every fresh installation
-  via `ensure_domain_admin_roles`) — **not** part of "everyone", a machine-to-machine callback with
-  exactly one legitimate caller. `archival-service`'s `DocumentClient` now asserts a fixed
-  `X-DMS-Principal: archival-service` identity. Live-verified end-to-end against the real running stack:
-  `curl` without a header → `401`, with an unrelated authenticated principal → `403`, with the
-  `archival-service` identity → `200`.
+- **(1) `RetentionPanel`/`FolderRetentionModal`**: the plan assumed legal-hold set/release was still
+  ungated — it was not, ADR 0075 (P19-S10) already closed that. Redirected to the REAL, adjacent gap in
+  the same components: `PUT /documents/{id}/retention`/`PUT /folders/{id}/retention`/
+  `PUT /retention-config`/`PUT /trash-config` had zero permission check at all, client or server side.
+- **(2) admin-ui's "inconsistent authorization surface"**: the audit found this wasn't a missing-
+  frontend-affordance problem on a few pages — of ~27 admin pages, only 3 had any client-side check, and
+  most of the corresponding BACKEND endpoints had no RBAC at all either, not just a missing wrapper. User
+  chose full alignment over a narrow subset.
 
-**Scope decision made during implementation**: `case-service`'s analogous `PUT /cases/{id}/archived`
-callback was examined against this same finding and deliberately left ungated — it already carries its
-own explicit architecture decision ([ADR 0070](docs/adr/0070-case-service-rbac.md)) with the identical
-"pure machine-to-machine callback, network topology is the trust boundary" rationale this session was
-otherwise moving away from. Revisiting that decision was judged a separate scope question (the plan's own
-wording named only `document-service`), not silently folded into this fix — noted in
-`docs/services/document-service.md` "Open Points" for a future session to pick up explicitly if desired.
+Closed via [ADR 0148](docs/adr/0148-admin-ui-authorization-full-alignment.md) — **6 new/reused
+capability domains**: `admin.retention` (new, shared by document-service + folder-service — a hold
+PREVENTS deletion, retention administration SCHEDULES it, same split ADR 0075 already drew for legal
+hold vs. deletion admin), `admin.document_config` (new, covers 5 document-service settings pages — one
+capability per owning concern, not per page), `admin.signature_config`/`admin.notification_config` (new,
+one page each), `admin.object_config` (REUSED — wired up in `object-type-service` itself for the first
+time, having only ever governed workflow-service's BPMN/DMN definitions before, despite its own seeded
+role description already naming "object type" configuration), `admin.storage` (REUSED — seeded since
+P9-S1, never enforced anywhere in the codebase until now).
 
-Also found and fixed in passing (same bug class as P37-S1): `infra/docker-compose.yml` was missing
-`DMS_PERMISSION_SERVICE_BASE_URL`/the `permission-service` `depends_on` entry for `audit-service` and
-`notification-service` — a newly added `permission_service_base_url` setting silently falls back to an
-unreachable `localhost` default without both. `document-service`/`archival-service` test suites (352/138
-tests) all green, `ruff check`/`ruff format` clean (pre-existing, unrelated findings remain in
-`loadtest/notebook/analysis.ipynb` and `federation-hub-service`). No new ADR (a bugfix/hardening session,
-per Phase 38's own Definition of Done — only P38-S4 expects one).
+**Backend**: document-service (+2 helpers/9 endpoints), folder-service (+1/3), object-type-service
+(first-ever `permission_client`, +1/6), storage-service (first-ever `permission_client`, +1/4),
+signature-service (first-ever `permission_client`, +1/1), notification-service (+1/3, the
+`EmailTemplate` CRUD), permission-service (`GET /delegations`'s installation-wide-overview branch and
+`DELETE /delegations/{id}`'s admin-role branch migrated off "no check"/the legacy `X-DMS-Roles` string
+check onto `admin.user_management`, checked via a self-call to its own `repository` since
+permission-service has no HTTP client to itself; self-service filtering by one's own principal stays
+free, matching `user-ui`'s `DelegationsPane.tsx`). **Frontend**: `RequireCapability` wrappers added to
+15 admin-ui pages (`AdminSidebar`'s `requiresCapability` map extended to match); `user-ui`'s
+`RetentionPanel`/`FolderRetentionModal` "Save" button now disabled without `admin.retention`,
+independently of the legal-hold buttons.
 
-**Next session:** **P38-S3** (ungated/weakly-gated endpoints, round 2, frontend: `user-ui`'s
-`RetentionPanel`/`FolderRetentionModal` get a real role restriction — currently any logged-in user can
-set/release a legal hold; `admin-ui`'s inconsistent authorization surface is audited and aligned). See
-`IMPLEMENTATION_PLAN.md` "Phase 38" for the full session breakdown.
+**A full cross-service backend-suite run (`./scripts/run-tests.sh` across ~30 services) surfaced 3 more
+production gaps this session's own per-service test runs had missed**: `config-service`'s and
+`query-service`'s own `object-type-service` HTTP clients sent no `X-DMS-Principal` at all (fixed with
+the same fixed-service-identity pattern already established — `config-service`'s identity already held
+`admin.object_config` from its own pre-existing self-bootstrap, `query-service`'s needed a fresh grant);
+and — a genuine **P38-S2** miss, not this session's own gate — `mail-connector`'s `VirusScanClient`
+similarly sent nothing to `virus-scan-service`'s `POST /scan` (fixed the same way, no new grant needed
+since that capability is in "everyone"). None of the three were caught by any single service's own test
+suite (`query-service`'s `test_manipulation.py` exercises the action only against a fake client); only
+running every service's tests together, live, surfaced them. Also found and left deliberately alone:
+`webdav-connector`'s root `PROPFIND` times out under this dev environment's accumulated 2,472-document
+root folder — a real but pre-existing, unrelated N+1 performance characteristic, not a regression (noted
+in `docs/services/webdav-connector.md` "Open Points").
+
+**Tests**: document-service 356 (+4), folder-service 140 (+3), object-type-service 97 (+46, first-ever
+RBAC coverage), storage-service 136 (+15), signature-service 18 (+7), permission-service 170 (+4),
+notification-service 89 (+5, first-ever HTTP-level `EmailTemplate` coverage); admin-ui vitest 241 (+1),
+user-ui vitest 270 (unchanged, 3 existing mocks extended for the new capability). All backend suites
+`ruff check`/`ruff format` clean; `apps/admin-ui`/`apps/user-ui` `tsc`/`eslint`/`next build` clean.
+**Live-verified**: `curl` against the real running `storage-service` (`401` → `403` → `200` across its
+new gate), plus a real headless-browser (Playwright) session against rebuilt `admin-ui`/`user-ui`
+containers — capability-gated sidebar visibility, a direct-URL `RequireCapability` redirect for a
+missing capability, and the `RetentionPanel` Save button's disabled→enabled transition across a real
+permission grant (with the independent legal-hold button staying disabled throughout). New ADR 0148
+(the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
+"only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
+
+**Next session:** **P38-S4** (teamspace permission anchoring — genuine architecture decision, new ADR:
+teamspace membership is currently enforced nowhere except `search-service`, direct access via
+`folder-service`/`document-service` bypasses it entirely). See `IMPLEMENTATION_PLAN.md` "Phase 38" for
+the full session breakdown.
+
+Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the
+Phase 38+ gap-closure plan). Closed four findings: `audit-service`'s `GET /events`/`.../verify` (new
+`audit.read`, added to "everyone", 37 new tests — this service had no `test_api.py` before), `virus-
+scan-service`'s `/scan`/`GET /scans/{id}`/`GET /scans` (new `virus_scan.write`/`virus_scan.read`, also
+"everyone", 38 tests), `notification-service`'s `POST /notifications` (new `notification.write`,
+deliberately NOT "everyone" — a dedicated role grant for the fixed principal
+`reporting-service-scheduler`, plus a new per-recipient rate limiter, 84 tests), and `document-service`'s
+three disposal callbacks (new `document.disposal_callback`, seeded as `archival-service-callback`, not
+"everyone" — `archival-service`'s `DocumentClient` asserts a fixed identity). `case-service`'s analogous
+`PUT /cases/{id}/archived` was examined and deliberately left alone (ADR 0070 already covers it). Also
+fixed the same `docker-compose.yml` env-var/depends_on omission bug class as P37-S1, for `audit-service`/
+`notification-service`. No new ADR (per Phase 38's own original Definition of Done).
 
 Immediately before P38-S2: **P38-S1** (`folder-service` move-cycle bugfix — first session of the Phase
 38+ gap-closure plan). Fixed the live-verified bug named in the plan: `repository.update_folder` only

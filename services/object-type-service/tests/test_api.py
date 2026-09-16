@@ -2,6 +2,11 @@ import pytest
 from fastapi.testclient import TestClient
 from object_type_service.main import app
 
+# Muss mit conftest.py::OBJECT_CONFIG_PRINCIPAL_ID übereinstimmen (dort per
+# `_grant_object_config_permission`-Fixture berechtigt) - kein Cross-File-
+# Import von Test-Konstanten, gleiche Projektkonvention wie andernorts.
+OBJECT_CONFIG_PRINCIPAL_ID = "object-type-service-tests"
+
 RECHNUNG_PAYLOAD = {
     "name": "Rechnung",
     "applies_to": "document",
@@ -15,7 +20,13 @@ RECHNUNG_PAYLOAD = {
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """`permission_client` stays UNMOCKED (a real call against the running
+    permission-service) - the `TestClient` therefore carries a
+    `X-DMS-Principal` header by default (RBAC since Post-Roadmap Phase 38
+    Session 3). Individual tests can override the header via
+    `headers={"X-DMS-Principal": ""}`/`headers={"X-DMS-Principal": "someone-
+    else"}` to exercise the negative cases, same pattern as other services."""
+    with TestClient(app, headers={"X-DMS-Principal": OBJECT_CONFIG_PRINCIPAL_ID}) as c:
         yield c
 
 
@@ -599,3 +610,80 @@ def test_put_kennzeichen_config_persists(client):
 
     get_response = client.get("/kennzeichen-config")
     assert get_response.json()["show_before_filename"] is False
+
+
+def test_create_object_type_without_principal_header_is_401():
+    with TestClient(app) as anon_client:
+        response = anon_client.post("/object-types", json=RECHNUNG_PAYLOAD)
+        assert response.status_code == 401
+
+
+def test_create_object_type_without_object_config_permission_is_403():
+    with TestClient(app, headers={"X-DMS-Principal": "some-random-authenticated-caller"}) as c:
+        response = c.post("/object-types", json=RECHNUNG_PAYLOAD)
+        assert response.status_code == 403
+
+
+def test_update_object_type_without_object_config_permission_is_403(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    response = client.put(
+        f"/object-types/{object_type_id}",
+        json={"name": "Rechnung2"},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_delete_object_type_without_object_config_permission_is_403(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    response = client.delete(
+        f"/object-types/{object_type_id}",
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_put_layout_without_object_config_permission_is_403(client):
+    object_type_id = client.post("/object-types", json=RECHNUNG_PAYLOAD).json()["id"]
+    response = client.put(
+        f"/object-types/{object_type_id}/layouts/display",
+        json={"rows": []},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_put_kennzeichen_config_without_object_config_permission_is_403(client):
+    response = client.put(
+        "/kennzeichen-config",
+        json={"show_before_filename": False},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_validate_and_next_kennzeichen_remain_ungated(client):
+    """`POST .../validate`/`POST .../next-kennzeichen` are called during
+    regular document/folder creation by any authenticated user, not an
+    administrative action - deliberately NOT gated by `admin.object_config`."""
+    object_type_id = client.post(
+        "/object-types",
+        json={
+            "name": "AkteUngegated",
+            "applies_to": "document",
+            "attributes": [],
+            "kennzeichen_format": "{Laufende_Nummer}",
+        },
+    ).json()["id"]
+
+    with TestClient(app, headers={"X-DMS-Principal": ""}) as anon_client:
+        validate_response = anon_client.post(
+            f"/object-types/{object_type_id}/validate",
+            json={"name": "x", "attributes": {}, "parent_is_root": True},
+        )
+        assert validate_response.status_code == 200
+
+        next_kennzeichen_response = anon_client.post(
+            f"/object-types/{object_type_id}/next-kennzeichen", json={}
+        )
+        assert next_kennzeichen_response.status_code == 200

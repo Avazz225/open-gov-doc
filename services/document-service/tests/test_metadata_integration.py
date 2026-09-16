@@ -5,6 +5,11 @@ from document_service.settings import Settings
 from fastapi.testclient import TestClient
 
 settings = Settings()
+# Post-Roadmap Phase 38 Session 3: `object-type-service`'s `POST`/`DELETE
+# /object-types` now require `admin.object_config` too, a cross-service
+# test dependency (not this service's own gate) - must match
+# conftest.py::OBJECT_CONFIG_ADMIN_PRINCIPAL_ID.
+OBJECT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-object-config-admin"}
 
 
 @pytest.fixture
@@ -25,7 +30,11 @@ def real_folder_id():
 
 @pytest.fixture
 def object_type_id():
-    with httpx.Client(base_url=settings.object_type_service_base_url, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=settings.object_type_service_base_url,
+        timeout=10.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
+    ) as oc:
         response = oc.post(
             "/object-types",
             json={
@@ -100,7 +109,11 @@ def test_create_document_with_malformed_attributes_json_returns_400(client):
 
 @pytest.fixture
 def folder_type_id():
-    with httpx.Client(base_url=settings.object_type_service_base_url, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=settings.object_type_service_base_url,
+        timeout=10.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
+    ) as oc:
         response = oc.post(
             "/object-types", json={"name": "Projektordner-Doc-Test", "applies_to": "folder"}
         )
@@ -112,7 +125,11 @@ def folder_type_id():
 
 @pytest.fixture
 def restricted_document_type_id(folder_type_id):
-    with httpx.Client(base_url=settings.object_type_service_base_url, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=settings.object_type_service_base_url,
+        timeout=10.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
+    ) as oc:
         response = oc.post(
             "/object-types",
             json={
@@ -190,7 +207,11 @@ def test_create_document_without_folder_is_rejected_when_root_not_allowed(
 
 @pytest.fixture
 def kennzeichen_object_type_id():
-    with httpx.Client(base_url=settings.object_type_service_base_url, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=settings.object_type_service_base_url,
+        timeout=10.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
+    ) as oc:
         response = oc.post(
             "/object-types",
             json={

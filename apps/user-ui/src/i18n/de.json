@@ -216,6 +216,7 @@
     "saving": "Speichere...",
     "saved": "Gespeichert.",
     "saveError": "Aufbewahrung konnte nicht gespeichert werden",
+    "retentionPermissionHint": "Nur für die Rolle \"Aufbewahrungsverwaltung\" verfügbar",
     "legalHoldActive": "Legal Hold aktiv (gesetzt von {setBy})",
     "legalHoldReasonLabel": "Grund für Legal Hold",
     "setLegalHold": "Legal Hold setzen",

@@ -729,12 +729,37 @@ async def restore_folder(folder_id: str, session: AsyncSession = Depends(get_ses
     return folder
 
 
+async def _require_retention_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - mirrors `document-service`'s
+    identical fix (see there for the full rationale): scheduling/changing a
+    folder's retention deadline/forced-deletion flag, and the two
+    installation-wide `retention-config`/`trash-config` settings below,
+    previously had no permission check at all. New capability
+    `admin.retention` (role "domain-admin-retention"), shared with
+    `document-service`'s own identical endpoints - one capability across
+    both services, since it's the same retention/disposal-policy concern
+    for both document and folder resources, not two separate domains."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.retention"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Aufbewahrungsverwaltung'",
+        )
+
+
 @app.put("/folders/{folder_id}/retention", response_model=FolderOut)
 async def put_retention(
-    folder_id: str, payload: RetentionUpdate, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    payload: RetentionUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> FolderOut:
     """Schedule retention/forced deletion (5.2/5.2a, since P7-S1b) - actual
-    enforcement happens asynchronously via `_retention_poll_loop`."""
+    enforcement happens asynchronously via `_retention_poll_loop`. Gated by
+    `admin.retention` since Post-Roadmap Phase 38 Session 3, see
+    `_require_retention_permission`."""
+    await _require_retention_permission(x_dms_principal)
     try:
         folder = await repository.get_folder(session, folder_id)
     except repository.NotFoundError as exc:
@@ -1072,8 +1097,11 @@ async def get_retention_config(session: AsyncSession = Depends(get_session)) -> 
 
 @app.put("/retention-config", response_model=RetentionConfigOut)
 async def put_retention_config(
-    body: RetentionConfigIn, session: AsyncSession = Depends(get_session)
+    body: RetentionConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> RetentionConfigOut:
+    await _require_retention_permission(x_dms_principal)
     config = await repository.update_retention_config(
         session,
         deletion_reason_required=body.deletion_reason_required,
@@ -1093,8 +1121,11 @@ async def get_trash_config(session: AsyncSession = Depends(get_session)) -> Tras
 
 @app.put("/trash-config", response_model=TrashConfigOut)
 async def put_trash_config(
-    body: TrashConfigIn, session: AsyncSession = Depends(get_session)
+    body: TrashConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> TrashConfigOut:
+    await _require_retention_permission(x_dms_principal)
     config = await repository.update_trash_config(
         session, restore_period_days=body.restore_period_days
     )

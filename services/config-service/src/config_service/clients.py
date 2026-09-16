@@ -7,8 +7,19 @@ import httpx
 
 
 class ObjectTypeServiceClient:
+    # Post-Roadmap Phase 38 Session 3: `POST`/`PUT /object-types` and `PUT
+    # .../layouts/{purpose}` now require `admin.object_config` - same fixed
+    # service identity `WorkflowServiceClient` below already asserts for
+    # the identical capability on workflow-service (already granted to
+    # this exact principal, no new role grant needed).
+    _CONFIG_ADMIN_PRINCIPAL_ID = "config-service"
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30.0,
+            headers={"X-DMS-Principal": self._CONFIG_ADMIN_PRINCIPAL_ID},
+        )
 
     async def close(self) -> None:
         await self._client.aclose()

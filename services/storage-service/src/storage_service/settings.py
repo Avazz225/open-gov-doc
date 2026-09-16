@@ -101,3 +101,8 @@ class Settings(BaseServiceSettings):
     # `X-DMS-Roles` header forwarded by the gateway, the same server-side
     # role-header pattern as `document_service.kennzeichen_admin_role`.
     governance_bypass_role: str = "dms-admin"
+
+    # RBAC (Post-Roadmap Phase 38 Session 3) - `guard-config`/`guard-status/
+    # {id}/config`/`operational-config` previously had NO permission check
+    # at all.
+    permission_service_base_url: str = "http://localhost:8004"

@@ -5,6 +5,12 @@ from folder_service.main import app
 from folder_service.settings import Settings
 
 OBJECT_TYPE_SERVICE_URL = Settings().object_type_service_base_url
+# Muss mit conftest.py::OBJECT_CONFIG_ADMIN_PRINCIPAL_ID übereinstimmen (dort
+# per `_grant_object_config_permission_for_test_setup`-Fixture berechtigt) -
+# kein Cross-File-Import von Test-Konstanten, gleiche Projektkonvention wie
+# andernorts. Post-Roadmap Phase 38 Session 3: `object-type-service`'s
+# `POST`/`DELETE /object-types` now require `admin.object_config` too.
+OBJECT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-object-config-admin"}
 
 
 @pytest.fixture
@@ -15,7 +21,9 @@ def client():
 
 @pytest.fixture
 def object_type_id():
-    with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0, headers=OBJECT_CONFIG_ADMIN_HEADERS
+    ) as oc:
         response = oc.post(
             "/object-types",
             json={
@@ -124,7 +132,9 @@ def test_update_folder_without_object_type_is_unaffected(client):
 
 @pytest.fixture
 def top_level_type_id():
-    with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0, headers=OBJECT_CONFIG_ADMIN_HEADERS
+    ) as oc:
         response = oc.post(
             "/object-types",
             json={
@@ -141,7 +151,9 @@ def top_level_type_id():
 
 @pytest.fixture
 def second_level_type_id(top_level_type_id):
-    with httpx.Client(base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0) as oc:
+    with httpx.Client(
+        base_url=OBJECT_TYPE_SERVICE_URL, timeout=10.0, headers=OBJECT_CONFIG_ADMIN_HEADERS
+    ) as oc:
         response = oc.post(
             "/object-types",
             json={

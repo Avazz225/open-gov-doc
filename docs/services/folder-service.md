@@ -113,6 +113,7 @@ Carries over the pattern built in P7-S1 for documents (see `docs/services/docume
 - **Four-eyes principle**: new action type `folder.force_delete`, an exact copy-paste pattern of `document.force_delete` (own `approval_client.py`/`consumer.py` in this service) — no change to `permission-service` needed.
 - **Deletion reminder**: `folder.deletion.reminder` event, consumed by a new `notification-service` consumer (1:1 copy of the `document.deletion.reminder` consumer, only `name` instead of `title` in the payload).
 - Storage relevance: none — folders have no content of their own, `hard_delete_folder` is a pure DB row removal (after cleaning up the legal-hold history, same intermediate-flush pattern as `document_service.repository.hard_delete_document`).
+- **Authorization (Post-Roadmap Phase 38 Session 3)**: `PUT /folders/{id}/retention`, `PUT /retention-config`, and `PUT /trash-config` previously had no permission check at all. All three now require `X-DMS-Principal` + the capability `admin.retention` (role `domain-admin-retention`), shared with the identical three endpoints on `document-service` — the same retention/disposal-policy concern for both resource types. See `docs/services/document-service.md` "Retention & Legal Hold" and [ADR 0148](../adr/0148-admin-ui-authorization-full-alignment.md).
 
 ## Deletion-Request Workflow for Regular Users (5.2, since P7-S1c)
 

@@ -69,6 +69,11 @@ def _create_object_type(*, applies_to: str = "folder") -> int:
         f"{OBJECT_TYPE_SERVICE_URL}/object-types",
         json={"name": f"wf-delegation-scope-test-{uuid.uuid4().hex[:8]}", "applies_to": applies_to},
         timeout=30.0,
+        # Post-Roadmap Phase 38 Session 3: `POST /object-types` now
+        # requires `admin.object_config` - reuses this file's own
+        # `CONFIG_ADMIN_PRINCIPAL_ID` (conftest.py, already granted
+        # `domain-admin-config` for process-definition uploads).
+        headers={"X-DMS-Principal": "workflow-test-config-admin"},
     )
     response.raise_for_status()
     return response.json()["id"]

@@ -13,6 +13,7 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from sqlalchemy import text
@@ -177,6 +178,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sensor_config_client = sensor_config_client
     app.state.sensor_registry = sensor_registry
 
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+
     # Records disposal (5.6, since P7-S3) - archive targets are NOT part
     # of `app.state.targets` (regular upload replication), but reachable
     # only via the new `.../archive-copy` endpoints. Since Post-Roadmap
@@ -216,6 +219,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
+    await app.state.permission_client.close()
     if registration:
         await registration.stop()
     await engine.dispose()
@@ -614,9 +618,29 @@ async def get_operational_config(
     return await _get_operational_config(session)
 
 
+async def _require_storage_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - `guard-config`/`guard-
+    status/{id}/config`/`guard-status/{id}/reidentify`/`operational-config`
+    previously had NO permission check at all - anyone with network access
+    could, e.g., disable the degraded-start guard or reassign a target's
+    `role`/`object_lock_mode`. Wires up the EXISTING capability
+    `admin.storage` (role "domain-admin-storage") for the first time - it
+    had been seeded in `permission-service` since P9-S1 but never actually
+    enforced anywhere in the codebase until this session."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.storage"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Storage-/Backend-Verwaltung'",
+        )
+
+
 @app.put("/operational-config", response_model=OperationalConfigOut)
 async def put_operational_config(
-    body: OperationalConfigIn, session: AsyncSession = Depends(get_session)
+    body: OperationalConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> OperationalConfigOut:
     """Operational parameters (Post-Roadmap Phase 22 Session 6, ADR 0091) -
     unlike the target set itself (credentials, `Settings.targets`,
@@ -624,7 +648,10 @@ async def put_operational_config(
     therefore live-editable. The number of configured targets is
     structurally fixed (env-var, this session does not change that) -
     same quorum-satisfiability check as at startup (`_validate_settings`),
-    here against an admin-chosen value instead of the env-var default."""
+    here against an admin-chosen value instead of the env-var default.
+    Gated by `admin.storage` since Post-Roadmap Phase 38 Session 3, see
+    `_require_storage_permission`."""
+    await _require_storage_permission(x_dms_principal)
     if body.write_strategy == "quorum" and not (1 <= body.quorum_count <= len(app.state.targets)):
         raise HTTPException(
             status_code=422,
@@ -650,8 +677,11 @@ async def get_guard_config(session: AsyncSession = Depends(get_session)) -> Guar
 
 @app.put("/guard-config", response_model=GuardConfigOut)
 async def put_guard_config(
-    body: GuardConfigIn, session: AsyncSession = Depends(get_session)
+    body: GuardConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> GuardConfigOut:
+    await _require_storage_permission(x_dms_principal)
     config = await repository.update_guard_config(
         session, allow_degraded_start=body.allow_degraded_start
     )
@@ -661,14 +691,18 @@ async def put_guard_config(
 
 @app.post("/guard-status/{target_id}/reidentify", response_model=GuardStatusEntry)
 async def reidentify_target(
-    target_id: str, session: AsyncSession = Depends(get_session)
+    target_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> GuardStatusEntry:
     """Correction mechanism for an intended storage device swap (3.6,
     P5c-S2, ADR 0017 follow-up item) - replaces the previously necessary
     direct correction in `backend_identity` with an API call, without a
     restart. Marks all previous copies of the target for re-replication,
     just as with an automatic degraded start (`POST
-    /replication/process-pending` picks them up)."""
+    /replication/process-pending` picks them up). Gated by `admin.storage`
+    since Post-Roadmap Phase 38 Session 3, see `_require_storage_permission`."""
+    await _require_storage_permission(x_dms_principal)
     if target_id not in app.state.targets:
         raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
 
@@ -719,7 +753,10 @@ async def get_guard_status(session: AsyncSession = Depends(get_session)) -> list
 
 @app.put("/guard-status/{target_id}/config", response_model=GuardStatusEntry)
 async def put_target_config(
-    target_id: str, body: TargetConfigIn, session: AsyncSession = Depends(get_session)
+    target_id: str,
+    body: TargetConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> GuardStatusEntry:
     """Edit target metadata live (Post-Roadmap Phase 22 Session 7,
     ADR 0092) - ONLY `object_lock_mode`/`role` per already-configured
@@ -727,7 +764,9 @@ async def put_target_config(
     an unknown `target_id` (the target *list* itself remains env-var-only,
     no new IDs via this endpoint). Writes the result immediately back to
     `app.state` (`_compute_target_state`), so it takes effect on every
-    subsequent request without a restart."""
+    subsequent request without a restart. Gated by `admin.storage` since
+    Post-Roadmap Phase 38 Session 3, see `_require_storage_permission`."""
+    await _require_storage_permission(x_dms_principal)
     if target_id not in {t.id for t in settings.targets}:
         raise HTTPException(status_code=404, detail=f"Unbekanntes Ziel: {target_id!r}")
 

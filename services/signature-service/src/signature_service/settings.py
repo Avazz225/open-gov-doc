@@ -61,3 +61,7 @@ class Settings(BaseServiceSettings):
     auth_service_admin_password: str = "users-admin"
 
     monitoring_service_base_url: str = "http://localhost:8026"
+
+    # RBAC (Post-Roadmap Phase 38 Session 3) - `PUT /signature-config`
+    # previously had NO permission check at all.
+    permission_service_base_url: str = "http://localhost:8004"

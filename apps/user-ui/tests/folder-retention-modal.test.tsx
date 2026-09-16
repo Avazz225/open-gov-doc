@@ -30,7 +30,9 @@ vi.mock("@/lib/auth-context", async () => {
       user: { sub: "alice", username: "alice", email: null, realm_roles: [] },
       // RBAC (Post-Roadmap Phase 19 Session 10, ADR 0075): the Legal Hold
       // button is only active for principals with `admin.legal_hold`.
-      permissions: ["admin.legal_hold"],
+      // RBAC (Post-Roadmap Phase 38 Session 3): the "Save" button is only
+      // active for principals with `admin.retention`.
+      permissions: ["admin.legal_hold", "admin.retention"],
       accessToken: "token-123",
       isLoading: false,
       login: vi.fn(),

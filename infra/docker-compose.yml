@@ -450,6 +450,10 @@ services:
       # P7-S1) - must match document-service's `DOCUMENT_SERVICE_GOVERNANCE_
       # BYPASS_ROLE`, see ADR 0030.
       DMS_GOVERNANCE_BYPASS_ROLE: ${STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE:-dms-admin}
+      # RBAC (Post-Roadmap Phase 38 Session 3) - `guard-config`/`guard-
+      # status/{id}/config`/`guard-status/{id}/reidentify`/`operational-
+      # config` now require `admin.storage`.
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     volumes:
       - storage-local-data:/data/storage
       - storage-archive-data:/data/archive
@@ -460,6 +464,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      permission-service:
+        condition: service_started
     networks:
       - dms-net
 
@@ -815,6 +821,9 @@ services:
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       DMS_REGISTRY_SERVICE_BASE_URL: http://registry-service:8000
       DMS_SELF_ADDRESS: http://signature-service:8000
+      # RBAC (Post-Roadmap Phase 38 Session 3) - `PUT /signature-config`
+      # now requires `admin.signature_config`.
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${SIGNATURE_SERVICE_PORT:-8017}:8000"
     depends_on:
@@ -827,6 +836,8 @@ services:
       object-type-service:
         condition: service_started
       auth-service:
+        condition: service_started
+      permission-service:
         condition: service_started
     networks:
       - dms-net
@@ -1487,11 +1498,16 @@ services:
       # Sensor concept (10.1, full rollout) - same fail-open pattern as
       # document-service/registry-service.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000
+      # RBAC (Post-Roadmap Phase 38 Session 3) - object type/layout/
+      # kennzeichen-config mutation now requires `admin.object_config`.
+      DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
     ports:
       - "${OBJECT_TYPE_SERVICE_PORT:-8007}:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      permission-service:
+        condition: service_started
     networks:
       - dms-net
 

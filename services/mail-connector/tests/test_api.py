@@ -100,6 +100,11 @@ def _real_document_with_kennzeichen() -> tuple[str, str]:
             "kennzeichen_format": "{YYYY}-{Laufende_Nummer}",
         },
         timeout=30.0,
+        # Post-Roadmap Phase 38 Session 3: `POST /object-types` now
+        # requires `admin.object_config` - reuses this file's own
+        # `CONFIG_ADMIN_PRINCIPAL_ID` (conftest.py, already granted
+        # `domain-admin-config` for workflow-service config imports).
+        headers={"X-DMS-Principal": "mail-connector-test-config-admin"},
     )
     response.raise_for_status()
     object_type_id = response.json()["id"]

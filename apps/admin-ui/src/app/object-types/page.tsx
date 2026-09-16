@@ -4,16 +4,19 @@ import { AdminShell } from "@/components/AdminShell";
 import { LayoutDesigner } from "@/components/LayoutDesigner";
 import { ObjectTypeEditor } from "@/components/ObjectTypeEditor";
 import { RequireAuth } from "@/components/RequireAuth";
+import { RequireCapability } from "@/components/RequireCapability";
 import { useI18n } from "@/i18n";
 
 export default function ObjectTypesPage() {
   const { t } = useI18n();
   return (
     <RequireAuth>
-      <AdminShell title={t("objectTypes.pageTitle")}>
-        <ObjectTypeEditor />
-        <LayoutDesigner />
-      </AdminShell>
+      <RequireCapability capability="admin.object_config">
+        <AdminShell title={t("objectTypes.pageTitle")}>
+          <ObjectTypeEditor />
+          <LayoutDesigner />
+        </AdminShell>
+      </RequireCapability>
     </RequireAuth>
   );
 }

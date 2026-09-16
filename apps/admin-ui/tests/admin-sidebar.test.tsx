@@ -35,7 +35,9 @@ function renderSidebar() {
 describe("AdminSidebar", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    mockPermissions = ["admin.user_management"];
+    // Post-Roadmap Phase 38 Session 3: `admin.object_config` gates
+    // "Objekttypen" now too (previously ungated).
+    mockPermissions = ["admin.user_management", "admin.object_config"];
   });
 
   it("shows both groups expanded by default with their nav items", () => {
@@ -67,7 +69,18 @@ describe("AdminSidebar", () => {
     renderSidebar();
 
     expect(screen.queryByText("Nutzende & Rollen")).not.toBeInTheDocument();
-    expect(screen.getByText("Objekttypen")).toBeInTheDocument();
+    // "Registry" carries no `requiresCapability` at all - stays visible
+    // regardless of which capabilities are missing.
+    expect(screen.getByText("Registry")).toBeInTheDocument();
+  });
+
+  it("hides the object types entry without the admin.object_config capability (Post-Roadmap Phase 38 Session 3)", () => {
+    mockPermissions = [];
+
+    renderSidebar();
+
+    expect(screen.queryByText("Objekttypen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kennzeichen-Einstellungen")).not.toBeInTheDocument();
   });
 
   it("hides the query console entry without the admin.query_console capability (6.1, P8-S1)", () => {

@@ -7,3 +7,8 @@ class Settings(BaseServiceSettings):
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
     monitoring_service_base_url: str = "http://localhost:8026"
+
+    # RBAC (Post-Roadmap Phase 38 Session 3) - object type/layout/
+    # kennzeichen-config mutation previously had NO permission check at
+    # all.
+    permission_service_base_url: str = "http://localhost:8004"

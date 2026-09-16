@@ -201,7 +201,7 @@ No limit on attachment size beyond what `aiosmtplib`/the configured SMTP server 
 ## Connection to the backend
 
 - **Storage Service** (3.6): staging of clean attachments/body texts until assignment; downloading the content of a `related_document_id` attachment in the outbox.
-- **Virus Scan Service** (10.3): every part of an incoming message is scanned.
+- **Virus Scan Service** (10.3): every part of an incoming message is scanned. **Since Post-Roadmap Phase 38 Session 3**: `virus_scan_client.py`'s `POST /scan` call asserts a fixed `X-DMS-Principal: mail-connector` identity — `virus-scan-service`'s `/scan` endpoint started requiring `X-DMS-Principal` + `virus_scan.write` in Post-Roadmap Phase 38 Session 2 (added to the "everyone" group), but this caller was missed in that session and only found via this session's full-suite live run (a genuine, if brief, regression: every inbound mail attachment scan silently failed and was retried on the next poll tick until this fix).
 - **Document Service**: reference-number lookup (`GET /documents/by-kennzeichen`, new, P15-S3) as well as regular document creation on assignment; since P24-S3 additionally `GET /documents/{id}`/`GET /documents/{id}/versions/{version_number}` for the outbox attachment.
 - **Case Service**: case-number lookup (`GET /cases/by-vorgangsnummer`, new) as well as document reference creation (`POST /cases/{id}/documents`, already existing).
 - Deliberately **no** `depends_on` on `document-service`/`case-service`/`virus-scan-service` in the reverse direction needed (no cycle, unlike `virus-scan-service`↔`document-service`, P15-S2) — none of these services calls `mail-connector` in turn.

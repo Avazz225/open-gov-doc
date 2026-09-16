@@ -166,6 +166,95 @@ async def _grant_records_quarantine_permission():
         response.raise_for_status()
 
 
+RETENTION_ADMIN_PRINCIPAL_ID = "document-service-test-retention-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_retention_permission():
+    """Post-Roadmap Phase 38 Session 3: `PUT /documents/{id}/retention`/
+    `PUT /retention-config`/`PUT /trash-config` require `admin.retention`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-retention")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": RETENTION_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": RETENTION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+DOCUMENT_CONFIG_ADMIN_PRINCIPAL_ID = "document-service-test-document-config-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_document_config_permission():
+    """Post-Roadmap Phase 38 Session 3: `upload-config`/`export-config`/
+    `audit-trace-config`/`audit-trace-role-overrides`/`share-link-config`
+    require `admin.document_config`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-document-config")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": DOCUMENT_CONFIG_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": DOCUMENT_CONFIG_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+OBJECT_CONFIG_ADMIN_PRINCIPAL_ID = "document-service-test-object-config-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_object_config_permission_for_test_setup():
+    """Post-Roadmap Phase 38 Session 3: `test_metadata_integration.py`
+    creates/deletes real object types against the live `object-type-
+    service` as test setup - that service's `POST`/`DELETE /object-types`
+    now require `admin.object_config` too, a cross-service test dependency
+    (not this service's own gate)."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-config")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": OBJECT_CONFIG_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": OBJECT_CONFIG_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 ARCHIVAL_SERVICE_PRINCIPAL_ID = "archival-service"
 
 

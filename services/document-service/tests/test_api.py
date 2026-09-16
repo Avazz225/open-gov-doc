@@ -38,6 +38,15 @@ CLASSIFIED_DELETION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFIED_DELETION_ADMI
 # itself asserts in production (see conftest.py's
 # `_grant_disposal_callback_permission`), not a separate test-only identity.
 ARCHIVAL_SERVICE_HEADERS = {"X-DMS-Principal": "archival-service"}
+# Post-Roadmap Phase 38 Session 3: must match
+# conftest.py::RETENTION_ADMIN_PRINCIPAL_ID/DOCUMENT_CONFIG_ADMIN_PRINCIPAL_ID.
+RETENTION_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-retention-admin"}
+DOCUMENT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-document-config-admin"}
+# Post-Roadmap Phase 38 Session 3: `object-type-service`'s `POST`/`DELETE
+# /object-types` now require `admin.object_config` too, a cross-service
+# test dependency (not this service's own gate) - must match
+# conftest.py::OBJECT_CONFIG_ADMIN_PRINCIPAL_ID.
+OBJECT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-object-config-admin"}
 
 
 def _create_object_type(*, is_classified: bool = False) -> int:
@@ -55,6 +64,7 @@ def _create_object_type(*, is_classified: bool = False) -> int:
             "classification_level": "VS-NfD" if is_classified else None,
         },
         timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -644,6 +654,7 @@ def test_create_document_renders_kennzeichen_attribute_placeholder(client):
             "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
         },
         timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
     ).json()["id"]
 
     response = upload(
@@ -668,6 +679,7 @@ def test_create_document_missing_kennzeichen_attribute_returns_422(client):
             "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
         },
         timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
     ).json()["id"]
 
     response = upload(client, object_type_id=str(object_type_id))
@@ -752,6 +764,7 @@ def test_create_document_as_draft_has_no_registered_at_or_kennzeichen(client):
             "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
         },
         timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
     ).json()["id"]
 
     response = upload(
@@ -776,6 +789,7 @@ def test_register_draft_document_assigns_kennzeichen(client):
             "kennzeichen_format": "{Federführung}-{Laufende_Nummer}",
         },
         timeout=30.0,
+        headers=OBJECT_CONFIG_ADMIN_HEADERS,
     ).json()["id"]
     document_id = upload(
         client,
@@ -922,7 +936,9 @@ def test_checkin_content_type_is_sniffed_not_trusted(client):
 
 def test_upload_rejects_content_type_not_on_whitelist(client):
     config_response = client.put(
-        "/upload-config", json={"allowed_content_types": ["application/pdf"]}
+        "/upload-config",
+        json={"allowed_content_types": ["application/pdf"]},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert config_response.status_code == 200
 
@@ -932,7 +948,11 @@ def test_upload_rejects_content_type_not_on_whitelist(client):
 
 
 def test_upload_allows_content_type_on_whitelist(client):
-    client.put("/upload-config", json={"allowed_content_types": ["text/plain"]})
+    client.put(
+        "/upload-config",
+        json={"allowed_content_types": ["text/plain"]},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
 
     response = upload(client, content=b"Hallo Welt")
 
@@ -950,13 +970,33 @@ def test_upload_config_empty_whitelist_means_no_restriction(client):
 
 def test_put_upload_config_persists(client):
     put_response = client.put(
-        "/upload-config", json={"allowed_content_types": ["application/pdf", "text/plain"]}
+        "/upload-config",
+        json={"allowed_content_types": ["application/pdf", "text/plain"]},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert put_response.status_code == 200
     assert put_response.json()["allowed_content_types"] == ["application/pdf", "text/plain"]
 
     get_response = client.get("/upload-config")
     assert get_response.json()["allowed_content_types"] == ["application/pdf", "text/plain"]
+
+
+def test_put_upload_config_without_principal_header_is_401(client):
+    response = client.put(
+        "/upload-config",
+        json={"allowed_content_types": []},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_put_upload_config_without_document_config_permission_is_403(client):
+    response = client.put(
+        "/upload-config",
+        json={"allowed_content_types": []},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
 
 
 def test_audit_trace_config_defaults_to_logging_everything(client):
@@ -969,7 +1009,9 @@ def test_audit_trace_config_defaults_to_logging_everything(client):
 
 def test_put_audit_trace_config_persists(client):
     put_response = client.put(
-        "/audit-trace-config", json={"log_viewed": False, "log_downloaded": True}
+        "/audit-trace-config",
+        json={"log_viewed": False, "log_downloaded": True},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert put_response.status_code == 200
     assert put_response.json()["log_viewed"] is False
@@ -983,6 +1025,7 @@ def test_audit_trace_role_override_create_list_delete(client):
     create_response = client.put(
         "/audit-trace-role-overrides/auditor",
         json={"log_viewed": True, "log_downloaded": None},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     assert create_response.status_code == 200
     assert create_response.json()["role"] == "auditor"
@@ -990,13 +1033,17 @@ def test_audit_trace_role_override_create_list_delete(client):
     list_response = client.get("/audit-trace-role-overrides")
     assert [o["role"] for o in list_response.json()] == ["auditor"]
 
-    delete_response = client.delete("/audit-trace-role-overrides/auditor")
+    delete_response = client.delete(
+        "/audit-trace-role-overrides/auditor", headers=DOCUMENT_CONFIG_ADMIN_HEADERS
+    )
     assert delete_response.status_code == 204
     assert client.get("/audit-trace-role-overrides").json() == []
 
 
 def test_delete_unknown_audit_trace_role_override_returns_404(client):
-    response = client.delete("/audit-trace-role-overrides/does-not-exist")
+    response = client.delete(
+        "/audit-trace-role-overrides/does-not-exist", headers=DOCUMENT_CONFIG_ADMIN_HEADERS
+    )
     assert response.status_code == 404
 
 
@@ -1051,7 +1098,11 @@ def test_get_document_does_not_publish_when_base_config_disables_viewed(client, 
 
     monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
 
-    client.put("/audit-trace-config", json={"log_viewed": False, "log_downloaded": True})
+    client.put(
+        "/audit-trace-config",
+        json={"log_viewed": False, "log_downloaded": True},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
     body = upload(client).json()
     published.clear()
 
@@ -1071,6 +1122,7 @@ def test_role_override_can_disable_viewed_for_specific_role(client, monkeypatch)
     client.put(
         "/audit-trace-role-overrides/quiet-role",
         json={"log_viewed": False, "log_downloaded": None},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     body = upload(client).json()
     published.clear()
@@ -1090,14 +1142,20 @@ def test_role_override_conflict_logging_wins(client, monkeypatch):
 
     monkeypatch.setattr(app.state.event_bus, "publish", fake_publish)
 
-    client.put("/audit-trace-config", json={"log_viewed": False, "log_downloaded": False})
+    client.put(
+        "/audit-trace-config",
+        json={"log_viewed": False, "log_downloaded": False},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
     client.put(
         "/audit-trace-role-overrides/quiet-role",
         json={"log_viewed": False, "log_downloaded": None},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     client.put(
         "/audit-trace-role-overrides/loud-role",
         json={"log_viewed": True, "log_downloaded": None},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
     )
     body = upload(client).json()
     published.clear()
@@ -1181,6 +1239,7 @@ def test_put_retention_sets_fields(client):
     response = client.put(
         f"/documents/{document_id}/retention",
         json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": True, "reason": "Test"},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
     assert response.status_code == 200
@@ -1190,29 +1249,55 @@ def test_put_retention_sets_fields(client):
     assert body["pending_deletion_reason"] == "Test"
 
 
+def test_put_retention_without_principal_header_is_401(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={"retention_until": None, "full_deletion": False},
+        headers={"X-DMS-Principal": ""},
+    )
+    assert response.status_code == 401
+
+
+def test_put_retention_without_retention_permission_is_403(client):
+    document_id = upload(client).json()["id"]
+    response = client.put(
+        f"/documents/{document_id}/retention",
+        json={"retention_until": None, "full_deletion": False},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
 def test_put_retention_unknown_document_returns_404(client):
     response = client.put(
         "/documents/does-not-exist/retention",
         json={"retention_until": None, "full_deletion": False},
+        headers=RETENTION_ADMIN_HEADERS,
     )
     assert response.status_code == 404
 
 
 def test_put_retention_requires_reason_when_configured(client):
     client.put(
-        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": True, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
     document_id = upload(client).json()["id"]
 
     response = client.put(
         f"/documents/{document_id}/retention",
         json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": True},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
     assert response.status_code == 422
     # Aufräumen für nachfolgende Tests.
     client.put(
-        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": False, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
 
@@ -1220,18 +1305,23 @@ def test_put_retention_reason_not_required_for_regular_soft_delete(client):
     """Löschgrund-Pflicht (5.2a) gilt nur für `full_deletion=True` - eine
     reguläre Aufbewahrungsfrist ohne Zwangslöschung braucht keinen Grund."""
     client.put(
-        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": True, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
     document_id = upload(client).json()["id"]
 
     response = client.put(
         f"/documents/{document_id}/retention",
         json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": False},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
     assert response.status_code == 200
     client.put(
-        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": False, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
 
@@ -1927,6 +2017,7 @@ def test_retention_config_get_and_put(client):
             "reminder_lead_days": 5,
             "deletion_reason_catalog": ["Aufbewahrungsfrist abgelaufen"],
         },
+        headers=RETENTION_ADMIN_HEADERS,
     )
     assert put_response.status_code == 200
     assert put_response.json()["reminder_lead_days"] == 5
@@ -1935,6 +2026,7 @@ def test_retention_config_get_and_put(client):
     client.put(
         "/retention-config",
         json={"deletion_reason_required": False, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
 
@@ -1943,11 +2035,13 @@ def test_trash_config_get_and_put(client):
     assert get_response.status_code == 200
     assert get_response.json()["restore_period_days"] == 30
 
-    put_response = client.put("/trash-config", json={"restore_period_days": 10})
+    put_response = client.put(
+        "/trash-config", json={"restore_period_days": 10}, headers=RETENTION_ADMIN_HEADERS
+    )
     assert put_response.status_code == 200
     assert put_response.json()["restore_period_days"] == 10
     # Aufräumen.
-    client.put("/trash-config", json={"restore_period_days": 30})
+    client.put("/trash-config", json={"restore_period_days": 30}, headers=RETENTION_ADMIN_HEADERS)
 
 
 def test_archive_request_and_status_roundtrip(client):
@@ -2020,11 +2114,19 @@ def test_share_link_config_get_and_put_roundtrip(client):
         "updated_at": get_response.json()["updated_at"],
     }
 
-    put_response = client.put("/share-link-config", json={"enabled": True, "max_validity_days": 7})
+    put_response = client.put(
+        "/share-link-config",
+        json={"enabled": True, "max_validity_days": 7},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
     assert put_response.status_code == 200
     assert put_response.json()["max_validity_days"] == 7
     # Aufräumen.
-    client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
+    client.put(
+        "/share-link-config",
+        json={"enabled": True, "max_validity_days": 30},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
 
 
 def test_create_share_link_requires_principal_header(client):
@@ -2078,7 +2180,11 @@ def test_create_share_link_requires_read_permission(client):
 
 def test_create_share_link_returns_404_when_feature_disabled(client):
     document_id = upload(client).json()["id"]
-    client.put("/share-link-config", json={"enabled": False, "max_validity_days": 30})
+    client.put(
+        "/share-link-config",
+        json={"enabled": False, "max_validity_days": 30},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
     try:
         response = client.post(
             f"/documents/{document_id}/share-links",
@@ -2087,7 +2193,11 @@ def test_create_share_link_returns_404_when_feature_disabled(client):
         )
         assert response.status_code == 404
     finally:
-        client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
+        client.put(
+            "/share-link-config",
+            json={"enabled": True, "max_validity_days": 30},
+            headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+        )
 
 
 def test_create_share_link_succeeds_and_publishes_event(client, monkeypatch):
@@ -2260,12 +2370,20 @@ def test_public_share_link_returns_404_when_feature_disabled(client):
         headers={"X-DMS-Principal": principal},
     ).json()["token"]
 
-    client.put("/share-link-config", json={"enabled": False, "max_validity_days": 30})
+    client.put(
+        "/share-link-config",
+        json={"enabled": False, "max_validity_days": 30},
+        headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+    )
     try:
         response = client.get("/public/share-links", params={"token": token})
         assert response.status_code == 404
     finally:
-        client.put("/share-link-config", json={"enabled": True, "max_validity_days": 30})
+        client.put(
+            "/share-link-config",
+            json={"enabled": True, "max_validity_days": 30},
+            headers=DOCUMENT_CONFIG_ADMIN_HEADERS,
+        )
 
 
 def test_create_webdav_edit_token_requires_principal_header(client):

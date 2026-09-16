@@ -97,6 +97,8 @@ Protects against an accidentally swapped/reset storage device that would otherwi
 - `GET /guard-status` shows, per target, the last confirmed device ID/timestamp as well as the number of still-open copies — a target with `pending_copies > 0` is still in recovery.
 - **Correction mechanism for intended storage device swaps** (since **P5c-S2**): `POST /guard-status/{target_id}/reidentify` adopts an already-present marker file of the new device, or stamps a new one (like the first-start bootstrap), updates `backend_identity`, and resets all previous copies of the target to `pending` via `reset_copies_for_backend` — functionally the same recovery as the automatic degraded start, but explicitly triggered by the admin and **without a restart** (Admin UI: "Accept storage device swap" button per row in `/storage-guard/`). Replaces the previously required direct correction in the `backend_identity` table.
 
+**Authorization (Post-Roadmap Phase 38 Session 3)**: `PUT /guard-config`, `POST /guard-status/{id}/reidentify`, `PUT /guard-status/{id}/config`, and `PUT /operational-config` previously had NO permission check at all — this service had no `permission_client` of any kind before this session. All four now require `X-DMS-Principal` + the capability `admin.storage` (role `domain-admin-storage`) — this capability had been seeded since P9-S1 but never actually enforced anywhere in the codebase until now. `GET` endpoints (`/guard-config`, `/guard-status`, `/operational-config`) remain ungated. See [ADR 0148](../adr/0148-admin-ui-authorization-full-alignment.md).
+
 ## Target Metadata Live-Editable (Post-Roadmap Phase 22 Session 7, [ADR 0092](../adr/0092-storage-target-metadata-editable.md))
 
 `PUT /guard-status/{target_id}/config` makes `object_lock_mode`/`role` per already-configured target
@@ -159,7 +161,10 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/storage-service/tests` (**134 tests since Post-Roadmap Phase 24 Session 1**
+- `uv run pytest services/storage-service/tests` (**136 tests since Post-Roadmap Phase 38 Session 3**
+  — +2 over the previous 134: `test_api.py` gained a default `X-DMS-Principal` header on its `client`
+  fixture plus a 401/403 pair for `PUT /guard-config`, the service's first-ever RBAC coverage — before
+  that, 134 tests since Post-Roadmap Phase 24 Session 1
   (Azure Blob backend, concept 1a) — +12 over the previous 122: `test_azure_backend.py` (10 tests, against
   real Azurite, no mocking, the same pattern as `test_s3_backend.py`) covers the write/read roundtrip,
   checksum, `exists`, delete (incl. idempotent on an already-missing key), `ObjectNotFoundError` on a

@@ -13,8 +13,9 @@ from dms_metrics_client import (
     http_sensor_declarations,
     metrics_payload,
 )
+from dms_permission_client import PermissionServiceClient
 from dms_registry_client import maybe_start_registration
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,6 +130,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sensor_config_client = sensor_config_client
     app.state.sensor_registry = sensor_registry
 
+    app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+
     registration = await maybe_start_registration(
         registry_service_base_url=settings.registry_service_base_url,
         self_address=settings.self_address,
@@ -145,6 +148,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
+    await app.state.permission_client.close()
     if registration:
         await registration.stop()
     await engine.dispose()
@@ -177,10 +181,37 @@ def get_metrics() -> Response:
     return Response(content=body, media_type=content_type)
 
 
+async def _require_object_config_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - creating/editing/deleting an
+    object type, its layouts, and the installation-wide `kennzeichen-
+    config` previously had NO permission check at all in this service.
+    Reuses the EXISTING capability `admin.object_config` (role "domain-
+    admin-config", "Objekttyp-/Workflow-Konfiguration") rather than
+    introducing a new one - this capability has governed BPMN process/DMN
+    definitions in `workflow-service` since P6-S6, and its own seeded role
+    description already names "object type" configuration explicitly; it
+    was simply never actually wired up here. `POST .../validate` and `POST
+    .../next-kennzeichen` deliberately remain ungated - both are called
+    during regular document/folder creation by any authenticated user, not
+    administrative actions. `GET` endpoints (list/get object type, get
+    kennzeichen-config, get layout) also remain ungated - broad read access
+    is needed for creation forms/the layout designer to render at all."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.object_config"):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Objekttyp-/Workflow-Konfiguration'",
+        )
+
+
 @app.post("/object-types", response_model=ObjectTypeOut, status_code=status.HTTP_201_CREATED)
 async def create_object_type(
-    payload: ObjectTypeCreate, session: AsyncSession = Depends(get_session)
+    payload: ObjectTypeCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> ObjectTypeOut:
+    await _require_object_config_permission(x_dms_principal)
     try:
         object_type = await repository.create_object_type(session, payload)
     except repository.DuplicateNameError as exc:
@@ -214,8 +245,12 @@ async def get_object_type(
 
 @app.put("/object-types/{object_type_id}", response_model=ObjectTypeOut)
 async def update_object_type(
-    object_type_id: int, payload: ObjectTypeUpdate, session: AsyncSession = Depends(get_session)
+    object_type_id: int,
+    payload: ObjectTypeUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> ObjectTypeOut:
+    await _require_object_config_permission(x_dms_principal)
     try:
         object_type = await repository.update_object_type(session, object_type_id, payload)
     except repository.NotFoundError as exc:
@@ -228,8 +263,11 @@ async def update_object_type(
 
 @app.delete("/object-types/{object_type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_object_type(
-    object_type_id: int, session: AsyncSession = Depends(get_session)
+    object_type_id: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _require_object_config_permission(x_dms_principal)
     try:
         await repository.delete_object_type(session, object_type_id)
     except repository.NotFoundError as exc:
@@ -301,8 +339,11 @@ async def get_kennzeichen_config(
 
 @app.put("/kennzeichen-config", response_model=KennzeichenConfigOut)
 async def put_kennzeichen_config(
-    body: KennzeichenConfigIn, session: AsyncSession = Depends(get_session)
+    body: KennzeichenConfigIn,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> KennzeichenConfigOut:
+    await _require_object_config_permission(x_dms_principal)
     config = await repository.update_kennzeichen_config(
         session, show_before_filename=body.show_before_filename
     )
@@ -331,8 +372,10 @@ async def put_layout(
     object_type_id: int,
     purpose: LayoutPurpose,
     payload: LayoutIn,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> LayoutOut:
+    await _require_object_config_permission(x_dms_principal)
     try:
         layout_row = await repository.upsert_layout(session, object_type_id, purpose.value, payload)
     except repository.NotFoundError as exc:
@@ -347,8 +390,12 @@ async def put_layout(
     "/object-types/{object_type_id}/layouts/{purpose}", status_code=status.HTTP_204_NO_CONTENT
 )
 async def reset_layout(
-    object_type_id: int, purpose: LayoutPurpose, session: AsyncSession = Depends(get_session)
+    object_type_id: int,
+    purpose: LayoutPurpose,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    await _require_object_config_permission(x_dms_principal)
     try:
         await repository.get_object_type(session, object_type_id)
     except repository.NotFoundError as exc:

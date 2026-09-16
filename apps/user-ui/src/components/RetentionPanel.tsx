@@ -39,6 +39,13 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
   // active for authorized principals. The server-side 403 remains the
   // actual enforcement; this is pure UX.
   const canManageLegalHold = permissions.includes("admin.legal_hold");
+  // RBAC (Post-Roadmap Phase 38 Session 3) - the "Save" button below (
+  // retentionUntil/fullDeletion/reason) previously had NO client- or
+  // server-side check at all, a real, separate gap from the legal-hold
+  // buttons above (already gated since ADR 0075). Mirrors the same
+  // "stays visible, disabled + hint" UX as `canManageLegalHold`, backed
+  // now by a real server-side `admin.retention` check too.
+  const canManageRetention = permissions.includes("admin.retention");
   const [retentionUntil, setRetentionUntil] = useState(
     toDateInputValue(activeDocument.retention_until)
   );
@@ -188,6 +195,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
           type="date"
           value={retentionUntil}
           onChange={(e) => setRetentionUntil(e.target.value)}
+          disabled={!canManageRetention}
         />
       </label>
       <label className="checkbox-label">
@@ -195,6 +203,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
           type="checkbox"
           checked={fullDeletion}
           onChange={(e) => setFullDeletion(e.target.checked)}
+          disabled={!canManageRetention}
         />
         {t("retention.fullDeletionLabel")}
       </label>
@@ -212,6 +221,7 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
                 setReason(e.target.value);
               }
             }}
+            disabled={!canManageRetention}
           >
             <option value="" disabled>
               {t("retention.reasonSelectPlaceholder")}
@@ -233,10 +243,19 @@ export function RetentionPanel({ document: activeDocument }: { document: Documen
             {retentionConfig && retentionConfig.deletion_reason_catalog.length > 0
               ? t("retention.reasonOtherLabel")
               : t("retention.reasonLabel")}
-            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              disabled={!canManageRetention}
+            />
           </label>
         )}
-      <button type="button" onClick={handleSubmit} disabled={isSaving}>
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={isSaving || !canManageRetention}
+        title={canManageRetention ? undefined : t("retention.retentionPermissionHint")}
+      >
         {isSaving ? t("retention.saving") : t("retention.save")}
       </button>
 

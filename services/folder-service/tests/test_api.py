@@ -427,6 +427,7 @@ def test_put_retention_sets_fields(client):
     response = client.put(
         f"/folders/{created['id']}/retention",
         json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": False, "reason": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
     assert response.status_code == 200
@@ -435,18 +436,23 @@ def test_put_retention_sets_fields(client):
 
 def test_put_retention_requires_reason_when_configured(client):
     client.put(
-        "/retention-config", json={"deletion_reason_required": True, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": True, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
     created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
 
     response = client.put(
         f"/folders/{created['id']}/retention",
         json={"retention_until": "2030-01-01T00:00:00Z", "full_deletion": True, "reason": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
     assert response.status_code == 422
     client.put(
-        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": False, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
 
@@ -454,11 +460,26 @@ def test_put_retention_unknown_folder_returns_404(client):
     response = client.put(
         "/folders/does-not-exist/retention",
         json={"retention_until": None, "full_deletion": False, "reason": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
     assert response.status_code == 404
 
 
+def test_put_retention_without_permission_is_403(client):
+    created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
+    response = client.put(
+        f"/folders/{created['id']}/retention",
+        json={"retention_until": None, "full_deletion": False, "reason": None},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
 LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-legal-hold-admin"}
+# Post-Roadmap Phase 38 Session 3: `PUT /folders/{id}/retention`/`PUT
+# /retention-config`/`PUT /trash-config` require `admin.retention` - must
+# match conftest.py::RETENTION_ADMIN_PRINCIPAL_ID.
+RETENTION_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-retention-admin"}
 
 
 def test_create_legal_hold_without_permission_is_403(client):
@@ -585,6 +606,7 @@ def test_retention_config_get_and_put(client):
             "reminder_lead_days": 5,
             "deletion_reason_catalog": ["Vorgang abgeschlossen"],
         },
+        headers=RETENTION_ADMIN_HEADERS,
     )
     assert response.status_code == 200
     assert response.json()["reminder_lead_days"] == 5
@@ -594,15 +616,37 @@ def test_retention_config_get_and_put(client):
     assert get_response.json()["deletion_reason_required"] is True
     assert get_response.json()["deletion_reason_catalog"] == ["Vorgang abgeschlossen"]
     client.put(
-        "/retention-config", json={"deletion_reason_required": False, "reminder_lead_days": None}
+        "/retention-config",
+        json={"deletion_reason_required": False, "reminder_lead_days": None},
+        headers=RETENTION_ADMIN_HEADERS,
     )
 
 
 def test_trash_config_get_and_put(client):
-    response = client.put("/trash-config", json={"restore_period_days": 10})
+    response = client.put(
+        "/trash-config", json={"restore_period_days": 10}, headers=RETENTION_ADMIN_HEADERS
+    )
     assert response.status_code == 200
     assert response.json()["restore_period_days"] == 10
-    client.put("/trash-config", json={"restore_period_days": 30})
+    client.put("/trash-config", json={"restore_period_days": 30}, headers=RETENTION_ADMIN_HEADERS)
+
+
+def test_put_retention_config_without_permission_is_403(client):
+    response = client.put(
+        "/retention-config",
+        json={"deletion_reason_required": True, "reminder_lead_days": None},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
+
+
+def test_put_trash_config_without_permission_is_403(client):
+    response = client.put(
+        "/trash-config",
+        json={"restore_period_days": 10},
+        headers={"X-DMS-Principal": "some-random-authenticated-caller"},
+    )
+    assert response.status_code == 403
 
 
 def _create_folder(client, *, name, parent_id="root", object_type_id=None):

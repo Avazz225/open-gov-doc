@@ -82,10 +82,24 @@ class DocumentClient:
 class ObjectTypeClient:
     """HTTP-Client gegen object-type-service - fuer die kritische
     Manipulations-Aktion `object_type.update` (6.1, "Objekttyp-/Constraint-
-    Definitionen", seit P8-S2)."""
+    Definitionen", seit P8-S2).
+
+    Post-Roadmap Phase 38 Session 3: `PUT /object-types/{id}` now requires
+    `admin.object_config` - asserts a fixed service identity (same pattern
+    already established by `config_service.clients.WorkflowServiceClient`/
+    the new `ObjectTypeServiceClient` there), since `execute`/`dry_run` in
+    `manipulation.py` have no per-request human principal threaded through
+    the generic `ManipulationAction` interface (mandatory four-eyes already
+    authorizes the actual human via the approval flow, not this HTTP call)."""
+
+    _CONFIG_ADMIN_PRINCIPAL_ID = "query-service"
 
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=10.0,
+            headers={"X-DMS-Principal": self._CONFIG_ADMIN_PRINCIPAL_ID},
+        )
 
     async def get_object_type(self, object_type_id: int) -> dict | None:
         response = await self._client.get(f"/object-types/{object_type_id}")

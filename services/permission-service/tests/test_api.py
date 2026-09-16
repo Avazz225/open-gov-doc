@@ -1274,11 +1274,44 @@ def test_list_delegations_filters_by_query_params(client):
         headers={"X-DMS-Principal": "alice"},
     )
 
-    response = client.get("/delegations", params={"deputy_principal_id": "bob"})
+    response = client.get(
+        "/delegations",
+        params={"deputy_principal_id": "bob"},
+        headers={"X-DMS-Principal": "bob"},
+    )
 
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["deputy_principal_id"] == "bob"
+
+
+def test_list_delegations_without_principal_header_is_401(client):
+    response = client.get("/delegations")
+    assert response.status_code == 401
+
+
+def test_list_delegations_with_no_filter_requires_admin_permission(client):
+    """Post-Roadmap Phase 38 Session 3: querying with NEITHER filter set
+    (the installation-wide overview, `admin-ui`'s `DelegationsAdmin.tsx`)
+    now requires `admin.user_management` - previously fully ungated."""
+    response = client.get("/delegations", headers={"X-DMS-Principal": "alice"})
+    assert response.status_code == 403
+
+
+def test_list_delegations_with_no_filter_succeeds_for_admin(client, role_management_headers):
+    response = client.get("/delegations", headers=role_management_headers)
+    assert response.status_code == 200
+
+
+def test_list_delegations_for_someone_elses_principal_is_forbidden(client):
+    """Closes a snooping vector: passing another principal's ID as the
+    filter (instead of one's own) is not self-service either."""
+    response = client.get(
+        "/delegations",
+        params={"delegator_principal_id": "alice"},
+        headers={"X-DMS-Principal": "eve"},
+    )
+    assert response.status_code == 403
 
 
 def test_list_active_delegations_for_deputy(client):
@@ -1315,7 +1348,7 @@ def test_check_delegation_allowed_and_denied(client):
     assert denied.json() == {"allowed": False}
 
 
-def test_revoke_delegation_requires_creator_or_admin_role(client):
+def test_revoke_delegation_requires_creator_or_admin_role(client, role_management_headers):
     created = client.post(
         "/delegations",
         json={"deputy_principal_id": "bob", **_delegation_window()},
@@ -1327,10 +1360,11 @@ def test_revoke_delegation_requires_creator_or_admin_role(client):
     )
     assert forbidden.status_code == 403
 
-    admin = client.delete(
-        f"/delegations/{created['id']}",
-        headers={"X-DMS-Principal": "an-admin", "X-DMS-Roles": "dms-admin"},
-    )
+    # `role_management_headers` grants "admin.user_management" to the
+    # principal "admin" (Post-Roadmap Phase 38 Session 3: this endpoint's
+    # admin branch now checks the real capability instead of the legacy
+    # `X-DMS-Roles`/`delegation_revoke_admin_role` string comparison).
+    admin = client.delete(f"/delegations/{created['id']}", headers=role_management_headers)
     assert admin.status_code == 204
 
 
@@ -1402,7 +1436,11 @@ def test_org_hierarchy_grant_supervisor_creates_one_delegation_per_direct_superv
     assert set(body["deputy_principal_ids"]) == {"petra-p10", "quirin-p10"}
     assert len(body["delegation_ids"]) == 2
 
-    delegations = client.get("/delegations", params={"delegator_principal_id": "oskar-p10"}).json()
+    delegations = client.get(
+        "/delegations",
+        params={"delegator_principal_id": "oskar-p10"},
+        headers={"X-DMS-Principal": "oskar-p10"},
+    ).json()
     assert {d["deputy_principal_id"] for d in delegations} == {"petra-p10", "quirin-p10"}
     assert all(d["scope_process_definition_ids"] == [1] for d in delegations)
 
@@ -1469,7 +1507,11 @@ def test_org_hierarchy_grant_org_unit_grants_every_group_member_except_self(
     # viktor-p10 selbst ist ausgeschlossen - eine Delegation an sich selbst wäre sinnlos.
     assert set(body["deputy_principal_ids"]) == {"wanda-p10", "xaver-p10"}
 
-    delegations = client.get("/delegations", params={"delegator_principal_id": "viktor-p10"}).json()
+    delegations = client.get(
+        "/delegations",
+        params={"delegator_principal_id": "viktor-p10"},
+        headers={"X-DMS-Principal": "viktor-p10"},
+    ).json()
     assert all(d["grant_kind"] == "org_unit" for d in delegations)
 
 

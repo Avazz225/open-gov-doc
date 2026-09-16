@@ -36,6 +36,8 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
   const { t } = useI18n();
   // RBAC (post-roadmap phase 19 session 10, ADR 0075) - see RetentionPanel.tsx.
   const canManageLegalHold = permissions.includes("admin.legal_hold");
+  // RBAC (Post-Roadmap Phase 38 Session 3) - see RetentionPanel.tsx.
+  const canManageRetention = permissions.includes("admin.retention");
   const [retentionUntil, setRetentionUntil] = useState(toDateInputValue(folder.retention_until));
   const [fullDeletion, setFullDeletion] = useState(folder.full_deletion);
   const [reason, setReason] = useState(folder.pending_deletion_reason ?? "");
@@ -186,6 +188,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
             type="date"
             value={retentionUntil}
             onChange={(e) => setRetentionUntil(e.target.value)}
+            disabled={!canManageRetention}
           />
         </label>
         <label className="checkbox-label">
@@ -193,6 +196,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
             type="checkbox"
             checked={fullDeletion}
             onChange={(e) => setFullDeletion(e.target.checked)}
+            disabled={!canManageRetention}
           />
           {t("retention.fullDeletionLabel")}
         </label>
@@ -210,6 +214,7 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
                   setReason(e.target.value);
                 }
               }}
+              disabled={!canManageRetention}
             >
               <option value="" disabled>
                 {t("retention.reasonSelectPlaceholder")}
@@ -231,10 +236,19 @@ export function FolderRetentionModal({ folder, onClose }: { folder: Folder; onCl
               {retentionConfig && retentionConfig.deletion_reason_catalog.length > 0
                 ? t("retention.reasonOtherLabel")
                 : t("retention.reasonLabel")}
-              <input value={reason} onChange={(e) => setReason(e.target.value)} />
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                disabled={!canManageRetention}
+              />
             </label>
           )}
-        <button type="button" onClick={handleSubmit} disabled={isSaving}>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSaving || !canManageRetention}
+          title={canManageRetention ? undefined : t("retention.retentionPermissionHint")}
+        >
           {isSaving ? t("retention.saving") : t("retention.save")}
         </button>
 

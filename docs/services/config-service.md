@@ -145,7 +145,15 @@ extension of the same responsibility. Since sensor configuration write access ad
 `PermissionServiceClient` additionally sends an `X-DMS-Principal: config-service` header (the
 client already held `admin.user_management` via `domain-admin-users`, but sent no header) —
 needed because `permission-service`'s own `POST`/`PUT /roles` has since required the same capability
-([ADR 0071](../adr/0071-permission-service-self-gating.md)).
+([ADR 0071](../adr/0071-permission-service-self-gating.md)). **Since Post-Roadmap Phase 38 Session 3**:
+`clients.py`'s `ObjectTypeServiceClient` (`POST`/`PUT /object-types`, `PUT .../layouts/{purpose}`)
+gained the identical fixed-header treatment, for the identical reason — `object-type-service` started
+requiring `admin.object_config` on these endpoints in that same session (previously fully ungated),
+and this service's own `config-service` identity already held the capability from the self-bootstrap
+above, so no new grant was needed, only the missing header on this one client. Found via that
+session's own full backend-suite live run (`test_import_object_type_roundtrips_classification_level`
+silently created 0 object types instead of 1, masked by `raise_for_status()` never firing on a
+same-process 401 that the test itself did not check for).
 
 ## Schema Versioning
 

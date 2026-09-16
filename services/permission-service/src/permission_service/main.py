@@ -993,11 +993,6 @@ async def lift_maintenance_mode(
 # --- Delegation during absence (4.4a, P14-S11) -------------------------
 
 
-def _has_delegation_admin_role(x_dms_roles: str) -> bool:
-    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
-    return settings.delegation_revoke_admin_role in roles
-
-
 @app.post("/delegations", response_model=DelegationOut, status_code=201)
 async def create_delegation(
     payload: DelegationCreate,
@@ -1037,8 +1032,32 @@ async def list_delegations(
     delegator_principal_id: str | None = None,
     deputy_principal_id: str | None = None,
     active_only: bool = False,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[DelegationOut]:
+    """RBAC (Post-Roadmap Phase 38 Session 3) - previously fully ungated,
+    including the installation-wide overview call with NEITHER filter set
+    (`admin-ui`'s `DelegationsAdmin.tsx`, showing every delegation across
+    every principal). Self-service remains ungated by design (`user-ui`'s
+    `DelegationsPane.tsx` always filters by the caller's OWN principal, see
+    below) - only two cases now require `admin.user_management`: querying
+    with no filter at all, or querying for a principal that is not the
+    caller (closes a snooping vector this endpoint otherwise leaves open:
+    passing someone else's ID as the filter)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    filters_are_own_principal = delegator_principal_id in (
+        None,
+        x_dms_principal,
+    ) and deputy_principal_id in (None, x_dms_principal)
+    is_self_service = (
+        bool(delegator_principal_id or deputy_principal_id) and filters_are_own_principal
+    )
+    if not is_self_service:
+        try:
+            await repository.require_capability(session, x_dms_principal, "admin.user_management")
+        except repository.MissingRequiredPermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
     return await repository.list_delegations(
         session,
         delegator_principal_id=delegator_principal_id,
@@ -1086,23 +1105,36 @@ async def check_delegation(
 async def revoke_delegation(
     delegation_id: str,
     x_dms_principal: str = Header(default=""),
-    x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Early termination (4.4a) - by the delegating person themself or an
     authorized admin role (concept wording), NOT by the deputy themself
     (who could otherwise effectively extend someone else's delegation
     unilaterally by ignoring their own revocation option - revocation must
-    be able to come from the side that carries the responsibility)."""
+    be able to come from the side that carries the responsibility).
+
+    RBAC (Post-Roadmap Phase 38 Session 3): the admin-role branch now
+    checks the real `admin.user_management` capability directly against
+    this service's own `repository` (a self-check, not an HTTP round trip
+    to itself - `app.state.permission_client` does not exist in this
+    service) instead of the legacy `X-DMS-Roles`/`delegation_revoke_
+    admin_role` string-equality gate - same "replace, don't supplement, a
+    placeholder mechanism" precedent as P32-S4's `admin.deletion_
+    classified` migration. The self-revocation branch (own delegation) is
+    untouched."""
     if not x_dms_principal:
         raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
 
     delegation = await repository.get_delegation(session, delegation_id)
     if delegation is None:
         raise HTTPException(status_code=404, detail=f"Delegation {delegation_id!r} unbekannt")
-    if delegation.delegator_principal_id != x_dms_principal and not _has_delegation_admin_role(
-        x_dms_roles
-    ):
+    is_admin = True
+    if delegation.delegator_principal_id != x_dms_principal:
+        try:
+            await repository.require_capability(session, x_dms_principal, "admin.user_management")
+        except repository.MissingRequiredPermissionError:
+            is_admin = False
+    if not is_admin:
         raise HTTPException(
             status_code=403,
             detail=(
