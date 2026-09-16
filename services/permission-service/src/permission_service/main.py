@@ -286,18 +286,45 @@ async def list_roles(session: AsyncSession = Depends(get_session)) -> list[RoleO
     return await repository.list_roles(session)
 
 
-@app.put("/roles/{role_id}", response_model=RoleOut)
+@app.put("/roles/{role_id}", response_model=RoleActionResult)
 async def update_role(
     role_id: int,
     payload: RoleUpdate,
     x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
-) -> RoleOut:
+) -> RoleActionResult:
     """Since P12-S3 (7.3) - basis for the configuration import (`config-
     service`), which needs to update an already existing role (matched by
     `name`) instead of duplicating it. Gated since P19-S6, see
-    `_require_role_management`."""
+    `_require_role_management`. Four-eyes wiring added Post-Roadmap Phase
+    39 Session 2 (ADR 0151, `permission.role.update`) - ADR 0130 (P32-S1)
+    deliberately built this only for `POST /roles`/`POST /role-assignments`
+    ("no direct precedent to mirror" for update at the time); a role's
+    `permissions`/`description` could until now be changed unilaterally by
+    anyone holding `admin.user_management`, with no second-person approval
+    path regardless of how `permission.role.create` is configured - the
+    exact same "role content itself is not real-time-critical, but changes
+    a lot at once" rationale ADR 0130 gave for gating creation applies at
+    least as much to silently reassigning an EXISTING, already-in-use
+    role's permissions. `role_id` is included in the approval payload
+    (unlike `create_role`, `RoleUpdate` addresses an existing role by ID,
+    not something the approval consumer can infer from the other fields)."""
     await _require_role_management(session, x_dms_principal)
+
+    config = await repository.get_approval_config(session, "permission.role.update")
+    if config.requires_approval:
+        request = await _request_approval(
+            session,
+            action_type="permission.role.update",
+            initiated_by=x_dms_principal,
+            payload={
+                "role_id": role_id,
+                "description": payload.description,
+                "permissions": payload.permissions,
+            },
+        )
+        return RoleActionResult(status="pending_approval", approval_request_id=request.id)
+
     try:
         role = await repository.update_role(
             session, role_id, description=payload.description, permissions=payload.permissions
@@ -305,7 +332,7 @@ async def update_role(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
-    return role
+    return RoleActionResult(status="updated", role=role)
 
 
 @app.post("/groups", response_model=GroupOut, status_code=201)
@@ -601,6 +628,33 @@ async def effective_permissions(
     )
 
 
+def _validate_access_type(permission: str, access_type: Literal["read", "write"]) -> None:
+    """Post-Roadmap Phase 39 Session 2 (P39-S2) - closes the gap where a
+    caller could pass an `access_type` that contradicts the `permission`
+    it's checking (`access_type` alone drives scope-lock blocking severity,
+    see the callers below; nothing previously cross-checked it against
+    `permission`). Every current caller already derives `permission` FROM
+    `access_type` by naming convention (e.g. `folder.read`/`folder.write`),
+    so this only rejects a genuine mismatch - it never second-guesses a
+    permission with no `.read`/`.write` suffix (e.g.
+    `reporting.forensic_trace`, capability-style permissions like
+    `admin.*`), since those have no textual convention to validate against."""
+    if permission.endswith(".read"):
+        expected: Literal["read", "write"] | None = "read"
+    elif permission.endswith(".write"):
+        expected = "write"
+    else:
+        expected = None
+    if expected is not None and expected != access_type:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"access_type={access_type!r} passt nicht zu permission={permission!r} "
+                f"(erwartet access_type={expected!r})"
+            ),
+        )
+
+
 @app.get("/check", response_model=CheckResult)
 async def check(
     principal_id: str,
@@ -609,6 +663,7 @@ async def check(
     access_type: Literal["read", "write"] = "write",
     session: AsyncSession = Depends(get_session),
 ) -> CheckResult:
+    _validate_access_type(permission, access_type)
     entry = await repository.get_effective_permissions(session, principal_id, resource_id)
 
     active_locks = await repository.get_active_scope_locks_for_resource(session, resource_id)
@@ -636,6 +691,7 @@ async def check_batch(
     Repeats the same logic as `/check` for each resource ID - each call hits
     the already existing `EffectivePermissionCache`, so no expensive
     recomputation despite the loop."""
+    _validate_access_type(payload.permission, payload.access_type)
     results: dict[str, bool] = {}
     for resource_id in set(payload.resource_ids):
         entry = await repository.get_effective_permissions(

@@ -333,6 +333,82 @@ async def test_role_create_with_missing_keys_is_logged_not_raised(engine):
     assert published == []
 
 
+async def test_approved_role_update_executes_and_publishes(engine):
+    """P39-S2 (ADR 0151) - gleiches Muster wie
+    `test_approved_role_create_executes_and_publishes`, nur mit
+    `permission.role.update`."""
+    session_factory = _session_factory(engine)
+    async with session_factory() as session:
+        role = await repository.create_role(session, "GatedEditor", "alt", ["read"])
+        await session.commit()
+        role_id = role.id
+
+    published = []
+
+    async def fake_publish(event_type, payload, actor=None):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(session_factory, fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-11",
+            "action_type": "permission.role.update",
+            "initiated_by": "admin",
+            "approved_by": "bob",
+            "payload": {
+                "role_id": role_id,
+                "description": "Aktualisiert über Vier-Augen",
+                "permissions": ["read", "write"],
+            },
+        },
+    )
+
+    await handler(event.to_bytes())
+
+    async with session_factory() as session:
+        roles = await repository.list_roles(session)
+    role = next(r for r in roles if r.id == role_id)
+    assert role.description == "Aktualisiert über Vier-Augen"
+    assert role.permissions == ["read", "write"]
+    assert published == [
+        (
+            "permission.role.updated",
+            {
+                "role_id": role_id,
+                "name": "GatedEditor",
+                "description": "Aktualisiert über Vier-Augen",
+                "permissions": ["read", "write"],
+            },
+        )
+    ]
+
+
+async def test_role_update_with_unknown_role_id_is_logged_not_raised(engine):
+    published = []
+
+    async def fake_publish(event_type, payload, actor=None):
+        published.append((event_type, payload))
+
+    handler = approval_consumer.make_handler(_session_factory(engine), fake_publish)
+    event = Event(
+        event_type="permission.approval.approved",
+        service_name="permission-service",
+        payload={
+            "request_id": "req-12",
+            "action_type": "permission.role.update",
+            "initiated_by": "admin",
+            "approved_by": "bob",
+            "payload": {"role_id": 999999, "description": "x", "permissions": []},
+        },
+    )
+
+    await handler(event.to_bytes())  # darf nicht raisen
+
+    assert published == []
+
+
 async def test_approved_not_shutdown_trigger_activates_and_publishes(engine):
     session_factory = _session_factory(engine)
     async with session_factory() as session:

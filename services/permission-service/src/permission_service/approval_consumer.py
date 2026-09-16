@@ -30,6 +30,7 @@ def make_handler(
             "system.not_shutdown.trigger",
             "permission.role_assignment.create",
             "permission.role.create",
+            "permission.role.update",
         )
         if action_type not in known_action_types:
             return
@@ -110,6 +111,31 @@ def make_handler(
                             "resource_id": assignment.resource_id,
                         },
                         actor=assignment.principal_id,
+                    )
+                elif action_type == "permission.role.update":
+                    # Post-Roadmap Phase 39 Session 2 (ADR 0151) - unlike
+                    # `create_role`, `update_role` already has a real
+                    # not-found precondition (`repository.NotFoundError`,
+                    # caught below like every other branch here) - a role
+                    # deleted between request and approval surfaces as a
+                    # logged, swallowed warning instead of an endless NATS
+                    # redelivery loop.
+                    role = await repository.update_role(
+                        session,
+                        action_payload["role_id"],
+                        description=action_payload.get("description", ""),
+                        permissions=action_payload.get("permissions", []),
+                    )
+                    await session.commit()
+                    await publish_event(
+                        "permission.role.updated",
+                        {
+                            "role_id": role.id,
+                            "name": role.name,
+                            "description": role.description,
+                            "permissions": role.permissions,
+                        },
+                        actor=event.payload.get("approved_by"),
                     )
                 else:
                     # permission.role.create (P32-S1, ADR 0130) -

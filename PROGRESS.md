@@ -2,7 +2,61 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P39-S1 (domain-admin roles without a technical account — first session of Phase 39,
+**Last completed:** P39-S2 (remaining four-eyes/validation gaps — second session of Phase 39, "RBAC
+completion"). Research (Explore agent, before any implementation, per the now very strong pattern of
+stale plan premises across P38/P39-S1) found all three named items genuinely real, but of different
+weight:
+
+1. **`PUT /roles/{id}` (role update) gets four-eyes** — confirmed, still-open gap exactly as described.
+   Wired up to mirror `POST /roles`'s exact ADR 0130 pattern: `_require_role_management` baseline check,
+   then `get_approval_config("permission.role.update")`, deferring to `_request_approval`/
+   `pending_approval` if gated. `approval_consumer.py` gained a matching execution branch. Response
+   shape changed from bare `RoleOut` to the `RoleActionResult` envelope (`status`/`role`/
+   `approval_request_id`) — a breaking change for any caller inspecting the old bare shape; the one
+   known production caller (`config-service`'s configuration import) is unaffected, since it already
+   doesn't inspect the identical sibling `create_role` response. No seeding needed:
+   `get_approval_config` already defaults an unknown action type to ungated.
+2. **`GET /check`/`POST /check/batch` `access_type` validation** — real structural gap, but the actual
+   risk was entirely theoretical (zero real mismatched callers found anywhere in the codebase across 12
+   services — every one derives `permission` FROM `access_type` by construction). New
+   `_validate_access_type()` helper rejects (`422`) a `permission` whose `.read`/`.write` suffix
+   contradicts `access_type` — deliberately suffix-derived, not a maintained lookup table, so it needs
+   no upkeep as new permissions are added and never incorrectly flags a permission without that suffix
+   (`admin.*`, `reporting.forensic_trace`).
+3. **Maintenance mode vs. direct service-to-service writes** — real in effect, but an explicitly
+   documented, deliberately accepted boundary in ADR 0024 itself, tied to ADR 0005's pre-existing "no
+   service-to-service auth exists" boundary. Presented to the user as three options; **the user chose
+   "Scope it properly first"**, mirroring the P37-S1 precedent — **Scoping, kein Feature**, no
+   implementation this session. Research found the gap splits into two categories of very different
+   severity: request-triggered write cascades (residual risk only), and ~9 background poll loops across
+   8 services with **zero** gateway involvement, ever (worst: archival disposal, retention forced-
+   deletion, mail-triggered document creation — exactly what 4.8's "halt scheduled jobs" already
+   names as in scope). `workflow-service` already solves this correctly for itself
+   (`is_maintenance_active()` in its own poll loops) — the recommendation for a future build session is
+   to extend `libs/dms-permission-client` with the same method and roll it out to the poll loops first.
+
+Both build items closed via [ADR 0151](docs/adr/0151-role-update-four-eyes-and-access-type-validation.md);
+the scoping deliverable closed via [ADR 0152](docs/adr/0152-maintenance-mode-service-to-service-enforcement-scoping.md).
+
+**Tests**: permission-service 176 passed (up from before this session — added
+`test_update_role_with_approval_required_defers_update`, `test_check_rejects_access_type_mismatch`,
+`test_check_allows_permission_without_read_write_suffix`, `test_check_batch_rejects_access_type_mismatch`
+in `test_api.py`; `test_approved_role_update_executes_and_publishes`,
+`test_role_update_with_unknown_role_id_is_logged_not_raised` in `test_approval_consumer.py`; fixed the
+one existing test that asserted the old bare-`RoleOut` shape). `ruff check`/`ruff format` clean (one
+line-length issue in my own new code, fixed). **Live-verified**: rebuilt and restarted the real
+`permission-service` container, then `curl` against it — confirmed `422` for a mismatched
+`permission`/`access_type` pair on both `/check` and `/check/batch`, confirmed `200` for a matching pair
+and for a suffix-less permission (uncheckable, as designed); confirmed the full role-update four-eyes
+round trip end-to-end: ungated update applies immediately (`status: "updated"`), gating
+`permission.role.update` via `PUT /approval-config/...` makes the next update defer
+(`status: "pending_approval"`, role unchanged), a second distinct principal approving the request
+(the service correctly rejected the same principal approving their own request) triggers the
+approval-consumer, which then actually applies the change. All test role-assignments/approval-config
+state cleaned up afterward (the one test role itself, `P39S2VerifyRole`, has no delete endpoint to clean
+up — same structural limitation as every other role created for testing purposes in this project).
+
+Immediately before P39-S2: **P39-S1** (domain-admin roles without a technical account — first session of Phase 39,
 "RBAC completion"). Research confirmed the plan's premise was stale (same pattern as P38-S1/S3/S4): of the
 5 roles named (`domain-admin-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs`), **4 already
 had real enforcement** before this session — `-license` since P9-S1, `-query-console` since P8-S1,
@@ -167,11 +221,10 @@ permission grant (with the independent legal-hold button staying disabled throug
 (the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
 "only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
 
-**Next session:** **P39-S2** (Phase 39, RBAC completion — remaining four-eyes/validation gaps: `PUT
-/roles/{id}` role **update** gets four-eyes analogous to create/assign, since ADR 0130 deliberately only
-built those two; `GET /check` doesn't server-side-validate `access_type` against a permission→access_type
-mapping; maintenance mode only blocks gateway writes, not direct service-to-service writes). See
-`IMPLEMENTATION_PLAN.md` "Phase 39" for the full session breakdown.
+**Next session:** **P39-S3** (Phase 39, RBAC completion — AD group→role mapping, precise remaining gap:
+combined-rule mapping via AND logic across multiple groups, a configurable default for unmapped groups,
+four-eyes on mapping changes, inclusion in config export/import). See `IMPLEMENTATION_PLAN.md`
+"Phase 39" for the full session breakdown.
 
 Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the
 Phase 38+ gap-closure plan). Closed four findings: `audit-service`'s `GET /events`/`.../verify` (new

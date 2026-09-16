@@ -38,7 +38,7 @@ class RoleActionResult(BaseModel):
     same precedent as `RoleAssignmentActionResult` (P17-S3) and
     `ScopeLockActionResult` (P6-S4) always wrapping their resource."""
 
-    status: Literal["created", "pending_approval"]
+    status: Literal["created", "updated", "pending_approval"]
     role: RoleOut | None = None
     approval_request_id: str | None = None
 

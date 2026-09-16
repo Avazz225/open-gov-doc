@@ -108,6 +108,9 @@ def test_create_role_with_approval_required_defers_creation(client, role_managem
 
 
 def test_update_role_changes_description_and_permissions(client, role_management_headers):
+    """Antwort-Envelope seit P39-S2 (ADR 0151) - `status`/`role`, analog zu
+    `test_create_role`, immer gesetzt unabhaengig von aktivierter
+    Vier-Augen-Pflicht."""
     created = client.post(
         "/roles",
         json={"name": "Editor", "description": "alt", "permissions": ["read"]},
@@ -122,9 +125,11 @@ def test_update_role_changes_description_and_permissions(client, role_management
 
     assert response.status_code == 200
     body = response.json()
-    assert body["name"] == "Editor"
-    assert body["description"] == "neu"
-    assert body["permissions"] == ["read", "write"]
+    assert body["status"] == "updated"
+    assert body["approval_request_id"] is None
+    assert body["role"]["name"] == "Editor"
+    assert body["role"]["description"] == "neu"
+    assert body["role"]["permissions"] == ["read", "write"]
 
 
 def test_update_unknown_role_returns_404(client, role_management_headers):
@@ -134,6 +139,43 @@ def test_update_unknown_role_returns_404(client, role_management_headers):
         headers=role_management_headers,
     )
     assert response.status_code == 404
+
+
+def test_update_role_with_approval_required_defers_update(client, role_management_headers):
+    """Vier-Augen-Retrofit fuer Rollen-Update (P39-S2, ADR 0151) - identisches
+    Muster wie `test_create_role_with_approval_required_defers_creation`, nur
+    mit `permission.role.update`."""
+    created = client.post(
+        "/roles",
+        json={"name": "GatedEditor", "description": "alt", "permissions": ["read"]},
+        headers=role_management_headers,
+    ).json()["role"]
+
+    client.put(
+        "/approval-config/permission.role.update",
+        json={"requires_approval": True},
+        headers=role_management_headers,
+    )
+
+    response = client.put(
+        f"/roles/{created['id']}",
+        json={"description": "neu", "permissions": ["read", "write"]},
+        headers=role_management_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending_approval"
+    assert body["approval_request_id"] is not None
+    assert body["role"] is None
+
+    # Die Aenderung ist noch nicht angewendet - Genehmigung erfolgt asynchron
+    # ueber das Event (siehe test_approval_consumer.py fuer die
+    # Konsumentenlogik).
+    roles = client.get("/roles").json()
+    unchanged = next(r for r in roles if r["id"] == created["id"])
+    assert unchanged["description"] == "alt"
+    assert unchanged["permissions"] == ["read"]
 
 
 def test_create_group_requires_authentication(client):
@@ -602,6 +644,53 @@ def test_check_batch_with_empty_resource_ids_returns_empty_results(client):
 
     assert response.status_code == 200
     assert response.json()["results"] == {}
+
+
+def test_check_rejects_access_type_mismatch(client):
+    """P39-S2 (ADR 0151) - `access_type` (only used for scope-lock blocking
+    severity) previously wasn't cross-checked against `permission` at all,
+    letting a caller pass `document.write` with `access_type=read`. Only
+    permissions following the `.read`/`.write` naming convention are
+    validated - see `_validate_access_type`'s own docstring."""
+    response = client.get(
+        "/check",
+        params={
+            "principal_id": "ivan",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "document.write",
+            "access_type": "read",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_check_allows_permission_without_read_write_suffix(client):
+    """Capability-style permissions (e.g. `admin.user_management`) have no
+    textual `.read`/`.write` convention to validate against - must stay
+    uncheckable, not rejected."""
+    response = client.get(
+        "/check",
+        params={
+            "principal_id": "ivan",
+            "resource_id": ROOT_RESOURCE_ID,
+            "permission": "admin.user_management",
+            "access_type": "read",
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_check_batch_rejects_access_type_mismatch(client):
+    response = client.post(
+        "/check/batch",
+        json={
+            "principal_id": "ivan",
+            "permission": "document.write",
+            "access_type": "read",
+            "resource_ids": [ROOT_RESOURCE_ID],
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_list_role_assignments_returns_all(client, role_management_headers):
