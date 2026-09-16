@@ -94,6 +94,14 @@ a wsgidav `BaseDomainController`. Missing `Authorization` header → `401` with
 dialog); wrong credentials → `403` (prevents browser login popups on accidental
 browser access, explicitly cited by 5.2.9.1 as a permitted alternative).
 
+**Authorization now actually reaches folder-service/document-service too (Post-Roadmap Phase 38
+Session 4, [ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md))**: the
+resolved `actor` (from `require_actor`, already used for `created_by`/`deleted_by`/`locked_by`
+business fields) is now also forwarded as `x_dms_principal` on every `DmsTreeClient`/
+`resolve_object`/`compute_folder_path` call, the same treatment `webdav-connector` got in the same
+session. This makes teamspace membership real through CMIS too — a non-member genuinely cannot
+browse/read/write a teamspace's folder via the CMIS Browser Binding.
+
 ## `asyncio.to_thread()` for the synchronous `DmsTreeClient`
 
 Read endpoints are ordinary (non-`async`) FastAPI routes — `DmsTreeClient` is synchronous (see
@@ -125,7 +133,13 @@ recorded in ADR 0034 as a future precedent for exactly this case).
   directly at the root, a single request took over 10 seconds. Fixed by a one-time
   cleanup (`POST /folders/{id}/trash`/`DELETE /documents/{id}` for all 142 root objects,
   identifiable without exception by test actor names), no code change needed — reduced the same
-  request to 76ms. See ADR 0036 for details.
+  request to 76ms. See ADR 0036 for details. **This recurred at a much larger scale in
+  Post-Roadmap Phase 38 Session 4** (236 documents/1039 folders, same underlying cause) — that
+  session traced it to a specific, recurring root cause (`teamspace-service`'s own test suite
+  leaking real folder-service folders on every run, since it deliberately tests against the
+  real neighbor services) and fixed the actual source with a teardown fixture, not just another
+  one-off cleanup — see [ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md).
+  `x_dms_principal` (below) was added to `DmsTreeClient` in the same session.
 
 ## Licensing (3.3/9.1, P9-S2 pattern)
 

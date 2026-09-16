@@ -27,52 +27,73 @@ class ResolvedObject:
         return self.folder.id if self.kind == "folder" else self.document.id  # type: ignore[union-attr]
 
 
-def compute_folder_path(tree: DmsTreeClient, folder: TreeFolder) -> str:
+def compute_folder_path(
+    tree: DmsTreeClient, folder: TreeFolder, *, x_dms_principal: str = ""
+) -> str:
     if folder.id == tree.root_folder_id:
         return "/"
     segments = [folder.name]
     parent_id = folder.parent_id
     while parent_id is not None and parent_id != tree.root_folder_id:
-        parent = tree.get_folder(parent_id)
+        parent = tree.get_folder(parent_id, x_dms_principal=x_dms_principal)
         segments.append(parent.name)
         parent_id = parent.parent_id
     return "/" + "/".join(reversed(segments))
 
 
-def resolve_by_id(tree: DmsTreeClient, object_id: str) -> ResolvedObject:
+def resolve_by_id(
+    tree: DmsTreeClient, object_id: str, *, x_dms_principal: str = ""
+) -> ResolvedObject:
     try:
-        folder = tree.get_folder(object_id)
+        folder = tree.get_folder(object_id, x_dms_principal=x_dms_principal)
     except PathNotFoundError:
         pass
     else:
         return ResolvedObject(
-            kind="folder", folder=folder, document=None, path=compute_folder_path(tree, folder)
+            kind="folder",
+            folder=folder,
+            document=None,
+            path=compute_folder_path(tree, folder, x_dms_principal=x_dms_principal),
         )
     try:
-        document = tree.get_document(object_id)
+        document = tree.get_document(object_id, x_dms_principal=x_dms_principal)
     except PathNotFoundError as exc:
         raise CmisError("objectNotFound", f"Kein Objekt mit id {object_id!r}") from exc
-    parent = tree.get_folder(document.folder_id) if document.folder_id else None
-    parent_path = compute_folder_path(tree, parent) if parent else "/"
+    parent = (
+        tree.get_folder(document.folder_id, x_dms_principal=x_dms_principal)
+        if document.folder_id
+        else None
+    )
+    parent_path = (
+        compute_folder_path(tree, parent, x_dms_principal=x_dms_principal) if parent else "/"
+    )
     document_path = parent_path.rstrip("/") + "/" + document.title
     return ResolvedObject(kind="document", folder=None, document=document, path=document_path)
 
 
-def resolve_by_path(tree: DmsTreeClient, path: str) -> ResolvedObject:
+def resolve_by_path(tree: DmsTreeClient, path: str, *, x_dms_principal: str = "") -> ResolvedObject:
     try:
-        node = tree.resolve_path(path)
+        node = tree.resolve_path(path, x_dms_principal=x_dms_principal)
     except PathNotFoundError as exc:
         raise CmisError("objectNotFound", f"Kein Objekt unter Pfad {path!r}") from exc
     if isinstance(node, TreeFolder):
         return ResolvedObject(
-            kind="folder", folder=node, document=None, path=compute_folder_path(tree, node)
+            kind="folder",
+            folder=node,
+            document=None,
+            path=compute_folder_path(tree, node, x_dms_principal=x_dms_principal),
         )
     return ResolvedObject(kind="document", folder=None, document=node, path="/" + path.strip("/"))
 
 
-def resolve_object(tree: DmsTreeClient, *, path: str, object_id: str | None) -> ResolvedObject:
+def resolve_object(
+    tree: DmsTreeClient, *, path: str, object_id: str | None, x_dms_principal: str = ""
+) -> ResolvedObject:
     """`objectId` takes precedence over the path (5.3.4, verbatim: "If the
-    parameter objectId is set, it takes precedence over the path")."""
+    parameter objectId is set, it takes precedence over the path").
+    `x_dms_principal` (Post-Roadmap Phase 38 Session 4, ADR 0149): forwarded
+    from the CMIS Basic-Auth actor (`require_actor`), same pattern as
+    webdav-connector's `_actor(environ)` forwarding."""
     if object_id:
-        return resolve_by_id(tree, object_id)
-    return resolve_by_path(tree, path)
+        return resolve_by_id(tree, object_id, x_dms_principal=x_dms_principal)
+    return resolve_by_path(tree, path, x_dms_principal=x_dms_principal)

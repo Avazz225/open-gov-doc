@@ -192,7 +192,7 @@ the current, consistent behavior. See ADR 0136 for the full reasoning.
 
 ## Backend Integration
 
-- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key.
+- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key. **Since Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)): both calls send a fixed `X-DMS-Principal: rendering-service` header — these endpoints previously had no permission check at all.
 - **Storage Service** (3.6): `PUT`/`GET /objects/renditions/{document_id}/{version_number}/{rendition_type}` — persistence of all results.
 - **OCR Service** (3.9, since P5-S3): `GET /ocr-results/{document_id}:{version_number}` — full-text lookup for the follow-up effect above.
 

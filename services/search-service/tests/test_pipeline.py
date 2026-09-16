@@ -38,6 +38,7 @@ def _create_folder(name: str) -> str:
         f"{FOLDER_SERVICE_URL}/folders",
         json={"name": name, "parent_id": "root", "created_by": "search-service-tests"},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -54,6 +55,7 @@ def _upload_document(*, filename: str, folder_id: str | None = None, draft: bool
         data=data,
         files={"file": (filename, b"Inhalt", "text/plain")},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -64,6 +66,7 @@ def _register_document(document_id: str) -> None:
         f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/register",
         json={"registered_by": "search-service-tests"},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
 
@@ -95,6 +98,7 @@ def _checkin_version(document_id: str, *, filename: str) -> None:
         data={"expected_base_version_number": 1, "created_by": "search-service-tests"},
         files={"file": (filename, b"Inhalt v2", "text/plain")},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
 
@@ -104,6 +108,7 @@ def _delete_document(document_id: str) -> None:
         f"{DOCUMENT_SERVICE_URL}/documents/{document_id}",
         params={"deleted_by": "search-service-tests"},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
 

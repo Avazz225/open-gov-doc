@@ -28,6 +28,7 @@ def _upload_document(*, filename: str, content: bytes, content_type: str) -> str
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": filename, "created_by": "ocr-service-tests"},
         files={"file": (filename, content, content_type)},
+        headers={"X-DMS-Principal": "ocr-service-tests"},
         timeout=30.0,
     )
     response.raise_for_status()
@@ -35,7 +36,10 @@ def _upload_document(*, filename: str, content: bytes, content_type: str) -> str
 
 
 def _delete_storage_object_for_version(document_id: str, version_number: int) -> None:
-    version = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions/{version_number}")
+    version = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions/{version_number}",
+        headers={"X-DMS-Principal": "ocr-service-tests"},
+    )
     version.raise_for_status()
     checksum = version.json()["checksum_sha256"]
     response = httpx.delete(f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}")
@@ -79,14 +83,18 @@ def _scanned_pdf(text: str) -> bytes:
 
 
 def _list_versions(document_id: str) -> list[dict]:
-    response = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions")
+    response = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions",
+        headers={"X-DMS-Principal": "ocr-service-tests"},
+    )
     response.raise_for_status()
     return response.json()
 
 
 def _download_version_content(document_id: str, version_number: int) -> bytes:
     response = httpx.get(
-        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions/{version_number}/content"
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions/{version_number}/content",
+        headers={"X-DMS-Principal": "ocr-service-tests"},
     )
     response.raise_for_status()
     return response.content

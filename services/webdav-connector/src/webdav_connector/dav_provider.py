@@ -107,11 +107,15 @@ class DmsDavFolder(DAVCollection):
         return self.folder.name or "/"
 
     def get_member_names(self) -> list[str]:
-        folders, documents = self._tree.list_children(self.folder.id)
+        folders, documents = self._tree.list_children(
+            self.folder.id, x_dms_principal=_actor(self.environ)
+        )
         return [f.name for f in folders] + [d.title for d in documents]
 
     def get_member(self, name: str):
-        folders, documents = self._tree.list_children(self.folder.id)
+        folders, documents = self._tree.list_children(
+            self.folder.id, x_dms_principal=_actor(self.environ)
+        )
         folder_match = next((f for f in folders if f.name == name), None)
         if folder_match is not None:
             return DmsDavFolder(join_uri(self.path, name), self.environ, folder_match)
@@ -128,8 +132,9 @@ class DmsDavFolder(DAVCollection):
 
     def create_collection(self, name: str):
         self.provider.check_license("write")
+        actor = _actor(self.environ)
         created = self._tree.create_folder(
-            parent_id=self.folder.id, name=name, created_by=_actor(self.environ)
+            parent_id=self.folder.id, name=name, created_by=actor, x_dms_principal=actor
         )
         return DmsDavFolder(join_uri(self.path, name), self.environ, created)
 
@@ -150,24 +155,28 @@ class DmsDavFolder(DAVCollection):
         # member" (saves O(children) HTTP round trips and fits the tree
         # structure that already exists anyway).
         self.provider.check_license("write")
-        folders, documents = self._tree.list_children(self.folder.id)
+        actor = _actor(self.environ)
+        folders, documents = self._tree.list_children(self.folder.id, x_dms_principal=actor)
         for document in documents:
-            self._tree.delete_document(document.id, deleted_by=_actor(self.environ))
+            self._tree.delete_document(document.id, deleted_by=actor, x_dms_principal=actor)
         for folder in folders:
             DmsDavFolder(join_uri(self.path, folder.name), self.environ, folder).handle_delete()
-        self._tree.delete_folder(self.folder.id)
+        self._tree.delete_folder(self.folder.id, x_dms_principal=actor)
         return True
 
     def handle_move(self, dest_path: str) -> bool:
         self.provider.check_license("write")
+        actor = _actor(self.environ)
         parent_path, new_name = _split_dest_path(dest_path)
         try:
-            target_parent = self._tree.resolve_path(parent_path)
+            target_parent = self._tree.resolve_path(parent_path, x_dms_principal=actor)
         except PathNotFoundError as exc:
             raise DAVError(HTTP_FORBIDDEN) from exc
         if not isinstance(target_parent, TreeFolder):
             raise DAVError(HTTP_FORBIDDEN)
-        self._tree.move_folder(self.folder.id, new_parent_id=target_parent.id, new_name=new_name)
+        self._tree.move_folder(
+            self.folder.id, new_parent_id=target_parent.id, new_name=new_name, x_dms_principal=actor
+        )
         return True
 
 
@@ -215,7 +224,9 @@ class DmsDavDocument(DAVNonCollection):
 
     def get_content(self) -> BytesIO:
         assert self.document is not None
-        return BytesIO(self._tree.read_document_content(self.document.id))
+        return BytesIO(
+            self._tree.read_document_content(self.document.id, x_dms_principal=_actor(self.environ))
+        )
 
     def begin_write(self, *, content_type: str | None = None) -> BytesIO:
         def _capture(data: bytes) -> None:
@@ -243,12 +254,16 @@ class DmsDavDocument(DAVNonCollection):
                 content=content,
                 content_type=self._write_content_type,
                 created_by=actor,
+                x_dms_principal=actor,
             )
             return
 
         try:
             self._tree.acquire_lock(
-                self.document.id, locked_by=actor, session_id=f"{_SESSION_PREFIX}{actor}"
+                self.document.id,
+                locked_by=actor,
+                session_id=f"{_SESSION_PREFIX}{actor}",
+                x_dms_principal=actor,
             )
         except LockConflictError as exc:
             raise DAVError(HTTP_LOCKED) from exc
@@ -261,28 +276,34 @@ class DmsDavDocument(DAVNonCollection):
                 created_by=actor,
                 existing_document_id=self.document.id,
                 expected_base_version_number=self.document.current_version_number,
+                x_dms_principal=actor,
             )
         finally:
-            self._tree.release_lock(self.document.id, released_by=actor)
+            self._tree.release_lock(self.document.id, released_by=actor, x_dms_principal=actor)
 
     def handle_delete(self) -> bool:
         assert self.document is not None
         self.provider.check_license("write")
-        self._tree.delete_document(self.document.id, deleted_by=_actor(self.environ))
+        actor = _actor(self.environ)
+        self._tree.delete_document(self.document.id, deleted_by=actor, x_dms_principal=actor)
         return True
 
     def handle_move(self, dest_path: str) -> bool:
         assert self.document is not None
         self.provider.check_license("write")
+        actor = _actor(self.environ)
         parent_path, new_name = _split_dest_path(dest_path)
         try:
-            target_parent = self._tree.resolve_path(parent_path)
+            target_parent = self._tree.resolve_path(parent_path, x_dms_principal=actor)
         except PathNotFoundError as exc:
             raise DAVError(HTTP_FORBIDDEN) from exc
         if not isinstance(target_parent, TreeFolder):
             raise DAVError(HTTP_FORBIDDEN)
         self._tree.move_document(
-            self.document.id, new_folder_id=target_parent.id, new_title=new_name
+            self.document.id,
+            new_folder_id=target_parent.id,
+            new_title=new_name,
+            x_dms_principal=actor,
         )
         return True
 
@@ -315,6 +336,7 @@ class DmsDavProvider(DAVProvider):
 
     def get_resource_inst(self, path: str, environ: dict):
         self.check_license("read")
+        actor = _actor(environ)
         if path.strip("/") == "by-id":
             # wsgidav's `do_PUT` handler resolves the target's parent path
             # and checks `is_collection` before every write access - for
@@ -331,14 +353,14 @@ class DmsDavProvider(DAVProvider):
             # type detection and is discarded here (the real content type
             # still comes from the document metadata).
             try:
-                node = self.tree.get_document(by_id)
+                node = self.tree.get_document(by_id, x_dms_principal=actor)
             except PathNotFoundError:
                 return None
             return DmsDavDocument(
                 path, environ, folder_id=node.folder_id, filename=node.title, document=node
             )
         try:
-            node = self.tree.resolve_path(path)
+            node = self.tree.resolve_path(path, x_dms_principal=actor)
         except PathNotFoundError:
             return None
         if isinstance(node, TreeFolder):

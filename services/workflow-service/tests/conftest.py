@@ -359,6 +359,7 @@ async def real_signature(real_signer):
                 "/documents",
                 data={"title": "Workflow-Signatur-Testdokument", "created_by": "alice"},
                 files={"file": ("sample.pdf", pdf_bytes, "application/pdf")},
+                headers={"X-DMS-Principal": "workflow-service-tests"},
             )
         ).json()
 
@@ -390,6 +391,7 @@ async def real_ses_signature(real_signer):
                 "/documents",
                 data={"title": "Workflow-SES-Testdokument", "created_by": "alice"},
                 files={"file": ("sample.pdf", pdf_bytes, "application/pdf")},
+                headers={"X-DMS-Principal": "workflow-service-tests"},
             )
         ).json()
 

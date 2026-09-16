@@ -41,6 +41,21 @@ Error cases are deliberately kept small (`PathNotFoundError`, `LockConflictError
 `LockNotHeldError`) — the actual protocol translation (WebDAV status codes, CMIS error objects)
 remains the concern of the respective connector service, not this lib.
 
+**`x_dms_principal`/`default_principal`** (Post-Roadmap Phase 38 Session 4, [ADR
+0149](../../docs/adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)):
+`folder-service`/`document-service` now require a valid `X-DMS-Principal` on every call (core
+CRUD gained real RBAC checks). Every `DmsTreeClient` method accepts `x_dms_principal: str = ""`
+(applied as a per-request header, overriding the client-level default for that one call), and the
+constructor accepts `default_principal: str = ""` (applied as a default header on both internal
+`httpx.Client`s). Two different usage patterns, by caller nature: a connector serving real,
+distinct end users (`webdav-connector`/`cmis-connector`) already resolves a real per-request actor
+for other purposes (`created_by`/`deleted_by`/`locked_by`) and forwards that same identity as
+`x_dms_principal` on every call — this is what makes teamspace membership (ADR 0043) actually work
+through these connectors, not just through direct API access, since a fixed service identity
+would not be a teamspace member and would incorrectly block legitimate access. A background/system
+caller with no live end-user session (`migration-service`) instead sets `default_principal` once at
+construction and never overrides it per call.
+
 See `services/webdav-connector/` for the first reference implementation (P12-S1),
 `services/cmis-connector/` for the second (P12-S4, a hand-implemented CMIS 1.1 browser
 binding instead of a library — see ADR 0036 for why no maintained Python CMIS server lib

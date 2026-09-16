@@ -74,6 +74,16 @@ async def list_teamspaces_for_principal(
     return list(result.scalars().all())
 
 
+async def list_all_root_folder_ids(session: AsyncSession) -> list[str]:
+    """Post-Roadmap Phase 38 Session 4 - startup backfill for existing
+    teamspaces' resource-tree isolation (see `main.py`
+    `_ensure_teamspace_isolation_backfill`): every teamspace ever created
+    already has a real `root_folder_id` (set atomically at creation, see
+    `create_teamspace` above), so no join/filter is needed here."""
+    result = await session.execute(select(Teamspace.root_folder_id))
+    return list(result.scalars().all())
+
+
 async def list_all_teamspaces_with_member_counts(
     session: AsyncSession,
 ) -> list[tuple[Teamspace, int]]:

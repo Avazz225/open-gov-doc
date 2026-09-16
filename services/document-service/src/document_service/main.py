@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from dms_eventbus_client import Event, NatsEventBusClient
@@ -1215,6 +1216,7 @@ async def _prepare_document_fields(
     attributes: str | None,
     derived_from_document_id: str | None,
     derived_from_version_number: int | None,
+    x_dms_principal: str = "",
     draft: bool = False,
 ) -> tuple[dict, datetime | None, datetime | None, str | None]:
     """Shared validation/derivation for every document creation path -
@@ -1245,7 +1247,9 @@ async def _prepare_document_fields(
 
     parent_folder = None
     if folder_id is not None:
-        parent_folder = await app.state.folder_client.get(folder_id)
+        parent_folder = await app.state.folder_client.get(
+            folder_id, x_dms_principal=x_dms_principal
+        )
         if parent_folder is None:
             raise HTTPException(status_code=400, detail=f"folder_id {folder_id!r} unbekannt")
 
@@ -1361,6 +1365,43 @@ async def _persist_new_document(
     return document
 
 
+async def _require_document_permission(
+    x_dms_principal: str, resource_id: str, *, access_type: str
+) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - unlike the
+    handful of "sensitive" endpoints already gated by `check_read`/
+    `check_write` below (share links, WebDAV edit tokens, redaction,
+    exports), the PRIMARY document paths (`POST /documents`, `GET
+    /documents/{id}`, `.../content`, `PATCH`, check-in, trash/restore,
+    listing) previously had NO permission check at all. Checks the same
+    generic `document.read`/`document.write` capabilities against the
+    same resource tree, now granted to "everyone" (preserving default
+    openness for ordinary, non-teamspace documents) while a teamspace's
+    root folder deliberately does NOT inherit that grant (`inherit=
+    False`) - only its own members' existing per-member role assignment
+    (ADR 0043) applies there. See `docs/adr/0149-teamspace-permission-
+    anchoring-broad-rbac-retrofit.md`. `401` without a principal header,
+    `403` without the permission; callers resolve `404` (unknown
+    resource) themselves first, same ordering already established by
+    `check_read`/`check_write`'s own call sites."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    allowed = (
+        await app.state.permission_client.check_read(
+            principal_id=x_dms_principal, resource_id=resource_id
+        )
+        if access_type == "read"
+        else await app.state.permission_client.check_write(
+            principal_id=x_dms_principal, resource_id=resource_id
+        )
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Fehlende Berechtigung 'document.{access_type}' auf {resource_id!r}",
+        )
+
+
 @app.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def create_document(
     file: UploadFile = File(...),
@@ -1373,6 +1414,7 @@ async def create_document(
     derived_from_version_number: int | None = Form(None),
     originating_case_id: str | None = Form(None),
     draft: bool = Form(False),
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     # Sensor "document.upload.duration" (10.1, P11-S1): start time is only
@@ -1380,6 +1422,21 @@ async def create_document(
     # minimal overhead is avoided entirely.
     upload_sensor = app.state.upload_duration_sensor
     upload_started_at = time.monotonic() if upload_sensor.is_active() else None
+
+    # RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - `create_document`
+    # previously had NO permission check of the CALLER at all (`created_by`
+    # is a client-supplied body field, not an authenticated identity - a
+    # separate, deliberately out-of-scope gap noted throughout P38-S2/S3,
+    # now closed as part of this session's broad retrofit). Checks
+    # `document.write` on the target folder (or "root") - but only the
+    # fast `401`-without-a-principal fail here; the full permission check
+    # runs AFTER `_prepare_document_fields` below (existence before
+    # permission, same ordering convention as everywhere else this
+    # session) so an unknown `folder_id` still resolves its pre-existing
+    # `400` instead of being pre-empted by a `403` from an unregistered
+    # `ResourceNode`.
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
 
     # License limit block (concept 9.3, P9-S2): only genuine new creations,
     # not versioning/restoration of existing documents - "doesn't
@@ -1400,8 +1457,10 @@ async def create_document(
         attributes=attributes,
         derived_from_document_id=derived_from_document_id,
         derived_from_version_number=derived_from_version_number,
+        x_dms_principal=x_dms_principal,
         draft=draft,
     )
+    await _require_document_permission(x_dms_principal, folder_id or "root", access_type="write")
 
     data = await file.read()
     content_type = await _resolve_content_type(session, data)
@@ -1499,6 +1558,7 @@ async def create_document_from_quarantine_release(
         attributes=attributes,
         derived_from_document_id=None,
         derived_from_version_number=None,
+        x_dms_principal=x_dms_principal,
     )
 
     data = await file.read()
@@ -1527,14 +1587,38 @@ async def create_document_from_quarantine_release(
 
 @app.get("/documents", response_model=list[DocumentOut])
 async def list_documents(
-    folder_id: str, registered: bool | None = None, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    registered: bool | None = None,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[DocumentOut]:
     """`registered` (post-roadmap phase 31 session 7, ADR 0118): optional
     filter on `registered_at IS (NOT) NULL` - `None` (default) is
     unfiltered, unchanged behavior. The first reader of this field as a
     distinct query dimension (ADR 0113 explicitly left this undone) - basis
     for a "work tray" view showing only a folder's still-unregistered
-    drafts."""
+    drafts. Gated by `document.read` on `folder_id` since Post-Roadmap
+    Phase 38 Session 4 (previously ungated) - but ONLY once `folder_id`
+    is confirmed to exist: this endpoint's pre-existing, unchanged
+    contract returns an empty list (not an error) for an unknown
+    `folder_id` (there is nothing to protect for a folder that isn't
+    real), so checking permission against an unregistered `resource_id`
+    first would incorrectly 403 instead of preserving that behavior (an
+    unregistered resource always denies in permission-service's ancestor
+    walk)."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    try:
+        folder = await app.state.folder_client.get(folder_id, x_dms_principal=x_dms_principal)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            raise HTTPException(
+                status_code=403, detail=f"Fehlende Berechtigung 'folder.read' auf {folder_id!r}"
+            ) from exc
+        raise
+    if folder is None:
+        return []
+    await _require_document_permission(x_dms_principal, folder_id, access_type="read")
     return await repository.list_documents_by_folder(session, folder_id, registered=registered)
 
 
@@ -1764,6 +1848,7 @@ async def count_active_total(session: AsyncSession = Depends(get_session)) -> Co
 @app.get("/documents/{document_id}", response_model=DocumentOut)
 async def get_document(
     document_id: str,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     x_dms_username: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
@@ -1772,6 +1857,9 @@ async def get_document(
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="read"
+    )
     if await _should_log_document_access(session, "viewed", x_dms_roles):
         await publish_event("document.viewed", document_id, {}, actor=x_dms_username or None)
     await session.commit()
@@ -1782,6 +1870,7 @@ async def get_document(
 async def update_document(
     document_id: str,
     payload: DocumentUpdate,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
@@ -1789,6 +1878,9 @@ async def update_document(
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="write"
+    )
 
     if payload.attributes is not None:
         old_kennzeichen = document.attributes.get(KENNZEICHEN_ATTRIBUTE)
@@ -1807,11 +1899,16 @@ async def update_document(
     is_move = payload.folder_id is not None and payload.folder_id != document.folder_id
     target_parent_folder = None
     if is_move:
-        target_parent_folder = await app.state.folder_client.get(payload.folder_id)
+        target_parent_folder = await app.state.folder_client.get(
+            payload.folder_id, x_dms_principal=x_dms_principal
+        )
         if target_parent_folder is None:
             raise HTTPException(
                 status_code=400, detail=f"folder_id {payload.folder_id!r} unbekannt"
             )
+        await _require_document_permission(
+            x_dms_principal, payload.folder_id or "root", access_type="write"
+        )
 
     if document.object_type_id is not None:
         placement_kwargs = (
@@ -1853,6 +1950,7 @@ async def update_document(
 async def register_document(
     document_id: str,
     payload: DocumentRegisterRequest,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Draft -> registered transition (post-roadmap phase 31 session 2, ADR
@@ -1861,11 +1959,15 @@ async def register_document(
     `draft` on `POST /documents`). No `kennzeichen_admin_role` gate here
     (unlike the PATCH check above): registering a still-unregistered
     document once is the intended lifecycle transition, not an override of
-    an already-assigned value."""
+    an already-assigned value. Gated by `document.write` on the document's
+    folder since Post-Roadmap Phase 38 Session 4 (previously ungated)."""
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="write"
+    )
 
     kennzeichen: str | None = None
     if document.object_type_id is not None:
@@ -1896,6 +1998,7 @@ async def register_document(
 async def promote_document(
     document_id: str,
     payload: DocumentPromoteRequest,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Work tray promotion (14.2, post-roadmap phase 31 session 7, ADR
@@ -1908,21 +2011,30 @@ async def promote_document(
     one dedicated `document.promoted` entry). `target_folder_id` omitted or
     unchanged is exactly `register_document` above (a work tray promotion
     doesn't have to move anything - only reference-number assignment is
-    ever mandatory). Deliberately ungated, like `register`/the PATCH move
-    branch it replaces - adding a new permission check here that neither
-    underlying primitive has today would be an arbitrary inconsistency,
-    not a considered decision this session's scope calls for."""
+    ever mandatory). Gated by `document.write` since Post-Roadmap Phase 38
+    Session 4, same as `register`/the PATCH move branch it replaces (this
+    docstring previously argued the opposite - "deliberately ungated, like
+    register/the PATCH move branch" - now stale since this session gates
+    all three consistently)."""
     try:
         document = await repository.get_document(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="write"
+    )
 
     target_folder_id = payload.target_folder_id
     is_move = target_folder_id is not None and target_folder_id != document.folder_id
     if is_move:
-        target_parent_folder = await app.state.folder_client.get(target_folder_id)
+        target_parent_folder = await app.state.folder_client.get(
+            target_folder_id, x_dms_principal=x_dms_principal
+        )
         if target_parent_folder is None:
             raise HTTPException(status_code=400, detail=f"folder_id {target_folder_id!r} unbekannt")
+        await _require_document_permission(
+            x_dms_principal, target_folder_id or "root", access_type="write"
+        )
         if document.object_type_id is not None:
             errors = await app.state.object_type_client.validate(
                 document.object_type_id,
@@ -2016,10 +2128,21 @@ async def set_document_classification_level(
 
 @app.get("/documents/{document_id}/derived", response_model=list[DocumentOut])
 async def list_derived_documents(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[DocumentOut]:
     """First actual reader of `derived_from_document_id` (post-roadmap phase
-    31 session 4, ADR 0115) - see `repository.list_derived_documents`."""
+    31 session 4, ADR 0115) - see `repository.list_derived_documents`.
+    Gated by `document.read` on the base document's folder since
+    Post-Roadmap Phase 38 Session 4 (previously ungated)."""
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="read"
+    )
     return await repository.list_derived_documents(session, document_id)
 
 
@@ -2045,7 +2168,9 @@ async def get_redaction_preview_page_count(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.redaction.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2080,7 +2205,9 @@ async def get_redaction_preview_page_image(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.redaction.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2140,7 +2267,9 @@ async def redact_document(
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.redaction.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2169,6 +2298,7 @@ async def redact_document(
         attributes=json.dumps(document.attributes),
         derived_from_document_id=None,
         derived_from_version_number=None,
+        x_dms_principal=x_dms_principal,
     )
 
     redacted_document = await _persist_new_document(
@@ -2219,8 +2349,18 @@ async def redact_document(
 
 @app.delete("/documents/{document_id}", response_model=DocumentOut)
 async def delete_document(
-    document_id: str, deleted_by: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    deleted_by: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
+    try:
+        existing = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, existing.folder_id or "root", access_type="write"
+    )
     try:
         document = await repository.delete_document(session, document_id, deleted_by=deleted_by)
     except repository.NotFoundError as exc:
@@ -2237,7 +2377,10 @@ async def delete_document(
 
 @app.post("/documents/{document_id}/trash", response_model=TrashResult)
 async def trash_document(
-    document_id: str, payload: TrashRequest, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: TrashRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> TrashResult:
     """Deletion request workflow for regular users (5.2, since P7-S1c) -
     optionally gated by the generic four-eyes mechanism (4.3, action type
@@ -2247,9 +2390,17 @@ async def trash_document(
     approval request is created instead - the actual execution then follows
     via `consumer.py` once `permission.approval.approved` arrives. By
     default (no configuration), behavior is unchanged: immediate execution,
-    the exact same pattern as `force_release_lock` (4.2, P6-S4). Alongside
-    the existing `DELETE /documents/{id}` - this endpoint remains unchanged
-    as an ungated path, since no frontend calls it at all so far."""
+    the exact same pattern as `force_release_lock` (4.2, P6-S4). Since
+    Post-Roadmap Phase 38 Session 4, additionally requires `document.write`
+    on the document's own folder (previously ungated, unlike `DELETE
+    /documents/{id}` above)."""
+    try:
+        existing = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, existing.folder_id or "root", access_type="write"
+    )
     if await app.state.approval_client.requires_approval("document.delete"):
         request = await app.state.approval_client.create_request(
             action_type="document.delete",
@@ -2276,10 +2427,19 @@ async def trash_document(
 
 @app.post("/documents/{document_id}/restore", response_model=DocumentOut)
 async def restore_document(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentOut:
     """Trash restoration (5.2, since P7-S1) - only possible within the
     configured deadline (`GET/PUT /trash-config`)."""
+    try:
+        existing = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, existing.folder_id or "root", access_type="write"
+    )
     try:
         document = await repository.restore_document(session, document_id)
     except repository.NotFoundError as exc:
@@ -2725,7 +2885,9 @@ async def create_share_link(
         )
 
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.share_link.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2762,7 +2924,9 @@ async def list_share_links(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.share_link.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -2827,7 +2991,9 @@ async def create_webdav_edit_token(
     # Write permission, not just read permission - this token grants actual
     # editing capability (check-in via WebDAV PUT), unlike a share link.
     allowed = await app.state.permission_client.check_write(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.webdav_edit.write",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Schreibrecht auf dieses Dokument")
@@ -2861,7 +3027,9 @@ async def list_webdav_edit_tokens(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     allowed = await app.state.permission_client.check_write(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.webdav_edit.write",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Schreibrecht auf dieses Dokument")
@@ -2989,27 +3157,43 @@ async def get_public_share_link_content(
 
 @app.get("/documents/{document_id}/versions", response_model=list[DocumentVersionOut])
 async def list_versions(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[DocumentVersionOut]:
     try:
-        return await repository.list_versions(session, document_id)
+        document = await repository.get_document(session, document_id)
+        versions = await repository.list_versions(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="read"
+    )
+    return versions
 
 
 @app.get("/documents/{document_id}/versions/{version_number}", response_model=DocumentVersionOut)
 async def get_version(
-    document_id: str, version_number: int, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    version_number: int,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> DocumentVersionOut:
     try:
-        return await repository.get_version(session, document_id, version_number)
+        document = await repository.get_document(session, document_id)
+        version = await repository.get_version(session, document_id, version_number)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="read"
+    )
+    return version
 
 
 @app.get("/documents/{document_id}/content")
 async def download_current_content(
     document_id: str,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     x_dms_username: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
@@ -3019,6 +3203,9 @@ async def download_current_content(
         version = await repository.get_current_version(session, document_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="read"
+    )
     if document.dehydrated_at is not None:
         raise HTTPException(
             status_code=409,
@@ -3047,6 +3234,7 @@ async def download_current_content(
 async def download_version_content(
     document_id: str,
     version_number: int,
+    x_dms_principal: str = Header(default=""),
     x_dms_roles: str = Header(default=""),
     x_dms_username: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
@@ -3056,6 +3244,9 @@ async def download_version_content(
         version = await repository.get_version(session, document_id, version_number)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(
+        x_dms_principal, document.folder_id or "root", access_type="read"
+    )
     if document.dehydrated_at is not None:
         raise HTTPException(
             status_code=409,
@@ -3087,8 +3278,23 @@ async def checkin_version(
     expected_base_version_number: int = Form(...),
     created_by: str = Form(...),
     comment: str | None = Form(None),
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> CheckinResult:
+    # RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - checked before the
+    # virus scan/anything else, same "fail fast on auth" convention as
+    # `create_document` above. An unknown `document_id` is deliberately let
+    # through here unchecked (no folder to check against) - `repository.
+    # checkin_version` raises its own `404` further down, unchanged.
+    try:
+        target_document = await repository.get_document(session, document_id)
+    except repository.NotFoundError:
+        target_document = None
+    if target_document is not None:
+        await _require_document_permission(
+            x_dms_principal, target_document.folder_id or "root", access_type="write"
+        )
+
     data = await file.read()
     content_type = await _resolve_content_type(session, data)
 
@@ -3112,12 +3318,9 @@ async def checkin_version(
     # Retention (5.1/5.2a, since P7-S1): if the document already carries a
     # deadline, this new version also gets the same storage-level lock
     # (only possible at write time, see storage_client.upload docstring) -
-    # an unknown document leaves `retention_until=None`.
-    try:
-        existing_document = await repository.get_document(session, document_id)
-        retention_until = existing_document.retention_until
-    except repository.NotFoundError:
-        retention_until = None
+    # an unknown document leaves `retention_until=None`. Reuses the lookup
+    # from the permission check above instead of a second round trip.
+    retention_until = target_document.retention_until if target_document is not None else None
 
     checksum = compute_checksum(data)
     key = _object_key(document_id, checksum)
@@ -3155,17 +3358,37 @@ async def checkin_version(
     return CheckinResult(version=version, is_conflict=is_conflict)
 
 
+async def _resolve_folder_id_or_root(session: AsyncSession, document_id: str) -> str:
+    """Post-Roadmap Phase 38 Session 4 - shared helper for the lock
+    endpoints below, whose repository functions take a bare `document_id`
+    with no document object of their own to read `folder_id` off of."""
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return document.folder_id or "root"
+
+
 @app.get("/documents/{document_id}/lock", response_model=LockOut | None)
 async def get_lock(
-    document_id: str, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> LockOut | None:
+    resource_id = await _resolve_folder_id_or_root(session, document_id)
+    await _require_document_permission(x_dms_principal, resource_id, access_type="read")
     return await repository.get_lock(session, document_id)
 
 
 @app.post("/documents/{document_id}/lock", response_model=LockOut, status_code=201)
 async def acquire_lock(
-    document_id: str, payload: LockAcquireRequest, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: LockAcquireRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> LockOut:
+    resource_id = await _resolve_folder_id_or_root(session, document_id)
+    await _require_document_permission(x_dms_principal, resource_id, access_type="write")
     try:
         lock = await repository.acquire_lock(
             session,
@@ -3184,8 +3407,13 @@ async def acquire_lock(
 
 @app.delete("/documents/{document_id}/lock", status_code=204)
 async def release_lock(
-    document_id: str, payload: LockReleaseRequest, session: AsyncSession = Depends(get_session)
+    document_id: str,
+    payload: LockReleaseRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> None:
+    resource_id = await _resolve_folder_id_or_root(session, document_id)
+    await _require_document_permission(x_dms_principal, resource_id, access_type="write")
     try:
         await repository.release_lock(session, document_id, released_by=payload.released_by)
     except repository.LockNotHeldError as exc:
@@ -3314,7 +3542,9 @@ async def get_document_export_accessibility_check(
             detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
         )
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.export.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -3363,7 +3593,9 @@ async def export_document(
             detail="Dokumentinhalt wurde ausgesondert und muss erst zurückgeholt werden",
         )
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=document.folder_id or "root"
+        principal_id=x_dms_principal,
+        resource_id=document.folder_id or "root",
+        permission="document.export.read",
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf dieses Dokument")
@@ -3423,7 +3655,7 @@ async def start_folder_export(
             status_code=422, detail="history_position muss 'before' oder 'after' sein"
         )
     allowed = await app.state.permission_client.check_read(
-        principal_id=x_dms_principal, resource_id=folder_id
+        principal_id=x_dms_principal, resource_id=folder_id, permission="document.export.read"
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Kein Leserecht auf diesen Ordner")

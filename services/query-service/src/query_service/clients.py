@@ -55,8 +55,20 @@ class DocumentClient:
     Dokumente sind selbst keine Permission-Resources, nur Ordner sind
     `ResourceNode`s (gleiche Begruendung wie in search-service)."""
 
+    # Post-Roadmap Phase 38 Session 4: document-service's primary endpoints
+    # now require a non-empty `X-DMS-Principal` header - asserts a fixed
+    # service identity (background/internal caller, no real end-user
+    # context available; covered by "everyone"'s grants, same reasoning as
+    # `archival_service.clients.DocumentClient`), same identity string
+    # `ObjectTypeClient` below already uses for object-type-service.
+    _SYSTEM_PRINCIPAL_ID = "query-service"
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=10.0,
+            headers={"X-DMS-Principal": self._SYSTEM_PRINCIPAL_ID},
+        )
 
     async def get_document(self, document_id: str) -> dict | None:
         response = await self._client.get(f"/documents/{document_id}")

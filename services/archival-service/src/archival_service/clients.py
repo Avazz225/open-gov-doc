@@ -15,7 +15,9 @@ class DocumentClient:
         return response.json()
 
     async def get_document(self, document_id: str) -> dict:
-        response = await self._client.get(f"/documents/{document_id}")
+        response = await self._client.get(
+            f"/documents/{document_id}", headers={"X-DMS-Principal": "archival-service"}
+        )
         response.raise_for_status()
         return response.json()
 
@@ -39,18 +41,23 @@ class DocumentClient:
             "/documents",
             data={"title": title, "created_by": created_by, "folder_id": folder_id},
             files={"file": (filename, data, content_type or "application/octet-stream")},
+            headers={"X-DMS-Principal": "archival-service"},
         )
         response.raise_for_status()
         return response.json()
 
     async def get_version(self, document_id: str, version_number: int) -> dict:
-        response = await self._client.get(f"/documents/{document_id}/versions/{version_number}")
+        response = await self._client.get(
+            f"/documents/{document_id}/versions/{version_number}",
+            headers={"X-DMS-Principal": "archival-service"},
+        )
         response.raise_for_status()
         return response.json()
 
     async def download_version_content(self, document_id: str, version_number: int) -> bytes:
         response = await self._client.get(
-            f"/documents/{document_id}/versions/{version_number}/content"
+            f"/documents/{document_id}/versions/{version_number}/content",
+            headers={"X-DMS-Principal": "archival-service"},
         )
         response.raise_for_status()
         return response.content

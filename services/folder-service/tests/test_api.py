@@ -20,8 +20,14 @@ def client():
     diese Tests unabhängig davon laufen, ob/wie `document-service` gerade
     deployed ist (die reine Kaskaden-LOGIK wird bereits in
     test_repository.py/test_retention.py gegen einen Fake geprüft; das echte
-    Zusammenspiel verifiziert der Live-Docker-Smoke-Test, siehe PROGRESS.md)."""
-    with TestClient(app) as c:
+    Zusammenspiel verifiziert der Live-Docker-Smoke-Test, siehe PROGRESS.md).
+    Default `X-DMS-Principal` (Post-Roadmap Phase 38 Session 4, ADR 0149):
+    core folder CRUD now requires a valid principal - same established
+    pattern as `ocr-service`/`object-type-service`'s test clients. Individual
+    tests that need a specific principal (e.g. for a resource-scoped hand-
+    folder role, or an explicit anonymous/unauthorized case) still override
+    it per-call via `headers=`, which httpx merges over this default."""
+    with TestClient(app, headers={"X-DMS-Principal": "folder-service-tests"}) as c:
         fake_document_client = AsyncMock()
         fake_document_client.cascade_trash.return_value = []
         fake_document_client.cascade_restore.return_value = []
@@ -335,7 +341,12 @@ def test_list_deleted_folders_personal_scope_hides_other_users_items(client):
 
 
 def test_list_deleted_folders_personal_scope_without_principal_returns_401(client):
-    response = client.get("/folders/deleted", params={"scope": "personal"})
+    # The `client` fixture sends a default `X-DMS-Principal` (Post-Roadmap
+    # Phase 38 Session 4) - explicitly overridden to empty here to actually
+    # exercise the "no principal at all" case this test is named for.
+    response = client.get(
+        "/folders/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": ""}
+    )
     assert response.status_code == 401
 
 
@@ -373,7 +384,8 @@ def test_purge_folder_unknown_returns_404(client):
 def test_purge_folder_without_principal_returns_401(client):
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
     client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
-    response = client.post(f"/folders/{created['id']}/purge")
+    # Same default-header override as the personal-scope test above.
+    response = client.post(f"/folders/{created['id']}/purge", headers={"X-DMS-Principal": ""})
     assert response.status_code == 401
 
 
@@ -825,9 +837,11 @@ def test_add_folder_document_reference_without_permission_is_403(client):
 
 def test_add_folder_document_reference_without_principal_is_401(client):
     folder = _create_folder(client, name="Handakte-Test")
+    # Same default-header override as the personal-scope/purge tests above.
     response = client.post(
         f"/folders/{folder['id']}/document-references",
         json={"document_id": "doc-1", "added_by": "alice"},
+        headers={"X-DMS-Principal": ""},
     )
     assert response.status_code == 401
 
@@ -835,7 +849,11 @@ def test_add_folder_document_reference_without_principal_is_401(client):
 def test_add_folder_document_reference_unknown_document_returns_400(client):
     folder = _create_folder(client, name="Handakte-Test")
     principal = f"principal-{uuid.uuid4().hex[:8]}"
-    _grant_folder_permission(principal, folder["id"], permissions=["folder.write", "folder.read"])
+    _grant_folder_permission(
+        principal,
+        folder["id"],
+        permissions=["folder.document_reference.write", "folder.document_reference.read"],
+    )
     # `client` fixture's fake_document_client.get defaults to None ("unknown").
 
     response = client.post(
@@ -865,7 +883,11 @@ def test_folder_document_reference_lifecycle(client):
     of the same reference."""
     folder = _create_folder(client, name="Handakte-Test")
     principal = f"principal-{uuid.uuid4().hex[:8]}"
-    _grant_folder_permission(principal, folder["id"], permissions=["folder.write", "folder.read"])
+    _grant_folder_permission(
+        principal,
+        folder["id"],
+        permissions=["folder.document_reference.write", "folder.document_reference.read"],
+    )
     app.state.document_client.get.return_value = {
         "current_version_number": 3,
         "deleted_at": None,
@@ -925,11 +947,14 @@ def test_list_folder_document_references_without_permission_is_403(client):
 
 
 def test_folder_read_permission_does_not_grant_write(client):
-    """`folder.read` alone must not be enough to curate the compilation -
-    only `folder.write` may add/remove references."""
+    """`folder.document_reference.read` alone must not be enough to curate
+    the compilation - only `folder.document_reference.write` may add/
+    remove references."""
     folder = _create_folder(client, name="Handakte-Test")
     principal = f"principal-{uuid.uuid4().hex[:8]}"
-    _grant_folder_permission(principal, folder["id"], permissions=["folder.read"])
+    _grant_folder_permission(
+        principal, folder["id"], permissions=["folder.document_reference.read"]
+    )
 
     list_response = client.get(
         f"/folders/{folder['id']}/document-references",

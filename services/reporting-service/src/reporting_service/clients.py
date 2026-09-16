@@ -111,8 +111,17 @@ class DocumentClient:
     the same resolution query-service already performs for its structured
     queries."""
 
+    # Post-Roadmap Phase 38 Session 4: document-service's primary endpoints
+    # now require a non-empty `X-DMS-Principal` header - asserts a fixed
+    # service identity (background/internal caller, no real end-user
+    # context available; covered by "everyone"'s grants, same reasoning as
+    # `archival_service.clients.DocumentClient`).
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "reporting-service"}
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=10.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def get_document(self, document_id: str) -> dict | None:
         response = await self._client.get(f"/documents/{document_id}")

@@ -68,13 +68,18 @@ lifecycle the way a circulation folder does.
   "Handakte" object type (`packages/egov/config.json`, name + icon only) exists purely for naming/
   discoverability, not as an enforced precondition — same as how any folder can already hold a legal hold
   or a retention setting.
-- **`POST`/`DELETE .../document-references` require `folder.write`, `GET` requires `folder.read`** — both
-  checked, folder-scoped, against `resource_id={id}` via `PermissionServiceClient.check()`, the same
-  generic primitive `teamspace-service`/`document-service`'s export/redaction endpoints already use
-  elsewhere. This is the **first actual consumer of folder-service's own resource tree from within
-  folder-service itself** — almost nothing else in this service checks any permission at all (see "Open
-  Points"). Existence is resolved before permission (`404` before `403`), the same ordering the public
-  share-link creation endpoint already established (document-service, ADR 0047).
+- **`POST`/`DELETE .../document-references` require `folder.document_reference.write`, `GET` requires
+  `folder.document_reference.read`** — both checked, folder-scoped, against `resource_id={id}` via
+  `PermissionServiceClient.check()`, the same generic primitive `teamspace-service`/`document-service`'s
+  export/redaction endpoints already use elsewhere. Originally `folder.write`/`folder.read` (this was the
+  first actual consumer of folder-service's own resource tree from within folder-service itself, at a time
+  when almost nothing else in this service checked any permission at all) — renamed to a dedicated pair in
+  **Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)),
+  once core folder CRUD started checking the plain `folder.read`/`folder.write` strings too and granting
+  them to "everyone" by default — reusing the same strings here would have silently handed every
+  authenticated principal hand-folder curation rights. Existence is resolved before permission (`404`
+  before `403`), the same ordering the public share-link creation endpoint already established
+  (document-service, ADR 0047).
 - **Live resolution, same two-field shape as case-service's `_resolve_reference`**: `GET .../document-
   references` calls `DocumentClient.get(document_id)` (a new method, exact mirror of case-service's own)
   for every still-active reference, returning `current_version_number`/`document_deleted_at` alongside
@@ -89,8 +94,9 @@ lifecycle the way a circulation folder does.
   compilation requires write access to the *hand folder*, not to each referenced document individually;
   a reference doesn't grant any new access to the document itself, it only records that this compilation
   points to it. Opening/reading the actual document content is still subject to whatever access control
-  already applies to it elsewhere (largely none, for document-service's core CRUD today — a pre-existing,
-  documented gap unrelated to this feature).
+  already applies to it elsewhere — since **Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)),
+  that means a real `document.read` check on document-service's own primary paths, not the previously
+  nonexistent check this bullet used to describe.
 - **`delete_folder`/`hard_delete_folder` both remove a folder's own `folder_document_reference` rows
   first** — found live during this session's own verification (an active reference otherwise violates the
   table's FK on `folder.folder.id` with a `500`), via a new existence-check-free `_list_document_
@@ -149,6 +155,8 @@ Publishes (stream `folder`, `ensure_stream=True`) exactly the contract the Permi
 
 **Audit hookup (since P7-S2, a genuine retrofit)**: `audit-service` was missing `"folder.>"` in its consumed subject list ever since this stream was introduced in P7-S1b — a pre-existing bug discovered during the P7-S2 live smoke test, fixed retroactively including a backfill of the complete prior folder event history (see `docs/services/audit-service.md`).
 
+**`inbox`/`outbox` synchronous registration (Post-Roadmap Phase 38 Session 4, [ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md))**: unlike every other folder, `inbox`/`outbox` are bootstrapped directly into the DB at startup (`ensure_special_folders`), not via `create_folder`, so they never went through the `folder.resource.created` event above and had no `ResourceNode` in `permission-service` at all. Now registered synchronously at startup via `POST /resources` (the same idempotent, create-if-missing primitive ADR 0144 added) — needed once core folder CRUD started actually checking permission-service's resource tree, since an unregistered `resource_id` denies outright rather than falling back to an ancestor's grant.
+
 ## Structure Templates (2.5/7.3, since P15-S6)
 
 A folder subtree as a named, reusable template (e.g. a file-plan skeleton) — the last session of Phase 15. Full architecture rationale: [ADR 0056](../adr/0056-struktur-vorlagen-folder-service-json-tree-no-attribute-values.md).
@@ -193,4 +201,5 @@ using the same resource-scoped role-grant test pattern already established for `
 - **Structure templates check neither required attributes nor parent-child object-type nesting rules (2.2b) when applying** (since P15-S6, see above) — a deliberate, documented simplification (ADR 0056), no mode in `object-type-service` exists for "structure-only, no attribute check".
 - **`created_by` on the template endpoints remains client-side in the body** (since P15-S6) — deliberately follows the pattern already used consistently throughout this service (`FolderCreate.created_by`, `TrashRequest.deleted_by`), not the newer `X-DMS-Principal` convention already hardened elsewhere in the project — a pre-existing legacy gap of the whole service, not resolved in this session.
 - ~~**`root` itself has no rename/move/delete protection** (P15-S3, found while building the new `inbox`/`outbox` protection)~~ — **resolved in Post-Roadmap Phase 19 Session 11** ([ADR 0076](../adr/0076-root-folder-mail-regex-dehydration-409.md)): `root` is now part of `PROTECTED_FOLDER_IDS`, going through the same three existing `409` checks as `inbox`/`outbox`.
-- **Beyond hand folders' `folder.read`/`folder.write` (14.2, Post-Roadmap Phase 31 Session 7, ADR 0118), core folder CRUD (`POST`/`GET`/`PATCH`/`DELETE /folders/...`) still enforces essentially no permission of its own** — `created_by`/`deleted_by` remain client-supplied body fields (see above), and reading/browsing any folder's contents is ungated. A work tray built on a teamspace's root folder is therefore only as securable in practice as the teamspace's own permission-service anchoring already is — which, per `docs/services/teamspace-service.md` "Open Points", is not the primary enforcement anywhere except `search-service` today. Closing this properly is a materially larger, separate RBAC-hardening effort (same category as Phase 19), not attempted in P31-S7.
+- ~~**Beyond hand folders' `folder.read`/`folder.write` (14.2, Post-Roadmap Phase 31 Session 7, ADR 0118), core folder CRUD (`POST`/`GET`/`PATCH`/`DELETE /folders/...`) still enforces essentially no permission of its own** — `created_by`/`deleted_by` remain client-supplied body fields (see above), and reading/browsing any folder's contents is ungated. A work tray built on a teamspace's root folder is therefore only as securable in practice as the teamspace's own permission-service anchoring already is — which, per `docs/services/teamspace-service.md` "Open Points", is not the primary enforcement anywhere except `search-service` today. Closing this properly is a materially larger, separate RBAC-hardening effort (same category as Phase 19), not attempted in P31-S7.~~ — **resolved in Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)): core folder CRUD now checks real `folder.read`/`folder.write` against `permission-service`'s resource tree, granted to "everyone" for ordinary folders (preserving default openness) while a teamspace's root folder is excluded via `inherit=False` — teamspace membership (ADR 0043) is now the actual, working enforcement, not just a `search-service`-only anchor. Hand folders (ADR 0118) deliberately kept their OWN, separate `folder.document_reference.read`/`.write` permission pair rather than reusing the now-broadly-granted `folder.read`/`.write`, preserving that feature's originally intended narrower gate.
+- **Residual, accepted gap (Post-Roadmap Phase 38 Session 4, ADR 0149)**: `teamspace-member`'s broad `folder.write` grant on a teamspace's root folder lets a regular (non-manager) member bypass `teamspace-service`'s own manager-only deletion guard via `DELETE /folders/{root_folder_id}` directly. A net improvement over the prior fully-open state (previously *anyone* could do this), not a new regression, but not closed — would need folder-service to distinguish "member with ordinary write" from "member with delete rights," which ADR 0043's single-role model doesn't support today.

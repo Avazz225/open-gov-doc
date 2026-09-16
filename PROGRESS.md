@@ -2,9 +2,76 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P38-S3 (ungated/weakly-gated endpoints, round 2 — third session of the Phase 38+
-gap-closure plan). Both plan-text premises turned out understated once checked against the real code
-(surfaced via research, confirmed with the user via `AskUserQuestion` before implementing):
+**Last completed:** P38-S4 (teamspace permission anchoring — fourth and final session of the Phase 38+
+gap-closure plan, genuine architecture decision, new [ADR 0149](docs/adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)).
+The plan's premise was stale (same pattern as P38-S1/S3): the anchoring mechanism it asked to "design and
+build" already existed since ADR 0043 (P14-S6) — `teamspace-service` already grants a real
+`teamspace-member` role on a teamspace's root folder. The actual gap: `folder-service`'s core CRUD calls
+`permission-service` never, and `document-service` only on a narrow "sensitive" subset (share-links,
+webdav-edit-tokens, redaction, exports) — not the primary read/write paths. Presented with two options —
+teamspace-scoped-only enforcement (recommended) vs. a broad `document`/`folder` RBAC retrofit across both
+services' core paths — **the user explicitly chose the broader, riskier option**. This session implements
+that and everything it required to avoid a system-breaking regression:
+
+- **Core mechanism**: `document.read`/`.write`/`folder.read`/`.write` added to permission-service's
+  "everyone" group (preserves default-open access for ordinary resources, now requiring only a valid
+  `X-DMS-Principal`); a teamspace's root folder gets `inherit=False` (`teamspace-service`'s new
+  `ensure_isolated_resource`, called at creation plus a startup backfill for pre-existing teamspaces) so
+  "everyone"'s grant doesn't reach inside — the existing `teamspace-member` role assignment (ADR 0043) is
+  now the real, working enforcement, not just a `search-service` anchor. `folder-service`'s `inbox`/
+  `outbox` needed the same synchronous `POST /resources` registration (bootstrapped directly, never went
+  through the async event).
+- **A second, more serious collision found and fixed**: five PRE-EXISTING narrow gates (hand-folder
+  curation ADR 0118, share-links ADR 0047, webdav-edit-tokens, redaction, export ADR 0107) reused the
+  exact same `folder.read`/`document.read`/`document.write` strings for their OWN, deliberately narrower
+  checks — ADR 0118 says outright that `folder.read`/`.write` being absent from "everyone" IS the
+  feature's security property. Adding them to "everyone" would have silently handed every authenticated
+  principal hand-folder curation rights and the ability to mint a public anonymous share link to any
+  document. Fixed by giving each of the five its own dedicated permission string (`folder.
+  document_reference.read`/`.write`, `document.share_link.read`, `document.webdav_edit.write`,
+  `document.redaction.read`, `document.export.read`), none added to "everyone".
+- **Internal service-to-service callers**: an audit found ~13 services calling folder-service's/
+  document-service's now-gated endpoints with no principal at all. Background/system callers
+  (archival-service, ocr-service, rendering-service, signature-service, mail-connector, search-service,
+  query-service, reporting-service, case-service, workflow-service, teamspace-service, migration-service)
+  got a fixed service-identity header. `webdav-connector`/`cmis-connector` instead forward the REAL
+  per-request actor they already resolve for other purposes (`libs/dms-connector-sdk`'s `DmsTreeClient`
+  gained `x_dms_principal`/`default_principal`) — this is what actually makes teamspace membership work
+  end-to-end through these connectors, not just direct API access.
+- **Two live consequences of the new mechanism, found and fixed**: `delete_teamspace` deliberately keeps
+  the root folder (a pre-existing decision) but never reset its `inherit` flag, so the kept folder became
+  permanently unreachable by anyone, including its creator — fixed with a new
+  `restore_default_inheritance()` call. `teamspace-service`'s own test suite (deliberately runs against
+  the real neighbor services, no mocking) creates real folders/resource nodes on every run with no
+  cleanup — harmless clutter before this session, now genuinely orphaning `inherit=False` folders; fixed
+  with a proper teardown fixture, plus a one-time dev-database cleanup (1039 leftover folders, 236
+  leftover documents accumulated under `root` across many past sessions).
+- **Residual, accepted gaps** (documented in ADR 0149, not fixed): a member can bypass teamspace-
+  service's own manager-only deletion guard via `folder-service` directly (net improvement over the prior
+  fully-open state, not a new regression); a soft-deleted document whose parent folder is later
+  hard-deleted becomes permanently unreadable (found via `cmis-connector`'s `deleteTree` test).
+
+**Fallout across ~20 services** (missing-principal-header test fixtures, mostly) was fixed via 4 parallel
+subagents plus direct work — final state, all green: permission-service 170, teamspace-service 47 (+2
+core isolation regression tests), folder-service 140, document-service 356, search-service 75 (2 stale
+test premises rewritten to use an isolated resource instead of asserting on now-intentionally-open
+`root`), cmis-connector 17 (+1 real app bug fixed: `_dispatch_write` wasn't forwarding `x_dms_principal`),
+webdav-connector 16, migration-service 8 (+1 real app bug fixed: `transfer_steps.delete_source()` missing
+a header), archival-service 138, query-service 54, reporting-service 69, ocr-service 53+8 skipped,
+rendering-service 98, signature-service 18, case-service 66, workflow-service 207. `mail-connector` 75/77
+— 2 pre-existing, unrelated `RuntimeError: bound to a different event loop` failures found at larger
+scale (documented, not fixed, out of RBAC scope). All `ruff check`/`ruff format` clean except pre-existing,
+unrelated findings in `loadtest/notebook/analysis.ipynb` and `federation-hub-service` (untouched by this
+session). **Live-verified**: `curl` against the real running stack — created a real teamspace, confirmed
+`401`/`403`/`200` for missing-principal/non-member/member on both `folder-service` and `document-service`
+direct access to the teamspace's folder and a document inside it, then deleted/purged everything cleanly
+(confirming the `restore_default_inheritance` fix). No frontend/UI code touched this session, so no
+browser verification needed per the standing DoD note. `graphify update .` run at the end of this session
+(Phase 38's last).
+
+Immediately before P38-S4: **P38-S3** (ungated/weakly-gated endpoints, round 2 — third session of the
+Phase 38+ gap-closure plan). Both plan-text premises turned out understated once checked against the real
+code (surfaced via research, confirmed with the user via `AskUserQuestion` before implementing):
 
 - **(1) `RetentionPanel`/`FolderRetentionModal`**: the plan assumed legal-hold set/release was still
   ungated — it was not, ADR 0075 (P19-S10) already closed that. Redirected to the REAL, adjacent gap in
@@ -64,10 +131,12 @@ permission grant (with the independent legal-hold button staying disabled throug
 (the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
 "only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
 
-**Next session:** **P38-S4** (teamspace permission anchoring — genuine architecture decision, new ADR:
-teamspace membership is currently enforced nowhere except `search-service`, direct access via
-`folder-service`/`document-service` bypasses it entirely). See `IMPLEMENTATION_PLAN.md` "Phase 38" for
-the full session breakdown.
+**Next session:** **P39-S1** (Phase 39, RBAC completion — domain-admin roles without a technical
+account: 5 of 7 such roles, `domain-admin-storage`/`-license`/`-query-console`/`-deletion`/
+`-deletion-vs`, exist only as a `Role` row with no technical account and no enforcing endpoint. Session
+decides per role whether it's actually needed — same pattern as `domain-admin-query-console`, enforced
+directly via role-assignment lookup with no dedicated account needed — or should be removed as dead
+scaffolding). See `IMPLEMENTATION_PLAN.md` "Phase 39" for the full session breakdown.
 
 Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the
 Phase 38+ gap-closure plan). Closed four findings: `audit-service`'s `GET /events`/`.../verify` (new

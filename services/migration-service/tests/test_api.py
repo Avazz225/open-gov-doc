@@ -26,10 +26,14 @@ def _client() -> httpx.Client:
     return httpx.Client(base_url=MIGRATION_SERVICE_URL, timeout=30.0)
 
 
+_DMS_PRINCIPAL_HEADERS = {"X-DMS-Principal": "migration-tests"}
+
+
 def _create_folder(*, parent_id: str = "root", name: str) -> dict:
     response = httpx.post(
         f"{FOLDER_SERVICE_URL}/folders",
         json={"name": name, "parent_id": parent_id, "created_by": "migration-tests"},
+        headers=_DMS_PRINCIPAL_HEADERS,
     )
     response.raise_for_status()
     return response.json()
@@ -40,25 +44,34 @@ def _upload_document(*, folder_id: str, title: str, content: bytes = b"Inhalt") 
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": title, "created_by": "migration-tests", "folder_id": folder_id},
         files={"file": (title, content, "text/plain")},
+        headers=_DMS_PRINCIPAL_HEADERS,
     )
     response.raise_for_status()
     return response.json()
 
 
 def _get_document(document_id: str) -> dict:
-    response = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}")
+    response = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}", headers=_DMS_PRINCIPAL_HEADERS
+    )
     response.raise_for_status()
     return response.json()
 
 
 def _list_children(folder_id: str) -> list[dict]:
-    response = httpx.get(f"{FOLDER_SERVICE_URL}/folders/{folder_id}/children")
+    response = httpx.get(
+        f"{FOLDER_SERVICE_URL}/folders/{folder_id}/children", headers=_DMS_PRINCIPAL_HEADERS
+    )
     response.raise_for_status()
     return response.json()
 
 
 def _list_documents(folder_id: str) -> list[dict]:
-    response = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": folder_id})
+    response = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": folder_id},
+        headers=_DMS_PRINCIPAL_HEADERS,
+    )
     response.raise_for_status()
     return response.json()
 

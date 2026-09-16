@@ -536,11 +536,17 @@ def test_check_batch_returns_per_resource_result(client, role_management_headers
 
 
 def test_check_batch_denies_principal_without_assignment(client):
+    # Post-Roadmap Phase 38 Session 4 (ADR 0149): `document.read` is now in
+    # `EVERYONE_ROLE_PERMISSIONS`, so it no longer distinguishes "no
+    # assignment" from "granted via everyone" - a permission deliberately
+    # NOT in that list keeps this test's actual intent (a principal with
+    # truly no grant is denied) instead of asserting behavior this same
+    # session intentionally changed.
     response = client.post(
         "/check/batch",
         json={
             "principal_id": "no-such-principal",
-            "permission": "document.read",
+            "permission": "admin.user_management",
             "access_type": "read",
             "resource_ids": [ROOT_RESOURCE_ID],
         },

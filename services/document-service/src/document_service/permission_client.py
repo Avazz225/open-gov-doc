@@ -15,30 +15,43 @@ class PermissionServiceClient:
     def __init__(self, base_url: str) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
 
-    async def check_read(self, *, principal_id: str, resource_id: str) -> bool:
+    async def check_read(
+        self, *, principal_id: str, resource_id: str, permission: str = "document.read"
+    ) -> bool:
+        """`permission` (Post-Roadmap Phase 38 Session 4, ADR 0149):
+        defaults to the new baseline `document.read` (now granted to
+        "everyone", see `permission-service`'s `EVERYONE_ROLE_PERMISSIONS`)
+        - every call site below that predates this session and relied on
+        `document.read` being a narrow, admin-granted permission (share
+        links, redaction, export) now passes its OWN dedicated permission
+        string instead, so "everyone" gaining baseline read access doesn't
+        silently defeat those pre-existing, deliberately narrower gates."""
         response = await self._client.get(
             "/check",
             params={
                 "principal_id": principal_id,
                 "resource_id": resource_id,
-                "permission": "document.read",
+                "permission": permission,
                 "access_type": "read",
             },
         )
         response.raise_for_status()
         return bool(response.json()["allowed"])
 
-    async def check_write(self, *, principal_id: str, resource_id: str) -> bool:
+    async def check_write(
+        self, *, principal_id: str, resource_id: str, permission: str = "document.write"
+    ) -> bool:
         """Direct Office editing (post-roadmap feature): a WebDAV edit
         token grants actual write permissions, not just read access like a
         share link - hence `access_type="write"` here instead of
-        `check_read`'s `"read"`."""
+        `check_read`'s `"read"`. `permission` - see `check_read`'s
+        docstring for why this is no longer hardcoded."""
         response = await self._client.get(
             "/check",
             params={
                 "principal_id": principal_id,
                 "resource_id": resource_id,
-                "permission": "document.write",
+                "permission": permission,
                 "access_type": "write",
             },
         )

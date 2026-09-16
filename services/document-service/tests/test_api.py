@@ -139,18 +139,27 @@ def _grant_root_permission(
 
 
 def _grant_document_read(principal_id: str) -> None:
-    """Vergibt `document.read` auf `root` für `principal_id` (4.2a) - gleiches
-    Muster wie search-service's `_grant_root_read`. Dokumente, die über den
-    `upload()`-Helfer ohne `folder_id` angelegt werden, prüfen intern gegen
-    die Ressource `"root"` (siehe main.py's Freigabelink-Endpunkte)."""
-    _grant_root_permission(principal_id, "document.read", "share-link-test-role")
+    """Vergibt `document.share_link.read` auf `root` für `principal_id`
+    (4.2a) - gleiches Muster wie search-service's `_grant_root_read`.
+    Dokumente, die über den `upload()`-Helfer ohne `folder_id` angelegt
+    werden, prüfen intern gegen die Ressource `"root"` (siehe main.py's
+    Freigabelink-Endpunkte). Dedicated permission, NOT the generic
+    `document.read` (Post-Roadmap Phase 38 Session 4, ADR 0149) - see
+    `permission_client.py`'s `check_read` docstring for why share-link
+    creation needs its own, narrower gate now that `document.read` is
+    granted to "everyone"."""
+    _grant_root_permission(principal_id, "document.share_link.read", "share-link-test-role")
 
 
 def _grant_document_write(principal_id: str) -> None:
     """Office-Direktbearbeitung (Post-Roadmap-Feature) - Gegenstück zu
-    `_grant_document_read` mit `document.write` statt `document.read`, da
-    ein WebDAV-Edit-Token echte Bearbeitungsfähigkeit gewährt."""
-    _grant_root_permission(principal_id, "document.write", "webdav-edit-token-test-role")
+    `_grant_document_read` mit `document.webdav_edit.write` statt
+    `document.share_link.read`, da ein WebDAV-Edit-Token echte
+    Bearbeitungsfähigkeit gewährt. Dedicated permission, same reasoning as
+    `_grant_document_read` above (ADR 0149)."""
+    _grant_root_permission(
+        principal_id, "document.webdav_edit.write", "webdav-edit-token-test-role"
+    )
 
 
 # Standardisierte EICAR-Testdatei-Signatur (https://www.eicar.org/) - von
@@ -163,7 +172,14 @@ EICAR_SIGNATURE = (
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): default `X-DMS-Principal`
+    - the primary document endpoints now require a valid principal, same
+    established pattern as `ocr-service`/`object-type-service`'s test
+    clients. Individual tests needing a specific principal (e.g. a role-
+    gated admin action, or an explicit anonymous/unauthorized case) still
+    override it per-call via `headers=`, which httpx merges over this
+    default."""
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
         yield c
 
 
@@ -603,6 +619,7 @@ def test_update_document_moves_to_new_folder(client):
     new_folder = httpx.post(
         f"{FOLDER_SERVICE_URL}/folders",
         json={"name": "Zielordner", "parent_id": "root", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     document_id = upload(client, folder_id="root").json()["id"]
 
@@ -868,6 +885,7 @@ def test_promote_draft_document_moves_to_target_folder(client):
     new_folder = httpx.post(
         f"{FOLDER_SERVICE_URL}/folders",
         json={"name": "Zielordner-Promote", "parent_id": "root", "created_by": "alice"},
+        headers={"X-DMS-Principal": "alice"},
     ).json()
     document_id = upload(client, folder_id="root", draft="true").json()["id"]
 
@@ -1446,7 +1464,11 @@ def test_list_deleted_documents_personal_scope_hides_other_users_items(client):
 
 
 def test_list_deleted_documents_personal_scope_without_principal_returns_401(client):
-    response = client.get("/documents/deleted", params={"scope": "personal"})
+    # The `client` fixture sends a default `X-DMS-Principal` (Post-Roadmap
+    # Phase 38 Session 4) - explicitly overridden to empty here.
+    response = client.get(
+        "/documents/deleted", params={"scope": "personal"}, headers={"X-DMS-Principal": ""}
+    )
     assert response.status_code == 401
 
 
@@ -1487,7 +1509,9 @@ def test_list_deleted_documents_admin_scope_excludes_classified(client):
 
 
 def test_list_deleted_documents_admin_classified_scope_requires_principal(client):
-    response = client.get("/documents/deleted", params={"scope": "admin_classified"})
+    response = client.get(
+        "/documents/deleted", params={"scope": "admin_classified"}, headers={"X-DMS-Principal": ""}
+    )
     assert response.status_code == 401
 
 
@@ -1539,7 +1563,7 @@ def test_purge_document_unknown_returns_404(client):
 def test_purge_document_without_principal_returns_401(client):
     document_id = upload(client, folder_id="root").json()["id"]
     client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
-    response = client.post(f"/documents/{document_id}/purge")
+    response = client.post(f"/documents/{document_id}/purge", headers={"X-DMS-Principal": ""})
     assert response.status_code == 401
 
 
@@ -1614,6 +1638,7 @@ def test_set_classification_level_without_principal_returns_401(client):
     response = client.put(
         f"/documents/{document_id}/classification-level",
         json={"classification_level": "VS-NfD", "changed_by": "alice"},
+        headers={"X-DMS-Principal": ""},
     )
     assert response.status_code == 401
 
@@ -2132,7 +2157,11 @@ def test_share_link_config_get_and_put_roundtrip(client):
 def test_create_share_link_requires_principal_header(client):
     document_id = upload(client).json()["id"]
 
-    response = client.post(f"/documents/{document_id}/share-links", json={"expires_at": _future(1)})
+    response = client.post(
+        f"/documents/{document_id}/share-links",
+        json={"expires_at": _future(1)},
+        headers={"X-DMS-Principal": ""},
+    )
     assert response.status_code == 401
 
 
@@ -2389,7 +2418,9 @@ def test_public_share_link_returns_404_when_feature_disabled(client):
 def test_create_webdav_edit_token_requires_principal_header(client):
     document_id = upload(client).json()["id"]
 
-    response = client.post(f"/documents/{document_id}/webdav-edit-tokens")
+    response = client.post(
+        f"/documents/{document_id}/webdav-edit-tokens", headers={"X-DMS-Principal": ""}
+    )
     assert response.status_code == 401
 
 
@@ -2552,7 +2583,11 @@ def test_archive_endpoints_return_404_for_unknown_document(client):
 
 def test_mark_archived_without_principal_header_is_401(client):
     document_id = upload(client).json()["id"]
-    response = client.put(f"/documents/{document_id}/archived", json={"archive_format": "pdf_a"})
+    response = client.put(
+        f"/documents/{document_id}/archived",
+        json={"archive_format": "pdf_a"},
+        headers={"X-DMS-Principal": ""},
+    )
     assert response.status_code == 401
 
 
@@ -2568,8 +2603,13 @@ def test_mark_archived_without_disposal_callback_permission_is_403(client):
 
 def test_mark_dehydrated_and_rehydrated_without_principal_header_is_401(client):
     document_id = upload(client).json()["id"]
-    assert client.put(f"/documents/{document_id}/dehydrated").status_code == 401
-    assert client.put(f"/documents/{document_id}/rehydrated").status_code == 401
+    no_principal = {"X-DMS-Principal": ""}
+    assert (
+        client.put(f"/documents/{document_id}/dehydrated", headers=no_principal).status_code == 401
+    )
+    assert (
+        client.put(f"/documents/{document_id}/rehydrated", headers=no_principal).status_code == 401
+    )
 
 
 def test_has_active_hold_reflects_legal_hold_state(client):
@@ -2640,7 +2680,7 @@ def test_lookup_by_kennzeichen_can_return_multiple_documents():
     """`Kennzeichen` ist nur je Objekttyp+Jahr eindeutig (P5e-S1), nicht
     global - zwei unterschiedliche Dokumente können denselben Wert tragen
     (siehe P15-S3, `mail-connector`s Matching muss damit umgehen können)."""
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
         first = upload(c, title="Erstes").json()
         second = upload(c, title="Zweites").json()
         for doc_id in (first["id"], second["id"]):
@@ -2658,7 +2698,9 @@ def test_lookup_by_kennzeichen_can_return_multiple_documents():
 
 
 def test_quarantine_release_requires_principal(client):
-    response = _release_from_quarantine(client)
+    # Same default-header override as the other "without_principal" tests
+    # above - the `client` fixture now sends one by default.
+    response = _release_from_quarantine(client, **{"X-DMS-Principal": ""})
     assert response.status_code == 401
 
 

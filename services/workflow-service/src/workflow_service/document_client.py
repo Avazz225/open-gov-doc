@@ -11,11 +11,20 @@ class DocumentServiceClient:
     circulation folder, depending on the process") - this activates
     `scope_folder_resource_ids` for the day a document-keyed process type
     exists, reusing the already-existing `GET /documents/{id}` rather than
-    adding new API surface. `GET /documents/{id}` has no RBAC gate of its
-    own (see `document_service.main`), so no principal header is needed."""
+    adding new API surface.
+
+    Post-Roadmap Phase 38 Session 4: `GET /documents/{id}` now requires a
+    non-empty `X-DMS-Principal` header (previously ungated) - asserts a
+    fixed service identity (background/internal caller, no real end-user
+    context available; covered by "everyone"'s grants, same reasoning as
+    `archival_service.clients.DocumentClient`)."""
+
+    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "workflow-service"}
 
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
+        )
 
     async def get_document(self, document_id: str) -> dict | None:
         response = await self._client.get(f"/documents/{document_id}")

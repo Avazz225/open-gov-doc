@@ -12,7 +12,10 @@ NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): default `X-DMS-Principal`,
+    same pattern as `test_api.py`'s `client` fixture - core folder CRUD now
+    requires a valid principal."""
+    with TestClient(app, headers={"X-DMS-Principal": "folder-service-tests"}) as c:
         yield c
 
 

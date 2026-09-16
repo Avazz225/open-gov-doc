@@ -8,8 +8,16 @@ import httpx
 
 
 class FolderServiceClient:
+    _PRINCIPAL_ID = "teamspace-service"
+
     def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+        """`X-DMS-Principal` (Post-Roadmap Phase 38 Session 4, ADR 0149):
+        `POST /folders` now requires a valid principal - same fixed
+        service-identity pattern as this module's `PermissionServiceClient`
+        (which has needed one since P32-S1)."""
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=30.0, headers={"X-DMS-Principal": self._PRINCIPAL_ID}
+        )
 
     async def create_folder(self, *, name: str, created_by: str) -> dict:
         """Creates the teamspace root folder directly under the global
@@ -93,6 +101,51 @@ class PermissionServiceClient:
             create_response.raise_for_status()
             self._role_id = create_response.json()["role"]["id"]
         return self._role_id
+
+    async def ensure_isolated_resource(self, *, resource_id: str, parent_id: str) -> None:
+        """Post-Roadmap Phase 38 Session 4 (ADR 0149) - the resource-tree
+        anchoring below (`grant_resource_access`) has existed since ADR
+        0043, but `folder-service`/`document-service` themselves never
+        actually enforced any RBAC check until this session; now that
+        they do, a teamspace's root folder must stop the ancestor walk
+        BEFORE it reaches the true `root` node (where `document.read`/
+        `.write`/`folder.read`/`.write` are granted to "everyone" to
+        preserve default openness for every OTHER, non-teamspace folder)
+        - otherwise "everyone"'s grant at `root` would propagate straight
+        into the teamspace and defeat the whole point. `POST /resources`
+        is the synchronous, idempotent create-if-missing counterpart to
+        the async `"folder.resource.created"` event (ADR 0144) - calling
+        it here closes a pre-existing race (this method used to rely on
+        that event having already landed by the time `grant_resource_
+        access` below runs its own lookup) as a side effect. `PATCH
+        /resources/{id}` then sets `inherit=False` - both endpoints are
+        deliberately ungated (see permission-service's own docstrings),
+        same trust boundary as the event bus."""
+        create_response = await self._client.post(
+            "/resources",
+            json={"resource_id": resource_id, "parent_id": parent_id, "resource_type": "folder"},
+        )
+        create_response.raise_for_status()
+        patch_response = await self._client.patch(
+            f"/resources/{resource_id}", json={"inherit": False}
+        )
+        patch_response.raise_for_status()
+
+    async def restore_default_inheritance(self, *, resource_id: str) -> None:
+        """Post-Roadmap Phase 38 Session 4 (ADR 0149) - counterpart to
+        `ensure_isolated_resource` above, called from `delete_teamspace`.
+        `delete_teamspace` deliberately keeps the root folder itself
+        ("deletes only the teamspace metadata... the root folder remains",
+        see its own docstring - a pre-existing decision, not revisited
+        here) - but without this, that kept folder stays `inherit=False`
+        forever with every member's grant just revoked, i.e. a folder
+        NOBODY can ever reach again, not even its creator, with no UI
+        trace pointing back to it. Resetting `inherit` here makes the kept
+        folder behave like any other ordinary, non-teamspace folder under
+        `root` again (open via "everyone", like before it ever became a
+        teamspace) instead of a permanently sealed dead end."""
+        response = await self._client.patch(f"/resources/{resource_id}", json={"inherit": True})
+        response.raise_for_status()
 
     async def grant_resource_access(self, *, principal_id: str, resource_id: str) -> None:
         role_id = await self._ensure_role()

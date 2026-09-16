@@ -118,6 +118,9 @@ def _real_document_with_kennzeichen() -> tuple[str, str]:
         },
         files={"file": ("dokument.txt", b"Inhalt", "text/plain")},
         timeout=30.0,
+        # Post-Roadmap Phase 38 Session 4 (ADR 0149): document-service's
+        # core endpoints now require a valid X-DMS-Principal.
+        headers={"X-DMS-Principal": "mail-connector-tests"},
     )
     upload.raise_for_status()
     document = upload.json()
@@ -143,7 +146,7 @@ def _real_document_with_kennzeichen() -> tuple[str, str]:
     patch = httpx.patch(
         f"{DOCUMENT_SERVICE_URL}/documents/{document['id']}",
         json={"attributes": attributes},
-        headers={"X-DMS-Roles": "dms-admin"},
+        headers={"X-DMS-Roles": "dms-admin", "X-DMS-Principal": "mail-connector-tests"},
         timeout=30.0,
     )
     patch.raise_for_status()
@@ -174,7 +177,10 @@ async def _get_case_documents(case_id: str) -> list[dict]:
 
 async def _get_document(document_id: str) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as c:
-        response = await c.get(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}")
+        response = await c.get(
+            f"{DOCUMENT_SERVICE_URL}/documents/{document_id}",
+            headers={"X-DMS-Principal": "mail-connector-tests"},
+        )
         response.raise_for_status()
         return response.json()
 
@@ -386,6 +392,7 @@ def _upload_test_document(*, filename: str, content_type: str, data: bytes) -> s
         data={"title": "Anhang-Testdokument", "created_by": "alice"},
         files={"file": (filename, data, content_type)},
         timeout=30.0,
+        headers={"X-DMS-Principal": "mail-connector-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -436,7 +443,11 @@ def test_send_outbound_with_related_document_attaches_file(client):
         part.raise_for_status()
         assert part.content == content
     finally:
-        httpx.delete(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}", timeout=30.0)
+        httpx.delete(
+            f"{DOCUMENT_SERVICE_URL}/documents/{document_id}",
+            timeout=30.0,
+            headers={"X-DMS-Principal": "mail-connector-tests"},
+        )
 
 
 def test_send_outbound_with_unknown_related_document_returns_400(client):

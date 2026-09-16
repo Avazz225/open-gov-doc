@@ -80,7 +80,7 @@ rendering-service additionally subscribes to `ocr.completed` (its own durable na
 
 ## Backend Integration
 
-- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key. Since the text-layer feature (see above), additionally write access: `POST /documents/{id}/versions` to check in the text-layer-embedded PDF as a new version (`document_client.create_version()`, same pattern as `signature-service`, which was previously the only caller of this endpoint outside the Document Service itself).
+- **Document Service** (3.1): `GET /documents/{id}/versions/{n}` (metadata) and `.../content` (original bytes) — no direct access to its schema/storage key. Since the text-layer feature (see above), additionally write access: `POST /documents/{id}/versions` to check in the text-layer-embedded PDF as a new version (`document_client.create_version()`, same pattern as `signature-service`, which was previously the only caller of this endpoint outside the Document Service itself). **Since Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)): all three calls send a fixed `X-DMS-Principal: ocr-service` header — these endpoints previously had no permission check at all.
 - **Storage Service** (3.6): `PUT`/`GET /objects/ocr/{document_id}/{version_number}/page-{seitenzahl}.png` — persistence of the standalone PDF page images, one object per page (`OcrResult.page_image_storage_key` only stores the prefix without the page suffix).
 
 ## Events

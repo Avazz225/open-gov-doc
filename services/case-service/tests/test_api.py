@@ -38,11 +38,17 @@ def process_definition_id(workflow_admin_headers: dict[str, str]) -> int:
 
 
 @pytest.fixture
-def document_id() -> str:
+def document_id(case_headers: dict[str, str]) -> str:
+    """RBAC-Retrofit auf document-service's `POST /documents` (Post-Roadmap,
+    Permission-Retrofit) - Aufruf braucht seither einen gültigen
+    `X-DMS-Principal`, sonst 401. Gleicher Testprincipal wie `case_headers`
+    (`case-service-tests`), der über die "everyone"-Rolle bereits
+    `document.write` hält."""
     response = httpx.post(
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": "Testdokument", "created_by": "alice"},
         files={"file": ("test.txt", b"Inhalt", "text/plain")},
+        headers=case_headers,
     )
     response.raise_for_status()
     return response.json()["id"]

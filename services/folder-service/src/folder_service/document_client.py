@@ -40,14 +40,22 @@ class DocumentClient:
         response.raise_for_status()
         return response.json()["count"]
 
-    async def get(self, document_id: str) -> dict | None:
+    async def get(self, document_id: str, *, x_dms_principal: str = "") -> dict | None:
         """Hand folder reference resolution (14.2, post-roadmap phase 31
         session 7, ADR 0118) - exact mirror of case-service's own
         `DocumentClient.get()`. A soft-deleted document remains retrievable
         via `GET /documents/{id}` (no 404), which already covers "a
         reference survives the deletion of its original, traceably" without
-        any extra logic here."""
-        response = await self._client.get(f"/documents/{document_id}")
+        any extra logic here. `x_dms_principal` (Post-Roadmap Phase 38
+        Session 4, ADR 0149): `GET /documents/{id}` now requires a valid
+        principal - forwards the caller already authenticated by this
+        endpoint's own `_require_folder_document_reference_permission`
+        check, rather than a fixed service identity, since this is a
+        read used to resolve a REAL document on behalf of that specific
+        caller (not a background/system operation)."""
+        response = await self._client.get(
+            f"/documents/{document_id}", headers={"X-DMS-Principal": x_dms_principal}
+        )
         if response.status_code == 404:
             return None
         response.raise_for_status()

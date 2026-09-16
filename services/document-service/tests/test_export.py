@@ -29,7 +29,9 @@ DOCUMENT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-docum
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): default `X-DMS-Principal`,
+    same pattern as `test_api.py`'s `client` fixture."""
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
         yield c
 
 
@@ -49,13 +51,20 @@ def upload(client, *, content=None, title="Vertrag", created_by="alice", **extra
 
 
 def _grant_read(principal_id: str, resource_id: str) -> None:
-    """Post-Roadmap Phase 28 (ADR 0107) - grants `document.read` on
+    """Post-Roadmap Phase 28 (ADR 0107) - grants `document.export.read`
+    (not the generic `document.read`, see Post-Roadmap Phase 38 Session
+    4/ADR 0149 - `permission_client.py`'s `check_read` docstring explains
+    why the export/accessibility-check gate needs its own dedicated
+    permission now that `document.read` is granted to "everyone") on
     `resource_id` for `principal_id`, same pattern as test_api.py's
     `_grant_root_permission`/`_grant_document_read`, duplicated rather than
     imported (see module docstring)."""
     role = httpx.post(
         f"{PERMISSION_SERVICE_URL}/roles",
-        json={"name": f"export-test-role-{uuid.uuid4().hex[:8]}", "permissions": ["document.read"]},
+        json={
+            "name": f"export-test-role-{uuid.uuid4().hex[:8]}",
+            "permissions": ["document.export.read"],
+        },
         headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         timeout=30.0,
     )
@@ -136,7 +145,10 @@ def test_export_document_404_for_unknown_document(client):
 
 def test_accessibility_check_without_principal_is_401(client):
     document_id = upload(client).json()["id"]
-    response = client.get(f"/documents/{document_id}/export/accessibility-check")
+    response = client.get(
+        f"/documents/{document_id}/export/accessibility-check",
+        headers={"X-DMS-Principal": ""},
+    )
     assert response.status_code == 401
 
 

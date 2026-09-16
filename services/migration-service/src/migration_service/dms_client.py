@@ -55,9 +55,16 @@ class LocalDmsClient:
     _PRINCIPAL_ID = "migration-service"
 
     def __init__(self, settings: Settings) -> None:
+        # `default_principal` (Post-Roadmap Phase 38 Session 4, ADR 0149):
+        # folder-service's/document-service's core endpoints now require a
+        # valid principal - migration transfers run under this fixed
+        # service identity, same as `self._permissions` above, not a
+        # per-user one (there is no live end-user session during a
+        # migration transfer).
         self.tree = DmsTreeClient(
             document_service_base_url=settings.document_service_base_url,
             folder_service_base_url=settings.folder_service_base_url,
+            default_principal=self._PRINCIPAL_ID,
         )
         self._permissions = httpx.Client(
             base_url=settings.permission_service_base_url,

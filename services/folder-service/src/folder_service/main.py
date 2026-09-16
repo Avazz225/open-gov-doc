@@ -51,7 +51,13 @@ from folder_service.schemas import (
     TrashRequest,
     TrashResult,
 )
-from folder_service.settings import PROTECTED_FOLDER_IDS, ROOT_FOLDER_ID, Settings
+from folder_service.settings import (
+    INBOX_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    PROTECTED_FOLDER_IDS,
+    ROOT_FOLDER_ID,
+    Settings,
+)
 
 settings = Settings()
 configure_logging(settings)
@@ -278,6 +284,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.approval_client = ApprovalClient(settings.permission_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
 
+    # Post-Roadmap Phase 38 Session 4 (ADR 0149): inbox/outbox (unlike every
+    # other folder) are bootstrapped directly via `ensure_special_folders`
+    # above, not through `create_folder` - so they never went through the
+    # `"folder.resource.created"` event that registers a `ResourceNode` in
+    # permission-service. Before this session that silently didn't matter
+    # (folder-service ran no permission check at all); now the resource-
+    # tree ancestor walk breaks immediately for an unregistered
+    # `resource_id` (denies outright rather than falling back to root), so
+    # this idempotent, synchronous registration (same `POST /resources`
+    # primitive as `case-service`'s/`teamspace-service`'s own resource
+    # bootstrap) is needed on every startup.
+    for folder_id in (INBOX_FOLDER_ID, OUTBOX_FOLDER_ID):
+        await app.state.permission_client.create_resource_node(
+            resource_id=folder_id, parent_id=ROOT_FOLDER_ID
+        )
+
     # Sensor concept (10.1, full rollout): a fresh `SensorConfigClient` per
     # startup, bound into the module-level `sensor_config_proxy` (its
     # httpx client can't outlive the event loop it was first used on, see
@@ -401,12 +423,15 @@ def get_metrics() -> Response:
 
 @app.post("/folders", response_model=FolderOut, status_code=status.HTTP_201_CREATED)
 async def create_folder(
-    payload: FolderCreate, session: AsyncSession = Depends(get_session)
+    payload: FolderCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> FolderOut:
     try:
         parent_folder = await repository.get_folder(session, payload.parent_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, payload.parent_id, access_type="write")
 
     await _validate_against_object_type(
         payload.object_type_id,
@@ -552,31 +577,45 @@ async def purge_folder(
 
 
 @app.get("/folders/{folder_id}", response_model=FolderOut)
-async def get_folder(folder_id: str, session: AsyncSession = Depends(get_session)) -> FolderOut:
+async def get_folder(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FolderOut:
     try:
-        return await repository.get_folder(session, folder_id)
+        folder = await repository.get_folder(session, folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
+    return folder
 
 
 @app.get("/folders/{folder_id}/children", response_model=list[FolderOut])
 async def list_children(
-    folder_id: str, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> list[FolderOut]:
     try:
-        return await repository.list_children(session, folder_id)
+        children = await repository.list_children(session, folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="read")
+    return children
 
 
 @app.patch("/folders/{folder_id}", response_model=FolderOut)
 async def update_folder(
-    folder_id: str, payload: FolderUpdate, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    payload: FolderUpdate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> FolderOut:
     try:
         current = await repository.get_folder(session, folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
 
     # Inbox/Outbox (2.5, P15-S3): must not be renamed or moved - "a special
     # area exists exactly once per installation", a rename/move would break
@@ -642,7 +681,11 @@ async def update_folder(
 
 
 @app.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_session)) -> None:
+async def delete_folder(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> None:
     """Immediate hard delete - remains as a fallback for already-empty
     cases that never had retention applied. The regular path since P7-S1b
     is `POST /folders/{folder_id}/trash`."""
@@ -650,6 +693,7 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
         raise HTTPException(
             status_code=409, detail=f"Sonderordner {folder_id!r} kann nicht gelöscht werden"
         )
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
     try:
         await repository.delete_folder(session, folder_id)
     except repository.NotFoundError as exc:
@@ -665,7 +709,10 @@ async def delete_folder(folder_id: str, session: AsyncSession = Depends(get_sess
 
 @app.post("/folders/{folder_id}/trash", response_model=TrashResult)
 async def trash_folder(
-    folder_id: str, payload: TrashRequest, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    payload: TrashRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> TrashResult:
     """Trash path (5.2, since P7-S1b) - cascades over the entire active
     subtree (subfolders + contained documents, see
@@ -681,6 +728,7 @@ async def trash_folder(
             status_code=409,
             detail=f"Sonderordner {folder_id!r} kann nicht in den Papierkorb verschoben werden",
         )
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
     if await app.state.approval_client.requires_approval("folder.delete"):
         request = await app.state.approval_client.create_request(
             action_type="folder.delete",
@@ -709,10 +757,23 @@ async def trash_folder(
 
 
 @app.post("/folders/{folder_id}/restore", response_model=FolderOut)
-async def restore_folder(folder_id: str, session: AsyncSession = Depends(get_session)) -> FolderOut:
+async def restore_folder(
+    folder_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> FolderOut:
     """Trash restore (5.2, since P7-S1b) - only possible within the
     configured retention period, also restores subfolders/documents that
     were deleted via cascade."""
+    # Existence check before permission (404 before 403) - `get_folder_
+    # any_state` (not the trash-filtered `get_folder`, since this must also
+    # find an already-trashed folder) instead of leaving `does-not-exist`
+    # to fall through to a 403 from an unregistered `ResourceNode`.
+    try:
+        await repository.get_folder_any_state(session, folder_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, folder_id, access_type="write")
     try:
         folder = await repository.restore_folder(
             session, folder_id, document_client=app.state.document_client
@@ -797,26 +858,79 @@ async def put_retention(
     return updated
 
 
+async def _require_folder_permission(
+    x_dms_principal: str, resource_id: str, *, access_type: str
+) -> None:
+    """RBAC (Post-Roadmap Phase 38 Session 4, ADR 0149) - core folder CRUD
+    (`POST`/`GET`/`PATCH`/`DELETE /folders/...`, trash/restore/purge,
+    folder templates) previously had NO permission check at all (see
+    `_require_folder_document_reference_permission` below for the one
+    prior exception, hand folders/ADR 0118 - that helper predates this one
+    but deliberately checks a DIFFERENT, dedicated permission pair, see its
+    own docstring for why). Checks `folder.read`/`folder.write` against the
+    resource tree, granted to "everyone" (preserving default openness for
+    ordinary, non-teamspace folders) while a teamspace's root folder
+    deliberately does NOT inherit that grant (`inherit=False`, see
+    `docs/adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md`)
+    - only its own members' existing per-member role assignment (ADR 0043)
+    applies there. `401` without a principal header, `403` without the
+    permission; callers resolve `404` (unknown resource) themselves first,
+    same ordering as the hand-folder helper."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    permission = "folder.read" if access_type == "read" else "folder.write"
+    allowed = await app.state.permission_client.check(
+        principal_id=x_dms_principal,
+        resource_id=resource_id,
+        permission=permission,
+        access_type=access_type,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail=f"Fehlende Berechtigung {permission!r} auf {resource_id!r}"
+        )
+
+
 async def _require_folder_document_reference_permission(
     x_dms_principal: str, folder_id: str, *, access_type: str
 ) -> None:
     """Hand folders (14.2, post-roadmap phase 31 session 7, ADR 0118) -
-    unlike almost every other endpoint in this service (folder-service
-    enforces essentially no RBAC of its own, see "Open Points" in
-    docs/services/folder-service.md), curating a hand folder's cross-
-    referenced compilation is gated by a real, folder-scoped `folder.read`/
-    `folder.write` check against permission-service's existing resource
-    tree (populated from this service's own `folder.resource.*` events,
-    see docs/services/permission-service.md) - the first actual consumer of
-    that tree from within folder-service itself. A compilation that can
-    surface documents from many different, possibly sensitive cases/
-    departments in one place deserves a real check, unlike the mostly-open
-    folder CRUD around it. Callers check `401`/`404` (missing principal /
-    unknown folder) themselves before calling this - resolving whether the
-    resource even exists has to happen before asking "does X have
-    permission on it", same ordering already established by the public
-    share-link creation endpoint (document-service, ADR 0047)."""
-    permission = "folder.read" if access_type == "read" else "folder.write"
+    curating a hand folder's cross-referenced compilation is gated by a
+    real, folder-scoped check against permission-service's existing
+    resource tree (populated from this service's own `folder.resource.*`
+    events, see docs/services/permission-service.md).
+
+    Uses `folder.document_reference.read`/`.write` - deliberately its OWN
+    permission pair, NOT the generic `folder.read`/`folder.write` this
+    module's core-CRUD gate (`_require_folder_permission`) checks (Post-
+    Roadmap Phase 38 Session 4, ADR 0149). ADR 0118 explicitly documented
+    `folder.read`/`folder.write` being absent from "everyone" as this
+    feature's actual security property ("an installation must explicitly
+    grant them per hand folder... before anyone besides the creator can
+    curate/view one - this is the intended, deliberate behavior"). Session
+    4 had to add both to "everyone" so ordinary, non-teamspace folder CRUD
+    stays open by default (see `EVERYONE_ROLE_PERMISSIONS` in permission-
+    service) - reusing the same two strings here would have silently
+    handed every authenticated principal curation rights on every hand
+    folder, defeating ADR 0118's model rather than merely inheriting its
+    openness. A dedicated pair keeps that model intact: nobody has it via
+    "everyone", so a hand folder is exactly as closed as before this
+    session. A real installation with an existing per-hand-folder grant on
+    the old `folder.read`/`folder.write` strings needs to be re-granted
+    under the new names - no admin-ui surface exists for this yet (ADR
+    0118's own "Consequences"), so the blast radius is limited to whoever
+    set one up by hand via permission-service's API directly.
+
+    Callers check `401`/`404` (missing principal / unknown folder)
+    themselves before calling this - resolving whether the resource even
+    exists has to happen before asking "does X have permission on it",
+    same ordering already established by the public share-link creation
+    endpoint (document-service, ADR 0047)."""
+    permission = (
+        "folder.document_reference.read"
+        if access_type == "read"
+        else "folder.document_reference.write"
+    )
     allowed = await app.state.permission_client.check(
         principal_id=x_dms_principal,
         resource_id=folder_id,
@@ -861,7 +975,9 @@ async def add_folder_document_reference(
     await _require_folder_document_reference_permission(
         x_dms_principal, folder_id, access_type="write"
     )
-    document = await app.state.document_client.get(payload.document_id)
+    document = await app.state.document_client.get(
+        payload.document_id, x_dms_principal=x_dms_principal
+    )
     if document is None:
         raise HTTPException(
             status_code=400, detail=f"document_id {payload.document_id!r} unbekannt"
@@ -924,7 +1040,7 @@ async def remove_folder_document_reference(
         payload={"document_id": document_id, "removed_by": payload.removed_by},
         actor=payload.removed_by,
     )
-    document = await app.state.document_client.get(document_id)
+    document = await app.state.document_client.get(document_id, x_dms_principal=x_dms_principal)
     return _resolve_document_reference(reference, document)
 
 
@@ -949,7 +1065,9 @@ async def list_folder_document_references(
     resolved = []
     for reference in references:
         document = (
-            await app.state.document_client.get(reference.document_id)
+            await app.state.document_client.get(
+                reference.document_id, x_dms_principal=x_dms_principal
+            )
             if reference.removed_at is None
             else None
         )
@@ -1140,15 +1258,21 @@ async def put_trash_config(
     "/folder-templates", response_model=FolderTemplateOut, status_code=status.HTTP_201_CREATED
 )
 async def create_folder_template(
-    payload: FolderTemplateCreate, session: AsyncSession = Depends(get_session)
+    payload: FolderTemplateCreate,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ) -> FolderTemplateOut:
     """Captures the active subtree starting at `payload.source_folder_id`
     as a named, reusable structure template (2.5/7.3, e.g. a file plan
-    skeleton) - see `repository.build_template_structure`/ADR 0056."""
+    skeleton) - see `repository.build_template_structure`/ADR 0056. Gated
+    by `folder.read` on `source_folder_id` since Post-Roadmap Phase 38
+    Session 4 - the captured structure (names/hierarchy) could otherwise
+    leak a teamspace's internal organization to a non-member."""
     try:
         structure = await repository.build_template_structure(session, payload.source_folder_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, payload.source_folder_id, access_type="read")
     template = await repository.create_template(
         session,
         name=payload.name,
@@ -1192,17 +1316,30 @@ async def delete_folder_template(
 async def apply_folder_template(
     template_id: str,
     payload: FolderTemplateApplyRequest,
+    x_dms_principal: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> FolderTemplateApplyResult:
     """Applies a structure template below `payload.target_parent_id` -
     creates real folders (see `repository.apply_template`) and publishes a
     regular `folder.resource.created` event for each of them, so that
     `permission-service`'s `ResourceNode` tree stays in sync (identical
-    event to a single `POST /folders`)."""
+    event to a single `POST /folders`). Gated by `folder.write` on
+    `target_parent_id` since Post-Roadmap Phase 38 Session 4 - the same
+    check `POST /folders` itself applies, since this creates real folders
+    there just as directly."""
     try:
         template = await repository.get_template(session, template_id)
     except repository.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Existence check before permission (404 before 403, same ordering as
+    # `create_folder`'s own `payload.parent_id` check above) - without this,
+    # an unknown `target_parent_id` would 403 (no `ResourceNode` to walk)
+    # before ever reaching `repository.apply_template`'s own 404.
+    try:
+        await repository.get_folder(session, payload.target_parent_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_folder_permission(x_dms_principal, payload.target_parent_id, access_type="write")
     try:
         created = await repository.apply_template(
             session,

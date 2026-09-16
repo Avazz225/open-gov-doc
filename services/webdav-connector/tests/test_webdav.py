@@ -18,10 +18,20 @@ ROLE_ADMIN_PRINCIPAL_ID = "webdav-connector-test-role-admin"
 
 
 def _dav_client(user: tuple[str, str]) -> Client:
-    return Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=user)
+    # `timeout=30.0` (not webdav4's/httpx's 5s default) - a root listing
+    # walks EVERY document directly under `root` with one extra HTTP call
+    # each (`DmsTreeClient._to_tree_document_enriched`, a deliberate,
+    # documented tradeoff for a reference implementation) and this dev
+    # installation's `root` has accumulated hundreds of documents from
+    # unrelated test runs over time - unrelated to Post-Roadmap Phase 38
+    # Session 4's own changes, but real enough to exceed a 5s default.
+    # Same 30.0 already used by `DmsTreeClient`'s own internal clients.
+    return Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=user, timeout=30.0)
 
 
 def _create_folder(*, parent_id: str = "root", name: str | None = None) -> dict:
+    # Post-Roadmap Phase 38 Session 4 (ADR 0149): `POST /folders` now
+    # requires a valid principal.
     response = httpx.post(
         f"{FOLDER_SERVICE_URL}/folders",
         json={
@@ -29,13 +39,21 @@ def _create_folder(*, parent_id: str = "root", name: str | None = None) -> dict:
             "parent_id": parent_id,
             "created_by": "webdav-tests",
         },
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
     )
     response.raise_for_status()
     return response.json()
 
 
 def _get_document(document_id: str) -> dict:
-    response = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}")
+    # Same reasoning as `_create_folder` above - `GET /documents/{id}` now
+    # requires a valid principal.
+    response = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}",
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    )
     response.raise_for_status()
     return response.json()
 
@@ -73,7 +91,11 @@ def _grant_document_write(principal_id: str) -> None:
             f"{PERMISSION_SERVICE_URL}/roles",
             json={
                 "name": f"webdav-connector-edit-token-test-role-{uuid.uuid4().hex[:8]}",
-                "permissions": ["document.write"],
+                # Post-Roadmap Phase 38 Session 4 (ADR 0149): dedicated
+                # permission, not the generic `document.write` - see
+                # document-service's `permission_client.py`'s `check_write`
+                # docstring for why.
+                "permissions": ["document.webdav_edit.write"],
             },
             headers=admin_headers,
             timeout=30.0,
@@ -122,12 +144,19 @@ def test_healthz_needs_no_authentication():
 
 
 def test_webdav_root_requires_authentication():
-    response = httpx.request("PROPFIND", f"{WEBDAV_CONNECTOR_URL}/webdav/", headers={"Depth": "0"})
+    # A generous timeout (see `_dav_client`'s docstring above) - unrelated
+    # slow requests earlier in this session can otherwise queue ahead of
+    # this one behind wsgidav's WSGI-to-ASGI bridge.
+    response = httpx.request(
+        "PROPFIND", f"{WEBDAV_CONNECTOR_URL}/webdav/", headers={"Depth": "0"}, timeout=30.0
+    )
     assert response.status_code == 401
 
 
 def test_wrong_credentials_are_rejected():
-    client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=("nobody", "wrong-password"))
+    client = Client(
+        f"{WEBDAV_CONNECTOR_URL}/webdav", auth=("nobody", "wrong-password"), timeout=30.0
+    )
     with pytest.raises(WebdavHTTPError) as exc_info:
         client.ls("/")
     assert exc_info.value.status_code == 401
@@ -184,7 +213,11 @@ def test_mkcol_creates_a_folder_visible_to_folder_service(real_user):
 
     _dav_client(real_user).mkdir(f"/{name}")
 
-    response = httpx.get(f"{FOLDER_SERVICE_URL}/folders/root/children")
+    response = httpx.get(
+        f"{FOLDER_SERVICE_URL}/folders/root/children",
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    )
     response.raise_for_status()
     assert any(f["name"] == name for f in response.json())
 
@@ -207,7 +240,12 @@ def test_move_between_folders_updates_document_service_folder_id(real_user):
     filename = f"verschoben-{uuid.uuid4().hex[:8]}.txt"
     client = _dav_client(real_user)
     client.upload_fileobj(BytesIO(b"Inhalt"), f"/{filename}")
-    matching = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": "root"}).json()
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
     document_id = next(d["id"] for d in matching if d["title"] == filename)
 
     client.move(f"/{filename}", f"/{target['name']}/{filename}")
@@ -219,7 +257,12 @@ def test_delete_soft_deletes_the_document(real_user):
     filename = f"loeschen-{uuid.uuid4().hex[:8]}.txt"
     client = _dav_client(real_user)
     client.upload_fileobj(BytesIO(b"weg damit"), f"/{filename}")
-    matching = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": "root"}).json()
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
     document_id = next(d["id"] for d in matching if d["title"] == filename)
 
     client.remove(f"/{filename}")
@@ -231,12 +274,19 @@ def test_lock_conflict_is_reported_as_locked(real_user):
     filename = f"gesperrt-{uuid.uuid4().hex[:8]}.txt"
     client = _dav_client(real_user)
     client.upload_fileobj(BytesIO(b"initial"), f"/{filename}")
-    matching = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": "root"}).json()
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
     document_id = next(d["id"] for d in matching if d["title"] == filename)
 
     lock_response = httpx.post(
         f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/lock",
         json={"locked_by": "andere-anwendung", "session_id": "fremd-session"},
+        headers={"X-DMS-Principal": "andere-anwendung"},
+        timeout=30.0,
     )
     lock_response.raise_for_status()
     try:
@@ -248,6 +298,8 @@ def test_lock_conflict_is_reported_as_locked(real_user):
             "DELETE",
             f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/lock",
             json={"released_by": "andere-anwendung"},
+            headers={"X-DMS-Principal": "andere-anwendung"},
+            timeout=30.0,
         )
 
 
@@ -259,14 +311,19 @@ def test_by_id_get_with_edit_token_returns_same_content_as_path_based_access(rea
     content = b"Inhalt fuer ID-basierten Zugriff"
     path_client = _dav_client(real_user)
     path_client.upload_fileobj(BytesIO(content), f"/{filename}")
-    matching = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": "root"}).json()
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
     document_id = next(d["id"] for d in matching if d["title"] == filename)
 
     principal = f"webdav-edit-token-test-{uuid.uuid4().hex[:8]}"
     _grant_document_write(principal)
     token = _create_webdav_edit_token(document_id, principal)
 
-    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""))
+    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""), timeout=30.0)
     buffer = BytesIO()
     token_client.download_fileobj(f"/by-id/{document_id}.txt", buffer)
 
@@ -277,14 +334,19 @@ def test_by_id_put_with_edit_token_checks_in_a_new_version(real_user):
     filename = f"by-id-put-{uuid.uuid4().hex[:8]}.txt"
     path_client = _dav_client(real_user)
     path_client.upload_fileobj(BytesIO(b"Version 1"), f"/{filename}")
-    matching = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": "root"}).json()
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
     document_id = next(d["id"] for d in matching if d["title"] == filename)
 
     principal = f"webdav-edit-token-test-{uuid.uuid4().hex[:8]}"
     _grant_document_write(principal)
     token = _create_webdav_edit_token(document_id, principal)
 
-    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""))
+    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""), timeout=30.0)
     token_client.upload_fileobj(
         BytesIO(b"Version 2 via Edit-Token"), f"/by-id/{document_id}.txt", overwrite=True
     )
@@ -301,7 +363,12 @@ def test_by_id_access_with_expired_or_revoked_token_is_rejected(real_user):
     filename = f"by-id-revoked-{uuid.uuid4().hex[:8]}.txt"
     path_client = _dav_client(real_user)
     path_client.upload_fileobj(BytesIO(b"Inhalt"), f"/{filename}")
-    matching = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents", params={"folder_id": "root"}).json()
+    matching = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents",
+        params={"folder_id": "root"},
+        headers={"X-DMS-Principal": "webdav-tests"},
+        timeout=30.0,
+    ).json()
     document_id = next(d["id"] for d in matching if d["title"] == filename)
 
     principal = f"webdav-edit-token-test-{uuid.uuid4().hex[:8]}"
@@ -312,7 +379,7 @@ def test_by_id_access_with_expired_or_revoked_token_is_rejected(real_user):
         headers={"X-DMS-Principal": principal},
     )
 
-    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""))
+    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=(token, ""), timeout=30.0)
     with pytest.raises(WebdavHTTPError) as exc_info:
         token_client.ls(f"/by-id/{document_id}.txt")
     assert exc_info.value.status_code == 401
@@ -320,7 +387,9 @@ def test_by_id_access_with_expired_or_revoked_token_is_rejected(real_user):
 
 def test_by_id_access_with_unknown_token_is_rejected():
     document_id = str(uuid.uuid4())
-    token_client = Client(f"{WEBDAV_CONNECTOR_URL}/webdav", auth=("not-a-real-token", ""))
+    token_client = Client(
+        f"{WEBDAV_CONNECTOR_URL}/webdav", auth=("not-a-real-token", ""), timeout=30.0
+    )
     with pytest.raises(WebdavHTTPError) as exc_info:
         token_client.ls(f"/by-id/{document_id}.txt")
     assert exc_info.value.status_code == 401

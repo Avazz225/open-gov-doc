@@ -14,13 +14,21 @@ OBJECT_CONFIG_ADMIN_HEADERS = {"X-DMS-Principal": "document-service-test-object-
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): default `X-DMS-Principal`,
+    same pattern as `test_api.py`'s `client` fixture."""
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
         yield c
 
 
 @pytest.fixture
 def real_folder_id():
-    with httpx.Client(base_url=settings.folder_service_base_url, timeout=10.0) as fc:
+    # Post-Roadmap Phase 38 Session 4 (ADR 0149): `POST`/`DELETE /folders`
+    # now require a valid principal.
+    with httpx.Client(
+        base_url=settings.folder_service_base_url,
+        timeout=10.0,
+        headers={"X-DMS-Principal": "document-service-test-folder-setup"},
+    ) as fc:
         response = fc.post("/folders", json={"name": "Testordner", "created_by": "alice"})
         response.raise_for_status()
         folder_id = response.json()["id"]
@@ -146,7 +154,11 @@ def restricted_document_type_id(folder_type_id):
 
 @pytest.fixture
 def typed_folder_id(folder_type_id):
-    with httpx.Client(base_url=settings.folder_service_base_url, timeout=10.0) as fc:
+    with httpx.Client(
+        base_url=settings.folder_service_base_url,
+        timeout=10.0,
+        headers={"X-DMS-Principal": "document-service-test-folder-setup"},
+    ) as fc:
         response = fc.post(
             "/folders",
             json={

@@ -19,7 +19,7 @@ DSN = os.environ.get(
 ROLE_ADMIN_PRINCIPAL_ID = "search-service-test-role-admin"
 
 
-def _grant_root_read(principal_id: str) -> None:
+def _grant_root_read(principal_id: str, *, resource_id: str = "root") -> None:
     role = httpx.post(
         f"{PERMISSION_SERVICE_URL}/roles",
         json={"name": f"search-test-role-{uuid.uuid4().hex[:8]}", "permissions": ["document.read"]},
@@ -35,7 +35,7 @@ def _grant_root_read(principal_id: str) -> None:
             # `POST /roles` also wraps its response since P32-S1 (ADR
             # 0130, `RoleActionResult`) - unwrap `["role"]`.
             "role_id": role.json()["role"]["id"],
-            "resource_id": "root",
+            "resource_id": resource_id,
         },
         timeout=30.0,
     )
@@ -47,6 +47,7 @@ async def _index_at_root(
     *,
     registered_at: datetime | None = None,
     records_quarantine_active: bool = False,
+    folder_id: str | None = None,
 ) -> str:
     document_id = f"doc-{uuid.uuid4().hex[:8]}"
     engine = build_engine(DSN)
@@ -57,7 +58,7 @@ async def _index_at_root(
             session,
             document_id=document_id,
             title=title,
-            folder_id=None,
+            folder_id=folder_id,
             folder_name=None,
             object_type_id=None,
             attributes={},
@@ -82,9 +83,34 @@ def _create_folder(name: str) -> str:
         f"{FOLDER_SERVICE_URL}/folders",
         json={"name": name, "parent_id": "root", "created_by": "search-service-tests"},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]
+
+
+def _isolate_resource(resource_id: str) -> None:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): `document.read`/
+    `folder.read` are now granted to "everyone" by default (preserving
+    the previous open-by-default behavior for ordinary folders), so a
+    plain, non-isolated folder is visible to any principal regardless of
+    an explicit grant - a test asserting "a principal without a grant
+    can't see this" now needs a resource that actually opts OUT of that
+    default, the same `inherit=False` mechanism `teamspace-service` uses
+    to anchor teamspace membership. Same idempotent `POST /resources` +
+    `PATCH /resources/{id}` primitives, deliberately ungated."""
+    create_response = httpx.post(
+        f"{PERMISSION_SERVICE_URL}/resources",
+        json={"resource_id": resource_id, "parent_id": "root", "resource_type": "folder"},
+        timeout=30.0,
+    )
+    create_response.raise_for_status()
+    patch_response = httpx.patch(
+        f"{PERMISSION_SERVICE_URL}/resources/{resource_id}",
+        json={"inherit": False},
+        timeout=30.0,
+    )
+    patch_response.raise_for_status()
 
 
 def _grant_folder_read(principal_id: str, folder_id: str) -> None:
@@ -175,12 +201,22 @@ async def test_search_finds_fuzzy_match_over_http():
 
 
 async def test_search_only_returns_documents_the_principal_may_read():
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): `document.read` is now
+    granted to "everyone" for ordinary, non-isolated folders (preserving
+    the previous open-by-default behavior for direct access) - a document
+    at plain `root` is therefore visible to any principal regardless of an
+    explicit grant, and no longer distinguishes this test's two principals.
+    An isolated folder (`inherit=False`, the same mechanism
+    `teamspace-service` uses to anchor teamspace membership) is the
+    resource that actually still opts out of that default."""
     title = f"Sondertitel-{uuid.uuid4().hex[:8]}"
-    await _index_at_root(title)
+    isolated_folder = _create_folder(f"Isoliert-{uuid.uuid4().hex[:8]}")
+    _isolate_resource(isolated_folder)
+    await _index_at_root(title, folder_id=isolated_folder)
 
     allowed_principal = f"alice-{uuid.uuid4().hex[:8]}"
     denied_principal = f"bob-{uuid.uuid4().hex[:8]}"
-    _grant_root_read(allowed_principal)
+    _grant_root_read(allowed_principal, resource_id=isolated_folder)
 
     with TestClient(app) as client:
         allowed_response = client.get(
@@ -248,9 +284,14 @@ def test_folder_references_requires_principal_header():
 
 
 async def test_folder_references_only_returns_folders_the_principal_may_read():
+    """`hidden_folder` is isolated (`inherit=False`) - Post-Roadmap Phase 38
+    Session 4 (ADR 0149) made `folder.read` a default "everyone" grant for
+    ordinary, non-isolated folders, so without isolation both folders would
+    now be visible to any principal regardless of an explicit grant."""
     unique = uuid.uuid4().hex[:8]
     readable_folder = _create_folder(f"Handakte-lesbar-{unique}")
     hidden_folder = _create_folder(f"Handakte-verborgen-{unique}")
+    _isolate_resource(hidden_folder)
     await _index_folder_reference(
         readable_folder, folder_name="Lesbar", document_id=f"doc-{unique}-a"
     )

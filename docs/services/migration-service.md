@@ -90,7 +90,13 @@ blocking — this actually occurred (`httpx.ReadTimeout`) and was fixed via `asy
 required `admin.user_management`. `LocalDmsClient` (`dms_client.py`) now sends an
 `X-DMS-Principal: migration-service` header for this (previously none) — affects
 `acquire_scope_lock`/`release_scope_lock` AND `apply_role_assignment`'s get-or-create of the
-target role. `main.py`'s `_ensure_config_admin_permission()` has since additionally
+target role. **Since Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)),
+the same `_PRINCIPAL_ID` is also passed as `DmsTreeClient`'s new `default_principal` for
+`self.tree` — `folder-service`/`document-service` now require a valid principal on every
+call, and a migration transfer runs entirely as this fixed service identity (there is no
+live end-user session to forward during a transfer, unlike `webdav-connector`/`cmis-connector`,
+which forward a real per-request actor instead). `main.py`'s `_ensure_config_admin_permission()`
+has since additionally
 bootstrapped `domain-admin-users` (`admin.user_management`) alongside the previous
 `domain-admin-config` role (`admin.object_config`) — `_REQUIRED_ROLE_NAMES =
 ("domain-admin-config", "domain-admin-users")`. Since **Post-Roadmap Phase 32 Session 1**

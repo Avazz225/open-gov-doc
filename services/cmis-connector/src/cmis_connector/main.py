@@ -119,14 +119,16 @@ def _repository_info() -> dict:
     }
 
 
-def _folder_envelope(folder) -> dict:
+def _folder_envelope(folder, *, actor: str) -> dict:
     return {
-        "succinctProperties": folder_properties(folder, path=compute_folder_path(_tree, folder))
+        "succinctProperties": folder_properties(
+            folder, path=compute_folder_path(_tree, folder, x_dms_principal=actor)
+        )
     }
 
 
-def _document_envelope(document) -> dict:
-    lock = _tree.get_lock(document.id)
+def _document_envelope(document, *, actor: str) -> dict:
+    lock = _tree.get_lock(document.id, x_dms_principal=actor)
     return {
         "succinctProperties": document_properties(
             document,
@@ -136,10 +138,10 @@ def _document_envelope(document) -> dict:
     }
 
 
-def _object_envelope_for(resolved: ResolvedObject) -> dict:
+def _object_envelope_for(resolved: ResolvedObject, *, actor: str) -> dict:
     if resolved.kind == "folder":
-        return _folder_envelope(resolved.folder)
-    return _document_envelope(resolved.document)
+        return _folder_envelope(resolved.folder, actor=actor)
+    return _document_envelope(resolved.document, actor=actor)
 
 
 # --- Reading (GET, cmisselector) -----------------------------------------
@@ -149,34 +151,36 @@ def _default_selector(resolved: ResolvedObject) -> str:
     return "children" if resolved.kind == "folder" else "content"
 
 
-def _get_children(resolved: ResolvedObject) -> dict:
+def _get_children(resolved: ResolvedObject, *, actor: str) -> dict:
     if resolved.kind != "folder":
         raise CmisError("invalidArgument", "cmisselector=children ist nur für Ordner gültig")
-    folders, documents = _tree.list_children(resolved.folder.id)
-    objects = [{"object": _folder_envelope(f)} for f in folders]
-    objects += [{"object": _document_envelope(d)} for d in documents]
+    folders, documents = _tree.list_children(resolved.folder.id, x_dms_principal=actor)
+    objects = [{"object": _folder_envelope(f, actor=actor)} for f in folders]
+    objects += [{"object": _document_envelope(d, actor=actor)} for d in documents]
     return {"objects": objects, "hasMoreItems": False, "numItems": len(objects)}
 
 
-def _get_content(resolved: ResolvedObject) -> Response:
+def _get_content(resolved: ResolvedObject, *, actor: str) -> Response:
     if resolved.kind != "document":
         raise CmisError("invalidArgument", "cmisselector=content ist nur für Dokumente gültig")
-    content = _tree.read_document_content(resolved.document.id)
+    content = _tree.read_document_content(resolved.document.id, x_dms_principal=actor)
     media_type = resolved.document.content_type or "application/octet-stream"
     return Response(content=content, media_type=media_type)
 
 
-def _handle_read(repository_id: str, path: str, cmisselector: str | None, object_id: str | None):
+def _handle_read(
+    repository_id: str, path: str, cmisselector: str | None, object_id: str | None, actor: str
+):
     _check_license("read")
     _require_repository(repository_id)
-    resolved = resolve_object(_tree, path=path, object_id=object_id)
+    resolved = resolve_object(_tree, path=path, object_id=object_id, x_dms_principal=actor)
     selector = (cmisselector or _default_selector(resolved)).lower()
     if selector == "children":
-        return _get_children(resolved)
+        return _get_children(resolved, actor=actor)
     if selector == "object":
-        return _object_envelope_for(resolved)
+        return _object_envelope_for(resolved, actor=actor)
     if selector == "content":
-        return _get_content(resolved)
+        return _get_content(resolved, actor=actor)
     raise CmisError("notSupported", f"cmisselector {selector!r} wird nicht unterstützt")
 
 
@@ -217,8 +221,9 @@ def _do_create_document(target: ResolvedObject, form, actor: str) -> tuple[dict,
         content=upload.file.read(),
         content_type=upload.content_type,
         created_by=actor,
+        x_dms_principal=actor,
     )
-    return _document_envelope(document), 201
+    return _document_envelope(document, actor=actor), 201
 
 
 def _do_create_folder(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
@@ -226,10 +231,12 @@ def _do_create_folder(target: ResolvedObject, form, actor: str) -> tuple[dict, i
         raise CmisError("invalidArgument", "createFolder braucht einen Ordner als Ziel")
     name = _require_name(form)
     try:
-        folder = _tree.create_folder(parent_id=target.folder.id, name=name, created_by=actor)
+        folder = _tree.create_folder(
+            parent_id=target.folder.id, name=name, created_by=actor, x_dms_principal=actor
+        )
     except PathNotFoundError as exc:
         raise CmisError("objectNotFound", str(exc)) from exc
-    return _folder_envelope(folder), 201
+    return _folder_envelope(folder, actor=actor), 201
 
 
 def _do_update(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
@@ -238,12 +245,12 @@ def _do_update(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
     # not exposed as CMIS properties, see "Deliberate Limitations".
     name = _extract_property(form, "cmis:name")
     if name is None:
-        return _object_envelope_for(target), 200
+        return _object_envelope_for(target, actor=actor), 200
     if target.kind == "folder":
-        folder = _tree.move_folder(target.folder.id, new_name=name)
-        return _folder_envelope(folder), 200
-    document = _tree.move_document(target.document.id, new_title=name)
-    return _document_envelope(document), 200
+        folder = _tree.move_folder(target.folder.id, new_name=name, x_dms_principal=actor)
+        return _folder_envelope(folder, actor=actor), 200
+    document = _tree.move_document(target.document.id, new_title=name, x_dms_principal=actor)
+    return _document_envelope(document, actor=actor), 200
 
 
 def _do_move(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
@@ -252,10 +259,14 @@ def _do_move(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
         raise CmisError("invalidArgument", "targetFolderId ist erforderlich")
     try:
         if target.kind == "folder":
-            folder = _tree.move_folder(target.folder.id, new_parent_id=target_folder_id)
-            return _folder_envelope(folder), 201
-        document = _tree.move_document(target.document.id, new_folder_id=target_folder_id)
-        return _document_envelope(document), 201
+            folder = _tree.move_folder(
+                target.folder.id, new_parent_id=target_folder_id, x_dms_principal=actor
+            )
+            return _folder_envelope(folder, actor=actor), 201
+        document = _tree.move_document(
+            target.document.id, new_folder_id=target_folder_id, x_dms_principal=actor
+        )
+        return _document_envelope(document, actor=actor), 201
     except PathNotFoundError as exc:
         raise CmisError("objectNotFound", str(exc)) from exc
 
@@ -267,22 +278,22 @@ def _do_delete(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
         # docs/services/cmis-connector.md "Deliberate Limitations") - CMIS's
         # `delete` MUST, however, reject on ANY child (folder OR document),
         # hence the complete check here instead of there.
-        subfolders, documents = _tree.list_children(target.folder.id)
+        subfolders, documents = _tree.list_children(target.folder.id, x_dms_principal=actor)
         if subfolders or documents:
             raise CmisError("constraint", "Ordner ist nicht leer")
-        _tree.delete_folder(target.folder.id)
+        _tree.delete_folder(target.folder.id, x_dms_principal=actor)
     else:
-        _tree.delete_document(target.document.id, deleted_by=actor)
+        _tree.delete_document(target.document.id, deleted_by=actor, x_dms_principal=actor)
     return {}, 200
 
 
 def _cascade_delete_folder(folder, actor: str) -> None:
-    folders, documents = _tree.list_children(folder.id)
+    folders, documents = _tree.list_children(folder.id, x_dms_principal=actor)
     for document in documents:
-        _tree.delete_document(document.id, deleted_by=actor)
+        _tree.delete_document(document.id, deleted_by=actor, x_dms_principal=actor)
     for child in folders:
         _cascade_delete_folder(child, actor)
-    _tree.delete_folder(folder.id)
+    _tree.delete_folder(folder.id, x_dms_principal=actor)
 
 
 def _do_delete_tree(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
@@ -304,8 +315,9 @@ def _do_set_content(target: ResolvedObject, form, actor: str) -> tuple[dict, int
         created_by=actor,
         existing_document_id=target.document.id,
         expected_base_version_number=target.document.current_version_number,
+        x_dms_principal=actor,
     )
-    return _document_envelope(document), 201
+    return _document_envelope(document, actor=actor), 201
 
 
 def _do_check_out(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
@@ -318,7 +330,12 @@ def _do_check_out(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
     if target.kind != "document":
         raise CmisError("invalidArgument", "checkOut ist nur für Dokumente gültig")
     try:
-        _tree.acquire_lock(target.document.id, locked_by=actor, session_id=f"cmis:{actor}")
+        _tree.acquire_lock(
+            target.document.id,
+            locked_by=actor,
+            session_id=f"cmis:{actor}",
+            x_dms_principal=actor,
+        )
     except LockConflictError as exc:
         raise CmisError("updateConflict", "Dokument ist bereits ausgecheckt") from exc
     return {
@@ -331,7 +348,7 @@ def _do_check_out(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
 def _do_cancel_check_out(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
     if target.kind != "document":
         raise CmisError("invalidArgument", "cancelCheckOut ist nur für Dokumente gültig")
-    _tree.release_lock(target.document.id, released_by=actor)
+    _tree.release_lock(target.document.id, released_by=actor, x_dms_principal=actor)
     return {}, 200
 
 
@@ -360,10 +377,11 @@ def _do_check_in(target: ResolvedObject, form, actor: str) -> tuple[dict, int]:
             existing_document_id=target.document.id,
             expected_base_version_number=target.document.current_version_number,
             comment=comment if isinstance(comment, str) else None,
+            x_dms_principal=actor,
         )
     finally:
-        _tree.release_lock(target.document.id, released_by=actor)
-    return _document_envelope(document), 201
+        _tree.release_lock(target.document.id, released_by=actor, x_dms_principal=actor)
+    return _document_envelope(document, actor=actor), 201
 
 
 _ACTIONS: dict[str, Callable[[ResolvedObject, object, str], tuple[dict, int]]] = {
@@ -384,7 +402,7 @@ def _dispatch_write(
     handler, path: str, object_id: str | None, form, actor: str
 ) -> tuple[dict, int]:
     _check_license("write")
-    target = resolve_object(_tree, path=path, object_id=object_id)
+    target = resolve_object(_tree, path=path, object_id=object_id, x_dms_principal=actor)
     return handler(target, form, actor)
 
 
@@ -498,7 +516,7 @@ def get_root_object(
     objectId: str | None = None,
     actor: str = Depends(require_actor),
 ):
-    return _handle_read(repository_id, "", cmisselector, objectId)
+    return _handle_read(repository_id, "", cmisselector, objectId, actor)
 
 
 @app.get("/browser/{repository_id}/root/{path:path}")
@@ -509,7 +527,7 @@ def get_object_by_path(
     objectId: str | None = None,
     actor: str = Depends(require_actor),
 ):
-    return _handle_read(repository_id, path, cmisselector, objectId)
+    return _handle_read(repository_id, path, cmisselector, objectId, actor)
 
 
 @app.post("/browser/{repository_id}/root")

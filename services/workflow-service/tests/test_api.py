@@ -90,6 +90,7 @@ def _create_document(*, folder_id: str = "root") -> dict:
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": "wf-delegation-scope-test", "created_by": "alice", "folder_id": folder_id},
         files={"file": ("test.txt", b"delegation scope test content", "text/plain")},
+        headers={"X-DMS-Principal": "workflow-service-tests"},
         timeout=30.0,
     )
     response.raise_for_status()

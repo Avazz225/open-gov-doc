@@ -46,6 +46,7 @@ def _upload_document(*, filename: str, content: bytes, content_type: str) -> str
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": filename, "created_by": "ocr-service-tests"},
         files={"file": (filename, content, content_type)},
+        headers={"X-DMS-Principal": "ocr-service-tests"},
         timeout=30.0,
     )
     response.raise_for_status()

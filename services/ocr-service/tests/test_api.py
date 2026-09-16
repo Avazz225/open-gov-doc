@@ -15,6 +15,7 @@ def _upload_corrupt_pdf() -> str:
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": filename, "created_by": "ocr-service-tests"},
         files={"file": (filename, b"das ist kein echtes PDF", "application/pdf")},
+        headers={"X-DMS-Principal": "ocr-service-tests"},
         timeout=30.0,
     )
     response.raise_for_status()

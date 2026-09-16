@@ -110,30 +110,64 @@ class DmsTreeClient:
         document_service_base_url: str,
         folder_service_base_url: str,
         root_folder_id: str = "root",
+        default_principal: str = "",
     ) -> None:
-        self._documents = httpx.Client(base_url=document_service_base_url, timeout=30.0)
-        self._folders = httpx.Client(base_url=folder_service_base_url, timeout=30.0)
+        """`default_principal` (Post-Roadmap Phase 38 Session 4, ADR 0149):
+        folder-service's/document-service's core endpoints now require a
+        valid `X-DMS-Principal`. Set here as a per-client default for
+        callers with no real per-request actor (e.g. migration-service,
+        a background system identity); callers that DO have one (e.g.
+        webdav-connector/cmis-connector, which already resolve the
+        authenticated user per request for `created_by`/`deleted_by`
+        elsewhere) pass `x_dms_principal=` on the individual calls below
+        instead, which httpx overrides this default with."""
+        default_headers = {"X-DMS-Principal": default_principal} if default_principal else {}
+        self._documents = httpx.Client(
+            base_url=document_service_base_url, timeout=30.0, headers=default_headers
+        )
+        self._folders = httpx.Client(
+            base_url=folder_service_base_url, timeout=30.0, headers=default_headers
+        )
         self.root_folder_id = root_folder_id
 
     def close(self) -> None:
         self._documents.close()
         self._folders.close()
 
-    def _fetch_current_version(self, document_id: str, version_number: int) -> dict:
-        response = self._documents.get(f"/documents/{document_id}/versions/{version_number}")
+    @staticmethod
+    def _principal_headers(x_dms_principal: str) -> dict | None:
+        return {"X-DMS-Principal": x_dms_principal} if x_dms_principal else None
+
+    def _fetch_current_version(
+        self, document_id: str, version_number: int, *, x_dms_principal: str = ""
+    ) -> dict:
+        response = self._documents.get(
+            f"/documents/{document_id}/versions/{version_number}",
+            headers=self._principal_headers(x_dms_principal),
+        )
         response.raise_for_status()
         return response.json()
 
-    def _to_tree_document_enriched(self, body: dict) -> TreeDocument:
-        version = self._fetch_current_version(body["id"], body["current_version_number"])
+    def _to_tree_document_enriched(self, body: dict, *, x_dms_principal: str = "") -> TreeDocument:
+        version = self._fetch_current_version(
+            body["id"], body["current_version_number"], x_dms_principal=x_dms_principal
+        )
         return _to_tree_document(body, version)
 
-    def list_children(self, folder_id: str) -> tuple[list[TreeFolder], list[TreeDocument]]:
-        folders_response = self._folders.get(f"/folders/{folder_id}/children")
+    def list_children(
+        self, folder_id: str, *, x_dms_principal: str = ""
+    ) -> tuple[list[TreeFolder], list[TreeDocument]]:
+        folders_response = self._folders.get(
+            f"/folders/{folder_id}/children", headers=self._principal_headers(x_dms_principal)
+        )
         if folders_response.status_code == 404:
             raise PathNotFoundError(folder_id)
         folders_response.raise_for_status()
-        documents_response = self._documents.get("/documents", params={"folder_id": folder_id})
+        documents_response = self._documents.get(
+            "/documents",
+            params={"folder_id": folder_id},
+            headers=self._principal_headers(x_dms_principal),
+        )
         documents_response.raise_for_status()
         folders = [_to_tree_folder(f) for f in folders_response.json() if f["deleted_at"] is None]
         # An extra HTTP call per document (version metadata doesn't live on
@@ -143,13 +177,13 @@ class DmsTreeClient:
         # directory listing; a wrong default value would be the worse
         # alternative.
         documents = [
-            self._to_tree_document_enriched(d)
+            self._to_tree_document_enriched(d, x_dms_principal=x_dms_principal)
             for d in documents_response.json()
             if d["deleted_at"] is None
         ]
         return folders, documents
 
-    def resolve_path(self, path: str) -> TreeFolder | TreeDocument:
+    def resolve_path(self, path: str, *, x_dms_principal: str = "") -> TreeFolder | TreeDocument:
         """Resolves a slash path segment by segment starting from
         `root_folder_id` - a connector keeps no local copy of the folder
         structure (3.1), every resolution queries live. O(depth) HTTP calls
@@ -172,7 +206,9 @@ class DmsTreeClient:
         current_folder_id = self.root_folder_id
         for index, segment in enumerate(segments):
             is_last = index == len(segments) - 1
-            folders, documents = self.list_children(current_folder_id)
+            folders, documents = self.list_children(
+                current_folder_id, x_dms_principal=x_dms_principal
+            )
             folder_match = next((f for f in folders if f.name == segment), None)
             if folder_match is not None:
                 if is_last:
@@ -186,31 +222,41 @@ class DmsTreeClient:
             raise PathNotFoundError(path)
         raise PathNotFoundError(path)  # unreachable, satisfies the type checker
 
-    def create_folder(self, *, parent_id: str, name: str, created_by: str) -> TreeFolder:
+    def create_folder(
+        self, *, parent_id: str, name: str, created_by: str, x_dms_principal: str = ""
+    ) -> TreeFolder:
         response = self._folders.post(
-            "/folders", json={"name": name, "parent_id": parent_id, "created_by": created_by}
+            "/folders",
+            json={"name": name, "parent_id": parent_id, "created_by": created_by},
+            headers=self._principal_headers(x_dms_principal),
         )
         if response.status_code == 404:
             raise PathNotFoundError(parent_id)
         response.raise_for_status()
         return _to_tree_folder(response.json())
 
-    def get_folder(self, folder_id: str) -> TreeFolder:
-        response = self._folders.get(f"/folders/{folder_id}")
+    def get_folder(self, folder_id: str, *, x_dms_principal: str = "") -> TreeFolder:
+        response = self._folders.get(
+            f"/folders/{folder_id}", headers=self._principal_headers(x_dms_principal)
+        )
         if response.status_code == 404:
             raise PathNotFoundError(folder_id)
         response.raise_for_status()
         return _to_tree_folder(response.json())
 
-    def get_document(self, document_id: str) -> TreeDocument:
-        response = self._documents.get(f"/documents/{document_id}")
+    def get_document(self, document_id: str, *, x_dms_principal: str = "") -> TreeDocument:
+        response = self._documents.get(
+            f"/documents/{document_id}", headers=self._principal_headers(x_dms_principal)
+        )
         if response.status_code == 404:
             raise PathNotFoundError(document_id)
         response.raise_for_status()
-        return self._to_tree_document_enriched(response.json())
+        return self._to_tree_document_enriched(response.json(), x_dms_principal=x_dms_principal)
 
-    def read_document_content(self, document_id: str) -> bytes:
-        response = self._documents.get(f"/documents/{document_id}/content")
+    def read_document_content(self, document_id: str, *, x_dms_principal: str = "") -> bytes:
+        response = self._documents.get(
+            f"/documents/{document_id}/content", headers=self._principal_headers(x_dms_principal)
+        )
         if response.status_code == 404:
             raise PathNotFoundError(document_id)
         response.raise_for_status()
@@ -227,6 +273,7 @@ class DmsTreeClient:
         existing_document_id: str | None = None,
         expected_base_version_number: int | None = None,
         comment: str | None = None,
+        x_dms_principal: str = "",
     ) -> TreeDocument:
         """PUT semantics (WebDAV/CMIS alike): if a document already exists at
         the target path, a new version is checked in instead of creating a
@@ -235,6 +282,7 @@ class DmsTreeClient:
         field) - since P12-S4, groundwork for CMIS'
         `checkinComment` (5.4.4.3.28)."""
         media_type = content_type or "application/octet-stream"
+        headers = self._principal_headers(x_dms_principal)
         if existing_document_id is not None:
             data = {
                 "expected_base_version_number": str(expected_base_version_number),
@@ -246,61 +294,91 @@ class DmsTreeClient:
                 f"/documents/{existing_document_id}/versions",
                 data=data,
                 files={"file": (filename, content, media_type)},
+                headers=headers,
             )
             if response.status_code == 404:
                 raise PathNotFoundError(existing_document_id)
             response.raise_for_status()
-            document_response = self._documents.get(f"/documents/{existing_document_id}")
+            document_response = self._documents.get(
+                f"/documents/{existing_document_id}", headers=headers
+            )
             document_response.raise_for_status()
-            return self._to_tree_document_enriched(document_response.json())
+            return self._to_tree_document_enriched(
+                document_response.json(), x_dms_principal=x_dms_principal
+            )
 
         response = self._documents.post(
             "/documents",
             data={"title": filename, "created_by": created_by, "folder_id": folder_id},
             files={"file": (filename, content, media_type)},
+            headers=headers,
         )
         if response.status_code == 400:
             raise PathNotFoundError(folder_id)
         response.raise_for_status()
-        return self._to_tree_document_enriched(response.json())
+        return self._to_tree_document_enriched(response.json(), x_dms_principal=x_dms_principal)
 
-    def delete_document(self, document_id: str, *, deleted_by: str) -> None:
+    def delete_document(
+        self, document_id: str, *, deleted_by: str, x_dms_principal: str = ""
+    ) -> None:
         response = self._documents.delete(
-            f"/documents/{document_id}", params={"deleted_by": deleted_by}
+            f"/documents/{document_id}",
+            params={"deleted_by": deleted_by},
+            headers=self._principal_headers(x_dms_principal),
         )
         if response.status_code == 404:
             raise PathNotFoundError(document_id)
         response.raise_for_status()
 
-    def delete_folder(self, folder_id: str) -> None:
-        response = self._folders.delete(f"/folders/{folder_id}")
+    def delete_folder(self, folder_id: str, *, x_dms_principal: str = "") -> None:
+        response = self._folders.delete(
+            f"/folders/{folder_id}", headers=self._principal_headers(x_dms_principal)
+        )
         if response.status_code == 404:
             raise PathNotFoundError(folder_id)
         response.raise_for_status()
 
     def move_document(
-        self, document_id: str, *, new_folder_id: str | None = None, new_title: str | None = None
+        self,
+        document_id: str,
+        *,
+        new_folder_id: str | None = None,
+        new_title: str | None = None,
+        x_dms_principal: str = "",
     ) -> TreeDocument:
         payload: dict = {}
         if new_folder_id is not None:
             payload["folder_id"] = new_folder_id
         if new_title is not None:
             payload["title"] = new_title
-        response = self._documents.patch(f"/documents/{document_id}", json=payload)
+        response = self._documents.patch(
+            f"/documents/{document_id}",
+            json=payload,
+            headers=self._principal_headers(x_dms_principal),
+        )
         if response.status_code in (400, 404):
             raise PathNotFoundError(new_folder_id or document_id)
         response.raise_for_status()
-        return self._to_tree_document_enriched(response.json())
+        return self._to_tree_document_enriched(response.json(), x_dms_principal=x_dms_principal)
 
     def move_folder(
-        self, folder_id: str, *, new_parent_id: str | None = None, new_name: str | None = None
+        self,
+        folder_id: str,
+        *,
+        new_parent_id: str | None = None,
+        new_name: str | None = None,
+        x_dms_principal: str = "",
     ) -> TreeFolder:
         payload: dict = {}
         if new_parent_id is not None:
             payload["parent_id"] = new_parent_id
         if new_name is not None:
             payload["name"] = new_name
-        response = self._folders.patch(f"/folders/{folder_id}", json=payload)
+        response = self._folders.patch(
+            f"/folders/{folder_id}",
+            json=payload,
+            headers=self._principal_headers(x_dms_principal),
+        )
         if response.status_code in (400, 404):
             raise PathNotFoundError(new_parent_id or folder_id)
         response.raise_for_status()
@@ -313,11 +391,16 @@ class DmsTreeClient:
         locked_by: str,
         session_id: str,
         timeout_seconds: float | None = None,
+        x_dms_principal: str = "",
     ) -> TreeLock:
         payload: dict = {"locked_by": locked_by, "session_id": session_id}
         if timeout_seconds is not None:
             payload["timeout_seconds"] = timeout_seconds
-        response = self._documents.post(f"/documents/{document_id}/lock", json=payload)
+        response = self._documents.post(
+            f"/documents/{document_id}/lock",
+            json=payload,
+            headers=self._principal_headers(x_dms_principal),
+        )
         if response.status_code == 409:
             raise LockConflictError(document_id)
         if response.status_code == 404:
@@ -331,9 +414,14 @@ class DmsTreeClient:
             expires_at=datetime.fromisoformat(body["expires_at"]),
         )
 
-    def release_lock(self, document_id: str, *, released_by: str) -> None:
+    def release_lock(
+        self, document_id: str, *, released_by: str, x_dms_principal: str = ""
+    ) -> None:
         response = self._documents.request(
-            "DELETE", f"/documents/{document_id}/lock", json={"released_by": released_by}
+            "DELETE",
+            f"/documents/{document_id}/lock",
+            json={"released_by": released_by},
+            headers=self._principal_headers(x_dms_principal),
         )
         if response.status_code == 403:
             raise LockNotHeldError(document_id)
@@ -341,11 +429,13 @@ class DmsTreeClient:
             return  # already unlocked/unknown - UNLOCK is idempotent
         response.raise_for_status()
 
-    def get_lock(self, document_id: str) -> TreeLock | None:
+    def get_lock(self, document_id: str, *, x_dms_principal: str = "") -> TreeLock | None:
         # Always returns 200 with a `null` body when no lock exists - doesn't
         # even check whether `document_id` exists at all (see document-service
         # main.py `get_lock()`), hence no 404 branch here.
-        response = self._documents.get(f"/documents/{document_id}/lock")
+        response = self._documents.get(
+            f"/documents/{document_id}/lock", headers=self._principal_headers(x_dms_principal)
+        )
         response.raise_for_status()
         body = response.json()
         if body is None:

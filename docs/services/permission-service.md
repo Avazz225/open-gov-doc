@@ -158,7 +158,16 @@ member, regardless of their own `principal_id`. The inheritance algorithm itself
   `rendering.read`, `rendering.write` — the same principle for `ocr-service`/`rendering-service`.
   **Deliberately NOT included**: `admin.quarantine` (`virus-scan-service`, the same session) — unlike
   the others, the quarantine area was already, before P19-S8, a real permission restricted to a
-  dedicated role (`domain-admin-virus-scan`), not a previously de-facto-open gap. **Important for
+  dedicated role (`domain-admin-virus-scan`), not a previously de-facto-open gap. **Since Post-Roadmap
+  Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md))
+  additionally `document.read`, `document.write`, `folder.read`, `folder.write` — `folder-service`'s
+  core CRUD and `document-service`'s primary document paths previously had no permission check at all
+  (a materially different case from every entry above: not "checked but too permissive," these two
+  services simply never called this service for their main endpoints). **Deliberately NOT included this
+  time either**: the five dedicated permissions this same session introduced for pre-existing narrower
+  gates that used to reuse these two strings (`folder.document_reference.read`/`.write`,
+  `document.share_link.read`, `document.webdav_edit.write`, `document.redaction.read`,
+  `document.export.read`) — see each service's own docs for why. **Important for
   future extensions of this list**:
   `ensure_everyone_role` does NOT automatically update an already-created "everyone" role (no
   migration mechanism, see its docstring) — on an already running installation, a new permission
@@ -257,7 +266,7 @@ Verified live end-to-end (P3-S3): a folder created via the real Folder Service A
 
 **Second producer since Post-Roadmap Phase 35 Session 2** ([ADR 0144](../adr/0144-case-per-case-resource-type.md)): `case-service` now also publishes `case.resource.created` per case (`resource_type="case"`, `parent_id="root"`), the identical contract above under the `case.>` prefix — `structure_consumer.py` itself needed no code change, only the `structure_subjects` config addition, confirming the contract's own "any producer can plug in" design.
 
-- **`POST /resources`** (new) — a SYNCHRONOUS, REST-based counterpart to the `"*.resource.created"` event above, added specifically for `case-service`'s own per-case checks: unlike `folder-service` (whose own CRUD never self-checks per-resource, only the gateway does, decoupled from the exact creation moment), `case-service`'s endpoints self-check immediately, and a purely event-driven registration would leave a race window where a freshly created case is briefly unreadable by anyone (an unregistered `resource_id` denies every check outright, no fallback to `root`). Shares `repository.create_resource_node`'s idempotent create-if-missing logic with the event handler — a second call for an already-registered `resource_id` never overwrites its `parent_id`/`resource_type`. Deliberately ungated, same reasoning as `POST /org-hierarchy-grants` (ADR 0121): no internal service-to-service auth exists anywhere in this project, and the event bus this endpoint mirrors carries no auth either.
+- **`POST /resources`** (new at the time) — a SYNCHRONOUS, REST-based counterpart to the `"*.resource.created"` event above, added specifically for `case-service`'s own per-case checks: at the time, unlike `folder-service` (whose own CRUD did not yet self-check per-resource), `case-service`'s endpoints self-check immediately, and a purely event-driven registration would leave a race window where a freshly created case is briefly unreadable by anyone (an unregistered `resource_id` denies every check outright, no fallback to `root`). Shares `repository.create_resource_node`'s idempotent create-if-missing logic with the event handler — a second call for an already-registered `resource_id` never overwrites its `parent_id`/`resource_type`. Deliberately ungated, same reasoning as `POST /org-hierarchy-grants` (ADR 0121): no internal service-to-service auth exists anywhere in this project, and the event bus this endpoint mirrors carries no auth either. **Two more consumers since Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)): `folder-service` itself now uses it at startup to register `inbox`/`outbox` (bootstrapped directly into its own DB, never went through the async event), and `teamspace-service`'s `ensure_isolated_resource` uses it (together with `PATCH /resources/{id}`'s `inherit` toggle, same reasoning as below) to anchor a teamspace's root folder — `folder-service`'s own CRUD now DOES self-check per-resource too (see "'everyone' Group" above), so the "unlike folder-service" framing above is now historical, not current.
 
 ## Deputizing During Absence (4.4a, since P14-S11)
 

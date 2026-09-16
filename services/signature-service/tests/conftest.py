@@ -122,7 +122,10 @@ async def pdf_document(sample_pdf_bytes):
     """Echtes, gegen den laufenden document-service angelegtes PDF-Dokument
     (kein Mocking von Sibling-Services) - liefert `(document_id,
     version_number)`. Version 1 wird bei der Anlage automatisch erzeugt."""
-    async with httpx.AsyncClient(base_url=DOCUMENT_SERVICE_URL) as client:
+    async with httpx.AsyncClient(
+        base_url=DOCUMENT_SERVICE_URL,
+        headers={"X-DMS-Principal": "signature-service-tests"},
+    ) as client:
         response = await client.post(
             "/documents",
             data={"title": "Signatur-Testdokument", "created_by": "alice"},
@@ -137,7 +140,10 @@ async def pdf_document(sample_pdf_bytes):
 async def non_pdf_document():
     """Echtes, gegen document-service angelegtes Nicht-PDF-Dokument - Grundlage
     für den `content_type != application/pdf`-Ablehnungstest."""
-    async with httpx.AsyncClient(base_url=DOCUMENT_SERVICE_URL) as client:
+    async with httpx.AsyncClient(
+        base_url=DOCUMENT_SERVICE_URL,
+        headers={"X-DMS-Principal": "signature-service-tests"},
+    ) as client:
         response = await client.post(
             "/documents",
             data={"title": "Textdokument", "created_by": "alice"},
@@ -208,7 +214,10 @@ async def aes_required_object_type():
 
 @pytest.fixture
 async def pdf_document_with_required_level(sample_pdf_bytes, aes_required_object_type):
-    async with httpx.AsyncClient(base_url=DOCUMENT_SERVICE_URL) as client:
+    async with httpx.AsyncClient(
+        base_url=DOCUMENT_SERVICE_URL,
+        headers={"X-DMS-Principal": "signature-service-tests"},
+    ) as client:
         response = await client.post(
             "/documents",
             data={

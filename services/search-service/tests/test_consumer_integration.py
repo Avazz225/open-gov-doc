@@ -33,6 +33,7 @@ def _upload_document(*, filename: str) -> str:
         data={"title": filename, "created_by": "search-service-tests"},
         files={"file": (filename, b"Inhalt", "text/plain")},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -43,6 +44,7 @@ def _create_folder(name: str) -> str:
         f"{FOLDER_SERVICE_URL}/folders",
         json={"name": name, "parent_id": "root", "created_by": "search-service-tests"},
         timeout=30.0,
+        headers={"X-DMS-Principal": "search-service-tests"},
     )
     response.raise_for_status()
     return response.json()["id"]
@@ -53,7 +55,14 @@ def _grant_folder_write(principal_id: str, folder_id: str) -> None:
         f"{PERMISSION_SERVICE_URL}/roles",
         json={
             "name": f"search-test-hand-folder-role-{uuid.uuid4().hex[:8]}",
-            "permissions": ["folder.write", "folder.read"],
+            # Hand folders (ADR 0118) gate `.../document-references` via
+            # their OWN dedicated permission pair, not the generic
+            # `folder.read`/`.write` the broad RBAC retrofit (ADR 0149)
+            # added to "everyone" - see
+            # `_require_folder_document_reference_permission`'s docstring
+            # in folder-service/main.py for why (granting the generic pair
+            # here would silently no-op against the actual gate).
+            "permissions": ["folder.document_reference.write", "folder.document_reference.read"],
         },
         headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         timeout=30.0,

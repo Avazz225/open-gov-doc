@@ -17,7 +17,9 @@ ROLE_ADMIN_PRINCIPAL_ID = "document-service-test-role-admin"
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149): default `X-DMS-Principal`,
+    same pattern as `test_api.py`'s `client` fixture."""
+    with TestClient(app, headers={"X-DMS-Principal": "document-service-tests"}) as c:
         yield c
 
 
@@ -43,12 +45,15 @@ def upload(client, *, content=None, title="Akte", created_by="alice", **extra):
 
 def _grant_read(principal_id: str, resource_id: str = "root") -> None:
     """Same pattern as test_export.py's `_grant_document_read`, duplicated
-    rather than imported (see module docstring)."""
+    rather than imported (see module docstring). Grants
+    `document.redaction.read`, not the generic `document.read` (Post-
+    Roadmap Phase 38 Session 4, ADR 0149 - see `permission_client.py`'s
+    `check_read` docstring)."""
     role = httpx.post(
         f"{PERMISSION_SERVICE_URL}/roles",
         json={
             "name": f"redaction-test-role-{uuid.uuid4().hex[:8]}",
-            "permissions": ["document.read"],
+            "permissions": ["document.redaction.read"],
         },
         headers={"X-DMS-Principal": ROLE_ADMIN_PRINCIPAL_ID},
         timeout=30.0,
@@ -80,6 +85,7 @@ def test_redact_requires_principal_header(client):
     response = client.post(
         f"/documents/{document_id}/redact",
         json={"regions": REGION_BOTTOM_STRIP, "created_by": "alice"},
+        headers={"X-DMS-Principal": ""},
     )
     assert response.status_code == 401
 

@@ -361,6 +361,28 @@ EVERYONE_ROLE_PERMISSIONS: list[str] = [
     # the actual gap (direct, unauthenticated network access) and making the
     # permission admin-editable going forward.
     "audit.read",
+    # Post-Roadmap Phase 38 Session 4 (ADR 0149): `folder-service`'s core
+    # folder CRUD and `document-service`'s primary document read/write
+    # paths previously had NO permission check at all (not the "checked
+    # but too permissive" case the entries above describe - these two
+    # services simply never called `permission-service` for their main
+    # endpoints). Retrofitting a REAL `document.read`/`.write`/
+    # `folder.read`/`.write` check without also granting these to
+    # "everyone" would 403 every regular, non-teamspace, non-shared
+    # document/folder for everyone except its literal creator (there is
+    # no "creator gets an automatic grant" mechanism in this project) -
+    # a system-breaking regression, not a security fix. "everyone"
+    # preserves the previous de-facto-open behavior for the vast
+    # majority of ordinary folders/documents (unchanged from before this
+    # session, modulo now requiring a valid `X-DMS-Principal`), while a
+    # teamspace's root folder is deliberately excluded from this via
+    # `inherit=False` on its own `ResourceNode` (ADR 0043's existing
+    # per-member role assignment already handles teamspace access
+    # correctly; see `docs/adr/0149-...md` for the full mechanism).
+    "document.read",
+    "document.write",
+    "folder.read",
+    "folder.write",
 ]
 
 

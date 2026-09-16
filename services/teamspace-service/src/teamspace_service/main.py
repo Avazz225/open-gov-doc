@@ -78,6 +78,29 @@ async def _ensure_bootstrap_permissions() -> None:
             response.raise_for_status()
 
 
+async def _ensure_teamspace_isolation_backfill(session_factory) -> None:
+    """Post-Roadmap Phase 38 Session 4 (ADR 0149) - every teamspace
+    created BEFORE this session got its resource node the old way (the
+    async `folder.resource.created` event, `inherit` defaulting to
+    `True`) and therefore still inherits straight up to `root`, where
+    `folder-service`/`document-service`'s newly-enforced checks now grant
+    "everyone" broad read/write - without this backfill, an existing
+    teamspace's isolation would silently NOT apply until its root folder
+    happened to be touched by some other code path. Idempotent
+    (`ensure_isolated_resource` is create-if-missing + an unconditional
+    `inherit=False` set), safe to run on every startup, same pattern as
+    `ensure_domain_admin_roles`."""
+    async with session_factory() as session:
+        root_folder_ids = await repository.list_all_root_folder_ids(session)
+    for root_folder_id in root_folder_ids:
+        try:
+            await app.state.permission_client.ensure_isolated_resource(
+                resource_id=root_folder_id, parent_id="root"
+            )
+        except httpx.HTTPStatusError:
+            logger.warning("teamspace_isolation_backfill_failed: root_folder_id=%s", root_folder_id)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -90,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.folder_client = FolderServiceClient(settings.folder_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
     await _ensure_bootstrap_permissions()
+    await _ensure_teamspace_isolation_backfill(app.state.session_factory)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
     await sensor_config_client.start()
@@ -210,6 +234,9 @@ async def create_teamspace(
         root_folder_id=folder["id"],
         created_by=x_dms_principal,
     )
+    await app.state.permission_client.ensure_isolated_resource(
+        resource_id=teamspace.root_folder_id, parent_id="root"
+    )
     await app.state.permission_client.grant_resource_access(
         principal_id=x_dms_principal, resource_id=teamspace.root_folder_id
     )
@@ -284,7 +311,12 @@ async def delete_teamspace(
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Deletes only the teamspace metadata, see
-    `repository.delete_teamspace` - the root folder remains."""
+    `repository.delete_teamspace` - the root folder remains. Since Post-
+    Roadmap Phase 38 Session 4 (ADR 0149), also restores the kept folder's
+    default `inherit`, see `PermissionServiceClient.
+    restore_default_inheritance`'s docstring - without it, the folder
+    would stay permanently unreachable (`inherit=False` with every
+    member's grant just revoked below)."""
     try:
         teamspace = await repository.get_teamspace(session, teamspace_id)
     except repository.NotFoundError as exc:
@@ -295,6 +327,9 @@ async def delete_teamspace(
         await app.state.permission_client.revoke_resource_access(
             principal_id=member.principal_id, resource_id=teamspace.root_folder_id
         )
+    await app.state.permission_client.restore_default_inheritance(
+        resource_id=teamspace.root_folder_id
+    )
     await repository.delete_teamspace(session, teamspace_id)
     await session.commit()
     await publish_event(

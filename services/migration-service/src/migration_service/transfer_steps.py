@@ -201,6 +201,11 @@ async def delete_source(
             response = client.post(
                 f"/folders/{transfer.source_folder_id}/trash",
                 json={"deleted_by": "migration-service"},
+                # Post-Roadmap Phase 38 Session 4 (ADR 0149): folder-service's
+                # core endpoints (incl. trash) now require a valid
+                # X-DMS-Principal - same fixed service identity as
+                # `LocalDmsClient._PRINCIPAL_ID` (dms_client.py).
+                headers={"X-DMS-Principal": "migration-service"},
             )
             response.raise_for_status()
             return response.json()

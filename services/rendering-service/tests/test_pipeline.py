@@ -23,6 +23,7 @@ def _upload_document(*, filename: str, content: bytes, content_type: str) -> str
         f"{DOCUMENT_SERVICE_URL}/documents",
         data={"title": filename, "created_by": "rendering-service-tests"},
         files={"file": (filename, content, content_type)},
+        headers={"X-DMS-Principal": "rendering-service-tests"},
         timeout=30.0,
     )
     response.raise_for_status()
@@ -30,7 +31,10 @@ def _upload_document(*, filename: str, content: bytes, content_type: str) -> str
 
 
 def _delete_storage_object_for_version(document_id: str, version_number: int) -> None:
-    version = httpx.get(f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions/{version_number}")
+    version = httpx.get(
+        f"{DOCUMENT_SERVICE_URL}/documents/{document_id}/versions/{version_number}",
+        headers={"X-DMS-Principal": "rendering-service-tests"},
+    )
     version.raise_for_status()
     checksum = version.json()["checksum_sha256"]
     response = httpx.delete(f"{STORAGE_SERVICE_URL}/objects/documents/{document_id}/{checksum}")
