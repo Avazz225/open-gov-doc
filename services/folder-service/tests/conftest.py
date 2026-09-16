@@ -35,6 +35,11 @@ RETENTION_ADMIN_PRINCIPAL_ID = "folder-service-test-retention-admin"
 # service's `POST`/`DELETE /object-types` now require `admin.object_config`
 # too, a cross-service test dependency (not this service's own gate).
 OBJECT_CONFIG_ADMIN_PRINCIPAL_ID = "folder-service-test-object-config-admin"
+# Post-Roadmap Phase 39 Session 1 (ADR 0150): `GET /folders/deleted?
+# scope=admin`/`POST /folders/{id}/purge` now require `admin.deletion`,
+# replacing the legacy `trash_hard_delete_admin_role` `X-DMS-Roles` string
+# check.
+DELETION_ADMIN_PRINCIPAL_ID = "folder-service-test-deletion-admin"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -98,6 +103,30 @@ async def _grant_retention_permission():
             json={
                 "principal_type": "user",
                 "principal_id": RETENTION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_deletion_permission():
+    """Post-Roadmap Phase 39 Session 1 (ADR 0150) - same pattern as
+    `_grant_retention_permission` above."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-deletion")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": DELETION_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": DELETION_ADMIN_PRINCIPAL_ID,
                 "role_id": role_id,
                 "resource_id": "root",
             },

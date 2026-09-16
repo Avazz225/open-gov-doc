@@ -2,8 +2,44 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P38-S4 (teamspace permission anchoring — fourth and final session of the Phase 38+
-gap-closure plan, genuine architecture decision, new [ADR 0149](docs/adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)).
+**Last completed:** P39-S1 (domain-admin roles without a technical account — first session of Phase 39,
+"RBAC completion"). Research confirmed the plan's premise was stale (same pattern as P38-S1/S3/S4): of the
+5 roles named (`domain-admin-storage`/`-license`/`-query-console`/`-deletion`/`-deletion-vs`), **4 already
+had real enforcement** before this session — `-license` since P9-S1, `-query-console` since P8-S1,
+`-deletion-vs` since Phase 32 Session 4 (ADR 0133), `-storage` since the immediately-preceding P38-S3. None
+has (or needs) a dedicated technical account; `auth-service.md`'s own "Open Points" bullet was simply never
+updated as those four sessions landed. Only `domain-admin-deletion` was genuinely still dead scaffolding:
+seeded with capability `admin.deletion`, but the real "regular trash/purge admin" gate on both
+`document-service` and `folder-service` still used the older `trash_hard_delete_admin_role`/`X-DMS-Roles`
+string check — exactly the gap ADR 0133 itself named as deferred when it migrated the classified-documents
+counterpart. Presented with build-vs-remove, **the user chose to migrate it to real RBAC**, closed via
+[ADR 0150](docs/adr/0150-domain-admin-deletion-capability-migration.md):
+
+- New `_require_deletion_permission` helper (`has_permission(..., "admin.deletion")`) in both
+  `document-service` (`GET /documents/deleted?scope=admin`, `POST /documents/{id}/purge`'s regular branch)
+  and `folder-service` (`GET /folders/deleted?scope=admin`, `POST /folders/{id}/purge`) — exact mirror of
+  `_require_classified_deletion_permission`/ADR 0133. `trash_hard_delete_admin_role` removed entirely from
+  both services' settings, no fallback (same "REPLACE, don't supplement" reasoning as ADR 0133/ADR 0073).
+- `user-ui`'s `TrashPane.tsx` "Vollständiger Papierkorb" tab now follows `permissions.includes("admin.
+  deletion")` instead of `user.realm_roles`, matching the classified tab's existing pattern.
+- `docs/services/auth-service.md`'s stale bullet corrected (4 roles struck as already-enforced with their
+  actual closing session cross-referenced; `-deletion` struck as resolved by this session);
+  `permission-service.md`'s table row updated to match.
+
+**Tests**: document-service 356 (unchanged count, existing purge/admin-scope tests now grant
+`domain-admin-deletion` via a real role-assignment instead of `X-DMS-Roles`), folder-service 140 (same),
+user-ui vitest 270 (unchanged count, `trash-pane.test.tsx` + one `document-workspace.test.tsx` case
+rewritten the same way) — all green. `ruff check`/`ruff format` and `tsc`/`eslint` clean. **Live-verified**:
+`curl` against the real running stack — trashed a real document/folder, confirmed `401`→`403`→`200`→`204`
+across both services' new gate (granted `domain-admin-deletion` to a real test principal mid-sequence, then
+revoked it); a real headless-browser (Playwright) session against a throwaway `alice-verify` Keycloak user
+confirmed the Trash pane shows only "Eigene Löschmarkierungen" before the grant, and "Vollständiger
+Papierkorb" appears with working, real content (existing trashed folders/documents, functional restore/purge
+buttons) after a plain page reload once `domain-admin-deletion` is granted — no console errors, no 401/403.
+All test-created state (role assignment, Keycloak user) cleaned up afterward.
+
+Immediately before P39-S1: **P38-S4** (teamspace permission anchoring — fourth and final session of the
+Phase 38+ gap-closure plan, genuine architecture decision, new [ADR 0149](docs/adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)).
 The plan's premise was stale (same pattern as P38-S1/S3): the anchoring mechanism it asked to "design and
 build" already existed since ADR 0043 (P14-S6) — `teamspace-service` already grants a real
 `teamspace-member` role on a teamspace's root folder. The actual gap: `folder-service`'s core CRUD calls
@@ -131,12 +167,11 @@ permission grant (with the independent legal-hold button staying disabled throug
 (the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
 "only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
 
-**Next session:** **P39-S1** (Phase 39, RBAC completion — domain-admin roles without a technical
-account: 5 of 7 such roles, `domain-admin-storage`/`-license`/`-query-console`/`-deletion`/
-`-deletion-vs`, exist only as a `Role` row with no technical account and no enforcing endpoint. Session
-decides per role whether it's actually needed — same pattern as `domain-admin-query-console`, enforced
-directly via role-assignment lookup with no dedicated account needed — or should be removed as dead
-scaffolding). See `IMPLEMENTATION_PLAN.md` "Phase 39" for the full session breakdown.
+**Next session:** **P39-S2** (Phase 39, RBAC completion — remaining four-eyes/validation gaps: `PUT
+/roles/{id}` role **update** gets four-eyes analogous to create/assign, since ADR 0130 deliberately only
+built those two; `GET /check` doesn't server-side-validate `access_type` against a permission→access_type
+mapping; maintenance mode only blocks gateway writes, not direct service-to-service writes). See
+`IMPLEMENTATION_PLAN.md` "Phase 39" for the full session breakdown.
 
 Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the
 Phase 38+ gap-closure plan). Closed four findings: `audit-service`'s `GET /events`/`.../verify` (new

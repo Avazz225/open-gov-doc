@@ -25,11 +25,12 @@ import {
 //   - "personal" (always available): only the user's own deletion markers, no
 //     "delete permanently" - per the concept, regular users can only mark for
 //     deletion.
-//   - "admin" (only with trash_hard_delete_admin_role, client-side gating via
-//     `user.realm_roles` - same pattern as MetadataPanel.tsx's reference-
-//     number admin check, an installation with a differently configured role
-//     name would need to adjust the constant below accordingly): full but
-//     non-classified trash, including "delete permanently".
+//   - "admin" (only with the `admin.deletion` domain-admin capability - since
+//     Post-Roadmap Phase 39 Session 1, ADR 0150, which replaced the previous
+//     `trash_hard_delete_admin_role` realm-role gate with the same
+//     system-native `permissions` check `RecordsQuarantinePanel.tsx`'s
+//     `admin.records_quarantine`/the classified tab below already use):
+//     full but non-classified trash, including "delete permanently".
 //   - "admin_classified" (only with the `admin.deletion_classified` domain-
 //     admin capability - since Post-Roadmap Phase 32 Session 4, ADR 0133,
 //     which replaced the previous `classified_trash_hard_delete_admin_role`
@@ -43,14 +44,13 @@ import {
 // `repository.get_folder`) - an in-place preview of a deleted object would be
 // a separate feature, not part of this session (the name/attributes shown in
 // the list already satisfy the concept goal of "searchable/viewable").
-const TRASH_HARD_DELETE_ADMIN_ROLE = "dms-admin";
 
 type PaneScope = "personal" | "admin" | "admin_classified";
 
 export function TrashPane({ token }: { token: string }) {
   const { t } = useI18n();
-  const { user, permissions } = useAuth();
-  const isTrashAdmin = Boolean(user?.realm_roles.includes(TRASH_HARD_DELETE_ADMIN_ROLE));
+  const { permissions } = useAuth();
+  const isTrashAdmin = permissions.includes("admin.deletion");
   const isClassifiedTrashAdmin = permissions.includes("admin.deletion_classified");
 
   const [scope, setScope] = useState<PaneScope>("personal");

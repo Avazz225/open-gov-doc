@@ -34,6 +34,8 @@ RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantin
 RECORDS_QUARANTINE_ADMIN_HEADERS = {"X-DMS-Principal": RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID}
 CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-classified-deletion-admin"
 CLASSIFIED_DELETION_ADMIN_HEADERS = {"X-DMS-Principal": CLASSIFIED_DELETION_ADMIN_PRINCIPAL_ID}
+DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-deletion-admin"
+DELETION_ADMIN_HEADERS = {"X-DMS-Principal": DELETION_ADMIN_PRINCIPAL_ID}
 # Post-Roadmap Phase 38 Session 2: the fixed principal `archival-service`
 # itself asserts in production (see conftest.py's
 # `_grant_disposal_callback_permission`), not a separate test-only identity.
@@ -1482,7 +1484,7 @@ def test_list_deleted_documents_admin_scope_requires_role(client):
     response = client.get(
         "/documents/deleted",
         params={"scope": "admin"},
-        headers={"X-DMS-Roles": "dms-admin"},
+        headers=DELETION_ADMIN_HEADERS,
     )
     assert response.status_code == 200
     assert document_id in [d["id"] for d in response.json()]
@@ -1500,7 +1502,7 @@ def test_list_deleted_documents_admin_scope_excludes_classified(client):
     response = client.get(
         "/documents/deleted",
         params={"scope": "admin"},
-        headers={"X-DMS-Roles": "dms-admin"},
+        headers=DELETION_ADMIN_HEADERS,
     )
 
     ids = [d["id"] for d in response.json()]
@@ -1545,17 +1547,14 @@ def test_list_deleted_documents_admin_classified_scope_shows_only_classified(cli
 
 def test_purge_document_not_in_trash_returns_409(client):
     document_id = upload(client, folder_id="root").json()["id"]
-    response = client.post(
-        f"/documents/{document_id}/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
-    )
+    response = client.post(f"/documents/{document_id}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 409
 
 
 def test_purge_document_unknown_returns_404(client):
     response = client.post(
         "/documents/does-not-exist/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+        headers=DELETION_ADMIN_HEADERS,
     )
     assert response.status_code == 404
 
@@ -1578,22 +1577,19 @@ def test_purge_document_with_admin_role_hard_deletes(client):
     document_id = upload(client, folder_id="root").json()["id"]
     client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
 
-    response = client.post(
-        f"/documents/{document_id}/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
-    )
+    response = client.post(f"/documents/{document_id}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 204
 
     still_there = client.get(
         "/documents/deleted",
         params={"scope": "admin"},
-        headers={"X-DMS-Roles": "dms-admin"},
+        headers=DELETION_ADMIN_HEADERS,
     ).json()
     assert document_id not in [d["id"] for d in still_there]
     register = client.get("/deletion-register").json()
     entry = next(e for e in register if e["document_id"] == document_id)
     assert entry["trigger"] == "manual_purge"
-    assert entry["triggered_by"] == "admin"
+    assert entry["triggered_by"] == DELETION_ADMIN_PRINCIPAL_ID
 
 
 def test_purge_classified_document_requires_classified_deletion_permission(client):
@@ -1603,12 +1599,10 @@ def test_purge_classified_document_requires_classified_deletion_permission(clien
     ]
     client.post(f"/documents/{document_id}/trash", json={"deleted_by": "alice"})
 
-    # The REGULAR trash role does not suffice for a classified document -
-    # `admin.deletion_classified` is a distinct capability (ADR 0133).
-    wrong_role = client.post(
-        f"/documents/{document_id}/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
-    )
+    # The REGULAR trash permission does not suffice for a classified
+    # document - `admin.deletion_classified` is a distinct capability
+    # (ADR 0133) from `admin.deletion` (ADR 0150).
+    wrong_role = client.post(f"/documents/{document_id}/purge", headers=DELETION_ADMIN_HEADERS)
     assert wrong_role.status_code == 403
 
     response = client.post(

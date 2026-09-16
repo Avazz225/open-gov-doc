@@ -358,7 +358,7 @@ def test_list_deleted_folders_admin_scope_requires_role(client):
     assert response.status_code == 403
 
     response = client.get(
-        "/folders/deleted", params={"scope": "admin"}, headers={"X-DMS-Roles": "dms-admin"}
+        "/folders/deleted", params={"scope": "admin"}, headers=DELETION_ADMIN_HEADERS
     )
     assert response.status_code == 200
     assert created["id"] in [f["id"] for f in response.json()]
@@ -366,17 +366,14 @@ def test_list_deleted_folders_admin_scope_requires_role(client):
 
 def test_purge_folder_not_in_trash_returns_409(client):
     created = client.post("/folders", json={"name": "X", "created_by": "alice"}).json()
-    response = client.post(
-        f"/folders/{created['id']}/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
-    )
+    response = client.post(f"/folders/{created['id']}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 409
 
 
 def test_purge_folder_unknown_returns_404(client):
     response = client.post(
         "/folders/does-not-exist/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
+        headers=DELETION_ADMIN_HEADERS,
     )
     assert response.status_code == 404
 
@@ -400,20 +397,17 @@ def test_purge_folder_with_admin_role_hard_deletes(client):
     created = client.post("/folders", json={"name": "Weg", "created_by": "alice"}).json()
     client.post(f"/folders/{created['id']}/trash", json={"deleted_by": "alice"})
 
-    response = client.post(
-        f"/folders/{created['id']}/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
-    )
+    response = client.post(f"/folders/{created['id']}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 204
 
     still_there = client.get(
-        "/folders/deleted", params={"scope": "admin"}, headers={"X-DMS-Roles": "dms-admin"}
+        "/folders/deleted", params={"scope": "admin"}, headers=DELETION_ADMIN_HEADERS
     ).json()
     assert created["id"] not in [f["id"] for f in still_there]
     register = client.get("/deletion-register").json()
     entry = next(e for e in register if e["folder_id"] == created["id"])
     assert entry["trigger"] == "manual_purge"
-    assert entry["triggered_by"] == "admin"
+    assert entry["triggered_by"] == DELETION_ADMIN_HEADERS["X-DMS-Principal"]
 
 
 def test_purge_folder_with_remaining_child_row_returns_409(client):
@@ -426,10 +420,7 @@ def test_purge_folder_with_remaining_child_row_returns_409(client):
     client.post("/folders", json={"name": "Kind", "parent_id": parent["id"], "created_by": "alice"})
     client.post(f"/folders/{parent['id']}/trash", json={"deleted_by": "alice"})
 
-    response = client.post(
-        f"/folders/{parent['id']}/purge",
-        headers={"X-DMS-Principal": "admin", "X-DMS-Roles": "dms-admin"},
-    )
+    response = client.post(f"/folders/{parent['id']}/purge", headers=DELETION_ADMIN_HEADERS)
     assert response.status_code == 409
 
 
@@ -492,6 +483,10 @@ LEGAL_HOLD_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-legal-hold-a
 # /retention-config`/`PUT /trash-config` require `admin.retention` - must
 # match conftest.py::RETENTION_ADMIN_PRINCIPAL_ID.
 RETENTION_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-retention-admin"}
+# Post-Roadmap Phase 39 Session 1 (ADR 0150): `GET /folders/deleted?
+# scope=admin`/`POST /folders/{id}/purge` require `admin.deletion` - must
+# match conftest.py::DELETION_ADMIN_PRINCIPAL_ID.
+DELETION_ADMIN_HEADERS = {"X-DMS-Principal": "folder-service-test-deletion-admin"}
 
 
 def test_create_legal_hold_without_permission_is_403(client):

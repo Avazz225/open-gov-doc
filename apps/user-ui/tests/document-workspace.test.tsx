@@ -2447,8 +2447,11 @@ describe("DocumentWorkspace", () => {
       expect(screen.queryByText("Endgültig löschen")).not.toBeInTheDocument();
     });
 
-    it("offers the admin trash scope only for a dms-admin user and purges a document", async () => {
-      authState.realmRoles = ["dms-admin"];
+    it("offers the admin trash scope only for a principal with admin.deletion and purges a document", async () => {
+      // Post-Roadmap Phase 39 Session 1 (ADR 0150): the regular admin trash
+      // tab's visibility now follows `permissions.includes("admin.deletion")`
+      // instead of a `dms-admin` realm-role check.
+      authState.permissions = ["admin.deletion"];
       listChildFoldersMock.mockResolvedValue([]);
       listDocumentsInFolderMock.mockResolvedValue([]);
       listDeletedDocumentsGlobalMock.mockResolvedValue([{ ...document1, deleted_at: "2026-01-05T00:00:00Z" }]);

@@ -136,6 +136,36 @@ async def _grant_classified_deletion_permission():
         response.raise_for_status()
 
 
+DELETION_ADMIN_PRINCIPAL_ID = "document-service-test-deletion-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_deletion_permission():
+    """Post-Roadmap Phase 39 Session 1 (ADR 0150): `GET /documents/deleted?
+    scope=admin`/`POST /documents/{id}/purge` (regular, non-classified
+    branch) require `admin.deletion`, replacing the previous
+    `trash_hard_delete_admin_role` `X-DMS-Roles` string check - same pattern
+    as `_grant_classified_deletion_permission` above."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-deletion")
+        existing = (
+            await pc.get("/role-assignments", params={"principal_id": DELETION_ADMIN_PRINCIPAL_ID})
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": DELETION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 RECORDS_QUARANTINE_ADMIN_PRINCIPAL_ID = "document-service-test-records-quarantine-admin"
 
 

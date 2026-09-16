@@ -15,14 +15,13 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
-let mockRealmRoles: string[] = [];
 let mockPermissions: string[] = [];
 vi.mock("@/lib/auth-context", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth-context")>("@/lib/auth-context");
   return {
     ...actual,
     useAuth: () => ({
-      user: { sub: "alice", username: "alice", email: null, realm_roles: mockRealmRoles },
+      user: { sub: "alice", username: "alice", email: null, realm_roles: [] },
       permissions: mockPermissions,
       accessToken: "token-123",
       isLoading: false,
@@ -40,21 +39,22 @@ function renderPane() {
   );
 }
 
-// Department-independent RBAC for the classified-documents trash tab
-// (Post-Roadmap Phase 32 Session 4, ADR 0133): the tab's visibility now
-// follows `permissions.includes("admin.deletion_classified")` (system-native
-// permission-service capability) instead of a `user.realm_roles` string
-// check - mirrors `RecordsQuarantinePanel`'s established `admin.
+// Both admin tabs' visibility follows a `permissions.includes(...)` check
+// (system-native permission-service capability) rather than a
+// `user.realm_roles` string check - the regular tab since Post-Roadmap Phase
+// 39 Session 1 (ADR 0150, `admin.deletion`, replacing the previous
+// `trash_hard_delete_admin_role` realm-role gate), the classified tab since
+// Post-Roadmap Phase 32 Session 4 (ADR 0133, `admin.deletion_classified`) -
+// both mirror `RecordsQuarantinePanel`'s established `admin.
 // records_quarantine` test pattern.
-describe("TrashPane classified-trash tab visibility", () => {
+describe("TrashPane admin tab visibility", () => {
   beforeEach(() => {
     listDeletedDocumentsGlobalMock.mockReset().mockResolvedValue([]);
     listDeletedFoldersGlobalMock.mockReset().mockResolvedValue([]);
-    mockRealmRoles = [];
     mockPermissions = [];
   });
 
-  it("hides both admin tabs for a principal with neither role nor permission", async () => {
+  it("hides both admin tabs for a principal with neither permission", async () => {
     renderPane();
     await waitFor(() => expect(listDeletedDocumentsGlobalMock).toHaveBeenCalled());
 
@@ -62,8 +62,8 @@ describe("TrashPane classified-trash tab visibility", () => {
     expect(screen.queryByText("Verschlusssachen-Papierkorb")).not.toBeInTheDocument();
   });
 
-  it("shows only the regular admin tab for dms-admin without admin.deletion_classified", async () => {
-    mockRealmRoles = ["dms-admin"];
+  it("shows only the regular admin tab for admin.deletion without admin.deletion_classified", async () => {
+    mockPermissions = ["admin.deletion"];
     renderPane();
     await waitFor(() => expect(listDeletedDocumentsGlobalMock).toHaveBeenCalled());
 
@@ -71,8 +71,7 @@ describe("TrashPane classified-trash tab visibility", () => {
     expect(screen.queryByText("Verschlusssachen-Papierkorb")).not.toBeInTheDocument();
   });
 
-  it("shows the classified-trash tab for a principal with admin.deletion_classified, independent of realm_roles", async () => {
-    mockRealmRoles = [];
+  it("shows the classified-trash tab for a principal with admin.deletion_classified, independent of admin.deletion", async () => {
     mockPermissions = ["admin.deletion_classified"];
     renderPane();
     await waitFor(() => expect(listDeletedDocumentsGlobalMock).toHaveBeenCalled());

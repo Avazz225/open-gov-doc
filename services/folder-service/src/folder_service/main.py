@@ -482,7 +482,6 @@ async def list_deleted_folders(
     parent_id: str | None = None,
     scope: str | None = None,
     x_dms_principal: str = Header(default=""),
-    x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> list[FolderOut]:
     """Trash contents of a folder (5.2, since P7-S1b) - route MUST be
@@ -493,8 +492,11 @@ async def list_deleted_folders(
     callers/tests remain unaffected. Since P15-S1 (2.5), two additional
     installation-wide views explicitly requested via `scope`: `personal`
     (only one's own deletion markers) and `admin` (full trash, deletion
-    administration) - no `admin_classified` variant as in document-service,
-    concept 2.5 marks only documents as classified documents, not folders."""
+    administration - since Post-Roadmap Phase 39 Session 1, ADR 0150,
+    gated by `_require_deletion_permission` instead of the legacy
+    `X-DMS-Roles` string check) - no `admin_classified` variant as in
+    document-service, concept 2.5 marks only documents as classified
+    documents, not folders."""
     if scope is None:
         if parent_id is None:
             raise HTTPException(
@@ -510,13 +512,7 @@ async def list_deleted_folders(
         )
 
     if scope == "admin":
-        roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
-        if settings.trash_hard_delete_admin_role not in roles:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf den "
-                "vollständigen Papierkorb einsehen",
-            )
+        await _require_deletion_permission(x_dms_principal)
         return await repository.list_deleted_folders(session, parent_id=parent_id)
 
     raise HTTPException(status_code=422, detail=f"Unbekannter scope {scope!r}")
@@ -526,7 +522,6 @@ async def list_deleted_folders(
 async def purge_folder(
     folder_id: str,
     x_dms_principal: str = Header(default=""),
-    x_dms_roles: str = Header(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Manual, immediate permanent deletion from trash (2.5, P15-S1) -
@@ -537,16 +532,11 @@ async def purge_folder(
     `trigger="trash_expiry"` - here `trigger="manual_purge"` with the real
     principal as `triggered_by`). Same safety check as forced deletion
     (`_execute_or_defer_forced_deletion`): deletion only actually happens
-    once the subtree no longer contains any active subfolders/documents."""
-    if not x_dms_principal:
-        raise HTTPException(status_code=401, detail="X-DMS-Principal fehlt")
-    roles = {role.strip() for role in x_dms_roles.split(",") if role.strip()}
-    if settings.trash_hard_delete_admin_role not in roles:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Nur die Rolle {settings.trash_hard_delete_admin_role!r} darf Ordner "
-            "endgültig aus dem Papierkorb löschen",
-        )
+    once the subtree no longer contains any active subfolders/documents.
+    Since Post-Roadmap Phase 39 Session 1 (ADR 0150), gated by
+    `_require_deletion_permission` (`admin.deletion`) instead of the legacy
+    `trash_hard_delete_admin_role` `X-DMS-Roles` string check."""
+    await _require_deletion_permission(x_dms_principal)
     try:
         folder = await repository.get_folder_any_state(session, folder_id)
     except repository.NotFoundError as exc:
@@ -1085,6 +1075,25 @@ async def _require_legal_hold_permission(x_dms_principal: str) -> None:
     if not await app.state.permission_client.has_permission(x_dms_principal, "admin.legal_hold"):
         raise HTTPException(
             status_code=403, detail="Fehlende Domain-Admin-Rolle 'Legal-Hold-Verwaltung'"
+        )
+
+
+async def _require_deletion_permission(x_dms_principal: str) -> None:
+    """RBAC (Post-Roadmap Phase 39 Session 1, ADR 0150) - trash/purge admin
+    gate, migrated off the legacy `trash_hard_delete_admin_role`
+    `X-DMS-Roles` string-equality check onto the real `admin.deletion`
+    capability (role `domain-admin-deletion`), exact mirror of
+    `document_service.main._require_deletion_permission`/its own
+    `_require_classified_deletion_permission` (ADR 0133). REPLACED, not
+    supplemented - same reasoning as those two migrations: a plain string
+    comparison against an unverified header is not a standalone,
+    conceptually anchored second gate worth defending indefinitely
+    alongside a real one."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(x_dms_principal, "admin.deletion"):
+        raise HTTPException(
+            status_code=403, detail="Fehlende Domain-Admin-Rolle 'Löschadministration'"
         )
 
 

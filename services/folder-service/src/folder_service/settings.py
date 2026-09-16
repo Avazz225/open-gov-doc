@@ -53,11 +53,3 @@ class Settings(BaseServiceSettings):
     # document-service's `kennzeichen_admin_role`, here for the new
     # `POST /folders/{id}/reconcile-restore-deletion` endpoint.
     admin_role: str = "dms-admin"
-
-    # Trash family (2.5, P15-S1): permanent deletion from trash is reserved
-    # for a separate, domain-specific admin role (4.6) - deliberately
-    # independently configurable instead of reusing `admin_role`, same
-    # principle as document-service's separate role settings. No classified
-    # documents variant here - concept 2.5 mentions the classification
-    # explicitly only for documents, not for folders.
-    trash_hard_delete_admin_role: str = "dms-admin"
