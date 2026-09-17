@@ -44,6 +44,7 @@ from auth_service.consumer import start_consuming
 from auth_service.directory_federation import CONTACT_DIRECTORY_CAPABILITY
 from auth_service.federation_hub_client import FederationHubClient
 from auth_service.keycloak_client import InvalidCredentialsError
+from auth_service.license_client import LicenseLimitClient
 from auth_service.models import (
     AdGroupRoleMapping,
     Base,
@@ -210,6 +211,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_realm_and_client(settings)
     app.state.keycloak_admin = build_admin_client(settings)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
+    app.state.license_limit_client = LicenseLimitClient(
+        settings.license_service_base_url, settings.license_limit_cache_ttl_seconds
+    )
 
     engine = build_engine(settings.postgres_dsn)
     async with engine.begin() as conn:
@@ -337,6 +341,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await consumer_bus.close()
     await event_bus.close()
     await app.state.permission_client.close()
+    await app.state.license_limit_client.close()
     if app.state.federation_hub_client is not None:
         await app.state.federation_hub_client.close()
     await engine.dispose()
@@ -833,6 +838,13 @@ def count_sessions() -> dict:
 @app.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def create_user(payload: UserCreate, user: dict = Depends(get_current_user)) -> dict:
     await _require_user_management(user)
+    # License limit block (concept 9.3, Post-Roadmap Phase 42 Session 2) -
+    # "users" dimension brought to parity with document-service's existing
+    # "documents"/"storage_gb" blocking; this is the one and only endpoint
+    # that creates a new named account in this codebase (no AD/Keycloak
+    # self-registration flow exists anywhere in the repo).
+    if await app.state.license_limit_client.is_exceeded("users"):
+        raise HTTPException(status_code=403, detail="Nutzerlimit der Lizenz überschritten")
     try:
         return admin_users.create_user(
             app.state.keycloak_admin,

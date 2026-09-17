@@ -83,3 +83,59 @@ def test_create_document_allowed_when_not_exceeded(client, monkeypatch):
     response = upload(client)
 
     assert response.status_code == 201
+
+
+def test_create_document_blocked_when_storage_limit_exceeded(client, monkeypatch):
+    """Post-Roadmap Phase 42 Session 2 - brings "storage_gb" to parity with
+    "documents"."""
+
+    async def _exceeded(self, dimension: str) -> bool:
+        return dimension == "storage_gb"
+
+    monkeypatch.setattr(LicenseLimitClient, "is_exceeded", _exceeded)
+
+    response = upload(client)
+
+    assert response.status_code == 403
+
+
+def test_checkin_version_blocked_when_storage_limit_exceeded(client, monkeypatch):
+    """A new version is excluded from the "documents" dimension (no new
+    document row) but genuinely adds new bytes to storage, so it must still
+    be blocked once "storage_gb" is exceeded."""
+    body = upload(client, content=b"v1").json()
+    document_id = body["id"]
+
+    async def _exceeded(self, dimension: str) -> bool:
+        return dimension == "storage_gb"
+
+    monkeypatch.setattr(LicenseLimitClient, "is_exceeded", _exceeded)
+
+    response = client.post(
+        f"/documents/{document_id}/versions",
+        data={"expected_base_version_number": 1, "created_by": "alice"},
+        files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+    )
+
+    assert response.status_code == 403
+
+    versions = client.get(f"/documents/{document_id}/versions").json()
+    assert len(versions) == 1
+
+
+def test_checkin_version_allowed_when_storage_limit_not_exceeded(client, monkeypatch):
+    body = upload(client, content=b"v1").json()
+    document_id = body["id"]
+
+    async def _not_exceeded(self, dimension: str) -> bool:
+        return False
+
+    monkeypatch.setattr(LicenseLimitClient, "is_exceeded", _not_exceeded)
+
+    response = client.post(
+        f"/documents/{document_id}/versions",
+        data={"expected_base_version_number": 1, "created_by": "alice"},
+        files={"file": ("vertrag.pdf", b"v2", "application/pdf")},
+    )
+
+    assert response.status_code == 201

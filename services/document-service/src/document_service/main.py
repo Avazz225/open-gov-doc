@@ -1382,6 +1382,17 @@ async def _persist_new_document(
     classification_level: str | None = None,
     derivation_type: str | None = None,
 ) -> Document:
+    # License limit block (concept 9.3, Post-Roadmap Phase 42 Session 2) -
+    # unlike the "documents" dimension (only checked at the two genuine
+    # new-upload endpoints, deliberately not here since redaction/quarantine-
+    # release routes both funnel through this same helper), "storage_gb"
+    # measures bytes, not document rows - every caller of this helper adds a
+    # brand-new object to storage, so the check belongs here once rather than
+    # duplicated at each of the three call sites (and automatically covers
+    # any future caller too).
+    if await app.state.license_limit_client.is_exceeded("storage_gb"):
+        raise HTTPException(status_code=403, detail="Speicherlimit der Lizenz überschritten")
+
     checksum = compute_checksum(data)
     document_id = str(uuid.uuid4())
     key = _object_key(document_id, checksum)
@@ -3611,6 +3622,13 @@ async def checkin_version(
         target_document = None
     if target_document is not None:
         await _require_document_permission(x_dms_principal, target_document.id, access_type="write")
+
+    # License limit block (concept 9.3, Post-Roadmap Phase 42 Session 2) - a
+    # new version is excluded from the "documents" dimension (no new document
+    # row, see `create_document`'s comment) but genuinely adds a new object to
+    # storage, so it is checked against "storage_gb" here.
+    if await app.state.license_limit_client.is_exceeded("storage_gb"):
+        raise HTTPException(status_code=403, detail="Speicherlimit der Lizenz überschritten")
 
     data = await file.read()
     content_type = await _resolve_content_type(session, data)

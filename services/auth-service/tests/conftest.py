@@ -23,6 +23,7 @@ from auth_service.bootstrap import (  # noqa: E402
     DOMAIN_ADMIN_USERS_USERNAME,
     ensure_realm_and_client,
 )
+from auth_service.license_client import LicenseLimitClient  # noqa: E402
 from auth_service.main import app  # noqa: E402
 from auth_service.models import Base  # noqa: E402
 from auth_service.settings import Settings  # noqa: E402
@@ -139,6 +140,22 @@ async def _clean_tables():
         )
     await eng.dispose()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _default_no_license_limit_exceeded(monkeypatch):
+    """License limit block (concept 9.3, Post-Roadmap Phase 42 Session 2)
+    checks the real running `license-service` - this test environment often
+    has no test license installed (or an expired one), which could break
+    `POST /users` with a default `403` without this patch. Individual tests
+    for the block itself override `is_exceeded` again (see
+    `test_license_limit.py`), same pattern as `document-service`'s
+    identically named fixture."""
+
+    async def _never_exceeded(self, dimension: str) -> bool:
+        return False
+
+    monkeypatch.setattr(LicenseLimitClient, "is_exceeded", _never_exceeded)
 
 
 @pytest.fixture

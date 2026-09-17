@@ -1,6 +1,6 @@
 # license-service
 
-**Responsibility:** License management/checking (9.1/9.2/9.3) — manages a signed license file (JWT/RS256, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)), continuously checks (not only at startup) current usage against four dimensions, and publishes status changes as events. `registry-service` consumes these events and derives from them a license status per component (P9-S2, see `docs/services/registry-service.md`); `document-service` queries `GET /license/status` directly to block new creations once the document limit is exceeded.
+**Responsibility:** License management/checking (9.1/9.2/9.3) — manages a signed license file (JWT/RS256, [ADR 0032](../adr/0032-lizenzdatei-signaturverfahren.md)), continuously checks (not only at startup) current usage against four dimensions, and publishes status changes as events. `registry-service` consumes these events and derives from them a license status per component (P9-S2, see `docs/services/registry-service.md`); `document-service` queries `GET /license/status` directly to block new creations/new versions once the document-count or storage limit is exceeded, and (**since Post-Roadmap Phase 42 Session 2**) `auth-service` does the same to block new user accounts once the user limit is exceeded — all three dimensions now have real, symmetric enforcement (see "Usage-limit blocking" below).
 
 **Concept Reference:** 9.1, 9.2, 9.3
 **Own Postgres Schema:** `license` (table `installed_license`, singleton row — genuinely own state, no duplication of foreign data).
@@ -42,7 +42,11 @@ Like every other service, via `dms-registry-client` (3.2a) — independent of th
 
 ## Tests
 
-`services/license-service/tests/` — 37 tests (previously 32, +5 since **Post-Roadmap Phase 21 Session 1**,
+`services/license-service/tests/` — 37 tests, unchanged since **Post-Roadmap Phase 42 Session 2**
+(the new blocking checks live entirely in `document-service`/`auth-service`'s own test suites, see
+`docs/services/document-service.md`/`docs/services/auth-service.md` — this service's own `GET
+/license/status` response already carried all three dimension names since P9-S1, no new endpoint or
+test needed here). Before that, 37 tests (previously 32, +5 since **Post-Roadmap Phase 21 Session 1**,
 [ADR 0084](../adr/0084-fleet-license-key-rotation.md), all in `test_license_verifier.py`: fallback to
 the previous key during a transition period, preference for the current key with no
 fallback needed, failure when neither the current nor the previous key matches, unchanged
@@ -59,4 +63,13 @@ installation binding).
 - ~~No key rotation~~ — **partially resolved in Post-Roadmap Phase 21 Session 1** ([ADR 0084](../adr/0084-fleet-license-key-rotation.md)): `license_previous_public_key_pem` allows a transition period in which both the new and the previous public verification key are accepted. **No JWKS** deliberately remains the case (ADR 0032) — a compromised PRIVATE key resides with the licensor, not in this service, and still requires a new public key issued there (the operator then enters it via the two settings, no new `license-service` release needed).
 - ~~Installation ID not enforced~~ — closed since P13-S1, see "Installation Binding" above.
 - The "application components" dimension (`licensed_components`) has been enforced since P9-S2, but only for `workflow-service` — the only licensable component that actually exists today (CMIS connector/migration service arrive only in Phase 12).
-- Usage-limit blocking (9.3) has so far only been implemented for the document count (`document-service`'s `POST /documents`) — storage/user limits currently do not prevent new creations, only the status display/events capture them.
+- ~~Usage-limit blocking (9.3) has so far only been implemented for the document count~~ — **closed in Post-Roadmap Phase 42 Session 2**: `storage_gb` and `users` now block new creations exactly like `documents` already did, see "Usage-Limit Blocking (9.3), All Three Dimensions" below.
+
+## Usage-Limit Blocking (9.3), All Three Dimensions (Post-Roadmap Phase 42 Session 2)
+
+All three usage dimensions (`documents`/`storage_gb`/`users`) now actively prevent new creations once exceeded, not just the document count as before this session — each caller queries this service's own already-existing `GET /license/status` (no new endpoint needed, `limits_exceeded` already listed all three dimension names since P9-S1) via a small, deliberately duplicated-per-service `LicenseLimitClient` (same TTL-cache-and-fail-open shape in both callers, matching `document_service.license_client`'s original P9-S2 implementation — same rationale as this project's other per-service crypto/client duplication: cheap to keep in sync, avoids a shared-library dependency for ~40 lines of code).
+
+- **`storage_gb`** (`document-service`): checked once, centrally, inside the shared `_persist_new_document()` helper — every caller that adds a brand-new object to storage (`POST /documents`, `POST /documents/from-quarantine-release`, and the redaction endpoint, all three funnel through this one helper) is covered by a single check rather than three duplicated ones. Additionally checked in `POST /documents/{id}/versions` (`checkin_version`) — a new version is deliberately excluded from the `documents` dimension (no new document row, see below) but genuinely adds new bytes to storage, so it must still be blocked once `storage_gb` is exceeded.
+- **`users`** (`auth-service`): checked in `POST /users`, the one and only endpoint anywhere in this codebase that creates a new named account (no AD/Keycloak self-registration flow exists in the repo) — new `auth_service.license_client.LicenseLimitClient`, wired into `app.state` exactly like `document-service`'s.
+- **`documents`** (unchanged): still only `POST /documents`/`POST /documents/from-quarantine-release` — existing documents/versioning/restoration remain deliberately unaffected (concept 9.3 literally: "does not block retroactively"), exactly as before this session.
+- **A real bug found and fixed only by live verification, not by the test suite**: `infra/docker-compose.yml`'s `auth-service` block was missing `DMS_LICENSE_SERVICE_BASE_URL` entirely (present on `document-service`/`registry-service` since P9-S1/P9-S2, simply never added when `auth-service` needed its first outbound call to `license-service`) — the client silently fell back to its default `http://localhost:8023`, unreachable from inside the container, and `LicenseLimitClient.is_exceeded()`'s fail-open design meant every check simply logged a warning and let the request through with no visible error. Pytest never caught this because both services' tests monkeypatch `LicenseLimitClient.is_exceeded` directly (never a real network call), and the missing env var only manifests against the real Compose network. Found by actually calling `POST /users` through the real gateway against a real installed test license with `users` exceeded and observing an unexpected `201`; fixed by adding the missing environment variable.

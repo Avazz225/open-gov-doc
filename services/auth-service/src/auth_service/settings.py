@@ -25,6 +25,15 @@ class Settings(BaseServiceSettings):
 
     permission_service_base_url: str = "http://localhost:8004"
     monitoring_service_base_url: str = "http://localhost:8026"
+
+    # License limit block on new user creation (concept 9.3, Post-Roadmap
+    # Phase 42 Session 2) - brings the "users" dimension to parity with
+    # document-service's existing "documents"/"storage_gb" blocking
+    # (`POST /users` only, matching `POST /documents`'s "only genuine new
+    # creations" scope). Fail-open (TTL cache) if license-service is
+    # unreachable, same convention as document-service's client.
+    license_service_base_url: str = "http://localhost:8023"
+    license_limit_cache_ttl_seconds: float = 30.0
     # First consumer of this service (P6-S5, superuser break-glass, 4.6).
     subjects: list[str] = ["permission.approval.approved"]
 

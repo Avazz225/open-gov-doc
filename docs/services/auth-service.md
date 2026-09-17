@@ -15,7 +15,7 @@
 | `POST` | `/refresh` | `{refresh_token}` → new tokens. **Since Phase 18 Session 2**: recognizes locally issued refresh tokens via the `iss` claim and issues a fresh pair without Keycloak involvement |
 | `GET` | `/me` | Validate bearer token (JWKS, stateless, no round trip to Keycloak), return normalized identity. **Since P24-S2**: `realm_roles` additionally contains the roles derived from the `groups` JWT claim (AD group→role mapping, 4.4) alongside Keycloak's raw `realm_access.roles`, merged and deduplicated into the same list — see "AD Group→Role Mapping" below |
 | `GET` | `/users` | List users (since P4-S3, basis for the Admin UI user management) — reads directly from Keycloak. **Gated since P6-S5**: requires the capability `admin.user_management` (domain "user/permission management", 4.6), otherwise `403` |
-| `POST` | `/users` | Create user (`username`, `email`, `password`, `first_name`, `last_name`) — 409 for an already-taken username. Gated like `GET /users` |
+| `POST` | `/users` | Create user (`username`, `email`, `password`, `first_name`, `last_name`) — 409 for an already-taken username. Gated like `GET /users`. **Since Post-Roadmap Phase 42 Session 2**: also checks `license-service`'s `"users"` usage dimension first, `403` if exceeded — see "License-Limit Block on New Users" below |
 | `DELETE` | `/users/{id}` | Delete user — 404 for an unknown `id`. Gated like `GET /users` |
 | `GET` | `/users/{id}` | **Since P19-S4** (ADR 0069): reverse identity resolution, counterpart to `GET /users/lookup` — returns only `{id, username}`, `404` for an unknown `id`. Same gate as `GET /users/lookup` (`users.lookup` via the "everyone" group). Must be registered after all static `/users/...` paths (registration order, see ADR 0069) |
 | `GET` | `/me/preferences` | Theme preference of the logged-in account (`{theme}`, default `"auto"`) — since P4-S6 |
@@ -109,6 +109,12 @@ Concept 5.5, verbatim: "vollständige Session-Metadaten (u. a. Client-IP, Gerät
 - **Two separate capabilities** (`admin.user_tracking` for the toggle/retention config, `admin.user_tracking_view` for viewing collected session data) — same asymmetric-risk split this project already uses for `admin.attribute_pseudonymization`/`admin.attribute_reveal` (Post-Roadmap Phase 41 Session 2, ADR 0156): toggling REDUCES what's captured going forward, viewing EXPOSES already-captured behavioral data about a specific principal.
 - **Captured fields, deliberately limited to what's server-side determinable without new infrastructure**: `client_ip` (new `X-DMS-Client-IP` header, forwarded by the gateway unconditionally since this session — previously `request.client.host` was computed there only for its own rate limiting, never passed downstream), `user_agent` (the standard header, passed through unchanged by the gateway's own `filter_headers`), `auth_method` (`technical_account`/`keycloak`/`sso`). **No GeoIP/network-location lookup, no client-side canvas/font fingerprinting** — both deliberately out of scope, see ADR 0157 "Rationale". **"Session duration" is not a stored, correlated login/logout pair** — no session-id concept exists anywhere in this service to correlate events by; approximated at display time as time-since-last-login instead.
 - **Own, shorter retention** (`UserTrackingRetentionConfig`, `GET`/`PUT /user-tracking-retention-config`, concept default 7 days) — enforced by its own poll loop (`_tracking_retention_poll_loop`, `tracking_retention_poll_interval_seconds`, default 3600s, same idiom as `_superuser_poll_loop`), completely independent of the regular audit log's own retention rules (5.2/5.3).
+
+## License-Limit Block on New Users (Concept 9.3, Post-Roadmap Phase 42 Session 2)
+
+`POST /users` checks, right after the existing `admin.user_management` gate, via a new, thin `license_client.py` (`LicenseLimitClient`, 30s TTL cache, fail-open "not exceeded" — the same shape as `document-service`'s original P9-S2 client, deliberately duplicated rather than shared) whether `license-service`'s `GET /license/status` reports the `"users"` dimension in `limits_exceeded` — if so, `403`. This is the one and only endpoint anywhere in this codebase that creates a new named account (no AD/Keycloak self-registration flow exists in the repo), so no other call site needed the check. Brings `"users"` to parity with `document-service`'s pre-existing `"documents"`/`"storage_gb"` blocking, see `docs/services/license-service.md`'s "Usage-Limit Blocking (9.3), All Three Dimensions".
+
+**A real bug found only by live verification, not by the test suite**: `infra/docker-compose.yml`'s `auth-service` block had never needed an outbound call to `license-service` before this session and was missing `DMS_LICENSE_SERVICE_BASE_URL` entirely — the client's default (`http://localhost:8023`) is unreachable from inside the container, and its fail-open design meant the check silently always passed (a warning logged, no error surfaced) until the missing environment variable was added. Both services' pytest suites monkeypatch `LicenseLimitClient.is_exceeded` directly and never make a real network call, so this could only be caught by actually exercising the real Compose network.
 
 ## Not-Shutdown (4.8, since P6-S6)
 
@@ -271,8 +277,14 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/auth-service/tests` (**131 tests**, of which 11 new since **Post-Roadmap Phase
-41 Session 3** ([ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)),
+`uv run pytest services/auth-service/tests` (**136 tests**, of which 5 new since **Post-Roadmap Phase
+42 Session 2** — new `test_license_limit.py`: `LicenseLimitClient.is_exceeded` unit tests (exceeded/not
+exceeded/fails open, mirroring `document-service`'s identically named test module), `POST /users`
+blocked `403` when the `"users"` license dimension is exceeded, allowed `201` when it is not. A local
+`_default_no_license_limit_exceeded` override fixture (same name, same shadowing trick as
+`document-service`'s) lets these tests observe the client's real behavior instead of the global
+autouse patch every other test relies on. Before that 131 tests, of which 11 new since **Post-Roadmap
+Phase 41 Session 3** ([ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)),
 `test_user_tracking.py`: config get/put without permission → `403`, get defaults to `enabled: false`
 for an unconfigured principal, put/get roundtrip, a login is NOT recorded while disabled, a login IS
 recorded once enabled including the new `X-DMS-Client-IP`/`User-Agent` headers, a refresh is recorded,

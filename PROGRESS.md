@@ -2,8 +2,75 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P42-S1 (XDOMEA import hardening + missing case-creation UI — first session of
+**Last completed:** P42-S2 (`license-service`: usage-limit enforcement parity — second session of
 Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
+explicitly says none is expected (pure functional completion of already-established patterns).
+
+Before this session, only the `documents` dimension actively blocked new creations (`document-service`'s
+`POST /documents`, since P9-S2) — `storage_gb`/`users` were display-only, even though `license-service`'s
+`GET /license/status` had already reported all three dimensions' `exceeded` state (and listed them in
+`limits_exceeded`) since P9-S1. No new license-service endpoint was needed at all; this was purely about
+adding the missing caller-side checks, mirroring the exact TTL-cache/fail-open `LicenseLimitClient`
+pattern `document-service` already established for `documents`.
+
+**Implementation**: `storage_gb` is checked in `document-service`, `users` in `auth-service`.
+- `storage_gb`: rather than duplicating the check at each of `POST /documents`/`POST
+/documents/from-quarantine-release`/the redaction endpoint, the check now lives once, centrally, inside
+the shared `_persist_new_document()` helper all three funnel through — one check covers all three
+callers (and any future one). Additionally checked in `POST /documents/{id}/versions` (`checkin_version`),
+which is deliberately excluded from the `documents` dimension (no new document row) but genuinely adds
+new bytes to storage, so a full storage license must still block it — a real, intentional scope
+difference from how `documents` is checked, not an inconsistency.
+- `users`: new `auth_service.license_client.LicenseLimitClient` (a deliberately duplicated, not shared,
+copy of `document_service.license_client`'s implementation — same rationale as this project's other
+small per-service client/crypto duplication) checked in `POST /users`, the one and only endpoint anywhere
+in this codebase that creates a new named account.
+
+**Tests**: `document-service` 376 tests (previously 373, +3 — new `test_license_limit.py` cases:
+`create_document` blocked when `storage_gb` is exceeded, `checkin_version` blocked when `storage_gb` is
+exceeded, `checkin_version` allowed when it is not). `auth-service` 136 tests (previously 131, +5 — new
+`test_license_limit.py`: `LicenseLimitClient` unit tests mirroring document-service's own, `POST /users`
+blocked/allowed depending on the `users` dimension; needed its own local override of the global
+`_default_no_license_limit_exceeded` autouse fixture, same shadowing trick document-service's test file
+already used, so these specific tests can observe the client's real behavior). `ruff check`/`ruff format`
+clean throughout (one real import-order fix needed in `auth-service/main.py` after adding the new
+import).
+
+**A real bug found only by live verification, not caught by either test suite**: `infra/docker-compose.yml`'s
+`auth-service` block was missing `DMS_LICENSE_SERVICE_BASE_URL` entirely (present on
+`document-service`/`registry-service` since P9-S1/P9-S2, simply never added because `auth-service` never
+had an outbound call to `license-service` before this session). The client's default
+(`http://localhost:8023`) is unreachable from inside the container; combined with the client's
+deliberate fail-open design, every check silently passed with only a logged warning — `POST /users`
+returned `201` even with a real installed license reporting `users` as exceeded. Neither test suite could
+have caught this: both monkeypatch `LicenseLimitClient.is_exceeded` directly and never make a real network
+call. Found by actually calling `POST /users` through the real gateway and observing the unexpected `201`;
+fixed by adding the missing environment variable and restarting the container (no image rebuild needed,
+config-only fix).
+
+**Live-verified** against the rebuilt, restarted real stack (`document-service`, `auth-service`,
+`license-service`, through the real gateway): granted `users-admin` a temporary `domain-admin-license`
+role assignment, issued and installed a real signed test license (via `license-service`'s existing test
+fixture, `tests/fixtures/license_factory.py`) with `storage_limit_gb=1.0` (below the real ~1.74GB
+installation-wide usage) — confirmed `POST /documents` and `POST /documents/{id}/versions` both correctly
+returned `403` with the new "Speicherlimit der Lizenz überschritten" message, then confirmed a document
+upload succeeded normally once an unlimited license was reinstalled. Separately issued a `user_model:
+"named", max_users: 10` test license (below the real 18 named accounts) — first attempt incorrectly
+returned `201` (the docker-compose bug above, caught right here), fixed, then re-verified `POST /users`
+correctly returned `403` with "Nutzerlimit der Lizenz überschritten", and `201` again once an unlimited
+license was reinstalled. All test artifacts cleaned up afterward: both accidentally/deliberately created
+test users deleted, the test document soft-deleted to trash, the temporary `domain-admin-license` role
+assignment revoked. The installation is left with a harmless unlimited test license installed (no
+`DELETE /license` endpoint exists, same precedent as every prior license-service live verification).
+
+No `graphify update .` — not a phase end (Phase 42 has two more sessions planned: P42-S3/S4). Next step:
+**P42-S3** (`object-type-service`: a server-side resolved-display endpoint for the Kennzeichen config, to
+remove client-side duplication across ≥3 frontends).
+
+---
+
+Immediately before P42-S2: **P42-S1** (XDOMEA import hardening + missing case-creation UI — first session
+of Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
 explicitly says none is expected (pure functional completion of already-established patterns).
 
 Closed both remaining gaps ADR 0142 (Post-Roadmap Phase 34 Session 4) itself flagged as still open,
