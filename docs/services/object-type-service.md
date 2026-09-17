@@ -59,6 +59,8 @@ Known production callers of the now-gated endpoints and how they authenticate: `
 
 Supported attribute types: `string`, `decimal`, `integer`, `boolean`, `date`, `reference`.
 
+**`personal_data`** (boolean, optional, 5.2, Post-Roadmap Phase 41 Session 2, [ADR 0156](../adr/0156-attribute-pseudonymization-reversible-vault.md)): a free-form key inside the attribute definition, not a schema field this service itself validates or acts on (`dms_constraint_engine` ignores unrecognized keys) — marks an attribute as eligible for `document-service`'s attribute-level pseudonymization vault (`POST /documents/{id}/attributes/{name}/pseudonymize`). `admin-ui`'s `ObjectTypeEditor` exposes it as a per-attribute checkbox so it's reachable without raw API calls.
+
 ## Enforced Object Hierarchy & Icons (2.2a, since P5b-S1)
 
 Each object type can use `allowed_parent_types` to define under which folder classes it may be placed — e.g. `meinTopLevelOrd` only under `"$ROOT"` (directly under the root), `meinSecondLevelOrd` only under `meinTopLevelOrd`, `meinDoc` only under `meinSecondLevelOrd`. Multiple entries (several allowed parent classes) are permitted. If the field is missing or the list is empty, the type remains placeable everywhere, as before.

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -225,6 +225,49 @@ class ClassificationLevelUpdate(BaseModel):
 
     classification_level: Literal["VS-NfD", "VS-VERTRAULICH", "GEHEIM", "STRENG GEHEIM"]
     changed_by: str
+
+
+class PseudonymizeAttributeRequest(BaseModel):
+    """Trigger pseudonymization of one personal-data attribute (5.2, Post-
+    Roadmap Phase 41 Session 2, ADR 0156) - `pseudonymized_by` mirrors
+    `ClassificationLevelUpdate.changed_by` (opaque, attribution/audit only,
+    independent of the `X-DMS-Principal`-based `admin.attribute_
+    pseudonymization` permission check)."""
+
+    pseudonymized_by: str
+    reason: str | None = None
+
+
+class RevealAttributeRequest(BaseModel):
+    revealed_by: str
+
+
+class PseudonymizedAttributeOut(BaseModel):
+    id: str
+    document_id: str
+    attribute_name: str
+    reason: str | None
+    pseudonymized_by: str
+    pseudonymized_at: datetime
+    last_revealed_by: str | None
+    last_revealed_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class RevealedAttributeOut(BaseModel):
+    """The decrypted original value (5.2, Post-Roadmap Phase 41 Session 2)
+    - returned transiently in this response only, never persisted in
+    plaintext anywhere and never written back into `Document.attributes`
+    (restoring the live value is a separate, not-yet-built action, see
+    docs/services/document-service.md "Open Points")."""
+
+    document_id: str
+    attribute_name: str
+    value: Any
+    reason: str | None
+    pseudonymized_by: str
+    pseudonymized_at: datetime
 
 
 class RedactionRegion(BaseModel):

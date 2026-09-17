@@ -15,6 +15,12 @@ DSN = os.environ.get(
 # Test-Fixtures oben - sonst testet TestClient(app) unbemerkt gegen die Live-DB,
 # siehe PROGRESS.md "Tooling & Testing" (P5-S2-Datenverlust, P5b-S6-Leck).
 os.environ["DMS_POSTGRES_DSN"] = DSN
+# Attribute-level pseudonymization vault (5.2, Post-Roadmap Phase 41 Session
+# 2, ADR 0156) - same dev-only placeholder key as `infra/docker-compose.yml`,
+# `setdefault` so a real CI-provided key still takes precedence.
+os.environ.setdefault(
+    "DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU="
+)
 NATS_URL = os.environ.get("TEST_NATS_URL", "nats://localhost:4222")
 STORAGE_SERVICE_URL = os.environ.get("TEST_STORAGE_SERVICE_URL", "http://localhost:8005")
 PERMISSION_SERVICE_URL = os.environ.get("TEST_PERMISSION_SERVICE_URL", "http://localhost:8004")
@@ -223,6 +229,66 @@ async def _grant_retention_permission():
         response.raise_for_status()
 
 
+PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID = "document-service-test-pseudonymization-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_pseudonymization_permission():
+    """Post-Roadmap Phase 41 Session 2 (ADR 0156): `POST .../attributes/
+    {name}/pseudonymize` requires `admin.attribute_pseudonymization`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-pseudonymization")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": PSEUDONYMIZATION_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
+PII_REVEAL_ADMIN_PRINCIPAL_ID = "document-service-test-pii-reveal-admin"
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _grant_pii_reveal_permission():
+    """Post-Roadmap Phase 41 Session 2 (ADR 0156): `POST .../attributes/
+    {name}/reveal` requires `admin.attribute_reveal` - deliberately a
+    SEPARATE capability/principal from pseudonymization above, see
+    `_require_reveal_permission`'s docstring in `main.py`."""
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
+        roles = (await pc.get("/roles")).json()
+        role_id = next(r["id"] for r in roles if r["name"] == "domain-admin-pii-reveal")
+        existing = (
+            await pc.get(
+                "/role-assignments", params={"principal_id": PII_REVEAL_ADMIN_PRINCIPAL_ID}
+            )
+        ).json()
+        if any(a["role_id"] == role_id for a in existing):
+            return
+        response = await pc.post(
+            "/role-assignments",
+            json={
+                "principal_type": "user",
+                "principal_id": PII_REVEAL_ADMIN_PRINCIPAL_ID,
+                "role_id": role_id,
+                "resource_id": "root",
+            },
+        )
+        response.raise_for_status()
+
+
 DOCUMENT_CONFIG_ADMIN_PRINCIPAL_ID = "document-service-test-document-config-admin"
 
 
@@ -342,6 +408,7 @@ async def _clean_tables():
             text(
                 "TRUNCATE document.document_lock, document.document_version, "
                 "document.legal_hold, document.deletion_register_entry, "
+                "document.pseudonymized_attribute, "
                 "document.document, document.upload_config, document.retention_config, "
                 "document.trash_config, document.audit_trace_config, "
                 "document.audit_trace_role_override, document.export_config, "

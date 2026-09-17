@@ -473,6 +473,12 @@ export interface ObjectTypeAttribute {
   pattern?: string;
   min?: number;
   max?: number;
+  // Attribute-level pseudonymization eligibility (5.2, Post-Roadmap Phase
+  // 41 Session 2, ADR 0156) - a free-form key inside the already schema-
+  // free attribute definition (no backend schema change), marks this
+  // attribute as eligible for document-service's pseudonymize/reveal
+  // endpoints.
+  personal_data?: boolean;
 }
 
 // Sentinel for "can be placed directly under the root" (2.2a, ADR 0013) -

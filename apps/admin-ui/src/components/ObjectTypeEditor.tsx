@@ -56,10 +56,22 @@ interface AttributeDraft {
   pattern: string;
   min: string;
   max: string;
+  // Attribute-level pseudonymization eligibility (5.2, Post-Roadmap Phase
+  // 41 Session 2, ADR 0156).
+  personalData: boolean;
 }
 
 function emptyAttribute(): AttributeDraft {
-  return { name: "", label: "", type: "string", required: false, pattern: "", min: "", max: "" };
+  return {
+    name: "",
+    label: "",
+    type: "string",
+    required: false,
+    pattern: "",
+    min: "",
+    max: "",
+    personalData: false,
+  };
 }
 
 function toBackendAttribute(draft: AttributeDraft): ObjectTypeAttribute {
@@ -68,6 +80,9 @@ function toBackendAttribute(draft: AttributeDraft): ObjectTypeAttribute {
     type: draft.type,
     required: draft.required,
   };
+  if (draft.personalData) {
+    attribute.personal_data = true;
+  }
   if (draft.type === "string" && draft.pattern.trim()) {
     attribute.pattern = draft.pattern.trim();
   }
@@ -196,6 +211,7 @@ export function ObjectTypeEditor() {
         pattern: a.pattern ?? "",
         min: a.min !== undefined ? String(a.min) : "",
         max: a.max !== undefined ? String(a.max) : "",
+        personalData: Boolean(a.personal_data),
       }))
     );
     setIcon(ot.icon ?? "");
@@ -570,6 +586,14 @@ export function ObjectTypeEditor() {
                     onChange={(e) => updateAttribute(index, { required: e.target.checked })}
                   />
                   {t("objectTypes.attributeRequired")}
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={attribute.personalData}
+                    onChange={(e) => updateAttribute(index, { personalData: e.target.checked })}
+                  />
+                  {t("objectTypes.attributePersonalData")}
                 </label>
                 {attribute.type === "string" && (
                   <label>

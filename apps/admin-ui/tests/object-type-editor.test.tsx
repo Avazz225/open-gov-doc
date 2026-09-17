@@ -133,6 +133,48 @@ describe("ObjectTypeEditor", () => {
     expect(putObjectTypeLayoutMock).not.toHaveBeenCalled();
   });
 
+  it("creates an object type with a personal-data attribute (5.2, ADR 0156)", async () => {
+    createObjectTypeMock.mockResolvedValue({ ...RECHNUNG, id: 99 });
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Vertrag" } });
+    fireEvent.click(screen.getByText("Attribut hinzufügen"));
+    fireEvent.change(screen.getByLabelText("Technischer Name"), { target: { value: "SVNR" } });
+    fireEvent.click(screen.getByLabelText("Personenbezogen (pseudonymisierbar)"));
+
+    fireEvent.submit(screen.getByRole("form", { name: "Objekttyp anlegen" }));
+
+    await waitFor(() =>
+      expect(createObjectTypeMock).toHaveBeenCalledWith(
+        "token-123",
+        expect.objectContaining({
+          attributes: [{ name: "SVNR", type: "string", required: false, personal_data: true }],
+        })
+      )
+    );
+  });
+
+  it("loads an existing personal-data attribute flag into the form for editing", async () => {
+    const withPersonalData = {
+      ...RECHNUNG,
+      attributes: [
+        { name: "Betrag", type: "decimal", required: true },
+        { name: "SVNR", type: "string", required: false, personal_data: true },
+      ],
+    };
+    listObjectTypesMock.mockResolvedValue([withPersonalData, PROJEKTORDNER]);
+    updateObjectTypeMock.mockResolvedValue(withPersonalData);
+    renderObjectTypeEditor();
+    await waitFor(() => expect(listObjectTypesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getAllByText("Bearbeiten")[0]);
+
+    const checkboxes = screen.getAllByLabelText("Personenbezogen (pseudonymisierbar)");
+    expect((checkboxes[0] as HTMLInputElement).checked).toBe(false);
+    expect((checkboxes[1] as HTMLInputElement).checked).toBe(true);
+  });
+
   it("persists an initial smart layout for all three purposes when a display label differs", async () => {
     createObjectTypeMock.mockResolvedValue({ id: 42 });
     putObjectTypeLayoutMock.mockResolvedValue({});

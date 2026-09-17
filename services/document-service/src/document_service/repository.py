@@ -16,6 +16,7 @@ from document_service.models import (
     ExportConfig,
     FolderExportJob,
     LegalHold,
+    PseudonymizedAttribute,
     RecordsQuarantine,
     RetentionConfig,
     ShareLink,
@@ -80,6 +81,13 @@ class ClassificationDowngradeError(Exception):
     (post-roadmap phase 31 session 3, ADR 0114) - `PUT
     .../classification-level` only ever sets or raises, see
     `set_classification_level` below."""
+
+
+class AlreadyPseudonymizedError(Exception):
+    """An attribute already has an active vault entry (5.2, Post-Roadmap
+    Phase 41 Session 2, ADR 0156) - reveal (and, in a future session,
+    restore) the existing one first rather than encrypting a second,
+    orphaned original value nothing would ever decrypt."""
 
 
 # Rank order for the four levels from `ClassificationLevelUpdate`
@@ -179,6 +187,102 @@ async def list_derived_documents(session: AsyncSession, document_id: str) -> lis
         select(Document)
         .where(Document.derived_from_document_id == document_id, Document.deleted_at.is_(None))
         .order_by(Document.created_at)
+    )
+    return list(result.scalars().all())
+
+
+# Fixed placeholder overwriting a pseudonymized attribute's live value
+# (5.2, Post-Roadmap Phase 41 Session 2, ADR 0156) - deliberately a
+# constant sentinel, not e.g. an empty string or `None`, so the UI/API
+# consumer can always tell "pseudonymized" apart from "genuinely empty".
+PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER = "[PSEUDONYMISIERT]"
+
+
+async def pseudonymize_attribute(
+    session: AsyncSession,
+    document_id: str,
+    attribute_name: str,
+    *,
+    encrypted_value: bytes,
+    pseudonymized_by: str,
+    reason: str | None,
+) -> PseudonymizedAttribute:
+    """Overwrites `Document.attributes[attribute_name]` with a fixed
+    placeholder and stores the encrypted original in a new vault row
+    (5.2, Post-Roadmap Phase 41 Session 2, ADR 0156) - `encrypted_value`
+    is produced by the caller (`main.py`, `crypto.encrypt`), this function
+    stays free of any encryption-key knowledge, the same separation
+    `signature_service.repository` keeps from its own connector-level
+    crypto operations. Eligibility (object type schema `personal_data`
+    flag) and "does the attribute actually have a value" are likewise the
+    caller's responsibility (both require the plaintext value/an
+    object-type-service round trip, neither belongs in this module) -
+    this function only owns the one invariant it CAN own transactionally:
+    no second, orphaned vault entry for an already-pseudonymized
+    attribute."""
+    document = await get_document(session, document_id)
+    existing = await session.execute(
+        select(PseudonymizedAttribute.id).where(
+            PseudonymizedAttribute.document_id == document_id,
+            PseudonymizedAttribute.attribute_name == attribute_name,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise AlreadyPseudonymizedError(
+            f"Attribut {attribute_name!r} von Dokument {document_id!r} ist bereits pseudonymisiert"
+        )
+    vault_entry = PseudonymizedAttribute(
+        id=str(uuid.uuid4()),
+        document_id=document_id,
+        attribute_name=attribute_name,
+        encrypted_value=encrypted_value,
+        reason=reason,
+        pseudonymized_by=pseudonymized_by,
+        pseudonymized_at=datetime.now(UTC),
+    )
+    session.add(vault_entry)
+    document.attributes = {
+        **document.attributes,
+        attribute_name: PSEUDONYMIZED_ATTRIBUTE_PLACEHOLDER,
+    }
+    document.updated_at = datetime.now(UTC)
+    await session.flush()
+    return vault_entry
+
+
+async def get_pseudonymized_attribute(
+    session: AsyncSession, document_id: str, attribute_name: str
+) -> PseudonymizedAttribute:
+    result = await session.execute(
+        select(PseudonymizedAttribute).where(
+            PseudonymizedAttribute.document_id == document_id,
+            PseudonymizedAttribute.attribute_name == attribute_name,
+        )
+    )
+    vault_entry = result.scalar_one_or_none()
+    if vault_entry is None:
+        raise NotFoundError(
+            f"Attribut {attribute_name!r} von Dokument {document_id!r} ist nicht pseudonymisiert"
+        )
+    return vault_entry
+
+
+async def mark_revealed(session: AsyncSession, vault_entry_id: str, *, revealed_by: str) -> None:
+    vault_entry = await session.get(PseudonymizedAttribute, vault_entry_id)
+    if vault_entry is None:
+        raise NotFoundError(f"Vault-Eintrag {vault_entry_id!r} unbekannt")
+    vault_entry.last_revealed_by = revealed_by
+    vault_entry.last_revealed_at = datetime.now(UTC)
+    await session.flush()
+
+
+async def list_pseudonymized_attributes(
+    session: AsyncSession, document_id: str
+) -> list[PseudonymizedAttribute]:
+    result = await session.execute(
+        select(PseudonymizedAttribute)
+        .where(PseudonymizedAttribute.document_id == document_id)
+        .order_by(PseudonymizedAttribute.pseudonymized_at)
     )
     return list(result.scalars().all())
 

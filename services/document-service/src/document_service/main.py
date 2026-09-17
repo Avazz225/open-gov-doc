@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -32,7 +33,7 @@ from fastapi import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from document_service import metrics, repository, retention_actions
+from document_service import crypto, metrics, repository, retention_actions
 from document_service.approval_client import ApprovalClient
 from document_service.audit_client import AuditServiceClient
 from document_service.consumer import start_consuming
@@ -78,6 +79,8 @@ from document_service.schemas import (
     LockOut,
     LockReleaseRequest,
     MarkArchivedRequest,
+    PseudonymizeAttributeRequest,
+    PseudonymizedAttributeOut,
     PublicShareLinkOut,
     ReconcileRestoreDeletionRequest,
     RecordsQuarantineCreate,
@@ -87,6 +90,8 @@ from document_service.schemas import (
     RetentionConfigIn,
     RetentionConfigOut,
     RetentionUpdate,
+    RevealAttributeRequest,
+    RevealedAttributeOut,
     ShareLinkConfigIn,
     ShareLinkConfigOut,
     ShareLinkCreate,
@@ -2265,6 +2270,207 @@ async def list_derived_documents(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await _require_document_permission(x_dms_principal, document.id, access_type="read")
     return await repository.list_derived_documents(session, document_id)
+
+
+def _get_pseudonymization_key() -> bytes:
+    """Deliberately no fallback to a randomly generated key (5.2, Post-
+    Roadmap Phase 41 Session 2, ADR 0156) - same rationale as
+    `archival_service.keystore.EnvKeyStore`: a random fallback would
+    change on every restart and permanently render already-pseudonymized
+    attributes unrecoverable. Raised as a `503` (not `500`) - this is a
+    missing installation-time configuration, not an unexpected server
+    error."""
+    if not settings.attribute_pseudonymization_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Kein Verschlüsselungsschlüssel für Attribut-Pseudonymisierung "
+                "konfiguriert (DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY)"
+            ),
+        )
+    return base64.b64decode(settings.attribute_pseudonymization_key)
+
+
+async def _require_pseudonymization_permission(x_dms_principal: str) -> None:
+    """RBAC (5.2, Post-Roadmap Phase 41 Session 2, ADR 0156) - deliberately
+    a NEW domain-admin capability (`admin.attribute_pseudonymization`, role
+    "domain-admin-pseudonymization"), split from the reveal capability
+    below the same way `admin.legal_hold`/`admin.deletion` are split
+    (ADR 0075): pseudonymizing an attribute REDUCES exposure of personal
+    data (comparatively low-risk), revealing the original value back
+    EXPOSES it again (materially higher-risk) - an installation may want
+    different people responsible for each."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.attribute_pseudonymization"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Attribut-Pseudonymisierung'",
+        )
+
+
+async def _require_reveal_permission(x_dms_principal: str) -> None:
+    """See `_require_pseudonymization_permission` above for why this is a
+    separate capability (`admin.attribute_reveal`, role "domain-admin-pii-
+    reveal") rather than the same one."""
+    if not x_dms_principal:
+        raise HTTPException(status_code=401, detail="Fehlender X-DMS-Principal-Header")
+    if not await app.state.permission_client.has_permission(
+        x_dms_principal, "admin.attribute_reveal"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Fehlende Domain-Admin-Rolle 'Pseudonymisierte Attribute aufdecken'",
+        )
+
+
+@app.post(
+    "/documents/{document_id}/attributes/{attribute_name}/pseudonymize",
+    response_model=PseudonymizedAttributeOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def pseudonymize_document_attribute(
+    document_id: str,
+    attribute_name: str,
+    payload: PseudonymizeAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> PseudonymizedAttributeOut:
+    """Concept 5.2's GDPR-tension fix (Post-Roadmap Phase 41 Session 2,
+    ADR 0156): pseudonymize one personal-data attribute instead of hard-
+    deleting the whole document. Eligibility requires BOTH the attribute
+    to actually have a value AND its object-type schema entry to carry
+    `personal_data: true` (see `docs/services/object-type-service.md`) -
+    an object type without this flag makes every one of its attributes
+    ineligible, on purpose (default-deny, not default-allow, for a
+    compliance-relevant action)."""
+    await _require_pseudonymization_permission(x_dms_principal)
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if document.object_type_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Dokument hat keinen Objekttyp - kein Attributschema bekannt",
+        )
+    object_type = await app.state.object_type_client.get(document.object_type_id)
+    if object_type is None:
+        raise HTTPException(status_code=400, detail="Objekttyp des Dokuments nicht gefunden")
+    attribute_definition = next(
+        (a for a in object_type["attributes"] if a.get("name") == attribute_name), None
+    )
+    if attribute_definition is None or not attribute_definition.get("personal_data"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Attribut {attribute_name!r} ist im Objekttyp nicht als "
+                "personenbezogen markiert (personal_data)"
+            ),
+        )
+
+    value = document.attributes.get(attribute_name)
+    if value is None or value == "":
+        raise HTTPException(status_code=400, detail=f"Attribut {attribute_name!r} hat keinen Wert")
+
+    key = _get_pseudonymization_key()
+    encrypted_value = crypto.encrypt(json.dumps(value).encode("utf-8"), key)
+
+    try:
+        vault_entry = await repository.pseudonymize_attribute(
+            session,
+            document_id,
+            attribute_name,
+            encrypted_value=encrypted_value,
+            pseudonymized_by=payload.pseudonymized_by,
+            reason=payload.reason,
+        )
+    except repository.AlreadyPseudonymizedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    await publish_event(
+        "document.attribute.pseudonymized",
+        subject=document_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.pseudonymized_by,
+    )
+    return vault_entry
+
+
+@app.post(
+    "/documents/{document_id}/attributes/{attribute_name}/reveal",
+    response_model=RevealedAttributeOut,
+)
+async def reveal_document_attribute(
+    document_id: str,
+    attribute_name: str,
+    payload: RevealAttributeRequest,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> RevealedAttributeOut:
+    """Decrypts and returns the original value of a pseudonymized
+    attribute (5.2, Post-Roadmap Phase 41 Session 2, ADR 0156) -
+    transiently, in this response only: the live `Document.attributes`
+    value stays the placeholder, nothing is restored in place (see
+    docs/services/document-service.md "Open Points"). Always published as
+    `document.attribute.revealed`, unconditionally (unlike
+    `_should_log_document_access`'s configurable viewed/downloaded
+    logging) - re-exposing personal data is inherently security-relevant
+    every single time, not an optionally-quiet business-as-usual read."""
+    await _require_reveal_permission(x_dms_principal)
+    try:
+        vault_entry = await repository.get_pseudonymized_attribute(
+            session, document_id, attribute_name
+        )
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    key = _get_pseudonymization_key()
+    try:
+        original_value = json.loads(crypto.decrypt(vault_entry.encrypted_value, key))
+    except crypto.DecryptionError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    await repository.mark_revealed(session, vault_entry.id, revealed_by=payload.revealed_by)
+    await session.commit()
+    await publish_event(
+        "document.attribute.revealed",
+        subject=document_id,
+        payload={"attribute_name": attribute_name},
+        actor=payload.revealed_by,
+    )
+    return RevealedAttributeOut(
+        document_id=document_id,
+        attribute_name=attribute_name,
+        value=original_value,
+        reason=vault_entry.reason,
+        pseudonymized_by=vault_entry.pseudonymized_by,
+        pseudonymized_at=vault_entry.pseudonymized_at,
+    )
+
+
+@app.get(
+    "/documents/{document_id}/attributes/pseudonymized",
+    response_model=list[PseudonymizedAttributeOut],
+)
+async def list_pseudonymized_document_attributes(
+    document_id: str,
+    x_dms_principal: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
+) -> list[PseudonymizedAttributeOut]:
+    """Which attributes are currently pseudonymized (no plaintext, no
+    `encrypted_value` exposed) - gated like any other regular document
+    read (`document.read`), NOT the admin-only reveal capability, mirroring
+    `list_derived_documents` above."""
+    try:
+        document = await repository.get_document(session, document_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _require_document_permission(x_dms_principal, document.id, access_type="read")
+    return await repository.list_pseudonymized_attributes(session, document_id)
 
 
 @app.get("/documents/{document_id}/redaction-preview/page-count")

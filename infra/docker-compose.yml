@@ -498,6 +498,10 @@ services:
       # `STORAGE_SERVICE_GOVERNANCE_BYPASS_ROLE`, see ADR 0030).
       DMS_RETENTION_POLL_INTERVAL_SECONDS: ${DOCUMENT_SERVICE_RETENTION_POLL_INTERVAL_SECONDS:-3600}
       DMS_GOVERNANCE_BYPASS_ROLE: ${DOCUMENT_SERVICE_GOVERNANCE_BYPASS_ROLE:-dms-admin}
+      # Attribute-level pseudonymization vault (5.2, Post-Roadmap Phase 41
+      # Session 2, ADR 0156) - dev-only default key, same "obviously not for
+      # production" style as ARCHIVAL_SERVICE_ENCRYPTION_KEY below.
+      DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY: ${DOCUMENT_SERVICE_PSEUDONYMIZATION_KEY:-YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU=}
       # Sensor concept (10.1, P11-S1) - no depends_on, same fail-open
       # pattern as the license client above.
       DMS_MONITORING_SERVICE_BASE_URL: http://monitoring-service:8000

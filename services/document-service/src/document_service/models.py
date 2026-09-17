@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 Base = make_declarative_base("document")
@@ -268,6 +268,40 @@ class RecordsQuarantine(Base):
     set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     released_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PseudonymizedAttribute(Base):
+    """Reversible attribute-level pseudonymization vault (5.2, Post-Roadmap
+    Phase 41 Session 2, ADR 0156) - the concept's own solution to the GDPR
+    retention-vs-deletion tension: pseudonymize individual personal-data
+    attributes instead of hard-deleting an entire document that's still
+    under a retention obligation. `repository.pseudonymize_attribute`
+    overwrites the live `Document.attributes[attribute_name]` value with a
+    fixed placeholder at pseudonymization time - the ORIGINAL value lives
+    ONLY here, AES-256-GCM-encrypted (`crypto.py`, same algorithm as
+    `archival_service.crypto`, ADR 0029 - deliberately duplicated rather
+    than shared, the same precedent that module already established for
+    itself vs. `workflow_service.federation_crypto`). One row per
+    pseudonymized attribute; `last_revealed_by`/`last_revealed_at` track
+    only the most recent reveal for at-a-glance visibility on this row -
+    the full reveal history lives in the audit trail via
+    `document.attribute.revealed` events, not here."""
+
+    __tablename__ = "pseudonymized_attribute"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("document.document.id"), index=True
+    )
+    attribute_name: Mapped[str] = mapped_column(String(256))
+    encrypted_value: Mapped[bytes] = mapped_column(LargeBinary)
+    reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    pseudonymized_by: Mapped[str] = mapped_column(String(128))
+    pseudonymized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_revealed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_revealed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class DeletionRegisterEntry(Base):

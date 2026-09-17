@@ -2,7 +2,73 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P41-S1 (PAdES-B-LTA / long-term signature archiving — first session of Phase 41,
+**Last completed:** P41-S2 (Concept 5.2: real attribute-level pseudonymization — second session of
+Phase 41, "Compliance Gaps from the Concept Document", [ADR 0156](docs/adr/0156-attribute-pseudonymization-reversible-vault.md)).
+
+Concept 5.2's entire specification is one sentence: pseudonymize/redact individual personal-data
+attributes instead of hard-deleting a whole document under a retention obligation — it doesn't
+disambiguate "Pseudonymisierung" (reversible-by-design under GDPR) from "Schwärzung" (one-way
+redaction), doesn't name a trigger mechanism or an eligible-attribute marker, and doesn't say which of
+`document-service`/`folder-service`/`case-service` (all three independently store an `attributes` JSON
+column) this applies to.
+
+**Asked the user the one genuine fork**: reversible pseudonymization vs. irreversible redaction vs.
+building both. **The user chose reversible pseudonymization** — the original value is encrypted (AES-
+256-GCM, `crypto.py`, same shape as `archival_service.crypto`/ADR 0029, deliberately duplicated rather
+than shared) into a new vault table, the live attribute value is overwritten with a fixed placeholder
+(`"[PSEUDONYMISIERT]"`), and an authorized admin can later decrypt and view the original via a dedicated
+reveal endpoint. Two further scoping decisions resolved via research/precedent without a second
+question: **document-service only this session** (folder-service/case-service explicitly deferred —
+building three near-identical vault/crypto/RBAC stacks in one session would have traded depth for
+breadth) and **two separate RBAC capabilities** (`admin.attribute_pseudonymization`/`admin.attribute_
+reveal`, extending the `admin.legal_hold`-vs-`admin.deletion` split from ADR 0075 one step further —
+pseudonymizing reduces exposure, revealing re-exposes it, materially different risk).
+
+**Implementation**: new `personal_data: true` free-form key inside `object-type-service`'s already
+schema-free `Attribute` definition (no backend schema change needed — `dms_constraint_engine` ignores
+unrecognized keys) marks an attribute eligible; `admin-ui`'s `ObjectTypeEditor` gained a matching per-
+attribute checkbox. `document-service` gained a new `crypto.py`, a new `pseudonymized_attribute` vault
+table, a new settings key (`DMS_ATTRIBUTE_PSEUDONYMIZATION_KEY`, same "no random fallback key" principle
+as `archival_service.keystore.EnvKeyStore`), and three new endpoints: `POST /documents/{id}/attributes/
+{name}/pseudonymize` (encrypts + overwrites the live value, `400` if not eligible/no value, `409` if
+already pseudonymized), `POST .../reveal` (decrypts and returns the original value **transiently, in the
+response only** — nothing is restored in place; always published as `document.attribute.revealed`,
+unconditionally, unlike the configurable viewed/downloaded logging), and `GET .../pseudonymized` (status
+listing, no plaintext, gated like an ordinary document read). Two new domain-admin roles seeded in
+`permission-service` (`domain-admin-pseudonymization`/`domain-admin-pii-reveal`).
+
+**Tests**: `document-service` 373 tests (previously 360, +13 — new `test_attribute_pseudonymization.py`:
+RBAC split between the two capabilities, eligibility checks, the full pseudonymize→reveal round trip
+including value integrity and no-live-restore, double-pseudonymize `409`, listing).
+`permission-service` 181 tests (unchanged — the two new roles are read dynamically from
+`DOMAIN_ADMIN_ROLES`, no hardcoded count to update). `admin-ui` 249 tests (previously 247, +2 — the new
+checkbox submitted on create and correctly loaded per-attribute when editing); `npm run typecheck`/
+`npm run lint`/`npm run build` all clean. `ruff check`/`ruff format` clean throughout.
+
+**Live-verified** against the rebuilt, restarted real stack (`document-service`, `permission-service`,
+`admin-ui`): created a real object type with a `personal_data`-flagged attribute, a real document with a
+value in it, pseudonymized it (`201`, live attribute became the placeholder, unrelated attribute
+untouched), revealed it (`200`, original value round-tripped correctly through encryption, live
+attribute still the placeholder), and confirmed the listing endpoint tracks the reveal
+(`last_revealed_by`/`last_revealed_at`). Confirmed the two new domain-admin roles seed correctly on a
+fresh `permission-service` startup and `admin-ui`'s `/object-types/` page is reachable after rebuild.
+Test artifacts cleaned up afterward (object type deleted, document soft-deleted to trash).
+
+**Deliberately deferred, documented as Open Points (ADR 0156 "Consequences")**: no expiry/purge for
+vault entries (the encrypted original persists indefinitely, still regulated personal data for as long
+as it exists — the concept's own "deletion obligation" framing is therefore only partially discharged by
+this session); no automatic trigger on retention expiry (manual/admin-invoked only this session — a
+legitimate scope per 5.2a's own "direct configuration" allowance, not an accidental gap); no
+`folder-service`/`case-service` mirroring; no "restore in place" endpoint (a small, mechanically obvious
+follow-up via the existing `PATCH /documents/{id}` attribute-update path, not built here).
+
+No `graphify update .` — not a phase end (Phase 41 has one more session, P41-S3). Next step: **P41-S3**
+(Concept 5.5: fine-grained user tracking for privileged accounts — entirely new, requires live
+verification per the plan's own DoD note).
+
+---
+
+Immediately before P41-S2: **P41-S1** (PAdES-B-LTA / long-term signature archiving — first session of Phase 41,
 "Compliance Gaps from the Concept Document", [ADR 0155](docs/adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)).
 Research at session start against the real `signature-service` code (not just docs) found three
 things before any implementation started:

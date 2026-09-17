@@ -242,6 +242,7 @@
     "attributeLabel": "Anzeigename",
     "attributeType": "Typ",
     "attributeRequired": "Pflichtfeld",
+    "attributePersonalData": "Personenbezogen (pseudonymisierbar)",
     "attributePattern": "Muster (Regex)",
     "attributeMin": "Minimum",
     "attributeMax": "Maximum",

@@ -127,3 +127,11 @@ class Settings(BaseServiceSettings):
     # attempts, `failed_permanent` once exhausted.
     max_folder_export_attempts: int = 5
     folder_export_poll_interval_seconds: float = 30.0
+
+    # Attribute-level pseudonymization vault (5.2, Post-Roadmap Phase 41
+    # Session 2, ADR 0156) - a single AES-256 key (base64-encoded), same
+    # "no fallback to a randomly generated key" principle as archival-
+    # service's `archive_encryption_key` (ADR 0029): a random fallback
+    # would change on every restart and permanently render already-
+    # pseudonymized attributes unrecoverable.
+    attribute_pseudonymization_key: str | None = None

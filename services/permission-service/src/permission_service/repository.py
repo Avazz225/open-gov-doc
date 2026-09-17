@@ -301,6 +301,25 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
     # notification, this one governs who may change the wording every
     # future notification is sent with).
     ("domain-admin-notification", "Notification-Konfiguration", ["admin.notification_config"]),
+    # Post-Roadmap Phase 41 Session 2 (ADR 0156): concept 5.2's GDPR-tension
+    # fix (pseudonymize individual personal-data attributes instead of
+    # hard-deleting a whole document under a retention obligation).
+    # Deliberately TWO separate capabilities, not one, extending the
+    # "domain-admin-legal-hold"/"domain-admin-deletion" split once more:
+    # pseudonymizing REDUCES exposure of personal data (comparatively
+    # low-risk), revealing the original value back EXPOSES it again
+    # (materially higher-risk) - an installation may want different people
+    # responsible for each.
+    (
+        "domain-admin-pseudonymization",
+        "Attribut-Pseudonymisierung",
+        ["admin.attribute_pseudonymization"],
+    ),
+    (
+        "domain-admin-pii-reveal",
+        "Pseudonymisierte Attribute aufdecken",
+        ["admin.attribute_reveal"],
+    ),
 ]
 
 
