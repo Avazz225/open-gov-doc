@@ -2725,16 +2725,21 @@ export async function exportCaseXjustiz(
   return response.blob();
 }
 
-// Case-level XDOMEA/XJustiz import (ADR 0139/ADR 0141) - deliberately
-// ALWAYS attaches to the case whose detail view the import form lives on
-// (`case_id` always set), never `process_definition_id` ("create a new
-// case from an import package" has no UI entry point in this session - see
-// ADR 0141 "Rationale"; the backend still supports it, unused by this UI).
+// Case-level XDOMEA/XJustiz import (ADR 0128/0139, `processDefinitionId`
+// support since Post-Roadmap Phase 42 Session 1, ADR 0141's own flagged
+// gap): either attaches to an existing case (`caseId`, the case-detail
+// import form) OR creates a brand-new one named after the package's own
+// Vorgang/Akte Betreff (`processDefinitionId`, the case-LIST import form,
+// see `ProcessDefinitionPicker` in `CasesPane.tsx`) - exactly one of the
+// two, mirrored by the backend's own `case_id`/`process_definition_id`
+// mutual-exclusivity check (`422` otherwise).
 export interface XdomeaImportResult {
   case_id: string | null;
   case_created: boolean;
   vorgang_betreff: string | null;
   document_ids: string[];
+  skipped_document_count: number;
+  skipped_schriftstueck_count: number;
 }
 
 export interface XJustizImportResult {
@@ -2746,12 +2751,15 @@ export interface XJustizImportResult {
 
 export async function importXdomeaIntoCase(
   token: string,
-  params: { file: File; folderId: string; caseId: string }
+  params: { file: File; folderId: string; caseId?: string; processDefinitionId?: number }
 ): Promise<XdomeaImportResult> {
   const formData = new FormData();
   formData.append("file", params.file);
   formData.append("folder_id", params.folderId);
-  formData.append("case_id", params.caseId);
+  if (params.caseId !== undefined) formData.append("case_id", params.caseId);
+  if (params.processDefinitionId !== undefined) {
+    formData.append("process_definition_id", String(params.processDefinitionId));
+  }
   const response = await request(
     "archival-service",
     "xdomea/import",
@@ -2763,18 +2771,38 @@ export async function importXdomeaIntoCase(
 
 export async function importXjustizIntoCase(
   token: string,
-  params: { file: File; folderId: string; caseId: string }
+  params: { file: File; folderId: string; caseId?: string; processDefinitionId?: number }
 ): Promise<XJustizImportResult> {
   const formData = new FormData();
   formData.append("file", params.file);
   formData.append("folder_id", params.folderId);
-  formData.append("case_id", params.caseId);
+  if (params.caseId !== undefined) formData.append("case_id", params.caseId);
+  if (params.processDefinitionId !== undefined) {
+    formData.append("process_definition_id", String(params.processDefinitionId));
+  }
   const response = await request(
     "archival-service",
     "xjustiz/import",
     { method: "POST", body: formData },
     token
   );
+  return response.json();
+}
+
+// Minimal process-definition picker (7.1) - same shape as
+// `office-addin`'s `listProcessDefinitions`/`ProcessDefinition`
+// (deliberately duplicated per-app rather than shared, same convention as
+// every other cross-app type in this project, ADR 0006) - the smallest
+// entry point for "create a new case via import" that three prior ADRs
+// (0128/0141/0142) explicitly deferred pending exactly this.
+export interface ProcessDefinition {
+  id: number;
+  name: string;
+  version: number;
+}
+
+export async function listProcessDefinitions(token: string): Promise<ProcessDefinition[]> {
+  const response = await request("workflow-service", "process-definitions", {}, token);
   return response.json();
 }
 

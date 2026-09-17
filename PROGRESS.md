@@ -2,8 +2,70 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P41-S3 (Concept 5.5: fine-grained user tracking for privileged accounts — third
-and last session of Phase 41, "Compliance Gaps from the Concept Document",
+**Last completed:** P42-S1 (XDOMEA import hardening + missing case-creation UI — first session of
+Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
+explicitly says none is expected (pure functional completion of already-established patterns).
+
+Closed both remaining gaps ADR 0142 (Post-Roadmap Phase 34 Session 4) itself flagged as still open,
+after first re-verifying ADR 0142's own framing against the actual vendored XSD/code rather than
+trusting its docstring at face value: the real, narrower bug was an empty Betreff on the primary
+naming candidate with no fallback (not "Teilvorgang causes complete naming failure" as ADR 0142's own
+wording suggested — the existing `//`-descendant-axis XPath already matches at any depth; the actual
+gap was searching for the wrong element name, not the wrong depth), and a `DokumentMitSchriftstueck`'s
+nested `Schriftstueck` content being silently dropped entirely (parsed for its own `Dokument`-shaped
+metadata never).
+
+**Implementation**: `archival_service/xdomea.py`'s `parse_abgabe_message()` gained a fallback path —
+when the primary Akte/Vorgang Betreff resolution yields nothing, it searches for nested
+`Teilvorgang`/`Teilakte` elements and joins their Betreffe instead (only as a fallback; never overrides
+an already-usable primary Betreff) — plus a new loop that walks every `DokumentMitSchriftstueck`'s
+`Schriftstueck` children and imports each as a real document, with a new `skipped_schriftstueck_count`
+field (deliberately separate from the existing `skipped_document_count`, so a contentless Schriftstück
+is distinguishable from a contentless top-level Dokument in the API response). Threaded through
+`general_import.py`'s `ImportResult`, `schemas.py`'s `XdomeaImportResultOut`, and the `main.py` response
+construction.
+
+On the missing-UI side: `user-ui`'s case LIST view (`CasesPane.tsx`) gained a new
+`NewCaseImportSection` — the process-definition picker that never existed anywhere in the project (a
+plain `<select>` from a new `listProcessDefinitions()`, not a full `process-designer`-style picker),
+closing the "import-creates-new-case remains API-only" gap noted since Post-Roadmap Phase 31 Session
+13b. Renders nothing at all if the installation has no process definitions configured. The existing
+case-DETAIL import forms deliberately keep always attaching to the currently-open case, unchanged.
+
+**Tests**: `archival-service` 142 tests (previously 138, +4 — new `test_xdomea.py` cases: Teilvorgang
+Betreff fallback, fallback does NOT override an existing usable Betreff, a `DokumentMitSchriftstueck`'s
+real Schriftstueck content is actually imported, a contentless Schriftstueck is counted separately from
+a contentless Dokument; one existing `test_api.py` exact-dict assertion extended with the new field, no
+behavior change). `user-ui` 274 tests (previously 270, +4 — new `cases-pane.test.tsx` cases: the new
+section renders nothing with no process definitions, hidden without `archival.write`, creates a case via
+XDOMEA import with a selected process definition and navigates into it, same for XJustiz);
+`tsc --noEmit`/`eslint .` clean (2 pre-existing unrelated `<img>` warnings only). `ruff check`/
+`ruff format` clean throughout.
+
+**Live-verified** against the rebuilt, restarted real stack (`archival-service`, through the real
+gateway): a hand-built, schema-valid (validated against the actual vendored XSD) XDOMEA package — a
+top-level `Akte` with no Betreff, a nested `Vorgang`→`Teilvorgang` carrying the real Betreff plus a
+`Dokument`, and a second `Schriftgutobjekt` with a standalone `DokumentMitSchriftstueck`/`Schriftstueck`
+— posted to `POST /xdomea/import` with a real `process_definition_id`: a new case was created, correctly
+named after the `Teilvorgang`'s Betreff (the fallback path), both documents (Teilvorgang-nested and
+Schriftstueck) were created with their real byte content confirmed via `GET .../content` on both, and
+`skipped_schriftstueck_count: 0` appeared correctly in the response. Test artifacts cleaned up
+afterward. Building the hand-crafted test package itself required iterating through five separate XSD
+validation errors (missing root `produkt`/`produkthersteller`/`standard`/`version` attributes, the
+required `Importbestaetigung`/`Empfangsbestaetigung` sequence, `Version` needing `Nummer` before
+`Format`, `Format` needing `Name` before `Primaerdokument`, and `Primaerdokument/Dateiname` needing a
+UUID-prefixed filename) — resolved by reusing the existing `_build_dokument_wrapper()`/
+`package_filename()` helpers into a scratch parent and re-parenting/retagging the resulting elements,
+rather than hand-building every field.
+
+No `graphify update .` — not a phase end (Phase 42 has three more sessions planned: P42-S2 through
+P42-S4). Next step: **P42-S2** (`license-service`: usage-limit enforcement parity — storage/user
+limits currently display-only, only document count actively blocks).
+
+---
+
+Immediately before P42-S1: **P41-S3** (Concept 5.5: fine-grained user tracking for privileged accounts —
+third and last session of Phase 41, "Compliance Gaps from the Concept Document",
 [ADR 0157](docs/adr/0157-fine-grained-user-tracking-privileged-accounts.md)).
 
 Concept 5.5's field list (client IP, device/browser fingerprint, auth method, session duration,

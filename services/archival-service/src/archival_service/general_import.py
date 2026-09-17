@@ -67,6 +67,12 @@ class ImportResult:
     content, skipped rather than failing the import (Post-Roadmap Phase 34
     Session 4, see `xdomea.ParsedAbgabeMessage.skipped_document_count` and
     ADR 0142)."""
+    skipped_schriftstueck_count: int = 0
+    """`Schriftstueck` pages of a `DokumentMitSchriftstueck` with no
+    retrievable content (Post-Roadmap Phase 42 Session 1, see
+    `xdomea.ParsedAbgabeMessage.skipped_schriftstueck_count`) - counted
+    separately from `skipped_document_count` above, a structurally
+    different reason for having no digital content."""
 
 
 @dataclass
@@ -171,6 +177,7 @@ async def import_abgabe_package(
         vorgang_betreff=parsed.vorgang_betreff,
         document_ids=document_ids,
         skipped_document_count=parsed.skipped_document_count,
+        skipped_schriftstueck_count=parsed.skipped_schriftstueck_count,
     )
 
 

@@ -13,6 +13,7 @@ const exportCaseXdomeaMock = vi.fn();
 const exportCaseXjustizMock = vi.fn();
 const importXdomeaIntoCaseMock = vi.fn();
 const importXjustizIntoCaseMock = vi.fn();
+const listProcessDefinitionsMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -26,6 +27,7 @@ vi.mock("@/lib/api", async () => {
     exportCaseXjustiz: (...args: unknown[]) => exportCaseXjustizMock(...args),
     importXdomeaIntoCase: (...args: unknown[]) => importXdomeaIntoCaseMock(...args),
     importXjustizIntoCase: (...args: unknown[]) => importXjustizIntoCaseMock(...args),
+    listProcessDefinitions: (...args: unknown[]) => listProcessDefinitionsMock(...args),
   };
 });
 
@@ -92,6 +94,7 @@ describe("CasesPane", () => {
     exportCaseXjustizMock.mockReset();
     importXdomeaIntoCaseMock.mockReset();
     importXjustizIntoCaseMock.mockReset();
+    listProcessDefinitionsMock.mockReset().mockResolvedValue([]);
     mockPermissions = ["archival.write"];
   });
 
@@ -256,5 +259,93 @@ describe("CasesPane", () => {
       })
     );
     expect(await screen.findByText("1 Dokument(e) importiert.")).toBeInTheDocument();
+  });
+
+  it("does not show the new-case import section when no process definitions exist", async () => {
+    renderPane();
+
+    await screen.findByText("Umlaufmappe A (2026-001)");
+    expect(screen.queryByText("Neue Umlaufmappe per Import anlegen")).not.toBeInTheDocument();
+  });
+
+  it("hides the new-case import section without archival.write", async () => {
+    mockPermissions = [];
+    listProcessDefinitionsMock.mockResolvedValue([{ id: 1, name: "Standardprozess", version: 1 }]);
+    renderPane();
+
+    await screen.findByText("Umlaufmappe A (2026-001)");
+    expect(screen.queryByText("Neue Umlaufmappe per Import anlegen")).not.toBeInTheDocument();
+  });
+
+  it("creates a new case via XDOMEA import with the selected process definition and navigates into it", async () => {
+    listProcessDefinitionsMock.mockResolvedValue([{ id: 7, name: "Standardprozess", version: 1 }]);
+    importXdomeaIntoCaseMock.mockResolvedValue({
+      case_id: "case-new-1",
+      case_created: true,
+      vorgang_betreff: "Neuer Vorgang",
+      document_ids: ["new-doc-3"],
+    });
+    getCaseMock.mockImplementation((_token: string, caseId: string) =>
+      Promise.resolve({ ...CASE_A, id: caseId, name: "Neuer Vorgang" })
+    );
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(await screen.findByText("XDOMEA-Import"));
+    const form = screen.getByText("Paket-Datei (ZIP)").closest(".inline-form") as HTMLElement;
+    const file = new File(["PK-zip"], "abgabe.zip", { type: "application/zip" });
+    await user.upload(within(form).getByLabelText("Paket-Datei (ZIP)"), file);
+    await user.selectOptions(
+      within(form).getByLabelText("Prozessdefinition für die neue Umlaufmappe"),
+      "7"
+    );
+    await user.click(within(form).getByText("Paket importieren"));
+
+    await waitFor(() =>
+      expect(importXdomeaIntoCaseMock).toHaveBeenCalledWith("token-123", {
+        file,
+        folderId: "root",
+        processDefinitionId: 7,
+      })
+    );
+    // Navigated straight into the newly created case (14.2, Post-Roadmap
+    // Phase 42 Session 1) instead of staying on the list.
+    await waitFor(() => expect(getCaseMock).toHaveBeenCalledWith("token-123", "case-new-1"));
+    expect(await screen.findByRole("heading", { name: "Neuer Vorgang" })).toBeInTheDocument();
+  });
+
+  it("creates a new case via XJustiz import with the selected process definition", async () => {
+    listProcessDefinitionsMock.mockResolvedValue([{ id: 9, name: "Justizprozess", version: 1 }]);
+    importXjustizIntoCaseMock.mockResolvedValue({
+      case_id: "case-new-2",
+      case_created: true,
+      akte_anzeigename: "Neue Akte",
+      document_ids: ["new-doc-4"],
+    });
+    getCaseMock.mockImplementation((_token: string, caseId: string) =>
+      Promise.resolve({ ...CASE_A, id: caseId, name: "Neue Akte" })
+    );
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(await screen.findByText("XJustiz-Import"));
+    const form = screen.getByText("Paket-Datei (ZIP)").closest(".inline-form") as HTMLElement;
+    const file = new File(["PK-zip"], "xjustiz.zip", { type: "application/zip" });
+    await user.upload(within(form).getByLabelText("Paket-Datei (ZIP)"), file);
+    await user.selectOptions(
+      within(form).getByLabelText("Prozessdefinition für die neue Umlaufmappe"),
+      "9"
+    );
+    await user.click(within(form).getByText("Paket importieren"));
+
+    await waitFor(() =>
+      expect(importXjustizIntoCaseMock).toHaveBeenCalledWith("token-123", {
+        file,
+        folderId: "root",
+        processDefinitionId: 9,
+      })
+    );
+    await waitFor(() => expect(getCaseMock).toHaveBeenCalledWith("token-123", "case-new-2"));
+    expect(await screen.findByRole("heading", { name: "Neue Akte" })).toBeInTheDocument();
   });
 });

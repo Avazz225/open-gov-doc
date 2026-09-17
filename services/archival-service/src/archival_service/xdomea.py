@@ -407,10 +407,16 @@ class ParsedAbgabeMessage:
     whole package import (Post-Roadmap Phase 34 Session 4, see ADR 0142) -
     the previous behavior raised `ParseError` (surfaced as a `422`) and
     rejected an entire genuine third-party package over a single such
-    document. `DokumentMitSchriftstueck` (the schema's other
-    `DokumentOderDokumentMitSchriftstueck` choice member, a document with
-    nested physical-page/Schriftstück scans) remains entirely unsupported -
-    genuinely out of this session's bounded scope, not counted here either."""
+    document."""
+    skipped_schriftstueck_count: int = 0
+    """`Schriftstueck` elements (nested inside a `DokumentMitSchriftstueck` -
+    the schema's OTHER `DokumentOderDokumentMitSchriftstueck` choice member,
+    left entirely unsupported by ADR 0142) with no retrievable content -
+    same tolerant skip-and-count treatment as `skipped_document_count`, but
+    counted separately (Post-Roadmap Phase 42 Session 1): a `Schriftstueck`
+    represents an inherently physical/paper page of a `DokumentMitSchriftstueck`
+    record, a structurally different reason for having no digital content
+    than an ordinary `Dokument` simply missing its `Primaerdokument`."""
 
 
 def _vorgang_name(el: "etree._Element", ns: dict) -> tuple[str | None, str | None]:
@@ -475,14 +481,36 @@ def parse_abgabe_message(xml_bytes: bytes) -> ParsedAbgabeMessage:
     See `ParsedAbgabeMessage.vorgang_betreff`'s docstring for the
     Akte/multi-Vorgang naming priority and
     `ParsedAbgabeMessage.skipped_document_count`'s for the tolerant
-    per-document handling. Still deliberately bounded, not a claim of full
-    third-party-XDOMEA-package generality: `Teilvorgang`/`Teilakte` (nested
-    sub-Vorgänge/sub-Akten, a distinct element name from `Vorgang`/`Akte`
-    even though they share the same type) are not walked for their OWN
-    Betreff/UUID - only their nested `Dokument` elements are still picked up
-    via the unconditional `//Dokument` descendant search above, so no
-    document is silently dropped, but a package whose ONLY Vorgang-like
-    content lives inside a `Teilvorgang` gets no case name candidate from it."""
+    per-document handling.
+
+    `Teilvorgang`/`Teilakte` (nested sub-Vorgänge/sub-Akten, a distinct
+    element name from `Vorgang`/`Akte` even though they share the same type,
+    `VorgangType`/`AkteType`, per the vendored schema) are, since Post-
+    Roadmap Phase 42 Session 1, used as a FALLBACK naming source - only
+    when the primary Akte/Vorgang candidate(s) above yield no usable Betreff
+    at all (a schema-legal but empty `AllgemeineMetadaten/Betreff`). Per the
+    schema, a `Teilvorgang` can only ever occur inside an actual `Vorgang`-
+    or `Teilvorgang`-tagged ancestor (never as a bare top-level
+    `Schriftgutobjekt` choice member), so the primary search above always
+    finds at least one naming candidate when ANY is structurally present -
+    this fallback exists specifically for the case where that candidate's
+    own Betreff field happens to be empty, not for "no candidate at all".
+    Their nested `Dokument`/`DokumentMitSchriftstueck` elements were already,
+    even before this fallback, picked up regardless via the unconditional
+    descendant searches below - no document was ever silently dropped due
+    to Teilvorgang/Teilakte nesting depth.
+
+    `DokumentMitSchriftstueck` (the schema's OTHER `DokumentOderDokument
+    MitSchriftstueck` choice member - a document with nested physical/
+    paper-page `Schriftstueck` scans, `DokumentMitSchriftstueckType`
+    extends the same `DokumentSchriftstueckBasisType` as plain `Dokument`
+    but replaces its own `Version` with 0..N `Schriftstueck` children, each
+    itself a full `DokumentType`) is, since Post-Roadmap Phase 42 Session 1,
+    walked the same tolerant way as `Dokument` - each `Schriftstueck`'s own
+    `Version`/`Format`/`Primaerdokument` is parsed via the same
+    `_parse_dokument_element` helper, importing real scanned content when
+    present and counting a missing one separately
+    (`ParsedAbgabeMessage.skipped_schriftstueck_count`)."""
     root = etree.fromstring(xml_bytes)
     ns = {"xdomea": XDOMEA_NS}
 
@@ -502,6 +530,17 @@ def parse_abgabe_message(xml_bytes: bytes) -> ParsedAbgabeMessage:
         vorgang_betreff = "; ".join(betreffe) if betreffe else None
         vorgang_xdomea_uuid = None
 
+    if not vorgang_betreff:
+        teil_els = root.findall(
+            ".//xdomea:Schriftgutobjekt//xdomea:Teilvorgang", ns
+        ) + root.findall(".//xdomea:Schriftgutobjekt//xdomea:Teilakte", ns)
+        fallback_betreffe = [
+            betreff for betreff, _ in (_vorgang_name(el, ns) for el in teil_els) if betreff
+        ]
+        if fallback_betreffe:
+            vorgang_betreff = "; ".join(fallback_betreffe)
+            vorgang_xdomea_uuid = None
+
     documents: list[ParsedAbgabeDocument] = []
     skipped_document_count = 0
     for dokument_el in root.findall(".//xdomea:Schriftgutobjekt//xdomea:Dokument", ns):
@@ -511,9 +550,20 @@ def parse_abgabe_message(xml_bytes: bytes) -> ParsedAbgabeMessage:
         else:
             documents.append(parsed_document)
 
+    skipped_schriftstueck_count = 0
+    for dms_el in root.findall(".//xdomea:Schriftgutobjekt//xdomea:DokumentMitSchriftstueck", ns):
+        schriftstueck_els = dms_el.findall("./xdomea:Schriftstueck", ns)
+        for schriftstueck_el in schriftstueck_els:
+            parsed_schriftstueck = _parse_dokument_element(schriftstueck_el)
+            if parsed_schriftstueck is None:
+                skipped_schriftstueck_count += 1
+            else:
+                documents.append(parsed_schriftstueck)
+
     return ParsedAbgabeMessage(
         vorgang_betreff=vorgang_betreff,
         vorgang_xdomea_uuid=vorgang_xdomea_uuid,
         documents=documents,
         skipped_document_count=skipped_document_count,
+        skipped_schriftstueck_count=skipped_schriftstueck_count,
     )

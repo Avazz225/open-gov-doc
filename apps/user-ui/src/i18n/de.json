@@ -516,7 +516,11 @@
     "xdomeaImport": "XDOMEA-Import",
     "xdomeaImportErrorGeneric": "XDOMEA-Import fehlgeschlagen. Bitte später erneut versuchen.",
     "xjustizImport": "XJustiz-Import",
-    "xjustizImportErrorGeneric": "XJustiz-Import fehlgeschlagen. Bitte später erneut versuchen."
+    "xjustizImportErrorGeneric": "XJustiz-Import fehlgeschlagen. Bitte später erneut versuchen.",
+    "newCaseImportHeading": "Neue Umlaufmappe per Import anlegen",
+    "newCaseImportHint": "Ein zuvor exportiertes Paket wird eingelesen und eine neue Umlaufmappe nach dem im Paket enthaltenen Vorgang/Akte benannt.",
+    "newCaseProcessDefinitionLabel": "Prozessdefinition für die neue Umlaufmappe",
+    "newCaseProcessDefinitionPlaceholder": "Bitte auswählen"
   },
   "handFolderOverview": {
     "paneLabel": "Hand-Ordner/Arbeitsvorrat",

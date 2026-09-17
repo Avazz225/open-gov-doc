@@ -12,9 +12,11 @@ import {
   importXjustizIntoCase,
   listCaseDocuments,
   listCases,
+  listProcessDefinitions,
   type Case,
   type CaseDocumentReference,
   type DocumentSummary,
+  type ProcessDefinition,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -138,7 +140,221 @@ export function CasesPane({
           ))}
         </ul>
       )}
+
+      {canArchive && (
+        <NewCaseImportSection
+          token={token}
+          onCaseCreated={(caseId) => {
+            reload();
+            setSelectedCaseId(caseId);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+// "Import creates a new case" (14.2, Post-Roadmap Phase 42 Session 1) -
+// the one half of ADR 0128/0139's import shape ("attach to an EXISTING
+// case" OR "start a brand-new case via a process definition") that had NO
+// UI entry point at all before this session (ADR 0141 "Rationale":
+// deliberately deferred, since no process-definition-picker UI component
+// existed anywhere in the codebase yet). Lives on the case LIST view, not
+// inside `CaseDetail` - unlike the case-detail import forms (always
+// `case_id`), this one has no case to attach to yet by construction.
+// Minimal picker: a plain `<select>` populated from `listProcessDefinitions`
+// - the exact same pattern `office-addin`'s `WorkflowPanel` already
+// established for "start a workflow", not a full picker UI.
+function NewCaseImportSection({
+  token,
+  onCaseCreated,
+}: {
+  token: string;
+  onCaseCreated: (caseId: string) => void;
+}) {
+  const { t } = useI18n();
+  const [definitions, setDefinitions] = useState<ProcessDefinition[]>([]);
+
+  const [xdomeaOpen, setXdomeaOpen] = useState(false);
+  const [xdomeaFile, setXdomeaFile] = useState<File | null>(null);
+  const [xdomeaFolderId, setXdomeaFolderId] = useState("root");
+  const [xdomeaDefinitionId, setXdomeaDefinitionId] = useState("");
+  const [xdomeaImporting, setXdomeaImporting] = useState(false);
+  const [xdomeaError, setXdomeaError] = useState<string | null>(null);
+
+  const [xjustizOpen, setXjustizOpen] = useState(false);
+  const [xjustizFile, setXjustizFile] = useState<File | null>(null);
+  const [xjustizFolderId, setXjustizFolderId] = useState("root");
+  const [xjustizDefinitionId, setXjustizDefinitionId] = useState("");
+  const [xjustizImporting, setXjustizImporting] = useState(false);
+  const [xjustizError, setXjustizError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    listProcessDefinitions(token)
+      .then(setDefinitions)
+      .catch(() => setDefinitions([]));
+  }, [token]);
+
+  if (definitions.length === 0) return null;
+
+  async function handleXdomeaImport() {
+    if (!token || !xdomeaFile || !xdomeaFolderId.trim() || !xdomeaDefinitionId) return;
+    setXdomeaError(null);
+    setXdomeaImporting(true);
+    try {
+      const result = await importXdomeaIntoCase(token, {
+        file: xdomeaFile,
+        folderId: xdomeaFolderId.trim(),
+        processDefinitionId: Number(xdomeaDefinitionId),
+      });
+      setXdomeaOpen(false);
+      setXdomeaFile(null);
+      setXdomeaDefinitionId("");
+      if (result.case_id) onCaseCreated(result.case_id);
+    } catch (err) {
+      setXdomeaError(err instanceof ApiError ? err.message : t("cases.xdomeaImportErrorGeneric"));
+    } finally {
+      setXdomeaImporting(false);
+    }
+  }
+
+  async function handleXjustizImport() {
+    if (!token || !xjustizFile || !xjustizFolderId.trim() || !xjustizDefinitionId) return;
+    setXjustizError(null);
+    setXjustizImporting(true);
+    try {
+      const result = await importXjustizIntoCase(token, {
+        file: xjustizFile,
+        folderId: xjustizFolderId.trim(),
+        processDefinitionId: Number(xjustizDefinitionId),
+      });
+      setXjustizOpen(false);
+      setXjustizFile(null);
+      setXjustizDefinitionId("");
+      if (result.case_id) onCaseCreated(result.case_id);
+    } catch (err) {
+      setXjustizError(
+        err instanceof ApiError ? err.message : t("cases.xjustizImportErrorGeneric")
+      );
+    } finally {
+      setXjustizImporting(false);
+    }
+  }
+
+  return (
+    <>
+      <h3>{t("cases.newCaseImportHeading")}</h3>
+      <p className="hint">{t("cases.newCaseImportHint")}</p>
+
+      <button type="button" onClick={() => setXdomeaOpen((prev) => !prev)}>
+        {t("cases.xdomeaImport")}
+      </button>
+      {xdomeaOpen && (
+        <div className="inline-form">
+          <label>
+            {t("cases.importFileLabel")}
+            <input type="file" onChange={(e) => setXdomeaFile(e.target.files?.[0] ?? null)} />
+          </label>
+          <label>
+            {t("cases.importFolderLabel")}
+            <input
+              type="text"
+              value={xdomeaFolderId}
+              onChange={(e) => setXdomeaFolderId(e.target.value)}
+            />
+          </label>
+          <label htmlFor="new-case-xdomea-process-definition">
+            {t("cases.newCaseProcessDefinitionLabel")}
+            <select
+              id="new-case-xdomea-process-definition"
+              value={xdomeaDefinitionId}
+              onChange={(e) => setXdomeaDefinitionId(e.target.value)}
+            >
+              <option value="">{t("cases.newCaseProcessDefinitionPlaceholder")}</option>
+              {definitions.map((def) => (
+                <option key={def.id} value={def.id}>
+                  {def.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="actions">
+            <button
+              type="button"
+              disabled={
+                xdomeaImporting || !xdomeaFile || !xdomeaFolderId.trim() || !xdomeaDefinitionId
+              }
+              onClick={handleXdomeaImport}
+            >
+              {xdomeaImporting ? t("cases.importing") : t("cases.importSubmit")}
+            </button>
+            <button type="button" onClick={() => setXdomeaOpen(false)}>
+              {t("common.cancel")}
+            </button>
+          </span>
+        </div>
+      )}
+      {xdomeaError && (
+        <p className="error-text" role="alert">
+          {xdomeaError}
+        </p>
+      )}
+
+      <button type="button" onClick={() => setXjustizOpen((prev) => !prev)}>
+        {t("cases.xjustizImport")}
+      </button>
+      {xjustizOpen && (
+        <div className="inline-form">
+          <label>
+            {t("cases.importFileLabel")}
+            <input type="file" onChange={(e) => setXjustizFile(e.target.files?.[0] ?? null)} />
+          </label>
+          <label>
+            {t("cases.importFolderLabel")}
+            <input
+              type="text"
+              value={xjustizFolderId}
+              onChange={(e) => setXjustizFolderId(e.target.value)}
+            />
+          </label>
+          <label htmlFor="new-case-xjustiz-process-definition">
+            {t("cases.newCaseProcessDefinitionLabel")}
+            <select
+              id="new-case-xjustiz-process-definition"
+              value={xjustizDefinitionId}
+              onChange={(e) => setXjustizDefinitionId(e.target.value)}
+            >
+              <option value="">{t("cases.newCaseProcessDefinitionPlaceholder")}</option>
+              {definitions.map((def) => (
+                <option key={def.id} value={def.id}>
+                  {def.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="actions">
+            <button
+              type="button"
+              disabled={
+                xjustizImporting || !xjustizFile || !xjustizFolderId.trim() || !xjustizDefinitionId
+              }
+              onClick={handleXjustizImport}
+            >
+              {xjustizImporting ? t("cases.importing") : t("cases.importSubmit")}
+            </button>
+            <button type="button" onClick={() => setXjustizOpen(false)}>
+              {t("common.cancel")}
+            </button>
+          </span>
+        </div>
+      )}
+      {xjustizError && (
+        <p className="error-text" role="alert">
+          {xjustizError}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -437,8 +653,10 @@ function CaseDetail({
           <h3>{t("cases.importHeading")}</h3>
           <p className="hint">{t("cases.importHint")}</p>
           {/* Case-level XDOMEA import (ADR 0128/0139) - deliberately always
-              attaches to THIS case (`case_id`), never creates a new one
-              (`process_definition_id`) - see ADR 0141 "Rationale". */}
+              attaches to THIS case (`case_id`), never creates a new one -
+              the "create a new case from an import" path lives instead on
+              the case LIST view (`NewCaseImportSection`, Post-Roadmap Phase
+              42 Session 1), which has no existing case to attach to. */}
           <button type="button" onClick={() => setXdomeaImportOpen((prev) => !prev)}>
             {t("cases.xdomeaImport")}
           </button>

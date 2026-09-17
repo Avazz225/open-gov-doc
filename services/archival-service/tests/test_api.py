@@ -692,6 +692,7 @@ async def test_import_xdomea_standalone_document_creates_it_in_the_target_folder
         "vorgang_betreff": None,
         "document_ids": ["new-doc-1"],
         "skipped_document_count": 0,
+        "skipped_schriftstueck_count": 0,
     }
     app.state.document_client.create_document.assert_called_once()
     call_kwargs = app.state.document_client.create_document.call_args.kwargs

@@ -442,3 +442,164 @@ def test_parse_abgabe_message_combines_betreffe_of_several_top_level_vorgaenge()
     assert parsed.vorgang_betreff == "Erster Vorgang; Zweiter Vorgang"
     assert parsed.vorgang_xdomea_uuid is None
     assert sorted(d.dateiname for d in parsed.documents) == ["eins.pdf", "zwei.pdf"]
+
+
+def test_parse_abgabe_message_falls_back_to_teilvorgang_betreff_when_akte_betreff_is_empty():
+    """Post-Roadmap Phase 42 Session 1 (ADR 0142's own flagged gap, closed
+    here): a top-level `Akte` with no `AllgemeineMetadaten` of its own (a
+    schema-legal but empty Betreff, `AllgemeineMetadaten` is `minOccurs="0"`)
+    must not leave the whole package unnamed when a nested `Teilvorgang`
+    (a distinct element name from `Vorgang`, per `VorgangType`'s own
+    recursive `Teilvorgang` child) carries a real Betreff."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:Akte>
+      <xdomea:Identifikation>
+        <xdomea:xdomeaUUID>55555555-5555-5555-5555-555555555555</xdomea:xdomeaUUID>
+      </xdomea:Identifikation>
+      <xdomea:Akteninhalt>
+        <xdomea:Vorgang>
+          <xdomea:Identifikation>
+            <xdomea:xdomeaUUID>66666666-6666-6666-6666-666666666666</xdomea:xdomeaUUID>
+          </xdomea:Identifikation>
+          <xdomea:Teilvorgang>
+            <xdomea:Identifikation>
+              <xdomea:xdomeaUUID>77777777-7777-7777-7777-777777777777</xdomea:xdomeaUUID>
+            </xdomea:Identifikation>
+            <xdomea:AllgemeineMetadaten>
+              <xdomea:Betreff>Teilvorgang-Betreff</xdomea:Betreff>
+            </xdomea:AllgemeineMetadaten>
+            <xdomea:DokumentOderDokumentMitSchriftstueck>
+              <xdomea:Dokument>
+                <xdomea:Version>
+                  <xdomea:Format>
+                    <xdomea:Primaerdokument>
+                      <xdomea:Dateiname>teilvorgang.pdf</xdomea:Dateiname>
+                    </xdomea:Primaerdokument>
+                  </xdomea:Format>
+                </xdomea:Version>
+              </xdomea:Dokument>
+            </xdomea:DokumentOderDokumentMitSchriftstueck>
+          </xdomea:Teilvorgang>
+        </xdomea:Vorgang>
+      </xdomea:Akteninhalt>
+    </xdomea:Akte>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff == "Teilvorgang-Betreff"
+    assert parsed.vorgang_xdomea_uuid is None
+    assert [d.dateiname for d in parsed.documents] == ["teilvorgang.pdf"]
+
+
+def test_parse_abgabe_message_does_not_use_teilakte_fallback_when_a_normal_betreff_exists():
+    """The Teilvorgang/Teilakte fallback must only activate when the
+    primary candidate's Betreff is genuinely empty - not override an
+    already-usable Vorgang/Akte name."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:Vorgang>
+      <xdomea:Identifikation>
+        <xdomea:xdomeaUUID>88888888-8888-8888-8888-888888888888</xdomea:xdomeaUUID>
+      </xdomea:Identifikation>
+      <xdomea:AllgemeineMetadaten>
+        <xdomea:Betreff>Regulaerer Vorgang</xdomea:Betreff>
+      </xdomea:AllgemeineMetadaten>
+      <xdomea:Teilvorgang>
+        <xdomea:Identifikation>
+          <xdomea:xdomeaUUID>99999999-9999-9999-9999-999999999999</xdomea:xdomeaUUID>
+        </xdomea:Identifikation>
+        <xdomea:AllgemeineMetadaten>
+          <xdomea:Betreff>Sollte ignoriert werden</xdomea:Betreff>
+        </xdomea:AllgemeineMetadaten>
+      </xdomea:Teilvorgang>
+    </xdomea:Vorgang>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.vorgang_betreff == "Regulaerer Vorgang"
+    assert parsed.vorgang_xdomea_uuid == "88888888-8888-8888-8888-888888888888"
+
+
+def test_parse_abgabe_message_imports_schriftstueck_content_of_a_dokument_mit_schriftstueck():
+    """Post-Roadmap Phase 42 Session 1 (ADR 0142's other flagged gap): a
+    `DokumentMitSchriftstueck` (physical/paper-page record) with a real
+    scanned `Schriftstueck` must actually be imported, not silently
+    ignored - `DokumentMitSchriftstueckType` replaces `Dokument`'s own
+    `Version` with 0..N `Schriftstueck` children, each itself a full
+    `DokumentType` with the identical `Version`/`Format`/`Primaerdokument`
+    shape."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:DokumentOderDokumentMitSchriftstueck>
+      <xdomea:DokumentMitSchriftstueck>
+        <xdomea:Identifikation>
+          <xdomea:xdomeaUUID>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</xdomea:xdomeaUUID>
+        </xdomea:Identifikation>
+        <xdomea:Schriftstueck>
+          <xdomea:Version>
+            <xdomea:Format>
+              <xdomea:Primaerdokument>
+                <xdomea:Dateiname>seite1.pdf</xdomea:Dateiname>
+              </xdomea:Primaerdokument>
+            </xdomea:Format>
+          </xdomea:Version>
+        </xdomea:Schriftstueck>
+        <xdomea:Schriftstueck>
+          <xdomea:Version>
+            <xdomea:Format>
+              <xdomea:Primaerdokument>
+                <xdomea:Dateiname>seite2.pdf</xdomea:Dateiname>
+              </xdomea:Primaerdokument>
+            </xdomea:Format>
+          </xdomea:Version>
+        </xdomea:Schriftstueck>
+      </xdomea:DokumentMitSchriftstueck>
+    </xdomea:DokumentOderDokumentMitSchriftstueck>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert sorted(d.dateiname for d in parsed.documents) == ["seite1.pdf", "seite2.pdf"]
+    assert parsed.skipped_schriftstueck_count == 0
+    assert parsed.skipped_document_count == 0
+
+
+def test_parse_abgabe_message_counts_a_contentless_schriftstueck_separately_from_dokument():
+    """A `Schriftstueck` with no retrievable content (schema-legal, same
+    tolerance as a plain contentless `Dokument`) is skipped and counted in
+    its OWN counter - `skipped_schriftstueck_count`, not
+    `skipped_document_count`, since it's a structurally different reason
+    (inherently physical, not a digital document simply missing its
+    content)."""
+    xml_bytes = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xdomea:Abgabe.Abgabe.0401 xmlns:xdomea="urn:xoev-de:xdomea:schema:4.0.0">
+  <xdomea:Schriftgutobjekt>
+    <xdomea:DokumentOderDokumentMitSchriftstueck>
+      <xdomea:DokumentMitSchriftstueck>
+        <xdomea:Identifikation>
+          <xdomea:xdomeaUUID>bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb</xdomea:xdomeaUUID>
+        </xdomea:Identifikation>
+        <xdomea:Schriftstueck>
+          <xdomea:Version>
+            <xdomea:Format/>
+          </xdomea:Version>
+        </xdomea:Schriftstueck>
+      </xdomea:DokumentMitSchriftstueck>
+    </xdomea:DokumentOderDokumentMitSchriftstueck>
+  </xdomea:Schriftgutobjekt>
+</xdomea:Abgabe.Abgabe.0401>"""
+
+    parsed = xdomea.parse_abgabe_message(xml_bytes)
+
+    assert parsed.documents == []
+    assert parsed.skipped_schriftstueck_count == 1
+    assert parsed.skipped_document_count == 0
