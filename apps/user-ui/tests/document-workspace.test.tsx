@@ -2196,12 +2196,12 @@ describe("DocumentWorkspace", () => {
 
     // Since P16-S1, each dockview panel group (Explorer/preview/
     // metadata) has its own tab list - `getByRole("tablist")` is therefore
-    // no longer unique, see above. The dockview tab itself deliberately
-    // shows the raw document title without the reference-number prefix (see
-    // `DockableDocumentArea` - the same simplification the preview
-    // heading has always had); reference-number formatting
-    // remains reserved for the Explorer file list, confirmed there separately.
-    expect(screen.getByRole("tab", { name: "Vertrag.pdf" })).toBeInTheDocument();
+    // no longer unique, see above. Since Post-Roadmap Phase 42 Session 3,
+    // the dockview tab title is formatted exactly like the Explorer file
+    // list/tree (`DockableDocumentArea` fetches its own copy of the same
+    // object-type/global-default config) - the raw-title simplification
+    // that used to apply here now only applies to `PreviewPane`'s heading.
+    expect(screen.getByRole("tab", { name: "2026-001 Vertrag.pdf" })).toBeInTheDocument();
   });
 
   it("hides the Kennzeichen prefix when the object type overrides the global default off", async () => {

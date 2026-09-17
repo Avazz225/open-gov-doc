@@ -5,6 +5,7 @@ import {
   forwardRef,
   useCallback,
   useContext,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -19,7 +20,8 @@ import {
 } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { useI18n } from "@/i18n";
-import type { DocumentSummary, Folder } from "@/lib/api";
+import { getKennzeichenConfig, listObjectTypes, type DocumentSummary, type Folder, type ObjectType } from "@/lib/api";
+import { formatDocumentTitle } from "@/lib/kennzeichen";
 import { ExplorerPane, type BreadcrumbEntry } from "./ExplorerPane";
 import { MetadataPanel } from "./MetadataPanel";
 import { PreviewPane } from "./PreviewPane";
@@ -224,6 +226,24 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
     );
     const activeDocument = activeDocumentId ? (openDocumentsById.get(activeDocumentId) ?? null) : null;
 
+    // Reference-number display (2.2/8, P5e-S3) for document tab titles -
+    // own copy of the same load-once fetch `ExplorerPane` already does for
+    // its own list/tree titles (`documentTypeById`/`kennzeichenShowByDefault`
+    // aren't lifted out of `ExplorerPane`, so this component needs its own).
+    // Closes the tab-title inconsistency noted in P42-S3's research: tabs
+    // previously always showed the raw title, unlike the explorer list/tree.
+    const [documentTypeById, setDocumentTypeById] = useState<Record<number, ObjectType>>({});
+    const [kennzeichenShowByDefault, setKennzeichenShowByDefault] = useState(true);
+    useEffect(() => {
+      if (!token) return;
+      listObjectTypes(token, "document")
+        .then((types) => setDocumentTypeById(Object.fromEntries(types.map((ot) => [ot.id, ot]))))
+        .catch(() => {});
+      getKennzeichenConfig(token)
+        .then((config) => setKennzeichenShowByDefault(config.show_before_filename))
+        .catch(() => {});
+    }, [token]);
+
     const persistLayout = useCallback((api: DockviewApi) => {
       try {
         window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
@@ -234,23 +254,19 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
       }
     }, []);
 
-    // `title: doc.title` deliberately the raw document title, not the
-    // reference-number-formatted display from `formatDocumentTitle`
-    // (`@/lib/kennzeichen`, see `ExplorerPane`) - its object-type/
-    // configuration data (`documentTypeById`, `kennzeichenShowByDefault`)
-    // would otherwise have to be lifted out of `ExplorerPane` and up to here.
-    // Same simplification as `PreviewPane`'s heading, which has also always
-    // shown only the raw title - a deliberate limitation of this scaffold
-    // (P16-S1), not a regression.
+    // Tab title formatted exactly like the explorer list/tree (Post-Roadmap
+    // Phase 42 Session 3) - `PreviewPane`'s own heading is a separate,
+    // still-unaddressed instance of the same raw-title simplification, out
+    // of scope for this fix.
     const docPanelOptions = useCallback(
       (doc: DocumentSummary, position?: { referencePanel: string; direction: "right" | "within" }) => ({
         id: `${DOC_PANEL_PREFIX}${doc.id}`,
         component: "documentPreview",
-        title: doc.title,
+        title: formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault),
         params: { documentId: doc.id },
         position,
       }),
-      []
+      [documentTypeById, kennzeichenShowByDefault]
     );
 
     // Factory default (concept 8): explorer standalone on the left, top
@@ -416,13 +432,29 @@ export const DockableDocumentArea = forwardRef<DockableDocumentAreaHandle, Docka
 
     useImperativeHandle(ref, () => ({ openDocument, resetLayout }), [openDocument, resetLayout]);
 
+    // Refreshes already-created panels' titles once the reference-number
+    // config (fetched asynchronously above) becomes available - panels built
+    // by `onReady`/`buildDefaultLayout` before that point were necessarily
+    // created with the not-yet-loaded defaults (empty override map, global
+    // default `true`), a one-tick lag `ExplorerPane` doesn't have (its titles
+    // are plain JSX, re-rendered every time, not an imperative dockview
+    // `setTitle` call).
+    useEffect(() => {
+      const api = apiRef.current;
+      if (!api) return;
+      openDocuments.forEach((doc) => {
+        const panel = api.getPanel(`${DOC_PANEL_PREFIX}${doc.id}`);
+        panel?.api.setTitle(formatDocumentTitle(doc, documentTypeById, kennzeichenShowByDefault));
+      });
+    }, [documentTypeById, kennzeichenShowByDefault, openDocuments]);
+
     const handleMetadataSaved = useCallback(
       (updated: DocumentSummary) => {
         const panel = apiRef.current?.getPanel(`${DOC_PANEL_PREFIX}${updated.id}`);
-        panel?.api.setTitle(updated.title);
+        panel?.api.setTitle(formatDocumentTitle(updated, documentTypeById, kennzeichenShowByDefault));
         propsOnMetadataSaved(updated);
       },
-      [propsOnMetadataSaved]
+      [propsOnMetadataSaved, documentTypeById, kennzeichenShowByDefault]
     );
 
     const contextValue: WorkspaceContextValue = {

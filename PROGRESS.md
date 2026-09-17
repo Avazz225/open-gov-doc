@@ -2,8 +2,68 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P42-S2 (`license-service`: usage-limit enforcement parity — second session of
+**Last completed:** P42-S3 (`object-type-service`: resolved Kennzeichen display — third session of
 Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
+explicitly says none is expected (pure functional completion of already-established patterns), and this
+session ended up being a small frontend fix, not an architecture decision.
+
+**Research before implementation found the plan's own premise didn't hold**: the plan's text claimed
+"at least 3 frontends duplicate their own client-side resolution logic for `kennzeichen_display_override`/
+format." A dedicated research pass across all six frontends found exactly ONE implementation
+(`user-ui`'s `lib/kennzeichen.ts`, `resolveKennzeichenDisplay()`/`formatDocumentTitle()`), consistently
+reused across every one of its own call sites (explorer list, tree, breadcrumbs) — `admin-ui` only uses
+the config for editing, not display, and `reviewer-ui`/`process-designer`/`migration-console`/both Office
+add-ins reference "kennzeichen" zero times. This was already correctly flagged as deferred (not
+duplicated) tech debt back in P5e-S3 (see "Immediately before" below) and nothing since then created a
+second implementation. Building the originally-planned server-side "resolved display" endpoint would
+therefore have removed no actual duplication — worse, since `object-type-service` never sees an assigned
+Kennzeichen value again after generation (only `document-service` does, in its own `attributes`), the
+endpoint could only work by accepting `(object_type_id, kennzeichen)` per call, trading `user-ui`'s
+current zero-latency local resolution (already-fetched data, resolved in a tight loop with no network
+round trip) for either N+1 calls per document or a new batch-endpoint design — solving a problem that
+does not exist at the cost of a real one.
+
+There WAS one real, but already deliberate and documented, inconsistency: `DockableDocumentArea.tsx`
+explicitly skipped the formatter for open-document dockview tab titles (kept as the raw title), unlike
+the explorer list/tree, with a comment from P16-S1 explaining why (the object-type/config data lived only
+inside `ExplorerPane`, never lifted out). **Asked the user** how to proceed given the corrected premise;
+chosen answer: fix this one real gap, skip the endpoint entirely.
+
+**Implementation**: `DockableDocumentArea` now fetches its own copy of `documentTypeById`/
+`kennzeichenShowByDefault` (same load-once `useEffect` pattern as `ExplorerPane`'s own fetch — a second,
+independent fetch rather than lifting shared state, since the two components don't otherwise share a
+parent holding this data) and applies `formatDocumentTitle()` in `docPanelOptions` (initial tab creation)
+and `handleMetadataSaved` (title after a rename). A new `useEffect` additionally refreshes already-created
+panels' titles via the imperative `panel.api.setTitle()` once the async config fetch resolves — panels
+built by `onReady`/`buildDefaultLayout` before that point would otherwise be permanently stuck with the
+not-yet-loaded defaults (empty override map, global default `true`), since dockview panel titles (unlike
+`ExplorerPane`'s plain JSX) are set once at creation and never re-render on their own.
+
+**Tests**: `user-ui` 274 tests, unchanged (no new test file/case) — one existing
+`document-workspace.test.tsx` assertion updated in place (`"prefixes a document's title with its
+Kennzeichen when the global default allows it"` now expects the tab's accessible name to include the
+`2026-001` prefix, since that is now the actually fixed, correct behavior the test was written to
+describe — the old assertion had literally been pinning down the bug). `tsc --noEmit`/`eslint .`/
+`next build` all clean (2 pre-existing unrelated `<img>` warnings only).
+
+**Live-verified** in a real headless browser (Playwright's bundled Chromium, found already installed as a
+`user-ui` devDependency — the "no browser available in this environment" limitation noted in
+`docs/services/user-ui.md` since P5e-S3 no longer applies, at least for this dependency) against the
+rebuilt, restarted real stack, through the real running gateway: created a temporary object type with a
+simple Kennzeichen format and a real document under it (server-generated `Kennzeichen: "2026-001"`),
+logged in as `users-admin` in the browser, opened the document via the search panel (the root folder has
+many pre-existing test folders, full-text search was faster than scrolling), and confirmed via
+`page.$$eval('[role="tab"]', ...)` and a screenshot that the dockview tab's accessible name is now
+`"2026-001 P42S3-Vertrag.pdf"`, not the previous raw `"P42S3-Vertrag.pdf"`. Test artifacts (document,
+object type, temporary driver script/screenshots) all cleaned up afterward.
+
+No `graphify update .` — not a phase end (Phase 42 has one more session planned: P42-S4). Next step:
+**P42-S4** (`rendering-service`: preserve PDF/UA tags on multi-document folder export).
+
+---
+
+Immediately before P42-S3: **P42-S2** (`license-service`: usage-limit enforcement parity — second session
+of Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
 explicitly says none is expected (pure functional completion of already-established patterns).
 
 Before this session, only the `documents` dimension actively blocked new creations (`document-service`'s
