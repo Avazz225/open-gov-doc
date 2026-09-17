@@ -1,9 +1,9 @@
 # signature-service
 
-**Responsibility:** Signature Service (concept 3.10) - eIDAS-compliant electronic signature (SES/AES/QES), a broker in front of external QTSPs via interchangeable signature-provider connectors (plugin principle like storage backends/CMIS, 3.3). This session (P6-S7) implements the basic framework + a genuinely working internal, self-signed connector for SES/AES, as well as the new "signature task" type in the Workflow Service (7.1) — QES via a real accredited QTSP is deliberately not part of this session (see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md)).
+**Responsibility:** Signature Service (concept 3.10) - eIDAS-compliant electronic signature (SES/AES/QES), a broker in front of external QTSPs via interchangeable signature-provider connectors (plugin principle like storage backends/CMIS, 3.3). This session (P6-S7) implements the basic framework + a genuinely working internal, self-signed connector for SES/AES, as well as the new "signature task" type in the Workflow Service (7.1) — QES via a real accredited QTSP is deliberately not part of this session (see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md)). **Since Post-Roadmap Phase 41 Session 1** ([ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)): every signature is produced at the full PAdES-B-LTA (long-term archival) profile, via a new internal timestamp authority and a periodically extended archive-timestamp chain — see "PAdES-B-LTA" below.
 
 **Concept reference:** 3.10, 2.1a, 7.1
-**Own Postgres schema:** `signature` (tables `signature`, `internal_ca`)
+**Own Postgres schema:** `signature` (tables `signature`, `internal_ca`, `internal_tsa`)
 
 ## API
 
@@ -20,13 +20,14 @@
 ## Data Model
 
 - `internal_ca`: singleton (`id=1`) - `certificate_pem`, `private_key_pem`, `created_at`. Self-signed internal root CA (RSA 2048, 20-year validity), generated on first start (`connectors/internal.generate_root_ca`), reused idempotently thereafter - a restart must not generate a new CA, otherwise previously issued signatures would no longer be verifiable.
-- `signature`: `document_id`, `source_version_number` (the signed source version), `version_number` (the newly created, signed version), `level`, `connector_id`, `signer_principal_id`, `signer_display_name`, `certificate_subject`/`certificate_serial`/`certificate_not_before`/`certificate_not_after`, `reason`, `signed_at`.
+- `internal_tsa`: singleton (`id=1`), **since Post-Roadmap Phase 41 Session 1** ([ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)) - `certificate_pem`, `private_key_pem`, `created_at`. RFC 3161 timestamp authority certificate (TIME_STAMPING Extended Key Usage, critical), issued once from the internal root CA (`connectors/internal.issue_tsa_certificate`) and reused idempotently, same rationale as `internal_ca`.
+- `signature`: `document_id`, `source_version_number` (the signed source version), `version_number` (the newly created, signed version), `level`, `connector_id`, `signer_principal_id`, `signer_display_name`, `certificate_subject`/`certificate_serial`/`certificate_not_before`/`certificate_not_after`, `reason`, `signed_at`, `last_timestamped_at` (nullable, **since Post-Roadmap Phase 41 Session 1** - `NULL` until the first periodic archive-timestamp-chain extension; the initial signature already embeds the first archive timestamp regardless, see "PAdES-B-LTA" below).
 
 ## Signature Provider Connectors (3.10, plugin principle like 3.3)
 
 `SignatureProviderConnector` (ABC, `connectors/interface.py`): `sign(pdf_bytes, signer, level)`/`verify(pdf_bytes)`. The factory (`connectors/__init__.py`) dispatches on `type` with a stable `id` mapping (like `storage_service.backends.build_backend`, ADR 0017), configured via `DMS_SIGNATURE_PROVIDERS` (a JSON list). Default seed: `{id: "internal", type: "internal", levels: ["ses","aes"]}`. **Since Post-Roadmap Phase 22 Session 6** ([ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `levels` is additionally live-editable via `GET`/`PUT /signature-config` (a new DB singleton table `signature_config`, freshly read on every signing operation) — `id`/`type` remain structurally from `DMS_SIGNATURE_PROVIDERS`. Since then, `resolve_connector_for_level()` (`connectors/__init__.py`) takes an already-merged `list[SignatureProviderConfig]` instead of reading `Settings` directly.
 
-- **`InternalSelfSignedConnector`** (`connectors/internal.py`, the only one actually implemented): issues a leaf certificate signed by the internal root CA per signing operation - `level="ses"` with a generic subject (`CN=DMS System (SES)`), `level="aes"` with a person-specific subject (`CN=<display name>`, `emailAddress=<email>`, from a real `auth-service` account check). Embeds the certificate into the PDF bytes via **pyHanko** (`SimpleSigner.load()` + `async_sign_pdf()`, PAdES-B-B). `verify()` uses `async_validate_pdf_signature()` with a `ValidationContext` whose only trust root is the internal CA (`allow_fetching=False`, `revocation_mode="soft-fail"` - no real OCSP/CRL infrastructure available). **`IncrementalPdfFileWriter`/`PdfFileReader` run with `strict=False`** (a bug fix after user feedback: `SigningError: ... hybrid cross-reference sections ...` on PDFs with a hybrid cross-reference table, as produced by, among others, LibreOffice) - pyHanko rejects such documents in its default strict mode (protection against "shadow attacks" when *validating* foreign PDFs); for signing/verifying a document uploaded within the own system, that is too common a legitimate case for a blanket rejection, a deliberate trade-off rather than an oversight.
+- **`InternalSelfSignedConnector`** (`connectors/internal.py`, the only one actually implemented): issues a leaf certificate signed by the internal root CA per signing operation - `level="ses"` with a generic subject (`CN=DMS System (SES)`), `level="aes"` with a person-specific subject (`CN=<display name>`, `emailAddress=<email>`, from a real `auth-service` account check). Embeds the certificate into the PDF bytes via **pyHanko** (`SimpleSigner.load()` + `async_sign_pdf()`), at the full **PAdES-B-LTA** profile since Post-Roadmap Phase 41 Session 1 (see "PAdES-B-LTA" below; previously B-B only, and — due to a since-fixed bug — not even a real PAdES signature, see [ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)). `verify()` uses `async_validate_pdf_signature()` with a `ValidationContext` whose only trust root is the internal CA (`allow_fetching=False`, `revocation_mode="soft-fail"` - a freshly signed, always-empty CRL is embedded/supplied for structural B-LT conformance, but no real OCSP or revocation-registry infrastructure exists, since nothing in this self-signed-CA design is ever meaningfully "revoked"). **`IncrementalPdfFileWriter`/`PdfFileReader` run with `strict=False`** (a bug fix after user feedback: `SigningError: ... hybrid cross-reference sections ...` on PDFs with a hybrid cross-reference table, as produced by, among others, LibreOffice) - pyHanko rejects such documents in its default strict mode (protection against "shadow attacks" when *validating* foreign PDFs); for signing/verifying a document uploaded within the own system, that is too common a legitimate case for a blanket rejection, a deliberate trade-off rather than an oversight.
 - **`type: "qtsp"`** is provided for in the configuration schema but **not implemented** - a configuration attempt fails in the factory with a clear error message. No accredited external trust service provider available/testable in this session (see "Open Points").
 
 **Authorization (Post-Roadmap Phase 38 Session 3)**: `PUT /signature-config` previously had no permission check at all — this service had no `permission_client` of any kind before this session. Now requires `X-DMS-Principal` + the new capability `admin.signature_config` (role `domain-admin-signature`) — a dedicated domain rather than reusing `admin.object_config`/`admin.storage`, since electronic-signature provider configuration is a materially different, more specialized concern than object-type schema or storage-backend administration. `GET /signature-config` remains ungated. See [ADR 0148](../adr/0148-admin-ui-authorization-full-alignment.md).
@@ -34,6 +35,40 @@
 ## Signing Creates a New Document Version (2.1a)
 
 A PAdES signature necessarily changes the PDF bytes (that is the whole point of the cryptographic binding). `POST /signatures` loads the version to be signed from document-service via `document_client.py`, signs it, and checks in the signed bytes as a **new version** (`POST /documents/{id}/versions`, `expected_base_version_number = the signed source version`) - the unsigned original version remains accessible untouched. **Since Post-Roadmap Phase 38 Session 4** ([ADR 0149](../adr/0149-teamspace-permission-anchoring-broad-rbac-retrofit.md)): `document_client.py`'s calls (`get_document`, `get_version_content`, `checkin_signed_version`) send a fixed `X-DMS-Principal: signature-service` header — these endpoints previously had no permission check at all. If the current main version is not the one being signed, document-service's existing optimistic conflict detection (4.2) automatically produces a conflict copy instead of moving the main version - no special handling needed here. The resulting `Signature` record references `source_version_number` (input) and `version_number` (the actual result, main or conflict version).
+
+## PAdES-B-LTA (3.10, Post-Roadmap Phase 41 Session 1, ADR 0155)
+
+Concept 3.10 explicitly requires the PAdES-B-LTA (long-term archival) profile for the disposal use case
+(5.6). Every signature is now produced at this profile unconditionally (no per-signature profile
+choice — 3.10 does not call for one):
+
+- **Fixed a real, silent bug first**: `sign()` never set `subfilter=SigSeedSubFilter.PADES`. Without it,
+  pyHanko defaults to `ADOBE_PKCS7_DETACHED` (plain PKCS#7) - every signature this service ever produced
+  before this session was, structurally, not actually a PAdES signature at all, despite this service's
+  own name and docs.
+- **Internal TSA** (`internal_tsa` table): a dedicated TIME_STAMPING-purpose certificate, issued once
+  from the internal root CA (`connectors/internal.issue_tsa_certificate`), feeds pyHanko's
+  `DummyTimeStamper` - despite its "testing purposes" docstring, a genuine, complete, self-contained
+  RFC 3161 signer that produces real `TSTInfo` CMS tokens. Same "internal instead of external"
+  precedent as `internal_ca` itself (ADR 0025) and `federation-hub-service`'s hub identity (ADR 0085) -
+  a real external TSA would require a business relationship this project cannot establish.
+- **A freshly signed, always-empty CRL** (`connectors/internal._build_crl_der`, via `cryptography`'s
+  `CertificateRevocationListBuilder`) satisfies B-LT's structural requirement for embedded revocation
+  info, regenerated on every embed rather than cached.
+- **`sign()` now sets** `embed_validation_info=True`, `validation_context=` (trust root + CRL),
+  `use_pades_lta=True`, and passes the internal TSA as `timestamper=` to `signers.async_sign_pdf()`.
+- **Periodic archive-timestamp-chain extension, entirely self-contained within this service** - a new
+  background poll loop (`main._retimestamp_poll_loop`, `retimestamp_poll_interval_seconds` default 1
+  day) queries `Signature` rows due for renewal (`last_timestamped_at` `NULL` and `signed_at`, or
+  `last_timestamped_at` itself, older than `retimestamp_interval_days`, default 365) and calls
+  `InternalSelfSignedConnector.extend_timestamp_chain` (pyHanko's `PdfTimeStamper.
+  async_update_archival_timestamp_chain`) on each, checking the extended bytes back in via the
+  already-existing `document_client` as a new document version (same "signed bytes get their own
+  version" principle as the original signature) and stamping `last_timestamped_at`. **No new
+  `archival-service` dependency** - this service's own `document_client` (fetch + check-in) is
+  sufficient; see [`docs/services/archival-service.md`](archival-service.md) for the cross-reference.
+  Per-item try/except, same fault-tolerant multi-phase poll-loop idiom used throughout this project.
+  **No manual HTTP trigger** - same precedent as `document-service`'s retention poll loop.
 
 ## Minimum Signature Level per Object Type (3.10)
 
@@ -79,14 +114,15 @@ None yet - follows in Phase 11.
 - Object-type minimum-level gate (`400` on a level too low, `201` when sufficient).
 - Rejection on a non-PDF document, unknown document, unknown signer principal, `level="qes"` without a configured connector.
 - List/detail/verify incl. `404` cases.
-- **18 tests since Post-Roadmap Phase 38 Session 3** (previously 16, +2): 401/403 pair for `PUT /signature-config` — the service's first-ever RBAC coverage — before that, 16 tests since Post-Roadmap Phase 22 Session 6 (previously 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` returns the env-var defaults before the first `PUT`, `PUT` with an unknown connector `id`/empty `levels`/`qes` for `type=internal` each return `422`, an end-to-end test removes `aes` from `internal`'s levels and proves live (without a restart) that a subsequent AES signing attempt fails with `400`, while SES continues to work.
+- **25 tests since Post-Roadmap Phase 41 Session 1** (previously 18, +7, [ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)): `test_connector_internal_pades_lta.py` (5) unit-tests `InternalSelfSignedConnector` directly (no cross-service dependency) - a real PAdES subfilter (regression test for the fixed silent bug), embedded validation info (`/DSS`), initial verification, and `extend_timestamp_chain` staying verifiable across repeated calls. `test_retimestamp_poll_loop.py` (2) exercises `main._run_retimestamp_tick` end-to-end (real document-service round trip) for both the "due" and "not yet due" cases, using its own engine/session bound to the test's own event loop rather than `TestClient`'s (which runs the app's lifespan-bound asyncpg engine on a separate event loop internally).
+- Before that, 18 tests since Post-Roadmap Phase 38 Session 3 (previously 16, +2): 401/403 pair for `PUT /signature-config` — the service's first-ever RBAC coverage — before that, 16 tests since Post-Roadmap Phase 22 Session 6 (previously 11, +5, [ADR 0091](../adr/0091-connector-operational-config-live-editable.md)): `GET /signature-config` returns the env-var defaults before the first `PUT`, `PUT` with an unknown connector `id`/empty `levels`/`qes` for `type=internal` each return `422`, an end-to-end test removes `aes` from `internal`'s levels and proves live (without a restart) that a subsequent AES signing attempt fails with `400`, while SES continues to work.
 - A pure backend session, no browser test needed (for user-UI integration see `docs/services/user-ui.md`).
 
 ## Open Points
 
 - **QES completely unimplemented** - neither a real QTSP connector nor a test case for it exists; a signing attempt with `level="qes"` fails with `400` regardless of object type ("no connector configured"). Requires an external business relationship with an accredited trust service provider, see [ADR 0025](../adr/0025-signature-service-internal-ca-and-connector-plugin.md).
-- **No PAdES-B-LTA/long-term archiving** - only PAdES-B-B implemented (no timestamp-authority countersigning). 3.10 explicitly names B-LTA for records disposal (5.6) - a future retrofit would need a real timestamp authority.
-- **No OCSP/CRL revocation check** - `GET /signatures/{id}/verify` only checks integrity and the certificate's validity period. For a self-signed internal CA without real revocation-list infrastructure, this is the only honest verification depth.
+- ~~No PAdES-B-LTA/long-term archiving~~ — **implemented in Post-Roadmap Phase 41 Session 1** ([ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)): internal TSA + periodic archive-timestamp-chain extension, see "PAdES-B-LTA" above.
+- **No OCSP, only a CRL** - `GET /signatures/{id}/verify` checks integrity, trust chain, and certificate validity period; B-LT-required revocation info is now a real, freshly signed CRL (always empty - see "PAdES-B-LTA" above), not OCSP. For a self-signed internal CA with no revocation registry of any kind, an always-empty CRL is the honest ceiling here, not a placeholder for a "real" one still to come.
 - **No process-designer palette entry for signature tasks** - BPMN modeling remains a raw XML upload; a signature task must have its extension attributes set by hand in the XML. Follows with P6-S8.
 - **No PKCS#11/HSM support** - 3.10 explicitly mentions pyHanko also for hardware-token/HSM integration; this session uses exclusively in-memory-generated software keys.
 - **Only PDF documents can be signed** - PAdES is PDF-specific (dictated by pyHanko itself); XAdES/CAdES for other formats are not implemented.

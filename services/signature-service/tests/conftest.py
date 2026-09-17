@@ -84,9 +84,17 @@ async def _clean_tables():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS signature"))
         await conn.run_sync(Base.metadata.create_all)
+        # PAdES-B-LTA (3.10, Post-Roadmap Phase 41 Session 1) - ad-hoc
+        # migration like everywhere in this system (no Alembic).
         await conn.execute(
             text(
-                "TRUNCATE signature.signature, signature.internal_ca, "
+                "ALTER TABLE signature.signature "
+                "ADD COLUMN IF NOT EXISTS last_timestamped_at TIMESTAMPTZ"
+            )
+        )
+        await conn.execute(
+            text(
+                "TRUNCATE signature.signature, signature.internal_ca, signature.internal_tsa, "
                 "signature.signature_config CASCADE"
             )
         )
@@ -100,6 +108,12 @@ async def engine():
     async with eng.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS signature"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(
+                "ALTER TABLE signature.signature "
+                "ADD COLUMN IF NOT EXISTS last_timestamped_at TIMESTAMPTZ"
+            )
+        )
     yield eng
     await eng.dispose()
 

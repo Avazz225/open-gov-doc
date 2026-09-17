@@ -308,6 +308,19 @@ XJustiz mirror of `xdomea.parse_abgabe_message()`) and
   always to the currently-open case) was added in Post-Roadmap Phase 34 Session 3's "Umlaufmappen" pane,
   see [ADR 0141](../adr/0141-case-browsing-ui-user-ui-list-detail.md) and `docs/services/user-ui.md`.
 
+## Signature Long-Term Verifiability Depends on `signature-service` (3.10/5.6)
+
+Concept 3.10 explicitly requires the PAdES-B-LTA profile for signed documents that go through records
+disposal (5.6) — a signature on a disposed document must stay verifiable long after this service has
+released/dehydrated it, past the point any active correction would even be possible. This service does
+**not** implement or trigger any part of that itself, and has **no runtime dependency of any kind on
+`signature-service`** — this cross-reference exists purely so that a reader assessing 5.6 coverage from
+this service's docs alone doesn't miss it. `signature-service` produces every signature at the full
+B-LTA profile unconditionally and self-manages the periodic archive-timestamp-chain extension a B-LTA
+signature needs over the years, entirely on its own (its own `document_client`, no callback into this
+service or any other) — see [`docs/services/signature-service.md`](signature-service.md) "PAdES-B-LTA"
+and [ADR 0155](../adr/0155-internal-tsa-and-self-contained-pades-b-lta.md).
+
 ## KeyStore Plugin (5.6, [ADR 0029](../adr/0029-aussonderung-xdomea-eigenimplementierung-kdbx-plugin.md))
 
 `keystore.KeyStore` (ABC, one method `get_key(key_id) -> bytes`) — same plugin pattern as `storage_service.backends.interface.StorageBackend`. Shipped: `EnvKeyStore`, reads exactly one key from `Settings.archive_encryption_key` (base64, 32 bytes). **No fallback to a randomly generated key** if configuration is missing — that would change on every restart and permanently render already-encrypted archive copies undecryptable; `get_key()` instead raises `KeyNotFoundError`. `crypto.py` implements AES-256-GCM (nonce prepended to the ciphertext bytes) — simpler than the RSA-hybrid, cross-installation encryption in `workflow_service.federation_crypto`, since only a single symmetric key from the `KeyStore` is needed here, no public-key cryptography between two parties.

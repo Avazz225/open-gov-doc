@@ -4,19 +4,30 @@ from signature_service.connectors.interface import (
     SignerInfo,
     VerificationResult,
 )
-from signature_service.connectors.internal import InternalSelfSignedConnector, generate_root_ca
+from signature_service.connectors.internal import (
+    InternalSelfSignedConnector,
+    generate_root_ca,
+    issue_tsa_certificate,
+)
 from signature_service.settings import Settings, SignatureProviderConfig
 
 
 def build_connector(
-    config: SignatureProviderConfig, *, ca_certificate_pem: bytes, ca_private_key_pem: bytes
+    config: SignatureProviderConfig,
+    *,
+    ca_certificate_pem: bytes,
+    ca_private_key_pem: bytes,
+    tsa_certificate_pem: bytes,
+    tsa_private_key_pem: bytes,
 ) -> SignatureProviderConnector:
     """Builds a connector (3.10) for a single configured instance - new
     connector types (especially a real QTSP for QES) are added here without
     touching the rest of the service (same pattern as
     `storage_service.backends.build_backend`)."""
     if config.type == "internal":
-        return InternalSelfSignedConnector(ca_certificate_pem, ca_private_key_pem)
+        return InternalSelfSignedConnector(
+            ca_certificate_pem, ca_private_key_pem, tsa_certificate_pem, tsa_private_key_pem
+        )
     if config.type == "qtsp":
         raise ValueError(
             f"Connector {config.id!r}: type=qtsp ist im Schema vorgesehen, aber in dieser "
@@ -27,11 +38,20 @@ def build_connector(
 
 
 def build_connectors(
-    settings: Settings, *, ca_certificate_pem: bytes, ca_private_key_pem: bytes
+    settings: Settings,
+    *,
+    ca_certificate_pem: bytes,
+    ca_private_key_pem: bytes,
+    tsa_certificate_pem: bytes,
+    tsa_private_key_pem: bytes,
 ) -> dict[str, SignatureProviderConnector]:
     return {
         config.id: build_connector(
-            config, ca_certificate_pem=ca_certificate_pem, ca_private_key_pem=ca_private_key_pem
+            config,
+            ca_certificate_pem=ca_certificate_pem,
+            ca_private_key_pem=ca_private_key_pem,
+            tsa_certificate_pem=tsa_certificate_pem,
+            tsa_private_key_pem=tsa_private_key_pem,
         )
         for config in settings.signature_providers
     }
@@ -65,5 +85,6 @@ __all__ = [
     "build_connector",
     "build_connectors",
     "generate_root_ca",
+    "issue_tsa_certificate",
     "resolve_connector_for_level",
 ]

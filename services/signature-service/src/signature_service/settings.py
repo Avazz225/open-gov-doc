@@ -65,3 +65,14 @@ class Settings(BaseServiceSettings):
     # RBAC (Post-Roadmap Phase 38 Session 3) - `PUT /signature-config`
     # previously had NO permission check at all.
     permission_service_base_url: str = "http://localhost:8004"
+
+    # PAdES-B-LTA (3.10, Post-Roadmap Phase 41 Session 1): how often the
+    # background poll loop checks for signatures whose archive-timestamp
+    # chain is due for extension, and how old a signature's last
+    # extension (or, for a never-extended one, its original signing) must
+    # be before it's picked up. Daily/yearly are deliberately generous
+    # defaults - the leaf certificate's own 5-year validity
+    # (`connectors/internal.py`) is the actual deadline this is racing
+    # against, so there is no need for a tight cadence.
+    retimestamp_poll_interval_seconds: int = 24 * 60 * 60
+    retimestamp_interval_days: int = 365

@@ -25,6 +25,24 @@ class InternalCa(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class InternalTsa(Base):
+    """Internal RFC 3161 timestamp authority certificate (3.10, PAdES-B-LTA,
+    Post-Roadmap Phase 41 Session 1) - same singleton pattern as
+    `InternalCa`, and issued FROM `InternalCa` (see
+    `connectors.internal.issue_tsa_certificate`), so both chain up to the
+    same trust root. Generated once on first startup and then reused
+    idempotently, same rationale as `InternalCa`: a restart must not
+    reissue it, or previously embedded timestamp tokens would no longer
+    resolve to a trusted signer."""
+
+    __tablename__ = "internal_tsa"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    certificate_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    private_key_pem: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Signature(Base):
     """A single electronic signature (3.10) - bound to a specific, newly
     created document version at document-service (2.1a): signing
@@ -32,7 +50,20 @@ class Signature(Base):
     file itself), so the signed bytes are checked in as a standalone,
     permanently retained version instead of overwriting the source
     version - `source_version_number` refers to the signed source version,
-    `version_number` to the newly created, signed version."""
+    `version_number` to the newly created, signed version.
+
+    `last_timestamped_at` (Phase 41 Session 1, PAdES-B-LTA/3.10): `NULL`
+    until the first periodic archive-timestamp-chain extension
+    (`connectors.internal.InternalSelfSignedConnector.extend_timestamp_
+    chain`) - the INITIAL `sign()` call already embeds the first archive
+    timestamp (`use_pades_lta=True`), so a signature is B-LTA-conformant
+    from the moment it's created; this field only tracks LATER,
+    periodic re-timestamps (`_run_retimestamp_tick`), which is what
+    actually makes it "archival" (a continuously extended timestamp
+    chain, not a one-off). `version_number` is updated in place on every
+    successful extension, since each one checks in a new document
+    version (same "signed bytes get their own version" principle as the
+    original signature)."""
 
     __tablename__ = "signature"
 
@@ -50,6 +81,9 @@ class Signature(Base):
     certificate_not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
     signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_timestamped_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class SignatureConfig(Base):

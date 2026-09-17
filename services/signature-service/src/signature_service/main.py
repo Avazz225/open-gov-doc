@@ -1,8 +1,9 @@
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
@@ -43,6 +44,65 @@ logger = logging.getLogger(__name__)
 _LEVEL_RANK = {"ses": 0, "aes": 1, "qes": 2}
 
 
+async def _run_retimestamp_tick(app: FastAPI, *, cutoff: datetime) -> None:
+    """One pass of the PAdES-B-LTA periodic archive-timestamp-chain
+    extension (3.10, Post-Roadmap Phase 41 Session 1) - self-contained
+    within this service (reuses the already-existing `document_client`
+    for fetch/checkin), no new cross-service dependency on
+    `archival-service` needed (see docs/services/archival-service.md).
+    Per-item try/except, same fault-tolerant idiom as every other
+    multi-phase poll loop in this project (e.g. `archival_service.main.
+    _archival_poll_loop`) - one signature's failure must not abort the
+    whole batch. `cutoff` is computed by the caller (not read from
+    `Settings` in here) so tests can force a tick to find something "due"
+    without mutating the module-level `settings` singleton - every
+    `TestClient`-started app instance runs its own real
+    `_retimestamp_poll_loop` in the background, and mutating shared
+    global state would race with those instances' own ticks."""
+    async with app.state.session_factory() as session:
+        due = await repository.list_signatures_due_for_retimestamp(session, cutoff=cutoff)
+        for signature in due:
+            try:
+                connector = app.state.connectors.get(signature.connector_id)
+                extend = getattr(connector, "extend_timestamp_chain", None)
+                if extend is None:
+                    continue
+                _content_type, pdf_bytes = await app.state.document_client.get_version_content(
+                    signature.document_id, signature.version_number
+                )
+                extended_bytes = await extend(pdf_bytes)
+                checkin = await app.state.document_client.checkin_signed_version(
+                    signature.document_id,
+                    expected_base_version_number=signature.version_number,
+                    signed_bytes=extended_bytes,
+                    filename=f"retimestamped-{signature.document_id}-v{signature.version_number}.pdf",
+                    created_by="signature-service",
+                    comment="Archiv-Zeitstempel erneuert (PAdES-B-LTA, 3.10)",
+                )
+                await repository.mark_timestamped(
+                    session,
+                    signature.id,
+                    version_number=checkin["version"]["version_number"],
+                )
+                await session.commit()
+            except Exception:
+                logger.exception(
+                    "Archiv-Zeitstempel-Erneuerung für signature_id=%s fehlgeschlagen",
+                    signature.id,
+                )
+                await session.rollback()
+
+
+async def _retimestamp_poll_loop(app: FastAPI) -> None:
+    while True:
+        try:
+            cutoff = datetime.now(UTC) - timedelta(days=settings.retimestamp_interval_days)
+            await _run_retimestamp_tick(app, cutoff=cutoff)
+        except Exception:
+            logger.exception("Archiv-Zeitstempel-Poll-Tick fehlgeschlagen")
+        await asyncio.sleep(settings.retimestamp_poll_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_start = time.time()
@@ -50,16 +110,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS signature"))
         await conn.run_sync(Base.metadata.create_all)
+        # PAdES-B-LTA (3.10, Post-Roadmap Phase 41 Session 1) - ad-hoc
+        # migration like everywhere in this system (no Alembic).
+        await conn.execute(
+            text(
+                "ALTER TABLE signature.signature "
+                "ADD COLUMN IF NOT EXISTS last_timestamped_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
     async with app.state.session_factory() as session:
         ca = await repository.get_or_create_ca(session)
+        tsa = await repository.get_or_create_tsa(
+            session,
+            ca_certificate_pem=ca.certificate_pem,
+            ca_private_key_pem=ca.private_key_pem,
+        )
         await session.commit()
         ca_certificate_pem, ca_private_key_pem = ca.certificate_pem, ca.private_key_pem
+        tsa_certificate_pem, tsa_private_key_pem = tsa.certificate_pem, tsa.private_key_pem
 
     app.state.connectors = build_connectors(
-        settings, ca_certificate_pem=ca_certificate_pem, ca_private_key_pem=ca_private_key_pem
+        settings,
+        ca_certificate_pem=ca_certificate_pem,
+        ca_private_key_pem=ca_private_key_pem,
+        tsa_certificate_pem=tsa_certificate_pem,
+        tsa_private_key_pem=tsa_private_key_pem,
     )
     app.state.document_client = DocumentServiceClient(settings.document_service_base_url)
     app.state.object_type_client = ObjectTypeServiceClient(settings.object_type_service_base_url)
@@ -88,12 +166,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sensors=http_sensor_declarations(),
     )
 
+    app.state.retimestamp_task = asyncio.create_task(_retimestamp_poll_loop(app))
+
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
     logger.info("Startup completed in %s ms.", millis, exc_info=True)
 
     yield
 
+    app.state.retimestamp_task.cancel()
     sensor_config_proxy.unbind()
     await app.state.sensor_config_client.stop()
     if registration:

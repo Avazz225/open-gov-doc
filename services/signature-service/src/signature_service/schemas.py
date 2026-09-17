@@ -34,6 +34,7 @@ class SignatureOut(BaseModel):
     certificate_not_after: datetime
     reason: str | None
     signed_at: datetime
+    last_timestamped_at: datetime | None
 
     model_config = {"from_attributes": True}
 

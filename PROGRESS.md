@@ -2,7 +2,104 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P40-S4 (targeted sensor retrofit — fourth and final session of Phase 40,
+**Last completed:** P41-S1 (PAdES-B-LTA / long-term signature archiving — first session of Phase 41,
+"Compliance Gaps from the Concept Document", [ADR 0155](docs/adr/0155-internal-tsa-and-self-contained-pades-b-lta.md)).
+Research at session start against the real `signature-service` code (not just docs) found three
+things before any implementation started:
+
+- **A real, silent bug**: `InternalSelfSignedConnector.sign()` never set `subfilter=SigSeedSubFilter.
+  PADES` — without it, pyHanko defaults to plain PKCS#7 (`ADOBE_PKCS7_DETACHED`), so every signature
+  this service had ever produced before this session was, structurally, not actually a PAdES
+  signature at all, despite the connector's own name/docstring and this service's docs claiming
+  "PAdES-B-B".
+- **No TSA or CRL/OCSP infrastructure of any kind existed** — both structurally required for B-T/
+  B-LT/B-LTA.
+- **pyHanko (already a pinned dependency) already fully supports B-T/B-LT/B-LTA** — achieving it was a
+  wiring exercise against already-installed API surface (`PdfSignatureMetadata(subfilter=,
+  timestamper=, embed_validation_info=, validation_context=, use_pades_lta=)`,
+  `signers.async_sign_pdf(..., timestamper=...)`), not a new-capability build.
+
+Three genuine architecture decisions followed, all resolved via this project's own established
+precedent (no user question needed — same reasoning P40-S2/S4 used for one-sided technical
+corrections): **an internal TSA** (new `InternalTsa` singleton, TIME_STAMPING leaf cert issued from
+the existing internal root CA, fed to pyHanko's `DummyTimeStamper` — despite its "testing purposes"
+docstring, a genuine, complete RFC 3161 signer), same "internal instead of external" precedent as
+`InternalCa` itself (ADR 0025) and `federation-hub-service`'s hub identity (ADR 0085); **a freshly
+signed, always-empty CRL** for B-LT's structural validation-info requirement (via `cryptography`'s
+already-available `CertificateRevocationListBuilder`, regenerated on every embed rather than cached);
+and **the periodic archive-timestamp-chain extension living entirely self-contained within
+`signature-service`**, with **no new `archival-service` dependency** — `signature-service`'s own
+`document_client` (fetch + check-in) is fully sufficient, so the plan's "close the missing doc
+cross-reference" instruction was satisfied as a pure documentation edit to
+`docs/services/archival-service.md` (no runtime dependency existed before this session and none is
+created now either).
+
+**Implementation**: `sign()` now sets `subfilter=SigSeedSubFilter.PADES`, `embed_validation_info=True`,
+`validation_context=` (trust root + CRL), `use_pades_lta=True`, and passes the internal TSA as
+`timestamper=` to `signers.async_sign_pdf()`. New `InternalTsa` model/table (singleton, same
+get-or-create pattern as `InternalCa`) and `Signature.last_timestamped_at` (nullable, `NULL` until the
+first periodic extension — the initial signature already embeds the first archive timestamp
+regardless). New `connectors.internal.issue_tsa_certificate`/`_build_crl_der`/`_asn1_certificate`/
+`_asn1_private_key` helpers, and a new `InternalSelfSignedConnector.extend_timestamp_chain` method
+(pyHanko's `PdfTimeStamper.async_update_archival_timestamp_chain`). New background poll loop
+(`main._retimestamp_poll_loop`/`_run_retimestamp_tick`, same multi-phase/per-item-try-except idiom as
+every other poll loop in this project, e.g. `archival_service.main._archival_poll_loop`) queries
+`Signature` rows due for renewal (`retimestamp_interval_days` default 365) and checks the extended
+bytes back in as a new document version, same "signed bytes get their own version" principle as the
+original signature. **Deliberately no manual HTTP trigger** — same "no manual trigger" precedent as
+`document-service`'s own retention poll loop.
+
+**Test-suite hang found and fixed during this session, not by a test first**: the initial version of
+`_run_retimestamp_tick` read `Settings.retimestamp_interval_days` directly from the module-level
+`settings` singleton, and the first version of the new poll-loop tests `monkeypatch`ed that same
+global to force a signature to be "due". Running the full `services/signature-service/tests` suite
+(not just the new files in isolation) hung indefinitely — root-caused via `pg_stat_activity` on the
+live Postgres container: a `signature.signature` row was `idle in transaction` for 5+ minutes,
+blocking a *different* test file's `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` migration on the same
+table. Cause: every single `TestClient(app)`-based test in `test_api.py` starts its own real, ambient
+`_retimestamp_poll_loop` background task on startup (one per `TestClient` lifespan cycle) — an
+orphaned instance of that task, still alive from an earlier test and reading the same mutated global
+`settings.retimestamp_interval_days = -1`, considered essentially the entire, already-populated
+`signature` table "due" all at once and started hammering document-service with real HTTP
+checkin/lock-conflict traffic concurrently with the new test's own signing operations on the same
+document — a self-inflicted race, not a pyHanko or Postgres bug. **Fixed** by refactoring
+`_run_retimestamp_tick(app)` to `_run_retimestamp_tick(app, *, cutoff: datetime)` — the cutoff is now
+computed by the caller (`_retimestamp_poll_loop` from `Settings` for the real loop, tests pass an
+explicit future/past `cutoff` directly) instead of being read from the shared global singleton, which
+removes the entire cross-test contamination vector. Verified: the full suite (25 tests) now passes in
+~16s, and `pg_stat_activity` shows zero lingering `idle in transaction` backends afterward.
+
+**Tests**: **25 tests since Post-Roadmap Phase 41 Session 1** (previously 18, +7): new
+`test_connector_internal_pades_lta.py` (5) unit-tests `InternalSelfSignedConnector` directly (no
+cross-service dependency) — real PAdES subfilter (regression test for the fixed silent bug), embedded
+validation info (`/DSS`), initial verification, `extend_timestamp_chain` staying verifiable across
+repeated calls. New `test_retimestamp_poll_loop.py` (2) exercises `main._run_retimestamp_tick`
+end-to-end (real document-service round trip) for both the "due" and "not yet due" cases, built
+against a dedicated engine/session bound to the test's own event loop rather than `TestClient`'s
+(which runs the app's lifespan-bound asyncpg engine on a separate event loop internally — reusing it
+directly would break under cross-loop asyncpg use). `ruff check`/`ruff format` clean.
+
+**Live-verified** against the rebuilt, restarted real `signature-service` container: created a real
+test document at `document-service`, signed it via `POST /signatures` (`level=ses`,
+`last_timestamped_at: null` in the response as expected), `GET /signatures/{id}/verify` returned
+`valid: true`, and the actual signed PDF bytes fetched back from `document-service` were inspected
+directly with pyHanko's own `PdfFileReader` — confirmed a real `/Sig` field with
+`/SubFilter: /ETSI.CAdES.detached` (the content signature), a separate `/DocTimeStamp` field with
+`/ETSI.RFC3161` (the archive timestamp), and `/DSS` present in the PDF catalog (embedded validation
+info) — exactly the B-LTA structure. Test artifacts left in place (a harmless extra test document;
+`DELETE /documents/{id}` returned `422` on the first attempt and wasn't chased further, not worth the
+extra effort for a throwaway live-verification document).
+
+`docs/services/signature-service.md` (new "PAdES-B-LTA" section, data model, connector description,
+Open Points, Tests) and `docs/services/archival-service.md` (new "Signature Long-Term Verifiability
+Depends on `signature-service`" cross-reference section) updated. `docs/adr/0155-internal-tsa-and-self-contained-pades-b-lta.md`
+(new). No `graphify update .` — not a phase end (Phase 41 has two more sessions, P41-S2/S3). Next step:
+**P41-S2** (Concept 5.2: real attribute-level pseudonymization, distinct from the already-built
+document-content redaction of ADR 0115).
+
+---
+
+Immediately before P41-S1: **P40-S4** (targeted sensor retrofit — fourth and final session of Phase 40,
 "Operational Reliability"). Research ahead of implementation surfaced one genuine architectural
 decision (storage-service, presented to the user) and two premises that needed correcting before
 writing anything:

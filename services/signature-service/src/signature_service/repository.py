@@ -1,12 +1,14 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from signature_service.connectors import generate_root_ca
-from signature_service.models import InternalCa, Signature, SignatureConfig
+from signature_service.connectors import generate_root_ca, issue_tsa_certificate
+from signature_service.models import InternalCa, InternalTsa, Signature, SignatureConfig
 
 _CA_ID = 1
+_TSA_ID = 1
 _SIGNATURE_CONFIG_ID = 1
 
 
@@ -37,6 +39,30 @@ async def get_or_create_ca(session: AsyncSession) -> InternalCa:
     session.add(ca)
     await session.flush()
     return ca
+
+
+async def get_or_create_tsa(
+    session: AsyncSession, *, ca_certificate_pem: bytes, ca_private_key_pem: bytes
+) -> InternalTsa:
+    """Singleton pattern like `get_or_create_ca` (3.10, PAdES-B-LTA,
+    Post-Roadmap Phase 41 Session 1) - the internal TSA certificate is
+    issued once, from the already-existing root CA, and then reused
+    idempotently for the same reason as the CA itself: a restart must not
+    reissue it, or previously embedded timestamp tokens would no longer
+    resolve to a trusted signer."""
+    tsa = await session.get(InternalTsa, _TSA_ID)
+    if tsa is not None:
+        return tsa
+    certificate_pem, private_key_pem = issue_tsa_certificate(ca_certificate_pem, ca_private_key_pem)
+    tsa = InternalTsa(
+        id=_TSA_ID,
+        certificate_pem=certificate_pem,
+        private_key_pem=private_key_pem,
+        created_at=datetime.now(UTC),
+    )
+    session.add(tsa)
+    await session.flush()
+    return tsa
 
 
 async def create_signature(
@@ -90,6 +116,37 @@ async def list_signatures(
         query = query.where(Signature.document_id == document_id)
     result = await session.execute(query.order_by(Signature.signed_at.desc()))
     return list(result.scalars().all())
+
+
+async def list_signatures_due_for_retimestamp(
+    session: AsyncSession, *, cutoff: datetime
+) -> Sequence[Signature]:
+    """Signatures whose archive-timestamp chain needs extending (PAdES-
+    B-LTA, 3.10, Post-Roadmap Phase 41 Session 1) - either never extended
+    yet and signed before `cutoff`, or last extended before `cutoff`.
+    Called from `main.py`'s periodic poll loop with `cutoff = now -
+    Settings.retimestamp_interval_days`."""
+    query = select(Signature).where(
+        or_(
+            and_(Signature.last_timestamped_at.is_(None), Signature.signed_at <= cutoff),
+            Signature.last_timestamped_at <= cutoff,
+        )
+    )
+    result = await session.execute(query)
+    return result.scalars().all()
+
+
+async def mark_timestamped(
+    session: AsyncSession, signature_id: int, *, version_number: int
+) -> None:
+    """Records a successful archive-timestamp-chain extension - advances
+    `version_number` to the new document version the extended bytes were
+    checked in as (same "signed bytes get their own version" principle as
+    the original signature) and stamps `last_timestamped_at`."""
+    signature = await get_signature(session, signature_id)
+    signature.version_number = version_number
+    signature.last_timestamped_at = datetime.now(UTC)
+    await session.flush()
 
 
 async def get_signature_config(
