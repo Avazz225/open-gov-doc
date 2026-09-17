@@ -1,4 +1,4 @@
-import { GATEWAY_BASE_URL as DEFAULT_GATEWAY_BASE_URL } from "./config";
+import { FEDERATION_HUB_BASE_URL, GATEWAY_BASE_URL as DEFAULT_GATEWAY_BASE_URL } from "./config";
 
 // Mutable instead of a fixed import (P4-S5, multi-installation, Concept 8):
 // the admin UI can manage multiple installations, each with its own gateway
@@ -47,6 +47,26 @@ async function request(
     headers,
   });
 
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  return response;
+}
+
+// Federation Hub (Phase 40 Session 3) - the ONE exception to "every call
+// goes through the gateway" above: federation-hub-service is shared,
+// cross-installation infrastructure, not an internal service of any one
+// installation (it deliberately doesn't register with registry-service,
+// so the gateway can't proxy to it at all, see lib/config.ts). Calls it
+// directly at a fixed base URL instead - unlike `gatewayBaseUrl`, this is
+// NOT mutable per installation switch, since it's the same shared hub
+// regardless of which installation the admin is currently viewing. No
+// `Authorization` header either - the hub has no admin-token model, its
+// gated endpoints (installation rotate-key/revoke) use a different
+// mechanism entirely (signatures/an operator secret), not the JWT this
+// module otherwise carries.
+async function federationHubRequest(path: string, init: RequestInit = {}): Promise<Response> {
+  const response = await fetch(`${FEDERATION_HUB_BASE_URL}/${path}`, init);
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response));
   }
@@ -1905,6 +1925,38 @@ export async function retryRendition(token: string, id: string): Promise<Renditi
     { method: "POST" },
     token
   );
+  return response.json();
+}
+
+// Federation Hub handovers (Phase 40 Session 3) - visibility into failed
+// handovers on BOTH independent legs (`delivery_failed` = forward
+// delivery to the target installation, `result_delivery_failed` = the
+// hub's return-path delivery back to the origin installation, ADR 0081 +
+// this session). A single `retryHandover()` call covers both - the
+// endpoint itself dispatches on the handover's current status.
+export interface Handover {
+  id: string;
+  from_installation_id: string;
+  to_installation_id: string;
+  process_type: string;
+  status: string;
+  attempts: number;
+  next_retry_at: string | null;
+  result_attempts: number;
+  result_next_retry_at: string | null;
+  created_at: string;
+  delivered_at: string | null;
+  completed_at: string | null;
+}
+
+export async function listHandovers(status?: string): Promise<Handover[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await federationHubRequest(`handovers${query}`);
+  return response.json();
+}
+
+export async function retryHandover(id: string): Promise<Handover> {
+  const response = await federationHubRequest(`handovers/${id}/retry`, { method: "POST" });
   return response.json();
 }
 

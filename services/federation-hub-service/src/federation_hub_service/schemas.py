@@ -79,6 +79,10 @@ class HandoverOut(BaseModel):
     status: str
     attempts: int
     next_retry_at: datetime | None
+    # Return-path retry (Phase 40 Session 3) - mirrors `attempts`/
+    # `next_retry_at` above for the separate result-delivery leg.
+    result_attempts: int
+    result_next_retry_at: datetime | None
     created_at: datetime
     delivered_at: datetime | None
     completed_at: datetime | None

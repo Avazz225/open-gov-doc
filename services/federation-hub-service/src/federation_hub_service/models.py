@@ -113,13 +113,32 @@ class Handover(Base):
     to_installation_id: Mapped[str] = mapped_column(String(128), index=True)
     process_type: Mapped[str] = mapped_column(String(256))
     # "pending" -> "delivered"|"pending_retry"->...->"delivery_failed" ->
-    # "completed"|"result_delivery_failed" (Post-Roadmap Phase 20 Session 5,
-    # ADR 0081: "pending_retry" is new, "delivery_failed" is now only reached
-    # after max_handover_delivery_attempts is exhausted instead of, as
-    # before, immediately on every single failure).
+    # "result_pending_retry"->...->"completed"|"result_delivery_failed"
+    # (Post-Roadmap Phase 20 Session 5, ADR 0081: "pending_retry" is new,
+    # "delivery_failed" is now only reached after
+    # max_handover_delivery_attempts is exhausted instead of, as before,
+    # immediately on every single failure. Phase 40 Session 3: the same
+    # retry-then-give-up shape is now ALSO applied to the separate return
+    # path, `POST /handovers/{id}/result`'s hub->origin-installation
+    # delivery - "result_pending_retry" is new, `attempts`/`next_retry_at`
+    # above remain exclusively for the forward-delivery leg, see
+    # `result_attempts`/`result_next_retry_at` below for the mirrored
+    # counters on the result leg).
     status: Mapped[str] = mapped_column(String(32))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Return-path retry (Phase 40 Session 3) - mirrors `attempts`/
+    # `next_retry_at` above exactly, but for the hub's outbound delivery of
+    # the RESULT to `from_installation_id` (inside `submit_handover_result`),
+    # independent of the forward-delivery leg's own counters. The
+    # `encrypted_result` payload that still needs retrying, like the forward
+    # payload, is kept only ephemerally in process memory
+    # (`app.state.pending_handover_result_payloads`), never here - same
+    # ADR 0028/0081 rationale, doubled for this second leg.
+    result_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    result_next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

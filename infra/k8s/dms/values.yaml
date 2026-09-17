@@ -617,7 +617,15 @@ services:
     podDisruptionBudget:
       enabled: false
       minAvailable: 1
-    env: {}
+    # Admin UI access (Phase 40 Session 3) - admin-ui calls this service
+    # DIRECTLY (see apps/admin-ui/src/lib/config.ts), not through the
+    # gateway (this service isn't registered with registry-service, see
+    # the block comment above), so IT needs its own CORS list instead of
+    # relying on gateway-service's (line ~197 above) - must contain
+    # admin-ui's own ingress hostname, unlike gateway-service's list
+    # which contains every frontend app's hostname.
+    env:
+      DMS_CORS_ALLOWED_ORIGINS: '["http://localhost:3000","http://localhost:3001","https://admin-ui.dms.local"]'
 
   favorite-service:
     enabled: true

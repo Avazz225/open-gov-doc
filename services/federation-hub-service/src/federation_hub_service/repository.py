@@ -361,8 +361,63 @@ async def reset_for_retry(session: AsyncSession, handover: Handover) -> None:
 
 
 async def mark_handover_result_delivered(
-    session: AsyncSession, handover: Handover, *, success: bool
+    session: AsyncSession, handover: Handover, *, success: bool, max_attempts: int
 ) -> None:
-    handover.status = "completed" if success else "result_delivery_failed"
-    handover.completed_at = datetime.now(UTC)
+    """Retry-aware version (Phase 40 Session 3, mirrors
+    `mark_handover_delivered` exactly for the return path's hub->origin-
+    installation delivery): a failure no longer leads immediately to
+    ``result_delivery_failed``, but to ``result_pending_retry`` with
+    full-jitter backoff, as long as ``max_attempts`` hasn't been reached
+    yet. ``completed_at`` is only set on an actually terminal outcome
+    (success or exhausted failure), not on an intermediate retry state -
+    same convention as ``delivered_at`` on the forward-delivery leg."""
+    if success:
+        handover.status = "completed"
+        handover.completed_at = datetime.now(UTC)
+        handover.result_next_retry_at = None
+        await session.flush()
+        return
+    handover.result_attempts += 1
+    if handover.result_attempts >= max_attempts:
+        handover.status = "result_delivery_failed"
+        handover.result_next_retry_at = None
+        handover.completed_at = datetime.now(UTC)
+    else:
+        handover.status = "result_pending_retry"
+        delay = compute_backoff_seconds(handover.result_attempts - 1)
+        handover.result_next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
     await session.flush()
+
+
+async def list_due_for_result_retry(session: AsyncSession) -> list[Handover]:
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Handover).where(
+            Handover.status == "result_pending_retry",
+            Handover.result_next_retry_at <= now,
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def reset_for_result_retry(session: AsyncSession, handover: Handover) -> None:
+    """MUST run before a new result-delivery attempt - mirrors
+    `reset_for_retry` exactly, see its docstring for why (ADR 0080)."""
+    handover.result_attempts = 0
+    handover.result_next_retry_at = None
+    await session.flush()
+
+
+async def list_handovers(session: AsyncSession, *, status: str | None = None) -> list[Handover]:
+    """Collection endpoint basis (Phase 40 Session 3) - previously only a
+    single-``id`` `GET` existed, no way to list e.g. every
+    ``delivery_failed``/``result_delivery_failed`` handover for the admin
+    UI's failure-visibility view, unlike the equivalent list-with-status-
+    filter endpoints in `rendering-service`/`ocr-service`/
+    `notification-service`. Most-recent-first, same convention as an
+    admin-facing failure list is typically read (newest problem first)."""
+    query = select(Handover)
+    if status is not None:
+        query = query.where(Handover.status == status)
+    result = await session.execute(query.order_by(Handover.created_at.desc()))
+    return list(result.scalars().all())

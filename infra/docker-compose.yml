@@ -1620,6 +1620,9 @@ services:
       dockerfile: apps/admin-ui/Dockerfile
       args:
         NEXT_PUBLIC_GATEWAY_BASE_URL: ${ADMIN_UI_GATEWAY_BASE_URL:-http://localhost:8009}
+        # Federation Hub (Phase 40 Session 3) - reached directly, not
+        # through the gateway above, see apps/admin-ui/src/lib/config.ts.
+        NEXT_PUBLIC_FEDERATION_HUB_BASE_URL: ${ADMIN_UI_FEDERATION_HUB_BASE_URL:-http://localhost:8018}
     restart: "no"
     ports:
       - "${ADMIN_UI_PORT:-3001}:80"

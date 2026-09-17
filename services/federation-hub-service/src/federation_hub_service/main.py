@@ -4,11 +4,13 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 import httpx
 from dms_common import configure_logging
 from dms_db_base import build_engine, make_session_factory
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,6 +114,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ADD COLUMN IF NOT EXISTS certificate_not_after TIMESTAMPTZ"
             )
         )
+        # Return-path retry (Phase 40 Session 3) - same ad-hoc migration
+        # pattern as the forward-delivery `attempts`/`next_retry_at` above.
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.handover "
+                "ADD COLUMN IF NOT EXISTS result_attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE federation.handover "
+                "ADD COLUMN IF NOT EXISTS result_next_retry_at TIMESTAMPTZ"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -151,8 +167,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # to automatically redeliver - documented, not silently worked around
     # (see `docs/services/federation-hub-service.md` "Open Points").
     app.state.pending_handover_payloads = {}
+    # Return-path retry (Phase 40 Session 3) - same ephemeral, in-process-
+    # only cache principle, doubled for the result-delivery leg (see
+    # `models.Handover`'s docstring and ADR 0147's memory-pressure note,
+    # which now applies to both caches together).
+    app.state.pending_handover_result_payloads = {}
     retry_poll_task = asyncio.create_task(
-        _handover_retry_poll_loop(app.state.session_factory, app.state.pending_handover_payloads)
+        _handover_retry_poll_loop(
+            app.state.session_factory,
+            app.state.pending_handover_payloads,
+            app.state.pending_handover_result_payloads,
+        )
     )
 
     startup_end = time.time()
@@ -169,6 +194,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.service_name, lifespan=lifespan)
+
+# Admin UI access (Phase 40 Session 3, see `settings.cors_allowed_origins`
+# docstring) - this service is called directly by a browser (admin-ui),
+# bypassing the gateway (which normally handles CORS for every other
+# admin-ui-visible service), since it deliberately isn't registered with
+# `registry-service` for the gateway to proxy to. Registered before the
+# routes, same ordering rationale as `gateway-service`'s own
+# `CORSMiddleware` registration (Starlette must intercept preflight
+# OPTIONS requests before any route).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -394,18 +435,71 @@ async def _run_retry_tick(session_factory, pending_payloads: dict[str, dict]) ->
             await session.commit()
 
 
-async def _handover_retry_poll_loop(session_factory, pending_payloads: dict[str, dict]) -> None:
+async def _run_result_retry_tick(session_factory, pending_result_payloads: dict[str, dict]) -> None:
+    """Return-path counterpart of `_run_retry_tick` (Phase 40 Session 3) -
+    same shape exactly, but retries the hub's outbound delivery to
+    `from_installation_id` (the handover's origin) inside
+    `submit_handover_result`, not the forward delivery to
+    `to_installation_id`."""
+    async with session_factory() as session:
+        due = await repository.list_due_for_result_retry(session)
+    for stale in due:
+        async with session_factory() as session:
+            handover = await session.get(Handover, stale.id)
+            if handover is None or handover.status != "result_pending_retry":
+                continue  # handled differently in the meantime (e.g. manual retry)
+            cached = pending_result_payloads.get(handover.id)
+            if cached is None:
+                logger.warning(
+                    "federation_handover_result_retry_payload_lost",
+                    extra={"handover_id": handover.id},
+                )
+                handover.status = "result_delivery_failed"
+                handover.result_next_retry_at = None
+                handover.completed_at = datetime.now(UTC)
+                await session.commit()
+                continue
+            origin = await session.get(Installation, handover.from_installation_id)
+            delivered = False
+            if origin is not None:
+                delivered = await _deliver(
+                    origin.callback_base_url.rstrip("/") + "/federation/inbound-result", cached
+                )
+            await repository.mark_handover_result_delivered(
+                session,
+                handover,
+                success=delivered,
+                max_attempts=settings.max_handover_delivery_attempts,
+            )
+            if delivered:
+                pending_result_payloads.pop(handover.id, None)
+            await session.commit()
+
+
+async def _handover_retry_poll_loop(
+    session_factory, pending_payloads: dict[str, dict], pending_result_payloads: dict[str, dict]
+) -> None:
     """Retries failed initial handover deliveries (Post-Roadmap Phase 20
     Session 5, ADR 0081) - the first delivery attempt deliberately stays
     synchronous in `POST /handovers` (fast response in the normal case), only
     the RETRY runs asynchronously in this dedicated poll loop. Same idiom as
-    notification-service's `_notification_retry_poll_loop` (ADR 0079)."""
+    notification-service's `_notification_retry_poll_loop` (ADR 0079). Since
+    Phase 40 Session 3, the same loop/interval also drives the return path's
+    retry tick - one poll loop, two independent legs, rather than a second
+    `asyncio.create_task`/lifespan-managed loop for a symmetric concern."""
     while True:
         try:
             await _run_retry_tick(session_factory, pending_payloads)
         except Exception:
             logger.exception(
                 "Federation-Handover-Retry-Poll-Tick fehlgeschlagen - "
+                "wird beim naechsten Tick erneut versucht."
+            )
+        try:
+            await _run_result_retry_tick(session_factory, pending_result_payloads)
+        except Exception:
+            logger.exception(
+                "Federation-Handover-Result-Retry-Poll-Tick fehlgeschlagen - "
                 "wird beim naechsten Tick erneut versucht."
             )
         await asyncio.sleep(settings.handover_retry_poll_interval_seconds)
@@ -523,18 +617,40 @@ async def submit_handover_result(
             detail="Nur die Zielinstallation dieses Handover darf ein Ergebnis zurückmelden",
         )
 
+    result_body = {
+        "handover_id": handover.id,
+        "outcome": payload.outcome,
+        "encrypted_result": payload.encrypted_result,
+    }
     origin = await session.get(Installation, handover.from_installation_id)
     delivered = origin is not None and await _deliver(
-        origin.callback_base_url.rstrip("/") + "/federation/inbound-result",
-        {
-            "handover_id": handover.id,
-            "outcome": payload.outcome,
-            "encrypted_result": payload.encrypted_result,
-        },
+        origin.callback_base_url.rstrip("/") + "/federation/inbound-result", result_body
     )
-    await repository.mark_handover_result_delivered(session, handover, success=delivered)
+    await repository.mark_handover_result_delivered(
+        session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
+    )
+    if not delivered:
+        # Same retry-cache principle as the forward-delivery leg in
+        # `create_handover` (Phase 40 Session 3) - stays cached even after
+        # exhaustion (`result_delivery_failed`), a manual `POST .../retry`
+        # needs it precisely then.
+        app.state.pending_handover_result_payloads[handover.id] = result_body
     await session.commit()
     return handover
+
+
+@app.get("/handovers", response_model=list[HandoverOut])
+async def list_handovers(
+    status: str | None = None, session: AsyncSession = Depends(get_session)
+) -> list[HandoverOut]:
+    """Collection endpoint (Phase 40 Session 3) - previously only a
+    single-``id`` `GET` existed. Basis for the admin UI's failure-
+    visibility view (``?status=delivery_failed``/``?status=
+    result_delivery_failed``), analogous to `rendering-service`/
+    `ocr-service`/`notification-service`'s equivalent list-with-status-
+    filter endpoints. Deliberately ungated, same rationale as
+    `GET /installations` (7.4: metadata, not content)."""
+    return await repository.list_handovers(session, status=status)
 
 
 @app.get("/handovers/{handover_id}", response_model=HandoverOut)
@@ -547,33 +663,13 @@ async def get_handover(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.post("/handovers/{handover_id}/retry", response_model=HandoverOut)
-async def retry_handover(
-    handover_id: str, session: AsyncSession = Depends(get_session)
-) -> HandoverOut:
-    """Manual restart of a permanently failed handover (Post-Roadmap Phase 20
-    Session 5, ADR 0081) - only meaningful for `delivery_failed` (409
-    otherwise); makes a new synchronous delivery attempt immediately instead
-    of waiting for the next poll tick, same pattern as ocr-/rendering-service
-    (ADR 0080). MUST reset `attempts`/`next_retry_at` BEFORE the new attempt
-    (`repository.reset_for_retry`). Only works as long as the encrypted
-    payload is still in the hub's process memory - after a restart during an
-    open retry window it is irrecoverably lost (deliberate consequence of "no
-    payload is ever persisted", ADR 0028); in that case the sending
-    installation must submit a new handover with a new handover_id."""
-    try:
-        handover = await repository.get_handover(session, handover_id)
-    except repository.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if handover.status != "delivery_failed":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Handover hat Status {handover.status!r}, nur 'delivery_failed' "
-                "kann erneut versucht werden"
-            ),
-        )
-    cached = app.state.pending_handover_payloads.get(handover_id)
+async def _retry_forward_delivery(session: AsyncSession, handover: Handover) -> None:
+    """Forward-delivery leg of a manual retry (Post-Roadmap Phase 20
+    Session 5, ADR 0081) - `retry_handover` dispatches here for
+    `delivery_failed`. MUST reset `attempts`/`next_retry_at` BEFORE the new
+    attempt (`repository.reset_for_retry`) - see ADR 0080 "Consequences"
+    for the bug this guards against."""
+    cached = app.state.pending_handover_payloads.get(handover.id)
     if cached is None:
         raise HTTPException(
             status_code=409,
@@ -599,6 +695,72 @@ async def retry_handover(
     # further manual retry (or a poll loop resumed in the meantime, if
     # attempts hadn't been exhausted yet) can still use it.
     if delivered:
-        app.state.pending_handover_payloads.pop(handover_id, None)
+        app.state.pending_handover_payloads.pop(handover.id, None)
     await session.commit()
+
+
+async def _retry_result_delivery(session: AsyncSession, handover: Handover) -> None:
+    """Return-path counterpart (Phase 40 Session 3) - `retry_handover`
+    dispatches here for `result_delivery_failed`, mirroring
+    `_retry_forward_delivery` exactly but for the hub's outbound delivery
+    to `from_installation_id`."""
+    cached = app.state.pending_handover_result_payloads.get(handover.id)
+    if cached is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Verschlüsselter Ergebnis-Payload ist nicht mehr im Hub-Speicher "
+                "vorhanden (z. B. nach einem Neustart) - die Zielinstallation muss "
+                "das Ergebnis erneut über POST /handovers/{id}/result einreichen"
+            ),
+        )
+    await repository.reset_for_result_retry(session, handover)
+    await session.commit()
+
+    origin = await session.get(Installation, handover.from_installation_id)
+    delivered = False
+    if origin is not None:
+        delivered = await _deliver(
+            origin.callback_base_url.rstrip("/") + "/federation/inbound-result", cached
+        )
+    await repository.mark_handover_result_delivered(
+        session, handover, success=delivered, max_attempts=settings.max_handover_delivery_attempts
+    )
+    if delivered:
+        app.state.pending_handover_result_payloads.pop(handover.id, None)
+    await session.commit()
+
+
+@app.post("/handovers/{handover_id}/retry", response_model=HandoverOut)
+async def retry_handover(
+    handover_id: str, session: AsyncSession = Depends(get_session)
+) -> HandoverOut:
+    """Manual restart of a permanently failed handover (Post-Roadmap Phase 20
+    Session 5, ADR 0081; extended Phase 40 Session 3 to also cover the
+    return path) - dispatches on the handover's CURRENT status so the admin
+    UI can call this single endpoint uniformly regardless of which of the
+    two independent legs failed (409 for any other status). Makes a new
+    synchronous delivery attempt immediately instead of waiting for the next
+    poll tick, same pattern as ocr-/rendering-service (ADR 0080). Only works
+    as long as the relevant encrypted payload is still in the hub's process
+    memory - after a restart during an open retry window it is irrecoverably
+    lost (deliberate consequence of "no payload is ever persisted",
+    ADR 0028)."""
+    try:
+        handover = await repository.get_handover(session, handover_id)
+    except repository.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if handover.status == "delivery_failed":
+        await _retry_forward_delivery(session, handover)
+    elif handover.status == "result_delivery_failed":
+        await _retry_result_delivery(session, handover)
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Handover hat Status {handover.status!r}, nur 'delivery_failed' "
+                "oder 'result_delivery_failed' kann erneut versucht werden"
+            ),
+        )
     return handover

@@ -9,6 +9,10 @@ RUN npm install
 COPY apps/admin-ui/ ./
 ARG NEXT_PUBLIC_GATEWAY_BASE_URL=http://localhost:8009
 ENV NEXT_PUBLIC_GATEWAY_BASE_URL=$NEXT_PUBLIC_GATEWAY_BASE_URL
+# Federation Hub (Phase 40 Session 3) - reached directly, not through the
+# gateway above, see lib/config.ts.
+ARG NEXT_PUBLIC_FEDERATION_HUB_BASE_URL=http://localhost:8018
+ENV NEXT_PUBLIC_FEDERATION_HUB_BASE_URL=$NEXT_PUBLIC_FEDERATION_HUB_BASE_URL
 RUN npm run build
 
 FROM nginx:1.27-alpine

@@ -2,7 +2,71 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P40-S2 (unbounded concurrency fan-out to `document-service` — second session of
+**Last completed:** P40-S3 (`federation-hub-service` reliability — third session of Phase 40,
+"Operational Reliability"). Research ahead of implementation found item 1's own premise stale:
+API-key rotation/revocation was already fully built in ADR 0039 (`POST /installations/{id}/rotate-
+key`/`.../revoke`) — the plan's wording restated a literal "Open Points" line in the service's own
+doc that was simply never cleaned up after that ADR shipped, three sections above it in the same
+file. Item 3 also turned up a real architectural wrinkle needing a user decision before building:
+`federation-hub-service` deliberately doesn't register with `registry-service` (it's shared,
+cross-installation infrastructure, not any one installation's internal service), so it can't be
+proxied through the gateway the way the other three comparison services can — **presented to the
+user as a three-way choice, the user chose "direct base URL, bypass the gateway"** (new
+`NEXT_PUBLIC_FEDERATION_HUB_BASE_URL` + `CORSMiddleware` added to the hub itself, matching how
+`workflow-service`/`auth-service` already reach it).
+
+1. **Item 1 — doc correction only, no code**: struck the stale "API key with no rotation/revocation"
+   Open Points bullet in `docs/services/federation-hub-service.md`, replaced with an explanation of
+   why it was already resolved (and never actually needed the literal "full de-/re-registration" the
+   old text implied — `Handover.from_installation_id`/`to_installation_id` aren't even `ForeignKey`s
+   to `installation`, so there was never a cascade risk either).
+2. **Return-path retry** — `POST /handovers/{id}/result`'s hub→origin-installation delivery
+   previously had ZERO retry logic (a single failure landed immediately in `result_delivery_failed`),
+   unlike the forward-delivery leg (ADR 0081). Mirrors that leg exactly: new `result_pending_retry`
+   status, `result_attempts`/`result_next_retry_at` columns, full-jitter backoff via the SAME
+   `max_handover_delivery_attempts` setting, a second ephemeral process-memory payload cache
+   (`pending_handover_result_payloads`) under the same ADR 0028 "never persist payload" rule, driven
+   by the SAME poll loop (one loop, two independent legs now). `POST /handovers/{id}/retry` now
+   dispatches on the handover's CURRENT status (`delivery_failed` vs `result_delivery_failed`) so one
+   endpoint covers both legs.
+3. **Admin UI visibility + manual restart** — new `GET /handovers?status=...` collection endpoint
+   (previously only a single-`id` `GET` existed at all), reusing the now-dual-leg `POST .../retry`; a
+   fourth `HandoverFailuresSection` in the existing `ProcessingFailuresView`/`/processing-failures/`
+   (alongside notification-/rendition-/OCR-result sections), merging both failure legs into one table
+   with a "failed leg" column. Per the user's decision above: calls `federation-hub-service` directly,
+   not through the gateway — the first time a browser reaches this service, hence the new CORS layer.
+
+No new ADR (per this phase's own Definition of Done — pure completion/hardening); the doc correction
+in item 1 and the direct-access architecture note in item 3 are both recorded in
+`docs/services/federation-hub-service.md`/`docs/services/admin-ui.md` instead.
+
+**Tests**: federation-hub-service 65 passed (+10: return-path retry mirroring the four existing
+forward-delivery `_run_retry_tick` tests exactly for `_run_result_retry_tick`, plus the API-level
+result-retry/reattempt/cache-loss tests and one for the new collection endpoint's status filter).
+admin-ui vitest 247 passed (+3: `HandoverFailuresSection` — lists both failure legs via a direct,
+no-token fetch, unreachable state, retry-then-reload). `ruff check`/`ruff format` and `tsc`/`eslint`/
+`next build` clean throughout (two pre-existing, unrelated ruff-format nits in `main.py`/
+`test_repository.py` left untouched, same ones already flagged as out-of-scope in P40-S1).
+**Live-verified** against the fully rebuilt, restarted real stack: a real CORS preflight from
+`http://localhost:3001` succeeds against the hub directly; `GET /handovers`/`?status=...` returns 71
+real historical rows with the new `result_attempts`/`result_next_retry_at` fields correctly
+defaulted; `POST /handovers/{id}/retry` against a real, years-old `delivery_failed` row correctly
+dispatches to the forward-leg branch and returns the expected 409 (payload long lost after past
+restarts) without mutating anything; a real headless-browser (Playwright) session against the
+rebuilt `admin-ui` container confirmed the full round trip end-to-end — the new section renders real
+data via the direct, gateway-bypassing fetch, and a real retry click surfaces the real 409 message in
+the UI. (Did not attempt a real successful end-to-end handover+result delivery over the network — the
+target installation's callback would need a real second listener reachable from inside the container;
+the mocked-transport test suite already covers that path precisely, and the live checks above prove
+the parts that couldn't otherwise be verified: real CORS, real collection-endpoint data at scale, and
+the real browser round trip.)
+
+**Next session:** **P40-S4** (targeted sensor retrofit — `federation-hub-service`'s retry-cache depth/
+pending count, now doubly relevant with two caches instead of one; `storage-service`'s replication
+backlog; migrating `plugin-orchestration-service` off its `psutil` snapshot). See
+`IMPLEMENTATION_PLAN.md` "Phase 40" for the full session breakdown.
+
+Immediately before P40-S3: **P40-S2** (unbounded concurrency fan-out to `document-service` — second session of
 Phase 40, "Operational Reliability"). **Closed as a no-op, confirmed moot, exactly as the plan's own note
 flagged.** Re-verified directly against the real current source before writing anything: neither
 `query_service/filtering.py` nor `reporting_service/filtering.py` calls `document-service` at all any
@@ -19,10 +83,11 @@ no tests run (nothing to test), no Docker rebuild (nothing to rebuild), no ADR (
 confirmation). `IMPLEMENTATION_PLAN.md`'s P40-S2 row updated from "likely already moot, re-verify" to
 "confirmed moot, closed as no-op."
 
-**Next session:** **P40-S3** (`federation-hub-service` reliability — API key/certificate rotation without
-full de-/re-registration, return-path retry logic mirroring the existing outbound retry, admin UI
-visibility + manual restart for failed handovers). See `IMPLEMENTATION_PLAN.md` "Phase 40" for the full
-session breakdown.
+At the time this was written, next was **P40-S3** (`federation-hub-service` reliability — API key/
+certificate rotation without full de-/re-registration, return-path retry logic mirroring the existing
+outbound retry, admin UI visibility + manual restart for failed handovers) — **done now, see "Last
+completed" at the top of this file** (item 1's "API key rotation" premise turned out to already be
+resolved, a stale-doc correction rather than a real gap).
 
 Immediately before P40-S2: **P40-S1** (storage-target decommissioning + related gaps — first session of Phase 40,
 "Operational Reliability"). Research ahead of implementation confirmed all three plan items accurately:

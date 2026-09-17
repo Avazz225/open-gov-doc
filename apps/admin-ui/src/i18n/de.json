@@ -405,7 +405,17 @@
     "ocrHeading": "OCR-Ergebnisse",
     "ocrHint": "OCR-Läufe, die nach mehreren Versuchen mit Backoff endgültig fehlgeschlagen sind (Post-Roadmap Phase 20 Session 4, ADR 0080) - ein manueller Neustart versucht die Texterkennung sofort erneut.",
     "ocrUnreachable": "OCR Service nicht erreichbar.",
-    "ocrEmpty": "Keine dauerhaft fehlgeschlagenen OCR-Ergebnisse."
+    "ocrEmpty": "Keine dauerhaft fehlgeschlagenen OCR-Ergebnisse.",
+    "handoverHeading": "Handover-Vermittlungen (Federation Hub)",
+    "handoverHint": "Handover-Zustellungen zwischen Installationen, die nach mehreren Versuchen mit Backoff endgültig fehlgeschlagen sind (Post-Roadmap Phase 20 Session 5/Phase 40 Session 3, ADR 0081) - entweder die Hinweg-Zustellung an die Zielinstallation oder die Rückweg-Zustellung des Ergebnisses an die Absenderinstallation. Wird DIREKT vom Federation Hub geladen, nicht über das Gateway dieser Installation (der Hub ist geteilte Infrastruktur, keine interne Installations-Komponente).",
+    "handoverUnreachable": "Federation Hub nicht erreichbar.",
+    "handoverEmpty": "Keine dauerhaft fehlgeschlagenen Handover-Vermittlungen.",
+    "handoverFrom": "Von Installation",
+    "handoverTo": "An Installation",
+    "handoverProcessType": "Prozesstyp",
+    "handoverLeg": "Fehlgeschlagene Zustellung",
+    "handoverLegForward": "Hinweg (an Ziel)",
+    "handoverLegResult": "Rückweg (Ergebnis an Absender)"
   },
   "delegationsAdmin": {
     "pageTitle": "Stellvertretungen",

@@ -17,6 +17,8 @@ const listRenditionsMock = vi.fn();
 const retryRenditionMock = vi.fn();
 const listOcrResultsMock = vi.fn();
 const retryOcrResultMock = vi.fn();
+const listHandoversMock = vi.fn();
+const retryHandoverMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listNotifications: (...args: unknown[]) => listNotificationsMock(...args),
@@ -25,6 +27,8 @@ vi.mock("@/lib/api", () => ({
   retryRendition: (...args: unknown[]) => retryRenditionMock(...args),
   listOcrResults: (...args: unknown[]) => listOcrResultsMock(...args),
   retryOcrResult: (...args: unknown[]) => retryOcrResultMock(...args),
+  listHandovers: (...args: unknown[]) => listHandoversMock(...args),
+  retryHandover: (...args: unknown[]) => retryHandoverMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
     constructor(status: number, message: string) {
@@ -88,6 +92,40 @@ const FAILED_OCR_RESULT = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const FAILED_HANDOVER_FORWARD = {
+  id: "handover-1",
+  from_installation_id: "install-a",
+  to_installation_id: "install-b",
+  process_type: "test-process",
+  status: "delivery_failed",
+  attempts: 5,
+  next_retry_at: null,
+  result_attempts: 0,
+  result_next_retry_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  delivered_at: null,
+  completed_at: null,
+};
+
+const FAILED_HANDOVER_RESULT = {
+  id: "handover-2",
+  from_installation_id: "install-c",
+  to_installation_id: "install-d",
+  process_type: "test-process",
+  status: "result_delivery_failed",
+  attempts: 0,
+  next_retry_at: null,
+  result_attempts: 5,
+  result_next_retry_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  delivered_at: "2026-01-01T00:00:01Z",
+  completed_at: "2026-01-01T00:00:02Z",
+};
+
+function mockHandoverLists(byStatus: Record<string, unknown[]>) {
+  listHandoversMock.mockImplementation(async (status: string) => byStatus[status] ?? []);
+}
+
 describe("ProcessingFailuresView", () => {
   beforeEach(() => {
     listNotificationsMock.mockReset();
@@ -96,9 +134,12 @@ describe("ProcessingFailuresView", () => {
     retryRenditionMock.mockReset();
     listOcrResultsMock.mockReset();
     retryOcrResultMock.mockReset();
+    listHandoversMock.mockReset();
+    retryHandoverMock.mockReset();
+    mockHandoverLists({});
   });
 
-  it("lists failed_permanent items from all three services with the status filter", async () => {
+  it("lists failed_permanent items from all three gateway-routed services with the status filter", async () => {
     listNotificationsMock.mockResolvedValue([FAILED_NOTIFICATION]);
     listRenditionsMock.mockResolvedValue([FAILED_RENDITION]);
     listOcrResultsMock.mockResolvedValue([FAILED_OCR_RESULT]);
@@ -123,6 +164,7 @@ describe("ProcessingFailuresView", () => {
     expect(await screen.findByText("Keine dauerhaft fehlgeschlagenen Benachrichtigungen.")).toBeInTheDocument();
     expect(screen.getByText("Keine dauerhaft fehlgeschlagenen Ersatzdarstellungen.")).toBeInTheDocument();
     expect(screen.getByText("Keine dauerhaft fehlgeschlagenen OCR-Ergebnisse.")).toBeInTheDocument();
+    expect(screen.getByText("Keine dauerhaft fehlgeschlagenen Handover-Vermittlungen.")).toBeInTheDocument();
   });
 
   it("shows an unreachable state when notification-service cannot be reached", async () => {
@@ -184,5 +226,61 @@ describe("ProcessingFailuresView", () => {
 
     expect(retryOcrResultMock).toHaveBeenCalledWith("token-123", "doc-2:1");
     await vi.waitFor(() => expect(listOcrResultsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists failed handovers from BOTH legs via listHandovers, called directly (no gateway token)", async () => {
+    listNotificationsMock.mockResolvedValue([]);
+    listRenditionsMock.mockResolvedValue([]);
+    listOcrResultsMock.mockResolvedValue([]);
+    mockHandoverLists({
+      delivery_failed: [FAILED_HANDOVER_FORWARD],
+      result_delivery_failed: [FAILED_HANDOVER_RESULT],
+    });
+
+    renderView();
+
+    expect(await screen.findByText("install-a")).toBeInTheDocument();
+    expect(screen.getByText("install-d")).toBeInTheDocument();
+    expect(screen.getByText("Hinweg (an Ziel)")).toBeInTheDocument();
+    expect(screen.getByText("Rückweg (Ergebnis an Absender)")).toBeInTheDocument();
+    expect(listHandoversMock).toHaveBeenCalledWith("delivery_failed");
+    expect(listHandoversMock).toHaveBeenCalledWith("result_delivery_failed");
+    // Direct call, not routed through the gateway/token like the other
+    // three sections above (Phase 40 Session 3 - federation-hub-service
+    // isn't proxyable, see lib/api.ts).
+    expect(listHandoversMock).not.toHaveBeenCalledWith("token-123", expect.anything());
+  });
+
+  it("shows an unreachable state when federation-hub-service cannot be reached", async () => {
+    listNotificationsMock.mockResolvedValue([]);
+    listRenditionsMock.mockResolvedValue([]);
+    listOcrResultsMock.mockResolvedValue([]);
+    listHandoversMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    renderView();
+
+    expect(await screen.findByText(/Federation Hub nicht erreichbar/)).toBeInTheDocument();
+  });
+
+  it("retries a failed handover (result leg) and reloads", async () => {
+    listNotificationsMock.mockResolvedValue([]);
+    listRenditionsMock.mockResolvedValue([]);
+    listOcrResultsMock.mockResolvedValue([]);
+    listHandoversMock
+      .mockImplementationOnce(async (status: string) =>
+        status === "result_delivery_failed" ? [FAILED_HANDOVER_RESULT] : []
+      )
+      .mockImplementationOnce(async (status: string) =>
+        status === "result_delivery_failed" ? [{ ...FAILED_HANDOVER_RESULT, status: "completed" }] : []
+      );
+    retryHandoverMock.mockResolvedValue({ ...FAILED_HANDOVER_RESULT, status: "completed" });
+
+    renderView();
+    await screen.findByText("install-c");
+
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(retryHandoverMock).toHaveBeenCalledWith("handover-2");
+    await vi.waitFor(() => expect(listHandoversMock).toHaveBeenCalledTimes(4));
   });
 });

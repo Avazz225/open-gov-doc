@@ -4,12 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n";
 import {
   ApiError,
+  listHandovers,
   listNotifications,
   listOcrResults,
   listRenditions,
+  retryHandover,
   retryNotification,
   retryOcrResult,
   retryRendition,
+  type Handover,
   type Notification,
   type OcrResult,
   type Rendition,
@@ -21,16 +24,19 @@ const FAILED_PERMANENT = "failed_permanent";
 // Processing failure visibility (Post-Roadmap Phase 20 Session 7) - pure
 // visibility into `failed_permanent` records from three independent
 // services + manual restart, analogous to `ArchivalTransfersView`'s
-// Document/Case sections. Deliberately THREE standalone sections (no
-// shared generic hook) - same "lightweight duplication instead of
-// abstraction" principle as the poll loops of this phase's associated
-// backend services.
+// Document/Case sections. Deliberately standalone sections (no shared
+// generic hook) - same "lightweight duplication instead of abstraction"
+// principle as the poll loops of this phase's associated backend
+// services. `HandoverFailuresSection` (Phase 40 Session 3) added a fourth
+// - federation-hub-service, unlike the other three, is reached directly
+// rather than through the gateway (see lib/api.ts's `federationHubRequest`).
 export function ProcessingFailuresView() {
   return (
     <div>
       <NotificationFailuresSection />
       <RenditionFailuresSection />
       <OcrResultFailuresSection />
+      <HandoverFailuresSection />
     </div>
   );
 }
@@ -327,6 +333,120 @@ function OcrResultFailuresSection() {
                 </td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+const HANDOVER_FAILURE_STATUSES = ["delivery_failed", "result_delivery_failed"] as const;
+
+function HandoverFailuresSection() {
+  const { t } = useI18n();
+  const [items, setItems] = useState<Handover[]>([]);
+  const [unreachable, setUnreachable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  // No accessToken guard here - unlike the three sections above,
+  // federation-hub-service isn't gated by an admin JWT at all (it has no
+  // admin-token model, see lib/api.ts's `federationHubRequest`), so this
+  // section can load independently of the auth state.
+  const reload = useCallback(async () => {
+    setIsLoading(true);
+    setUnreachable(false);
+    setError(null);
+    try {
+      const lists = await Promise.all(
+        HANDOVER_FAILURE_STATUSES.map((status) => listHandovers(status))
+      );
+      setItems(lists.flat());
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setUnreachable(true);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  async function handleRetry(item: Handover) {
+    setError(null);
+    setRetryingId(item.id);
+    try {
+      await retryHandover(item.id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("processingFailures.retryError"));
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  if (isLoading) return <p>{t("common.loading")}</p>;
+  if (unreachable) {
+    return <p className="empty-state">{t("processingFailures.handoverUnreachable")}</p>;
+  }
+
+  return (
+    <div className="card">
+      <h2>{t("processingFailures.handoverHeading")}</h2>
+      <p className="hint">{t("processingFailures.handoverHint")}</p>
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+      {items.length === 0 ? (
+        <p className="empty-state">{t("processingFailures.handoverEmpty")}</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("processingFailures.handoverFrom")}</th>
+              <th>{t("processingFailures.handoverTo")}</th>
+              <th>{t("processingFailures.handoverProcessType")}</th>
+              <th>{t("processingFailures.handoverLeg")}</th>
+              <th>{t("processingFailures.attempts")}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => {
+              const isResultLeg = item.status === "result_delivery_failed";
+              return (
+                <tr key={item.id}>
+                  <td>{item.from_installation_id}</td>
+                  <td>{item.to_installation_id}</td>
+                  <td>{item.process_type}</td>
+                  <td>
+                    {isResultLeg
+                      ? t("processingFailures.handoverLegResult")
+                      : t("processingFailures.handoverLegForward")}
+                  </td>
+                  <td>{isResultLeg ? item.result_attempts : item.attempts}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handleRetry(item)}
+                      disabled={retryingId !== null}
+                    >
+                      {retryingId === item.id
+                        ? t("common.loading")
+                        : t("processingFailures.retry")}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

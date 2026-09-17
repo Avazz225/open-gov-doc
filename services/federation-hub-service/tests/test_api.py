@@ -653,6 +653,261 @@ def test_submit_result_only_allowed_by_target_installation(client):
     assert correct_caller.json()["status"] == "completed"
 
 
+def test_submit_result_marks_result_pending_retry_on_unreachable_origin(client):
+    """Return-path retry (Phase 40 Session 3, mirrors
+    `test_create_handover_marks_pending_retry_on_unreachable_target` for the
+    OTHER leg): a transient failure delivering the result back to the
+    origin installation lands in the retry-capable `result_pending_retry`,
+    not immediately in the terminal `result_delivery_failed`."""
+    sender, sender_key = register_installation(
+        client, callback_base_url="http://unreachable.invalid"
+    )
+    target, target_key = register_installation(client)
+
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    handover_payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    handover = _signed_post(
+        client, "/handovers", handover_payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert handover["status"] == "delivered"
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+    response = _signed_post(
+        client,
+        f"/handovers/{handover['id']}/result",
+        result_payload,
+        target_key,
+        installation_id=target["id"],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "result_pending_retry"
+    assert body["result_attempts"] == 1
+    assert body["result_next_retry_at"] is not None
+    assert body["id"] in app.state.pending_handover_result_payloads
+
+
+def test_submit_result_reaches_result_delivery_failed_after_exhausting_attempts(client):
+    sender, sender_key = register_installation(
+        client, callback_base_url="http://unreachable.invalid"
+    )
+    target, target_key = register_installation(client)
+
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    handover_payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    handover = _signed_post(
+        client, "/handovers", handover_payload, sender_key, installation_id=sender["id"]
+    ).json()
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        response = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "result_delivery_failed"
+        assert body["result_attempts"] == 1
+        assert body["result_next_retry_at"] is None
+        assert body["id"] in app.state.pending_handover_result_payloads
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+
+
+def test_retry_handover_reattempts_a_result_delivery_failed_handover(client):
+    """Return-path counterpart of
+    `test_retry_handover_reattempts_a_delivery_failed_handover` - the SAME
+    `POST .../retry` endpoint dispatches on the current status, no separate
+    endpoint needed for the admin UI to call."""
+    sender, sender_key = register_installation(
+        client, callback_base_url="http://unreachable.invalid"
+    )
+    target, target_key = register_installation(client)
+
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    handover_payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    handover = _signed_post(
+        client, "/handovers", handover_payload, sender_key, installation_id=sender["id"]
+    ).json()
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        created = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        ).json()
+        assert created["status"] == "result_delivery_failed"
+
+        stub, received = _make_stub_receiver()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+
+        response = client.post(f"/handovers/{handover['id']}/retry")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "completed"
+        assert body["result_attempts"] == 0
+        assert len(received) == 1
+        assert handover["id"] not in app.state.pending_handover_result_payloads
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+
+
+def test_retry_handover_without_cached_result_payload_returns_409(client):
+    sender, sender_key = register_installation(
+        client, callback_base_url="http://unreachable.invalid"
+    )
+    target, target_key = register_installation(client)
+
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    handover_payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    handover = _signed_post(
+        client, "/handovers", handover_payload, sender_key, installation_id=sender["id"]
+    ).json()
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        created = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        ).json()
+        assert created["status"] == "result_delivery_failed"
+
+        app.state.pending_handover_result_payloads.pop(handover["id"], None)
+
+        response = client.post(f"/handovers/{handover['id']}/retry")
+        assert response.status_code == 409
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+
+
+def test_retry_handover_rejects_a_status_other_than_the_two_failure_states(client):
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client)
+
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    created = _signed_post(
+        client, "/handovers", payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert created["status"] == "delivered"
+
+    response = client.post(f"/handovers/{created['id']}/retry")
+    assert response.status_code == 409
+
+
+def test_list_handovers_filters_by_status(client):
+    sender, sender_key = register_installation(client)
+    target, _ = register_installation(client, callback_base_url="http://unreachable.invalid")
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+    original_max_attempts = hub_settings.max_handover_delivery_attempts
+    hub_settings.max_handover_delivery_attempts = 1
+    try:
+        failed_payload = {
+            "handover_id": str(uuid.uuid4()),
+            "to_installation_id": target["id"],
+            "process_type": "test-process",
+            "encrypted_payload": "opaque",
+        }
+        failed = _signed_post(
+            client, "/handovers", failed_payload, sender_key, installation_id=sender["id"]
+        ).json()
+        assert failed["status"] == "delivery_failed"
+    finally:
+        hub_settings.max_handover_delivery_attempts = original_max_attempts
+
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    ok_target, _ = register_installation(client)
+    ok_payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": ok_target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    delivered = _signed_post(
+        client, "/handovers", ok_payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert delivered["status"] == "delivered"
+
+    unfiltered = client.get("/handovers")
+    assert unfiltered.status_code == 200
+    ids = {h["id"] for h in unfiltered.json()}
+    assert {failed["id"], delivered["id"]} <= ids
+
+    filtered = client.get("/handovers", params={"status": "delivery_failed"})
+    assert filtered.status_code == 200
+    filtered_ids = {h["id"] for h in filtered.json()}
+    assert failed["id"] in filtered_ids
+    assert delivered["id"] not in filtered_ids
+
+
 def test_get_handover_unknown_returns_404(client):
     assert client.get("/handovers/does-not-exist").status_code == 404
 

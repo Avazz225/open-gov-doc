@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from federation_hub_service import repository
 from federation_hub_service.crypto_utils import sign_body
-from federation_hub_service.main import _run_retry_tick, app, settings
+from federation_hub_service.main import _run_result_retry_tick, _run_retry_tick, app, settings
 
 
 @pytest.fixture
@@ -57,6 +57,11 @@ def _make_stub_receiver() -> tuple[FastAPI, list[dict]]:
 
     @stub.post("/federation/inbound")
     async def inbound(request: Request) -> dict:
+        received.append({"body": await request.body()})
+        return {"status": "ok"}
+
+    @stub.post("/federation/inbound-result")
+    async def inbound_result(request: Request) -> dict:
         received.append({"body": await request.body()})
         return {"status": "ok"}
 
@@ -256,5 +261,200 @@ async def test_run_retry_tick_marks_delivery_failed_when_payload_cache_lost(
             fresh = await repository.get_handover(fresh_session, created["id"])
             assert fresh.status == "delivery_failed"
             assert fresh.next_retry_at is None
+    finally:
+        settings.max_handover_delivery_attempts = original_max_attempts
+
+
+async def _create_delivered_handover(client, session_factory, *, sender, sender_key, target):
+    """Erzeugt einen bereits erfolgreich zugestellten Handover - Vorbedingung
+    für alle Result-Retry-Tick-Tests unten (`submit_handover_result` läuft
+    unabhängig vom Zustellstatus, aber ein realistisches Szenario braucht
+    einen bereits zugestellten Handover, bevor die Zielinstallation ein
+    Ergebnis zurückmeldet)."""
+    stub, _ = _make_stub_receiver()
+    app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+    payload = {
+        "handover_id": str(uuid.uuid4()),
+        "to_installation_id": target["id"],
+        "process_type": "test-process",
+        "encrypted_payload": "opaque",
+    }
+    created = _signed_post(
+        client, "/handovers", payload, sender_key, installation_id=sender["id"]
+    ).json()
+    assert created["status"] == "delivered"
+    return created
+
+
+async def test_run_result_retry_tick_redelivers_a_due_handover(client, session_factory):
+    """Return-path counterpart of `test_run_retry_tick_redelivers_a_due_
+    handover` (Phase 40 Session 3) - the poll-loop tick redelivers a due,
+    process-memory-cached result to the ORIGIN installation."""
+    sender, sender_key = _register(client, callback_base_url="http://unreachable.invalid")
+    target, target_key = _register(client)
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    original_max_attempts = settings.max_handover_delivery_attempts
+    settings.max_handover_delivery_attempts = 5
+    try:
+        handover = await _create_delivered_handover(
+            client, session_factory, sender=sender, sender_key=sender_key, target=target
+        )
+
+        app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        result = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        ).json()
+        assert result["status"] == "result_pending_retry"
+        assert result["result_attempts"] == 1
+        assert handover["id"] in app.state.pending_handover_result_payloads
+
+        async with session_factory() as session:
+            fresh = await repository.get_handover(session, handover["id"])
+            fresh.result_next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.commit()
+
+        stub, received = _make_stub_receiver()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=stub))
+
+        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+
+        async with session_factory() as fresh_session:
+            fresh = await repository.get_handover(fresh_session, handover["id"])
+            assert fresh.status == "completed"
+            assert fresh.result_attempts == 1
+        assert len(received) == 1
+        assert handover["id"] not in app.state.pending_handover_result_payloads
+    finally:
+        settings.max_handover_delivery_attempts = original_max_attempts
+
+
+async def test_run_result_retry_tick_skips_handovers_not_yet_due(client, session_factory):
+    sender, sender_key = _register(client, callback_base_url="http://unreachable.invalid")
+    target, target_key = _register(client)
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    original_max_attempts = settings.max_handover_delivery_attempts
+    settings.max_handover_delivery_attempts = 5
+    try:
+        handover = await _create_delivered_handover(
+            client, session_factory, sender=sender, sender_key=sender_key, target=target
+        )
+
+        app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        result = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        ).json()
+        assert result["result_attempts"] == 1
+
+        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+
+        async with session_factory() as fresh_session:
+            fresh = await repository.get_handover(fresh_session, handover["id"])
+            # result_next_retry_at liegt noch in der Zukunft - der Tick darf
+            # sie nicht anfassen.
+            assert fresh.result_attempts == 1
+    finally:
+        settings.max_handover_delivery_attempts = original_max_attempts
+
+
+async def test_run_result_retry_tick_keeps_cached_payload_after_reaching_result_delivery_failed(
+    client, session_factory
+):
+    sender, sender_key = _register(client, callback_base_url="http://unreachable.invalid")
+    target, target_key = _register(client)
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    original_max_attempts = settings.max_handover_delivery_attempts
+    settings.max_handover_delivery_attempts = 2
+    try:
+        handover = await _create_delivered_handover(
+            client, session_factory, sender=sender, sender_key=sender_key, target=target
+        )
+
+        app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        result = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        ).json()
+        assert result["status"] == "result_pending_retry"
+        assert result["result_attempts"] == 1
+
+        async with session_factory() as session:
+            fresh = await repository.get_handover(session, handover["id"])
+            fresh.result_next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.commit()
+
+        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+
+        async with session_factory() as fresh_session:
+            fresh = await repository.get_handover(fresh_session, handover["id"])
+            assert fresh.status == "result_delivery_failed"
+            assert fresh.result_attempts == 2
+        assert handover["id"] in app.state.pending_handover_result_payloads
+    finally:
+        settings.max_handover_delivery_attempts = original_max_attempts
+
+
+async def test_run_result_retry_tick_marks_result_delivery_failed_when_payload_cache_lost(
+    client, session_factory
+):
+    sender, sender_key = _register(client, callback_base_url="http://unreachable.invalid")
+    target, target_key = _register(client)
+
+    def _raise(*_args, **_kwargs):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", "http://x"))
+
+    original_max_attempts = settings.max_handover_delivery_attempts
+    settings.max_handover_delivery_attempts = 5
+    try:
+        handover = await _create_delivered_handover(
+            client, session_factory, sender=sender, sender_key=sender_key, target=target
+        )
+
+        app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(_raise))
+        result_payload = {"outcome": "completed", "encrypted_result": "opaque-result"}
+        result = _signed_post(
+            client,
+            f"/handovers/{handover['id']}/result",
+            result_payload,
+            target_key,
+            installation_id=target["id"],
+        ).json()
+        assert result["status"] == "result_pending_retry"
+
+        app.state.pending_handover_result_payloads.pop(handover["id"], None)
+
+        async with session_factory() as session:
+            fresh = await repository.get_handover(session, handover["id"])
+            fresh.result_next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.commit()
+
+        await _run_result_retry_tick(session_factory, app.state.pending_handover_result_payloads)
+
+        async with session_factory() as fresh_session:
+            fresh = await repository.get_handover(fresh_session, handover["id"])
+            assert fresh.status == "result_delivery_failed"
+            assert fresh.result_next_retry_at is None
     finally:
         settings.max_handover_delivery_attempts = original_max_attempts
