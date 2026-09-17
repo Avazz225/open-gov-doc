@@ -185,10 +185,20 @@ feature) — it ran BEFORE `export_pdf.py`'s own merge/stamp pass and unconditio
 struct tree via `PdfWriter()` + per-page `add_page()`. Both this and `build_document_export`'s own merge
 now use `PdfWriter(clone_from=<reader>)`, which preserves an already-present struct tree (confirmed
 empirically, pypdf 6.14.2) — `.append()`/`.merge()` afterward for additional (untagged) pages does not
-clear it. `build_folder_export` (multiple documents combined into one PDF) is **unchanged and still drops
-tags** — deliberately: it would need real structure-tree merging across independent sources, which pypdf
-does not support, and a partial fix (only the first document keeping tags) would be more misleading than
-the current, consistent behavior. See ADR 0136 for the full reasoning.
+clear it. `build_folder_export` (multiple documents combined into one PDF) had, at that point, still been
+left **unchanged and still dropping tags** — deliberately: real structure-tree merging across independent
+sources needs manual PDF object-graph work pypdf has no built-in feature for, and a partial fix (only the
+first document keeping tags) would have been more misleading than the current, consistent behavior. See
+ADR 0136 for the full reasoning at the time.
+
+**Since Post-Roadmap Phase 42 Session 4** ([ADR 0158](../adr/0158-multi-document-struct-tree-merge.md)):
+that gap is now closed by actually doing the manual object-graph work ADR 0136 declined to attempt —
+`export_pdf._merge_struct_trees` clones every tagged source's structure elements into the combined
+writer (reusing pypdf's own object-clone cache, which already resolves each element's `/Pg` page
+back-reference to the correct already-appended page with no extra code) and renumbers every page's
+`/StructParents` with one running counter across all sources into a freshly built `/ParentTree`, since
+each source independently numbers its own pages from 0 and would otherwise collide once combined. See
+ADR 0158 for the full spec-level mechanism and its one deliberate scope cut.
 
 ## Backend Integration
 
@@ -216,7 +226,20 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-- `uv run pytest services/rendering-service/tests` (**98 tests**, +5 since **Post-Roadmap Phase 33
+- `uv run pytest services/rendering-service/tests` (**101 tests**, net +3 since **Post-Roadmap Phase 42
+  Session 4** ([ADR 0158](../adr/0158-multi-document-struct-tree-merge.md)): `test_export_pdf.py` gained
+  a real, navigable structure-tree fixture (`_add_real_struct_tree` — one genuine `/StructElem` linked to
+  page 0 via a real `/ParentTree` entry, replacing the old bare-presence-only marker for these specific
+  tests) plus a resolution helper (`_resolve_struct_tag_for_page`, walks `/StructParents` ->
+  `/ParentTree` -> `/StructElem` exactly like a real assistive-technology consumer would) and 4 new
+  tests: a single tagged document now correctly comes out tagged through `build_folder_export` (was
+  previously dropped unconditionally, regardless of source count), two independently tagged documents
+  (each internally numbering `/StructParents` from 0, as real producers do) are merged into one correctly
+  renumbered structure tree with no `/ParentTree` key collision, an all-untagged folder still fabricates
+  nothing, and a mixed tagged/untagged folder preserves exactly the tagged document's tag and nothing
+  for the untagged one. The old regression-lock test that pinned down the previous "always drops tags in
+  `build_folder_export`" behavior was removed (its premise no longer holds) — net +3, not +4, since one
+  test was replaced rather than purely added. Before that 98 tests, +5 since **Post-Roadmap Phase 33
   Session 2** ([ADR 0136](../adr/0136-pdf-ua-tag-preservation-on-export.md)): `test_export_pdf.py` (4:
   `build_document_export` preserves a tagged source's struct tree for both `history_position` values,
   leaves an untagged source untagged, and a regression-lock test confirming `build_folder_export` still
@@ -252,7 +275,17 @@ None yet — follows in Phase 11.
   through conversion~~ — **fixed for single-document export in Post-Roadmap Phase 33 Session 2** ([ADR
   0136](../adr/0136-pdf-ua-tag-preservation-on-export.md)): both `PdfArchiveRenderer._tag_pdf` and
   `export_pdf.build_document_export` now use `PdfWriter(clone_from=...)`, which preserves an existing
-  struct tree. **Still open**: `build_folder_export` (multiple documents combined into one PDF) still
+  struct tree. ~~**Still open**: `build_folder_export` (multiple documents combined into one PDF) still
   drops every constituent document's tags — deliberately, since preserving more than one independent
-  structure tree in a single merged PDF is a genuinely harder problem pypdf doesn't support, and a partial
-  fix would be more misleading than the current, consistent behavior.
+  structure tree in a single merged PDF is a genuinely harder problem pypdf doesn't support, and a
+  partial fix would be more misleading than the current, consistent behavior.~~ — **closed in
+  Post-Roadmap Phase 42 Session 4** ([ADR 0158](../adr/0158-multi-document-struct-tree-merge.md)): pypdf
+  still has no built-in multi-source structure-tree merge, but the object graph is plain PDF objects pypdf
+  already exposes low-level access to, so `export_pdf._merge_struct_trees` builds the merge by hand —
+  cloning each tagged source's `/K` entries (pypdf's own object-clone cache transparently resolves their
+  `/Pg` back-references to the already-appended correct page, no manual page remapping needed) and
+  renumbering every page's `/StructParents` with one running counter across all sources into a freshly
+  built `/ParentTree`, since each source independently numbers its own pages starting at 0 and would
+  otherwise collide once merged. See ADR 0158 for the full spec-level rationale and the one deliberate
+  scope cut (annotation-level `/StructParent` is not remapped — not produced by this project's own
+  rendering pipeline in practice).

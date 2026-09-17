@@ -2,8 +2,65 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P42-S3 (`object-type-service`: resolved Kennzeichen display — third session of
-Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
+**Last completed:** P42-S4 (`rendering-service`: preserve PDF/UA tags on multi-document folder export —
+fourth and last session of Phase 42, "Remaining Functional Completion", [ADR
+0158](docs/adr/0158-multi-document-struct-tree-merge.md)). Unlike the other three P42 sessions, this one
+DOES get a new ADR — Phase 42's DoD text says none is "expected", not that one is barred, and this
+session's decision (attempt real cross-document structure-tree merging vs. a partial fix vs. reaffirming
+out of scope) is a genuine, non-trivial technical/architecture call, not pure functional completion of an
+already-established pattern.
+
+**Research before implementation** confirmed real cross-document PDF/UA structure-tree merging isn't
+supported by any library already in this project (`pypdf`, `PyMuPDF`) — and that ADR 0136 (Phase 33
+Session 2) had already explicitly considered and rejected a *partial* fix ("only the first document
+keeping tags... would be more misleading than the current, consistent behavior"), locking that decision
+in with its own regression test. **Asked the user** how to proceed given that constraint: build a
+scope-limited but honest partial fix (single-tagged-document folders only), attempt the real multi-document
+merge (a substantial, self-contained low-level PDF implementation effort with real correctness risk), or
+reaffirm out of scope with stronger docs. **The user chose the real merge.**
+
+**Implementation**: before writing any production code, the exact pypdf mechanism was validated
+empirically with a standalone throwaway probe script (build two independently tagged PDFs, merge, write,
+re-read from a fresh reader with no shared object graph, walk the result) — confirming that pypdf's own
+general-purpose `PdfObject.clone(writer)` (used internally by `.append()` for pages) transparently
+resolves a structure element's `/Pg` page back-reference to the already-appended correct page, via its
+own `_id_translated` clone-cache, with zero manual remapping needed. The only piece that genuinely needed
+hand-written logic was `/StructParents`/`/ParentTree` renumbering (both sources typically number their own
+pages from 0, which would otherwise collide once merged) — a new `export_pdf._merge_struct_trees()`
+clones every tagged source's `/K` structure elements, renumbers every page's `/StructParents` with one
+running counter across all sources, rebuilds `/ParentTree` as a flat `/Nums` leaf, and re-parents
+top-level cloned elements to the new merged `/StructTreeRoot`. Called from `build_folder_export` after
+all entries are already appended. Untagged sources contribute nothing; an all-untagged folder still
+produces an untagged output, exactly as before. Deliberately out of scope: annotation-level
+`/StructParent` (singular) is not remapped — not produced anywhere in this project's own rendering
+pipeline in practice.
+
+**Tests**: `rendering-service` 101 tests (previously 98, net +3 — a real, navigable structure-tree test
+fixture replacing the old bare-presence-only one, plus a `/StructParents`→`/ParentTree`→`/StructElem`
+resolution helper matching how a real assistive-technology consumer would walk the tree; the old
+regression-lock test whose premise no longer holds was replaced by 4 new tests: single tagged document
+now preserved, two tagged documents merged with no `/ParentTree` collision — each page correctly
+resolving to its OWN source's distinct tag type — an all-untagged folder still untagged, and a mixed
+tagged/untagged folder preserving exactly the tagged one). `ruff check`/`ruff format` clean.
+
+**Live-verified** against the rebuilt, restarted real stack, through the real gateway, exercising the
+actual `POST /render/export/document` (Pass A) then `POST /render/export/folder` (Pass B) endpoints
+directly (not just document-service's higher-level flow) with two hand-built, genuinely tagged PDFs:
+confirmed the merged 5-page result carries both documents' distinct structure tags (`/P` for one, `/H1`
+for the other), correctly renumbered `/StructParents` (0 and 1, no collision), no fabricated tags on the
+untagged TOC/history pages, and both structure elements correctly re-parented to the new merged root — via
+a fresh re-read of the actual HTTP response bytes, the same validation depth as the local test suite.
+
+**This closes Phase 42** ("Remaining Functional Completion") — `graphify update .` now runs, per the
+standing "only at phase-end" rule.
+
+**Next session:** not yet planned — Phase 42 is complete. See `IMPLEMENTATION_PLAN.md` for the phase
+index and whatever comes next.
+
+---
+
+Immediately before P42-S4: **P42-S3** (`object-type-service`: resolved Kennzeichen display — third
+session of Phase 42, "Remaining Functional Completion"). No new ADR — Phase 42's own Definition of Done
 explicitly says none is expected (pure functional completion of already-established patterns), and this
 session ended up being a small frontend fix, not an architecture decision.
 

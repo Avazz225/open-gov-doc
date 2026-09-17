@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import DictionaryObject, NameObject
+from pypdf.generic import ArrayObject, DictionaryObject, NameObject, NumberObject
 from rendering_service.export_pdf import (
     ExportHistoryEntry,
     FolderExportEntry,
@@ -40,6 +40,73 @@ def _add_struct_tree_root(data: bytes) -> bytes:
     output = BytesIO()
     writer.write(output)
     return output.getvalue()
+
+
+def _add_real_struct_tree(data: bytes, *, tag: str = "/P") -> bytes:
+    """Post-Roadmap Phase 42 Session 4: unlike `_add_struct_tree_root`
+    (bare presence marker, no navigable content - sufficient for
+    `is_tagged_pdf`'s own tests), this builds a REAL, minimal-but-genuine
+    one-element structure tree: one `/StructElem` of type `tag` under
+    `/StructTreeRoot`, linked to page 0 via a real `/ParentTree` entry keyed
+    off that page's `/StructParents` - exactly the shape needed to test
+    genuine cross-document structure-tree MERGING (element identity,
+    `/Pg` back-references, `/ParentTree` key resolution), not just
+    `/StructTreeRoot` presence. The page's content stream is deliberately
+    NOT made to actually contain a matching marked-content operator for the
+    declared MCID - the merge logic under test operates purely on the
+    object graph (`/K`/`/Pg`/`/ParentTree`), never on content-stream bytes,
+    so this simplification does not weaken what these tests verify."""
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(data)))
+    page = writer.pages[0]
+
+    struct_elem = DictionaryObject()
+    struct_elem[NameObject("/Type")] = NameObject("/StructElem")
+    struct_elem[NameObject("/S")] = NameObject(tag)
+    struct_elem[NameObject("/Pg")] = page.indirect_reference
+    struct_elem[NameObject("/K")] = NumberObject(0)
+    struct_elem_ref = writer._add_object(struct_elem)
+
+    struct_tree_root = DictionaryObject()
+    struct_tree_root[NameObject("/Type")] = NameObject("/StructTreeRoot")
+    struct_tree_root[NameObject("/K")] = ArrayObject([struct_elem_ref])
+    struct_tree_root_ref = writer._add_object(struct_tree_root)
+    struct_elem[NameObject("/P")] = struct_tree_root_ref
+
+    parent_tree = DictionaryObject()
+    parent_tree[NameObject("/Nums")] = ArrayObject(
+        [NumberObject(0), ArrayObject([struct_elem_ref])]
+    )
+    parent_tree_ref = writer._add_object(parent_tree)
+    struct_tree_root[NameObject("/ParentTree")] = parent_tree_ref
+    struct_tree_root[NameObject("/ParentTreeNextKey")] = NumberObject(1)
+
+    page[NameObject("/StructParents")] = NumberObject(0)
+    writer._root_object[NameObject("/StructTreeRoot")] = struct_tree_root_ref
+
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def _resolve_struct_tag_for_page(reader: PdfReader, page_index: int) -> str | None:
+    """Test helper: follows a real reader's page `/StructParents` through
+    its `/ParentTree` to the owning `/StructElem`'s `/S` tag name - the same
+    resolution path a real assistive-technology consumer (or a PDF/UA
+    validator) would perform, used here to verify the MERGED document's
+    structure tree is not just present but actually internally consistent
+    and correctly attributes each page to the right source document."""
+    struct_parents = reader.pages[page_index].get("/StructParents")
+    if struct_parents is None:
+        return None
+    struct_root = reader.trailer["/Root"]["/StructTreeRoot"]
+    parent_tree = struct_root["/ParentTree"]
+    nums = parent_tree["/Nums"]
+    for i in range(0, len(nums), 2):
+        if int(nums[i]) == int(struct_parents):
+            entry = nums[i + 1].get_object()
+            elem = entry[0].get_object()
+            return elem.get("/S")
+    return None
 
 
 def test_is_tagged_pdf_false_for_untagged_pdf():
@@ -223,21 +290,14 @@ def test_build_folder_export_has_toc_and_stable_local_numbers_plus_global_number
     assert reader.get_destination_page_number(outline[1]) == 4
 
 
-def test_build_folder_export_still_drops_struct_tree_known_limitation():
-    """Honest, deliberate limitation (ADR 0136 "Consequences"): unlike
-    `build_document_export`'s single-source `clone_from`, combining a TOC
-    plus MULTIPLE already-tagged per-document PDFs into one writer still
-    goes through `.append()` for every entry after the first, which never
-    contributes a source's own struct tree (see `build_document_export`'s
-    own docstring for the empirical basis) - preserving more than one
-    document's structure tree in a single merged PDF would need actual
-    structure-tree merging across sources, which pypdf does not support.
-    This test locks in the current, documented behavior rather than letting
-    a future refactor silently "fix" it halfway (e.g. only the first
-    document keeping its tags, which would be a worse, misleading partial
-    fix than dropping all of them consistently)."""
+def test_build_folder_export_preserves_struct_tree_for_a_single_tagged_document():
+    """Post-Roadmap Phase 42 Session 4 (ADR 0158): the single-document case
+    (one tagged document, no other tagged sources) now correctly comes out
+    tagged too - previously dropped unconditionally regardless of source
+    count (the old, now-replaced "known limitation" test locked in exactly
+    that unconditional drop)."""
     doc_a = build_document_export(
-        document_pdf=_add_struct_tree_root(_real_pdf(pages=1, text="A")),
+        document_pdf=_add_real_struct_tree(_real_pdf(pages=1, text="A"), tag="/P"),
         history_pdf=_real_pdf(pages=1, text="AHist"),
         history_position="after",
     )
@@ -245,4 +305,99 @@ def test_build_folder_export_still_drops_struct_tree_known_limitation():
 
     result = build_folder_export([FolderExportEntry(title="A.pdf", export_pdf=doc_a)])
 
+    assert is_tagged_pdf(result) is True
+
+
+def test_build_folder_export_merges_struct_trees_from_multiple_tagged_documents():
+    """The actual multi-document merge (ADR 0158): two independently tagged
+    source documents, each numbering its own `/StructParents` starting at 0
+    (as real producers typically do) - without renumbering, document B's
+    key would collide with and shadow document A's `/ParentTree` entry.
+    Verifies not just `is_tagged_pdf()` (mere presence) but that each merged
+    page's structure tag can genuinely be resolved back to its OWN source's
+    tag type, via a real `/StructParents` -> `/ParentTree` -> `/StructElem`
+    walk (`_resolve_struct_tag_for_page`) - the same path a screen reader or
+    a PDF/UA validator would take."""
+    doc_a = build_document_export(
+        document_pdf=_add_real_struct_tree(_real_pdf(pages=1, text="A"), tag="/P"),
+        history_pdf=_real_pdf(pages=1, text="AHist"),
+        history_position="after",
+    )
+    doc_b = build_document_export(
+        document_pdf=_add_real_struct_tree(_real_pdf(pages=1, text="B"), tag="/H1"),
+        history_pdf=_real_pdf(pages=1, text="BHist"),
+        history_position="after",
+    )
+
+    result = build_folder_export(
+        [
+            FolderExportEntry(title="A.pdf", export_pdf=doc_a),
+            FolderExportEntry(title="B.pdf", export_pdf=doc_b),
+        ]
+    )
+
+    assert is_tagged_pdf(result) is True
+    reader = PdfReader(BytesIO(result))
+    # 1 TOC page + 2 pages for A (doc + history) + 2 pages for B (doc + history).
+    assert len(reader.pages) == 5
+
+    # TOC page (index 0) and both untagged history pages (indices 2, 4) have
+    # no /StructParents at all - nothing fabricated for untagged content.
+    assert reader.pages[0].get("/StructParents") is None
+    assert reader.pages[2].get("/StructParents") is None
+    assert reader.pages[4].get("/StructParents") is None
+
+    # Each document's own tagged page (index 1 for A, index 3 for B)
+    # resolves to its OWN, distinct tag type - not swapped, not collided.
+    assert _resolve_struct_tag_for_page(reader, 1) == "/P"
+    assert _resolve_struct_tag_for_page(reader, 3) == "/H1"
+
+    # No /StructParents collision: both source documents used key 0
+    # internally, but the merged document's two tagged pages must have been
+    # renumbered to two DIFFERENT keys.
+    assert reader.pages[1].get("/StructParents") != reader.pages[3].get("/StructParents")
+
+
+def test_build_folder_export_leaves_untagged_folder_untagged():
+    """Regression guard: when no source is tagged at all, no empty/
+    fabricated `/StructTreeRoot` is added - unchanged, pre-existing
+    behavior."""
+    doc_a = build_document_export(
+        document_pdf=_real_pdf(pages=1, text="A"),
+        history_pdf=_real_pdf(pages=1, text="AHist"),
+        history_position="after",
+    )
+
+    result = build_folder_export([FolderExportEntry(title="A.pdf", export_pdf=doc_a)])
+
     assert is_tagged_pdf(result) is False
+
+
+def test_build_folder_export_preserves_tags_for_the_tagged_document_in_a_mixed_folder():
+    """A folder with one tagged and one untagged document: the tagged
+    document's page correctly keeps its tag, the untagged document's page
+    correctly gets none - a real, partial-by-CONTENT (not partial-by-bug)
+    result, since there is genuinely nothing to preserve for the untagged
+    one."""
+    doc_a = build_document_export(
+        document_pdf=_add_real_struct_tree(_real_pdf(pages=1, text="A"), tag="/P"),
+        history_pdf=_real_pdf(pages=1, text="AHist"),
+        history_position="after",
+    )
+    doc_b = build_document_export(
+        document_pdf=_real_pdf(pages=1, text="B"),
+        history_pdf=_real_pdf(pages=1, text="BHist"),
+        history_position="after",
+    )
+
+    result = build_folder_export(
+        [
+            FolderExportEntry(title="A.pdf", export_pdf=doc_a),
+            FolderExportEntry(title="B.pdf", export_pdf=doc_b),
+        ]
+    )
+
+    assert is_tagged_pdf(result) is True
+    reader = PdfReader(BytesIO(result))
+    assert _resolve_struct_tag_for_page(reader, 1) == "/P"
+    assert reader.pages[3].get("/StructParents") is None
