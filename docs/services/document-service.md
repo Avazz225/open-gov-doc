@@ -92,6 +92,59 @@
 
 **Ad hoc schema migration**: `attributes` was only added to the existing `document` table in P3-S3. Without Alembic (see `CONTRIBUTING.md`), an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in the lifespan startup routine applies this additive, defaulted change idempotently — this only works for exactly this kind of change (a new, nullable/defaulted column), not for renames/type changes/column removal. Once schema changes become more complex, real Alembic tooling will be needed (see "Open Decisions" in `PROGRESS.md`).
 
+## Per-Document RBAC Resource (4.1, Post-Roadmap Phase 39 Session 4, [ADR 0154](../adr/0154-document-per-document-resource-case-list-filtering-org-hierarchy-case-scope.md))
+
+Every document now registers a real `permission-service` `ResourceNode` of its own
+(`resource_type="document"`, `parent_id=folder_id or "root"`) — mirroring `case-service`'s identical
+ADR-0144 pattern exactly. `_persist_new_document` (the shared creation path for uploads/derived
+documents/redaction copies) synchronously calls `document_service.permission_client.
+PermissionServiceClient.create_resource_node()` (this service's own, deliberately duplicated copy of
+`dms-permission-client`'s identical method — this service predates that library's Phase 19 Session 1
+consolidation and has not been migrated onto it) right after the document row commits, then publishes
+`document.resource.created` for symmetry/self-healing (a harmless no-op, `structure_consumer.py`'s
+handler is idempotent). `permission-service`'s `structure_subjects` setting gained `"document.>"`
+(config-only — the handler dispatches on event-type suffix, domain-agnostic).
+
+**A startup backfill loop** (`repository.list_all_documents()` + `create_resource_node()` per row, run
+on every startup, idempotent/self-healing) registers every document created BEFORE this session -
+without it, an unregistered `resource_id` would deny every check outright, permanently locking out every
+pre-existing document the instant this session's checks went live. **Bounded-concurrent, not sequential**
+(`asyncio.Semaphore`, default `document_resource_backfill_concurrency=50`) - live verification against
+this project's own dev database (42,699 real documents) found a naive sequential version crashed the
+service's startup outright (an orphaned `parent_id` reference, see below) and, even once fixed, would
+have taken minutes; bounded concurrency brought a clean run down to ~109 seconds in this environment -
+still a real, ongoing startup cost at this scale (the loop runs on every restart), not a one-time
+migration cost, see [ADR 0154](../adr/0154-document-per-document-resource-case-list-filtering-org-hierarchy-case-scope.md)
+"Consequences" for the caveat. `permission_service.repository.create_resource_node()` itself also gained
+a safety net from this same live verification: if `parent_id` doesn't correspond to an existing node
+(possible for a real, pre-existing folder whose own `ResourceNode` was never registered - `folder-
+service`'s registration is purely event-driven, no synchronous guarantee), it now falls back to `root`
+with a logged warning instead of raising an unhandled `ForeignKeyViolationError` - protecting every
+caller of that function, not just this backfill loop.
+
+**Almost every existing-document permission check now targets the document's own `resource_id`**
+(`document.id`) instead of its containing folder's - `GET`/`PATCH /documents/{id}`, `.../register`,
+`.../promote`, `.../redact`, `.../redaction-preview/*`, share links, WebDAV edit tokens, locks, versions,
+`.../content`, check-in, export, `.../export/accessibility-check`. Inheritance via the existing resource
+tree (`ResourceNode.inherit`, default `True`) means every pre-existing folder-level `RoleAssignment`
+keeps applying unchanged (a document's node parents onto its folder or root) — an admin can now
+ADDITIONALLY narrow one specific document's own `RoleAssignment`s, the same guarantee ADR 0144 gave
+cases. Checks that inherently precede the document's existence (`POST /documents`) or target a
+DIFFERENT, destination folder (a move's target-folder check, `POST /folders/{id}/export`'s whole-folder
+export, `GET /documents?folder_id=...`'s folder-level listing gate) deliberately remain folder-scoped —
+migrating those would check the wrong resource entirely, not fix anything.
+
+**Move re-parenting**: `PATCH /documents/{id}` and `POST /documents/{id}/promote` (the two paths that
+change an EXISTING document's `folder_id`) publish `document.resource.moved` when a move actually
+happens, mirroring `folder-service`'s own `folder.resource.moved`.
+
+**Hard-delete cleanup, a deliberate improvement over the folder/case precedent**: all five real
+hard-delete call sites (forced deletion ×2, trash-expiry/manual purge ×2, records-quarantine auto-delete)
+now publish `document.resource.deleted`, removing the `ResourceNode` row. `folder-service` itself has a
+known, pre-existing, undocumented gap here (`POST /folders/{id}/purge` never cleans up its `ResourceNode`
+row) — not fixed by this session (a separate, independently-scoped issue), but not reproduced for
+documents either, since the mechanism was being built fresh anyway.
+
 ## Reference Number Generator (2.2/4.4, since P5e-S2)
 
 Builds on the Object-Type Service (see `docs/services/object-type-service.md` "Reference Number Generator") — this service itself knows no format, but queries `POST /object-types/{id}/next-kennzeichen` (`ObjectTypeClient.next_kennzeichen()`, `404` = no generator configured, in which case `attributes["Kennzeichen"]` simply remains unset) on every document creation with `object_type_id` set. **Since P17-S2** (14.2) this call additionally passes the already-parsed creation attributes (`parsed_attributes`) in the request body — the basis for attribute-based reference-number placeholders such as `{Federführung}` on the object type (see object-type-service.md). If a referenced attribute value is missing (attribute not marked as required), object-type-service returns `422`, which this service passes through as its own `422` to the caller (`MissingKennzeichenAttributeError` in `object_type_client.py`).

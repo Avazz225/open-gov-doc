@@ -99,6 +99,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "ALTER TABLE permission.delegation ADD COLUMN IF NOT EXISTS grant_kind VARCHAR(32)"
             )
         )
+        # Post-Roadmap Phase 39 Session 4 (ADR 0154) - same ad-hoc pattern.
+        await conn.execute(
+            text(
+                "ALTER TABLE permission.delegation "
+                "ADD COLUMN IF NOT EXISTS scope_case_resource_ids JSON"
+            )
+        )
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
 
@@ -1073,6 +1080,7 @@ async def create_delegation(
         scope_object_type_ids=payload.scope_object_type_ids,
         scope_process_definition_ids=payload.scope_process_definition_ids,
         scope_folder_resource_ids=payload.scope_folder_resource_ids,
+        scope_case_resource_ids=payload.scope_case_resource_ids,
     )
     await session.commit()
     await publish_event(
@@ -1141,11 +1149,14 @@ async def check_delegation(
     process_definition_id: int | None = None,
     object_type_id: int | None = None,
     folder_resource_id: str | None = None,
+    case_resource_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> DelegationCheckResult:
     """The actual enforcement endpoint (4.4a) - called by workflow-service
     "on behalf of" when completing a task (same pattern as document-service's
-    `GET /check` for read permissions, P14-S10)."""
+    `GET /check` for read permissions, P14-S10). `case_resource_id`
+    (Post-Roadmap Phase 39 Session 4, ADR 0154) - the fourth scope
+    dimension."""
     allowed = await repository.is_active_deputy_for(
         session,
         deputy_principal_id=deputy_principal_id,
@@ -1153,6 +1164,7 @@ async def check_delegation(
         process_definition_id=process_definition_id,
         object_type_id=object_type_id,
         folder_resource_id=folder_resource_id,
+        case_resource_id=case_resource_id,
     )
     return DelegationCheckResult(allowed=allowed)
 
@@ -1229,6 +1241,7 @@ async def create_org_hierarchy_grant(
         grant_kind=payload.grant_kind,
         process_definition_id=payload.process_definition_id,
         ends_at=payload.ends_at,
+        case_resource_id=payload.case_resource_id,
     )
     await session.commit()
     return OrgHierarchyGrantOut(

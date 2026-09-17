@@ -2,7 +2,71 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P39-S3 (AD group→role mapping, precise remaining gap — third session of Phase 39,
+**Last completed:** P39-S4 (document/case RBAC polish — fourth and final session of Phase 39, "RBAC
+completion"). Research ahead of implementation found item 1's own framing overstated: documents already
+checked their containing folder's real resource node (materially finer than what cases had before ADR
+0144, which had no substructure at all), so there was no urgent driver for full per-document RBAC —
+presented to the user as a build-vs-skip decision, **the user chose to build it fully**, matching cases'
+architecture exactly.
+
+1. **Documents get a real per-document `ResourceNode`** — mirrors `case-service`'s ADR-0144 pattern:
+   synchronous registration on creation + `document.resource.created`/`.moved`/`.deleted` events, a
+   startup backfill for pre-existing documents, and ~22 existing-document permission checks across
+   `document-service` migrated from the containing folder's resource_id to the document's own (folder-
+   level `RoleAssignment`s keep applying via inheritance; an admin can now ALSO narrow one specific
+   document). `query-service`/`reporting-service`/`search-service`'s own row-level result filtering
+   also switched from resolving a document event/row to its folder to using the document's own id
+   directly — closing a latent inconsistency this session's own change would otherwise have introduced.
+   `reporting-service` no longer depends on `document-service` at all (its `DocumentClient` removed
+   entirely) — and, as a valuable side effect, this ALSO eliminates the exact unbounded-fan-out
+   connection-pool-exhaustion risk P40-S2 was planned to fix for both services (see below).
+2. **`GET /cases`/`.../by-vorgangsnummer` get row-level RBAC filtering** — additive to the unchanged
+   collection-level `root` baseline check, via a new `_filter_cases_by_permission()` reusing the
+   already-available `check_batch`.
+3. **Org-hierarchy grants gain a fourth delegation scope dimension, `scope_case_resource_ids`** —
+   `workflow-service`'s existing `business_key` resolution (ADR 0131) now also returns the resolved
+   case's own id (no new case-service field needed, a case's `resource_id` IS its `id`, ADR 0144),
+   narrowing a grant to the SPECIFIC case in addition to the process-definition family. Also exposed on
+   self-service `POST /delegations` for consistency (no dedicated UI yet, `DelegationsPane` exposes no
+   scope dimension at all today).
+
+Closed via [ADR 0154](docs/adr/0154-document-per-document-resource-case-list-filtering-org-hierarchy-case-scope.md).
+
+**Two real bugs found only by live verification, not by the test suite** (both fixed): (a) the FIRST
+backfill attempt crashed document-service's entire startup with an unhandled `ForeignKeyViolationError`
+— a real, pre-existing folder in this installation had no `ResourceNode` of its own (`folder-service`'s
+registration is purely event-driven, no synchronous guarantee); fixed at the source in `permission-
+service`'s `create_resource_node()`, which now falls back to `root` with a logged warning instead of
+raising, protecting every caller. (b) Even after that fix, a naive sequential backfill against this
+project's own dev database (**42,699 real documents**) would have taken minutes, and a bounded-concurrent
+`asyncio.gather` (default concurrency 50) still crashed the whole startup on one transient connection
+error; fixed by wrapping each backfill call in its own try/except (log and move on, self-heals on the
+next restart). A clean run now takes ~109 seconds in this environment — a real, ongoing startup cost at
+this scale, not a one-time migration cost, flagged in the ADR for a future session to reconsider if it
+becomes disruptive.
+
+**Tests**: document-service 360 passed (+4: resource-node-on-creation, isolation-until-granted, move-
+reparents, purge-removes-resource), permission-service 181 passed (+3: `create_resource_node` idempotency/
+parent-fallback tests, org-hierarchy-grant case-scoping), case-service 67 passed (+1: case-list row-level
+filtering), query-service 53 passed (filtering.py simplified, no count change), reporting-service 68
+passed (`DocumentClient` removed, fixture rewritten to register real resource nodes instead of mocking
+folder resolution), search-service 75 passed (indexing helper now registers a real resource node per
+test document), workflow-service 208 passed (+1: org-hierarchy-grant case-scoping against a real,
+monkeypatched case resolution) — **1009 tests total across all seven touched services, all green**.
+`ruff check`/`ruff format` clean throughout. **Live-verified** against the fully rebuilt, restarted real
+stack: a real document upload registers a real resource node under root; isolating it (`inherit=false`)
+correctly 403s an unrelated principal; a real two-case row-level-filtering round trip (isolate one case,
+confirm only it disappears from the list); a real org-hierarchy-grant round trip scoped to a specific
+case (allowed for that case, denied for a different one in the same process-definition family). All test
+role-assignments/supervisor-assignments/grants cleaned up afterward; the two test cases and one trashed
+test document were left in place (no case-delete endpoint exists, matching this project's established
+residual-test-data convention for resources with no delete path).
+
+This is Phase 39's last planned session — `graphify update .` runs once all of this session's docs/
+plan updates are finalized (deferred through every prior P39 session per the standing "only at phase-end"
+rule; now due since the whole phase is complete).
+
+Immediately before P39-S4: **P39-S3** (AD group→role mapping, precise remaining gap — third session of Phase 39,
 "RBAC completion"). A research pass ahead of implementation (per the now very strong pattern from
 P38/P39-S1/P39-S2 of stale plan premises) verified all four items named by the plan against the actual
 current code and against [ADR 0093](docs/adr/0093-ad-group-role-mapping-simple-1to1-scope-cut.md)'s own
@@ -280,12 +344,16 @@ permission grant (with the independent legal-hold button staying disabled throug
 (the full-alignment decision qualifies as non-trivial per `CONTRIBUTING.md`, overriding Phase 38's own
 "only P38-S4 needs one" text, which predates this session's scope growing past a narrow bugfix).
 
-**Next session:** **P39-S4** (Phase 39, RBAC completion — document/case RBAC polish: documents get a
-real per-document resource-tree entry like cases got since ADR 0144, instead of the coarse
-`resource_id="root"` fallback; `GET /cases` gets row-level RBAC filtering (currently all-or-nothing);
-org-hierarchy grants (ADR 0121) narrow onto the case resource type instead of scoping only by
-`process_definition_id`). This is Phase 39's last planned session. See `IMPLEMENTATION_PLAN.md`
-"Phase 39" for the full session breakdown.
+**Next session:** **P40-S1** (Phase 40, Operational Reliability — storage-target decommissioning + related
+gaps: a mechanism to cleanly remove a storage target from the target set, since this has already caused
+30,410 orphaned rows in a real incident; `quorum_count` re-validated on a target-role change instead of
+silently allowing an unfulfillable combination; a bulk fixity-verify cronjob complementing the existing
+single-object check). This is the first session of Phase 40. **Note for P40-S2** (unbounded fan-out to
+document-service, planned to be fixed with bounded concurrency or a lower default limit): P39-S4 already
+eliminated the underlying fan-out entirely for both `query-service` and `reporting-service` (a document's
+own resource_id is now checked directly, no more `document_client.get_document()` folder-resolution call
+at all) — re-verify whether this plan item is still needed before starting it, it may already be moot.
+See `IMPLEMENTATION_PLAN.md` "Phase 40" for the full session breakdown.
 
 Immediately before P38-S3: **P38-S2** (ungated/weakly-gated endpoints, round 1 — second session of the
 Phase 38+ gap-closure plan). Closed four findings: `audit-service`'s `GET /events`/`.../verify` (new

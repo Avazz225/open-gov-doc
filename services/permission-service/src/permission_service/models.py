@@ -164,6 +164,17 @@ class Delegation(Base):
     scope_object_type_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     scope_process_definition_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     scope_folder_resource_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154) - the fourth scope
+    # dimension, closing the gap ADR 0121 itself named: an org-hierarchy
+    # grant previously scoped only by `scope_process_definition_ids`
+    # (the whole process-definition family, e.g. every "Bauantrag" case),
+    # even though ADR 0144 gave cases their own real `ResourceNode` -
+    # narrowing to the SPECIFIC case's own `resource_id` (its `id`, which
+    # IS its `ResourceNode.resource_id`) is a strictly tighter scope than
+    # the process-definition family alone. Exposed on `POST /delegations`
+    # too (self-service), for the same reason `scope_folder_resource_ids`
+    # already is - the underlying matching/storage is shared.
+    scope_case_resource_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)

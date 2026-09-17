@@ -100,6 +100,19 @@ async def get_document(session: AsyncSession, document_id: str) -> Document:
     return document
 
 
+async def list_all_documents(session: AsyncSession) -> list[Document]:
+    """Every document row regardless of state (Post-Roadmap Phase 39
+    Session 4, ADR 0154) - basis for the startup backfill that registers a
+    `ResourceNode` for every document created BEFORE this session, mirroring
+    `case_service.repository.list_cases`'s identical role in ADR 0144's own
+    backfill loop. Deliberately unfiltered (including trashed documents,
+    which still need a real resource node for their own trash/restore
+    permission checks) - a hard-purged document's row is simply gone by
+    the time this runs, no filter needed for that case."""
+    result = await session.execute(select(Document))
+    return list(result.scalars().all())
+
+
 async def list_documents_by_folder(
     session: AsyncSession, folder_id: str, *, registered: bool | None = None
 ) -> list[Document]:

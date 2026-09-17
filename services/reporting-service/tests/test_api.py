@@ -40,18 +40,37 @@ async def _grant_role_admin_permission():
         response.raise_for_status()
 
 
+# Fake document ids used across the forensic-trace tests below (Post-
+# Roadmap Phase 39 Session 4, ADR 0154: documents are now real
+# `ResourceNode`s in permission-service, so a fake `doc-N` subject used by a
+# test's fake audit event needs a REAL resource node registered for it, the
+# same way `document-service` itself registers one synchronously on every
+# real document creation - see `_grant_document_read_permission` below,
+# which registers these with `parent_id="root"` so they inherit the same
+# `document.read` grant a real document created under an ungated folder
+# would). A deliberately never-registered id (`doc-unregistered`) is used
+# by the "hides an unreadable entry" tests - an unregistered resource_id
+# denies outright, exactly modeling a document this principal genuinely
+# has no access to, with no need for a separate "never granted folder".
+FAKE_DOCUMENT_IDS = ["doc-1", "doc-2", "doc-3"]
+
+
 @pytest.fixture(scope="session", autouse=True)
 async def _grant_document_read_permission():
     """Row-level RBAC filtering for the forensic trace (Post-Roadmap Phase
     36 Session 3) - `document.read` is NOT part of the default "everyone"
     grant set (unlike `reporting.*`), so `REPORTING_TEST_PRINCIPAL_ID` needs
     an explicit grant on `root` for the existing forensic-trace tests (whose
-    fake events all resolve to `folder_id="root"` via the mocked
-    `document_client`, see the `client` fixture) to keep seeing their
-    expected entries. Idempotent via a fixed role name (not the usual
-    random-uuid throwaway pattern elsewhere in this project), since this
-    fixture is session-scoped and must survive repeated runs against the
-    same permission-service without accumulating duplicate roles."""
+    fake events use `FAKE_DOCUMENT_IDS`, registered below as real resource
+    nodes under `root`) to keep seeing their expected entries. Idempotent
+    via a fixed role name (not the usual random-uuid throwaway pattern
+    elsewhere in this project), since this fixture is session-scoped and
+    must survive repeated runs against the same permission-service without
+    accumulating duplicate roles. Since Post-Roadmap Phase 39 Session 4
+    (ADR 0154), also registers `FAKE_DOCUMENT_IDS` as real resource nodes
+    (`create_resource_node` is idempotent create-if-missing, safe to repeat
+    every session) - without this, every fake `doc-N` subject would be an
+    unregistered resource_id, denied outright regardless of the grant."""
     role_name = "reporting-service-test-document-read"
     async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL) as pc:
         roles = (await pc.get("/roles")).json()
@@ -67,18 +86,27 @@ async def _grant_document_read_permission():
         existing = (
             await pc.get("/role-assignments", params={"principal_id": REPORTING_TEST_PRINCIPAL_ID})
         ).json()
-        if any(a["role_id"] == role["id"] for a in existing):
-            return
-        response = await pc.post(
-            "/role-assignments",
-            json={
-                "principal_type": "user",
-                "principal_id": REPORTING_TEST_PRINCIPAL_ID,
-                "role_id": role["id"],
-                "resource_id": "root",
-            },
-        )
-        response.raise_for_status()
+        if not any(a["role_id"] == role["id"] for a in existing):
+            response = await pc.post(
+                "/role-assignments",
+                json={
+                    "principal_type": "user",
+                    "principal_id": REPORTING_TEST_PRINCIPAL_ID,
+                    "role_id": role["id"],
+                    "resource_id": "root",
+                },
+            )
+            response.raise_for_status()
+        for document_id in FAKE_DOCUMENT_IDS:
+            resource_response = await pc.post(
+                "/resources",
+                json={
+                    "resource_id": document_id,
+                    "parent_id": "root",
+                    "resource_type": "document",
+                },
+            )
+            resource_response.raise_for_status()
 
 
 @pytest.fixture
@@ -94,15 +122,18 @@ def client():
     ADR 0072; die "everyone"-Gruppe gewaehrt `reporting.read`/`.write`/
     `.forensic_trace` jedem authentifizierten Principal). Einzelne Tests
     koennen den Header per `headers={"X-DMS-Principal": ""}` ueberschreiben,
-    um den Negativfall zu pruefen. Seit Post-Roadmap Phase 36 Session 3:
-    `document_client` gemockt (loest jede `subject` auf `folder_id="root"`
-    auf - die bereits existierenden Forensik-Trace-Tests verwenden erfundene
-    `doc-N`-IDs, die im echten document-service nicht existieren), waehrend
-    `permission_client` weiterhin echt bleibt - `REPORTING_TEST_PRINCIPAL_ID`
-    braucht dafuer ein echtes `document.read`-Grant auf `root`, siehe
-    `_grant_document_read_permission` unten (anders als `reporting.*`, ist
-    `document.read` NICHT Teil der "everyone"-Gruppe). `auth_client` bleibt
-    ebenfalls echt (ein frischer Dev-Stack hat keinen aktiven Superuser, die
+    um den Negativfall zu pruefen. `permission_client` bleibt UNGEMOCKT
+    (echter Aufruf gegen den laufenden permission-service) fuer die
+    Zeilenfilterung des forensischen Trace (Post-Roadmap Phase 36 Session
+    3) - die bereits existierenden Tests verwenden `FAKE_DOCUMENT_IDS`
+    (echt als `ResourceNode` registriert, siehe `_grant_document_read_
+    permission` oben, Post-Roadmap Phase 39 Session 4/ADR 0154, seit dieser
+    Session ist kein `document_client`-Mock mehr noetig - jedes `document-
+    service`-Ereignis prueft direkt gegen seine eigene `resource_id`).
+    `REPORTING_TEST_PRINCIPAL_ID` braucht dafuer ein echtes `document.
+    read`-Grant auf `root` (anders als `reporting.*`, ist `document.read`
+    NICHT Teil der "everyone"-Gruppe). `auth_client` bleibt ebenfalls echt
+    (ein frischer Dev-Stack hat keinen aktiven Superuser, die
     Zeilenfilterung greift also normal)."""
     with TestClient(app, headers={"X-DMS-Principal": REPORTING_TEST_PRINCIPAL_ID}) as c:
         app.state.workflow_client = AsyncMock()
@@ -112,8 +143,6 @@ def client():
         app.state.storage_client = AsyncMock()
         app.state.storage_client.get_usage.return_value = []
         app.state.notification_client = AsyncMock()
-        app.state.document_client = AsyncMock()
-        app.state.document_client.get_document.return_value = {"folder_id": "root"}
         yield c
 
 
@@ -387,23 +416,20 @@ def test_forensic_trace_reports_transparency_counts(client):
     assert body["superuser"] is False
 
 
-def test_forensic_trace_hides_entry_resolving_to_an_unreadable_folder(client):
-    """The mocked `document_client` normally resolves every subject to
-    `folder_id="root"` (which the test principal has `document.read` on,
-    see `_grant_document_read_permission`) - overriding it to a DIFFERENT,
-    never-granted folder proves the row-level filter actually excludes an
-    entry the caller isn't allowed to read, not just that root-resolved
-    entries happen to pass."""
-    app.state.document_client.get_document.return_value = {
-        "folder_id": "reporting-test-never-granted-folder"
-    }
+def test_forensic_trace_hides_entry_resolving_to_an_unreadable_resource(client):
+    """Post-Roadmap Phase 39 Session 4 (ADR 0154): a document-service event
+    for a document with NO registered resource node (`doc-unregistered`,
+    unlike `FAKE_DOCUMENT_IDS`) is denied outright by permission-service's
+    ancestor walk - proves the row-level filter actually excludes an entry
+    the caller isn't allowed to read, not just that registered entries
+    happen to pass."""
     app.state.audit_client.list_events.return_value = [
         {
             "id": 1,
             "event_type": "document.downloaded",
             "occurred_at": "2026-08-01T10:00:00+00:00",
             "service_name": "document-service",
-            "subject": "doc-1",
+            "subject": "doc-unregistered",
             "actor": "alice",
             "payload": {},
         }
@@ -449,16 +475,17 @@ def test_forensic_trace_active_superuser_sees_unfiltered_entries(client, monkeyp
         return True, REPORTING_TEST_PRINCIPAL_ID
 
     monkeypatch.setattr(app.state.auth_client, "get_active_superuser", fake_active_superuser)
-    app.state.document_client.get_document.return_value = {
-        "folder_id": "reporting-test-never-granted-folder"
-    }
+    # Deliberately an unregistered resource - the activated superuser
+    # bypasses row-level filtering entirely (no `check_batch` call at all),
+    # so this document being otherwise unreadable proves the bypass, not
+    # merely that a readable one happens to pass.
     app.state.audit_client.list_events.return_value = [
         {
             "id": 1,
             "event_type": "document.downloaded",
             "occurred_at": "2026-08-01T10:00:00+00:00",
             "service_name": "document-service",
-            "subject": "doc-1",
+            "subject": "doc-unregistered",
             "actor": "alice",
             "payload": {},
         }
@@ -476,16 +503,13 @@ def test_forensic_trace_export_excludes_unreadable_rows(client):
     """The CSV/PDF export endpoint reuses the same `_fetch_forensic_trace`
     filtering - a caller cannot bypass row-level RBAC by exporting instead
     of viewing."""
-    app.state.document_client.get_document.return_value = {
-        "folder_id": "reporting-test-never-granted-folder"
-    }
     app.state.audit_client.list_events.return_value = [
         {
             "id": 1,
             "event_type": "document.downloaded",
             "occurred_at": "2026-08-01T10:00:00+00:00",
             "service_name": "document-service",
-            "subject": "doc-1",
+            "subject": "doc-unregistered",
             "actor": "alice",
             "payload": {},
         }
@@ -494,7 +518,7 @@ def test_forensic_trace_export_excludes_unreadable_rows(client):
     response = client.get("/forensic-trace/export", params={"format": "csv"})
 
     assert response.status_code == 200
-    assert "doc-1" not in response.text
+    assert "doc-unregistered" not in response.text
 
 
 def test_forensic_trace_reports_download_anomaly(client):

@@ -907,9 +907,6 @@ services:
       DMS_STORAGE_SERVICE_BASE_URL: http://storage-service:8000
       DMS_NOTIFICATION_SERVICE_BASE_URL: http://notification-service:8000
       DMS_PERMISSION_SERVICE_BASE_URL: http://permission-service:8000
-      # Row-level RBAC filtering for the forensic trace (5.4b, Post-Roadmap
-      # Phase 36 Session 3) - parity with query-service's own `filtering.py`.
-      DMS_DOCUMENT_SERVICE_BASE_URL: http://document-service:8000
       DMS_AUTH_SERVICE_BASE_URL: http://auth-service:8000
       # Externally reachable gateway address for download links in scheduled
       # report emails (5.4a, since P7-S2b) - deliberately not the internal

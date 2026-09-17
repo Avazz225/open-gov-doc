@@ -259,14 +259,18 @@ async def search(
     except QuerySyntaxError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    resource_ids = {doc.folder_id or "root" for doc, _rank in rows}
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154): checked against each
+    # document's own `resource_id` (`document_id`) directly - documents are
+    # real `ResourceNode`s now, previously only their containing folder was,
+    # so this checked `doc.folder_id or "root"` as a proxy.
+    resource_ids = {doc.document_id for doc, _rank in rows}
     allowed = await app.state.permission_client.check_batch(
         principal_id=principal_id,
         permission="document.read",
         access_type="read",
         resource_ids=list(resource_ids),
     )
-    readable = [(doc, rank) for doc, rank in rows if allowed.get(doc.folder_id or "root", False)]
+    readable = [(doc, rank) for doc, rank in rows if allowed.get(doc.document_id, False)]
     page = readable[offset : offset + limit]
 
     facets = await repository.facet_counts(

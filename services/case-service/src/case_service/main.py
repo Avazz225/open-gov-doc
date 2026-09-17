@@ -234,6 +234,30 @@ async def _require_case_permission(
         raise HTTPException(status_code=403, detail=f"Fehlende Berechtigung {permission!r}")
 
 
+async def _filter_cases_by_permission(x_dms_principal: str, cases: list) -> list:
+    """Row-level RBAC filtering for case listings (Post-Roadmap Phase 39
+    Session 4, ADR 0154) - closes the gap named alongside it: `GET /cases`/
+    `GET /cases/by-vorgangsnummer` previously checked only the collection-
+    level `case.read` on `root` (`_require_case_permission`'s default
+    `resource_id`), then returned every matching row unfiltered, ignoring
+    that ADR 0144 already lets an admin narrow an INDIVIDUAL case's own
+    `RoleAssignment`s - the same all-or-nothing gap `document-service`'s
+    listing endpoints would have had before this session's broader
+    per-document resource-tree retrofit. Same `check_batch`-then-filter
+    shape as `query-service`/`reporting-service`/`search-service`'s own
+    row-level filtering (this service already depends on
+    `dms-permission-client`, so no new client method needed)."""
+    if not cases:
+        return cases
+    allowed = await app.state.permission_client.check_batch(
+        principal_id=x_dms_principal,
+        permission="case.read",
+        access_type="read",
+        resource_ids=[case.id for case in cases],
+    )
+    return [case for case in cases if allowed.get(case.id, False)]
+
+
 async def _get_case_or_404(session: AsyncSession, case_id: str):
     """Post-Roadmap Phase 35 Session 2 (ADR 0144) - every per-case endpoint
     must confirm the case actually EXISTS before calling
@@ -420,7 +444,8 @@ async def list_cases(
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseOut]:
     await _require_case_permission(x_dms_principal, access_type="read")
-    return await repository.list_cases(session, status=status, object_type_id=object_type_id)
+    cases = await repository.list_cases(session, status=status, object_type_id=object_type_id)
+    return await _filter_cases_by_permission(x_dms_principal, cases)
 
 
 @app.get("/cases/by-vorgangsnummer", response_model=list[CaseOut])
@@ -434,7 +459,8 @@ async def list_cases_by_vorgangsnummer(
     `{case_id}` (same route-ordering rule as `/cases/due-for-archival`
     below)."""
     await _require_case_permission(x_dms_principal, access_type="read")
-    return await repository.list_cases_by_vorgangsnummer(session, value)
+    cases = await repository.list_cases_by_vorgangsnummer(session, value)
+    return await _filter_cases_by_permission(x_dms_principal, cases)
 
 
 @app.get("/cases/due-for-archival", response_model=list[CaseOut])

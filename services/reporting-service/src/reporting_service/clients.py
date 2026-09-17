@@ -103,37 +103,6 @@ class StorageClient:
         await self._client.aclose()
 
 
-class DocumentClient:
-    """Thin HTTP client against document-service - row-level RBAC filtering
-    for the forensic trace (5.4b, Post-Roadmap Phase 36 Session 3, parity
-    with query-service's own `filtering.py`, ADR 0072): resolves a
-    `document-service` event's `subject` (a document ID) to its `folder_id`,
-    the same resolution query-service already performs for its structured
-    queries."""
-
-    # Post-Roadmap Phase 38 Session 4: document-service's primary endpoints
-    # now require a non-empty `X-DMS-Principal` header - asserts a fixed
-    # service identity (background/internal caller, no real end-user
-    # context available; covered by "everyone"'s grants, same reasoning as
-    # `archival_service.clients.DocumentClient`).
-    _SYSTEM_PRINCIPAL_HEADERS = {"X-DMS-Principal": "reporting-service"}
-
-    def __init__(self, base_url: str) -> None:
-        self._client = httpx.AsyncClient(
-            base_url=base_url, timeout=10.0, headers=self._SYSTEM_PRINCIPAL_HEADERS
-        )
-
-    async def get_document(self, document_id: str) -> dict | None:
-        response = await self._client.get(f"/documents/{document_id}")
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-        return response.json()
-
-    async def close(self) -> None:
-        await self._client.aclose()
-
-
 class AuthServiceClient:
     """HTTP client against auth-service - `GET /superuser/status` is the
     only way to check "is the current caller the activated superuser" (4.6,

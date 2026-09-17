@@ -1367,30 +1367,33 @@ async def _reject_manual_federated_completion(
 
 async def _resolve_business_key_scope(
     business_key: str | None, x_dms_principal: str
-) -> tuple[int | None, str | None]:
+) -> tuple[int | None, str | None, str | None]:
     """Activates delegation's previously-dead `scope_object_type_ids`/
-    `scope_folder_resource_ids` (P32-S2, ADR 0048's own anticipated
-    "additional resolution step") - `business_key` is a genuinely opaque
-    cross-service reference (no FK enforcement), so this tries
-    `case-service` first (the real, exercised path: every
-    circulation-folder process sets `business_key=case_id`, see
-    `case_service.workflow_client`) and falls back to `document-service`
+    `scope_folder_resource_ids`/`scope_case_resource_ids` (P32-S2, ADR
+    0048's own anticipated "additional resolution step"; the third
+    dimension since Post-Roadmap Phase 39 Session 4, ADR 0154) -
+    `business_key` is a genuinely opaque cross-service reference (no FK
+    enforcement), so this tries `case-service` first (the real, exercised
+    path: every circulation-folder process sets `business_key=case_id`,
+    see `case_service.workflow_client`) and falls back to `document-service`
     (no real process sets a document business_key today, but the field's
     own docstring already anticipates it and this reuses an existing
-    endpoint, not new API surface). Returns `(None, None)` if
+    endpoint, not new API surface). Returns `(None, None, None)` if
     `business_key` is unset or resolves against neither service - callers
     then fall back to the existing fail-closed scope semantics
     (`_delegation_scope_matches`), exactly as if the dimension had never
-    been supplied."""
+    been supplied. When `business_key` resolves to a case, its own id IS
+    its `resource_id` (ADR 0144: cases are real `ResourceNode`s keyed by
+    their own id) - no extra field needed from case-service's response."""
     if not business_key:
-        return None, None
+        return None, None, None
     case = await app.state.case_client.get_case(business_key, x_dms_principal=x_dms_principal)
     if case is not None:
-        return case.get("object_type_id"), None
+        return case.get("object_type_id"), None, business_key
     document = await app.state.document_client.get_document(business_key)
     if document is not None:
-        return document.get("object_type_id"), document.get("folder_id")
-    return None, None
+        return document.get("object_type_id"), document.get("folder_id"), None
+    return None, None, None
 
 
 async def _require_delegation_if_on_behalf_of(
@@ -1416,7 +1419,7 @@ async def _require_delegation_if_on_behalf_of(
             ),
         )
     instance = await repository.get_instance(session, instance_id)
-    object_type_id, folder_resource_id = await _resolve_business_key_scope(
+    object_type_id, folder_resource_id, case_resource_id = await _resolve_business_key_scope(
         instance.business_key, x_dms_principal
     )
     allowed = await app.state.permission_client.check_delegation(
@@ -1425,6 +1428,7 @@ async def _require_delegation_if_on_behalf_of(
         process_definition_id=instance.process_definition_id,
         object_type_id=object_type_id,
         folder_resource_id=folder_resource_id,
+        case_resource_id=case_resource_id,
     )
     if not allowed:
         raise HTTPException(
@@ -1609,11 +1613,19 @@ async def create_task_org_hierarchy_grant(
 
     await _revoke_claim_grants(list(claim.granted_delegation_ids or []))
     ends_at = datetime.now(UTC) + timedelta(hours=settings.org_hierarchy_grant_max_duration_hours)
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154): narrows the grant to the
+    # instance's own resolved case (if any), in addition to its process-
+    # definition family - same resolution `_require_delegation_if_on_
+    # behalf_of` already uses for self-service delegation checks.
+    _object_type_id, _folder_resource_id, case_resource_id = await _resolve_business_key_scope(
+        instance.business_key, x_dms_principal
+    )
     result = await app.state.permission_client.create_org_hierarchy_grant(
         principal_id=target_principal_id,
         grant_kind=payload.grant_kind,
         process_definition_id=instance.process_definition_id,
         ends_at=ends_at,
+        case_resource_id=case_resource_id,
     )
     await repository.set_claim_grant(
         session, claim, grant_kind=payload.grant_kind, delegation_ids=result["delegation_ids"]

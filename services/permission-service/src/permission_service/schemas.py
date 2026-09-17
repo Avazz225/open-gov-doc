@@ -288,6 +288,7 @@ class DelegationCreate(BaseModel):
     scope_object_type_ids: list[int] | None = None
     scope_process_definition_ids: list[int] | None = None
     scope_folder_resource_ids: list[str] | None = None
+    scope_case_resource_ids: list[str] | None = None
 
 
 class DelegationOut(BaseModel):
@@ -299,6 +300,7 @@ class DelegationOut(BaseModel):
     scope_object_type_ids: list[int] | None
     scope_process_definition_ids: list[int] | None
     scope_folder_resource_ids: list[str] | None
+    scope_case_resource_ids: list[str] | None = None
     created_at: datetime
     revoked_at: datetime | None
     revoked_by: str | None
@@ -325,6 +327,12 @@ class OrgHierarchyGrantCreate(BaseModel):
     grant_kind: Literal["supervisor", "supervisor_chain", "org_unit"]
     process_definition_id: int
     ends_at: datetime
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154) - optional, set by
+    # workflow-service when it has already resolved the triggering
+    # instance's `business_key` to a real case (see `_resolve_business_
+    # key_scope`). `None` preserves the pre-existing, process-definition-
+    # family-wide scope exactly.
+    case_resource_id: str | None = None
 
 
 class OrgHierarchyGrantOut(BaseModel):

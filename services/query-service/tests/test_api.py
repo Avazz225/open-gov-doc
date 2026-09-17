@@ -76,12 +76,10 @@ def test_query_events_filters_result_by_permission(client):
         },
     ]
 
-    async def fake_get_document(document_id: str) -> dict:
-        folder_id = "folder-a" if document_id == "doc-1" else "folder-b"
-        return {"id": document_id, "folder_id": folder_id}
-
-    app.state.document_client.get_document.side_effect = fake_get_document
-    app.state.permission_client.check_batch.return_value = {"folder-a": True, "folder-b": False}
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154): filtering checks a
+    # document event's own `subject` (its own `resource_id`) directly, no
+    # more `document_client` lookup to a containing folder.
+    app.state.permission_client.check_batch.return_value = {"doc-1": True, "doc-2": False}
 
     response = client.get("/query/events", headers={"x-dms-principal": "alice"})
     assert response.status_code == 200

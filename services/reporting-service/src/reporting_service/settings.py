@@ -14,9 +14,6 @@ class Settings(BaseServiceSettings):
     # previously had no permission check at all, not even for the forensic
     # trace.
     permission_service_base_url: str = "http://localhost:8004"
-    # Row-level RBAC filtering for the forensic trace (5.4b, Post-Roadmap
-    # Phase 36 Session 3) - parity with query-service's own `filtering.py`.
-    document_service_base_url: str = "http://localhost:8006"
     auth_service_base_url: str = "http://localhost:8003"
     # Externally reachable gateway address for the download link in
     # scheduled report emails (5.4a) - deliberately separate from

@@ -1540,6 +1540,68 @@ def test_org_hierarchy_grant_supervisor_creates_one_delegation_per_direct_superv
     assert all(d["scope_process_definition_ids"] == [1] for d in delegations)
 
 
+def test_org_hierarchy_grant_with_case_resource_id_narrows_the_delegation_scope(
+    client, role_management_headers
+):
+    """Post-Roadmap Phase 39 Session 4 (ADR 0154) - when the caller
+    (workflow-service) has already resolved the triggering instance's
+    `business_key` to a real case, the resulting delegation is scoped to
+    BOTH the process-definition family AND that specific case."""
+    client.post(
+        "/supervisor-assignments",
+        json={"principal_id": "ulla-p39s4", "supervisor_principal_id": "viktor-p39s4"},
+        headers=role_management_headers,
+    )
+
+    response = client.post(
+        "/org-hierarchy-grants",
+        json={
+            "principal_id": "ulla-p39s4",
+            "grant_kind": "supervisor",
+            "process_definition_id": 1,
+            "ends_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+            "case_resource_id": "case-p39s4-1",
+        },
+    )
+
+    assert response.status_code == 201
+    delegations = client.get(
+        "/delegations",
+        params={"delegator_principal_id": "ulla-p39s4"},
+        headers={"X-DMS-Principal": "ulla-p39s4"},
+    ).json()
+    assert len(delegations) == 1
+    assert delegations[0]["scope_process_definition_ids"] == [1]
+    assert delegations[0]["scope_case_resource_ids"] == ["case-p39s4-1"]
+
+    assert (
+        client.get(
+            "/delegations/check",
+            params={
+                "deputy_principal_id": "viktor-p39s4",
+                "delegator_principal_id": "ulla-p39s4",
+                "process_definition_id": 1,
+                "case_resource_id": "case-p39s4-1",
+            },
+        ).json()["allowed"]
+        is True
+    )
+    # A different case in the same process-definition family - the extra
+    # dimension makes the grant strictly narrower, not just process-wide.
+    assert (
+        client.get(
+            "/delegations/check",
+            params={
+                "deputy_principal_id": "viktor-p39s4",
+                "delegator_principal_id": "ulla-p39s4",
+                "process_definition_id": 1,
+                "case_resource_id": "case-p39s4-other",
+            },
+        ).json()["allowed"]
+        is False
+    )
+
+
 def test_org_hierarchy_grant_supervisor_chain_unions_diamond_dag(client, role_management_headers):
     for principal, supervisor in [
         ("rosa-p10", "sven-p10"),

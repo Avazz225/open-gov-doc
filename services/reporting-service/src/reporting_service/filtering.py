@@ -1,55 +1,37 @@
-import asyncio
-
 from dms_permission_client import PermissionServiceClient
 
-from reporting_service.clients import DocumentClient
 from reporting_service.schemas import ForensicTraceEntry
 
 # Same convention as query-service's own filtering.py (P8-S2) and
 # search-service (P5-S4): "document.read" is the generic "may read this
-# folder's content" permission, checked against the folder's `resource_id`
-# - for both document content and actions on the folder itself, since only
-# folders are `ResourceNode`s.
+# content" permission. Since Post-Roadmap Phase 39 Session 4 (ADR 0154),
+# checked against the entry's own `subject` directly for both `document-
+# service` and `folder-service` entries - both are real `ResourceNode`s now
+# (previously only folders were, so a document entry's subject had to be
+# resolved to its containing folder's `resource_id` via a `DocumentClient`
+# lookup first - no longer needed, this module no longer depends on it at
+# all).
 RESULT_READ_PERMISSION = "document.read"
 
+_RESOLVABLE_SERVICE_NAMES = ("folder-service", "document-service")
 
-async def _resolve_resource_ids(
-    entries: list[ForensicTraceEntry], document_client: DocumentClient
-) -> list[str | None]:
-    """Resolves a folder `resource_id` per entry, where possible - 1:1
-    logic copy of `query_service.filtering._resolve_resource_ids`, adapted
-    to operate on `ForensicTraceEntry` objects (attribute access) instead
-    of raw event dicts, since `_fetch_forensic_trace` already builds typed
-    entries before this filter runs. `document-service` entries carry the
-    document ID as `subject` and must first be resolved to their
-    `folder_id`; `folder-service` entries already carry the resource_id
-    directly as `subject`. Every other `service_name` (workflow/case/
-    auth/signature/notification/registry/permission-on-non-folder/...) is
-    not resolvable - see docs/services/reporting-service.md for the
-    deliberate scope boundary (same one query-service already documents)."""
-    unique_document_ids = list(
-        {
-            entry.subject
-            for entry in entries
-            if entry.service_name == "document-service" and entry.subject
-        }
-    )
-    docs = await asyncio.gather(
-        *(document_client.get_document(document_id) for document_id in unique_document_ids)
-    )
-    folder_by_document_id: dict[str, str | None] = {
-        document_id: (doc.get("folder_id") or "root") if doc is not None else None
-        for document_id, doc in zip(unique_document_ids, docs, strict=True)
-    }
 
+def _resolve_resource_ids(entries: list[ForensicTraceEntry]) -> list[str | None]:
+    """Resolves a `resource_id` per entry, where possible - 1:1 logic copy
+    of `query_service.filtering._resolve_resource_ids`, adapted to operate
+    on `ForensicTraceEntry` objects (attribute access) instead of raw event
+    dicts, since `_fetch_forensic_trace` already builds typed entries
+    before this filter runs. Both `document-service` and `folder-service`
+    entries carry their own real `resource_id` directly as `subject`
+    (Post-Roadmap Phase 39 Session 4, ADR 0154). Every other `service_name`
+    (workflow/case/auth/signature/notification/registry/permission-on-
+    non-folder/...) is not resolvable - see docs/services/
+    reporting-service.md for the deliberate scope boundary (same one
+    query-service already documents)."""
     resolved: list[str | None] = []
     for entry in entries:
-        if not entry.subject:
-            resolved.append(None)
-        elif entry.service_name == "folder-service":
+        if entry.subject and entry.service_name in _RESOLVABLE_SERVICE_NAMES:
             resolved.append(entry.subject)
-        elif entry.service_name == "document-service":
-            resolved.append(folder_by_document_id.get(entry.subject))
         else:
             resolved.append(None)
     return resolved
@@ -60,7 +42,6 @@ async def filter_entries_by_permission(
     *,
     principal_id: str,
     permission_client: PermissionServiceClient,
-    document_client: DocumentClient,
     is_superuser: bool,
 ) -> list[ForensicTraceEntry]:
     """Row-level RBAC filtering for the forensic trace (5.4b, Post-Roadmap
@@ -73,7 +54,7 @@ async def filter_entries_by_permission(
     events. The base capability check (`reporting.forensic_trace`, ADR
     0072) is unchanged and still gates the endpoint as a whole; this is an
     ADDITIONAL, row-level layer on top of it. The activated superuser (4.6)
-    is the only exception. Entries without a resolvable folder resource are
+    is the only exception. Entries without a resolvable resource are
     hidden fail-closed, instead of inventing a non-existent generic object
     permission for every conceivable domain (workflow/case/auth/...) - same
     boundary query-service's own filtering already draws.
@@ -84,7 +65,7 @@ async def filter_entries_by_permission(
     absent from the (also-filtered) entries actually shown."""
     if is_superuser:
         return entries
-    resource_ids = await _resolve_resource_ids(entries, document_client)
+    resource_ids = _resolve_resource_ids(entries)
     unique_resource_ids = {resource_id for resource_id in resource_ids if resource_id is not None}
     if not unique_resource_ids:
         return []

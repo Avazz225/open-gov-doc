@@ -989,6 +989,74 @@ def test_org_hierarchy_grant_supervisor_grants_the_assignees_direct_supervisor(
     assert tasks[0]["grant_kind"] == "supervisor"
 
 
+def test_org_hierarchy_grant_narrows_to_the_resolved_case(
+    client, manual_task_bpmn, admin_headers, users_admin_headers, monkeypatch
+):
+    """Post-Roadmap Phase 39 Session 4 (ADR 0154) - when the instance's
+    `business_key` resolves to a real case, the resulting delegation is
+    scoped to that SPECIFIC case in addition to the process-definition
+    family (previously only the latter). Same `case_client.get_case`
+    boundary-patch precedent as `test_complete_task_on_behalf_of_respects_
+    object_type_scope` above, for the identical structural reason (a real
+    `POST /cases` would call back into this same, stopped-for-tests
+    `workflow-service`)."""
+    _create_supervisor_assignment(
+        principal_id="dora-assignee-g3",
+        supervisor_principal_id="petra-supervisor-g3",
+        users_admin_headers=users_admin_headers,
+    )
+    definition_id = _upload_definition(
+        client, manual_task_bpmn, name="CaseScopedGrant", headers=admin_headers
+    ).json()["id"]
+    business_key = f"fake-case-{uuid.uuid4().hex[:8]}"
+
+    async def fake_get_case(case_id: str, *, x_dms_principal: str) -> dict | None:
+        if case_id == business_key:
+            return {"id": case_id, "object_type_id": None}
+        return None
+
+    monkeypatch.setattr(app.state.case_client, "get_case", fake_get_case)
+
+    instance = client.post(
+        f"/process-definitions/{definition_id}/instances",
+        json={"created_by": "alice", "business_key": business_key},
+    ).json()
+    task_id = client.get(f"/instances/{instance['id']}/tasks").json()[0]["id"]
+    client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/claim",
+        json={"principal_id": "dora-assignee-g3"},
+    )
+
+    response = client.post(
+        f"/instances/{instance['id']}/tasks/{task_id}/org-hierarchy-grant",
+        json={"grant_kind": "supervisor"},
+    )
+    assert response.status_code == 200
+    assert response.json()["deputy_principal_ids"] == ["petra-supervisor-g3"]
+
+    matching_case = httpx.get(
+        f"{PERMISSION_SERVICE_URL}/delegations/check",
+        params={
+            "deputy_principal_id": "petra-supervisor-g3",
+            "delegator_principal_id": "dora-assignee-g3",
+            "process_definition_id": instance["process_definition_id"],
+            "case_resource_id": business_key,
+        },
+    ).json()
+    assert matching_case["allowed"] is True
+
+    other_case = httpx.get(
+        f"{PERMISSION_SERVICE_URL}/delegations/check",
+        params={
+            "deputy_principal_id": "petra-supervisor-g3",
+            "delegator_principal_id": "dora-assignee-g3",
+            "process_definition_id": instance["process_definition_id"],
+            "case_resource_id": "some-other-case",
+        },
+    ).json()
+    assert other_case["allowed"] is False
+
+
 def test_org_hierarchy_grant_org_unit_without_org_unit_of_returns_422(
     client, manual_task_bpmn, admin_headers
 ):

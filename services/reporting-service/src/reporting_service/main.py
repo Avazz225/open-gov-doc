@@ -26,7 +26,6 @@ from reporting_service import forensic, reports, repository
 from reporting_service.clients import (
     AuditClient,
     AuthServiceClient,
-    DocumentClient,
     NotificationClient,
     StorageClient,
     WorkflowClient,
@@ -263,7 +262,6 @@ async def _fetch_forensic_trace(
         entries,
         principal_id=principal_id,
         permission_client=app.state.permission_client,
-        document_client=app.state.document_client,
         is_superuser=is_superuser,
     )
     anomalies = forensic.detect_download_anomalies(
@@ -320,9 +318,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage_client = StorageClient(settings.storage_service_base_url)
     app.state.notification_client = NotificationClient(settings.notification_service_base_url)
     app.state.permission_client = PermissionServiceClient(settings.permission_service_base_url)
-    # Row-level RBAC filtering for the forensic trace (5.4b, Post-Roadmap
-    # Phase 36 Session 3) - parity with query-service's own filtering.py.
-    app.state.document_client = DocumentClient(settings.document_service_base_url)
     app.state.auth_client = AuthServiceClient(settings.auth_service_base_url)
 
     sensor_config_client = SensorConfigClient(settings.monitoring_service_base_url)
@@ -374,7 +369,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.storage_client.close()
     await app.state.notification_client.close()
     await app.state.permission_client.close()
-    await app.state.document_client.close()
     await app.state.auth_client.close()
     await engine.dispose()
 

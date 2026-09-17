@@ -13,6 +13,41 @@ async def _add_child(session, resource_id, parent_id=ROOT_RESOURCE_ID, inherit=T
     await session.flush()
 
 
+async def test_create_resource_node_is_idempotent(session):
+    first = await repository.create_resource_node(session, "res-1", ROOT_RESOURCE_ID, "folder")
+    second = await repository.create_resource_node(session, "res-1", "some-other-parent", "case")
+
+    assert first.resource_id == second.resource_id == "res-1"
+    # A second call never overwrites an existing node's parent_id/resource_type.
+    assert second.parent_id == ROOT_RESOURCE_ID
+    assert second.resource_type == "folder"
+
+
+async def test_create_resource_node_falls_back_to_root_for_unregistered_parent(session, caplog):
+    """Post-Roadmap Phase 39 Session 4 (ADR 0154) - found via live
+    verification of document-service's new startup backfill loop against
+    this project's own dev database: a real installation can have a folder
+    whose own `ResourceNode` was never registered (`folder-service`'s
+    registration is purely event-driven, no synchronous guarantee). Without
+    this fallback, registering anything under such a `parent_id` raises an
+    unhandled `ForeignKeyViolationError` that could crash the CALLING
+    service's entire startup."""
+    node = await repository.create_resource_node(
+        session, "doc-under-orphaned-folder", "folder-that-was-never-registered", "document"
+    )
+
+    assert node.parent_id == ROOT_RESOURCE_ID
+    assert "wird stattdessen unter root registriert" in caplog.text
+
+
+async def test_create_resource_node_keeps_a_real_parent(session):
+    await _add_child(session, "real-folder", parent_id=ROOT_RESOURCE_ID)
+
+    node = await repository.create_resource_node(session, "doc-1", "real-folder", "document")
+
+    assert node.parent_id == "real-folder"
+
+
 async def test_create_role(session):
     role = await repository.create_role(session, "Editor", "kann bearbeiten", ["read", "write"])
 
@@ -691,6 +726,7 @@ async def _create_delegation(
     scope_object_type_ids=None,
     scope_process_definition_ids=None,
     scope_folder_resource_ids=None,
+    scope_case_resource_ids=None,
 ):
     now = datetime.now(UTC)
     return await repository.create_delegation(
@@ -702,6 +738,7 @@ async def _create_delegation(
         scope_object_type_ids=scope_object_type_ids,
         scope_process_definition_ids=scope_process_definition_ids,
         scope_folder_resource_ids=scope_folder_resource_ids,
+        scope_case_resource_ids=scope_case_resource_ids,
     )
 
 
@@ -853,6 +890,43 @@ async def test_is_active_deputy_for_respects_folder_and_object_type_scope(sessio
         delegator_principal_id="alice",
         object_type_id=3,
         folder_resource_id="folder-b",
+    )
+
+
+async def test_is_active_deputy_for_respects_case_resource_scope(session):
+    """Post-Roadmap Phase 39 Session 4 (ADR 0154) - the fourth scope
+    dimension, same fail-open/fail-closed shape as the other three."""
+    await _create_delegation(
+        session,
+        delegator="alice",
+        deputy="bob",
+        scope_process_definition_ids=[7],
+        scope_case_resource_ids=["case-a"],
+    )
+
+    assert await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        process_definition_id=7,
+        case_resource_id="case-a",
+    )
+    # A different case in the SAME process-definition family is not enough -
+    # both set dimensions must match, this is a strictly narrower scope.
+    assert not await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        process_definition_id=7,
+        case_resource_id="case-b",
+    )
+    # No case_resource_id supplied at all - fail closed, same as the other
+    # three dimensions.
+    assert not await repository.is_active_deputy_for(
+        session,
+        deputy_principal_id="bob",
+        delegator_principal_id="alice",
+        process_definition_id=7,
     )
 
 

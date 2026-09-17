@@ -6,6 +6,16 @@ class Settings(BaseServiceSettings):
 
     postgres_dsn: str = "postgresql+asyncpg://dms:dms_dev_only@localhost:5432/dms"
 
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154) - the startup `ResourceNode`
+    # backfill loop makes one HTTP round trip per document; a real
+    # installation can have tens of thousands of rows (42,699 found live in
+    # this project's own dev database), so a purely sequential loop was
+    # measured to make startup take minutes. Bounded concurrency instead of
+    # unbounded `asyncio.gather` (which would itself risk exhausting
+    # permission-service's own connection pool, the same class of bug ADR
+    # 0154 closed for query-service/reporting-service's unrelated fan-out).
+    document_resource_backfill_concurrency: int = 50
+
     # Document Service does not hold any file content itself, but
     # instead exclusively talks to the Storage Service's HTTP API (3.6) - no
     # import of its internals, pure service-to-service communication.

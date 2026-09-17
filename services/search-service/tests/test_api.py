@@ -72,6 +72,24 @@ async def _index_at_root(
         )
         await session.commit()
     await engine.dispose()
+    # Post-Roadmap Phase 39 Session 4 (ADR 0154): documents indexed directly
+    # into search-service's own table (bypassing the real document-service)
+    # need their own `ResourceNode` registered too, mirroring what
+    # `document-service` itself now does synchronously on every real
+    # document creation - `/search`'s permission-batch-check now checks the
+    # document's own `resource_id`, not its containing folder's, so an
+    # unregistered one would otherwise be denied outright regardless of any
+    # folder/root-level grant.
+    async with httpx.AsyncClient(base_url=PERMISSION_SERVICE_URL, timeout=30.0) as pc:
+        resource_response = await pc.post(
+            "/resources",
+            json={
+                "resource_id": document_id,
+                "parent_id": folder_id or "root",
+                "resource_type": "document",
+            },
+        )
+        resource_response.raise_for_status()
     return document_id
 
 

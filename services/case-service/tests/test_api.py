@@ -139,6 +139,56 @@ def test_list_cases_returns_403_without_case_read_permission(client, everyone_ro
     assert response.status_code == 403
 
 
+def test_list_cases_filters_out_a_case_isolated_from_the_default_grant(
+    client, process_definition_id, case_headers
+):
+    """Row-level RBAC filtering (Post-Roadmap Phase 39 Session 4, ADR 0154)
+    - closes the gap named alongside it: `GET /cases` previously checked
+    only the collection-level `case.read` on `root`, then returned every
+    row unfiltered, ignoring that ADR 0144 already lets an admin narrow an
+    INDIVIDUAL case's own resource node (`inherit=False`, the same
+    mechanism `teamspace-service`/`search-service`'s own tests use to
+    anchor/prove per-resource isolation). `case_headers` keeps its default
+    `case.read` via "everyone" throughout (no coarse collection-level gate
+    is touched here) - only `isolated_case`'s OWN node stops inheriting
+    that grant, so it must disappear from the list while `visible_case`
+    (still inheriting normally) stays."""
+    visible_case_id = client.post(
+        "/cases",
+        json={
+            "name": f"Sichtbar-{uuid.uuid4().hex[:8]}",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()["id"]
+    isolated_case_id = client.post(
+        "/cases",
+        json={
+            "name": f"Isoliert-{uuid.uuid4().hex[:8]}",
+            "process_definition_id": process_definition_id,
+            "created_by": "alice",
+        },
+        headers=case_headers,
+    ).json()["id"]
+
+    # The case's `ResourceNode` already exists (registered synchronously by
+    # `create_case` itself, ADR 0144) - only its `inherit` flag needs
+    # flipping, no `POST /resources` needed first.
+    patch_response = httpx.patch(
+        f"{PERMISSION_SERVICE_URL}/resources/{isolated_case_id}",
+        json={"inherit": False},
+        timeout=30.0,
+    )
+    patch_response.raise_for_status()
+
+    response = client.get("/cases", headers=case_headers)
+    assert response.status_code == 200
+    ids = [c["id"] for c in response.json()]
+    assert visible_case_id in ids
+    assert isolated_case_id not in ids
+
+
 def test_add_and_list_case_documents_resolves_current_version(
     client, process_definition_id, document_id, case_headers
 ):

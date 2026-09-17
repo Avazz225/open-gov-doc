@@ -172,7 +172,6 @@ async def _run_query(
         events,
         principal_id=principal_id,
         permission_client=app.state.permission_client,
-        document_client=app.state.document_client,
         is_superuser=is_superuser,
     )
     await _record_query(

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -20,6 +21,8 @@ from permission_service.models import (
     SystemMaintenanceMode,
 )
 from permission_service.settings import ROOT_RESOURCE_ID
+
+logger = logging.getLogger(__name__)
 
 
 class NotFoundError(Exception):
@@ -81,10 +84,35 @@ async def create_resource_node(
     here). Returns the existing node unchanged if one already exists
     (matches the event handler's own prior "if missing, insert" behavior
     exactly - callers on either path never overwrite an existing node's
-    `parent_id`/`resource_type`)."""
+    `parent_id`/`resource_type`).
+
+    `parent_id` falls back to `ROOT_RESOURCE_ID` if it doesn't correspond to
+    an existing node (Post-Roadmap Phase 39 Session 4, ADR 0154 - found via
+    live verification of document-service's new startup backfill loop: a
+    real installation can have a folder whose OWN `ResourceNode` was, for
+    whatever historical reason, never registered - `folder-service`'s
+    purely event-driven registration has no synchronous guarantee the way
+    `case-service`'s/`document-service`'s own registrations do. Without
+    this fallback, a single such orphaned folder reference would raise an
+    unhandled `ForeignKeyViolationError` and could crash the CALLING
+    service's entire startup, not just fail one document's registration -
+    a disproportionate blast radius for what is, functionally, the exact
+    same "unregistered resource" case this whole mechanism already handles
+    everywhere else by falling back to root/denying gracefully, never by
+    crashing)."""
     existing = await session.get(ResourceNode, resource_id)
     if existing is not None:
         return existing
+    if parent_id is not None and parent_id != ROOT_RESOURCE_ID:
+        parent_exists = await session.get(ResourceNode, parent_id)
+        if parent_exists is None:
+            logger.warning(
+                "create_resource_node: parent_id=%r hat keinen eigenen ResourceNode - "
+                "resource_id=%r wird stattdessen unter root registriert",
+                parent_id,
+                resource_id,
+            )
+            parent_id = ROOT_RESOURCE_ID
     node = ResourceNode(resource_id=resource_id, parent_id=parent_id, resource_type=resource_type)
     session.add(node)
     await session.flush()
@@ -1045,6 +1073,7 @@ async def create_delegation(
     scope_object_type_ids: list[int] | None,
     scope_process_definition_ids: list[int] | None,
     scope_folder_resource_ids: list[str] | None,
+    scope_case_resource_ids: list[str] | None = None,
     grant_kind: str | None = None,
 ) -> Delegation:
     delegation = Delegation(
@@ -1056,6 +1085,7 @@ async def create_delegation(
         scope_object_type_ids=scope_object_type_ids,
         scope_process_definition_ids=scope_process_definition_ids,
         scope_folder_resource_ids=scope_folder_resource_ids,
+        scope_case_resource_ids=scope_case_resource_ids,
         created_at=datetime.now(UTC),
         grant_kind=grant_kind,
     )
@@ -1114,12 +1144,15 @@ def _delegation_scope_matches(
     process_definition_id: int | None,
     object_type_id: int | None,
     folder_resource_id: str | None,
+    case_resource_id: str | None = None,
 ) -> bool:
     """A set scope list restricts to exactly these IDs; an empty/``None``
     list means "unrestricted on this dimension". If the corresponding ID of
     the operation being checked is not supplied (the caller doesn't know
     it), a set scope list counts as NOT satisfied (fail closed) - see
-    main.py ``GET /delegations/check``."""
+    main.py ``GET /delegations/check``. `case_resource_id` (Post-Roadmap
+    Phase 39 Session 4, ADR 0154) - the fourth dimension, same fail-closed
+    reasoning as the other three."""
     if delegation.scope_process_definition_ids:
         if process_definition_id is None or process_definition_id not in (
             delegation.scope_process_definition_ids
@@ -1133,6 +1166,9 @@ def _delegation_scope_matches(
             delegation.scope_folder_resource_ids
         ):
             return False
+    if delegation.scope_case_resource_ids:
+        if case_resource_id is None or case_resource_id not in delegation.scope_case_resource_ids:
+            return False
     return True
 
 
@@ -1144,6 +1180,7 @@ async def is_active_deputy_for(
     process_definition_id: int | None = None,
     object_type_id: int | None = None,
     folder_resource_id: str | None = None,
+    case_resource_id: str | None = None,
 ) -> bool:
     """Core of the delegation check (4.4a) - true if at least one active,
     non-revoked delegation from ``delegator_principal_id`` to
@@ -1161,6 +1198,7 @@ async def is_active_deputy_for(
             process_definition_id=process_definition_id,
             object_type_id=object_type_id,
             folder_resource_id=folder_resource_id,
+            case_resource_id=case_resource_id,
         )
         for d in delegations
     )
@@ -1173,6 +1211,7 @@ async def create_org_hierarchy_grant(
     grant_kind: str,
     process_definition_id: int,
     ends_at: datetime,
+    case_resource_id: str | None = None,
 ) -> list[Delegation]:
     """The org-hierarchy foundation (P31-S9's `SupervisorAssignment`/reused
     `Group`) put to use for dynamic access grants (Post-Roadmap Phase 31
@@ -1199,7 +1238,16 @@ async def create_org_hierarchy_grant(
     silently granting through an unrelated group. Each created `Delegation`
     row is stamped with `grant_kind` for admin traceability (previously
     indistinguishable from a self-service delegation, ADR 0121
-    "Consequences")."""
+    "Consequences").
+
+    `case_resource_id` (Post-Roadmap Phase 39 Session 4, ADR 0154):
+    optional, when the caller (workflow-service) has already resolved the
+    triggering instance's `business_key` to a real case. When given, the
+    grant is scoped to BOTH `scope_process_definition_ids` AND
+    `scope_case_resource_ids` (both dimensions must match, strictly
+    narrower than the process-definition family alone) - `None` preserves
+    the exact pre-existing behavior (process-definition-family-wide),
+    e.g. when the instance has no resolvable case."""
     if grant_kind == "supervisor":
         assignments = await list_supervisor_assignments(session, principal_id=principal_id)
         deputy_ids = {a.supervisor_principal_id for a in assignments}
@@ -1227,6 +1275,7 @@ async def create_org_hierarchy_grant(
                 scope_object_type_ids=None,
                 scope_process_definition_ids=[process_definition_id],
                 scope_folder_resource_ids=None,
+                scope_case_resource_ids=[case_resource_id] if case_resource_id else None,
                 grant_kind=grant_kind,
             )
         )

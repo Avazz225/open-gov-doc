@@ -64,16 +64,19 @@ class PermissionServiceClient:
         process_definition_id: int,
         object_type_id: int | None = None,
         folder_resource_id: str | None = None,
+        case_resource_id: str | None = None,
     ) -> bool:
         """Deputizing during absence (4.4a, P14-S11) - true if
         ``deputy_principal_id`` is currently registered as an active
         deputy for ``delegator_principal_id`` (time window + optional
-        process/object-type/folder scope), see main.py's ``complete_task``.
-        ``object_type_id``/``folder_resource_id`` activate the previously
-        dead scope dimensions since P32-S2 (ADR 0048's own anticipated
-        "additional resolution step") - see main.py's
-        ``_resolve_business_key_scope``, which resolves them from the
-        instance's ``business_key`` before this call."""
+        process/object-type/folder/case scope), see main.py's
+        ``complete_task``. ``object_type_id``/``folder_resource_id``
+        activate the previously dead scope dimensions since P32-S2 (ADR
+        0048's own anticipated "additional resolution step") - see
+        main.py's ``_resolve_business_key_scope``, which resolves them
+        (and, since Post-Roadmap Phase 39 Session 4/ADR 0154,
+        ``case_resource_id``) from the instance's ``business_key`` before
+        this call."""
         params: dict[str, str | int] = {
             "deputy_principal_id": deputy_principal_id,
             "delegator_principal_id": delegator_principal_id,
@@ -83,6 +86,8 @@ class PermissionServiceClient:
             params["object_type_id"] = object_type_id
         if folder_resource_id is not None:
             params["folder_resource_id"] = folder_resource_id
+        if case_resource_id is not None:
+            params["case_resource_id"] = case_resource_id
         response = await self._client.get("/delegations/check", params=params)
         response.raise_for_status()
         return bool(response.json()["allowed"])
@@ -94,6 +99,7 @@ class PermissionServiceClient:
         grant_kind: str,
         process_definition_id: int,
         ends_at: datetime,
+        case_resource_id: str | None = None,
     ) -> dict:
         """Dynamic org-hierarchy-based temporary access grant (14.2,
         Post-Roadmap Phase 31 Session 10) - resolves ``principal_id``'s
@@ -102,7 +108,11 @@ class PermissionServiceClient:
         dict (``{"delegation_ids": [...], "deputy_principal_ids": [...]}``)
         - callers need both: the delegation IDs to store for later
         revocation (``main.py``'s ``TaskClaim.granted_delegation_ids``) and
-        the deputy IDs to report back to whoever requested the grant."""
+        the deputy IDs to report back to whoever requested the grant.
+        ``case_resource_id`` (Post-Roadmap Phase 39 Session 4, ADR 0154) -
+        when the triggering instance's ``business_key`` resolved to a real
+        case, narrows the grant to that specific case in addition to the
+        process-definition family."""
         response = await self._client.post(
             "/org-hierarchy-grants",
             json={
@@ -110,6 +120,7 @@ class PermissionServiceClient:
                 "grant_kind": grant_kind,
                 "process_definition_id": process_definition_id,
                 "ends_at": ends_at.isoformat(),
+                "case_resource_id": case_resource_id,
             },
         )
         response.raise_for_status()
