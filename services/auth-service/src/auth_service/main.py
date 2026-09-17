@@ -36,6 +36,7 @@ from auth_service import (
     keycloak_client,
     local_token_issuer,
     superuser,
+    tracking,
 )
 from auth_service.admin_users import UserAlreadyExistsError, UserNotFoundError, build_admin_client
 from auth_service.bootstrap import DOMAIN_ADMIN_ACCOUNTS, ensure_realm_and_client
@@ -49,6 +50,7 @@ from auth_service.models import (
     FederationIdentity,
     SsoConfig,
     TechnicalAccount,
+    UserTrackingConfig,
 )
 from auth_service.permission_client import PermissionServiceClient
 from auth_service.schemas import (
@@ -81,6 +83,11 @@ from auth_service.schemas import (
     UserCreate,
     UserLookupOut,
     UserOut,
+    UserTrackingConfigIn,
+    UserTrackingConfigOut,
+    UserTrackingRetentionConfigIn,
+    UserTrackingRetentionConfigOut,
+    UserTrackingSessionOut,
 )
 from auth_service.settings import Settings
 
@@ -110,6 +117,32 @@ async def _superuser_poll_loop() -> None:
                 "Superuser-Poll-Tick fehlgeschlagen - wird beim nächsten Tick erneut versucht."
             )
         await asyncio.sleep(settings.superuser_poll_interval_seconds)
+
+
+async def _tracking_retention_poll_loop() -> None:
+    """Enforces the configurable retention period of fine-grained user
+    tracking data (5.5, Post-Roadmap Phase 41 Session 3, ADR 0157) - same
+    poll-instead-of-push idiom as `_superuser_poll_loop` above, but a
+    deliberately SEPARATE loop rather than a second phase of it: purging
+    tracking rows and enforcing the break-glass time limit are unrelated
+    concerns, and a slow/failing purge tick must never delay superuser
+    auto-deactivation (or vice versa)."""
+    while True:
+        try:
+            async with app.state.session_factory() as session:
+                config = await tracking.get_or_create_retention_config(session)
+                purged = await tracking.purge_expired_sessions(
+                    session, retention_days=config.retention_days
+                )
+                await session.commit()
+                if purged:
+                    logger.info("Tracking-Aufbewahrung: %s abgelaufene Einträge gelöscht.", purged)
+        except Exception:
+            logger.exception(
+                "Tracking-Aufbewahrungs-Poll-Tick fehlgeschlagen - wird beim nächsten Tick "
+                "erneut versucht."
+            )
+        await asyncio.sleep(settings.tracking_retention_poll_interval_seconds)
 
 
 async def _ensure_federation_identity(
@@ -283,6 +316,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     superuser_poll_task = asyncio.create_task(_superuser_poll_loop())
+    tracking_retention_poll_task = asyncio.create_task(_tracking_retention_poll_loop())
 
     startup_end = time.time()
     millis = round((startup_end - startup_start) * 1000, 3)
@@ -295,6 +329,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     superuser_poll_task.cancel()
     with suppress(asyncio.CancelledError):
         await superuser_poll_task
+    tracking_retention_poll_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await tracking_retention_poll_task
     if registration:
         await registration.stop()
     await consumer_bus.close()
@@ -426,10 +463,57 @@ async def _login_technical_account(account: TechnicalAccount, password: str) -> 
     return _mint_technical_account_tokens(account)
 
 
+async def _maybe_track_session_event(
+    session: AsyncSession,
+    *,
+    access_token: str,
+    event_type: str,
+    auth_method: str,
+    client_ip: str | None,
+    user_agent: str | None,
+) -> None:
+    """Fine-grained user tracking (5.5, Post-Roadmap Phase 41 Session 3,
+    ADR 0157) - decodes the JUST-ISSUED access token (not any claims the
+    caller might have supplied) so this one helper works identically for
+    every token-minting endpoint (technical-account/Keycloak login, both
+    refresh branches, SSO callback), regardless of which path produced the
+    tokens. The activated superuser (4.6) is tracked unconditionally, tied
+    directly to its live activation state rather than a persisted flag
+    (see `UserTrackingConfig`'s docstring); every other principal needs an
+    explicit `UserTrackingConfig.enabled` row. Never allowed to propagate -
+    a tracking bug must not lock anyone out of logging in or refreshing."""
+    try:
+        claims = app.state.combined_validator.validate(access_token)
+        principal_id = claims.get("sub", "")
+        enabled = await tracking.is_tracking_enabled(session, principal_id)
+        if not enabled:
+            superuser_active, _ = await superuser.get_status(app.state.session_factory)
+            enabled = superuser_active and principal_id == await superuser.get_principal_id(
+                app.state.session_factory
+            )
+        if not enabled:
+            return
+        await tracking.record_session_event(
+            session,
+            principal_id=principal_id,
+            username=claims.get("preferred_username", ""),
+            event_type=event_type,
+            auth_method=auth_method,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+    except Exception:
+        logger.exception(
+            "Sitzungs-Tracking-Erfassung fehlgeschlagen - Login/Refresh bleibt unberührt."
+        )
+
+
 @app.post("/login", response_model=TokenResponse)
 async def login(
     payload: LoginRequest,
     x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_client_ip: str | None = Header(default=None),
+    user_agent: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     """Emergency shutdown (4.8, P6-S6): the gateway broadcasts the
@@ -444,7 +528,13 @@ async def login(
     matches a `TechnicalAccount` (currently only the superuser, domain
     admins follow in P18-S3), this endpoint authenticates locally instead
     of forwarding to Keycloak - Keycloak's reachability therefore no longer
-    matters for the superuser login."""
+    matters for the superuser login.
+
+    `x_dms_client_ip` (5.5, Post-Roadmap Phase 41 Session 3, ADR 0157): the
+    gateway forwards the real client IP unconditionally since this
+    session (previously computed only for its own rate limiting, never
+    passed downstream) - used only for tracking, see
+    `_maybe_track_session_event`."""
     maintenance_active = x_dms_maintenance_active.lower() == "true"
     if maintenance_active and payload.username != superuser.SUPERUSER_USERNAME:
         raise HTTPException(
@@ -456,13 +546,25 @@ async def login(
         select(TechnicalAccount).where(TechnicalAccount.username == payload.username)
     )
     if technical_account is not None:
-        return await _login_technical_account(technical_account, payload.password)
-
-    try:
-        tokens = await keycloak_client.login(settings, payload.username, payload.password)
-    except InvalidCredentialsError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    return TokenResponse(**tokens)
+        tokens = await _login_technical_account(technical_account, payload.password)
+        auth_method = "technical_account"
+    else:
+        try:
+            raw_tokens = await keycloak_client.login(settings, payload.username, payload.password)
+        except InvalidCredentialsError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        tokens = TokenResponse(**raw_tokens)
+        auth_method = "keycloak"
+    await _maybe_track_session_event(
+        session,
+        access_token=tokens.access_token,
+        event_type="login",
+        auth_method=auth_method,
+        client_ip=x_dms_client_ip,
+        user_agent=user_agent,
+    )
+    await session.commit()
+    return tokens
 
 
 async def _refresh_technical_account_token(
@@ -492,15 +594,31 @@ async def _refresh_technical_account_token(
 
 @app.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    payload: RefreshRequest, session: AsyncSession = Depends(get_session)
+    payload: RefreshRequest,
+    x_dms_client_ip: str | None = Header(default=None),
+    user_agent: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     if local_token_issuer.is_local_token(payload.refresh_token):
-        return await _refresh_technical_account_token(payload.refresh_token, session)
-    try:
-        tokens = await keycloak_client.refresh(settings, payload.refresh_token)
-    except InvalidCredentialsError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    return TokenResponse(**tokens)
+        tokens = await _refresh_technical_account_token(payload.refresh_token, session)
+        auth_method = "technical_account"
+    else:
+        try:
+            raw_tokens = await keycloak_client.refresh(settings, payload.refresh_token)
+        except InvalidCredentialsError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        tokens = TokenResponse(**raw_tokens)
+        auth_method = "keycloak"
+    await _maybe_track_session_event(
+        session,
+        access_token=tokens.access_token,
+        event_type="refresh",
+        auth_method=auth_method,
+        client_ip=x_dms_client_ip,
+        user_agent=user_agent,
+    )
+    await session.commit()
+    return tokens
 
 
 @app.get("/me")
@@ -1217,7 +1335,11 @@ async def oidc_authorize(redirect_uri: str, state: str) -> OidcAuthorizeOut:
 
 @app.post("/oidc/callback", response_model=TokenResponse)
 async def oidc_callback(
-    payload: OidcCallbackRequest, x_dms_maintenance_active: str = Header(default="false")
+    payload: OidcCallbackRequest,
+    x_dms_maintenance_active: str = Header(default="false"),
+    x_dms_client_ip: str | None = Header(default=None),
+    user_agent: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     """Exchanges the `code` delivered by Keycloak's redirect for tokens
     server-side - identical response format to `POST /login`, so nothing
@@ -1233,20 +1355,30 @@ async def oidc_callback(
     if not _redirect_uri_origin_allowed(payload.redirect_uri):
         raise HTTPException(status_code=400, detail="redirect_uri nicht erlaubt")
     try:
-        tokens = await keycloak_client.exchange_code(
+        raw_tokens = await keycloak_client.exchange_code(
             settings, code=payload.code, redirect_uri=payload.redirect_uri
         )
     except InvalidCredentialsError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     if x_dms_maintenance_active.lower() == "true":
-        claims = _keycloak_validator.validate(tokens["access_token"])
+        claims = _keycloak_validator.validate(raw_tokens["access_token"])
         if claims.get("preferred_username") != superuser.SUPERUSER_USERNAME:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Systemweite Notfallsperre aktiv - Login nur für den Superuser möglich",
             )
-    return TokenResponse(**tokens)
+    tokens = TokenResponse(**raw_tokens)
+    await _maybe_track_session_event(
+        session,
+        access_token=tokens.access_token,
+        event_type="login",
+        auth_method="sso",
+        client_ip=x_dms_client_ip,
+        user_agent=user_agent,
+    )
+    await session.commit()
+    return tokens
 
 
 @app.get("/sso-config", response_model=SsoConfigOut)
@@ -1271,6 +1403,108 @@ async def put_sso_config(
     config = await _get_or_create_sso_config(session)
     config.enabled = payload.enabled
     config.updated_at = datetime.now(UTC)
+    await session.commit()
+    return config
+
+
+# --- Fine-grained user tracking (5.5, Post-Roadmap Phase 41 Session 3, ADR
+# 0157) ---------------------------------------------------------------------
+
+
+async def _require_user_tracking_permission(user: dict) -> None:
+    """Toggling tracking for a principal REDUCES how much is captured
+    about them going forward - comparatively low-risk, but still a
+    deliberately separate capability from viewing already-collected data
+    below (same asymmetric-risk split this project already uses for
+    `admin.attribute_pseudonymization`/`admin.attribute_reveal`, Post-
+    Roadmap Phase 41 Session 2, ADR 0156)."""
+    await _require_permission(
+        user, "admin.user_tracking", "Fehlende Domain-Admin-Rolle 'Nutzer-Tracking-Verwaltung'"
+    )
+
+
+async def _require_user_tracking_view_permission(user: dict) -> None:
+    """Viewing collected session data (client IP, User-Agent, auth method)
+    EXPOSES behavioral information about a specific principal - materially
+    higher-risk than the toggle above, hence its own capability. Matches
+    the concept's own wording (5.5): access to the tracking data itself is
+    restricted to "nur wenige, explizit berechtigte Rollen"."""
+    await _require_permission(
+        user,
+        "admin.user_tracking_view",
+        "Fehlende Domain-Admin-Rolle 'Nutzer-Tracking einsehen'",
+    )
+
+
+@app.get("/user-tracking-config/{principal_id}", response_model=UserTrackingConfigOut)
+async def get_user_tracking_config(
+    principal_id: str,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserTrackingConfigOut:
+    await _require_user_tracking_permission(user)
+    config = await session.get(UserTrackingConfig, principal_id)
+    if config is None:
+        # No row yet = not tracked (default off) - synthesize the same
+        # shape a real row would have, rather than a `404` for what is, in
+        # this feature, a perfectly normal/expected state.
+        return UserTrackingConfigOut(
+            principal_id=principal_id, enabled=False, updated_by="", updated_at=datetime.now(UTC)
+        )
+    return config
+
+
+@app.put("/user-tracking-config/{principal_id}", response_model=UserTrackingConfigOut)
+async def put_user_tracking_config(
+    principal_id: str,
+    payload: UserTrackingConfigIn,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserTrackingConfigOut:
+    await _require_user_tracking_permission(user)
+    config = await tracking.set_tracking_enabled(
+        session, principal_id, enabled=payload.enabled, updated_by=payload.updated_by
+    )
+    await session.commit()
+    await publish_event(
+        "auth.user_tracking.config_changed",
+        {"principal_id": principal_id, "enabled": payload.enabled},
+        actor=payload.updated_by,
+    )
+    return config
+
+
+@app.get("/user-tracking-sessions", response_model=list[UserTrackingSessionOut])
+async def list_user_tracking_sessions(
+    principal_id: str | None = None,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[UserTrackingSessionOut]:
+    await _require_user_tracking_view_permission(user)
+    return await tracking.list_tracked_sessions(session, principal_id=principal_id)
+
+
+@app.get("/user-tracking-retention-config", response_model=UserTrackingRetentionConfigOut)
+async def get_user_tracking_retention_config(
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserTrackingRetentionConfigOut:
+    await _require_user_tracking_permission(user)
+    config = await tracking.get_or_create_retention_config(session)
+    await session.commit()
+    return config
+
+
+@app.put("/user-tracking-retention-config", response_model=UserTrackingRetentionConfigOut)
+async def put_user_tracking_retention_config(
+    payload: UserTrackingRetentionConfigIn,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserTrackingRetentionConfigOut:
+    await _require_user_tracking_permission(user)
+    if payload.retention_days < 1:
+        raise HTTPException(status_code=422, detail="retention_days muss mindestens 1 sein")
+    config = await tracking.update_retention_config(session, retention_days=payload.retention_days)
     await session.commit()
     return config
 

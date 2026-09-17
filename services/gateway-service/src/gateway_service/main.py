@@ -162,7 +162,14 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
     route_key = f"{service_type}:{path}"
     client_host = request.client.host if request.client else "unknown"
     rate_limit_key = client_host
-    identity_headers: dict[str, str] = {}
+    # Fine-grained user tracking (5.5, Post-Roadmap Phase 41 Session 3, ADR
+    # 0157): forwarded unconditionally, unlike Principal/Username/Roles
+    # below - `auth-service`'s login/refresh/oidc-callback endpoints are
+    # exactly the ones this header exists for, and all three are public
+    # routes (no bearer token yet at that point), so they never enter the
+    # `identity_headers` branch that used to be the only place this dict
+    # was populated.
+    identity_headers: dict[str, str] = {"X-DMS-Client-IP": client_host}
 
     # Emergency shutdown (4.8, P6-S6): single central enforcement point,
     # since every proxied request passes through this function. A small
@@ -188,11 +195,15 @@ async def proxy(service_type: str, path: str, request: Request) -> Response:
                 headers={"WWW-Authenticate": "Bearer"},
             ) from exc
         rate_limit_key = claims.get("sub", client_host)
-        identity_headers = {
-            "X-DMS-Principal": claims.get("sub", ""),
-            "X-DMS-Username": claims.get("preferred_username", ""),
-            "X-DMS-Roles": ",".join(claims.get("realm_access", {}).get("roles", [])),
-        }
+        # `.update()`, not reassignment - keeps the `X-DMS-Client-IP` entry
+        # set unconditionally above.
+        identity_headers.update(
+            {
+                "X-DMS-Principal": claims.get("sub", ""),
+                "X-DMS-Username": claims.get("preferred_username", ""),
+                "X-DMS-Roles": ",".join(claims.get("realm_access", {}).get("roles", [])),
+            }
+        )
 
     if not await request.app.state.rate_limiter.allow(rate_limit_key):
         raise HTTPException(

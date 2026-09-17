@@ -49,6 +49,49 @@ class SsoConfigOut(SsoConfigIn):
     updated_at: datetime
 
 
+class UserTrackingConfigIn(BaseModel):
+    """Toggle fine-grained session tracking for one principal (5.5, Post-
+    Roadmap Phase 41 Session 3, ADR 0157) - `updated_by` mirrors
+    `LegalHoldCreate.set_by`-style attribution fields elsewhere in this
+    project (opaque, independent of the `X-DMS-Principal`-based
+    `admin.user_tracking` permission check)."""
+
+    enabled: bool
+    updated_by: str
+
+
+class UserTrackingConfigOut(BaseModel):
+    principal_id: str
+    enabled: bool
+    updated_by: str
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserTrackingSessionOut(BaseModel):
+    id: str
+    principal_id: str
+    username: str
+    event_type: str
+    auth_method: str
+    client_ip: str | None
+    user_agent: str | None
+    occurred_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserTrackingRetentionConfigIn(BaseModel):
+    retention_days: int
+
+
+class UserTrackingRetentionConfigOut(UserTrackingRetentionConfigIn):
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class UserCreate(BaseModel):
     username: str
     email: str

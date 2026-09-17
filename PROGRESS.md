@@ -2,7 +2,69 @@
 
 > ⚠️ **Read before every `uv run pytest`**: test runs against the running Docker Compose stack delete its real data if `TEST_POSTGRES_DSN` does not explicitly point to an isolated throwaway database (every service's `conftest.py` truncates its tables, by default against the same Postgres instance that the stack also uses). At P5-S2 this caused all previously existing documents to be irretrievably lost. Since **P5c-S1** every `conftest.py` additionally enforces `DMS_POSTGRES_DSN = TEST_POSTGRES_DSN`, so that `TestClient(app)` tests no longer unnoticedly read/write the live DB past `TEST_POSTGRES_DSN` (this had led to a real incident at P5b-S6) — however, the basic rule "without an explicitly set `TEST_POSTGRES_DSN`, everything points to the same DB as the stack" still applies unchanged. Details/rule: see "Tooling & Testing" below.
 
-**Last completed:** P41-S2 (Concept 5.2: real attribute-level pseudonymization — second session of
+**Last completed:** P41-S3 (Concept 5.5: fine-grained user tracking for privileged accounts — third
+and last session of Phase 41, "Compliance Gaps from the Concept Document",
+[ADR 0157](docs/adr/0157-fine-grained-user-tracking-privileged-accounts.md)).
+
+Concept 5.5's field list (client IP, device/browser fingerprint, auth method, session duration,
+optional network/location info) and its 7-day retention default are essentially verbatim in the
+concept text, not a plan paraphrase — but neither the toggle authority, the meaning of "network/
+location info", nor a "privileged account" definition are specified. Close re-reading resolved two of
+these without a question: the toggle is framed entirely in the third person (admin-driven, not
+self-service), and the superuser default is explicitly tied to its *activation* state ("active while
+activated"), not a standing flag — so no automatic "privileged account" enumeration is needed at all,
+any principal can be individually toggled by an admin. Two remaining scope decisions resolved via
+research/precedent (no existing GeoIP dependency anywhere in the project, no existing client-side
+fingerprinting instrumentation in any of the six frontends): **no GeoIP/network-location lookup** (raw
+client IP only) and **no real device/browser fingerprinting** (the server-side `User-Agent` header
+only — the honest ceiling of "as far as determinable" without new frontend instrumentation).
+
+**Implementation**: a completely new feature area — no session/login-event table existed anywhere in
+this project before this session. `auth-service` gained three new tables (`UserTrackingConfig` per-
+principal opt-in, `UserTrackingSession` the actual event log, `UserTrackingRetentionConfig` singleton,
+default 7 days) and hooked all three token-minting endpoints (`/login`, `/refresh`, `/oidc/callback`)
+via one shared helper that decodes the just-issued access token (works uniformly across technical-
+account/Keycloak/SSO paths) — wrapped in a blanket try/except so a tracking bug can never lock anyone
+out of logging in. The activated superuser (4.6) is tracked by default with **no** `UserTrackingConfig`
+row at all — the check reads the live break-glass activation state directly, matching the concept's
+own wording literally. Two new RBAC capabilities (`admin.user_tracking`/`admin.user_tracking_view`,
+mirroring P41-S2's pseudonymize/reveal asymmetric-risk split — toggling reduces future exposure,
+viewing exposes already-captured behavioral data). `gateway-service` gained a new `X-DMS-Client-IP`
+header, forwarded unconditionally to every downstream service (previously `request.client.host` was
+computed only for the gateway's own rate limiting, never passed on) — had to be set OUTSIDE the
+existing identity-headers branch since `/login`/`/refresh`/`/oidc/callback` are public routes with no
+bearer token yet at that point. A new, independent poll loop purges expired tracking rows per the
+configurable retention period.
+
+**Tests**: `auth-service` 131 tests (previously 120, +11 — new `test_user_tracking.py`: RBAC split
+between the two capabilities, enable/disable roundtrip, login/refresh correctly NOT tracked while
+disabled vs. tracked once enabled including real `X-DMS-Client-IP`/`User-Agent` capture, retention
+config defaults/validation, and the activated-superuser-tracked-by-default behavior verified by
+calling `superuser.activate()` directly to isolate it from the full four-eyes approval flow).
+`gateway-service` 29 tests unchanged (header-forwarding fix is additive, no existing assertion
+touched). `permission-service` 181 tests unchanged (two more roles read dynamically from
+`DOMAIN_ADMIN_ROLES`, no hardcoded count). `ruff check`/`ruff format` clean throughout.
+
+**Live-verified** against the rebuilt, restarted real stack (`gateway-service`, `auth-service`,
+`permission-service`), through the ACTUAL gateway (not directly against auth-service) to prove the
+new header-forwarding path end-to-end: logged in as a real technical account through
+`http://localhost:8009/api/auth-service/login`, granted both tracking capabilities, enabled tracking,
+logged in again with a custom `User-Agent` header — the recorded session showed the correct real
+client IP (the Docker bridge gateway address, exactly right for a call from outside the compose
+network) and the correct custom User-Agent string. Confirmed a subsequent `/refresh` through the
+gateway also gets tracked, and that `GET /user-tracking-retention-config` returns the 7-day default.
+Test artifacts cleaned up afterward (tracking disabled again for the account, both temporary role
+assignments revoked) — the account's own pre-existing `domain-admin-config` role was left untouched.
+
+**This closes Phase 41** ("Compliance Gaps from the Concept Document") — `graphify update .` now runs,
+per the standing "only at phase-end" rule.
+
+**Next session:** not yet planned — Phase 41 is complete. See `IMPLEMENTATION_PLAN.md` for the phase
+index and whatever comes next.
+
+---
+
+Immediately before P41-S3: **P41-S2** (Concept 5.2: real attribute-level pseudonymization — second session of
 Phase 41, "Compliance Gaps from the Concept Document", [ADR 0156](docs/adr/0156-attribute-pseudonymization-reversible-vault.md)).
 
 Concept 5.2's entire specification is one sentence: pseudonymize/redact individual personal-data

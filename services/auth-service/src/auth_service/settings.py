@@ -74,3 +74,10 @@ class Settings(BaseServiceSettings):
     # lifetimes.
     local_access_token_ttl_seconds: int = 300
     local_refresh_token_ttl_seconds: int = 1800
+
+    # Fine-grained user tracking (5.5, Post-Roadmap Phase 41 Session 3, ADR
+    # 0157) - the retention period itself is a DB-backed, admin-editable
+    # config (`UserTrackingRetentionConfig`, concept default 7 days), same
+    # pattern as document-service's `RetentionConfig`; this is only the
+    # poll cadence for the purge loop that enforces it.
+    tracking_retention_poll_interval_seconds: float = 3600.0

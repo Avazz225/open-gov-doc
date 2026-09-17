@@ -320,6 +320,23 @@ DOMAIN_ADMIN_ROLES: list[tuple[str, str, list[str]]] = [
         "Pseudonymisierte Attribute aufdecken",
         ["admin.attribute_reveal"],
     ),
+    # Post-Roadmap Phase 41 Session 3 (ADR 0157): concept 5.5's fine-
+    # grained user tracking. Deliberately TWO separate capabilities, not
+    # one, same asymmetric-risk split as P41-S2's pseudonymize/reveal pair
+    # above: toggling tracking REDUCES what's captured going forward
+    # (comparatively low-risk), viewing already-collected session data
+    # (client IP, User-Agent, auth method per login) EXPOSES behavioral
+    # information about a specific principal (materially higher-risk).
+    (
+        "domain-admin-user-tracking",
+        "Nutzer-Tracking-Verwaltung",
+        ["admin.user_tracking"],
+    ),
+    (
+        "domain-admin-user-tracking-view",
+        "Nutzer-Tracking einsehen",
+        ["admin.user_tracking_view"],
+    ),
 ]
 
 

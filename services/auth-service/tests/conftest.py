@@ -123,6 +123,12 @@ async def _clean_tables():
             )
         )
         await conn.execute(text("TRUNCATE auth.ad_group_mapping_default_role"))
+        await conn.execute(
+            text(
+                "TRUNCATE auth.user_tracking_config, auth.user_tracking_session, "
+                "auth.user_tracking_retention_config"
+            )
+        )
         # Nur Nicht-Domain-Admin-Konten (aktuell also der Superuser) werden
         # pro Test zurückgesetzt - Domain-Admin-Zeilen bleiben bewusst über
         # die gesamte Session stabil, siehe
@@ -150,6 +156,36 @@ async def session_factory():
     eng = build_engine(DSN)
     yield make_session_factory(eng)
     await eng.dispose()
+
+
+@pytest.fixture
+def grant_role():
+    """Generic role-assignment helper (Post-Roadmap Phase 41 Session 3,
+    fine-grained user tracking, ADR 0157) - grants an arbitrary already-
+    seeded domain-admin role to an arbitrary principal at the root
+    resource, reusable across capabilities instead of one dedicated
+    fixture per role (same underlying call shape as
+    `_grant_role_admin_permission` above, just parameterized)."""
+
+    def _grant(principal_id: str, role_name: str) -> None:
+        with httpx.Client(base_url=settings.permission_service_base_url, timeout=10.0) as pc:
+            roles = pc.get("/roles").json()
+            role_id = next(r["id"] for r in roles if r["name"] == role_name)
+            existing = pc.get("/role-assignments", params={"principal_id": principal_id}).json()
+            if any(a["role_id"] == role_id for a in existing):
+                return
+            response = pc.post(
+                "/role-assignments",
+                json={
+                    "principal_type": "user",
+                    "principal_id": principal_id,
+                    "role_id": role_id,
+                    "resource_id": "root",
+                },
+            )
+            response.raise_for_status()
+
+    return _grant
 
 
 @pytest.fixture

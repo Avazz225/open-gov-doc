@@ -5,7 +5,7 @@
 **Concept Reference:** 4.4/2.5 (contacts, since P15-S4)/7.4 (federated contact search, since P15-S4)/14.1 (realm roles for configuration packages, since P17-S1)
 **Own Postgres Schema:** `auth` (since P15-S4, `federation_identity` — a singleton row for the optional federated contact search; since the ad-hoc post-roadmap SSO feature additionally `sso_config`, also a singleton row; since Phase 18 additionally `local_signing_key` (singleton) and `technical_account`, see "Auth Decoupling from Keycloak" below; since **P24-S2** additionally `ad_group_role_mapping`, see "AD Group→Role Mapping" below; since
 **Post-Roadmap Phase 39 Session 3** additionally `ad_group_role_composite_rule`,
-`ad_group_role_composite_rule_group`, and the singleton `ad_group_mapping_default_role`, ADR 0153). Until P15-S4 the service was fully stateless; Keycloak itself continues to manage its own data in its own schema `keycloak` (see `infra/postgres-init/001-schemas.sql`).
+`ad_group_role_composite_rule_group`, and the singleton `ad_group_mapping_default_role`, ADR 0153; since **Post-Roadmap Phase 41 Session 3** additionally `user_tracking_config`, `user_tracking_session`, and the singleton `user_tracking_retention_config`, see "Fine-Grained User Tracking" below, [ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)). Until P15-S4 the service was fully stateless; Keycloak itself continues to manage its own data in its own schema `keycloak` (see `infra/postgres-init/001-schemas.sql`).
 
 ## API
 
@@ -44,6 +44,9 @@
 | `GET`/`POST`/`DELETE` | `/ad-group-composite-rules`(`/{id}`) | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): AND-composite counterpart of the three endpoints above (`{role_name, ad_group_names}`, at least 2 groups or `422`) — same gate/four-eyes/audit pattern, action types `auth.ad_group_role_composite_rule.create`/`.delete` |
 | `GET`/`PUT` | `/ad-group-mappings/default-role` | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): the configurable default role for genuinely unmapped groups (`{default_role_name, updated_at, updated_by}`) — gated on `admin.user_management`, deliberately no four-eyes |
 | `GET`/`POST` | `/ad-group-mapping-config`(`/import`) | **Since Post-Roadmap Phase 39 Session 3** (ADR 0153): `config-service`'s export/import target for the whole AD-group-mapping bundle (mappings + composite rules + default role) — service-to-service-gated (`X-DMS-Principal`/`_require_service_user_management`) like `POST /realm-roles`, not the bearer-token endpoints above; import is idempotent per item and deliberately bypasses four-eyes, same precedent as `POST /realm-roles` |
+| `GET`/`PUT` | `/user-tracking-config/{principal_id}` | **Since Post-Roadmap Phase 41 Session 3** (5.5, [ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)): per-principal opt-in for fine-grained session tracking (`{principal_id, enabled, updated_by, updated_at}`) — `GET` synthesizes a default `enabled: false` shape instead of `404` for a principal with no row yet (the normal, expected state). Both gated on `admin.user_tracking` (role `domain-admin-user-tracking`) |
+| `GET` | `/user-tracking-sessions?principal_id=` | **Since Post-Roadmap Phase 41 Session 3**: tracked login/refresh events (`{id, principal_id, username, event_type, auth_method, client_ip, user_agent, occurred_at}`) — gated on a SEPARATE, higher-risk capability, `admin.user_tracking_view` (role `domain-admin-user-tracking-view`), since viewing already-collected data exposes behavioral information the toggle above does not |
+| `GET`/`PUT` | `/user-tracking-retention-config` | **Since Post-Roadmap Phase 41 Session 3**: configurable retention period for tracked sessions (`{retention_days, updated_at}`, concept default 7 days, `422` if `< 1`) — gated on `admin.user_tracking`, same as the toggle above (a config knob, not exposed data) |
 
 ## Realm/Client Bootstrap
 
@@ -96,6 +99,16 @@ Keycloak password grant — the bug known since P6-S6 and never fixed ("superuse
 log in interactively", missing required fields on a historically incompletely created Keycloak
 account) has thereby disappeared without replacement — there is no more Keycloak account that could be
 in that state.
+
+## Fine-Grained User Tracking (5.5, Post-Roadmap Phase 41 Session 3, [ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md))
+
+Concept 5.5, verbatim: "vollständige Session-Metadaten (u. a. Client-IP, Geräte-/Browser-Fingerprint, ... Authentifizierungsmethode, Zeitpunkt/Dauer der Session, ggf. bekannte Netzwerk-/Standortinformationen)" for privileged accounts, default-active for the activated superuser (4.6), individually toggleable for others, with its own configurable retention (default 7 days) separate from the regular audit log (5.3).
+
+- **Hooked into all three token-minting endpoints** (`POST /login`, `POST /refresh`, `POST /oidc/callback`) via one shared helper, `_maybe_track_session_event` — decodes the JUST-ISSUED access token (not any caller-supplied claims) so it works identically regardless of which branch produced the tokens (technical-account/Keycloak login, either refresh branch, SSO callback). Never allowed to propagate an exception — a tracking bug must not lock anyone out of logging in.
+- **Default off, per-principal opt-in** (`UserTrackingConfig`, `PUT /user-tracking-config/{principal_id}`) — a principal with no row is simply not tracked. The activated superuser is the ONE exception, and deliberately NOT via a persisted flag: `_maybe_track_session_event` checks `superuser.get_status()`/`get_principal_id()` directly, tying the default to the live activation state itself (matching the concept's own wording literally — "default active *while activated*"), so activating/deactivating break-glass never needs to keep a separate tracking flag in sync.
+- **Two separate capabilities** (`admin.user_tracking` for the toggle/retention config, `admin.user_tracking_view` for viewing collected session data) — same asymmetric-risk split this project already uses for `admin.attribute_pseudonymization`/`admin.attribute_reveal` (Post-Roadmap Phase 41 Session 2, ADR 0156): toggling REDUCES what's captured going forward, viewing EXPOSES already-captured behavioral data about a specific principal.
+- **Captured fields, deliberately limited to what's server-side determinable without new infrastructure**: `client_ip` (new `X-DMS-Client-IP` header, forwarded by the gateway unconditionally since this session — previously `request.client.host` was computed there only for its own rate limiting, never passed downstream), `user_agent` (the standard header, passed through unchanged by the gateway's own `filter_headers`), `auth_method` (`technical_account`/`keycloak`/`sso`). **No GeoIP/network-location lookup, no client-side canvas/font fingerprinting** — both deliberately out of scope, see ADR 0157 "Rationale". **"Session duration" is not a stored, correlated login/logout pair** — no session-id concept exists anywhere in this service to correlate events by; approximated at display time as time-since-last-login instead.
+- **Own, shorter retention** (`UserTrackingRetentionConfig`, `GET`/`PUT /user-tracking-retention-config`, concept default 7 days) — enforced by its own poll loop (`_tracking_retention_poll_loop`, `tracking_retention_poll_interval_seconds`, default 3600s, same idiom as `_superuser_poll_loop`), completely independent of the regular audit log's own retention rules (5.2/5.3).
 
 ## Not-Shutdown (4.8, since P6-S6)
 
@@ -258,7 +271,16 @@ None yet — follows in Phase 11.
 
 ## Tests
 
-`uv run pytest services/auth-service/tests` (**120 tests**, of which 15 new since **Post-Roadmap Phase
+`uv run pytest services/auth-service/tests` (**131 tests**, of which 11 new since **Post-Roadmap Phase
+41 Session 3** ([ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)),
+`test_user_tracking.py`: config get/put without permission → `403`, get defaults to `enabled: false`
+for an unconfigured principal, put/get roundtrip, a login is NOT recorded while disabled, a login IS
+recorded once enabled including the new `X-DMS-Client-IP`/`User-Agent` headers, a refresh is recorded,
+listing sessions requires the separate view capability (not just the toggle one), retention config
+defaults to 7 days and is editable, `422` for `retention_days < 1`, and the activated superuser is
+tracked by default with NO `UserTrackingConfig` row at all (`superuser.activate()` called directly,
+bypassing the full four-eyes flow, to isolate the tracking behavior itself). Before that 120 tests,
+15 new since **Post-Roadmap Phase
 39 Session 3** (ADR 0153): composite-rule create/list/delete (`422` for a single-group rule),
 AND-only-with-both-groups resolution against real Keycloak groups (re-logging in after each membership
 change, since the `groups` claim is baked into the token at login time, not re-evaluated live), default-
@@ -311,3 +333,4 @@ new role idempotently — a second call with the same name does not fail, same
 - **No rolling inactivity deactivation** (4.6, since P6-S5): a single absolute expiry timestamp instead of separate total-duration/10-minute-inactivity timers, see ADR 0023.
 - ~~**Bug discovered at P6-S6, not fixed (P6-S5 code)**: the superuser account cannot log in interactively in the current live environment (`POST /login` returns `401`/"Account is not fully set up" directly from Keycloak). Cause: `firstName`/`lastName`/`email` missing on the Keycloak account...~~ — **disappeared without replacement since Phase 18 Session 2** ([ADR 0064](../adr/0064-superuser-migration-lokale-tokens-gateway-multi-issuer.md)): the superuser is no longer a Keycloak account, there is no more declarative-user-profile required-field problem that could cause this state.
 - **`GET /users/lookup` is an existence oracle** (since P14-S6): any authenticated user can find out whether a particular username exists — deliberately left as is (internal management software, known user population), but a documented deviation from the previous state (user directory fully behind `admin.user_management`). Since P19-S3 (ADR 0068) gated via the "everyone" group instead of hard-coded open — an admin can revoke `users.lookup` from the "everyone" role to close the oracle, without a code change. See [ADR 0043](../adr/0043-teamspace-service-membership-and-permission-integration.md).
+- **Fine-grained user tracking (5.5, Post-Roadmap Phase 41 Session 3, [ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)) has no GeoIP/network-location lookup** — only the raw `client_ip` is captured, the concept's own "Netzwerk-/Standortinformationen" field is deliberately left unimplemented (no existing dependency in this project for it, and the concept itself hedges it as optional). **No client-side device/browser fingerprinting** either — only the server-side `User-Agent` header, real canvas/font-based fingerprinting would need new frontend instrumentation with no precedent anywhere in this project. **No stored, correlated session duration** — approximated as time-since-last-login at display time, since no session-id concept exists to correlate a login with its later logout/expiry. **No four-eyes on the toggle action** — the concept explicitly names this as optional ("kann optional... unterliegen"), not built this session. **No admin-UI page** — API/curl-only, same deliberate "backend before frontend" precedent already established for AD-group-mapping administration (see above) and consistent with this session's own scope; live verification instead ran through the real gateway with a real login, proving the actual capture pipeline end-to-end.

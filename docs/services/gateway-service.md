@@ -117,6 +117,9 @@ identity headers) — the basis for the fleet-agent key bypass mentioned
 above, which only the respective target service itself checks, not the
 gateway.
 
+**`X-DMS-Client-IP` (Post-Roadmap Phase 41 Session 3, 5.5, [ADR 0157](../adr/0157-fine-grained-user-tracking-privileged-accounts.md)):**
+forwarded to every downstream service, unconditionally — unlike `X-DMS-Principal`/`-Username`/`-Roles`, which are only set for non-public routes (the JWT they're derived from doesn't exist yet at that point). `client_host` was previously computed only for this service's own rate limiting, never passed downstream; `auth-service`'s three token-minting endpoints (`/login`/`/refresh`/`/oidc/callback`) are exactly the ones that need it and are all public routes, so this had to be set OUTSIDE the `if route_key not in settings.public_routes` branch (via `.update()` on `identity_headers`, not a reassignment, so the value survives into the authenticated-route branch too).
+
 **Security finding + fix (P14-S11 live verification, [ADR 0049](../adr/0049-gateway-header-spoofing-fix-strip-client-x-dms-headers.md)):**
 until this finding, a client with a valid bearer token could send its own
 `X-DMS-Principal`/`-Roles` header, which was NOT overwritten by the real,
@@ -238,6 +241,11 @@ None yet — to follow in Phase 11.
   **The `X-DMS-Maintenance-Active` header (4.8, since P6-S6) is consumed by
   two services** (`auth-service`'s `/login`, `workflow-service`'s
   instance start/task completion) — see "Emergency Shutdown / Maintenance Mode" above.
+  **`X-DMS-Client-IP` (Post-Roadmap Phase 41 Session 3, 5.5, ADR 0157) has exactly one consumer**
+  (`auth-service`'s fine-grained user tracking) — no dedicated gateway-level test for the forwarding
+  itself (would need a synthetic header-echoing test target with no existing precedent in this
+  service's test suite); verified instead via live E2E through the real running gateway with a real
+  login, see `docs/services/auth-service.md` "Fine-Grained User Tracking".
 - Backend service ports remain directly published in the Docker Compose
   environment (developer convenience) — a genuine network perimeter that
   makes backends reachable exclusively via the gateway is a later

@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from dms_db_base import make_declarative_base
@@ -164,6 +165,74 @@ class AdGroupRoleCompositeRuleGroup(Base):
         ForeignKey("auth.ad_group_role_composite_rule.id", ondelete="CASCADE"), index=True
     )
     ad_group_name: Mapped[str] = mapped_column(String(255), index=True)
+
+
+class UserTrackingConfig(Base):
+    """Per-principal opt-in for fine-grained session tracking (5.5, Post-
+    Roadmap Phase 41 Session 3, ADR 0157) - one row per principal that has
+    ever been explicitly toggled; a principal with no row is NOT tracked
+    (default off), matching the concept's own wording ("individuell
+    zuschaltbar für ... privilegierte Konten"). The activated superuser's
+    own "default active while activated" (4.6) is deliberately NOT a
+    persisted row here - it's tied directly to the superuser's live
+    activation state (see `main.py._maybe_track_session_event`), since the
+    concept literally ties the default to the activation itself, not to a
+    standing flag that would need to be kept in sync across every
+    activate/deactivate cycle."""
+
+    __tablename__ = "user_tracking_config"
+
+    principal_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_by: Mapped[str] = mapped_column(String(128))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class UserTrackingSession(Base):
+    """One tracked login/refresh event (5.5) - `client_ip` comes from the
+    new `X-DMS-Client-IP` header the gateway forwards unconditionally
+    since this session (ADR 0157, previously computed only for rate-
+    limiting, never forwarded downstream); `user_agent` is the standard
+    `User-Agent` request header, the server-side ceiling of "device/
+    browser fingerprint... soweit ermittelbar" (as far as determinable) -
+    real client-side fingerprinting (canvas/font enumeration) would need
+    new frontend instrumentation with no precedent anywhere in this
+    project, deliberately not built (see ADR 0157 "Rationale"). No GeoIP/
+    network-location lookup either - same reasoning, no existing
+    dependency, the concept itself hedges this field as optional ("ggf.
+    bekannte..."). "Session duration" (part of the concept's own non-
+    exhaustive field list) is deliberately NOT a stored, correlated
+    login/logout pair - approximated at query/display time instead as
+    time-since-last-login, since no session-id concept exists anywhere in
+    this service to correlate events by."""
+
+    __tablename__ = "user_tracking_session"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    username: Mapped[str] = mapped_column(String(128))
+    # "login" | "refresh" - see `main.py`'s three token-minting endpoints.
+    event_type: Mapped[str] = mapped_column(String(16))
+    # "technical_account" | "keycloak" | "sso".
+    auth_method: Mapped[str] = mapped_column(String(32))
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class UserTrackingRetentionConfig(Base):
+    """Singleton (`id=1`), same pattern as `SsoConfig` - configurable
+    retention period for `UserTrackingSession` rows (5.5, concept default
+    7 days), deliberately shorter than and independent of the regular
+    audit log's own retention (5.2/5.3) - purged by its own poll loop
+    (`main.py._tracking_retention_poll_loop`), never by the audit-service
+    machinery."""
+
+    __tablename__ = "user_tracking_retention_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retention_days: Mapped[int] = mapped_column(Integer, default=7)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AdGroupMappingDefaultRole(Base):
